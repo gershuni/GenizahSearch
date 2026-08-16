@@ -240,6 +240,7 @@ def test_the_live_fjms_vocabulary_covers_every_shipped_genre_string():
     Hebrew page. `get_domain_translations` keeps every name; this asserts the
     coverage rather than trusting it.
     """
+    from shared.discovery_service import DOMAIN_UNASSIGNED
     from shared.fjms_service import FjmsService
 
     service = FjmsService(db_path=str(FJMS_DB), thread_safe=True)
@@ -271,12 +272,31 @@ def test_the_live_fjms_vocabulary_covers_every_shipped_genre_string():
 
         unmapped = [
             genre for genre in genres
-            if any(_needs_translation(part.strip()) and part.strip() not in mapping
-                   for part in genre.split(gl.GENRE_PART_SEPARATOR))
+            # The unassigned SENTINEL is not a domain name and is deliberately
+            # absent from the FJMS vocabulary: `genre_display_label` routes it
+            # through its own `tr("Unclassified")` branch before the vocabulary
+            # is ever consulted. Reported as a coverage gap when the V4 artifact
+            # (the first shipped build to carry it) was staged locally on
+            # 2026-08-16 -- the product was right and this check was too broad.
+            # The exemption is PROVED below rather than trusted, so deleting
+            # that branch still fails a test.
+            if genre != DOMAIN_UNASSIGNED
+            and any(_needs_translation(part.strip()) and part.strip() not in mapping
+                    for part in genre.split(gl.GENRE_PART_SEPARATOR))
         ]
         assert not unmapped, (
             f"{path.name}: {len(unmapped)} English genre string(s) have no Hebrew "
             f"name in the live FJMS vocabulary: {unmapped[:5]}")
+
+        if DOMAIN_UNASSIGNED in genres:
+            rendered = gl.genre_display_label(DOMAIN_UNASSIGNED, "he")
+            assert rendered and rendered != DOMAIN_UNASSIGNED, (
+                f"{path.name} ships the unassigned sentinel and it rendered as "
+                f"{rendered!r} under Hebrew -- the vocabulary exemption above is "
+                "only sound while the dedicated branch supplies a Hebrew name")
+            assert any("֐" <= ch <= "ת" for ch in rendered), (
+                f"the unassigned sentinel rendered {rendered!r}, which carries no "
+                "Hebrew, so a Hebrew reader sees an English facet value")
 
     if not checked:
         pytest.skip("no discovery sidecar in discovery_data/ carries genre values")

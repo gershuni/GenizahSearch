@@ -301,12 +301,46 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
   reviewed source map are tracked. Yalkut Shimoni's two identities are dropped from the public
   projection by a 2026-08-14 owner ruling — they stay in the private bake as routing competitors,
   but their claims and evidence are removed before works, identifications, loci, excerpts, counts
-  and graph closure are recomputed. **Built, and deployed to production** (owner-confirmed): the
-  expanded reference set is live, so passages that previously could not be shown from a reusable
-  edition now can be. Like the 2026-08-08 flag flip, the deploy itself left **no record in this
-  repository** — the artifacts live in the gitignored data depot and the promotion was a manual
-  operational step, so the repo cannot corroborate it and this entry rests on the owner's
-  confirmation rather than on evidence in the tree.
+  and graph closure are recomputed. **Built, and deployed to production**: the expanded reference
+  set is live, so passages that previously could not be shown from a reusable edition now can be.
+- **The V4 deploy is now recorded; for a day it was not** (2026-08-16). Like the 2026-08-08 flag
+  flip, the promotion was a manual operational step, so nothing in the tree named the artifact
+  production had been serving since 2026-08-15 — `discovery_data/manifest.deploy.json` and
+  `discovery_data/live/` both still named the beta-launch build, and so did the masking sweep's
+  scan record, which meant the one un-waived REL-01 obligation was pointed at a superseded file.
+  All three were repointed at `discovery-v1-528f6d36…` after it was verified rather than assumed:
+  its SHA-256 matches both its filename and its manifest, `audience=public`, `frame_content_hash`
+  agrees, `PRAGMA integrity_check` returns `ok`, and the shipped fail-closed loader
+  (`web/discovery_assets.py`) loads it to `ready=True` under its full validation matrix. The
+  four-mode masking scan was re-run over it — clean, 52 s — and shown non-vacuous by planting three
+  values read out of that artifact, one of them from `discovery_identification`, a table the
+  2026-08-05 scan record never reached. The repo manifest `discovery_data/manifest.json` was
+  deliberately **not** repointed: `tests/test_cert01_grading_validator.py` resolves the frozen
+  CERT-01 artifact through it, so moving it would silently redirect an unrelated gate.
+- **Staging the real artifact locally exposed a test that had been wrong since Phase 136.**
+  `tests/render_smoke/test_atlas_four_surface.py` identified the atlas nav item by the
+  `nav-item-badge` class, on the written premise that the atlas was the only badged nav item. Phase
+  136 added a second one — the badged "Computed Identifications" entry — so in the two
+  atlas-unavailable states the check reported the atlas nav item as present when it was not there.
+  It kept passing on a dev box only because the artifact staged in `discovery_data/live` predated
+  the `rendered_relation` column, the loader refused it, and the second badged item never rendered;
+  staging a current artifact turned it red. The helper now identifies the atlas by its own nav row.
+- **The beta-launch artifact is no longer a usable rollback target**, which nothing recorded.
+  `web/discovery_assets.py::_REQUIRED_COLUMNS` has required
+  `discovery_identification.rendered_relation` since the 2026-08-12 C-track batch, and
+  `e9365edc…` (2026-08-03) predates it — staged alone, the loader logs the missing column and
+  clean-hides every discovery surface. Deploying it as a rollback would have been an outage.
+  The rollback target is `ef3a79fd…` (2026-08-14, in the build depot): same 596 works / 55,250
+  identifications, differing only in the Judeo-Arabic range-picker label. It follows that
+  production served some intermediate artifact between the C-track deploy and V4 that no copy on
+  this box corresponds to; that gap is recorded, unresolved, in the V4 spec.
+- **A genre-vocabulary coverage test was too broad, and the V4 artifact was the first to prove it.**
+  V4 is the first shipped build whose `works.genre` carries the `Unassigned` sentinel, and the
+  live-FJMS coverage check reported it as an English string with no Hebrew name — which on a
+  Hebrew-default site would be a real defect. It is not one: `genre_display_label` routes the
+  sentinel through its own `tr("Unclassified")` branch before the vocabulary is consulted, and
+  renders `לא מסווג`. The check now exempts the sentinel and, rather than trusting the exemption,
+  asserts that the dedicated branch really does return Hebrew — deleting that branch fails the test.
 - **Local `master-main` and `origin/master-main` had diverged 6/6** and were reconciled on
   2026-08-16 (merge `629f4bb6`). The V4 work above was merged upstream through PR #320 while the
   corpus-repair commits landed only locally, so for a day neither branch was a complete picture and

@@ -159,8 +159,25 @@ _COPY_EXPORT_APIS = (
 # ===========================================================================
 
 PRODUCTION_DATABASE_SCANS: Dict[str, Dict[str, Any]] = {
+    "discovery-v1-528f6d365ac642a7a6cbbfcf16d4d3fed7bc170d310e052fbbd81d70ae8dadaf.db": {
+        "what": "the DEPLOYED public artifact (audience=public, manifest.deploy.json) "
+                "-- the V4 reference-expansion build production has served since "
+                "2026-08-15. It reached production without a deploy record anywhere "
+                "in the repo, so the manifest named a superseded artifact for a day "
+                "and THIS record scanned one. Both were repointed on 2026-08-16 and "
+                "the scan re-run; the entry below is what it displaced",
+        "modes": ("--strict", "--scan-repo", "--scan-asset", "--scan-sqlite"),
+        "result": "clean",
+        "seconds": 52,
+        "date": "2026-08-16",
+    },
     "discovery-v1-e9365edcab27af7d0739ab1a07b1a187683993bcbff41ff88128c8fe4fbb7181.db": {
-        "what": "the DEPLOYED public artifact (audience=public, manifest.deploy.json)",
+        "what": "the artifact deployed at beta launch and served until the V4 build "
+                "above replaced it. Retained but NO LONGER DEPLOYABLE: it predates "
+                "the 2026-08-12 discovery_identification.rendered_relation column "
+                "that web/discovery_assets.py::_REQUIRED_COLUMNS now requires, so "
+                "the loader refuses it and every discovery surface clean-hides. "
+                "The rollback target is ef3a79fd..., in the build depot",
         "modes": ("--strict", "--scan-repo", "--scan-asset", "--scan-sqlite"),
         "result": "clean",
         "seconds": 48,
@@ -212,14 +229,30 @@ PRODUCTION_DATABASE_SCANS: Dict[str, Dict[str, Any]] = {
     },
 }
 
-#: The measured proof that the 48-second clean runs above were not vacuous: a
-#: value read OUT of the deployed artifact, fed back in as the whole pattern
-#: set, and reported. A cell walk that never happened would report nothing here
-#: exactly as it reports nothing on a clean run.
+#: The measured proof that the clean runs above were not vacuous: a value read
+#: OUT of the scanned artifact, fed back in as the whole pattern set, and
+#: reported. A cell walk that never happened would report nothing here exactly
+#: as it reports nothing on a clean run.
+#:
+#: Labels carry WHICH artifact, because there are now two. The V4 rows are not a
+#: formality: that artifact carries tables the 2026-08-05 walk never saw
+#: (`discovery_identification`, `discovery_excerpt`, `discovery_locus_piece`),
+#: so the older proof does not transfer to it. `rendered_relation` is planted
+#: precisely because it lives in one of those new tables.
 PRODUCTION_SQLITE_NON_VACUITY = {
-    "needle from manuscript_display.sys_id": {"exit": 1, "hits": 11, "seconds": 32},
-    "needle from discovery_evidence.novelty_status": {"exit": 1, "hits": 26480, "seconds": 32},
-    "needle from a TABLE NAME (schema pass only)": {"exit": 1, "hits": 1, "seconds": 32},
+    "e9365edc: needle from manuscript_display.sys_id":
+        {"exit": 1, "hits": 11, "seconds": 32, "date": "2026-08-05"},
+    "e9365edc: needle from discovery_evidence.novelty_status":
+        {"exit": 1, "hits": 26480, "seconds": 32, "date": "2026-08-05"},
+    "e9365edc: needle from a TABLE NAME (schema pass only)":
+        {"exit": 1, "hits": 1, "seconds": 32, "date": "2026-08-05"},
+    "528f6d36: needle from manuscript_display.sys_id":
+        {"exit": 1, "hits": 12, "seconds": 30, "date": "2026-08-16"},
+    "528f6d36: needle from discovery_identification.rendered_relation "
+    "(a table the 2026-08-05 walk never reached)":
+        {"exit": 1, "hits": 267255, "seconds": 32, "date": "2026-08-16"},
+    "528f6d36: needle from a TABLE NAME (schema pass only)":
+        {"exit": 1, "hits": 4, "seconds": 30, "date": "2026-08-16"},
 }
 
 
@@ -824,6 +857,18 @@ def _findings_deep_renders(seed: Optional[str] = None) -> Tuple[List[str], List[
         _take(_render_component(
             lambda ln=lang: fp._render_locus_range(
                 {"status": "ok", "items": [], "total": 0, "meta": {}},
+                {"locus_from": None, "locus_to": None}, ln,
+                lambda: None,
+            )))
+        # A DEGRADED read. `timeout` is the honest degradation the address-unit
+        # wrapper returns when the query exceeds its budget
+        # (shared/discovery_surface_projection.py::STATUS_TIMEOUT), so this is a
+        # production state and not a hypothetical -- and the guard that handles
+        # it must be SHOWN to paint nothing rather than assumed to. It was the
+        # one uncaptured line in either findings module.
+        _take(_render_component(
+            lambda ln=lang: fp._render_locus_range(
+                {"status": "timeout", "items": [], "total": 0, "meta": {}},
                 {"locus_from": None, "locus_to": None}, ln,
                 lambda: None,
             )))
@@ -2315,7 +2360,7 @@ def test_the_recorded_production_database_scans_name_both_modes_and_a_result():
     here is that the record is complete and internally honest; the attestation
     quotes it and says the same thing.
     """
-    assert len(PRODUCTION_DATABASE_SCANS) == 6, PRODUCTION_DATABASE_SCANS
+    assert len(PRODUCTION_DATABASE_SCANS) == 7, PRODUCTION_DATABASE_SCANS
     for name, record in PRODUCTION_DATABASE_SCANS.items():
         assert name.endswith(".db"), name
         for mode in ("--strict", "--scan-repo", "--scan-asset", "--scan-sqlite"):

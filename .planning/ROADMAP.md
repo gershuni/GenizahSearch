@@ -410,6 +410,14 @@ last attested on 2026-08-05 (`136-19`). Three surfaces shipped after it — the 
 excerpt view, and the homepage promotion — and **none has been swept**. This is a safety check
 rather than a copy or policy debt, and it is the first task of Phase 139a.
 
+> **Partial progress, 2026-08-16 — the ARTIFACT half only.** Recording the deployed V4 build
+> (`528f6d36…`) revealed that the obligation was in worse shape than written: the sweep's scan
+> record named `e9365edc…`, so it was attesting an artifact production had stopped serving on
+> 2026-08-15, and the manifests said the same. The four-mode scan was re-run over the real deployed
+> artifact — clean, and shown non-vacuous against `discovery_identification`, a table the 2026-08-05
+> walk never reached. **The three unswept SURFACES remain unswept**; Phase 139a's first task is
+> unchanged in scope. What changed is that the artifact it will attest is now the right one.
+
 ---
 
 ## Archived Milestones

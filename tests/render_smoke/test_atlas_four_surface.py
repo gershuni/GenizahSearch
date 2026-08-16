@@ -64,7 +64,10 @@ from nicegui.ui_run import set_storage_secret
 
 
 _TEASER_MARKER = "atlas-teaser-card"
-_NAV_BADGE_CLASS = "nav-item-badge"  # unique to the atlas nav item (only badged nav item)
+_NAV_BADGE_CLASS = "nav-item-badge"
+#: The atlas nav item's OWN label. The badge class alone no longer identifies it
+#: -- see `_nav_badge_present`.
+_ATLAS_NAV_LABEL = "The Genizah Atlas"
 _STATES = ["off", "asset_missing", "ready"]
 
 
@@ -191,15 +194,39 @@ def _has_atlas_canvas(user) -> bool:
 
 
 def _nav_badge_present(user) -> bool:
-    """True iff a label carrying the unique atlas nav badge class is rendered.
-    The atlas nav item is the ONLY badged nav item, and the page-chrome 'Beta'
-    badge does NOT carry this class -- so this isolates the NAV surface."""
+    """True iff the ATLAS nav item is rendered, badge and all.
+
+    This used to be "any label carrying `nav-item-badge`", on the stated premise
+    that the atlas was the only badged nav item. Phase 136 added a second one --
+    the badged "Computed Identifications" entry -- so the premise became false
+    and this helper began answering a different question than its name asks: with
+    discovery available, the two unavailable states reported the atlas nav item
+    as present when it was not there.
+
+    It kept passing on a dev box for a reason worth recording, because it is the
+    kind of thing that hides a stale test indefinitely: the artifact staged in
+    `discovery_data/live` predated the 2026-08-12 `rendered_relation` column, so
+    the loader refused it, `discovery_available()` was False, and the second
+    badged item never rendered. Staging the artifact production actually serves
+    turned it red. The test was wrong the whole time; only the stale local data
+    was hiding it.
+
+    So identify the atlas nav item by its OWN row -- a `nav-item` carrying both
+    the atlas label and a badge -- and let any other badged nav item come and go.
+    """
     from nicegui import ElementFilter, ui
     with user._client:
-        return any(
-            _NAV_BADGE_CLASS in (getattr(e, "_classes", None) or [])
-            for e in ElementFilter(kind=ui.label)
-        )
+        for badge in ElementFilter(kind=ui.label):
+            if _NAV_BADGE_CLASS not in (getattr(badge, "_classes", None) or []):
+                continue
+            row = getattr(getattr(badge, "parent_slot", None), "parent", None)
+            if row is None:
+                continue
+            for slot in getattr(row, "slots", {}).values():
+                for child in getattr(slot, "children", []):
+                    if getattr(child, "text", None) == _ATLAS_NAV_LABEL:
+                        return True
+    return False
 
 
 def _marked_element(user, marker: str):

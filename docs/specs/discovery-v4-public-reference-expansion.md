@@ -24,6 +24,64 @@ transformations and the reviewed source map are tracked.
 > those strings, so no manifest was rewritten and no pinned hash changed. Pass the
 > new paths as the usual CLI arguments when re-running any stage.
 
+## Deployed artifact
+
+Production has served the V4 public projection since **2026-08-15**:
+
+| | |
+|---|---|
+| `asset_basename` | `discovery-v1-528f6d365ac642a7a6cbbfcf16d4d3fed7bc170d310e052fbbd81d70ae8dadaf` |
+| size | 605,577,216 bytes |
+| `meta.build_date` / `data_as_of` | `2026-08-14T14:43:05Z` / `2026-08-14` |
+| `frame_content_hash` | `90a51e0b7ed1e1c107ee331dd92c011eed1838e956444121378fcf3c11a236f9` |
+| identifications | 55,250 |
+| works / manuscripts they reach | 596 / 39,341 — the identification grain, and the figures README.md publishes |
+| `works` / `manuscript_display` table rows | 653 / 40,363 — the containing tables, which also hold rows no public identification points at |
+| with a visible matched passage | 48,270 identifications (36,990 distinct manuscripts) |
+| depot path | `discovery_builds/discovery_v4/guidefix/preview/` |
+
+Verified 2026-08-16 rather than assumed: the streamed SHA-256 matches both the
+filename and the manifest, `meta.audience` is `public`, the manifest and `meta`
+frame hashes agree, `PRAGMA integrity_check` returns `ok`, and
+`web/discovery_assets.py::load_discovery_state()` — the shipped fail-closed
+loader, with its full validation matrix — reaches `ready=True` on it.
+
+Two builds share these counts. `528f6d36…` supersedes `ef3a79fd…` (2026-08-14);
+they are byte-different but count-identical, because the change between them was
+the Judeo-Arabic range-picker label (`פרק יז` rather than `פרק יז, עמ' 219`) and
+not the population. Both share `frame_content_hash 90a51e0b…`, so a figure read
+from either is correct for the other. `528f6d36…` is the live one.
+
+### Rollback target
+
+**Not `e9365edc…`.** The beta-launch artifact (2026-08-03, 555 works / 53,581
+identifications) is retained in `discovery_data/`, but the current code
+*refuses* it: `web/discovery_assets.py::_REQUIRED_COLUMNS` requires
+`discovery_identification.rendered_relation`, added by the 2026-08-12 C-track
+batch, and that artifact predates it. Deploying it would leave the loader at
+`ready=False` and clean-hide every discovery surface — measured, not inferred:
+staged alone in a directory it logs `table 'discovery_identification' missing
+required column(s): ['rendered_relation']`.
+
+The rollback target is **`ef3a79fd07f375ccf1b6fcec4ad87576058bdc4d536155c44725952a630a071d`**
+(2026-08-14, `discovery_builds/discovery_v4/preview/`), which carries the column
+and the same 596 works / 55,250 identifications; it differs from the live build
+only in the Judeo-Arabic range-picker label. It is not currently staged in
+`discovery_data/live/` — that directory deliberately holds one artifact.
+
+> **Unresolved.** Production served *something* between the C-track deploy and
+> V4 that satisfied the `rendered_relation` requirement, and no copy of it is on
+> this box. Either the batch's code and artifact shipped together or an
+> intermediate rebake was promoted and never captured here. Worth settling
+> before anyone plans a rollback to that window rather than to `ef3a79fd…`.
+
+The three places that name the live artifact — `discovery_data/live/manifest.json`,
+`discovery_data/manifest.deploy.json`, and `PRODUCTION_DATABASE_SCANS` in
+`tests/render_smoke/test_discovery_masking_sweep.py` — must move together; see
+`_tmp/BETA-LAUNCH-RUNBOOK.md` §2. The repo's own `discovery_data/manifest.json`
+is deliberately NOT one of them: it resolves the frozen CERT-01 artifact for
+`tests/test_cert01_grading_validator.py`.
+
 ## Frozen input chain
 
 The V4 reference corpus is an append-only extension of `ref_corpus_v2.pkl`.
