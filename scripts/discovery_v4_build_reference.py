@@ -28,33 +28,58 @@ from scripts.build_work_divisions import WorkUnits, build_staged_ja_chapters
 
 try:
     from scripts.discovery_v4_common import (
+        DEFAULT_REFERENCE_NAMESPACE,
         compact_stream,
         load_source_config,
         normalize_title,
+        raw_id_prefix,
         require_hash,
+        resolve_namespace,
         sha256_file,
         stable_json_dump,
     )
 except ModuleNotFoundError:  # direct ``python scripts/...py`` invocation
     from discovery_v4_common import (
+        DEFAULT_REFERENCE_NAMESPACE,
         compact_stream,
         load_source_config,
         normalize_title,
+        raw_id_prefix,
         require_hash,
+        resolve_namespace,
         sha256_file,
         stable_json_dump,
     )
 
 
-def raw_reference_id(source_key: str, mapping: dict, mapping_count: int) -> str:
+# V4 wrote this record under a hand-written key. Reusing that literal keeps a
+# REF4 rebuild byte-identical to the pinned coverage file; a later namespace
+# gets its own key so chaining V4.1 onto V4's coverage cannot overwrite the
+# record of what V4 added.
+_LEGACY_COVERAGE_EXTENSION_KEYS = {"REF4": "v4_extension"}
+
+
+def coverage_extension_key(namespace: str) -> str:
+    return _LEGACY_COVERAGE_EXTENSION_KEYS.get(
+        namespace, f"{namespace.lower()}_extension"
+    )
+
+
+def raw_reference_id(
+    source_key: str,
+    mapping: dict,
+    mapping_count: int,
+    namespace: str = DEFAULT_REFERENCE_NAMESPACE,
+) -> str:
+    prefix = raw_id_prefix(namespace)
     if mapping_count == 1:
-        return f"REF4:{source_key}"
+        return f"{prefix}{source_key}"
     chapter_range = mapping.get("chapter_range")
     if chapter_range:
         suffix = f"{chapter_range[0]}_{chapter_range[1]}"
     else:
         suffix = mapping["target_work_id"]
-    return f"REF4:{source_key}:{suffix}"
+    return f"{prefix}{source_key}:{suffix}"
 
 
 def select_units(units: list[dict], mapping: dict) -> list[dict]:
@@ -166,11 +191,17 @@ def _extend_locus(
     output_coverage: Path,
     new_reference_hash: str,
     reference_entries: list[dict],
+    namespace: str = DEFAULT_REFERENCE_NAMESPACE,
     supplemental_works: list[WorkUnits] | None = None,
 ) -> dict:
     coverage = json.loads(base_coverage.read_text(encoding="utf-8"))
     if coverage.get("invariant_problems") != []:
         raise ValueError("base locus coverage reports invariant problems")
+    extension_key = coverage_extension_key(namespace)
+    if extension_key in coverage:
+        raise ValueError(
+            f"base locus coverage already records a {namespace} extension"
+        )
     output_db.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(base_db, output_db)
     conn = sqlite3.connect(output_db)
@@ -273,7 +304,7 @@ def _extend_locus(
         "by_family": families,
         "by_grain": grains,
         "invariant_problems": problems,
-        "v4_extension": {
+        extension_key: {
             "added_works_with_units": added_works,
             "added_units": added_units,
             "whole_work_fallback_refs": whole_work_refs,
@@ -315,6 +346,7 @@ def run(args: argparse.Namespace) -> dict:
         base_locus_coverage, args.base_locus_coverage_sha256, "base locus coverage"
     )
     config = load_source_config(source_map_path)
+    namespace = resolve_namespace(config, getattr(args, "reference_namespace", None))
     config_by_key = {source["key"]: source for source in config["sources"]}
     acquisition = json.loads(acquisition_manifest_path.read_text(encoding="utf-8"))
     if acquisition.get("schema_version") != "discovery-v4-acquisition-manifest-v1":
@@ -382,7 +414,7 @@ def run(args: argparse.Namespace) -> dict:
             if work is None or work["identity_visibility"] != "private":
                 raise ValueError(f"V4 target absent or non-private: {target_id}")
             units = select_units(normalized["units"], mapping)
-            ref_id = raw_reference_id(key, mapping, len(source["mappings"]))
+            ref_id = raw_reference_id(key, mapping, len(source["mappings"]), namespace)
             if ref_id in existing_ids:
                 raise ValueError(f"new reference id collides with base corpus: {ref_id}")
             stream, offsets = _unit_offsets(units)
@@ -450,6 +482,7 @@ def run(args: argparse.Namespace) -> dict:
         output_coverage=output_locus_coverage,
         new_reference_hash=output_ref_hash,
         reference_entries=reference_entries,
+        namespace=namespace,
         supplemental_works=[guide_units],
     )
     report = {
@@ -482,6 +515,11 @@ def run(args: argparse.Namespace) -> dict:
         },
         "entries": reference_entries,
     }
+    if namespace != DEFAULT_REFERENCE_NAMESPACE:
+        # Emitted only off the default so a REF4 rebuild still reproduces the
+        # pinned V4 reference manifest byte for byte. Readers treat an absent
+        # field as REF4, which is what every V4 manifest on disk means.
+        report["reference_namespace"] = namespace
     stable_json_dump(report, output_manifest)
     print(
         json.dumps(
@@ -509,6 +547,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--source-map",
         default=str(Path(__file__).with_name("discovery_v4_sources.json")),
+    )
+    parser.add_argument(
+        "--reference-namespace",
+        help=(
+            "optional cross-check of the raw-id namespace the source map "
+            "declares (REF4 when the map omits it); a different value is "
+            "refused rather than applied"
+        ),
     )
     parser.add_argument("--base-locus-db", required=True)
     parser.add_argument("--base-locus-sha256", required=True)

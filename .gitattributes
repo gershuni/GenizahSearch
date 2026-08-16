@@ -1,0 +1,14 @@
+# Hash-pinned Discovery inputs must be byte-identical in every working tree.
+#
+# The V4/V4.1 pipeline records `sha256_file(<source map>)` in its acquisition
+# and reference manifests, and every consuming stage re-verifies it. This repo
+# has no other .gitattributes and the owner's git runs `core.autocrlf=true`, so
+# a Windows checkout rewrote scripts/discovery_v4_sources.json to CRLF while git
+# stored LF -- the file hashed ba3f413a... in the tree against the 6f21efcd...
+# the V4 build pinned, and `discovery_v4_build_reference.py` would have refused
+# its own inputs with "acquisition manifest source-map hash mismatch".
+#
+# Keep these two paths LF-only. Do NOT widen this to the whole tree: that would
+# renormalize thousands of unrelated files.
+scripts/discovery_v4_sources.json text eol=lf
+scripts/discovery_v4_1_sources.json text eol=lf

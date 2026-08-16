@@ -12,9 +12,19 @@ from collections import Counter
 from pathlib import Path
 
 try:
-    from scripts.discovery_v4_common import sha256_file, stable_json_dump
+    from scripts.discovery_v4_common import (
+        DEFAULT_REFERENCE_NAMESPACE,
+        raw_id_prefix,
+        sha256_file,
+        stable_json_dump,
+    )
 except ModuleNotFoundError:  # direct invocation
-    from discovery_v4_common import sha256_file, stable_json_dump
+    from discovery_v4_common import (
+        DEFAULT_REFERENCE_NAMESPACE,
+        raw_id_prefix,
+        sha256_file,
+        stable_json_dump,
+    )
 
 
 def stream_hash(stream: str) -> str:
@@ -26,6 +36,12 @@ def run(args: argparse.Namespace) -> dict:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("schema_version") != "discovery-v4-reference-manifest-v1":
         raise ValueError("unsupported V4 reference manifest")
+    # The manifest, not a flag, states which namespace it appended under: the
+    # verifier's job is to check what the build claims. Absent means REF4.
+    namespace = str(
+        manifest.get("reference_namespace", DEFAULT_REFERENCE_NAMESPACE)
+    )
+    prefix = raw_id_prefix(namespace)
     base_path = Path(manifest["base_reference"])
     reference_path = Path(manifest["reference_corpus"])
     locus_path = Path(manifest["locus_divisions"])
@@ -54,6 +70,13 @@ def run(args: argparse.Namespace) -> dict:
     appended_by_id = {work["id"]: work for work in appended}
     if set(appended_by_id) != set(entry_by_id):
         raise ValueError("manifest entries do not equal the appended reference set")
+    outside = sorted(
+        raw_id for raw_id in appended_by_id if not str(raw_id).startswith(prefix)
+    )
+    if outside:
+        raise ValueError(
+            f"appended reference ids outside {namespace}: {outside[:4]}"
+        )
     for raw_id, entry in entry_by_id.items():
         work = appended_by_id[raw_id]
         if len(work["stream"]) != entry["stream_len"]:
@@ -89,7 +112,8 @@ def run(args: argparse.Namespace) -> dict:
         locus_ids = {
             row[0]
             for row in conn.execute(
-                "SELECT locus_ref_id FROM locus_work WHERE locus_ref_id LIKE 'REF4:%'"
+                "SELECT locus_ref_id FROM locus_work WHERE locus_ref_id LIKE ?",
+                (f"{prefix}%",),
             )
         }
         expected_locus_ids = {
@@ -138,6 +162,8 @@ def run(args: argparse.Namespace) -> dict:
         "integrity_check": integrity,
         "foreign_key_problems": len(foreign_keys),
     }
+    if namespace != DEFAULT_REFERENCE_NAMESPACE:
+        report["reference_namespace"] = namespace
     if args.report:
         stable_json_dump(report, args.report)
     print(json.dumps(report, indent=2))

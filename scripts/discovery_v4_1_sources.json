@@ -1,0 +1,72 @@
+{
+  "schema_version": "discovery-v4-sources-v1",
+  "reference_namespace": "REF5",
+  "license_allowlist": [
+    "Public Domain",
+    "CC0",
+    "CC-BY",
+    "CC-BY-SA"
+  ],
+  "minimum_hebrew_letters": 1000,
+  "note": "V4.1 candidate-only source expansion (docs/specs/discovery-v4.1-public-source-and-r-shadow-plan.md). Same schema as scripts/discovery_v4_sources.json; the REF5 namespace keeps every REF4 raw id and the byte-stable V2/V4 prefixes untouched. Each record's fields are copied from the reviewed probe map, not re-derived from prose.",
+  "quarantined_pending_license": [
+    {
+      "source_ref": "Bamidbar Rabbah",
+      "provider": "sefaria",
+      "target_work_id": "w000496",
+      "note": "Probed license was 'unknown', which the allowlist rejects. The Hebrew Wikisource edition below is the accepted stream for this work; do not promote this one on the strength of the existing unknown-license precedent."
+    },
+    {
+      "source_ref": "Rabbeinu Chananel on Shabbat",
+      "provider": "sefaria",
+      "target_work_id": "w000452",
+      "note": "Probed license was 'unknown'. No substitute stream; the work stays unmapped in V4.1."
+    }
+  ],
+  "reconciliation_queue": [
+    {
+      "source_ref": "אליהו זוטא",
+      "provider": "hewikisource",
+      "target_work_id": "w000162",
+      "note": "Acquirable (CC-BY-SA) but NOT added: an existing licensed Sefaria stream already covers this work. Owner review decides whether that edition stands; add a reference only if it is rejected."
+    },
+    {
+      "source_ref": "אליהו רבה",
+      "provider": "hewikisource",
+      "target_work_id": "w000161",
+      "note": "Same existing-coverage question as its companion, and separately below the size threshold (933 < 1000 usable Hebrew letters)."
+    }
+  ],
+  "rejected": [
+    {
+      "source_ref": "מדרש תדשא",
+      "provider": "hewikisource",
+      "target_work_id": "w000899",
+      "note": "Below the size threshold: 205 < 1000 usable Hebrew letters."
+    },
+    {
+      "source_ref": "מדרש תנחומא",
+      "provider": "hewikisource",
+      "target_work_id": "w000926",
+      "note": "Below the size threshold: 506 < 1000 usable Hebrew letters. Sefaria's Midrash Tanchuma below is this work's reference stream."
+    },
+    {
+      "source_ref": "עשרת הדיברות",
+      "provider": "hewikisource",
+      "target_work_id": "w000848",
+      "note": "Acquirable but rejected on coverage: 5,227 letters is insufficient target coverage, and insufficient coverage must not be turned into an identity mapping."
+    }
+  ],
+  "sources": [
+    {"key":"midrash_tanchuma","provider":"sefaria","source_ref":"Midrash Tanchuma","mode":"schema_leaves","locus_grain":"section","mappings":[{"target_work_id":"w000926"}]},
+    {"key":"duties_of_the_heart","provider":"sefaria","source_ref":"Duties of the Heart","mode":"schema_leaves","locus_grain":"section","mappings":[{"target_work_id":"w000195"}]},
+    {"key":"sheiltot_derav_achai","provider":"sefaria","source_ref":"Sheiltot d'Rav Achai Gaon","mappings":[{"target_work_id":"w000732"}]},
+    {"key":"avot_derabbi_natan_a","provider":"sefaria","source_ref":"Avot DeRabbi Natan","mappings":[{"target_work_id":"w000788"}]},
+    {"key":"avot_derabbi_natan_b","provider":"sefaria","source_ref":"Avot DeRabbi Natan, Recension B","mappings":[{"target_work_id":"w000789"}]},
+    {"key":"machberet_menachem","provider":"sefaria","source_ref":"Machberet Menachem","mode":"schema_leaves","locus_grain":"section","mappings":[{"target_work_id":"w000911"}]},
+    {"key":"bamidbar_rabbah","provider":"hewikisource","source_ref":"במדבר רבה","link_prefix":"במדבר רבה ","mappings":[{"target_work_id":"w000496","chapter_range":[1,14]}]},
+    {"key":"midrash_panim_acherim","provider":"hewikisource","source_ref":"מדרש פנים אחרים","mappings":[{"target_work_id":"w000986"}]},
+    {"key":"alfa_beta_derabbi_akiva_a","provider":"hewikisource","source_ref":"אלפא ביתא דרבי עקיבא נוסח א","mappings":[{"target_work_id":"w001127"}]},
+    {"key":"alfa_beta_derabbi_akiva_b","provider":"hewikisource","source_ref":"אלפא ביתא דרבי עקיבא נוסח ב","mappings":[{"target_work_id":"w000892"}]}
+  ]
+}

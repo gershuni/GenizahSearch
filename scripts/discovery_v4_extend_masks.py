@@ -12,9 +12,21 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 try:
-    from scripts.discovery_v4_common import require_hash, sha256_file, stable_json_dump
+    from scripts.discovery_v4_common import (
+        DEFAULT_REFERENCE_NAMESPACE,
+        raw_id_prefix,
+        require_hash,
+        sha256_file,
+        stable_json_dump,
+    )
 except ModuleNotFoundError:  # direct invocation
-    from discovery_v4_common import require_hash, sha256_file, stable_json_dump
+    from discovery_v4_common import (
+        DEFAULT_REFERENCE_NAMESPACE,
+        raw_id_prefix,
+        require_hash,
+        sha256_file,
+        stable_json_dump,
+    )
 
 
 CANONICAL_CATEGORIES = {"Bible", "Mishnah", "Tosefta", "Bavli", "Yerushalmi"}
@@ -43,8 +55,14 @@ def run(args: argparse.Namespace) -> dict:
     if v4[: len(base)] != base:
         raise ValueError("V4 reference does not preserve the complete base-corpus prefix")
     appended = v4[len(base) :]
-    if not appended or any(not work.get("id", "").startswith("REF4:") for work in appended):
-        raise ValueError("V4 reference append set is missing or contains a non-REF4 id")
+    prefix = raw_id_prefix(args.reference_namespace)
+    if not appended or any(
+        not work.get("id", "").startswith(prefix) for work in appended
+    ):
+        raise ValueError(
+            "reference append set is missing or contains an id outside "
+            f"{args.reference_namespace}"
+        )
     canonical = [work for work in v4 if work.get("cat") in CANONICAL_CATEGORIES]
     index = build_ref_index(canonical)
     stats: Counter[str] = Counter()
@@ -96,6 +114,8 @@ def run(args: argparse.Namespace) -> dict:
         "workers": args.workers,
         "stats": dict(stats),
     }
+    if args.reference_namespace != DEFAULT_REFERENCE_NAMESPACE:
+        report["reference_namespace"] = args.reference_namespace
     stable_json_dump(report, output_path.with_suffix(".report.json"))
     print(json.dumps(report, indent=2))
     return report
@@ -111,6 +131,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-masks", required=True)
     parser.add_argument("--base-masks-sha256", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument(
+        "--reference-namespace",
+        default=DEFAULT_REFERENCE_NAMESPACE,
+        help="raw-id namespace every appended reference must carry",
+    )
     parser.add_argument("--workers", type=int, default=1)
     return parser.parse_args()
 

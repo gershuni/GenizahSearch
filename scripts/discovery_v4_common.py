@@ -16,6 +16,9 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 
+DEFAULT_REFERENCE_NAMESPACE = "REF4"
+REFERENCE_NAMESPACE_RE = re.compile(r"REF[0-9]+")
+
 HEBREW_LETTER_RE = re.compile(r"[\u05d0-\u05ea]")
 FINAL_LETTER_FOLD = str.maketrans({"ך": "כ", "ם": "מ", "ן": "נ", "ף": "פ", "ץ": "צ"})
 _TITLE_PUNCT_RE = re.compile(r"[\"'׳״“”„‘’`´]+")
@@ -120,6 +123,9 @@ def load_source_config(path: str | Path) -> dict:
     doc = json.loads(Path(path).read_text(encoding="utf-8"))
     if doc.get("schema_version") != "discovery-v4-sources-v1":
         raise ValueError("unsupported or missing V4 source-map schema_version")
+    namespace = doc.get("reference_namespace", DEFAULT_REFERENCE_NAMESPACE)
+    if not isinstance(namespace, str) or not REFERENCE_NAMESPACE_RE.fullmatch(namespace):
+        raise ValueError(f"invalid reference_namespace: {namespace!r}")
     sources = doc.get("sources")
     if not isinstance(sources, list) or not sources:
         raise ValueError("V4 source map must contain a non-empty sources list")
@@ -145,6 +151,38 @@ def load_source_config(path: str | Path) -> dict:
                 raise ValueError(f"target work appears more than once: {work_id}")
             seen_work_ids.add(work_id)
     return doc
+
+
+def reference_namespace(config: dict) -> str:
+    """Return the raw-id namespace this source map appends under.
+
+    V4 predates the field, so an absent value means ``REF4``.  A map that
+    declares one is authoritative: the namespace is a property of the reviewed
+    source set, not an operator's command-line choice.
+    """
+    return str(config.get("reference_namespace", DEFAULT_REFERENCE_NAMESPACE))
+
+
+def raw_id_prefix(namespace: str) -> str:
+    if not REFERENCE_NAMESPACE_RE.fullmatch(namespace or ""):
+        raise ValueError(f"invalid reference namespace: {namespace!r}")
+    return f"{namespace}:"
+
+
+def resolve_namespace(config: dict, requested: str | None) -> str:
+    """Reconcile a CLI ``--reference-namespace`` with the map's declaration.
+
+    Passing one is optional; passing a different one is an error rather than an
+    override, so a V4 map can never be run through a REF5 build (or the
+    reverse) by mistyping a flag.
+    """
+    declared = reference_namespace(config)
+    if requested and requested != declared:
+        raise ValueError(
+            f"--reference-namespace {requested} disagrees with the source map's {declared}"
+        )
+    raw_id_prefix(declared)
+    return declared
 
 
 def source_target_ids(config: dict) -> set[str]:

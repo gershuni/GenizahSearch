@@ -79,6 +79,50 @@ stream.
    run masking, SQLite integrity, foreign-key, source-attribution, excerpt
    replay, and real-loader checks.
 
+## Build-sequence status
+
+**Step 1 is done** (`scripts/discovery_v4_1_sources.json`, namespace threading,
+`tests/test_discovery_v4_1_sources.py`). Steps 2–6 are not started.
+
+The ten records were copied from the reviewed probe maps in
+`discovery_builds/discovery_v4/{source,wikisource}_probe_map.json` rather than
+re-derived from the table above, and each one's probe entry is `acquired` with an
+allowlisted licence. The map also records the exclusions as data — quarantined,
+reconciliation-queued, and rejected — so a later reader can see what was decided
+against, not merely what is absent.
+
+`REF5` is declared by the source map itself and threaded through
+`discovery_v4_common`, `_build_reference`, `_extend_masks`, and
+`_verify_reference`. A `--reference-namespace` flag that disagrees with the map
+is refused rather than applied, so a V4 map cannot be run through a REF5 build.
+Two fields stay conditional on the namespace being non-default —
+`reference_namespace` in the emitted manifests, and the `v4_extension` coverage
+key — because a REF4 rebuild must still reproduce the pinned V4 artifacts byte
+for byte. Verified, not assumed: regenerating the V4 ids from the committed
+source map reproduces the 43 `raw_reference_id` values in the built V4 reference
+manifest exactly, in order.
+
+**The V4 source-map hash pin was broken on this checkout and is now fixed.**
+`scripts/discovery_v4_sources.json` is pinned by SHA-256 in the V4 acquisition
+and reference manifests (`6f21efcd…`), but the repo had no `.gitattributes` and
+the owner's git runs `core.autocrlf=true`, so the working tree held a CRLF copy
+hashing `ba3f413a…` — `discovery_v4_build_reference.py` would have refused its
+own inputs with "acquisition manifest source-map hash mismatch". A narrow
+`.gitattributes` now holds both source maps at LF, and a test pins the V4 hash.
+
+Two items to settle before or during the later steps:
+
+- **`ref4_total_rows` / `ref4_live_rows` are frozen release-contract keys**
+  (`_TRACK1_V4_CONTRACT_KEYS` in `scripts/build_discovery_sidecar.py`), so
+  `discovery_v4_match.py` and `discovery_v4_reconcile.py` still carry `REF4:`
+  literals. A V4.1 run needs REF4 *and* REF5 counts, which means widening that
+  frozen key set — a coordinated change belonging to steps 5–6, not to the
+  acquisition side.
+- **`REF5:bamidbar_rabbah` has no `locus_title_he`**, matching its probe record,
+  so its chapter labels will fall back to the private work's `neutral_title`.
+  Worth an owner glance at step 4 if that title is not the expected
+  `במדבר רבה`.
+
 ## Restricted R-source shadow
 
 The R-source stays read-only in its restricted depot and is never an input to
