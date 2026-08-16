@@ -93,9 +93,15 @@ remain REF5-scoped.
 ## Build-sequence status
 
 **Step 1 is done** (`scripts/discovery_v4_1_sources.json`, namespace threading,
-`tests/test_discovery_v4_1_sources.py`). **Step 2 (the ten-source fetch) began
-2026-08-16** into `discovery_builds/discovery_v4_1/sources/`. Steps 3–6 are not
-started; 5–6 are governed by the combined-bake amendment above.
+`tests/test_discovery_v4_1_sources.py`). **Step 2 (the ten-source fetch)
+completed 2026-08-16** into `discovery_builds/discovery_v4_1/sources/`.
+**Step 3 (the REF5 append) executed and verified 2026-08-16** — exactly 10 REF5
+references (6 sefaria + 4 hewikisource, 2,658,587 normalized letters, 7 with
+locus units + 3 whole-work fallbacks), chained byte-stably onto the pinned V4
+corpus; outputs and hashes in
+`discovery_builds/discovery_v4_1/REF5-APPEND-RUNBOOK.md` (corpus v5
+`e6041360…27eae`, masks v5 `9333666c…bd17c`). Step 4 (REF6) awaits the owner
+sitting; 5–6 are governed by the combined-bake amendment above.
 
 The ten records were copied from the reviewed probe maps in
 `discovery_builds/discovery_v4/{source,wikisource}_probe_map.json` rather than
