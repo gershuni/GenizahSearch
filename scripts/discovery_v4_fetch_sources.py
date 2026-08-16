@@ -193,15 +193,13 @@ def select_chapter_links(links: list[dict], prefix: str) -> list[tuple[int, str]
 # Downstream consumers of the NEW "daf" locus_grain value born in
 # ``_acquire_wikisource_daf_pages`` (verified 2026-08-16, discovery-v4.2 C8):
 #
-# - ``discovery_v4_build_reference.py`` reads ``locus_grain`` from the
-#   SOURCE-MAP entry (not this acquisition manifest), so a real daf_pages
-#   map entry must declare ``"locus_grain": "daf"`` explicitly or it silently
-#   defaults to "chapter". Its ``_locus_label()`` has NO "daf" branch yet:
-#   the generic fallback re-derives ``f"{title} {heb_numeral(ordinal)}"``
-#   from the raw ordinal, which would MISLABEL every amud even though each
-#   unit already carries the correct ``daf_label_he`` label from acquisition.
-#   That branch must land (with its own tests) BEFORE the first real
-#   daf_pages entry is added to any source map.
+# - ``discovery_v4_build_reference.py`` reads the grain from the SOURCE-MAP
+#   entry via ``_locus_grain()``: explicit ``locus_grain`` wins, else
+#   ``mode == "daf_pages"`` implies "daf" (so a map entry cannot silently
+#   fall to "chapter"). Its ``_locus_label()`` "daf" branch uses each unit's
+#   parse-verified acquired label, cross-checked against the ordinal
+#   geometry (disagreement is a hard error), with citation_pos on the same
+#   ``daf*2+amud-1`` convention as daf_bavli.
 # - Beyond the locus DB the value is opaque: ``locus_work.grain`` is written
 #   verbatim, ``shared/discovery_service.py`` passes it through to envelope
 #   meta unbranched, and the verifier groups by grain self-consistently

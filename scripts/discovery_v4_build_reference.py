@@ -183,6 +183,19 @@ def _legacy_reference_metadata_key(corpus: list[dict]) -> str:
     return key.encode("utf-8").decode("utf-8")
 
 
+def _locus_grain(source: dict) -> str:
+    """Grain for a source-map entry: explicit ``locus_grain`` wins, else the
+    acquisition mode implies it ("daf_pages" -> "daf", "schema_leaves" ->
+    "section"), else "chapter"."""
+    return source.get("locus_grain") or (
+        "daf"
+        if source.get("mode") == "daf_pages"
+        else "section"
+        if source.get("mode") == "schema_leaves"
+        else "chapter"
+    )
+
+
 def _locus_label(
     source: dict, mapping: dict, work: dict, unit: dict, grain: str
 ) -> tuple[str, int]:
@@ -190,6 +203,26 @@ def _locus_label(
     if grain == "daf_bavli":
         daf, amud = sefaria_daf(ordinal)
         return daf_label_he(daf, amud), daf * 2 + amud - 1
+    if grain == "daf":
+        # daf_pages acquisition (V4.2 C8): each unit already carries its
+        # parse-verified ``daf_label_he`` label from fetch time; the ordinal
+        # geometry (ordinal = 2*(daf - daf_first) + amud) is a completeness
+        # invariant of that mode, so the label is recomputed here and a
+        # disagreement is a hard error, never a guess. citation_pos uses the
+        # same daf*2+amud-1 convention as daf_bavli so locus-range filtering
+        # treats both daf shapes identically.
+        daf_first = int(source["daf_range"][0])
+        daf = daf_first + (ordinal - 1) // 2
+        amud = (ordinal - 1) % 2 + 1
+        expected_label = daf_label_he(daf, amud)
+        unit_label = str(unit.get("label") or "").strip()
+        if unit_label != expected_label:
+            raise ValueError(
+                f"daf unit label/ordinal geometry disagreement for "
+                f"{source['key']}: ordinal {ordinal} implies "
+                f"{expected_label!r} but the acquired unit says {unit_label!r}"
+            )
+        return unit_label, daf * 2 + amud - 1
     locus_title = source.get("locus_title_he") or work["title"]
     if grain == "section":
         unit_label = str(unit.get("label") or "").strip()
@@ -490,9 +523,7 @@ def run(args: argparse.Namespace) -> dict:
             if ref_id in existing_ids:
                 raise ValueError(f"new reference id collides with base corpus: {ref_id}")
             stream, offsets = _unit_offsets(units)
-            grain = source.get("locus_grain") or (
-                "section" if source.get("mode") == "schema_leaves" else "chapter"
-            )
+            grain = _locus_grain(source)
             locus_rows = []
             for unit, start_offset in offsets:
                 label, citation_pos = _locus_label(source, mapping, work, unit, grain)

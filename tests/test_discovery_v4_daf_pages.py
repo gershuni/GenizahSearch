@@ -486,3 +486,57 @@ def test_existing_v4_v41_v42_maps_still_load_identically():
     assert reference_namespace(v4_2) == "REF6"
     assert len(v4_2["sources"]) == 15
     assert all(source.get("mode") is None for source in v4_2["sources"])
+
+
+# ---------------------------------------------------------------------------
+# Build-time locus for the "daf" grain (discovery_v4_build_reference.py)
+# ---------------------------------------------------------------------------
+#
+# The acquisition above births the units; these tests pin what the reference
+# builder does with them. Before the "daf" branch existed, a daf_pages work
+# fell to the generic label branch and re-derived "{title} {heb_numeral(N)}"
+# from the raw ordinal -- mislabeling every amud.
+
+from scripts.discovery_v4_build_reference import (  # noqa: E402
+    _locus_grain,
+    _locus_label,
+)
+
+
+def _daf_unit(ordinal: int, daf: int, amud: int) -> dict:
+    return {"ordinal": ordinal, "label": daf_label_he(daf, amud), "text": "א"}
+
+
+def test_locus_grain_derives_daf_from_daf_pages_mode():
+    assert _locus_grain({"mode": "daf_pages"}) == "daf"
+    # Explicit locus_grain always wins over the mode-implied default.
+    assert _locus_grain({"mode": "daf_pages", "locus_grain": "daf_bavli"}) == "daf_bavli"
+    assert _locus_grain({"mode": "schema_leaves"}) == "section"
+    assert _locus_grain({}) == "chapter"
+
+
+def test_locus_label_daf_branch_uses_acquired_label_and_bavli_citation_pos():
+    source = _daf_pages_source(daf_range=[30, 31])
+    work = {"title": "בדיקה"}
+    expected = [
+        (1, 30, 1),
+        (2, 30, 2),
+        (3, 31, 1),
+        (4, 31, 2),
+    ]
+    for ordinal, daf, amud in expected:
+        unit = _daf_unit(ordinal, daf, amud)
+        label, citation_pos = _locus_label(source, {}, work, unit, "daf")
+        assert label == daf_label_he(daf, amud)
+        # Same convention as the daf_bavli branch, so locus-range filtering
+        # treats both daf shapes identically.
+        assert citation_pos == daf * 2 + amud - 1
+
+
+def test_locus_label_daf_geometry_disagreement_is_a_hard_error():
+    """An acquired label disagreeing with the ordinal geometry (ordinal =
+    2*(daf - daf_first) + amud) must fail loudly, never relabel by guess."""
+    source = _daf_pages_source(daf_range=[30, 31])
+    unit = _daf_unit(1, 31, 1)  # ordinal 1 under daf_first=30 implies daf 30
+    with pytest.raises(ValueError, match="geometry disagreement"):
+        _locus_label(source, {}, {"title": "בדיקה"}, unit, "daf")
