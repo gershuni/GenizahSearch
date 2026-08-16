@@ -863,6 +863,15 @@ def _acquire_container_sefaria(
             "license_url": _LICENSE_URL.get(effective_license_key),
             "license_ruling": license_ruling,
             "attribution": attribution,
+            # A container spans several independent Sefaria indices, so there
+            # is no single provider URL for the whole work; the first child is
+            # the work's opening section and its page is the honest landing
+            # point. The build step requires source_url on every acquired
+            # source (its absence broke the first REF6 append, 2026-08-17).
+            "source_url": "https://www.sefaria.org/"
+            + urllib.parse.quote(
+                children_cfg[0]["source_ref"].replace(" ", "_"), safe=",_"
+            ),
             "units": units,
         },
         raw_paths,

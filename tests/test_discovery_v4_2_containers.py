@@ -388,6 +388,30 @@ def test_container_offset_intervals_are_correct_and_round_trip(tmp_path: Path):
     assert stream == "".join(compact_stream(u["text"]) for u in acquired["units"])
 
 
+def test_acquire_container_carries_a_source_url_for_the_builder(tmp_path: Path):
+    """discovery_v4_build_reference.py reads ``normalized["source_url"]`` for
+    EVERY acquired source; the container path must provide one (the first
+    child's Sefaria page -- there is no single provider URL for a container
+    spanning several indices, and the first child is the work's opening
+    section). Its absence broke the first REF6 append (2026-08-17)."""
+    children_specs = [
+        ("Ref A", "א", "Public Domain", "אבגד הוזח", "V1"),
+        ("Ref B", "ב", "Public Domain", "טיכל מנסע", "V1"),
+    ]
+    index_responses, text_responses = _build_fixture(children_specs)
+    fetcher = FakeFetcher(tmp_path, index_responses, text_responses)
+    source = _container_source_dict(
+        children=[
+            {"child_key": "a", "source_ref": "Ref A"},
+            {"child_key": "b", "source_ref": "Ref B"},
+        ]
+    )
+    acquired, _raw_paths = _acquire_container_sefaria(
+        fetcher, source, {"public domain"}, sleep_fn=lambda _s: None
+    )
+    assert acquired["source_url"] == "https://www.sefaria.org/Ref_A"
+
+
 def test_acquire_container_throttles_between_every_request(tmp_path: Path):
     children_specs = [
         ("Ref A", "א", "Public Domain", "אבגד", "V1"),
