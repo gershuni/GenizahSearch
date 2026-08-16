@@ -66,6 +66,10 @@ for _p in (_REPO_ROOT, _SCRIPTS_DIR):
 
 import discovery_ids as ids  # scripts/discovery_ids.py -- FROZEN id/enum/routing primitives
 import check_atlas_masking as _cam  # scripts/check_atlas_masking.py -- DATA-05 masking gate
+# scripts/discovery_track1_contract.py -- V4.2 plan C3/C4 committed shared
+# interface (contract-v2 schema, cohort registry, `classify_work_id`). This
+# module CONSUMES it; it never copies the interface.
+import discovery_track1_contract as track1_contract
 
 # 136-11 (T-136-11-01): the main-pool bucket rule has exactly ONE implementation
 # across the bake, the panel and the corpus-wide findings page. This builder
@@ -7250,6 +7254,28 @@ _EXPECTED_E1_R3_FRAME_ROWS = 9996
 _EXPECTED_Q2_WITNESS_COLLECTION_ROWS = 4367
 _EXPECTED_Q2_SHARED_TEXT_ROWS = 60156
 _EXPECTED_TIER_A_ROWS = 275894  # track1_matches WHERE shadowed_by IS NULL
+# V4.2 plan C4: the reviewed namespace/cohort registry, resolved relative to
+# the repo (never the process cwd) so a caller does not need to know the
+# on-disk layout. Overridable per call (`finalize_build`/
+# `load_track1_release_contract`'s `cohort_registry_path`), chiefly for
+# tests that must not depend on the real corpus's namespace population.
+DEFAULT_COHORT_REGISTRY_PATH = os.path.join(_SCRIPTS_DIR, "discovery_routing_cohorts.json")
+
+
+def _load_cohort_registry_for_build(cohort_registry_path: Optional[str] = None) -> Dict:
+    """Resolve + load the routing cohort registry (C4).
+
+    Thin wrapper over the committed `discovery_track1_contract.
+    load_cohort_registry` so every call site in this file resolves the
+    default path identically (`DEFAULT_COHORT_REGISTRY_PATH`) and an
+    override (tests) is honored the same way everywhere it is threaded.
+    """
+    return track1_contract.load_cohort_registry(
+        cohort_registry_path if cohort_registry_path is not None
+        else DEFAULT_COHORT_REGISTRY_PATH
+    )
+
+
 _TRACK1_V4_CONTRACT_VERSION = "discovery-v4-track1-release-contract-v1"
 _TRACK1_V4_CONTRACT_KEYS = frozenset({
     "schema_version", "reference_corpus_sha256", "canonical_masks_sha256",
@@ -7331,8 +7357,28 @@ class BandVocabPreflightError(RuntimeError):
     rename cascade's root cause was that v2 was inferred, never asserted)."""
 
 
-def load_track1_release_contract(path, *, sha256: Optional[str] = None) -> Dict:
-    """Load the hash-pinned V4 matcher population contract."""
+def load_track1_release_contract(
+    path, *, sha256: Optional[str] = None,
+    cohort_registry_path: Optional[str] = None,
+) -> Dict:
+    """Load the hash-pinned V4 matcher population contract.
+
+    Accepts EITHER the frozen v1 document (schema_version
+    ``discovery-v4-track1-release-contract-v1``, exact key set
+    `_TRACK1_V4_CONTRACT_KEYS`) -- validated exactly as before, byte-for-byte
+    -- OR a v2 document (schema_version `track1_contract.
+    CONTRACT_V2_SCHEMA_VERSION`), validated via the shared, committed
+    `validate_contract_v2` against the routing cohort registry's
+    extrapolated namespaces (V4.2 plan C3/C4). The branch below is decided
+    BEFORE the v1 key-set check, so a v2 document never touches the v1
+    validation path (and vice versa) -- every existing v1 caller keeps its
+    exact behavior.
+
+    `cohort_registry_path` (v2 documents only): defaults to the committed
+    `scripts/discovery_routing_cohorts.json` (`DEFAULT_COHORT_REGISTRY_PATH`,
+    resolved relative to the repo, never the process cwd); overridable,
+    chiefly for tests.
+    """
     contract_path = Path(path)
     if not contract_path.is_file():
         raise ReleaseInputsIncompleteError("Track-1 release contract file is missing")
@@ -7345,6 +7391,21 @@ def load_track1_release_contract(path, *, sha256: Optional[str] = None) -> Dict:
         raise ReleaseInputsIncompleteError(
             "Track-1 release contract is not strict JSON"
         ) from exc
+
+    if (
+        isinstance(contract, dict)
+        and contract.get("schema_version") == track1_contract.CONTRACT_V2_SCHEMA_VERSION
+    ):
+        registry = _load_cohort_registry_for_build(cohort_registry_path)
+        try:
+            track1_contract.validate_contract_v2(
+                contract,
+                expected_namespaces=track1_contract.extrapolated_namespaces(registry),
+            )
+        except ValueError as exc:
+            raise ReleaseInputsIncompleteError(str(exc)) from exc
+        return {**contract, "sha256": actual_sha}
+
     if not isinstance(contract, dict) or set(contract) != _TRACK1_V4_CONTRACT_KEYS:
         raise ReleaseInputsIncompleteError(
             "Track-1 release contract does not have the frozen V4 field set"
@@ -7438,6 +7499,102 @@ def assert_track1_release_contract(conn: sqlite3.Connection, contract: Dict) -> 
     if drift:
         raise ReleaseInputsIncompleteError(
             f"research Track-1 table differs from its release contract in {len(drift)} count(s)"
+        )
+
+
+def assert_track1_release_contract_v2(
+    conn: sqlite3.Connection, contract: Dict, registry: Dict
+) -> None:
+    """Recompute the v2 per-namespace Track-1 contract (C3) against the
+    research DB.
+
+    Mirrors `assert_track1_release_contract` (v1) at every count it shares
+    (schema/snapshot-table presence, corpus-wide `page_count`/`total_rows`/
+    `live_rows`, `missing_ref_offsets`/`duplicate_pairs`), and REPLACES the
+    single flat `ref4_total_rows`/`ref4_live_rows` pair with a per-namespace
+    recompute -- `total_rows`/`live_rows` for every namespace the cohort
+    registry marks `extrapolated` (REF4/REF5/REF6 today), each classified
+    via the shared, committed `discovery_track1_contract.classify_work_id`.
+    Any drift -- corpus-wide or per-namespace -- is the SAME hard failure
+    class (`ReleaseInputsIncompleteError`) as v1's. An unregistered `REF*`
+    prefix found in the research DB propagates `classify_work_id`'s own
+    `ValueError`, unwrapped -- exactly as it does at routing time in
+    `finalize_build` -- rather than being folded into "drift".
+
+    The REF6 `by_identity_mode` split is NOT independently re-derived here.
+    `classify_work_id` classifies `(namespace, cohort)` only: identity_mode
+    is a per-source-map-entry fact (C5, a sibling condition this consumer
+    does not own) that the research DB carries no signal for, and the
+    split's internal arithmetic -- its two modes summing to the namespace
+    total -- is already enforced by `validate_contract_v2` at document-load
+    time. Re-deriving it independently here would mean guessing at a schema
+    this file does not own.
+    """
+    columns = [row[1] for row in conn.execute("PRAGMA table_info(track1_matches)")]
+    if columns != contract["promoted_columns"]:
+        raise ReleaseInputsIncompleteError(
+            "research Track-1 table differs from the exact promoted schema"
+        )
+    tables = {
+        row[0]
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    if "track1_matches_v2_snapshot" not in tables:
+        raise ReleaseInputsIncompleteError("research DB lacks the preserved V2 snapshot")
+
+    expected_namespaces = set(contract["namespaces"])
+    actual = {
+        "page_count": conn.execute("SELECT COUNT(*) FROM pages").fetchone()[0],
+        "total_rows": conn.execute("SELECT COUNT(*) FROM track1_matches").fetchone()[0],
+        "live_rows": conn.execute(
+            "SELECT COUNT(*) FROM track1_matches WHERE shadowed_by IS NULL"
+        ).fetchone()[0],
+        "v2_snapshot_rows": conn.execute(
+            "SELECT COUNT(*) FROM track1_matches_v2_snapshot"
+        ).fetchone()[0],
+        "missing_ref_offsets": conn.execute(
+            "SELECT COUNT(*) FROM track1_matches WHERE ref_spans_json IS NULL "
+            "OR ref_spans_json='' OR ref_spans_json='[]'"
+        ).fetchone()[0],
+        "duplicate_pairs": conn.execute(
+            "SELECT COUNT(*) FROM (SELECT page_id, work_id, generation, COUNT(*) n "
+            "FROM track1_matches GROUP BY page_id, work_id, generation HAVING n != 1)"
+        ).fetchone()[0],
+    }
+    drift = [key for key, value in actual.items() if value != contract[key]]
+
+    namespace_actual = {
+        ns: {"total_rows": 0, "live_rows": 0} for ns in expected_namespaces
+    }
+    for work_id, shadowed_by in conn.execute(
+        "SELECT work_id, shadowed_by FROM track1_matches"
+    ):
+        classification = track1_contract.classify_work_id(work_id, registry)
+        if classification is None or classification[1] != "extrapolated":
+            continue
+        namespace = classification[0]
+        if namespace not in namespace_actual:
+            # The cohort registry itself is the source of `expected_namespaces`
+            # (via `validate_contract_v2` at load time), so this can only mean
+            # the registry and the contract have drifted apart since the
+            # contract was validated -- a hard failure, not silent absorption.
+            raise ReleaseInputsIncompleteError(
+                f"research Track-1 table contains namespace {namespace!r} the "
+                "v2 release contract does not expect"
+            )
+        namespace_actual[namespace]["total_rows"] += 1
+        if shadowed_by is None:
+            namespace_actual[namespace]["live_rows"] += 1
+
+    for namespace in sorted(expected_namespaces):
+        for key in ("total_rows", "live_rows"):
+            if namespace_actual[namespace][key] != contract["namespaces"][namespace][key]:
+                drift.append(f"namespaces.{namespace}.{key}")
+
+    if drift:
+        raise ReleaseInputsIncompleteError(
+            f"research Track-1 table differs from its v2 release contract in "
+            f"{len(drift)} count(s): {', '.join(sorted(drift))}"
         )
 
 
@@ -7913,6 +8070,14 @@ def finalize_build(
     canonical_merges_sha256: Optional[str] = None,
     track1_release_contract_path=None,
     track1_release_contract_sha256: Optional[str] = None,
+    # V4.2 plan C4: the routing cohort registry. Defaults to the committed
+    # `scripts/discovery_routing_cohorts.json` (`DEFAULT_COHORT_REGISTRY_
+    # PATH`) when None -- overridable, chiefly for tests that must not
+    # depend on the real corpus's namespace population. Consumed both by a
+    # v2 `track1_release_contract`'s recompute-and-compare and by the
+    # tier-A cohort routing below (independent of whether a release
+    # contract was supplied at all).
+    cohort_registry_path: Optional[str] = None,
     composition_dates_path=None,
     composition_dates_sha256: Optional[str] = None,
     seftja_dates_path=None,
@@ -8075,7 +8240,8 @@ def finalize_build(
     track1_release_contract = None
     if track1_release_contract_path is not None:
         track1_release_contract = load_track1_release_contract(
-            track1_release_contract_path, sha256=track1_release_contract_sha256
+            track1_release_contract_path, sha256=track1_release_contract_sha256,
+            cohort_registry_path=cohort_registry_path,
         )
         track1_release_contract_sha256 = track1_release_contract["sha256"]
         if (
@@ -8164,6 +8330,10 @@ def finalize_build(
     regrain_report = None
     e1_route_report = None
     v4_route_report = None
+    # C4: every extrapolated cohort's own report, keyed by namespace
+    # (`{"REF4": {...}, "REF5": {...}, ...}`). `v4_route_report` above stays
+    # the REF4 entry of this dict, for byte-for-byte backward compatibility.
+    v4_route_reports_by_namespace: Dict[str, Dict] = {}
     fullscan_legacy_route_report = None
     if gen2_router_evidence_db is not None:
         from v3_routing_ingest import load_router as _load_gen2_router
@@ -8279,7 +8449,16 @@ def finalize_build(
         # sidecar that still passes every other gate, and a failed release
         # build must never have already deleted/overwritten prior artifacts.
         if track1_release_contract is not None:
-            assert_track1_release_contract(conn_research, track1_release_contract)
+            if (
+                track1_release_contract["schema_version"]
+                == track1_contract.CONTRACT_V2_SCHEMA_VERSION
+            ):
+                assert_track1_release_contract_v2(
+                    conn_research, track1_release_contract,
+                    _load_cohort_registry_for_build(cohort_registry_path),
+                )
+            else:
+                assert_track1_release_contract(conn_research, track1_release_contract)
         tier_a_row_count = _count_tier_a_rows(conn_research) if release else None
         _assert_release_inputs_complete(
             release=release,
@@ -8343,12 +8522,37 @@ def finalize_build(
                 "SELECT page_id, work_id, matched_letters FROM track1_matches "
                 "WHERE shadowed_by IS NULL"
             ).fetchall()
-            _v4_rows = [row for row in _tier_a_rows if row[1].startswith("REF4:")]
-            _tier_a_keys = [
-                (page_id, work_id)
-                for page_id, work_id, _matched_letters in _tier_a_rows
-                if not work_id.startswith("REF4:")
-            ]
+            # C4 (V4.2 plan): classify EVERY tier-A row's work_id via the
+            # reviewed routing cohort registry
+            # (`discovery_track1_contract.classify_work_id`), replacing the
+            # REF4-only special-casing this superseded. A legacy row (no
+            # REF* prefix, or the registry's `legacy` cohort -- REF2 today)
+            # keeps today's split-grain regrain path EXACTLY; an
+            # EXTRAPOLATED-cohort row (REF4/REF5/REF6 today) is EXCLUDED
+            # from that population and routed through the gen2 extrapolation
+            # router below INSTEAD, one namespace at a time, so each cohort
+            # is classified and reported separately. An unregistered REF*
+            # prefix propagates `classify_work_id`'s own ValueError,
+            # unwrapped: a reference generation the registry does not know
+            # about must halt, never silently fall into the legacy
+            # population -- which is exactly the open P2 defect this
+            # replaces (only `REF4:` rows were excluded before, so a
+            # REF5/REF6 row would reach the fitted router's split-grain
+            # regrain path, which never scored it, instead of the
+            # new-reference extrapolation path built for it).
+            _cohort_registry = _load_cohort_registry_for_build(cohort_registry_path)
+            _extrapolated_rows_by_namespace: Dict[str, List] = {}
+            _tier_a_keys = []
+            for _row in _tier_a_rows:
+                _page_id, _work_id, _matched_letters = _row
+                _classification = track1_contract.classify_work_id(
+                    _work_id, _cohort_registry)
+                if _classification is not None and _classification[1] == "extrapolated":
+                    _extrapolated_rows_by_namespace.setdefault(
+                        _classification[0], []).append(_row)
+                else:
+                    _tier_a_keys.append((_page_id, _work_id))
+            _tier_a_keys_set = set(_tier_a_keys)
             regrain_report = _regrain(
                 gen2_router, _split_max, _page_chars, _tier_a_keys)
             if regrain_report["undecided"]:
@@ -8361,7 +8565,7 @@ def finalize_build(
                     )
                 _legacy_unresolved = [
                     row for row in _tier_a_rows
-                    if not row[1].startswith("REF4:")
+                    if (row[0], row[1]) in _tier_a_keys_set
                     and _resolve_route(row[0], row[1], gen2_router)[0] is None
                 ]
                 if len(_legacy_unresolved) != regrain_report["undecided"]:
@@ -8384,17 +8588,20 @@ def finalize_build(
                         f"{fullscan_legacy_route_report['undecided']} row(s) with no "
                         f"decision -- halting rather than defaulting"
                     )
-            if _v4_rows:
-                v4_route_report = _route_v4(
-                    gen2_router, _v4_rows, _page_chars, raw_prefix="REF4:"
+            for _namespace in sorted(_extrapolated_rows_by_namespace):
+                _ns_report = _route_v4(
+                    gen2_router, _extrapolated_rows_by_namespace[_namespace],
+                    _page_chars, raw_prefix=f"{_namespace}:"
                 )
-                if v4_route_report["undecided"]:
+                if _ns_report["undecided"]:
                     raise RoutingConflictError(
-                        f"V4 public-reference routing left "
-                        f"{v4_route_report['undecided']} row(s) with no decision "
+                        f"{_namespace} public-reference routing left "
+                        f"{_ns_report['undecided']} row(s) with no decision "
                         f"-- they would keep the ingest default and silently "
                         f"bypass coverage routing. Halting rather than defaulting."
                     )
+                v4_route_reports_by_namespace[_namespace] = _ns_report
+            v4_route_report = v4_route_reports_by_namespace.get("REF4")
 
             # E1 witness routing (2026-08-08, owner-authorized). The four E1
             # collections are drawn ENTIRELY from the matcher's tier B, which
@@ -8707,12 +8914,12 @@ def finalize_build(
             # evidence.
             ("coverage_routing", (
                 "gen2_router_split_regrained_fullscan_legacy_v4_extrapolated"
-                if (v4_route_report is not None
+                if (bool(v4_route_reports_by_namespace)
                     and fullscan_legacy_route_report is not None)
                 else "gen2_router_split_regrained_fullscan_legacy_extrapolated"
                 if fullscan_legacy_route_report is not None
                 else "gen2_router_split_regrained_v4_extrapolated"
-                if v4_route_report is not None
+                if bool(v4_route_reports_by_namespace)
                 else "gen2_router_split_regrained" if regrain_report is not None
                 else ("gen2_router" if gen2_router is not None
                       else ("lever1_cliff" if run_d17 else "none")))),
@@ -8768,6 +8975,28 @@ def finalize_build(
                 ("coverage_v4_reference_same_work", str(v4_route_report["same_work"])),
                 ("coverage_v4_reference_parallel", str(v4_route_report["parallel"])),
             ])
+        # C4: the analogous per-namespace facts for every extrapolated cohort
+        # BEYOND REF4 that routed rows this build. REF4 keeps the
+        # `coverage_v4_reference_*` key names above, byte-for-byte, for
+        # backward compatibility; a namespace beyond REF4 gets its own block,
+        # named consistently: `coverage_<namespace-lower>_reference_*`.
+        for _namespace in sorted(v4_route_reports_by_namespace):
+            if _namespace == "REF4":
+                continue
+            _ns_report = v4_route_reports_by_namespace[_namespace]
+            _ns_meta_key = _namespace.lower()
+            meta_rows.extend([
+                (f"coverage_{_ns_meta_key}_reference_routing",
+                 "threshold_extrapolated_new_works"),
+                (f"coverage_{_ns_meta_key}_reference_prefix", _ns_report["raw_prefix"]),
+                (f"coverage_{_ns_meta_key}_reference_considered",
+                 str(_ns_report["considered"])),
+                (f"coverage_{_ns_meta_key}_reference_routed", str(_ns_report["added"])),
+                (f"coverage_{_ns_meta_key}_reference_same_work",
+                 str(_ns_report["same_work"])),
+                (f"coverage_{_ns_meta_key}_reference_parallel",
+                 str(_ns_report["parallel"])),
+            ])
         if fullscan_legacy_route_report is not None:
             meta_rows.extend([
                 ("coverage_fullscan_legacy_routing",
@@ -8806,8 +9035,29 @@ def finalize_build(
                 ("track1_matcher_fingerprint", track1_release_contract["matcher_fingerprint"]),
                 ("track1_input_total_rows", str(track1_release_contract["total_rows"])),
                 ("track1_input_live_rows", str(track1_release_contract["live_rows"])),
-                ("track1_input_ref4_live_rows", str(track1_release_contract["ref4_live_rows"])),
             ])
+            if (
+                track1_release_contract["schema_version"]
+                == track1_contract.CONTRACT_V2_SCHEMA_VERSION
+            ):
+                # C3: a v2 contract reports per-namespace live_rows under
+                # `namespaces`, not the flat `ref4_live_rows` key a v1
+                # contract carries. REF4 keeps the EXACT pre-existing meta
+                # key name; every other namespace the contract carries gets
+                # the analogous key.
+                _v2_namespaces = track1_release_contract["namespaces"]
+                for _namespace in sorted(_v2_namespaces):
+                    _meta_key = (
+                        "track1_input_ref4_live_rows" if _namespace == "REF4"
+                        else f"track1_input_{_namespace.lower()}_live_rows"
+                    )
+                    meta_rows.append(
+                        (_meta_key, str(_v2_namespaces[_namespace]["live_rows"])))
+            else:
+                meta_rows.append((
+                    "track1_input_ref4_live_rows",
+                    str(track1_release_contract["ref4_live_rows"]),
+                ))
         if composition_dates_sha256 is not None:
             meta_rows.append(("composition_dates_sha256", composition_dates_sha256))
         if seftja_dates_sha256 is not None:
@@ -8968,6 +9218,10 @@ def finalize_build(
         "router_parity": result.get("router_parity"),
         "coverage_regrain": regrain_report,
         "coverage_v4_references": v4_route_report,
+        # C4: every extrapolated cohort's own report, keyed by namespace --
+        # a superset of "coverage_v4_references" above (which stays the
+        # REF4 entry, for backward compatibility).
+        "coverage_v4_references_by_namespace": v4_route_reports_by_namespace,
         "coverage_fullscan_legacy": fullscan_legacy_route_report,
         "manifest_path": str(manifest_path),
         "db_path": str(out_path),
@@ -9122,6 +9376,10 @@ def build_parser() -> argparse.ArgumentParser:
                              "recomputed against --db-path before a release build.")
     v2_group.add_argument("--track1-release-contract-sha256", metavar="HEX", default=None,
                         help="SHA-256 pin verified before --track1-release-contract is used.")
+    v2_group.add_argument("--cohort-registry", metavar="PATH", default=None,
+                        help="Routing cohort registry (V4.2 plan C4). Defaults to the "
+                             "committed scripts/discovery_routing_cohorts.json; overriding "
+                             "is chiefly a test/dev knob.")
     v2_group.add_argument("--composition-dates", metavar="PATH", default=None,
                         help="Hash-pinned M-source composition dates (REQUIRED for --release "
                              "D-17; Codex #5). Frozen schema; normalized to a numeric year.")
@@ -9364,6 +9622,7 @@ def main(argv=None) -> int:
         canonical_merges_sha256=args.canonical_merges_sha256,
         track1_release_contract_path=args.track1_release_contract,
         track1_release_contract_sha256=args.track1_release_contract_sha256,
+        cohort_registry_path=args.cohort_registry,
         composition_dates_path=args.composition_dates,
         composition_dates_sha256=args.composition_dates_sha256,
         seftja_dates_path=args.seftja_dates,

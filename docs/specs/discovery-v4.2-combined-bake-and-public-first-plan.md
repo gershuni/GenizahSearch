@@ -84,8 +84,15 @@ The sidecar builder's regrain/routing must consume a reviewed namespace/cohort
 registry with at least three cohorts — REF5 private-target, REF6
 private-target, REF6 public-first — each excluded from the legacy fullscan
 path and routed through the frozen-threshold extrapolation, reported
-separately. (Today only `REF4:` rows are excluded — an open P2 defect that
-blocks V4.1 steps 5–6 regardless of V4.2.)
+separately. (Was an open P2 defect — only `REF4:` rows were excluded —
+**fixed 2026-08-16**: `finalize_build` classifies every tier-A row through
+`scripts/discovery_routing_cohorts.json`, routes each extrapolated namespace
+separately, and hard-errors on unregistered `REF*` prefixes.)
+
+**Status: C1, C2 (excerpt-bake side), C3 (emitter + consumer), and C4 were
+implemented and committed 2026-08-16** with mutation-proven gates. Still open
+from the conditions: C2's reconcile side (lands with C5), C5–C9, C10, C11's
+handoff-artifact sweep wiring, and the remaining C12 gates tied to those.
 
 ### C5. Public-first identity artifact
 
