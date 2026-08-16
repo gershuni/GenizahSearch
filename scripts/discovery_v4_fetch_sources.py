@@ -18,13 +18,14 @@ import time
 import urllib.parse
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import requests
 
 try:
     from scripts.discovery_v4_common import (
         clean_hebrew,
+        compact_stream,
         count_hebrew_letters,
         flatten_text_node,
         load_source_config,
@@ -34,12 +35,22 @@ try:
 except ModuleNotFoundError:  # direct ``python scripts/...py`` invocation
     from discovery_v4_common import (
         clean_hebrew,
+        compact_stream,
         count_hebrew_letters,
         flatten_text_node,
         load_source_config,
         sha256_file,
         stable_json_dump,
     )
+
+try:
+    # ``_unit_offsets`` is the established offset convention (compact_stream,
+    # empty-chunk skipping, running length) -- containers reuse it exactly
+    # rather than re-deriving it, so their offsets are guaranteed to round-trip
+    # against the reference builder that later consumes these same units.
+    from scripts.discovery_v4_build_reference import _unit_offsets
+except ModuleNotFoundError:  # direct ``python scripts/...py`` invocation
+    from discovery_v4_build_reference import _unit_offsets
 
 
 SEFARIA_BASE = "https://www.sefaria.org"
@@ -303,6 +314,75 @@ def _pick_open_hebrew_version(available: list[dict], allowlist: set[str]) -> dic
     return candidates[0]
 
 
+def _pick_hebrew_version_for_container(
+    available: list[dict], allowlist: set[str], *, has_ruling: bool
+) -> dict:
+    """Select a child's best Hebrew version for a container acquisition.
+
+    Without a ``license_ruling`` this is exactly ``_pick_open_hebrew_version``:
+    only allowlisted licenses are acquirable. A ``license_ruling`` widens
+    acceptance to ANY reported, KNOWN license (e.g. a non-allowlisted CC-BY-SA
+    on one child of an otherwise Public Domain container) -- the ruling
+    reinterprets what a child reports, it never manufactures a report where
+    the provider gave none. An absent/unknown license is refused either way.
+    """
+    if not has_ruling:
+        return _pick_open_hebrew_version(available, allowlist)
+    candidates = [
+        version
+        for version in available
+        if version.get("language") == "he"
+        and _license_key(version.get("license")) not in ("", "unknown")
+    ]
+    if not candidates:
+        seen = sorted(
+            {
+                str(version.get("license") or "unknown")
+                for version in available
+                if version.get("language") == "he"
+            }
+        )
+        raise ValueError(
+            f"no Hebrew version reports a known license; observed licenses={seen}"
+        )
+    candidates.sort(
+        key=lambda version: (
+            _LICENSE_RANK.get(_license_key(version.get("license")), 50),
+            not bool(version.get("isPrimary")),
+            str(version.get("versionTitle") or ""),
+        )
+    )
+    return candidates[0]
+
+
+def _check_frozen_children_against_toc(
+    children_cfg: list[dict], live_refs: list[str]
+) -> None:
+    """Verify the frozen ordered child list against a live Sefaria ToC listing.
+
+    The child list in the source map is FROZEN (C7): live ToC discovery may
+    VERIFY membership and order but never silently redefines them. A mismatch
+    -- a missing member, an extra member, or a reordering -- is a hard fetch
+    error surfaced for a source-map edit, never a silent redefinition.
+    """
+    frozen_refs = [child["source_ref"] for child in children_cfg]
+    if frozen_refs == live_refs:
+        return
+    frozen_set = set(frozen_refs)
+    live_set = set(live_refs)
+    missing = [ref for ref in frozen_refs if ref not in live_set]
+    extra = [ref for ref in live_refs if ref not in frozen_set]
+    if missing or extra:
+        raise ValueError(
+            "frozen child list disagrees with the live Sefaria ToC membership: "
+            f"missing={missing} extra={extra}"
+        )
+    raise ValueError(
+        "frozen child list order disagrees with the live Sefaria ToC order: "
+        f"frozen={frozen_refs} live={live_refs}"
+    )
+
+
 def _units_from_nested_text(text: Any, ref: str) -> list[dict]:
     if not isinstance(text, list):
         text = [text]
@@ -408,6 +488,153 @@ def _acquire_sefaria(
     )
 
 
+def _acquire_container_sefaria(
+    fetcher: Fetcher,
+    source: dict,
+    allowlist: set[str],
+    *,
+    throttle_seconds: float = 1.0,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    live_children_refs: list[str] | None = None,
+) -> tuple[dict, list[Path]]:
+    """Acquire a multi-text container: an ordered list of independent Sefaria
+    indices stitched into ONE combined normalized source (C7).
+
+    Each child is fetched via the existing v3 pattern (metadata with
+    version=all, pick a version, fetch the selected version's text) plus one
+    index lookup for its Hebrew title. A failed child quarantines the WHOLE
+    container -- never a partial one. Throttled at ``throttle_seconds`` between
+    every network call.
+    """
+    key = source["key"]
+    children_cfg = source["children"]
+    license_ruling = source.get("license_ruling")
+    if live_children_refs is not None:
+        _check_frozen_children_against_toc(children_cfg, live_children_refs)
+
+    raw_paths: list[Path] = []
+    units: list[dict] = []
+    child_manifest: list[dict] = []
+    reported_licenses: set[str] = set()
+
+    for position, child in enumerate(children_cfg, start=1):
+        child_key = child["child_key"]
+        ref = child["source_ref"]
+        stem = f"{position:04d}-{child_key}"
+
+        index_path = fetcher.raw_dir / key / f"{stem}-index.json"
+        index_doc = fetcher.sefaria_index(ref, index_path)
+        raw_paths.append(index_path)
+        sleep_fn(throttle_seconds)
+        he_title = _primary_title(index_doc, "he") or ref
+
+        all_path = fetcher.raw_dir / key / f"{stem}-all.json"
+        metadata = fetcher.sefaria_text(ref, "all", all_path)
+        raw_paths.append(all_path)
+        sleep_fn(throttle_seconds)
+        if metadata.get("error"):
+            raise ValueError(
+                f"Sefaria text metadata error for child {child_key} ({ref}): "
+                f"{metadata['error']}"
+            )
+        best = _pick_hebrew_version_for_container(
+            metadata.get("available_versions") or [],
+            allowlist,
+            has_ruling=bool(license_ruling),
+        )
+        version_title = best.get("versionTitle")
+
+        text_path = fetcher.raw_dir / key / f"{stem}-selected.json"
+        selected = fetcher.sefaria_text(ref, f"hebrew|{version_title}", text_path)
+        raw_paths.append(text_path)
+        sleep_fn(throttle_seconds)
+        if selected.get("error"):
+            raise ValueError(
+                f"Sefaria selected-version error for child {child_key} ({ref}): "
+                f"{selected['error']}"
+            )
+        versions = selected.get("versions") or []
+        if not versions:
+            raise ValueError(
+                f"Sefaria selected version response has no versions for "
+                f"child {child_key} ({ref})"
+            )
+        cleaned = clean_hebrew(" ".join(flatten_text_node(versions[0].get("text"))))
+        license_name = str(best.get("license") or "")
+        license_key = _license_key(license_name)
+        reported_licenses.add(license_key)
+
+        units.append(
+            {
+                "ordinal": position,
+                "label": he_title,
+                "provider_ref": ref,
+                "text": cleaned,
+                "hebrew_letters": count_hebrew_letters(cleaned),
+            }
+        )
+        child_manifest.append(
+            {
+                "child_key": child_key,
+                "source_ref": ref,
+                "he_title": he_title,
+                "version_title": version_title,
+                "version_source": best.get("versionSource"),
+                "reported_license": license_name,
+                "reported_license_url": _LICENSE_URL.get(license_key),
+            }
+        )
+
+    if len(reported_licenses) > 1 and not license_ruling:
+        raise ValueError(
+            "container children report mixed licenses "
+            f"({sorted(reported_licenses)}) and no license_ruling resolves them"
+        )
+    if license_ruling:
+        effective_license = str(license_ruling["effective_license"])
+    else:
+        effective_license = child_manifest[0]["reported_license"]
+    effective_license_key = _license_key(effective_license)
+
+    _, offset_rows = _unit_offsets(units)
+    offset_by_ordinal = {unit["ordinal"]: start for unit, start in offset_rows}
+    for entry, unit in zip(child_manifest, units):
+        start = offset_by_ordinal.get(unit["ordinal"])
+        if start is None:
+            # _unit_offsets silently drops a unit that folds to an empty
+            # stream; a container child must never be silently absent instead.
+            raise ValueError(
+                f"child {entry['child_key']} ({entry['source_ref']}) produced "
+                "no usable Hebrew text"
+            )
+        entry["offset_start"] = start
+        entry["offset_end"] = start + len(compact_stream(unit["text"]))
+
+    attribution = (
+        str(license_ruling["note"])
+        if license_ruling and license_ruling.get("note")
+        else (
+            f'Combined Sefaria container "{key}" '
+            f"({len(child_manifest)} sections), via Sefaria.org."
+        )
+    )
+
+    return (
+        {
+            "provider": "sefaria",
+            "container": True,
+            "children": child_manifest,
+            "child_count": len(child_manifest),
+            "license": effective_license,
+            "license_url": _LICENSE_URL.get(effective_license_key),
+            "license_ruling": license_ruling,
+            "attribution": attribution,
+            "units": units,
+        },
+        raw_paths,
+    )
+
+
 def _acquire_wikisource(fetcher: Fetcher, source: dict) -> tuple[dict, list[Path]]:
     key = source["key"]
     ref = source["source_ref"]
@@ -484,6 +711,18 @@ def _combined_raw_hash(paths: list[Path]) -> str:
     return digest.hexdigest()
 
 
+def _source_display_ref(source: dict) -> str:
+    """Return a printable/manifest ref for both plain and container sources.
+
+    A container has no single ``source_ref``; it has an ordered list of
+    children, each with its own.
+    """
+    if source.get("container"):
+        children = source.get("children") or []
+        return f"container/{len(children)} children"
+    return source["source_ref"]
+
+
 def run(args: argparse.Namespace) -> dict:
     config_path = Path(args.source_map)
     config = load_source_config(config_path)
@@ -494,7 +733,8 @@ def run(args: argparse.Namespace) -> dict:
     fetcher = Fetcher(output_dir, timeout=args.timeout)
     entries = []
     for source in config["sources"]:
-        print(f"[{source['provider']}] {source['key']}: {source['source_ref']}", flush=True)
+        display_ref = _source_display_ref(source)
+        print(f"[{source['provider']}] {source['key']}: {display_ref}", flush=True)
         normalized_path = output_dir / "normalized" / f"{source['key']}.json"
         try:
             if args.reuse_existing and normalized_path.is_file():
@@ -503,11 +743,15 @@ def run(args: argparse.Namespace) -> dict:
                     raise ValueError("existing normalized source mapping drift")
                 if acquired.get("provider") != source["provider"]:
                     raise ValueError("existing normalized source provider drift")
+                if bool(acquired.get("container")) != bool(source.get("container")):
+                    raise ValueError("existing normalized source container-flag drift")
                 if _license_key(acquired.get("license")) not in allowlist:
                     raise ValueError("existing normalized source license is not allowlisted")
                 raw_paths = sorted((output_dir / "raw" / source["key"]).glob("*.json"))
                 if not raw_paths:
                     raise ValueError("existing normalized source has no raw responses")
+            elif source.get("container"):
+                acquired, raw_paths = _acquire_container_sefaria(fetcher, source, allowlist)
             elif source["provider"] == "sefaria":
                 acquired, raw_paths = _acquire_sefaria(fetcher, source, allowlist)
             else:
@@ -529,25 +773,29 @@ def run(args: argparse.Namespace) -> dict:
                 ),
             }
             stable_json_dump(normalized, normalized_path)
-            entries.append(
-                {
-                    "key": source["key"],
-                    "provider": source["provider"],
-                    "status": "acquired",
-                    "source_ref": source["source_ref"],
-                    "license": acquired["license"],
-                    "license_url": acquired["license_url"],
-                    "unit_count": len(acquired["units"]),
-                    "hebrew_letters": total_letters,
-                    "target_work_ids": [
-                        mapping["target_work_id"] for mapping in source["mappings"]
-                    ],
-                    "raw_response_count": len(raw_paths),
-                    "raw_responses_sha256": _combined_raw_hash(raw_paths),
-                    "normalized_file": normalized_path.name,
-                    "normalized_sha256": sha256_file(normalized_path),
-                }
-            )
+            entry = {
+                "key": source["key"],
+                "provider": source["provider"],
+                "status": "acquired",
+                "source_ref": source.get("source_ref"),
+                "license": acquired["license"],
+                "license_url": acquired["license_url"],
+                "unit_count": len(acquired["units"]),
+                "hebrew_letters": total_letters,
+                "target_work_ids": [
+                    mapping["target_work_id"] for mapping in source["mappings"]
+                ],
+                "raw_response_count": len(raw_paths),
+                "raw_responses_sha256": _combined_raw_hash(raw_paths),
+                "normalized_file": normalized_path.name,
+                "normalized_sha256": sha256_file(normalized_path),
+            }
+            if source.get("container"):
+                entry["container"] = True
+                entry["child_count"] = acquired["child_count"]
+                entry["children"] = acquired["children"]
+                entry["license_ruling"] = acquired.get("license_ruling")
+            entries.append(entry)
             print(
                 f"  acquired {len(acquired['units'])} units / {total_letters:,} letters",
                 flush=True,
@@ -560,7 +808,7 @@ def run(args: argparse.Namespace) -> dict:
                     "key": source["key"],
                     "provider": source["provider"],
                     "status": "quarantined",
-                    "source_ref": source["source_ref"],
+                    "source_ref": source.get("source_ref"),
                     "target_work_ids": [
                         mapping["target_work_id"] for mapping in source["mappings"]
                     ],

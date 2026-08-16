@@ -138,7 +138,53 @@ def load_source_config(path: str | Path) -> dict:
         if key in seen_keys:
             raise ValueError(f"duplicate source key: {key}")
         seen_keys.add(key)
-        if source.get("provider") not in {"sefaria", "hewikisource"}:
+        if source.get("container"):
+            # Multi-text container (discovery-v4.2 C7): a FROZEN ordered list of
+            # independent Sefaria index refs stitched into one target work. The
+            # ordered list itself is validated here; live-ToC membership/order
+            # verification happens at fetch time and never redefines it.
+            if source.get("provider") != "sefaria":
+                raise ValueError(f"container source {key} must use provider 'sefaria'")
+            children = source.get("children")
+            if not isinstance(children, list) or not children:
+                raise ValueError(
+                    f"container source {key} must have a non-empty children list"
+                )
+            seen_child_keys: set[str] = set()
+            for child in children:
+                if not isinstance(child, dict):
+                    raise ValueError(f"container source {key} has an invalid child entry")
+                child_key = child.get("child_key")
+                if not isinstance(child_key, str) or not re.fullmatch(
+                    r"[a-z0-9_]+", child_key
+                ):
+                    raise ValueError(
+                        f"container source {key} has an invalid child_key: {child_key!r}"
+                    )
+                if child_key in seen_child_keys:
+                    raise ValueError(
+                        f"container source {key} has a duplicate child_key: {child_key}"
+                    )
+                seen_child_keys.add(child_key)
+                child_ref = child.get("source_ref")
+                if not isinstance(child_ref, str) or not child_ref.strip():
+                    raise ValueError(
+                        f"container source {key} child {child_key!r} has an "
+                        "invalid source_ref"
+                    )
+            license_ruling = source.get("license_ruling")
+            if license_ruling is not None:
+                if not isinstance(license_ruling, dict):
+                    raise ValueError(
+                        f"container source {key} has an invalid license_ruling"
+                    )
+                effective_license = license_ruling.get("effective_license")
+                if not isinstance(effective_license, str) or not effective_license.strip():
+                    raise ValueError(
+                        f"container source {key} license_ruling is missing "
+                        "effective_license"
+                    )
+        elif source.get("provider") not in {"sefaria", "hewikisource"}:
             raise ValueError(f"invalid provider for {key}")
         mappings = source.get("mappings")
         if not isinstance(mappings, list) or not mappings:

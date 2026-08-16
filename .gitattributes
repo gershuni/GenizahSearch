@@ -12,3 +12,4 @@
 # renormalize thousands of unrelated files.
 scripts/discovery_v4_sources.json text eol=lf
 scripts/discovery_v4_1_sources.json text eol=lf
+scripts/discovery_v4_2_sources.json text eol=lf

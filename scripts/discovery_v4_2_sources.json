@@ -1,0 +1,651 @@
+{
+  "schema_version": "discovery-v4-sources-v1",
+  "reference_namespace": "REF6",
+  "license_allowlist": [
+    "Public Domain",
+    "CC0",
+    "CC-BY",
+    "CC-BY-SA"
+  ],
+  "minimum_hebrew_letters": 1000,
+  "note": "V4.2 REF6 source expansion (docs/specs/discovery-v4.2-combined-bake-and-public-first-plan.md), condition C7. This file carries ONLY the 15 Mishneh Torah book-grain multi-text containers (w000174-w000188); the six small identity_mode=private_sibling additions and the public_first candidates from the same REF6 cohort are owned by other tracks and are not in this file. Each container's ordered child list is copied verbatim, in order, from the measured probe at discovery_builds/discovery_v4/probe_v42/mishneh_torah_container_probe.json -- it is FROZEN; live Sefaria ToC discovery may verify membership/order at fetch time but never silently redefines it. Same schema as scripts/discovery_v4_1_sources.json plus the container/license_ruling extension.",
+  "sources": [
+    {
+      "key": "mishneh_torah_introduction",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "transmission_of_the_oral_law",
+          "source_ref": "Mishneh Torah, Transmission of the Oral Law"
+        },
+        {
+          "child_key": "positive_mitzvot",
+          "source_ref": "Mishneh Torah, Positive Mitzvot"
+        },
+        {
+          "child_key": "negative_mitzvot",
+          "source_ref": "Mishneh Torah, Negative Mitzvot"
+        },
+        {
+          "child_key": "overview_of_mishneh_torah_contents",
+          "source_ref": "Mishneh Torah, Overview of Mishneh Torah Contents"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000174"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_madda",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "foundations_of_the_torah",
+          "source_ref": "Mishneh Torah, Foundations of the Torah"
+        },
+        {
+          "child_key": "human_dispositions",
+          "source_ref": "Mishneh Torah, Human Dispositions"
+        },
+        {
+          "child_key": "torah_study",
+          "source_ref": "Mishneh Torah, Torah Study"
+        },
+        {
+          "child_key": "foreign_worship_and_customs_of_the_nations",
+          "source_ref": "Mishneh Torah, Foreign Worship and Customs of the Nations"
+        },
+        {
+          "child_key": "repentance",
+          "source_ref": "Mishneh Torah, Repentance"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000175"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_ahavah",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "reading_the_shema",
+          "source_ref": "Mishneh Torah, Reading the Shema"
+        },
+        {
+          "child_key": "prayer_and_the_priestly_blessing",
+          "source_ref": "Mishneh Torah, Prayer and the Priestly Blessing"
+        },
+        {
+          "child_key": "tefillin_mezuzah_and_the_torah_scroll",
+          "source_ref": "Mishneh Torah, Tefillin, Mezuzah and the Torah Scroll"
+        },
+        {
+          "child_key": "fringes",
+          "source_ref": "Mishneh Torah, Fringes"
+        },
+        {
+          "child_key": "blessings",
+          "source_ref": "Mishneh Torah, Blessings"
+        },
+        {
+          "child_key": "circumcision",
+          "source_ref": "Mishneh Torah, Circumcision"
+        },
+        {
+          "child_key": "the_order_of_prayer",
+          "source_ref": "Mishneh Torah, The Order of Prayer"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000176"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_zemanim",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "sabbath",
+          "source_ref": "Mishneh Torah, Sabbath"
+        },
+        {
+          "child_key": "eruvin",
+          "source_ref": "Mishneh Torah, Eruvin"
+        },
+        {
+          "child_key": "rest_on_the_tenth_of_tishrei",
+          "source_ref": "Mishneh Torah, Rest on the Tenth of Tishrei"
+        },
+        {
+          "child_key": "rest_on_a_holiday",
+          "source_ref": "Mishneh Torah, Rest on a Holiday"
+        },
+        {
+          "child_key": "leavened_and_unleavened_bread",
+          "source_ref": "Mishneh Torah, Leavened and Unleavened Bread"
+        },
+        {
+          "child_key": "shofar_sukkah_and_lulav",
+          "source_ref": "Mishneh Torah, Shofar, Sukkah and Lulav"
+        },
+        {
+          "child_key": "sheqel_dues",
+          "source_ref": "Mishneh Torah, Sheqel Dues"
+        },
+        {
+          "child_key": "sanctification_of_the_new_month",
+          "source_ref": "Mishneh Torah, Sanctification of the New Month"
+        },
+        {
+          "child_key": "fasts",
+          "source_ref": "Mishneh Torah, Fasts"
+        },
+        {
+          "child_key": "scroll_of_esther_and_hanukkah",
+          "source_ref": "Mishneh Torah, Scroll of Esther and Hanukkah"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000177"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_nashim",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "marriage",
+          "source_ref": "Mishneh Torah, Marriage"
+        },
+        {
+          "child_key": "divorce",
+          "source_ref": "Mishneh Torah, Divorce"
+        },
+        {
+          "child_key": "levirate_marriage_and_release",
+          "source_ref": "Mishneh Torah, Levirate Marriage and Release"
+        },
+        {
+          "child_key": "virgin_maiden",
+          "source_ref": "Mishneh Torah, Virgin Maiden"
+        },
+        {
+          "child_key": "woman_suspected_of_infidelity",
+          "source_ref": "Mishneh Torah, Woman Suspected of Infidelity"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000178"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_kedushah",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "forbidden_intercourse",
+          "source_ref": "Mishneh Torah, Forbidden Intercourse"
+        },
+        {
+          "child_key": "forbidden_foods",
+          "source_ref": "Mishneh Torah, Forbidden Foods"
+        },
+        {
+          "child_key": "ritual_slaughter",
+          "source_ref": "Mishneh Torah, Ritual Slaughter"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000179"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_haflaah",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "oaths",
+          "source_ref": "Mishneh Torah, Oaths"
+        },
+        {
+          "child_key": "vows",
+          "source_ref": "Mishneh Torah, Vows"
+        },
+        {
+          "child_key": "nazariteship",
+          "source_ref": "Mishneh Torah, Nazariteship"
+        },
+        {
+          "child_key": "appraisals_and_devoted_property",
+          "source_ref": "Mishneh Torah, Appraisals and Devoted Property"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000180"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_zeraim",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "diverse_species",
+          "source_ref": "Mishneh Torah, Diverse Species"
+        },
+        {
+          "child_key": "gifts_to_the_poor",
+          "source_ref": "Mishneh Torah, Gifts to the Poor"
+        },
+        {
+          "child_key": "heave_offerings",
+          "source_ref": "Mishneh Torah, Heave Offerings"
+        },
+        {
+          "child_key": "tithes",
+          "source_ref": "Mishneh Torah, Tithes"
+        },
+        {
+          "child_key": "second_tithes_and_fourth_year_s_fruit",
+          "source_ref": "Mishneh Torah, Second Tithes and Fourth Year's Fruit"
+        },
+        {
+          "child_key": "first_fruits_and_other_gifts_to_priests_outside_the_sanctuary",
+          "source_ref": "Mishneh Torah, First Fruits and other Gifts to Priests Outside the Sanctuary"
+        },
+        {
+          "child_key": "sabbatical_year_and_the_jubilee",
+          "source_ref": "Mishneh Torah, Sabbatical Year and the Jubilee"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000181"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_avodah",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "the_chosen_temple",
+          "source_ref": "Mishneh Torah, The Chosen Temple"
+        },
+        {
+          "child_key": "vessels_of_the_sanctuary_and_those_who_serve_therein",
+          "source_ref": "Mishneh Torah, Vessels of the Sanctuary and Those Who Serve Therein"
+        },
+        {
+          "child_key": "admission_into_the_sanctuary",
+          "source_ref": "Mishneh Torah, Admission into the Sanctuary"
+        },
+        {
+          "child_key": "things_forbidden_on_the_altar",
+          "source_ref": "Mishneh Torah, Things Forbidden on the Altar"
+        },
+        {
+          "child_key": "sacrificial_procedure",
+          "source_ref": "Mishneh Torah, Sacrificial Procedure"
+        },
+        {
+          "child_key": "daily_offerings_and_additional_offerings",
+          "source_ref": "Mishneh Torah, Daily Offerings and Additional Offerings"
+        },
+        {
+          "child_key": "sacrifices_rendered_unfit",
+          "source_ref": "Mishneh Torah, Sacrifices Rendered Unfit"
+        },
+        {
+          "child_key": "service_on_the_day_of_atonement",
+          "source_ref": "Mishneh Torah, Service on the Day of Atonement"
+        },
+        {
+          "child_key": "trespass",
+          "source_ref": "Mishneh Torah, Trespass"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000182"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_korbanot",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "paschal_offering",
+          "source_ref": "Mishneh Torah, Paschal Offering"
+        },
+        {
+          "child_key": "festival_offering",
+          "source_ref": "Mishneh Torah, Festival Offering"
+        },
+        {
+          "child_key": "firstlings",
+          "source_ref": "Mishneh Torah, Firstlings"
+        },
+        {
+          "child_key": "offerings_for_unintentional_transgressions",
+          "source_ref": "Mishneh Torah, Offerings for Unintentional Transgressions"
+        },
+        {
+          "child_key": "offerings_for_those_with_incomplete_atonement",
+          "source_ref": "Mishneh Torah, Offerings for Those with Incomplete Atonement"
+        },
+        {
+          "child_key": "substitution",
+          "source_ref": "Mishneh Torah, Substitution"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000183"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_taharah",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "defilement_by_a_corpse",
+          "source_ref": "Mishneh Torah, Defilement by a Corpse"
+        },
+        {
+          "child_key": "red_heifer",
+          "source_ref": "Mishneh Torah, Red Heifer"
+        },
+        {
+          "child_key": "defilement_by_leprosy",
+          "source_ref": "Mishneh Torah, Defilement by Leprosy"
+        },
+        {
+          "child_key": "those_who_defile_bed_or_seat",
+          "source_ref": "Mishneh Torah, Those Who Defile Bed or Seat"
+        },
+        {
+          "child_key": "other_sources_of_defilement",
+          "source_ref": "Mishneh Torah, Other Sources of Defilement"
+        },
+        {
+          "child_key": "defilement_of_foods",
+          "source_ref": "Mishneh Torah, Defilement of Foods"
+        },
+        {
+          "child_key": "vessels",
+          "source_ref": "Mishneh Torah, Vessels"
+        },
+        {
+          "child_key": "immersion_pools",
+          "source_ref": "Mishneh Torah, Immersion Pools"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000184"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_nezikim",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "damages_to_property",
+          "source_ref": "Mishneh Torah, Damages to Property"
+        },
+        {
+          "child_key": "theft",
+          "source_ref": "Mishneh Torah, Theft"
+        },
+        {
+          "child_key": "robbery_and_lost_property",
+          "source_ref": "Mishneh Torah, Robbery and Lost Property"
+        },
+        {
+          "child_key": "one_who_injures_a_person_or_property",
+          "source_ref": "Mishneh Torah, One Who Injures a Person or Property"
+        },
+        {
+          "child_key": "murderer_and_the_preservation_of_life",
+          "source_ref": "Mishneh Torah, Murderer and the Preservation of Life"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000185"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_kinyan",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "sales",
+          "source_ref": "Mishneh Torah, Sales"
+        },
+        {
+          "child_key": "ownerless_property_and_gifts",
+          "source_ref": "Mishneh Torah, Ownerless Property and Gifts"
+        },
+        {
+          "child_key": "neighbors",
+          "source_ref": "Mishneh Torah, Neighbors"
+        },
+        {
+          "child_key": "agents_and_partners",
+          "source_ref": "Mishneh Torah, Agents and Partners"
+        },
+        {
+          "child_key": "slaves",
+          "source_ref": "Mishneh Torah, Slaves"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000186"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_mishpatim",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "hiring",
+          "source_ref": "Mishneh Torah, Hiring"
+        },
+        {
+          "child_key": "borrowing_and_deposit",
+          "source_ref": "Mishneh Torah, Borrowing and Deposit"
+        },
+        {
+          "child_key": "creditor_and_debtor",
+          "source_ref": "Mishneh Torah, Creditor and Debtor"
+        },
+        {
+          "child_key": "plaintiff_and_defendant",
+          "source_ref": "Mishneh Torah, Plaintiff and Defendant"
+        },
+        {
+          "child_key": "inheritances",
+          "source_ref": "Mishneh Torah, Inheritances"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000187"
+        }
+      ]
+    },
+    {
+      "key": "mishneh_torah_sefer_shoftim",
+      "provider": "sefaria",
+      "container": true,
+      "children": [
+        {
+          "child_key": "the_sanhedrin_and_the_penalties_within_their_jurisdiction",
+          "source_ref": "Mishneh Torah, The Sanhedrin and the Penalties within Their Jurisdiction"
+        },
+        {
+          "child_key": "testimony",
+          "source_ref": "Mishneh Torah, Testimony"
+        },
+        {
+          "child_key": "rebels",
+          "source_ref": "Mishneh Torah, Rebels"
+        },
+        {
+          "child_key": "mourning",
+          "source_ref": "Mishneh Torah, Mourning"
+        },
+        {
+          "child_key": "kings_and_wars",
+          "source_ref": "Mishneh Torah, Kings and Wars"
+        }
+      ],
+      "locus_grain": "section",
+      "license_ruling": {
+        "effective_license": "Public Domain",
+        "ruled_by": "owner",
+        "ruled_on": "2026-08-16",
+        "note": "Owner ruling (2026-08-16): the Mishneh Torah is treated as Public Domain in its entirety. Provider-reported per-child licenses (81 of 88 children report Public Domain, 7 report CC-BY-SA on the Wikisource presentation layer) are preserved in the acquisition manifest as fact; this ruling sets the container's EFFECTIVE license to Public Domain. Attribution for excerpts is a single Public Domain notice. This ruling is specific to the Mishneh Torah; any other mixed-license container needs its own ruling or the full per-child attribution machinery."
+      },
+      "mappings": [
+        {
+          "target_work_id": "w000188"
+        }
+      ]
+    }
+  ]
+}
