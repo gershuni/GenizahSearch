@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 8.5.2
+# Dicta Genizah Search Pro 9.0.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,9 +8,9 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 8.5.2?
+## What's New in Version 9.0.0?
 
-### Computed Identifications (beta, web)
+### v9.0.0: Computed Identifications (public beta, web)
 
 The website now shows **computed identifications**: where the text on a Genizah fragment matches a
 known work, the manuscript's browse page can list those matches, and a new corpus-wide
@@ -534,7 +534,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Dicta Geniza
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V8.5.2_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V9.0.0_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

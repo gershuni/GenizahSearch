@@ -4,7 +4,17 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
-## [Unreleased] — Connections Atlas & Computed Identifications (beta, web)
+## [9.0.0] - 2026-08-16 — Computed Identifications & Connections Atlas (public beta, web)
+
+> **Web-only release.** No GitHub Release object is created (the desktop polls
+> `/releases/latest` and would prompt every desktop user to update for a release with no
+> installer). The desktop application is unchanged in 9.0.0.
+>
+> **"Public beta" is meant literally.** The surfaces below are live to every visitor, but the
+> milestone's own release gate is not fully closed: of the six items recorded as gating public
+> exposure, one is resolved, four are waived in writing, and one — a cross-surface masking
+> re-sweep over the three surfaces that shipped after 2026-08-05 — remains an open obligation.
+> See `.planning/ROADMAP.md`, "REL-01: the 2026-08-08 flag flip, recorded after the fact".
 
 ### LIVE (beta) — discovery read surfaces (web)
 
@@ -281,9 +291,15 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
   verifies a full SHA-256 before reading its input, and the verifier additionally proves each
   readable public text reproduces its matcher stream exactly. Generated text, audit snapshots and
   match databases stay in the ignored data depot; only the deterministic transformations and the
-  reviewed source map are tracked. **Built and merged, not deployed:** promoting the expanded
-  reference set remains a separate owner-approved deployment step per its own spec, so no reader
-  sees a V4-sourced passage yet.
+  reviewed source map are tracked. Yalkut Shimoni's two identities are dropped from the public
+  projection by a 2026-08-14 owner ruling — they stay in the private bake as routing competitors,
+  but their claims and evidence are removed before works, identifications, loci, excerpts, counts
+  and graph closure are recomputed. **Built, and deployed to production** (owner-confirmed): the
+  expanded reference set is live, so passages that previously could not be shown from a reusable
+  edition now can be. Like the 2026-08-08 flag flip, the deploy itself left **no record in this
+  repository** — the artifacts live in the gitignored data depot and the promotion was a manual
+  operational step, so the repo cannot corroborate it and this entry rests on the owner's
+  confirmation rather than on evidence in the tree.
 - **Local `master-main` and `origin/master-main` had diverged 6/6** and were reconciled on
   2026-08-16 (merge `629f4bb6`). The V4 work above was merged upstream through PR #320 while the
   corpus-repair commits landed only locally, so for a day neither branch was a complete picture and
