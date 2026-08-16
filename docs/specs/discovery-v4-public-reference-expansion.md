@@ -13,6 +13,17 @@ too-short sources were quarantined. Generated text, audit snapshots, match
 databases, and candidates stay in the ignored data depot. Only deterministic
 transformations and the reviewed source map are tracked.
 
+> **Depot location (2026-08-16).** That depot is `discovery_builds/discovery_v4/`
+> — 623 files, 10.9 GB, gitignored. It was moved there from `_tmp/discovery_v4/`,
+> because `_tmp/` is this repo's SCRATCH directory (`CLAUDE.md` and
+> `scripts/init.ps1` both describe it as "working notes") and the depot includes
+> the local twin of the artifact production serves, whose content hash matches its
+> own `asset_basename`. The move is provenance-safe: the `reference_manifest.json`
+> entries record absolute `_tmp/...` paths, but every consumer reads only
+> `entries`, `schema_version` and the `*_sha256` fields and never dereferences
+> those strings, so no manifest was rewritten and no pinned hash changed. Pass the
+> new paths as the usual CLI arguments when re-running any stage.
+
 ## Frozen input chain
 
 The V4 reference corpus is an append-only extension of `ref_corpus_v2.pkl`.

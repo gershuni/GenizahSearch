@@ -250,6 +250,20 @@ corpus_mapper_output/
 # posture: temp upload -> verify -> atomic rename -> code deploy).
 /discovery_data/
 
+# Discovery BUILD depot: the intermediate and candidate artifacts a discovery
+# bake produces (reference corpora, match databases, private/public candidate
+# sidecars, preview copies, per-run manifests). Relocated here from /_tmp/ on
+# 2026-08-16 for one reason: /_tmp/ is this repo's SCRATCH directory -- CLAUDE.md
+# and scripts/init.ps1 both describe it as "working notes" and init.ps1 lists its
+# contents as ephemera -- and the V4 depot sitting in it included the local twin
+# of the artifact production serves, 10.9 GB whose content hash matches its own
+# asset_basename. Nothing had deleted it; the point is that clearing scratch is a
+# routine act and this was not scratch. Ignored for the same reason as
+# /discovery_data/: built payloads are scp'd, never committed. NOTE this is still
+# inside the working tree, so `git clean -xfd` would remove it exactly as it
+# would /discovery_data/ and /atlas_data/.
+/discovery_builds/
+
 # discovery-v3 bake run state (scripts/v3_bake_state.py). Per-run, per-machine
 # progress ledgers + their interrupted-write temp files. Already covered by the
 # /discovery_data/ and /_tmp/ rules above, but named explicitly and without a
