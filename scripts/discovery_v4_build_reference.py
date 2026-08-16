@@ -5,6 +5,23 @@ The append is intentionally narrow: existing reference objects are copied byte
 for semantic byte after deserialization, and only acquired/allowlisted V4
 sources are added.  The same run extends the pinned locus-division database so
 new matcher offsets and locus offsets share one exact coordinate system.
+
+Locus family "sefaria" is a REDEFINED vocabulary term (C6, 2026-08-16), not a
+provider name.  `_extend_locus` writes the literal ``"sefaria"`` into
+``locus_work.family`` for every open-public-reference row it appends -- V4.1's
+Wikisource-acquired rows included -- because the reviewed vocabulary is frozen
+(`discovery_v4_verify_reference.py`'s ``expected_vocab`` and the live
+`shared/discovery_service.py:3137` SELECT both pin the four-value set
+``{"sefaria", "ja", "msource_header", "msource_daf"}``) and a fifth value would
+break both.  Read "sefaria" as *open public reference, Sefaria-style citation
+addressing* (chapter/section/daf-style loci minted the way Sefaria works are),
+never as "acquired from Sefaria the site".  Per-entry provider truth --
+"sefaria" vs "hewikisource" vs whatever a future acquisition adds -- lives in
+the reference manifest, one level up: each `reference_entries[i]["provider"]`
+(sourced from the normalized document's own ``provider`` field) and the
+corresponding reference-corpus row's ``provenance``.  A reader who needs to
+know which provider actually supplied a given locus-bearing row must join
+through the manifest's ``entries``, never infer it from ``locus_work.family``.
 """
 
 from __future__ import annotations
@@ -194,6 +211,36 @@ def _extend_locus(
     namespace: str = DEFAULT_REFERENCE_NAMESPACE,
     supplemental_works: list[WorkUnits] | None = None,
 ) -> dict:
+    """Copy ``base_db`` and append one namespace's worth of locus rows.
+
+    Chain-append (C2/C6): this is called once per reference-build stage
+    (REF4, then REF5 onto REF4's output, then REF6 onto REF5's output, ...).
+    Each call's own namespace gets its own extension-summary key
+    (``coverage_extension_key``) so an earlier stage's summary is never
+    touched by a later one -- the dict spread below (``**coverage``) carries
+    every prior extension key forward unchanged.
+
+    ``supplemental_structures`` is the one summary block that is NOT
+    namespace-keyed -- every stage re-passes the same fixed-id supplemental
+    works (e.g. the Guide for the Perplexed, ``REF2:ja2_rambam_moreh``), and
+    the per-row ``exists -> continue`` guard above means only the FIRST stage
+    to see a given supplemental ref_id actually inserts it; every later stage
+    skips it as already present.  Before the C6 fix this block was
+    unconditionally overwritten each run, so a later stage's (correct) zero
+    counts erased an earlier stage's real ones.  The chosen semantics: MERGE,
+    not replace.
+      - ``reference_ids``: the order-stable union of the base coverage's
+        prior list and this run's ``supplemental_works`` ref_ids (prior
+        entries first, then any new ones, no duplicates).  A ref_id that was
+        skipped this run (already in the DB) is still recorded -- it was
+        already in the prior list from the stage that inserted it.
+      - ``added_works_with_units`` / ``added_units``: prior recorded totals
+        PLUS what THIS run newly inserted (``supplemental_added_works`` /
+        ``supplemental_added_units``, which the ``exists`` guard already
+        limits to genuinely new rows) -- never double-counted, because a
+        supplemental work already present contributes 0 to this run's added
+        counters.
+    """
     coverage = json.loads(base_coverage.read_text(encoding="utf-8"))
     if coverage.get("invariant_problems") != []:
         raise ValueError("base locus coverage reports invariant problems")
@@ -247,6 +294,15 @@ def _extend_locus(
                 continue
             grain = entry["locus_grain"]
             raw_id = entry["raw_reference_id"]
+            # "sefaria" here is the REDEFINED family vocabulary term (C6): every
+            # open-public-reference row appended by this script gets it, Wikisource
+            # acquisitions (V4.1) included -- it names the citation-addressing
+            # style, not the acquisition provider. The provider actually used for
+            # THIS raw_id is recorded per entry in the reference manifest
+            # (`reference_entries[i]["provider"]`), never here. Do not special-case
+            # a different literal per provider: the verifier's frozen vocabulary
+            # (`discovery_v4_verify_reference.py`) and the live
+            # `shared/discovery_service.py:3137` SELECT both pin this exact set.
             conn.execute(
                 "INSERT INTO locus_work VALUES (?,?,?,?,?)",
                 (raw_id, "sefaria", grain, entry["stream_len"], len(unit_rows)),
@@ -296,6 +352,16 @@ def _extend_locus(
         int(coverage["units_total"]) + added_units + supplemental_added_units
     ):
         problems.append("unit-count drift")
+    # Merge, not replace (C6): fold this run's newly-added supplemental rows
+    # into whatever the base coverage already recorded, so a later chain stage
+    # (which typically adds nothing new here, per the exists-guard above)
+    # cannot erase an earlier stage's real counts. See the docstring above for
+    # the exact semantics.
+    prior_supplemental = coverage.get("supplemental_structures") or {}
+    merged_reference_ids = list(prior_supplemental.get("reference_ids", []))
+    for work in supplemental_works:
+        if work.ref_id not in merged_reference_ids:
+            merged_reference_ids.append(work.ref_id)
     new_coverage = {
         **coverage,
         "reference_corpus_sha256": new_reference_hash,
@@ -311,9 +377,15 @@ def _extend_locus(
             "added_by_grain": dict(sorted(grain_counts.items())),
         },
         "supplemental_structures": {
-            "added_works_with_units": supplemental_added_works,
-            "added_units": supplemental_added_units,
-            "reference_ids": [work.ref_id for work in supplemental_works],
+            "added_works_with_units": (
+                int(prior_supplemental.get("added_works_with_units", 0))
+                + supplemental_added_works
+            ),
+            "added_units": (
+                int(prior_supplemental.get("added_units", 0))
+                + supplemental_added_units
+            ),
+            "reference_ids": merged_reference_ids,
         },
     }
     stable_json_dump(new_coverage, output_coverage)

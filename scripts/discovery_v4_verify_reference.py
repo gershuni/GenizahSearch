@@ -138,6 +138,17 @@ def run(args: argparse.Namespace) -> dict:
                 raise ValueError("V4 locus units drifted from the reference manifest")
     if integrity != "ok" or foreign_keys:
         raise ValueError("V4 locus database failed SQLite integrity checks")
+    # "sefaria" is a REDEFINED vocabulary term, not a provider name (C6,
+    # 2026-08-16): discovery_v4_build_reference.py writes it for every
+    # open-public-reference locus row it appends, Wikisource acquisitions
+    # (V4.1) included -- it means "open public reference, Sefaria-style
+    # citation addressing", not "acquired from Sefaria the site". This set is
+    # frozen because `shared/discovery_service.py:3137` SELECTs `family`
+    # live and hands it to a surface envelope's meta; a fifth value or a
+    # per-provider split here would change what that surface renders without
+    # a corresponding vocabulary update there. Per-entry provider truth
+    # (sefaria vs hewikisource vs future providers) lives in the reference
+    # manifest's `entries[i]["provider"]`, never in this column.
     expected_vocab = {"sefaria", "ja", "msource_header", "msource_daf"}
     if set(families) != expected_vocab:
         raise ValueError("V4 locus family vocabulary drift")
