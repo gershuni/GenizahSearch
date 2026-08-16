@@ -79,10 +79,23 @@ stream.
    run masking, SQLite integrity, foreign-key, source-attribution, excerpt
    replay, and real-loader checks.
 
+## Ratified amendment (owner, 2026-08-16): combined bake with V4.2
+
+The acceptance gate "exactly ten new REF5 works" now means **exactly ten REF5
+reference inputs, evaluated inside the final combined competitor set** of the
+shared V4.1+V4.2 bake (`docs/specs/discovery-v4.2-combined-bake-and-public-first-plan.md`).
+A REF6 competitor may shadow a REF5 row. The separately-shadowed base+REF5
+candidate this plan originally described is superseded and will not be built;
+steps 5–6 below execute once, inside the combined bake, under the V4.2 plan's
+conditions. Steps 2–4 (fetch, append, locus/mask extension) are unchanged and
+remain REF5-scoped.
+
 ## Build-sequence status
 
 **Step 1 is done** (`scripts/discovery_v4_1_sources.json`, namespace threading,
-`tests/test_discovery_v4_1_sources.py`). Steps 2–6 are not started.
+`tests/test_discovery_v4_1_sources.py`). **Step 2 (the ten-source fetch) began
+2026-08-16** into `discovery_builds/discovery_v4_1/sources/`. Steps 3–6 are not
+started; 5–6 are governed by the combined-bake amendment above.
 
 The ten records were copied from the reviewed probe maps in
 `discovery_builds/discovery_v4/{source,wikisource}_probe_map.json` rather than
