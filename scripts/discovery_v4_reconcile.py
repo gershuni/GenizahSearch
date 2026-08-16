@@ -1,5 +1,31 @@
 #!/usr/bin/env python3
-"""Mint and reconcile the public identities that survive the V4 rematch."""
+"""Mint and reconcile the public identities that survive the V4 rematch.
+
+Reference-manifest entry contract (V4.2 C5, ``identity_mode`` awareness)
+--------------------------------------------------------------------------
+Each entry in a V4/V4.2 reference manifest's ``entries`` list may carry an
+``identity_mode`` field: ``"private_sibling"`` (the default when the field
+is ABSENT, so every pre-C5 manifest -- with no such field at all -- keeps
+its original meaning byte-for-byte) or ``"public_first"``.
+
+* A ``private_sibling`` entry keeps the pre-existing ``target_private_work_id``
+  field: an opaque ``w000xxx`` id of an existing, owner-approved private
+  identity this public source is a sibling reference of. Reference metadata
+  (author/genre) is inherited from that private identity's approved review
+  row, exactly as before.
+* A ``public_first`` entry instead carries an ``identity_key`` field (a
+  ``pf-####``-shaped key into the C5 public-first identity artifact loaded
+  from ``--public-first-artifact``) and has NO ``target_private_work_id`` --
+  no private counterpart exists. Reference metadata (title/author/genre) and
+  domain assignment come EXCLUSIVELY from that artifact's matching approved
+  entry; the minted work is STANDALONE (no merge group of any kind).
+
+When the reference manifest contains no ``public_first`` entries and
+``--public-first-artifact`` is not supplied, this module's behavior is
+byte-for-byte identical to the pre-C5 script (see
+``tests/test_discovery_v4_common.py::test_v4_reconciliation_mints_and_merges_only_a_live_public_reference``,
+which is pinned and must keep passing unmodified).
+"""
 
 from __future__ import annotations
 
@@ -16,8 +42,12 @@ from pathlib import Path
 
 try:
     from scripts.discovery_v4_common import require_hash, sha256_file, stable_json_dump
+    from scripts.discovery_track1_contract import IDENTITY_MODES
+    from scripts.discovery_public_first_identity import load_public_first_artifact
 except ModuleNotFoundError:  # direct invocation
     from discovery_v4_common import require_hash, sha256_file, stable_json_dump
+    from discovery_track1_contract import IDENTITY_MODES
+    from discovery_public_first_identity import load_public_first_artifact
 
 
 APPROVED_HEADER = (
@@ -35,6 +65,16 @@ APPROVED_HEADER = (
 )
 V4_MERGE_CONTRACT = "discovery-v4-public-reference-merges-v1"
 OPAQUE_RE = re.compile(r"w[0-9]{6}")
+_PRIVATE_SIBLING = "private_sibling"
+_PUBLIC_FIRST = "public_first"
+assert {_PRIVATE_SIBLING, _PUBLIC_FIRST} == set(IDENTITY_MODES)
+# The reconcile step's raw-id namespace filter (any REF<digits>: prefix),
+# generalized from the V4-era hardcoded 'REF4:%' SQL LIKE clause so a V4.2
+# combined manifest's REF6 rows are read too (C2 reconcile side). Byte-
+# compatible with the old behavior: a match DB carrying only REF4: rows
+# (every existing fixture and the pinned test) selects exactly the same rows
+# either way.
+_RAW_ID_NAMESPACE_RE = re.compile(r"^REF[0-9]+:")
 
 
 def curated_content_hash(payload: list[dict]) -> str:
@@ -99,6 +139,19 @@ def run(args: argparse.Namespace) -> dict:
     }
     if len(entries) != len(reference_manifest["entries"]):
         raise ValueError("reference manifest contains duplicate raw ids")
+    for raw_id, entry in entries.items():
+        mode = entry.get("identity_mode", _PRIVATE_SIBLING)
+        if mode not in IDENTITY_MODES:
+            raise ValueError(
+                f"reference manifest entry {raw_id} has an invalid identity_mode: {mode!r}"
+            )
+        if mode == _PRIVATE_SIBLING:
+            if not entry.get("target_private_work_id"):
+                raise ValueError(
+                    f"private_sibling entry {raw_id} is missing target_private_work_id"
+                )
+        elif not entry.get("identity_key"):
+            raise ValueError(f"public_first entry {raw_id} is missing identity_key")
 
     base_crosswalk_path = Path(args.base_crosswalk)
     base_approved_path = Path(args.base_approved)
@@ -109,6 +162,26 @@ def run(args: argparse.Namespace) -> dict:
     require_hash(base_merges_path, args.base_merges_sha256, "base canonical merges")
     require_hash(base_domains_path, args.base_work_domains_sha256, "base work domains")
 
+    # C5: the public-first identity artifact is OPTIONAL input. Absent, the
+    # reconcile step behaves exactly as the pre-C5 (private_sibling-only)
+    # script did -- this is what keeps the pinned byte-compatibility test
+    # green. Both flags are getattr'd with a None default (not read via
+    # args.public_first_artifact directly) because callers that build an
+    # argparse.Namespace by hand -- as the pinned test does -- never set
+    # these new attributes at all.
+    public_first_artifact_path = getattr(args, "public_first_artifact", None)
+    public_first_artifact_sha256 = getattr(args, "public_first_artifact_sha256", None)
+    if bool(public_first_artifact_path) != bool(public_first_artifact_sha256):
+        raise ValueError(
+            "--public-first-artifact and --public-first-artifact-sha256 must be "
+            "supplied together"
+        )
+    public_first_artifact = None
+    if public_first_artifact_path:
+        public_first_artifact = load_public_first_artifact(
+            public_first_artifact_path, sha256=public_first_artifact_sha256,
+        )
+
     match_db = Path(args.match_db).resolve()
     with sqlite3.connect(f"file:{match_db.as_posix()}?mode=ro", uri=True) as conn:
         columns = {
@@ -116,19 +189,28 @@ def run(args: argparse.Namespace) -> dict:
         }
         if not {"shadowed_by", "ref_spans_json"}.issubset(columns):
             raise ValueError("V4 match DB has not been promoted with reference offsets")
-        match_rows = conn.execute(
+        all_rows = conn.execute(
             """SELECT work_id, MIN(title), MIN(author), MIN(genre),
                       COUNT(*), COUNT(DISTINCT sys_id), COUNT(DISTINCT page_id)
                  FROM track1_matches
-                WHERE shadowed_by IS NULL AND work_id LIKE 'REF4:%'
+                WHERE shadowed_by IS NULL
                 GROUP BY work_id ORDER BY work_id"""
         ).fetchall()
+    match_rows = [row for row in all_rows if _RAW_ID_NAMESPACE_RE.match(row[0])]
     live_raw_ids = [row[0] for row in match_rows]
     if not live_raw_ids:
         raise ValueError("V4 rematch produced no live public-reference rows")
     unknown = set(live_raw_ids) - set(entries)
     if unknown:
         raise ValueError("V4 rematch contains raw ids absent from its reference manifest")
+
+    if public_first_artifact is None:
+        for raw_id in live_raw_ids:
+            if entries[raw_id].get("identity_mode", _PRIVATE_SIBLING) == _PUBLIC_FIRST:
+                raise ValueError(
+                    f"live raw id {raw_id} has identity_mode public_first but no "
+                    "--public-first-artifact was supplied"
+                )
 
     crosswalk = json.loads(base_crosswalk_path.read_text(encoding="utf-8"))
     collisions = set(live_raw_ids) & set(crosswalk)
@@ -146,29 +228,69 @@ def run(args: argparse.Namespace) -> dict:
     approved_by_id = {row["work_id"]: row for row in approved_rows}
     if len(approved_by_id) != len(approved_rows):
         raise ValueError("base approved-review file contains duplicate work ids")
+
+    private_sibling_raw_ids: list[str] = []
+    public_first_raw_ids: list[str] = []
+    public_first_matched_keys: set[str] = set()
+
     for raw_id, _title, _author, genre, row_count, witnesses, claims in match_rows:
         entry = entries[raw_id]
-        target = entry["target_private_work_id"]
-        target_review = approved_by_id.get(target)
-        if target_review is None or target_review["owner_verdict"] not in {"approve", "edit"}:
-            raise ValueError("V4 target private identity is not owner-approved")
-        approved_rows.append(
-            {
-                "work_id": minted[raw_id],
-                "candidate_title": entry["title"],
-                "author": target_review["author"],
-                "genre": genre or target_review["genre"],
-                "source_label": "sefaria",
-                "confidence_basis": "v4-public-reference-owner-authorized",
-                "tier_a_witnesses": str(witnesses),
-                "claim_count": str(claims),
-                "owner_title": "",
-                "owner_verdict": "approve",
-                "owner_note": (
-                    f"V4 public-source sibling of {target}; matcher rows={row_count}"
-                ),
-            }
-        )
+        mode = entry.get("identity_mode", _PRIVATE_SIBLING)
+        if mode == _PRIVATE_SIBLING:
+            target = entry["target_private_work_id"]
+            target_review = approved_by_id.get(target)
+            if target_review is None or target_review["owner_verdict"] not in {"approve", "edit"}:
+                raise ValueError("V4 target private identity is not owner-approved")
+            private_sibling_raw_ids.append(raw_id)
+            approved_rows.append(
+                {
+                    "work_id": minted[raw_id],
+                    "candidate_title": entry["title"],
+                    "author": target_review["author"],
+                    "genre": genre or target_review["genre"],
+                    "source_label": "sefaria",
+                    "confidence_basis": "v4-public-reference-owner-authorized",
+                    "tier_a_witnesses": str(witnesses),
+                    "claim_count": str(claims),
+                    "owner_title": "",
+                    "owner_verdict": "approve",
+                    "owner_note": (
+                        f"V4 public-source sibling of {target}; matcher rows={row_count}"
+                    ),
+                }
+            )
+        else:
+            # public_first (C5): reference metadata comes EXCLUSIVELY from
+            # the approved artifact entry -- never the matcher's own
+            # title/genre, and never inherited from any private identity
+            # (there isn't one).
+            identity_key = entry["identity_key"]
+            pf_entry = public_first_artifact["entries_by_key"].get(identity_key)
+            if pf_entry is None or pf_entry["verdict"] != "approve":
+                raise ValueError(
+                    f"public-first identity_key {identity_key!r} for raw id {raw_id} "
+                    "is absent, rejected, or deferred in the public-first artifact"
+                )
+            public_first_raw_ids.append(raw_id)
+            public_first_matched_keys.add(identity_key)
+            approved_rows.append(
+                {
+                    "work_id": minted[raw_id],
+                    "candidate_title": pf_entry["title_he"],
+                    "author": pf_entry["author"],
+                    "genre": pf_entry["genre"],
+                    "source_label": pf_entry["provider"],
+                    "confidence_basis": "v4-public-first-owner-authorized",
+                    "tier_a_witnesses": str(witnesses),
+                    "claim_count": str(claims),
+                    "owner_title": "",
+                    "owner_verdict": "approve",
+                    "owner_note": (
+                        f"V4.2 public-first identity {identity_key}; "
+                        f"matcher rows={row_count}"
+                    ),
+                }
+            )
     output_approved = Path(args.output_approved)
     output_approved.parent.mkdir(parents=True, exist_ok=True)
     with output_approved.open("w", encoding="utf-8-sig", newline="") as stream:
@@ -180,7 +302,7 @@ def run(args: argparse.Namespace) -> dict:
     old_canonical = canonical_map(base_merges)
     used_members = set(old_canonical)
     new_groups = []
-    for raw_id in live_raw_ids:
+    for raw_id in private_sibling_raw_ids:
         target = entries[raw_id]["target_private_work_id"]
         public = minted[raw_id]
         if target in used_members:
@@ -193,16 +315,28 @@ def run(args: argparse.Namespace) -> dict:
                 "owner_verdict": "approve",
             }
         )
+    # C5: public_first mints are STANDALONE canonical works -- NO merge group
+    # of any kind (no singleton, no synthetic two-member pairing). They are
+    # recorded in their own list instead, validated by
+    # build_discovery_sidecar.py::load_canonical_merges to be absent from
+    # every merge group.
+    public_first_standalone_canonical_ids = [
+        minted[raw_id] for raw_id in public_first_raw_ids
+    ]
     merges = copy.deepcopy(base_merges)
     merges["release_contract_version"] = V4_MERGE_CONTRACT
     merges["v4_public_reference_canonical_ids"] = [
-        minted[raw_id] for raw_id in live_raw_ids
+        minted[raw_id] for raw_id in private_sibling_raw_ids
     ]
     merges["v4_source_manifest_sha256"] = reference_manifest[
         "acquisition_manifest_sha256"
     ]
     merges["source"] = "Discovery V4 public-reference expansion"
     merges["merges"] = [*base_merges["merges"], *new_groups]
+    if public_first_standalone_canonical_ids:
+        merges["public_first_standalone_canonical_ids"] = (
+            public_first_standalone_canonical_ids
+        )
     stable_json_dump(merges, args.output_merges)
 
     domains = json.loads(base_domains_path.read_text(encoding="utf-8"))
@@ -211,7 +345,7 @@ def run(args: argparse.Namespace) -> dict:
     domain_by_id = {
         row["canonical_work_id"]: row for row in domains["assignments"]
     }
-    for raw_id in live_raw_ids:
+    for raw_id in private_sibling_raw_ids:
         target = entries[raw_id]["target_private_work_id"]
         target_canonical = old_canonical.get(target, target)
         source_row = domain_by_id.get(target_canonical)
@@ -221,6 +355,20 @@ def run(args: argparse.Namespace) -> dict:
         new_row["canonical_work_id"] = minted[raw_id]
         new_row["provenance"] = f"v4-public-reference-inherits:{target_canonical}"
         domains["assignments"].append(new_row)
+    for raw_id in public_first_raw_ids:
+        identity_key = entries[raw_id]["identity_key"]
+        pf_entry = public_first_artifact["entries_by_key"][identity_key]
+        # C5: domains come from the artifact -- no inheritance from a
+        # nonexistent private identity.
+        domains["assignments"].append(
+            {
+                "canonical_work_id": minted[raw_id],
+                "domain_parent": pf_entry["domain_parent"],
+                "domain_leaf": pf_entry["domain_leaf"],
+                "confidence": "high",
+                "provenance": f"public-first:{identity_key}",
+            }
+        )
     domains["assignments"].sort(key=lambda row: row["canonical_work_id"])
     domains["generated_by"] = "scripts/discovery_v4_reconcile.py"
     domains["generated_utc"] = datetime.now(timezone.utc).isoformat()
@@ -232,7 +380,7 @@ def run(args: argparse.Namespace) -> dict:
         "schema_version": "discovery-v4-reconciliation-v1",
         "reference_manifest_sha256": sha256_file(reference_manifest_path),
         "source_manifest_sha256": reference_manifest["acquisition_manifest_sha256"],
-        "live_public_reference_count": len(live_raw_ids),
+        "live_public_reference_count": len(private_sibling_raw_ids),
         "quarantined_or_unmatched_reference_count": len(entries) - len(live_raw_ids),
         "live_match_rows": sum(row[4] for row in match_rows),
         "live_witnesses": sum(row[5] for row in match_rows),
@@ -247,6 +395,24 @@ def run(args: argparse.Namespace) -> dict:
         "work_domain_assignments": len(domains["assignments"]),
         "raw_to_opaque": minted,
     }
+    # C5 reporting is additive-only: these keys are omitted entirely (not
+    # emitted as empty/zero) when no public-first artifact was supplied, so
+    # the artifact-absent report is byte-identical to the pre-C5 script's.
+    if public_first_artifact is not None:
+        public_first_unmatched_approved = sorted(
+            (
+                {"identity_key": identity_key, "verdict": pf_entry["verdict"]}
+                for identity_key, pf_entry in public_first_artifact["entries_by_key"].items()
+                if pf_entry["verdict"] == "approve"
+                and identity_key not in public_first_matched_keys
+            ),
+            key=lambda row: row["identity_key"],
+        )
+        report["live_public_first_count"] = len(public_first_raw_ids)
+        report["public_first_standalone_canonical_ids"] = (
+            public_first_standalone_canonical_ids
+        )
+        report["public_first_unmatched_approved"] = public_first_unmatched_approved
     if args.report:
         stable_json_dump(report, args.report)
     print(json.dumps(report, indent=2))
@@ -270,6 +436,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-approved", required=True)
     parser.add_argument("--output-merges", required=True)
     parser.add_argument("--output-work-domains", required=True)
+    parser.add_argument(
+        "--public-first-artifact",
+        help="C5 public-first identity artifact (discovery-public-first-identities-v1)",
+    )
+    parser.add_argument(
+        "--public-first-artifact-sha256",
+        help="required alongside --public-first-artifact",
+    )
     parser.add_argument("--report")
     return parser.parse_args()
 

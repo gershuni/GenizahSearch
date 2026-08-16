@@ -868,7 +868,7 @@ _CANONICAL_MERGES_TOP_KEYS = frozenset({
     "ratified_at", "relations_policy", "chronological_rule_examples", "contested",
     "provisional_relations_measurement_only", "residual_direct", "notes",
     "release_contract_version", "v4_public_reference_canonical_ids",
-    "v4_source_manifest_sha256",
+    "v4_source_manifest_sha256", "public_first_standalone_canonical_ids",
 })
 _MERGE_ENTRY_KEYS = frozenset({"members_w", "canonical_w", "owner_verdict"})
 _W_ID_RE = re.compile(r"^w\d{6}$")
@@ -900,6 +900,17 @@ def load_canonical_merges(
     >=2 DISTINCT members, canonical_w a member) -> approve-only load ->
     transitivity guard (no id in two approved groups) -> (release only) the
     16-merge / drop=={w001239} / D-14-flip semantic-ratification assertion.
+
+    Optional `public_first_standalone_canonical_ids` (V4.2 C5): the opaque
+    ids minted for public_first identities are STANDALONE canonical works --
+    the reconcile step (`scripts/discovery_v4_reconcile.py`) never puts them
+    in a merge group. This is the consumer-side validation of that
+    invariant: every listed id must be DISTINCT, w000xxx-shaped, absent from
+    EVERY merge group in `merges` (any verdict, not just approved -- a
+    rejected/contested group is still a "merge group" the id must not sit
+    in), and disjoint from `v4_public_reference_canonical_ids` (the sibling
+    canonical ids of the OTHER V4 identity mode, private_sibling). Absent
+    entirely, behavior is byte-identical to before this field existed.
 
     Masking: members are referenced ONLY by opaque w000xxx id -- never a title
     or the restricted codename.
@@ -960,6 +971,24 @@ def load_canonical_merges(
             )
         v4_canonical_ids = set(v4_canonical_raw)
 
+    public_first_ids_raw = doc.get("public_first_standalone_canonical_ids", [])
+    if not isinstance(public_first_ids_raw, list) or any(
+        not _is_w_id(value) for value in public_first_ids_raw
+    ):
+        raise CanonicalMergesError(
+            "--canonical-merges public_first_standalone_canonical_ids must be a "
+            "list of w000xxx-shaped strings"
+        )
+    if len(public_first_ids_raw) != len(set(public_first_ids_raw)):
+        raise CanonicalMergesError(
+            "--canonical-merges public_first_standalone_canonical_ids must be DISTINCT"
+        )
+    if contract_version == _V3_MERGE_CONTRACT and public_first_ids_raw:
+        raise CanonicalMergesError(
+            "V3 canonical-merge contract cannot carry public_first_standalone_canonical_ids"
+        )
+    public_first_standalone_ids = set(public_first_ids_raw)
+
     dropped = set()
     for d in dropped_raw:
         if not _is_w_id(d):
@@ -968,6 +997,7 @@ def load_canonical_merges(
 
     cross_corpus_map: Dict[str, str] = {}
     seen_ids: set = set()
+    all_group_ids: set = set()
     approve_count = 0
     d14_ok = False
     approved_groups: List[Tuple[set, str]] = []
@@ -992,6 +1022,7 @@ def load_canonical_merges(
             raise CanonicalMergesError(f"merges[{i}] canonical_w must be w000xxx-shaped")
         if canon not in distinct:
             raise CanonicalMergesError(f"merges[{i}] canonical_w must be an element of its own members_w")
+        all_group_ids |= distinct | {canon}
         if verdict != _MERGE_APPROVE:
             continue
         group_ids = distinct | {canon}
@@ -1007,6 +1038,20 @@ def load_canonical_merges(
             cross_corpus_map[member] = canon
         if distinct == _D14_MEMBERS and canon == _D14_CANONICAL:
             d14_ok = True
+
+    if public_first_standalone_ids:
+        in_a_group = public_first_standalone_ids & all_group_ids
+        if in_a_group:
+            raise CanonicalMergesError(
+                f"{len(in_a_group)} public_first_standalone_canonical_ids id(s) "
+                "appear in a merge group -- public_first mints must be STANDALONE"
+            )
+        overlaps_siblings = public_first_standalone_ids & v4_canonical_ids
+        if overlaps_siblings:
+            raise CanonicalMergesError(
+                f"{len(overlaps_siblings)} public_first_standalone_canonical_ids "
+                "id(s) overlap v4_public_reference_canonical_ids"
+            )
 
     if require_release_semantics:
         problems = []
@@ -1041,6 +1086,7 @@ def load_canonical_merges(
         "release_contract_version": contract_version,
         "v4_public_reference_merges": len(v4_canonical_ids),
         "v4_source_manifest_sha256": v4_source_manifest_sha256,
+        "public_first_standalone_canonical_ids": public_first_standalone_ids,
     }
 
 
