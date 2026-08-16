@@ -222,6 +222,55 @@ def test_anomalous_sibling_page_under_the_prefix_is_never_fetched(tmp_path: Path
 
 
 # ---------------------------------------------------------------------------
+# Traditional pagination euphemisms (live-verified on זהר חלק ג, 2026-08-17)
+# ---------------------------------------------------------------------------
+
+
+def test_euphemism_transposed_daf_numeral_parses_and_label_stays_canonical(
+    tmp_path: Path,
+):
+    """Hebrew pagination avoids spelling offensive words: the REAL page for
+    daf 298 carries the TRANSPOSED numeral (רחצ, not the canonical רצח),
+    the canonical title being only a redirect to it. Requesting the
+    canonical title with redirects therefore returns the transposed title,
+    which the parser must accept as 298 -- while the unit label stays the
+    CANONICAL ``daf_label_he`` form (the builder's daf-grain geometry check
+    recomputes it)."""
+    pages = _build_pages(
+        PREFIX,
+        297,
+        299,
+        retitle={
+            (298, "א"): f"{PREFIX} רחצ א",
+            (298, "ב"): f"{PREFIX} רחצ ב",
+        },
+    )
+    fetcher = FakeFetcher(tmp_path / "raw", pages)
+    source = _daf_pages_source(daf_range=[297, 299])
+
+    acquired, _ = _acquire_wikisource_daf_pages(fetcher, source)
+
+    assert acquired["coverage_status"] == "complete"
+    assert acquired["page_count"] == 6
+    unit = acquired["units"][2]  # daf 298, amud א
+    assert unit["label"] == daf_label_he(298, 1)
+    assert unit["provider_ref"] == f"{PREFIX} רחצ א"
+
+
+def test_euphemism_variants_parse_to_their_values():
+    assert parse_daf_page_title(f"{PREFIX} ער א", PREFIX) == (270, 1)
+    assert parse_daf_page_title(f"{PREFIX} ערה ב", PREFIX) == (275, 2)
+    assert parse_daf_page_title(f"{PREFIX} רחצ א", PREFIX) == (298, 1)
+
+
+def test_non_traditional_transposition_is_still_rejected():
+    # חצר also sums to 298 by gematria, but it is neither the canonical
+    # rendering nor the traditional euphemism -- the strict table refuses it.
+    with pytest.raises(ValueError, match="unrecognized daf numeral"):
+        parse_daf_page_title(f"{PREFIX} חצר א", PREFIX)
+
+
+# ---------------------------------------------------------------------------
 # Parse/enumeration cross-check (the anti-drift gate)
 # ---------------------------------------------------------------------------
 

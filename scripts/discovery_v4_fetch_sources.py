@@ -268,6 +268,28 @@ def select_chapter_links(
 _DAF_NUMERAL_TO_INT: dict[str, int] = {
     heb_numeral(value): value for value in range(1, 1000)
 }
+
+#: Traditional pagination euphemisms (live-verified on זהר חלק ג, 2026-08-17):
+#: Hebrew numbering avoids spelling out offensive words, so the REAL page for
+#: these values carries the TRANSPOSED letter order and the canonical title is
+#: only a redirect to it -- requesting the canonical title (redirects on)
+#: returns the transposed title, which the canonical-only table refused and
+#: quarantined the whole chelek. Accepted IN ADDITION to the canonical forms:
+#:   270  canonical "רע"  ("evil")   -> pages use "ער"
+#:   275  canonical "רעה" ("evil")   -> pages use "ערה"
+#:   298  canonical "רצח" ("murder") -> pages use "רחצ"
+#: None of these transposed strings is the canonical rendering of any value
+#: (heb_numeral renders strictly descending letter order, bar טו/טז), so the
+#: table stays a function: every accepted string maps to exactly one value.
+#: The import-time guard below makes that non-collision a hard invariant.
+_DAF_NUMERAL_EUPHEMISMS: dict[str, int] = {"ער": 270, "ערה": 275, "רחצ": 298}
+for _variant, _value in _DAF_NUMERAL_EUPHEMISMS.items():
+    if _variant in _DAF_NUMERAL_TO_INT:
+        raise RuntimeError(
+            f"euphemism variant {_variant!r} collides with a canonical numeral"
+        )
+    _DAF_NUMERAL_TO_INT[_variant] = _value
+
 _DAF_AMUD_TO_INT = {"א": 1, "ב": 2}
 
 
