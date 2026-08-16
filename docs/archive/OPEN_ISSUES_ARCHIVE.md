@@ -574,3 +574,9 @@ Moved verbatim by `scripts/archive_closed_issues.py`. Nothing was edited or dele
 | **Text sanitization inconsistency** | Desktop vs Web | ✅ Fixed (2026-02-04) | Single `sanitize_text_for_excel()` in `shared_export_utils.py` |
 | `_CACHE_TTL = 30` | `joins_panel.py:19` | ✅ Fixed (2026-02-04) | Now uses `JOINS_CACHE_TTL` env var |
 | `CACHE_TTL = 300` | `api.py:46` | ✅ Fixed (2026-02-04) | Now uses `NLI_CACHE_TTL` / `IMAGE_CACHE_TTL` env vars |
+
+## Closed entries moved out of the tracker on 2026-08-16
+
+### From `1. Outstanding Bugs / P2 - Medium`
+
+| **Excerpt bake dereferences the dead `_tmp\` acquisition-manifest path and accepts only one V4 manifest** | `scripts/bake_discovery_excerpts.py` | ✅ Fixed (2026-08-16) | V4.2 plan condition C2. `main()` now takes a required `--sources-bundle` (schema `discovery-excerpt-sources-bundle-v1`): per-stage reference-manifest hash pins, the acquisition manifest supplied by EXPLICIT path and verified against the reference manifest's recorded `acquisition_manifest_sha256` (binding unchanged, only the path source moved), `base_reference_sha256` chain-continuity across REF4→REF5→REF6 stages, and namespace-generalized source loading (`WorkSources` dispatches any bundle namespace, not a hard-coded `REF4:`). The recorded-path dereference survives only in an explicit legacy fallback of `load_v4_public_sources` that `main()` never takes, kept so `tests/test_bake_excerpt_cleaning.py` pins the old behavior unmodified. Every new gate mutation-proven RED→GREEN (11 gates); regression test proves a manifest recording a NONEXISTENT absolute path loads fine through the bundle. Meta keys: `excerpt_v4_*` → per-namespace `excerpt_{ns}_*` + `excerpt_sources_bundle_sha256` (grep-verified unread elsewhere); `excerpt_refs_manifest_sha256` unchanged. CLI is breaking (`--v4-reference-manifest`/`--v4-normalized-dir` removed) — the V4.2 bake invocation must use the bundle. |

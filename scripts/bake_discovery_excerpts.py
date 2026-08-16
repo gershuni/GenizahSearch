@@ -29,9 +29,12 @@ Non-Tanakh masked works get NO work-side pieces (the UI shows an honest
 (project_discovery_public.run_masking_gate) re-runs over the final artifact.
 
 Work-side sources, by edition class (crosswalk ref-id prefix):
-  REF4:  V4 normalized public-source snapshot, exact offsets. The reference
-         manifest and its acquisition manifest are hash-bound; the recomputed
-         stream must equal the pickle stream.
+  REF4/REF5/REF6/...: normalized public-source snapshot from an ORDERED
+         reference-manifest CHAIN (V4.2 plan C2, `--sources-bundle`), exact
+         offsets. Each stage's reference manifest and acquisition manifest
+         are hash-bound; the recomputed stream must equal the pickle stream.
+         Recognized namespaces come from the bundle itself, never a
+         hard-coded tuple.
   REF2:  refs_staging body file, exact offsets. The recomputed stream must
          EQUAL the pickle stream for that ref (prepped_for discipline) or the
          work side is dropped for that work -- never silently approximated.
@@ -48,9 +51,21 @@ stage_cd_preview lesson that a defaulted path silently stages stale data):
   python scripts/bake_discovery_excerpts.py <public.db> --out <baked.db> \
       --crosswalk <crosswalk.json> --refs-staging <dir> --ja-dir <dir> \
       --fullcorpus <fullcorpus_v2.db> --ref-pkl <ref_corpus_v2.pkl> \
-      [--v4-reference-manifest <reference_manifest.json> \
-       --v4-normalized-dir <normalized_dir>] \
+      --sources-bundle <excerpt_sources_bundle.json> \
+      --base-reference-sha256 <hex> \
       [--ctx 90] [--span-cap 600] [--min-align-score 65] [--limit N]
+
+`--sources-bundle` is the ORDERED (REF4->REF5->REF6->...) chain-order
+`discovery-excerpt-sources-bundle-v1` JSON (V4.2 plan C2): every stage names
+its reference manifest, acquisition manifest, and normalized-source
+directory as explicit hash-pinned inputs. This script never dereferences a
+reference manifest's own recorded `acquisition_manifest` path string -- that
+recorded-absolute-path dereference was an open P2 defect (a depot move left
+it pointing at a deleted `_tmp/` path). `--base-reference-sha256` anchors
+chain-continuity for the bundle's first stage against the pinned base V2
+reference corpus; every later stage's `base_reference_sha256` must equal the
+previous stage's `reference_corpus_sha256`, or the bake hard-errors naming
+both stages.
 
 `--limit` exists for a fast dev smoke ONLY; every gate runs on a full bake.
 """
@@ -69,7 +84,7 @@ import time
 import unicodedata
 from collections import Counter, OrderedDict
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional, Tuple
+from typing import Dict, Iterable, List, Mapping, Optional, Tuple
 
 _REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO))
@@ -77,7 +92,28 @@ sys.path.insert(0, str(_REPO / "scripts"))
 
 from shared.discovery_locus import norm_stream  # noqa: E402
 
+try:  # package-style import (pytest rootdir on sys.path)
+    from scripts.discovery_track1_contract import _NAMESPACE_RE as _REF_NAMESPACE_RE
+except ModuleNotFoundError:  # direct ``python scripts/...py`` invocation
+    from discovery_track1_contract import _NAMESPACE_RE as _REF_NAMESPACE_RE
+
 EXCERPT_SCHEMA_VERSION = "excerpt-v1"
+
+#: Schema version of the ordered `--sources-bundle` JSON (V4.2 plan C2). One
+#: bundle names every reference-manifest-chain stage (REF4->REF5->REF6->...)
+#: whose public-source texts this bake dereferences by EXPLICIT path -- the
+#: fix for the P2 defect where a reference manifest's own recorded
+#: `acquisition_manifest` path went dead across a depot move.
+EXCERPT_SOURCES_BUNDLE_SCHEMA_VERSION = "discovery-excerpt-sources-bundle-v1"
+
+#: Required keys of one bundle stage, in the schema the plan specifies.
+_BUNDLE_STAGE_KEYS = (
+    "namespace",
+    "reference_manifest",
+    "reference_manifest_sha256",
+    "acquisition_manifest",
+    "normalized_dir",
+)
 
 _DDL = """
 CREATE TABLE discovery_excerpt (
@@ -241,13 +277,44 @@ def pieces(nfc: str, offs, lo: int, hi: int, ctx: int,
 
 
 def load_v4_public_sources(
-    reference_manifest_path: Path, normalized_dir: Path
+    reference_manifest_path: Path,
+    normalized_dir: Path,
+    acquisition_manifest_path: Optional[Path] = None,
+    *,
+    expected_namespace: Optional[str] = None,
 ) -> Tuple[Dict[str, str], Dict[str, str], str]:
-    """Reconstruct readable REF4 texts under their pinned matcher streams."""
+    """Reconstruct readable public-source texts under their pinned matcher streams.
+
+    ``acquisition_manifest_path`` is the P2 fix (V4.2 plan C2): when given, it
+    is the caller's OWN explicit path to the acquisition manifest -- verified
+    by hash against the reference manifest's recorded
+    ``acquisition_manifest_sha256``, but the manifest's own recorded
+    ``acquisition_manifest`` path STRING is never read as a path. Omitting it
+    falls back to that legacy dereference (kept only so a direct single-
+    manifest call -- e.g. this repo's pinned unit test -- keeps working); the
+    excerpt bake's ``main()`` always supplies the bundle's explicit path and
+    never takes this fallback, which is how the depot-move P2 defect (a
+    recorded absolute path going dead) is closed for the real bake.
+
+    ``expected_namespace``, when given, is cross-checked against the
+    manifest's own ``reference_namespace`` (absent means ``REF4``) and every
+    entry's raw id must carry that namespace as its ``NS:`` prefix.
+    """
     manifest = json.loads(reference_manifest_path.read_text(encoding="utf-8"))
     if manifest.get("schema_version") != "discovery-v4-reference-manifest-v1":
         raise ValueError("unsupported V4 reference manifest")
-    acquisition_path = Path(manifest["acquisition_manifest"])
+    if expected_namespace is not None:
+        actual_namespace = manifest.get("reference_namespace", "REF4")
+        if actual_namespace != expected_namespace:
+            raise ValueError(
+                f"reference manifest namespace {actual_namespace!r} does not "
+                f"match the sources bundle's declared namespace "
+                f"{expected_namespace!r}"
+            )
+    if acquisition_manifest_path is None:
+        acquisition_path = Path(manifest["acquisition_manifest"])
+    else:
+        acquisition_path = Path(acquisition_manifest_path)
     if sha256_file(acquisition_path) != manifest["acquisition_manifest_sha256"]:
         raise ValueError("V4 acquisition manifest hash differs from the reference manifest")
     acquisition = json.loads(acquisition_path.read_text(encoding="utf-8"))
@@ -260,6 +327,14 @@ def load_v4_public_sources(
     attributions: Dict[str, str] = {}
     for entry in manifest["entries"]:
         raw_id = entry["raw_reference_id"]
+        if expected_namespace is not None and not raw_id.startswith(
+            f"{expected_namespace}:"
+        ):
+            raise ValueError(
+                f"reference manifest entry {raw_id!r} does not carry the "
+                f"{expected_namespace!r} namespace prefix declared by its "
+                "bundle stage"
+            )
         source_key = entry["source_key"]
         acquired = acquired_by_key.get(source_key)
         if acquired is None:
@@ -277,6 +352,179 @@ def load_v4_public_sources(
     return texts, attributions, manifest["acquisition_manifest_sha256"]
 
 
+def load_excerpt_sources_bundle(bundle_path: Path) -> Dict[str, object]:
+    """Load + structurally validate the ordered `--sources-bundle` JSON.
+
+    Schema ``discovery-excerpt-sources-bundle-v1``: ``{"stages": [...]}`` in
+    CHAIN ORDER (REF4 -> REF5 -> REF6 -> ...). Each stage names one
+    reference-manifest generation's four inputs. This function only checks
+    shape; hash pins and chain continuity are verified while walking the
+    stages in `load_public_sources_from_bundle`, where the error can name the
+    stage(s) involved.
+    """
+    doc = json.loads(bundle_path.read_text(encoding="utf-8"))
+    if doc.get("schema_version") != EXCERPT_SOURCES_BUNDLE_SCHEMA_VERSION:
+        raise ValueError("unsupported excerpt sources bundle schema_version")
+    stages = doc.get("stages")
+    if not isinstance(stages, list):
+        raise ValueError("excerpt sources bundle 'stages' must be a list")
+    seen: set = set()
+    checked_stages = []
+    for stage in stages:
+        if not isinstance(stage, dict):
+            raise ValueError("excerpt sources bundle stage must be an object")
+        namespace = stage.get("namespace")
+        if not isinstance(namespace, str) or not _REF_NAMESPACE_RE.fullmatch(namespace):
+            raise ValueError(
+                f"excerpt sources bundle stage has invalid namespace: {namespace!r}"
+            )
+        if namespace in seen:
+            raise ValueError(f"excerpt sources bundle has duplicate namespace: {namespace}")
+        seen.add(namespace)
+        missing = [key for key in _BUNDLE_STAGE_KEYS if key not in stage]
+        if missing:
+            raise ValueError(f"bundle stage {namespace} missing keys: {missing}")
+        checked_stages.append(dict(stage))
+    return {"schema_version": doc["schema_version"], "stages": checked_stages}
+
+
+def load_public_sources_from_bundle(
+    bundle: Dict[str, object], base_reference_sha256: str
+) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, dict]]:
+    """Walk the ordered `--sources-bundle` stages (V4.2 plan C2), verifying:
+
+    - the bundle's pinned ``reference_manifest_sha256`` against the actual
+      file at ``reference_manifest``;
+    - the stage's declared namespace against what the reference manifest
+      itself records (absent means ``REF4``), and every entry's raw id
+      against that same namespace (inside `load_v4_public_sources`);
+    - the acquisition manifest's hash binding via the bundle's EXPLICIT
+      ``acquisition_manifest`` path (never the manifest's own recorded
+      string -- the P2 fix, inside `load_v4_public_sources`);
+    - hash-CHAIN continuity: stage N's ``base_reference_sha256`` must equal
+      stage N-1's ``reference_corpus_sha256`` (stage 0 against the caller's
+      pinned ``base_reference_sha256``). A break is a hard error naming both
+      stages (C12: manifest-chain discontinuity).
+
+    Returns the merged ``(texts, attributions)`` maps keyed by raw reference
+    id, plus a namespace -> stage-report dict (``reference_manifest_sha256``,
+    ``acquisition_manifest_sha256``, ``reference_corpus_sha256``, ``raw_ids``)
+    the caller uses for its own per-namespace pkl/crosswalk gates.
+    """
+    texts: Dict[str, str] = {}
+    attributions: Dict[str, str] = {}
+    stage_reports: Dict[str, dict] = {}
+    expected_base = base_reference_sha256
+    prev_label = "the pinned base reference corpus"
+    for stage in bundle["stages"]:
+        namespace = stage["namespace"]
+        reference_manifest_path = Path(stage["reference_manifest"])
+        actual_manifest_hash = sha256_file(reference_manifest_path)
+        if actual_manifest_hash != stage["reference_manifest_sha256"]:
+            raise ValueError(
+                f"{namespace} reference manifest SHA-256 differs from the "
+                "sources bundle's pin"
+            )
+        manifest = json.loads(reference_manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("schema_version") != "discovery-v4-reference-manifest-v1":
+            raise ValueError(
+                f"{namespace}: unsupported V4 reference manifest schema_version"
+            )
+        actual_base = manifest.get("base_reference_sha256")
+        if actual_base != expected_base:
+            raise ValueError(
+                "manifest-chain discontinuity: "
+                f"stage {namespace}'s base_reference_sha256 ({actual_base!r}) "
+                f"does not equal {prev_label}'s reference_corpus_sha256 "
+                f"({expected_base!r})"
+            )
+        stage_texts, stage_attrs, acquisition_manifest_sha256 = load_v4_public_sources(
+            reference_manifest_path,
+            Path(stage["normalized_dir"]),
+            acquisition_manifest_path=Path(stage["acquisition_manifest"]),
+            expected_namespace=namespace,
+        )
+        overlap = set(stage_texts) & set(texts)
+        if overlap:
+            raise ValueError(
+                f"{namespace} raw reference ids collide with an earlier "
+                f"bundle stage: {sorted(overlap)[:5]}"
+            )
+        texts.update(stage_texts)
+        attributions.update(stage_attrs)
+        stage_reports[namespace] = {
+            "reference_manifest_sha256": actual_manifest_hash,
+            "acquisition_manifest_sha256": acquisition_manifest_sha256,
+            "reference_corpus_sha256": manifest["reference_corpus_sha256"],
+            "raw_ids": set(stage_texts),
+        }
+        expected_base = manifest["reference_corpus_sha256"]
+        prev_label = f"stage {namespace}"
+    return texts, attributions, stage_reports
+
+
+def pkl_namespace_ids(pkl_stream: Mapping[str, str]) -> Dict[str, set]:
+    """Group `pkl_stream`'s ``REF*``-prefixed ids by namespace, EXCLUDING
+    ``REF2`` (governed by refs_staging's own manifest, not the sources
+    bundle). Feeds the generalized pkl/bundle coverage and set-equality
+    gates below (V4.2 plan C2/C12)."""
+    grouped: Dict[str, set] = {}
+    for ref_id in pkl_stream:
+        head, sep, _ = ref_id.partition(":")
+        if sep and head != "REF2" and _REF_NAMESPACE_RE.fullmatch(head):
+            grouped.setdefault(head, set()).add(ref_id)
+    return grouped
+
+
+def check_bundle_covers_pkl_namespaces(
+    pkl_namespaces: Mapping[str, set], bundle_namespaces: Iterable[str]
+) -> None:
+    """Every REF*-namespace present in the pickle must have a registered
+    sources-bundle stage -- an unregistered namespace is a hard error, never
+    a silent legacy fallback. Generalizes the former REF4-only "REF4
+    references require their pinned V4 public-source inputs" gate to any
+    reference generation."""
+    missing = sorted(set(pkl_namespaces) - set(bundle_namespaces))
+    if missing:
+        raise ValueError(
+            f"{missing[0]} references require their pinned public-source "
+            "inputs from the sources bundle"
+        )
+
+
+def check_pkl_source_set_equality(
+    pkl_namespaces: Mapping[str, set], stage_reports: Mapping[str, dict]
+) -> None:
+    """Each bundle namespace's loaded raw-id set must equal the pickle's set
+    of ids under that namespace. Generalizes the REF4-only "V4 public-source
+    set does not equal the REF4 pickle set" gate."""
+    for namespace, ids in pkl_namespaces.items():
+        if stage_reports[namespace]["raw_ids"] != ids:
+            raise ValueError(
+                f"{namespace} public-source set does not equal the "
+                f"{namespace} pickle set"
+            )
+
+
+def check_crosswalk_namespace_coverage(
+    crosswalk: Mapping[str, str], stage_reports: Mapping[str, dict]
+) -> None:
+    """No crosswalk raw id under a bundle namespace may be absent from that
+    namespace's pickle-derived raw-id set. Generalizes the REF4-only
+    "crosswalk contains REF4 ids absent from the reference pickle" gate."""
+    for namespace, report in stage_reports.items():
+        unknown = {
+            raw_id for raw_id in crosswalk
+            if raw_id.startswith(f"{namespace}:")
+            and raw_id not in report["raw_ids"]
+        }
+        if unknown:
+            raise ValueError(
+                f"crosswalk contains {namespace} ids absent from the "
+                "reference pickle"
+            )
+
+
 class WorkSources:
     """Lazy, cached access to public reference texts (NFC + stream + offsets).
 
@@ -288,21 +536,30 @@ class WorkSources:
 
     def __init__(self, refs_staging: Path, ja_dir: Path,
                  man_by_key: Dict[str, dict], pkl_stream: Dict[str, str],
-                 counters: Counter, *, v4_text: Optional[Dict[str, str]] = None,
-                 v4_attribution: Optional[Dict[str, str]] = None):
+                 counters: Counter, *, pub_text: Optional[Dict[str, str]] = None,
+                 pub_attribution: Optional[Dict[str, str]] = None,
+                 bundle_namespaces: Optional[Iterable[str]] = None):
         self.refs_staging = refs_staging
         self.ja_dir = ja_dir
         self.man_by_key = man_by_key
         self.pkl_stream = pkl_stream
         self.counters = counters
-        self.v4_text = v4_text or {}
-        self.v4_attribution = v4_attribution or {}
+        # The merged sources-bundle texts/attributions (V4.2 plan C2): keyed
+        # by raw reference id across EVERY bundle stage (REF4, REF5, REF6,
+        # ...). Which "NS:" prefixes this dispatches here comes from
+        # `bundle_namespaces` -- the bundle's own declared namespaces, never
+        # a hard-coded tuple, so a new reference generation needs no edit
+        # here, only a new bundle stage.
+        self.pub_text = pub_text or {}
+        self.pub_attribution = pub_attribution or {}
+        self.bundle_namespaces = frozenset(bundle_namespaces or ())
         self._cache: Dict[str, Optional[Tuple[str, object]]] = {}
 
     def _load(self, ref_id: str) -> Optional[Tuple[str, object]]:
         raw = None
-        if ref_id.startswith("REF4:"):
-            raw = self.v4_text.get(ref_id)
+        head, sep, _ = ref_id.partition(":")
+        if sep and head in self.bundle_namespaces:
+            raw = self.pub_text.get(ref_id)
             if raw is None:
                 self.counters["work_v4_source_missing"] += 1
                 return None
@@ -332,7 +589,7 @@ class WorkSources:
         return nfc, offs
 
     def attribution(self, ref_id: str) -> Optional[str]:
-        return self.v4_attribution.get(ref_id)
+        return self.pub_attribution.get(ref_id)
 
     def get(self, ref_id: str) -> Optional[Tuple[str, object]]:
         if ref_id not in self._cache:
@@ -516,8 +773,18 @@ def main() -> int:
     ap.add_argument("--ja-dir", required=True)
     ap.add_argument("--fullcorpus", required=True)
     ap.add_argument("--ref-pkl", required=True)
-    ap.add_argument("--v4-reference-manifest")
-    ap.add_argument("--v4-normalized-dir")
+    ap.add_argument(
+        "--sources-bundle", required=True,
+        help="ordered discovery-excerpt-sources-bundle-v1 JSON (V4.2 plan "
+             "C2): REF4->REF5->REF6->... chain-order stages, each an "
+             "explicit hash-pinned reference-manifest/acquisition-manifest/"
+             "normalized-dir input",
+    )
+    ap.add_argument(
+        "--base-reference-sha256", required=True,
+        help="pinned base V2 reference-corpus SHA-256 -- the chain-"
+             "continuity anchor for the sources bundle's first stage",
+    )
     ap.add_argument("--ctx", type=int, default=90)
     ap.add_argument("--span-cap", type=int, default=600)
     ap.add_argument("--min-align-score", type=float, default=65.0)
@@ -559,40 +826,59 @@ def main() -> int:
     pkl_stream = {w["id"]: w["stream"] for w in works_pkl}
     del works_pkl
 
-    v4_ids = {ref_id for ref_id in pkl_stream if ref_id.startswith("REF4:")}
-    have_v4_args = bool(args.v4_reference_manifest and args.v4_normalized_dir)
-    if bool(args.v4_reference_manifest) != bool(args.v4_normalized_dir):
-        sys.exit("--v4-reference-manifest and --v4-normalized-dir must be supplied together")
-    if v4_ids and not have_v4_args:
-        sys.exit("REF4 references require their pinned V4 public-source inputs")
-    v4_text: Dict[str, str] = {}
-    v4_attribution: Dict[str, str] = {}
-    v4_source_manifest_sha256 = None
-    if have_v4_args:
-        v4_text, v4_attribution, v4_source_manifest_sha256 = load_v4_public_sources(
-            Path(args.v4_reference_manifest), Path(args.v4_normalized_dir)
+    sources_bundle_path = Path(args.sources_bundle)
+    try:
+        bundle = load_excerpt_sources_bundle(sources_bundle_path)
+    except (OSError, ValueError) as exc:
+        sys.exit(str(exc))
+    try:
+        pub_text, pub_attribution, stage_reports = load_public_sources_from_bundle(
+            bundle, args.base_reference_sha256
         )
-        if set(v4_text) != v4_ids:
-            sys.exit("V4 public-source set does not equal the REF4 pickle set")
+    except (OSError, ValueError) as exc:
+        sys.exit(str(exc))
+    bundle_namespaces = set(stage_reports)
+
+    # Generalized pkl-namespace coverage + set-equality gates (V4.2 plan
+    # C2/C12): every REF*-prefixed namespace found in the pickle -- OTHER
+    # than REF2, which is governed by refs_staging's own manifest below, not
+    # the bundle -- must have a registered bundle stage AND load exactly the
+    # same raw-id set the pickle carries for it. Generalizes the former
+    # REF4-only gates to any reference generation.
+    pkl_namespaces = pkl_namespace_ids(pkl_stream)
+    try:
+        check_bundle_covers_pkl_namespaces(pkl_namespaces, bundle_namespaces)
+        check_pkl_source_set_equality(pkl_namespaces, stage_reports)
+    except ValueError as exc:
+        sys.exit(str(exc))
+
+    # REF4's historical cross-check against the canonical-merge input the
+    # public sidecar itself recorded stays scoped to REF4: the meta key it
+    # reads (`canonical_merges_v4_source_manifest_sha256`) is REF4-specific
+    # and owned by build_discovery_sidecar.py (V4.2 plan C3/C4), out of this
+    # change's scope. A future namespace gets its own such check when the
+    # sidecar builder grows the equivalent meta key.
+    if "REF4" in stage_reports:
         expected_source_hash = input_meta.get(
             "canonical_merges_v4_source_manifest_sha256"
         )
-        if not expected_source_hash or expected_source_hash != v4_source_manifest_sha256:
+        actual_source_hash = stage_reports["REF4"]["acquisition_manifest_sha256"]
+        if not expected_source_hash or expected_source_hash != actual_source_hash:
             sys.exit(
                 "V4 public-source manifest differs from the canonical-merge input "
                 "recorded by the public sidecar"
             )
-        unknown_crosswalk_refs = {
-            raw_id for raw_id in crosswalk
-            if raw_id.startswith("REF4:") and raw_id not in v4_ids
-        }
-        if unknown_crosswalk_refs:
-            sys.exit("crosswalk contains REF4 ids absent from the reference pickle")
+
+    try:
+        check_crosswalk_namespace_coverage(crosswalk, stage_reports)
+    except ValueError as exc:
+        sys.exit(str(exc))
 
     counters: Counter = Counter()
     sources = WorkSources(
         refs_staging, Path(args.ja_dir), man_by_key, pkl_stream, counters,
-        v4_text=v4_text, v4_attribution=v4_attribution,
+        pub_text=pub_text, pub_attribution=pub_attribution,
+        bundle_namespaces=bundle_namespaces,
     )
     targets = ReprojectionTargets(refs_staging, man_by_key)
 
@@ -703,9 +989,10 @@ def main() -> int:
                 wb, ws, wa, wclip = pieces(wnfc, woffs, r["w_start"],
                                            r["w_end"], args.ctx, args.span_cap)
                 wsrc = "direct"
+                ref0_head = refs[0].partition(":")[0]
                 if refs[0].startswith("REF2:"):
                     attribution = man_by_key[refs[0][5:]].get("attribution_text")
-                elif refs[0].startswith("REF4:"):
+                elif ref0_head in bundle_namespaces:
                     attribution = sources.attribution(refs[0])
                 elif refs[0].startswith("J:"):
                     # Structural markers out of the DISPLAY pieces, before
@@ -752,13 +1039,18 @@ def main() -> int:
         ("excerpt_ctx", str(args.ctx)),
         ("excerpt_span_cap", str(args.span_cap)),
         ("excerpt_refs_manifest_sha256", sha256_file(manifest_path)),
+        ("excerpt_sources_bundle_sha256", sha256_file(sources_bundle_path)),
     ]
-    if args.v4_reference_manifest:
-        meta_rows.extend([
-            ("excerpt_v4_reference_manifest_sha256",
-             sha256_file(Path(args.v4_reference_manifest))),
-            ("excerpt_v4_source_manifest_sha256", v4_source_manifest_sha256),
-        ])
+    for namespace, report in sorted(stage_reports.items()):
+        ns_key = namespace.lower()
+        meta_rows.append((
+            f"excerpt_{ns_key}_reference_manifest_sha256",
+            report["reference_manifest_sha256"],
+        ))
+        meta_rows.append((
+            f"excerpt_{ns_key}_acquisition_manifest_sha256",
+            report["acquisition_manifest_sha256"],
+        ))
     conn.executemany("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
                      meta_rows)
     conn.commit()
