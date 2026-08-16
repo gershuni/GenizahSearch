@@ -431,8 +431,16 @@ def test_v4_2_map_has_exactly_fifteen_containers_and_88_children():
     config = load_source_config(V4_2_MAP)
     assert reference_namespace(config) == "REF6"
     containers = [s for s in config["sources"] if s.get("container")]
-    additions = [s for s in config["sources"] if not s.get("container")]
-    assert len(config["sources"]) == 19
+    # "additions" here means the four post-sitting PRIVATE_SIBLING sources
+    # only -- the 31 public_first sources (this session) are neither a
+    # container nor mapping-bearing, so they are excluded from this specific
+    # pin; they get their own exact-composition test below.
+    additions = [
+        s
+        for s in config["sources"]
+        if not s.get("container") and s.get("identity_mode") != "public_first"
+    ]
+    assert len(config["sources"]) == 50
     assert len(containers) == 15
     total_children = sum(len(source["children"]) for source in containers)
     assert total_children == 88
@@ -482,7 +490,122 @@ def test_v4_2_map_inherits_v4s_license_allowlist_and_size_floor():
 
 
 # --------------------------------------------------------------------------
-# 6. Existing-map regression
+# 6. The 32 public_first REF6 additions (discovery-v4.2 C7/C8, this session)
+# --------------------------------------------------------------------------
+
+# Owner-approved identities deliberately absent from the map: three with no
+# viable route anywhere (confirmed live 2026-08-16), plus pf-1032 (תוספות
+# רי"ד), whose ~319 real pages exist under the long title scheme but are NOT
+# linked from the main ToC page (live spot-check 2026-08-16 selected 0 links
+# per authored cluster) -- its route needs a dedicated probe round.
+PUBLIC_FIRST_UNROUTED_IDENTITY_KEYS = {"pf-1013", "pf-1015", "pf-1031", "pf-1032"}
+
+
+def test_v4_2_map_has_exactly_thirty_one_public_first_sources():
+    config = load_source_config(V4_2_MAP)
+    public_first = [
+        s for s in config["sources"] if s.get("identity_mode") == "public_first"
+    ]
+    assert len(public_first) == 31
+    assert not any(s.get("container") for s in public_first)
+    assert not any("mappings" in s for s in public_first)
+
+    identity_keys = {s["identity_key"] for s in public_first}
+    expected_keys = {f"pf-{n:04d}" for n in range(1001, 1036)} - (
+        PUBLIC_FIRST_UNROUTED_IDENTITY_KEYS
+    )
+    assert identity_keys == expected_keys
+    assert len(identity_keys) == 31
+
+    by_shape = {"daf_pages": 0, "page_clusters": 0, "schema_leaves": 0, "plain": 0}
+    for source in public_first:
+        if source.get("mode") == "daf_pages":
+            by_shape["daf_pages"] += 1
+        elif "page_clusters" in source:
+            by_shape["page_clusters"] += 1
+        elif source.get("mode") == "schema_leaves":
+            by_shape["schema_leaves"] += 1
+        else:
+            by_shape["plain"] += 1
+    assert by_shape == {
+        "daf_pages": 3,
+        "page_clusters": 5,
+        "schema_leaves": 8,
+        "plain": 15,
+    }
+
+
+def test_v4_2_map_public_first_zohar_daf_ranges_have_no_daf_token():
+    config = load_source_config(V4_2_MAP)
+    zohar = {
+        s["identity_key"]: s
+        for s in config["sources"]
+        if s.get("mode") == "daf_pages" and s.get("identity_mode") == "public_first"
+    }
+    assert set(zohar) == {"pf-1021", "pf-1022", "pf-1023"}
+    assert zohar["pf-1021"]["daf_range"] == [1, 250]
+    assert zohar["pf-1022"]["daf_range"] == [2, 268]
+    assert zohar["pf-1023"]["daf_range"] == [2, 299]
+    for source in zohar.values():
+        assert "דף" not in source["link_prefix"]
+
+
+def test_v4_2_map_public_first_page_clusters_are_frozen_and_nonempty():
+    config = load_source_config(V4_2_MAP)
+    clustered = [
+        s
+        for s in config["sources"]
+        if "page_clusters" in s and s.get("identity_mode") == "public_first"
+    ]
+    assert {s["key"] for s in clustered} == {
+        "baal_haturim_torah",
+        "rashbam_torah",
+        "yad_rama_talmud",
+        "semag",
+        "ran_al_harif",
+    }
+    cluster_counts = {s["key"]: len(s["page_clusters"]) for s in clustered}
+    assert cluster_counts == {
+        "baal_haturim_torah": 5,
+        "rashbam_torah": 5,
+        "yad_rama_talmud": 2,
+        "semag": 2,
+        "ran_al_harif": 14,
+    }
+    # Every cluster in every page_clusters source has a non-empty toc_page
+    # and link_prefix -- the frozen shape load_source_config enforces.
+    for source in clustered:
+        for cluster in source["page_clusters"]:
+            assert cluster["toc_page"]
+            assert cluster["link_prefix"]
+
+
+def test_v4_2_map_public_first_exclude_pages_resolve_named_collisions():
+    """The three Tur works and torat_haadam each name the exact collision/
+    unwritten page the live probe identified -- pinned verbatim so a future
+    edit cannot silently drop or rename the exclusion."""
+    config = load_source_config(V4_2_MAP)
+    by_key = {s["key"]: s for s in config["sources"]}
+    assert by_key["tur_even_haezer"]["exclude_pages"] == ["טור אבן העזר הקדמה"]
+    assert by_key["tur_choshen_mishpat"]["exclude_pages"] == ["טור חושן משפט שד"]
+    assert by_key["tur_yoreh_deah"]["exclude_pages"] == ["טור יורה דעה שד"]
+    assert by_key["torat_haadam"]["exclude_pages"] == ["תורת האדם/שער הסוף"]
+
+
+def test_v4_2_map_public_first_sources_have_no_daf_bavli_grain():
+    # daf_bavli assumes Sefaria's ordinal geometry (C8) -- no public_first
+    # source in this map may declare it; the two daf shapes here are
+    # "daf" (Zohar) and "section" (everything else with a meaningful
+    # fetched-title label).
+    config = load_source_config(V4_2_MAP)
+    public_first = [
+        s for s in config["sources"] if s.get("identity_mode") == "public_first"
+    ]
+    assert not any(s.get("locus_grain") == "daf_bavli" for s in public_first)
+
+
+# --------------------------------------------------------------------------
+# 7. Existing-map regression
 # --------------------------------------------------------------------------
 
 

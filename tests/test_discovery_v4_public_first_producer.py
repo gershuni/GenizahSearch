@@ -49,6 +49,8 @@ from scripts.discovery_v4_common import (
 from scripts.discovery_v4_fetch_sources import (
     Fetcher,
     _acquire_wikisource,
+    _acquire_wikisource_page_clusters,
+    select_chapter_links,
     run as fetch_run,
 )
 from shared.discovery_locus import daf_label_he, heb_numeral
@@ -449,13 +451,34 @@ def test_source_target_ids_skips_public_first_sources(tmp_path):
 
 
 def test_existing_v4_v4_1_v4_2_maps_still_load_unaffected():
+    # V4/V4.1 predate C5 entirely -- no source in either map may carry
+    # identity_mode/identity_key. V4.2 now DOES (31 owner-approved
+    # public_first additions, this session; exact composition pinned in
+    # tests/test_discovery_v4_2_containers.py) -- its 19 pre-existing
+    # sources (15 containers + 4 private_sibling additions) are still
+    # identity_mode-absent, proving the C5 extension over this map is
+    # strictly additive.
     v4 = load_source_config(V4_MAP)
     v4_1 = load_source_config(V4_1_MAP)
-    v4_2 = load_source_config(V4_2_MAP)
-    for config in (v4, v4_1, v4_2):
+    for config in (v4, v4_1):
         for source in config["sources"]:
             assert source.get("identity_mode") is None
             assert "identity_key" not in source
+
+    v4_2 = load_source_config(V4_2_MAP)
+    pre_existing = [
+        source
+        for source in v4_2["sources"]
+        if source.get("identity_mode") != "public_first"
+    ]
+    assert len(pre_existing) == 19
+    for source in pre_existing:
+        assert source.get("identity_mode") is None
+        assert "identity_key" not in source
+    public_first = [
+        source for source in v4_2["sources"] if source.get("identity_mode") == "public_first"
+    ]
+    assert len(public_first) == 31
 
 
 # ===========================================================================
@@ -992,3 +1015,379 @@ def test_build_zero_public_first_sources_is_additive_only(tmp_path, monkeypatch)
     assert minted["title"] == "Private Ten"
     assert minted["author"] == "A"
     assert minted["genre"] == "G"
+
+
+# ===========================================================================
+# 4. discovery-v4.2 A1/A2/A4: exclude_pages, duplicate-ordinal naming, and
+#    the dead "missing" filter over select_chapter_links -- all FABRICATED,
+#    masking-clean synthetic titles (no network I/O; mirrors the real Tur/
+#    redirect-twin shape without copying any restricted fact).
+# ===========================================================================
+
+
+def _fake_toc_links(*titles: str) -> list[dict]:
+    return [{"ns": 0, "title": title} for title in titles]
+
+
+def test_exclude_pages_removes_exactly_the_named_pages():
+    # The Tur trap (A1): an auxiliary page's title ("הקדמה") gematria-parses
+    # to the same value (154) as a real, numbered page ("קנד") -- excluding
+    # the auxiliary page resolves the collision and leaves every other page
+    # untouched.
+    links = _fake_toc_links(
+        "בדיקה טור הקדמה", "בדיקה טור קנד", "בדיקה טור א", "בדיקה טור ב"
+    )
+    selected = select_chapter_links(
+        links, "בדיקה טור ", exclude_pages=["בדיקה טור הקדמה"]
+    )
+    assert selected == [
+        (1, "בדיקה טור א"),
+        (2, "בדיקה טור ב"),
+        (154, "בדיקה טור קנד"),
+    ]
+
+
+def test_exclude_pages_stale_entry_hard_errors():
+    links = _fake_toc_links("בדיקה טור א", "בדיקה טור ב")
+    with pytest.raises(ValueError, match="stale exclusion"):
+        select_chapter_links(links, "בדיקה טור ", exclude_pages=["בדיקה טור לא קיים"])
+
+
+def test_duplicate_ordinal_selection_names_ordinal_and_titles():
+    # The live-redirect-twin shape (A2): two titles sharing one gematria
+    # value (304) with no exclusion supplied to resolve it.
+    links = _fake_toc_links("בדיקה טור שד", "בדיקה טור דש")
+    with pytest.raises(ValueError) as excinfo:
+        select_chapter_links(links, "בדיקה טור ")
+    message = str(excinfo.value)
+    assert "304" in message
+    assert "בדיקה טור שד" in message
+    assert "בדיקה טור דש" in message
+
+
+def test_duplicate_ordinal_survives_after_exclusion_of_an_unrelated_page():
+    # An exclusion resolves ONLY the collision it names -- a second,
+    # unrelated collision must still hard-error.
+    links = _fake_toc_links(
+        "בדיקה טור הקדמה", "בדיקה טור קנד", "בדיקה טור שד", "בדיקה טור דש"
+    )
+    with pytest.raises(ValueError, match="duplicate ordinal"):
+        select_chapter_links(links, "בדיקה טור ", exclude_pages=["בדיקה טור הקדמה"])
+
+
+def test_missing_link_flag_is_not_filtered_a_dead_filter_removed():
+    # A4: MediaWiki's formatversion=2 "parse" response marks non-existence
+    # via "exists": false, never "missing" -- select_chapter_links must not
+    # special-case either key at selection time. A link explicitly carrying
+    # "missing": True is still SELECTED here; whether it is genuinely
+    # unwritten is resolved at FETCH time (the per-page request), never by
+    # a selection-time filter that would let a public_first source
+    # under-report its own coverage.
+    links = [
+        {"ns": 0, "title": "בדיקה טור א"},
+        {"ns": 0, "title": "בדיקה טור ב", "missing": True},
+    ]
+    assert select_chapter_links(links, "בדיקה טור ") == [
+        (1, "בדיקה טור א"),
+        (2, "בדיקה טור ב"),
+    ]
+
+
+# ===========================================================================
+# 5. discovery-v4.2 A3: page_clusters -- load_source_config validation
+# ===========================================================================
+
+
+def _page_clusters_source(*, key: str = "pc_src", clusters: list | None = None, **overrides) -> dict:
+    # identity_mode-absent (private_sibling) by default: the C5 "public_first
+    # cannot be a container" gate fires BEFORE page_clusters validation ever
+    # runs, so a mutex test that sets ``container`` would hit that gate
+    # first under public_first -- keeping this shape identity_mode-absent
+    # lets the page_clusters-specific gates be exercised in isolation.
+    # Callers that need public_first pass identity_mode/identity_key explicitly.
+    source = {
+        "key": key,
+        "provider": "hewikisource",
+        "page_clusters": clusters
+        if clusters is not None
+        else [
+            {"toc_page": "בדיקה עמוד א", "link_prefix": "בדיקה עמוד א/פרק "},
+            {"toc_page": "בדיקה עמוד ב", "link_prefix": "בדיקה עמוד ב/פרק "},
+        ],
+        "mappings": [{"target_work_id": "w000001"}],
+    }
+    source.update(overrides)
+    return source
+
+
+def test_page_clusters_source_with_valid_shape_is_accepted(tmp_path):
+    path = _write_map(tmp_path, [_page_clusters_source()])
+    config = load_source_config(path)
+    source = config["sources"][0]
+    assert len(source["page_clusters"]) == 2
+
+
+@pytest.mark.parametrize(
+    "mutex_field,mutex_value",
+    [
+        ("source_ref", "Something"),
+        ("link_prefix", "בדיקה "),
+        ("mode", "daf_pages"),
+        ("container", True),
+        ("exclude_pages", ["x"]),
+    ],
+)
+def test_page_clusters_is_mutually_exclusive_with_single_toc_fields(
+    tmp_path, mutex_field, mutex_value
+):
+    source = _page_clusters_source(**{mutex_field: mutex_value})
+    path = _write_map(tmp_path, [source])
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        load_source_config(path)
+
+
+def test_page_clusters_requires_hewikisource_provider(tmp_path):
+    source = _page_clusters_source(provider="sefaria")
+    path = _write_map(tmp_path, [source])
+    with pytest.raises(ValueError, match="requires provider 'hewikisource'"):
+        load_source_config(path)
+
+
+def test_page_clusters_must_be_a_non_empty_list(tmp_path):
+    source = _page_clusters_source(clusters=[])
+    path = _write_map(tmp_path, [source])
+    with pytest.raises(ValueError, match="non-empty list"):
+        load_source_config(path)
+
+
+def test_page_clusters_cluster_requires_toc_page(tmp_path):
+    source = _page_clusters_source(clusters=[{"link_prefix": "x "}])
+    path = _write_map(tmp_path, [source])
+    with pytest.raises(ValueError, match="invalid toc_page"):
+        load_source_config(path)
+
+
+def test_page_clusters_cluster_requires_link_prefix(tmp_path):
+    source = _page_clusters_source(clusters=[{"toc_page": "x"}])
+    path = _write_map(tmp_path, [source])
+    with pytest.raises(ValueError, match="invalid link_prefix"):
+        load_source_config(path)
+
+
+def test_page_clusters_cluster_rejects_unknown_keys(tmp_path):
+    source = _page_clusters_source(
+        clusters=[{"toc_page": "x", "link_prefix": "y ", "bogus": 1}]
+    )
+    path = _write_map(tmp_path, [source])
+    with pytest.raises(ValueError, match="unknown keys"):
+        load_source_config(path)
+
+
+def test_page_clusters_cluster_exclude_pages_is_shape_validated(tmp_path):
+    source = _page_clusters_source(
+        clusters=[{"toc_page": "x", "link_prefix": "y ", "exclude_pages": []}]
+    )
+    path = _write_map(tmp_path, [source])
+    with pytest.raises(ValueError, match="exclude_pages must be a non-empty list"):
+        load_source_config(path)
+
+
+def test_top_level_exclude_pages_requires_hewikisource_non_container(tmp_path):
+    source = _sibling_source(provider="sefaria")
+    source["exclude_pages"] = ["x"]
+    path = _write_map(tmp_path, [source])
+    with pytest.raises(ValueError, match="only allowed on a hewikisource ToC source"):
+        load_source_config(path)
+
+
+def test_top_level_exclude_pages_rejected_on_container(tmp_path):
+    source = {
+        "key": "cont",
+        "provider": "sefaria",
+        "container": True,
+        "children": [{"child_key": "a", "source_ref": "Ref A"}],
+        "exclude_pages": ["x"],
+        "mappings": [{"target_work_id": "w000001"}],
+    }
+    path = _write_map(tmp_path, [source])
+    with pytest.raises(ValueError, match="only allowed on a hewikisource ToC source"):
+        load_source_config(path)
+
+
+def test_top_level_exclude_pages_shape_validated(tmp_path):
+    source = _sibling_source(provider="hewikisource")
+    source["link_prefix"] = "בדיקה "
+    source["exclude_pages"] = ["dup", "dup"]
+    path = _write_map(tmp_path, [source])
+    with pytest.raises(ValueError, match="duplicate title"):
+        load_source_config(path)
+
+
+# ===========================================================================
+# 6. discovery-v4.2 A3: page_clusters -- acquisition (_FakeFetcher, no I/O)
+# ===========================================================================
+
+
+def test_page_clusters_global_reordinalization_and_labels_are_page_titles(tmp_path):
+    prefix_a = "בדיקה ספר א"
+    prefix_b = "בדיקה ספר ב"
+    toc_a = "בדיקה ראשי א"
+    toc_b = "בדיקה ראשי ב"
+    pages = {
+        toc_a: {
+            "parse": {
+                "title": toc_a,
+                "links": [
+                    {"ns": 0, "title": f"{prefix_a}/א"},
+                    {"ns": 0, "title": f"{prefix_a}/ב"},
+                ],
+            }
+        },
+        toc_b: {
+            "parse": {
+                "title": toc_b,
+                "links": [
+                    {"ns": 0, "title": f"{prefix_b}/א"},
+                    {"ns": 0, "title": f"{prefix_b}/ב"},
+                ],
+            }
+        },
+        f"{prefix_a}/א": _wiki_page_doc(f"{prefix_a}/א", 1, "טקסט אחד"),
+        f"{prefix_a}/ב": _wiki_page_doc(f"{prefix_a}/ב", 2, "טקסט שתיים"),
+        f"{prefix_b}/א": _wiki_page_doc(f"{prefix_b}/א", 3, "טקסט שלוש"),
+        f"{prefix_b}/ב": _wiki_page_doc(f"{prefix_b}/ב", 4, "טקסט ארבע"),
+    }
+    fetcher = _FakeFetcher(tmp_path, pages)
+    source = {
+        "key": "pc_test",
+        "provider": "hewikisource",
+        "page_clusters": [
+            {"toc_page": toc_a, "link_prefix": f"{prefix_a}/"},
+            {"toc_page": toc_b, "link_prefix": f"{prefix_b}/"},
+        ],
+        "identity_mode": "public_first",
+        "identity_key": "pf-1007",
+    }
+    acquired, _raw_paths = _acquire_wikisource_page_clusters(fetcher, source)
+    # Both clusters restart their own local ordinal at 1 ("א") -- the
+    # combined stream must NOT repeat 1/2 for the second cluster (that
+    # would silently reorder/collide the composite stream's offsets).
+    ordinals = [unit["ordinal"] for unit in acquired["units"]]
+    labels = [unit["label"] for unit in acquired["units"]]
+    assert ordinals == [1, 2, 3, 4]
+    assert labels == [
+        f"{prefix_a}/א",
+        f"{prefix_a}/ב",
+        f"{prefix_b}/א",
+        f"{prefix_b}/ב",
+    ]
+    assert acquired["cluster_count"] == 2
+    assert acquired["coverage_status"] == "complete"
+    assert acquired["provider"] == "hewikisource"
+    assert acquired["source_url"].startswith("https://he.wikisource.org/wiki/")
+    assert "2 clusters" in acquired["source_ref"]
+
+
+def test_page_clusters_cluster_level_exclude_pages_applied_during_acquisition(tmp_path):
+    prefix_a = "בדיקה נכלל א"
+    toc_a = "בדיקה ראשי נכלל א"
+    pages = {
+        toc_a: {
+            "parse": {
+                "title": toc_a,
+                "links": [
+                    {"ns": 0, "title": f"{prefix_a}/הקדמה"},
+                    {"ns": 0, "title": f"{prefix_a}/א"},
+                ],
+            }
+        },
+        f"{prefix_a}/הקדמה": _wiki_page_doc(f"{prefix_a}/הקדמה", 1, "הקדמה"),
+        f"{prefix_a}/א": _wiki_page_doc(f"{prefix_a}/א", 2, "טקסט"),
+    }
+    fetcher = _FakeFetcher(tmp_path, pages)
+    source = {
+        "key": "pc_excl",
+        "provider": "hewikisource",
+        "page_clusters": [
+            {
+                "toc_page": toc_a,
+                "link_prefix": f"{prefix_a}/",
+                "exclude_pages": [f"{prefix_a}/הקדמה"],
+            }
+        ],
+        "identity_mode": "public_first",
+        "identity_key": "pf-1009",
+    }
+    acquired, _raw_paths = _acquire_wikisource_page_clusters(fetcher, source)
+    assert [unit["label"] for unit in acquired["units"]] == [f"{prefix_a}/א"]
+
+
+def test_page_clusters_public_first_missing_page_is_a_hard_error_across_clusters(
+    tmp_path,
+):
+    prefix_a = "בדיקה שלם א"
+    prefix_b = "בדיקה שלם ב"
+    toc_a = "בדיקה ראשי שלם א"
+    toc_b = "בדיקה ראשי שלם ב"
+    pages = {
+        toc_a: {
+            "parse": {"title": toc_a, "links": [{"ns": 0, "title": f"{prefix_a}/א"}]}
+        },
+        toc_b: {
+            "parse": {
+                "title": toc_b,
+                "links": [
+                    {"ns": 0, "title": f"{prefix_b}/א"},
+                    {"ns": 0, "title": f"{prefix_b}/ב"},
+                ],
+            }
+        },
+        f"{prefix_a}/א": _wiki_page_doc(f"{prefix_a}/א", 1, "טקסט קיים"),
+        f"{prefix_b}/א": _wiki_page_doc(f"{prefix_b}/א", 2, "טקסט קיים שני"),
+        # f"{prefix_b}/ב" deliberately absent from `pages` -> missing.
+    }
+    fetcher = _FakeFetcher(tmp_path, pages)
+    source = {
+        "key": "pc_missing",
+        "provider": "hewikisource",
+        "page_clusters": [
+            {"toc_page": toc_a, "link_prefix": f"{prefix_a}/"},
+            {"toc_page": toc_b, "link_prefix": f"{prefix_b}/"},
+        ],
+        "identity_mode": "public_first",
+        "identity_key": "pf-1008",
+    }
+    with pytest.raises(ValueError, match="public_first completeness gate failed"):
+        _acquire_wikisource_page_clusters(fetcher, source)
+
+
+def test_page_clusters_missing_page_still_partial_for_private_sibling(tmp_path):
+    """The same cross-cluster missing-page shape must NOT raise for a
+    private_sibling (identity_mode-absent) source -- the existing
+    coverage_status="partial" escape applies to page_clusters exactly as it
+    does to the single-ToC path."""
+    prefix_a = "בדיקה חלקי א"
+    toc_a = "בדיקה ראשי חלקי א"
+    pages = {
+        toc_a: {
+            "parse": {
+                "title": toc_a,
+                "links": [
+                    {"ns": 0, "title": f"{prefix_a}/א"},
+                    {"ns": 0, "title": f"{prefix_a}/ב"},
+                ],
+            }
+        },
+        f"{prefix_a}/א": _wiki_page_doc(f"{prefix_a}/א", 1, "טקסט קיים"),
+        # f"{prefix_a}/ב" deliberately absent -> missing_pages non-empty.
+    }
+    fetcher = _FakeFetcher(tmp_path, pages)
+    source = {
+        "key": "pc_partial",
+        "provider": "hewikisource",
+        "page_clusters": [{"toc_page": toc_a, "link_prefix": f"{prefix_a}/"}],
+        "mappings": [{"target_work_id": "w000001"}],
+    }
+    acquired, _raw_paths = _acquire_wikisource_page_clusters(fetcher, source)
+    assert acquired["coverage_status"] == "partial"
+    assert acquired["missing_pages"]

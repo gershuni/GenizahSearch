@@ -8,7 +8,7 @@
     "CC-BY-SA"
   ],
   "minimum_hebrew_letters": 1000,
-  "note": "V4.2 REF6 source expansion (docs/specs/discovery-v4.2-combined-bake-and-public-first-plan.md), condition C7. Carries the 15 Mishneh Torah book-grain multi-text containers (w000174-w000188) plus the post-sitting (2026-08-16) private_sibling additions: rabbeinu_chananel_bava_kamma (w000463), sifrei_zuta_bamidbar (w000524), ben_sira_alfa_beta_a (w001079), and kuzari_ibn_tibbon (w000194 -- the ibn Tibbon translation is its own work identity; Sefaria's Kuzari IS that translation). The halakhot_gedolot_intro and kinyan_torah entries planned pre-sitting were WITHDRAWN by owner rulings (already covered / locus-layer decision). The owner-approved public_first sources (scripts/discovery_v4_2_public_first_identities.json) are NOT here yet: they need the identity_mode/identity_key source-map extension first. Each container's ordered child list is copied verbatim, in order, from the measured probe at discovery_builds/discovery_v4/probe_v42/mishneh_torah_container_probe.json -- it is FROZEN; live Sefaria ToC discovery may verify membership/order at fetch time but never silently redefines it. Same schema as scripts/discovery_v4_1_sources.json plus the container/license_ruling extension.",
+  "note": "V4.2 REF6 source expansion (docs/specs/discovery-v4.2-combined-bake-and-public-first-plan.md), condition C7. Carries the 15 Mishneh Torah book-grain multi-text containers (w000174-w000188) plus the post-sitting (2026-08-16) private_sibling additions: rabbeinu_chananel_bava_kamma (w000463), sifrei_zuta_bamidbar (w000524), ben_sira_alfa_beta_a (w001079), and kuzari_ibn_tibbon (w000194 -- the ibn Tibbon translation is its own work identity; Sefaria's Kuzari IS that translation). The halakhot_gedolot_intro and kinyan_torah entries planned pre-sitting were WITHDRAWN by owner rulings (already covered / locus-layer decision). The owner-approved public_first sources (scripts/discovery_v4_2_public_first_identities.json) are NOT here yet: they need the identity_mode/identity_key source-map extension first. Each container's ordered child list is copied verbatim, in order, from the measured probe at discovery_builds/discovery_v4/probe_v42/mishneh_torah_container_probe.json -- it is FROZEN; live Sefaria ToC discovery may verify membership/order at fetch time but never silently redefines it. Same schema as scripts/discovery_v4_1_sources.json plus the container/license_ruling extension. UPDATE (2026-08-16, discovery-v4.2 C7/C8/C11/C12): 31 owner-approved public_first sources appended (scripts/discovery_v4_2_public_first_identities.json, pf-1001..pf-1035 minus 4 -- see below), each identity_mode public_first / no mappings. 3 daf_pages (Zohar, per-chelek: link_prefix has NO \"דף\" token, confirmed live 2026-08-16), 17 sefaria (8 mode schema_leaves + locus_grain section, 9 direct), 2 plain hewikisource (1 ToC cluster, 1 single text page), 3 hewikisource ToC clusters with exclude_pages (the Tur trap: a Hebrew word or a live redirect twin gematria-collides with a real siman's ordinal), 5 hewikisource page_clusters (baal_haturim_torah/rashbam_torah: 5 Torah-order book clusters each; yad_rama_talmud: 2 Shas-order tractates; semag: Lo Ta'aseh then Aseh; ran_al_harif: 14 Shas-order tractates, נדרים via its own sub-index page), plus torat_haadam (single cluster + exclude_pages for the one unwritten gate, locus_grain section so the gate names survive as labels). A page_clusters source with a residual aspirational (unwritten) ToC link fails CLOSED at acquisition -- the public_first completeness gate names every missing page, and the fix is an explicit exclude_pages addition here, never a silent skip. NOT authored -- approved, no viable route 2026-08-16: pf-1013 (כפתור ופרח, ~2% of its ToC is actually written), pf-1015 (מגדל עוז, ~4% written, a 4-level structure unlike every other work here), pf-1031 (תוספות ישנים, ~8% written, thin and uneven per-tractate coverage). NOT authored -- approved, route NOT PINNABLE YET: pf-1032 (תוספות רי\"ד -- ~319 real pages exist under the long \"...על הש\"ס/<tractate>/פרק\" title scheme, but a live spot-check 2026-08-16 showed the main ToC page links NONE of them (0 selected per cluster) and the per-tractate sub-index pages link only their first perek; the work needs a dedicated route probe, possibly an apprefix-enumeration acquisition mode, before an entry can be authored).",
   "sources": [
     {
       "key": "mishneh_torah_introduction",
@@ -687,6 +687,394 @@
           "target_work_id": "w000194"
         }
       ]
+    },
+    {
+      "key": "zohar_chelek_a",
+      "provider": "hewikisource",
+      "mode": "daf_pages",
+      "link_prefix": "זהר חלק א",
+      "daf_range": [
+        1,
+        250
+      ],
+      "identity_mode": "public_first",
+      "identity_key": "pf-1021"
+    },
+    {
+      "key": "zohar_chelek_b",
+      "provider": "hewikisource",
+      "mode": "daf_pages",
+      "link_prefix": "זהר חלק ב",
+      "daf_range": [
+        2,
+        268
+      ],
+      "identity_mode": "public_first",
+      "identity_key": "pf-1022"
+    },
+    {
+      "key": "zohar_chelek_g",
+      "provider": "hewikisource",
+      "mode": "daf_pages",
+      "link_prefix": "זהר חלק ג",
+      "daf_range": [
+        2,
+        299
+      ],
+      "identity_mode": "public_first",
+      "identity_key": "pf-1023"
+    },
+    {
+      "key": "ohr_zarua",
+      "provider": "sefaria",
+      "source_ref": "Ohr Zarua",
+      "mode": "schema_leaves",
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1001"
+    },
+    {
+      "key": "bekhor_shor",
+      "provider": "sefaria",
+      "source_ref": "Bekhor Shor",
+      "mode": "schema_leaves",
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1006"
+    },
+    {
+      "key": "baalei_hanefesh",
+      "provider": "sefaria",
+      "source_ref": "Ba'alei HaNefesh",
+      "mode": "schema_leaves",
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1008"
+    },
+    {
+      "key": "chizkuni",
+      "provider": "sefaria",
+      "source_ref": "Chizkuni",
+      "mode": "schema_leaves",
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1010"
+    },
+    {
+      "key": "kad_hakemach",
+      "provider": "sefaria",
+      "source_ref": "Kad HaKemach",
+      "mode": "schema_leaves",
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1012"
+    },
+    {
+      "key": "machzor_vitry",
+      "provider": "sefaria",
+      "source_ref": "Machzor Vitry",
+      "mode": "schema_leaves",
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1016"
+    },
+    {
+      "key": "emunot_vedeot_ibn_tibbon",
+      "provider": "sefaria",
+      "source_ref": "HaEmunot veHaDeot",
+      "mode": "schema_leaves",
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1020"
+    },
+    {
+      "key": "sefer_hamitzvot_hebrew",
+      "provider": "sefaria",
+      "source_ref": "Sefer HaMitzvot",
+      "mode": "schema_leaves",
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1024"
+    },
+    {
+      "key": "isur_veheter_lerashi",
+      "provider": "sefaria",
+      "source_ref": "איסור והיתר לרש\"י",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1002"
+    },
+    {
+      "key": "mivchar_hapeninim",
+      "provider": "sefaria",
+      "source_ref": "מבחר הפנינים",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1014"
+    },
+    {
+      "key": "mishnat_rabbi_eliezer",
+      "provider": "sefaria",
+      "source_ref": "משנת רבי אליעזר",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1017"
+    },
+    {
+      "key": "siddur_rashi",
+      "provider": "sefaria",
+      "source_ref": "סידור רש\"י",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1019"
+    },
+    {
+      "key": "pirkei_derabbi_eliezer",
+      "provider": "sefaria",
+      "source_ref": "Pirkei DeRabbi Eliezer",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1027"
+    },
+    {
+      "key": "shibolei_haleket",
+      "provider": "sefaria",
+      "source_ref": "שבלי הלקט",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1029"
+    },
+    {
+      "key": "shulchan_shel_arba",
+      "provider": "sefaria",
+      "source_ref": "שלחן של ארבע",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1030"
+    },
+    {
+      "key": "tashbetz_katan",
+      "provider": "sefaria",
+      "source_ref": "תשב\"ץ קטן",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1034"
+    },
+    {
+      "key": "teshuvot_hageonim_harkavy",
+      "provider": "sefaria",
+      "source_ref": "תשובות הגאונים (הרכבי)",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1035"
+    },
+    {
+      "key": "drashot_haran",
+      "provider": "hewikisource",
+      "source_ref": "דרשות הר\"ן",
+      "link_prefix": "דרשות הר\"ן ",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1009"
+    },
+    {
+      "key": "seder_tannaim_veamoraim",
+      "provider": "hewikisource",
+      "source_ref": "סדר תנאים ואמוראים",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1018"
+    },
+    {
+      "key": "tur_even_haezer",
+      "provider": "hewikisource",
+      "source_ref": "טור אבן העזר",
+      "link_prefix": "טור אבן העזר ",
+      "exclude_pages": [
+        "טור אבן העזר הקדמה"
+      ],
+      "identity_mode": "public_first",
+      "identity_key": "pf-1003"
+    },
+    {
+      "key": "tur_choshen_mishpat",
+      "provider": "hewikisource",
+      "source_ref": "טור חושן משפט",
+      "link_prefix": "טור חושן משפט ",
+      "exclude_pages": [
+        "טור חושן משפט שד"
+      ],
+      "identity_mode": "public_first",
+      "identity_key": "pf-1004"
+    },
+    {
+      "key": "tur_yoreh_deah",
+      "provider": "hewikisource",
+      "source_ref": "טור יורה דעה",
+      "link_prefix": "טור יורה דעה ",
+      "exclude_pages": [
+        "טור יורה דעה שד"
+      ],
+      "identity_mode": "public_first",
+      "identity_key": "pf-1005"
+    },
+    {
+      "key": "baal_haturim_torah",
+      "provider": "hewikisource",
+      "page_clusters": [
+        {
+          "toc_page": "בעל הטורים על התורה",
+          "link_prefix": "בעל הטורים על התורה/בראשית/"
+        },
+        {
+          "toc_page": "בעל הטורים על התורה",
+          "link_prefix": "בעל הטורים על התורה/שמות/"
+        },
+        {
+          "toc_page": "בעל הטורים על התורה",
+          "link_prefix": "בעל הטורים על התורה/ויקרא/"
+        },
+        {
+          "toc_page": "בעל הטורים על התורה",
+          "link_prefix": "בעל הטורים על התורה/במדבר/"
+        },
+        {
+          "toc_page": "בעל הטורים על התורה",
+          "link_prefix": "בעל הטורים על התורה/דברים/"
+        }
+      ],
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1007"
+    },
+    {
+      "key": "rashbam_torah",
+      "provider": "hewikisource",
+      "page_clusters": [
+        {
+          "toc_page": "רשב\"ם על בראשית",
+          "link_prefix": "רשב\"ם על בראשית "
+        },
+        {
+          "toc_page": "רשב\"ם על שמות",
+          "link_prefix": "רשב\"ם על שמות "
+        },
+        {
+          "toc_page": "רשב\"ם על ויקרא",
+          "link_prefix": "רשב\"ם על ויקרא "
+        },
+        {
+          "toc_page": "רשב\"ם על במדבר",
+          "link_prefix": "רשב\"ם על במדבר "
+        },
+        {
+          "toc_page": "רשב\"ם על דברים",
+          "link_prefix": "רשב\"ם על דברים "
+        }
+      ],
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1026"
+    },
+    {
+      "key": "yad_rama_talmud",
+      "provider": "hewikisource",
+      "page_clusters": [
+        {
+          "toc_page": "יד רמ\"ה על הש\"ס",
+          "link_prefix": "יד רמ\"ה על הש\"ס/בבא בתרא/פרק "
+        },
+        {
+          "toc_page": "יד רמ\"ה על הש\"ס",
+          "link_prefix": "יד רמ\"ה על הש\"ס/סנהדרין/פרק "
+        }
+      ],
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1011"
+    },
+    {
+      "key": "semag",
+      "provider": "hewikisource",
+      "page_clusters": [
+        {
+          "toc_page": "סמ\"ג",
+          "link_prefix": "סמ\"ג לאו "
+        },
+        {
+          "toc_page": "סמ\"ג",
+          "link_prefix": "סמ\"ג עשה "
+        }
+      ],
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1025"
+    },
+    {
+      "key": "ran_al_harif",
+      "provider": "hewikisource",
+      "page_clusters": [
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/שבת/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/פסחים/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/סוכה/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/ביצה/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/ראש השנה/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/תענית/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/מגילה/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/כתובות/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על נדרים",
+          "link_prefix": "ר\"ן על נדרים/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/גיטין/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/קידושין/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/שבועות/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/עבודה זרה/פרק "
+        },
+        {
+          "toc_page": "ר\"ן על הרי\"ף",
+          "link_prefix": "ר\"ן על הרי\"ף/חולין/פרק "
+        }
+      ],
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1028"
+    },
+    {
+      "key": "torat_haadam",
+      "provider": "hewikisource",
+      "source_ref": "תורת האדם",
+      "link_prefix": "תורת האדם/שער ",
+      "exclude_pages": [
+        "תורת האדם/שער הסוף"
+      ],
+      "locus_grain": "section",
+      "identity_mode": "public_first",
+      "identity_key": "pf-1033"
     }
   ]
 }

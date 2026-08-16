@@ -132,6 +132,67 @@ def iter_sefaria_titles(value: Any, path: tuple[str, ...] = ()) -> Iterator[dict
         yield from iter_sefaria_titles(child, child_path)
 
 
+def _validate_exclude_pages(value: Any, label: str) -> None:
+    """Shared shape validation for an ``exclude_pages`` list (A1): a
+    non-empty list of unique, non-empty title strings. This only checks
+    shape -- the "every excluded title must have been present in the live
+    selection" guard (stale-exclusion protection) is a fetch-time concern,
+    since it needs the live ToC's links, not just the source map."""
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{label} exclude_pages must be a non-empty list")
+    seen: set[str] = set()
+    for title in value:
+        if not isinstance(title, str) or not title.strip():
+            raise ValueError(f"{label} exclude_pages has an invalid title: {title!r}")
+        if title in seen:
+            raise ValueError(f"{label} exclude_pages has a duplicate title: {title!r}")
+        seen.add(title)
+
+
+def _validate_page_clusters(source: dict, key: str, page_clusters: Any) -> None:
+    """Validate a ``page_clusters`` source (A3): a FROZEN ordered list of
+    independent hewikisource ToC/link_prefix pairs stitched into ONE
+    combined acquisition, for works whose content spans several ToC pages
+    (per-book Torah commentaries, per-tractate Talmud commentaries, sm"g's
+    two commandment lists). Mutually exclusive with the single-ToC fields
+    it replaces; live-ToC verification/ordinal reassignment happens at
+    fetch time and never redefines this frozen list (same C7/C8 discipline
+    as the container and daf_pages modes)."""
+    if source.get("provider") != "hewikisource":
+        raise ValueError(f"source {key} page_clusters requires provider 'hewikisource'")
+    for mutex_field in ("source_ref", "link_prefix", "mode", "container", "exclude_pages"):
+        if mutex_field in source:
+            raise ValueError(
+                f"source {key} page_clusters is mutually exclusive with {mutex_field}"
+            )
+    if not isinstance(page_clusters, list) or not page_clusters:
+        raise ValueError(f"source {key} page_clusters must be a non-empty list")
+    allowed_cluster_keys = {"toc_page", "link_prefix", "exclude_pages"}
+    for index, cluster in enumerate(page_clusters):
+        if not isinstance(cluster, dict):
+            raise ValueError(f"source {key} page_clusters[{index}] must be an object")
+        extra = set(cluster) - allowed_cluster_keys
+        if extra:
+            raise ValueError(
+                f"source {key} page_clusters[{index}] has unknown keys: {sorted(extra)}"
+            )
+        toc_page = cluster.get("toc_page")
+        if not isinstance(toc_page, str) or not toc_page.strip():
+            raise ValueError(
+                f"source {key} page_clusters[{index}] has an invalid toc_page: {toc_page!r}"
+            )
+        link_prefix = cluster.get("link_prefix")
+        if not isinstance(link_prefix, str) or not link_prefix.strip():
+            raise ValueError(
+                f"source {key} page_clusters[{index}] has an invalid link_prefix: "
+                f"{link_prefix!r}"
+            )
+        if "exclude_pages" in cluster:
+            _validate_exclude_pages(
+                cluster["exclude_pages"], f"source {key} page_clusters[{index}]"
+            )
+
+
 def load_source_config(path: str | Path) -> dict:
     doc = json.loads(Path(path).read_text(encoding="utf-8"))
     if doc.get("schema_version") != "discovery-v4-sources-v1":
@@ -195,6 +256,26 @@ def load_source_config(path: str | Path) -> dict:
                 f"source {key} has identity_mode {identity_mode!r} but carries "
                 f"an identity_key ({identity_key!r}); only public_first sources may"
             )
+
+        # discovery-v4.2 A3: ``page_clusters`` is checked FIRST (ahead of the
+        # container branch below) so a source that mistakenly carries both
+        # gets the precise "mutually exclusive with container" message
+        # rather than being swallowed by container validation. A source with
+        # no ``page_clusters`` key is completely unaffected.
+        page_clusters = source.get("page_clusters")
+        if page_clusters is not None:
+            _validate_page_clusters(source, key, page_clusters)
+        elif "exclude_pages" in source:
+            # discovery-v4.2 A1: only a hewikisource, non-container,
+            # non-page_clusters ToC source may carry a top-level
+            # exclude_pages (a page_clusters source carries it PER CLUSTER
+            # instead -- already enforced as a mutual exclusion above).
+            if source.get("provider") != "hewikisource" or source.get("container"):
+                raise ValueError(
+                    f"source {key} exclude_pages is only allowed on a "
+                    "hewikisource ToC source"
+                )
+            _validate_exclude_pages(source["exclude_pages"], f"source {key}")
 
         if source.get("container"):
             # Multi-text container (discovery-v4.2 C7): a FROZEN ordered list of

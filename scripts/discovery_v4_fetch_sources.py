@@ -174,10 +174,41 @@ def hebrew_numeral(value: str) -> int | None:
     return sum(_HEBREW_NUMERAL_VALUES[char] for char in letters)
 
 
-def select_chapter_links(links: list[dict], prefix: str) -> list[tuple[int, str]]:
+def select_chapter_links(
+    links: list[dict], prefix: str, *, exclude_pages: list[str] | None = None
+) -> list[tuple[int, str]]:
+    """Select ``(ordinal, title)`` pairs whose title starts with ``prefix``
+    and whose remainder parses as a Hebrew numeral.
+
+    ``exclude_pages`` (discovery-v4.2 A1, the Tur trap): titles to drop
+    AFTER selection -- a Hebrew word that gematria-parses to a real siman's
+    value (e.g. "הקדמה"), or a letter-transposed
+    redirect twin, collides on ordinal with the genuine page. Every named
+    title MUST already be present in the selection, or this raises (a stale
+    exclusion -- one that no longer matches anything live -- is a source-map
+    bug, not a silent no-op: it would hide a real drift instead of guarding
+    against one).
+
+    The duplicate-ordinal check below runs on the SURVIVING (post-exclusion)
+    selection and names the exact colliding ordinal and titles (A2) -- this
+    is deliberately a hard error, never a silent pick-one-and-continue,
+    because a Tur-shaped collision means one of the two pages is not what it
+    claims to be.
+    """
     selected = []
     for link in links:
-        if link.get("ns") != 0 or link.get("missing"):
+        # A4 (2026-08-16 finding): MediaWiki's formatversion=2 "parse"
+        # response marks a non-existent link target via "exists": false,
+        # never "missing" -- a ``link.get("missing")`` filter here would be
+        # a dead no-op against this response shape (it was, before this
+        # comment). Unwritten ToC links are therefore deliberately KEPT in
+        # the selection here; they surface at FETCH time instead, when the
+        # per-page request itself fails: recorded as a missing page
+        # (coverage_status="partial") for a private_sibling source, a hard
+        # completeness-gate error for a public_first source (C8). Filtering
+        # them out of the selection here would let a public_first source
+        # under-report its own coverage while still claiming "complete".
+        if link.get("ns") != 0:
             continue
         title = link.get("title") or ""
         if not title.startswith(prefix):
@@ -186,9 +217,28 @@ def select_chapter_links(links: list[dict], prefix: str) -> list[tuple[int, str]
         if ordinal is not None:
             selected.append((ordinal, title))
     selected.sort(key=lambda item: (item[0], item[1]))
-    ordinals = [item[0] for item in selected]
-    if len(ordinals) != len(set(ordinals)):
-        raise ValueError(f"chapter link prefix produces duplicate ordinals: {prefix}")
+    if exclude_pages:
+        present = {title for _, title in selected}
+        stale = [title for title in exclude_pages if title not in present]
+        if stale:
+            raise ValueError(
+                f"exclude_pages names page(s) absent from the {prefix!r} "
+                f"selection (stale exclusion): {stale}"
+            )
+        exclude_set = set(exclude_pages)
+        selected = [item for item in selected if item[1] not in exclude_set]
+    by_ordinal: dict[int, list[str]] = {}
+    for ordinal, title in selected:
+        by_ordinal.setdefault(ordinal, []).append(title)
+    duplicates = sorted(
+        (ordinal, titles) for ordinal, titles in by_ordinal.items() if len(titles) > 1
+    )
+    if duplicates:
+        ordinal, titles = duplicates[0]
+        raise ValueError(
+            f"chapter link prefix {prefix!r} produces duplicate ordinal "
+            f"{ordinal} across titles {titles}"
+        )
     return selected
 
 
@@ -731,7 +781,9 @@ def _acquire_wikisource(fetcher: Fetcher, source: dict) -> tuple[dict, list[Path
     selected: list[tuple[int, str]]
     if source.get("link_prefix"):
         selected = select_chapter_links(
-            parsed.get("links") or [], source["link_prefix"]
+            parsed.get("links") or [],
+            source["link_prefix"],
+            exclude_pages=source.get("exclude_pages"),
         )
         if not selected:
             raise ValueError("Wikisource table of contents yielded no chapter links")
@@ -907,6 +959,116 @@ def _acquire_wikisource_daf_pages(fetcher: Fetcher, source: dict) -> tuple[dict,
     )
 
 
+def _acquire_wikisource_page_clusters(fetcher: Fetcher, source: dict) -> tuple[dict, list[Path]]:
+    """Acquire a multi-cluster hewikisource work (``page_clusters``, A3): a
+    FROZEN ordered list of independent ToC-page/link_prefix pairs stitched
+    into ONE combined acquisition, for works whose content spans several ToC
+    pages (per-book Torah commentaries, per-tractate Talmud commentaries,
+    sm"g's two commandment lists).
+
+    Clusters are processed strictly in list order. Within each cluster this
+    does EXACTLY what the existing single-ToC path does: parse the cluster's
+    ``toc_page``, run ``select_chapter_links`` with the cluster's own
+    ``link_prefix`` (and its own ``exclude_pages``, which already hard-errors
+    on a duplicate ordinal or a stale exclusion -- see that function).
+    Ordinals restart per cluster in the raw (per-cluster) selection, so each
+    surviving unit is reassigned a GLOBAL sequential ordinal (1..N across
+    every cluster, in fetch order) -- this keeps the combined stream ordered
+    and its offsets contiguous. Labels stay each unit's own fetched page
+    title (never the global ordinal or a synthesized "cluster N"), so
+    section-grain citation labels remain meaningful per tractate/book (C8's
+    parse-vs-enumerate spirit: never silently redefine the frozen cluster
+    list from live ToC content).
+
+    Missing pages are checked ACROSS ALL clusters combined, using the exact
+    same rule as everywhere else: recorded (coverage_status="partial") for a
+    private_sibling source, a HARD ERROR for a public_first source (C8) --
+    a Zohar-class source spanning several ToC pages gets no extra leniency
+    just because it has more than one ToC to fail on.
+    """
+    key = source["key"]
+    clusters = source["page_clusters"]
+    raw_paths: list[Path] = []
+    units: list[dict] = []
+    revisions: list[dict] = []
+    missing_pages: list[dict] = []
+    global_ordinal = 0
+    for cluster_index, cluster in enumerate(clusters):
+        toc_page = cluster["toc_page"]
+        link_prefix = cluster["link_prefix"]
+        toc_path = fetcher.raw_dir / key / f"cluster-{cluster_index:02d}-toc.json"
+        toc_doc = fetcher.wikisource_parse(toc_page, toc_path)
+        raw_paths.append(toc_path)
+        if toc_doc.get("error"):
+            raise ValueError(
+                f"page_clusters toc_page fetch failed for {key} cluster "
+                f"{cluster_index} ({toc_page!r}): {toc_doc['error']}"
+            )
+        parsed = toc_doc.get("parse") or {}
+        selected = select_chapter_links(
+            parsed.get("links") or [],
+            link_prefix,
+            exclude_pages=cluster.get("exclude_pages"),
+        )
+        if not selected:
+            raise ValueError(
+                f"page_clusters cluster {cluster_index} ({toc_page!r}, "
+                f"link_prefix {link_prefix!r}) yielded no chapter links for {key}"
+            )
+        for _local_ordinal, page in selected:
+            global_ordinal += 1
+            page_path = fetcher.raw_dir / key / f"page-{global_ordinal:04d}.json"
+            doc = fetcher.wikisource_parse(page, page_path)
+            raw_paths.append(page_path)
+            if doc.get("error"):
+                missing_pages.append({"page": page, "error": doc["error"].get("code")})
+                continue
+            item = doc.get("parse") or {}
+            cleaned = clean_hebrew(visible_text(item.get("text") or ""))
+            if cleaned:
+                units.append(
+                    {
+                        "ordinal": global_ordinal,
+                        "label": item.get("title") or page,
+                        "provider_ref": item.get("title") or page,
+                        "revision_id": item.get("revid"),
+                        "text": cleaned,
+                        "hebrew_letters": count_hebrew_letters(cleaned),
+                    }
+                )
+            revisions.append(
+                {"page": item.get("title") or page, "revision_id": item.get("revid")}
+            )
+    if missing_pages and source.get("identity_mode") == IDENTITY_MODE_PUBLIC_FIRST:
+        names = ", ".join(entry["page"] for entry in missing_pages)
+        raise ValueError(
+            f"public_first completeness gate failed for {key}: "
+            f"{len(missing_pages)} page(s) missing across {len(clusters)} "
+            'page_clusters (coverage_status="partial" is not available for '
+            f"public_first sources -- C8): {names}"
+        )
+    display_ref = _source_display_ref(source)
+    first_toc_page = clusters[0]["toc_page"]
+    return (
+        {
+            "provider": "hewikisource",
+            "source_ref": display_ref,
+            "source_url": "https://he.wikisource.org/wiki/"
+            + urllib.parse.quote(first_toc_page.replace(" ", "_")),
+            "version_title": "Hebrew Wikisource revision snapshot",
+            "license": WIKISOURCE_LICENSE,
+            "license_url": WIKISOURCE_LICENSE_URL,
+            "attribution": f'"{display_ref}", Hebrew Wikisource contributors.',
+            "revisions": revisions,
+            "coverage_status": "partial" if missing_pages else "complete",
+            "missing_pages": missing_pages,
+            "cluster_count": len(clusters),
+            "units": units,
+        },
+        raw_paths,
+    )
+
+
 def _combined_raw_hash(paths: list[Path]) -> str:
     digest = hashlib.sha256()
     for path in sorted(paths, key=lambda item: str(item)):
@@ -922,6 +1084,8 @@ def _source_display_ref(source: dict) -> str:
     A container has no single ``source_ref``; it has an ordered list of
     children, each with its own. A daf_pages source (C8) likewise has no
     ``source_ref`` -- it is named by its ``link_prefix`` and ``daf_range``.
+    A page_clusters source (A3) has no ``source_ref`` either -- it is named
+    by its first cluster's ``toc_page`` plus the cluster count.
     """
     if source.get("container"):
         children = source.get("children") or []
@@ -929,6 +1093,9 @@ def _source_display_ref(source: dict) -> str:
     if source.get("mode") == "daf_pages":
         first, last = source["daf_range"]
         return f"{source['link_prefix']} [daf {first}-{last}]"
+    if "page_clusters" in source:
+        clusters = source["page_clusters"]
+        return f"{clusters[0]['toc_page']} [{len(clusters)} clusters]"
     return source["source_ref"]
 
 
@@ -957,6 +1124,8 @@ def run(args: argparse.Namespace) -> dict:
                     raise ValueError("existing normalized source provider drift")
                 if bool(acquired.get("container")) != bool(source.get("container")):
                     raise ValueError("existing normalized source container-flag drift")
+                if ("page_clusters" in source) != (acquired.get("cluster_count") is not None):
+                    raise ValueError("existing normalized source page_clusters-flag drift")
                 if _license_key(acquired.get("license")) not in allowlist:
                     raise ValueError("existing normalized source license is not allowlisted")
                 raw_paths = sorted((output_dir / "raw" / source["key"]).glob("*.json"))
@@ -966,6 +1135,8 @@ def run(args: argparse.Namespace) -> dict:
                 acquired, raw_paths = _acquire_container_sefaria(fetcher, source, allowlist)
             elif source.get("mode") == "daf_pages":
                 acquired, raw_paths = _acquire_wikisource_daf_pages(fetcher, source)
+            elif "page_clusters" in source:
+                acquired, raw_paths = _acquire_wikisource_page_clusters(fetcher, source)
             elif source["provider"] == "sefaria":
                 acquired, raw_paths = _acquire_sefaria(fetcher, source, allowlist)
             else:
@@ -1023,6 +1194,14 @@ def run(args: argparse.Namespace) -> dict:
                 entry["locus_grain"] = acquired["locus_grain"]
                 entry["daf_range"] = acquired["daf_range"]
                 entry["page_count"] = acquired["page_count"]
+            if "page_clusters" in source:
+                # A3 manifest fields: cluster count and the coverage status
+                # this acquisition actually reached (the generic
+                # ``hebrew_letters``/``unit_count`` above already carry the
+                # combined-across-clusters aggregate).
+                entry["page_clusters"] = True
+                entry["cluster_count"] = acquired["cluster_count"]
+                entry["coverage_status"] = acquired["coverage_status"]
             if source.get("identity_mode") == IDENTITY_MODE_PUBLIC_FIRST:
                 # Carried through verbatim so discovery_v4_build_reference.py
                 # can route a public_first acquisition without re-deriving

@@ -485,10 +485,26 @@ def test_existing_v4_v41_v42_maps_still_load_identically():
     v4_2 = load_source_config(V4_2_MAP)
     assert reference_namespace(v4_2) == "REF6"
     # 15 Mishneh Torah containers + the four post-sitting (2026-08-16)
-    # private_sibling additions; the exact composition is pinned in
+    # private_sibling additions + 32 owner-approved public_first additions
+    # (this session); the exact composition of each group is pinned in
     # tests/test_discovery_v4_2_containers.py.
-    assert len(v4_2["sources"]) == 19
-    assert all(source.get("mode") is None for source in v4_2["sources"])
+    assert len(v4_2["sources"]) == 50
+    non_public_first = [
+        source
+        for source in v4_2["sources"]
+        if source.get("identity_mode") != "public_first"
+    ]
+    assert len(non_public_first) == 19
+    assert all(source.get("mode") is None for source in non_public_first)
+    # The public_first additions DO carry "daf_pages" (the 3 Zohar cheleks)
+    # and "schema_leaves" (8 Sefaria works) modes -- proving C5 composes
+    # with both pre-existing modes exactly as designed (the Zohar shape).
+    public_first_modes = {
+        source.get("mode")
+        for source in v4_2["sources"]
+        if source.get("identity_mode") == "public_first"
+    }
+    assert public_first_modes == {None, "daf_pages", "schema_leaves"}
 
 
 # ---------------------------------------------------------------------------
