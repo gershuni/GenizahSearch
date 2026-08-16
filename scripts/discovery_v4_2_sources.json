@@ -682,6 +682,7 @@
       "key": "kuzari_ibn_tibbon",
       "provider": "sefaria",
       "source_ref": "Kuzari",
+      "version_title": "Sefer haKuzari - Project Ben-Yehuda",
       "mappings": [
         {
           "target_work_id": "w000194"

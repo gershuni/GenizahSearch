@@ -277,6 +277,23 @@ def load_source_config(path: str | Path) -> dict:
                 )
             _validate_exclude_pages(source["exclude_pages"], f"source {key}")
 
+        version_title = source.get("version_title")
+        if version_title is not None:
+            # Explicit Sefaria version pin (2026-08-16): the fetcher's PD-first
+            # ranking normally picks, but a provider can list a non-Hebrew text
+            # under language "he" (the Kuzari's Judeo-Arabic original), so a
+            # source may name its exact versionTitle. Fetch-time still
+            # license-checks the pinned version against the allowlist.
+            if not isinstance(version_title, str) or not version_title.strip():
+                raise ValueError(
+                    f"source {key} has an invalid version_title: {version_title!r}"
+                )
+            if source.get("provider") != "sefaria" or source.get("container"):
+                raise ValueError(
+                    f"source {key}: version_title is only valid on a "
+                    "non-container sefaria source"
+                )
+
         if source.get("container"):
             # Multi-text container (discovery-v4.2 C7): a FROZEN ordered list of
             # independent Sefaria index refs stitched into one target work. The

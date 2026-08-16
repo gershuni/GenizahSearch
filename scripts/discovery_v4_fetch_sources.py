@@ -491,6 +491,39 @@ def _pick_open_hebrew_version(available: list[dict], allowlist: set[str]) -> dic
     return candidates[0]
 
 
+def _select_hebrew_version(
+    source: dict, available: list[dict], allowlist: set[str]
+) -> dict:
+    """Resolve the Hebrew version for a non-container Sefaria source.
+
+    An explicit ``version_title`` pin in the source map wins: the named
+    version must exist among the provider's Hebrew versions AND report an
+    allowlisted license -- fail closed on either. Without a pin, the
+    established PD-first ranking picks. The pin exists because a provider's
+    version list can carry a non-Hebrew text under language "he": the
+    Kuzari's Judeo-Arabic original ("... [jrb]", Public Domain) outranked
+    the ibn Tibbon Hebrew translation by license and was not even
+    retrievable as a Hebrew version (2026-08-16 REF6 quarantine).
+    """
+    pinned = source.get("version_title")
+    if not pinned:
+        return _pick_open_hebrew_version(available, allowlist)
+    for version in available:
+        if (
+            version.get("language") == "he"
+            and version.get("versionTitle") == pinned
+        ):
+            if _license_key(version.get("license")) not in allowlist:
+                raise ValueError(
+                    f"pinned version {pinned!r} reports a non-allowlisted "
+                    f"license: {version.get('license')!r}"
+                )
+            return version
+    raise ValueError(
+        f"pinned version {pinned!r} is not among the provider's Hebrew versions"
+    )
+
+
 def _pick_hebrew_version_for_container(
     available: list[dict], allowlist: set[str], *, has_ruling: bool
 ) -> dict:
@@ -600,7 +633,9 @@ def _acquire_sefaria(
         raw_paths.append(probe_path)
         if probe.get("error"):
             raise ValueError(f"Sefaria leaf metadata error: {probe['error']}")
-        best = _pick_open_hebrew_version(probe.get("available_versions") or [], allowlist)
+        best = _select_hebrew_version(
+            source, probe.get("available_versions") or [], allowlist
+        )
         version_title = best.get("versionTitle")
         units = []
         for ordinal, (leaf_ref, label_en, label_he) in enumerate(leaves, start=1):
@@ -630,8 +665,8 @@ def _acquire_sefaria(
         raw_paths.append(all_path)
         if metadata.get("error"):
             raise ValueError(f"Sefaria text metadata error: {metadata['error']}")
-        best = _pick_open_hebrew_version(
-            metadata.get("available_versions") or [], allowlist
+        best = _select_hebrew_version(
+            source, metadata.get("available_versions") or [], allowlist
         )
         version_title = best.get("versionTitle")
         text_path = fetcher.raw_dir / key / "selected.json"
