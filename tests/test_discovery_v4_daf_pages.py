@@ -484,7 +484,10 @@ def test_existing_v4_v41_v42_maps_still_load_identically():
 
     v4_2 = load_source_config(V4_2_MAP)
     assert reference_namespace(v4_2) == "REF6"
-    assert len(v4_2["sources"]) == 15
+    # 15 Mishneh Torah containers + the four post-sitting (2026-08-16)
+    # private_sibling additions; the exact composition is pinned in
+    # tests/test_discovery_v4_2_containers.py.
+    assert len(v4_2["sources"]) == 19
     assert all(source.get("mode") is None for source in v4_2["sources"])
 
 

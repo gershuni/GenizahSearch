@@ -46,6 +46,7 @@ from scripts.build_work_divisions import WorkUnits, build_staged_ja_chapters
 try:
     from scripts.discovery_v4_common import (
         DEFAULT_REFERENCE_NAMESPACE,
+        IDENTITY_MODE_PUBLIC_FIRST,
         compact_stream,
         load_source_config,
         normalize_title,
@@ -55,9 +56,11 @@ try:
         sha256_file,
         stable_json_dump,
     )
+    from scripts.discovery_public_first_identity import load_public_first_artifact
 except ModuleNotFoundError:  # direct ``python scripts/...py`` invocation
     from discovery_v4_common import (
         DEFAULT_REFERENCE_NAMESPACE,
+        IDENTITY_MODE_PUBLIC_FIRST,
         compact_stream,
         load_source_config,
         normalize_title,
@@ -67,6 +70,7 @@ except ModuleNotFoundError:  # direct ``python scripts/...py`` invocation
         sha256_file,
         stable_json_dump,
     )
+    from discovery_public_first_identity import load_public_first_artifact
 
 
 # V4 wrote this record under a hand-written key. Reusing that literal keeps a
@@ -463,6 +467,36 @@ def run(args: argparse.Namespace) -> dict:
         args.base_reference_sha256.lower()
     ):
         raise ValueError("base locus coverage does not describe the base reference")
+
+    # C5, producer side: the public-first identity artifact is OPTIONAL input,
+    # mirroring scripts/discovery_v4_reconcile.py's own both-or-neither
+    # pattern exactly (including the error message) so a hand-built
+    # argparse.Namespace that never sets these two new attributes -- as every
+    # pre-C5 caller's does -- behaves exactly as before via getattr's None
+    # default.
+    public_first_artifact_path = getattr(args, "public_first_artifact", None)
+    public_first_artifact_sha256 = getattr(args, "public_first_artifact_sha256", None)
+    if bool(public_first_artifact_path) != bool(public_first_artifact_sha256):
+        raise ValueError(
+            "--public-first-artifact and --public-first-artifact-sha256 must be "
+            "supplied together"
+        )
+    public_first_artifact = None
+    if public_first_artifact_path:
+        public_first_artifact = load_public_first_artifact(
+            public_first_artifact_path, sha256=public_first_artifact_sha256,
+        )
+    if public_first_artifact is None:
+        for acquired_entry in acquisition["entries"]:
+            if (
+                acquired_entry.get("status") == "acquired"
+                and acquired_entry.get("identity_mode") == IDENTITY_MODE_PUBLIC_FIRST
+            ):
+                raise ValueError(
+                    f"acquired source {acquired_entry['key']} has identity_mode "
+                    "public_first but no --public-first-artifact was supplied"
+                )
+
     private_works = _load_private_works(private_db)
     with base_ref.open("rb") as stream:
         corpus = pickle.load(stream)
@@ -511,8 +545,94 @@ def run(args: argparse.Namespace) -> dict:
             normalized_path, acquired_entry["normalized_sha256"], f"normalized {key}"
         )
         normalized = json.loads(normalized_path.read_text(encoding="utf-8"))
-        if normalized.get("mappings") != source["mappings"]:
+        if normalized.get("mappings") != source.get("mappings"):
             raise ValueError(f"normalized source mapping drift: {key}")
+
+        if source.get("identity_mode") == IDENTITY_MODE_PUBLIC_FIRST:
+            # C5: a public_first source has no private target, no mappings,
+            # and no chapter_range splitting -- exactly one reference per
+            # source, and its metadata comes EXCLUSIVELY from the approved
+            # artifact entry (never the provider-fetched title/author/genre,
+            # never a private-works lookup, never identity_visibility).
+            identity_key = source["identity_key"]
+            pf_entry = (
+                public_first_artifact["entries_by_key"].get(identity_key)
+                if public_first_artifact is not None
+                else None
+            )
+            if pf_entry is None or pf_entry["verdict"] != "approve":
+                raise ValueError(
+                    f"public_first identity_key {identity_key!r} for source {key} "
+                    "is absent, rejected, or deferred in the public-first artifact"
+                )
+            units = normalized["units"]
+            ref_id = raw_reference_id(key, {}, 1, namespace)
+            if ref_id in existing_ids:
+                raise ValueError(f"new reference id collides with base corpus: {ref_id}")
+            stream, offsets = _unit_offsets(units)
+            grain = _locus_grain(source)
+            # ``_locus_label`` never reads its ``mapping`` argument, and only
+            # reads ``work["title"]`` as a locus-title fallback when the
+            # source itself declares no ``locus_title_he`` (grain "daf"/
+            # "daf_bavli" never touch ``work`` at all) -- an empty mapping and
+            # a synthetic work carrying only the artifact's title are
+            # therefore safe for every grain a public_first source can have.
+            synthetic_work = {"title": pf_entry["title_he"]}
+            locus_rows = []
+            for unit, start_offset in offsets:
+                label, citation_pos = _locus_label(
+                    source, {}, synthetic_work, unit, grain
+                )
+                locus_rows.append(
+                    {
+                        "source_ordinal": int(unit["ordinal"]),
+                        "start_offset": start_offset,
+                        "label_he": label,
+                        "citation_pos": citation_pos,
+                    }
+                )
+            reference_work = {
+                "id": ref_id,
+                "cat": "Sefaria",
+                "author": pf_entry["author"],
+                "title": pf_entry["title_he"],
+                "date": "",
+                "genre": pf_entry["genre"],
+                legacy_metadata_key: "",
+                "stream": stream,
+                "title_en": "",
+                "provenance": normalized["provider"],
+                "source_url": normalized["source_url"],
+                "license": normalized["license"],
+                "ref_kind": "public_reference",
+                "vgroup": None,
+                "split_parent": None,
+                "split_division": None,
+            }
+            corpus.append(reference_work)
+            existing_ids.add(ref_id)
+            reference_entries.append(
+                {
+                    "raw_reference_id": ref_id,
+                    "source_key": key,
+                    "identity_mode": IDENTITY_MODE_PUBLIC_FIRST,
+                    "identity_key": identity_key,
+                    "title": pf_entry["title_he"],
+                    "provider": normalized["provider"],
+                    "license": normalized["license"],
+                    "source_url": normalized["source_url"],
+                    "source_coverage_status": normalized.get(
+                        "coverage_status", "complete"
+                    ),
+                    "source_missing_pages": normalized.get("missing_pages", []),
+                    "stream_len": len(stream),
+                    "stream_sha256": hashlib.sha256(stream.encode("utf-8")).hexdigest(),
+                    "locus_grain": grain,
+                    "unit_offsets": locus_rows,
+                }
+            )
+            continue
+
         for mapping in source["mappings"]:
             target_id = mapping["target_work_id"]
             work = private_works.get(target_id)
@@ -623,6 +743,15 @@ def run(args: argparse.Namespace) -> dict:
         # pinned V4 reference manifest byte for byte. Readers treat an absent
         # field as REF4, which is what every V4 manifest on disk means.
         report["reference_namespace"] = namespace
+    if public_first_artifact is not None:
+        # Additive-only (mirrors discovery_v4_reconcile.py's own C5
+        # reporting convention): these keys are OMITTED entirely -- not
+        # emitted empty/null -- when no artifact was supplied, so a
+        # public_first-free build's manifest is byte-identical to today's.
+        report["public_first_artifact_sha256"] = public_first_artifact["sha256"]
+        report["public_first_artifact_content_hash"] = public_first_artifact[
+            "content_hash"
+        ]
     stable_json_dump(report, output_manifest)
     print(
         json.dumps(
@@ -664,6 +793,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-locus-coverage", required=True)
     parser.add_argument("--base-locus-coverage-sha256", required=True)
     parser.add_argument("--refs-staging", required=True)
+    parser.add_argument(
+        "--public-first-artifact",
+        help="C5 public-first identity approval artifact (discovery-public-first-identities-v1)",
+    )
+    parser.add_argument(
+        "--public-first-artifact-sha256",
+        help="required alongside --public-first-artifact",
+    )
     parser.add_argument("--output-reference", required=True)
     parser.add_argument("--output-manifest", required=True)
     parser.add_argument("--output-locus-db", required=True)

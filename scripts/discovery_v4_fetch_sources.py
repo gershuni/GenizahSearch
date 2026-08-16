@@ -25,6 +25,7 @@ import requests
 
 try:
     from scripts.discovery_v4_common import (
+        IDENTITY_MODE_PUBLIC_FIRST,
         clean_hebrew,
         compact_stream,
         count_hebrew_letters,
@@ -35,6 +36,7 @@ try:
     )
 except ModuleNotFoundError:  # direct ``python scripts/...py`` invocation
     from discovery_v4_common import (
+        IDENTITY_MODE_PUBLIC_FIRST,
         clean_hebrew,
         compact_stream,
         count_hebrew_letters,
@@ -764,6 +766,20 @@ def _acquire_wikisource(fetcher: Fetcher, source: dict) -> tuple[dict, list[Path
         revisions.append(
             {"page": item.get("title") or page, "revision_id": item.get("revid")}
         )
+    if missing_pages and source.get("identity_mode") == IDENTITY_MODE_PUBLIC_FIRST:
+        # C8 fail-closed completeness: the generic chapter-link Wikisource
+        # path's ``coverage_status="partial"`` escape below is available to a
+        # private_sibling source (unchanged, pre-existing behavior) but NOT
+        # to a public_first source -- a public_first identity with silently
+        # missing pages would misreport its own coverage, so this is a hard
+        # error here instead of a recorded status.
+        names = ", ".join(entry["page"] for entry in missing_pages)
+        raise ValueError(
+            f"public_first completeness gate failed for {key}: "
+            f"{len(missing_pages)} page(s) missing "
+            '(coverage_status="partial" is not available for public_first '
+            f"sources -- C8): {names}"
+        )
     canonical_title = parsed.get("title") or ref
     return (
         {
@@ -932,7 +948,10 @@ def run(args: argparse.Namespace) -> dict:
         try:
             if args.reuse_existing and normalized_path.is_file():
                 acquired = json.loads(normalized_path.read_text(encoding="utf-8"))
-                if acquired.get("mappings") != source["mappings"]:
+                # A public_first source has no "mappings" key at all (enforced
+                # by load_source_config); both sides must then agree on
+                # absent/None, never on a KeyError.
+                if acquired.get("mappings") != source.get("mappings"):
                     raise ValueError("existing normalized source mapping drift")
                 if acquired.get("provider") != source["provider"]:
                     raise ValueError("existing normalized source provider drift")
@@ -960,7 +979,11 @@ def run(args: argparse.Namespace) -> dict:
                 "schema_version": "discovery-v4-acquired-source-v1",
                 "key": source["key"],
                 **acquired,
-                "mappings": source["mappings"],
+                # public_first sources carry no "mappings" key at all
+                # (load_source_config forbids it); ``.get`` keeps both sides
+                # of the reuse-existing drift check above at None rather
+                # than raising a KeyError here.
+                "mappings": source.get("mappings"),
                 "transformation": (
                     "HTML markup and non-content UI removed; Unicode decomposed; "
                     "combining marks, punctuation, digits, and non-Hebrew characters "
@@ -978,7 +1001,8 @@ def run(args: argparse.Namespace) -> dict:
                 "unit_count": len(acquired["units"]),
                 "hebrew_letters": total_letters,
                 "target_work_ids": [
-                    mapping["target_work_id"] for mapping in source["mappings"]
+                    mapping["target_work_id"]
+                    for mapping in (source.get("mappings") or [])
                 ],
                 "raw_response_count": len(raw_paths),
                 "raw_responses_sha256": _combined_raw_hash(raw_paths),
@@ -999,6 +1023,15 @@ def run(args: argparse.Namespace) -> dict:
                 entry["locus_grain"] = acquired["locus_grain"]
                 entry["daf_range"] = acquired["daf_range"]
                 entry["page_count"] = acquired["page_count"]
+            if source.get("identity_mode") == IDENTITY_MODE_PUBLIC_FIRST:
+                # Carried through verbatim so discovery_v4_build_reference.py
+                # can route a public_first acquisition without re-deriving
+                # identity_mode/identity_key from the source map a second
+                # time (discovery-v4.2 C5, producer side). Absent for every
+                # private_sibling (or identity_mode-absent) source -- this
+                # branch is additive-only.
+                entry["identity_mode"] = IDENTITY_MODE_PUBLIC_FIRST
+                entry["identity_key"] = source["identity_key"]
             entries.append(entry)
             print(
                 f"  acquired {len(acquired['units'])} units / {total_letters:,} letters",
@@ -1007,18 +1040,21 @@ def run(args: argparse.Namespace) -> dict:
         except Exception as exc:  # fail closed per source; manifest remains complete
             if normalized_path.exists():
                 normalized_path.unlink()
-            entries.append(
-                {
-                    "key": source["key"],
-                    "provider": source["provider"],
-                    "status": "quarantined",
-                    "source_ref": source.get("source_ref"),
-                    "target_work_ids": [
-                        mapping["target_work_id"] for mapping in source["mappings"]
-                    ],
-                    "reason": str(exc),
-                }
-            )
+            quarantined_entry = {
+                "key": source["key"],
+                "provider": source["provider"],
+                "status": "quarantined",
+                "source_ref": source.get("source_ref"),
+                "target_work_ids": [
+                    mapping["target_work_id"]
+                    for mapping in (source.get("mappings") or [])
+                ],
+                "reason": str(exc),
+            }
+            if source.get("identity_mode") == IDENTITY_MODE_PUBLIC_FIRST:
+                quarantined_entry["identity_mode"] = IDENTITY_MODE_PUBLIC_FIRST
+                quarantined_entry["identity_key"] = source["identity_key"]
+            entries.append(quarantined_entry)
             print(f"  quarantined: {exc}", flush=True)
     manifest = {
         "schema_version": "discovery-v4-acquisition-manifest-v1",

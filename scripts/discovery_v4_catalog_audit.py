@@ -181,16 +181,22 @@ def run(args: argparse.Namespace) -> dict:
                 f"curated {source['provider']} source is absent from pinned catalogue: "
                 f"{source['source_ref']}"
             )
+        # discovery-v4.2 C5: a public_first source has no private target and
+        # no "mappings" key at all -- this audit exists to find MISSING
+        # private targets, so a public_first source (which has none by
+        # construction) simply contributes target_count=0 and no
+        # source_by_work entries, rather than a KeyError.
+        source_mappings = source.get("mappings") or []
         source_checks.append(
             {
                 "key": source["key"],
                 "provider": source["provider"],
                 "source_ref": source["source_ref"],
                 "catalogue_present": present,
-                "target_count": len(source["mappings"]),
+                "target_count": len(source_mappings),
             }
         )
-        for mapping in source["mappings"]:
+        for mapping in source_mappings:
             source_by_work[mapping["target_work_id"]] = {
                 "source_key": source["key"],
                 "source_provider": source["provider"],

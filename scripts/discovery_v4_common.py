@@ -19,6 +19,19 @@ from typing import Any, Iterable, Iterator
 DEFAULT_REFERENCE_NAMESPACE = "REF4"
 REFERENCE_NAMESPACE_RE = re.compile(r"REF[0-9]+")
 
+# discovery-v4.2 C5, producer side. MIRRORS -- deliberately does not import
+# -- ``discovery_track1_contract.IDENTITY_MODES`` exactly. This module has no
+# import of scripts.discovery_track1_contract today, and importing it here
+# would make this file's "dependency-free" character and its direct-
+# invocation (``python scripts/...py``) fallback path fragile for no real
+# gain; see scripts/discovery_public_first_identity.py's docstring for the
+# established precedent of mirroring instead of importing across a module
+# pair. Keep the two constants in lock-step if either changes.
+IDENTITY_MODE_PRIVATE_SIBLING = "private_sibling"
+IDENTITY_MODE_PUBLIC_FIRST = "public_first"
+IDENTITY_MODES = (IDENTITY_MODE_PRIVATE_SIBLING, IDENTITY_MODE_PUBLIC_FIRST)
+IDENTITY_KEY_RE = re.compile(r"pf-[0-9]{4}")
+
 HEBREW_LETTER_RE = re.compile(r"[\u05d0-\u05ea]")
 FINAL_LETTER_FOLD = str.maketrans({"ך": "כ", "ם": "מ", "ן": "נ", "ף": "פ", "ץ": "צ"})
 _TITLE_PUNCT_RE = re.compile(r"[\"'׳״“”„‘’`´]+")
@@ -131,6 +144,7 @@ def load_source_config(path: str | Path) -> dict:
         raise ValueError("V4 source map must contain a non-empty sources list")
     seen_keys: set[str] = set()
     seen_work_ids: set[str] = set()
+    seen_identity_keys: set[str] = set()
     for source in sources:
         key = source.get("key")
         if not isinstance(key, str) or not re.fullmatch(r"[a-z0-9_]+", key):
@@ -138,6 +152,50 @@ def load_source_config(path: str | Path) -> dict:
         if key in seen_keys:
             raise ValueError(f"duplicate source key: {key}")
         seen_keys.add(key)
+
+        # discovery-v4.2 C5, producer side: ``identity_mode`` is an OPTIONAL
+        # per-source field, vocabulary {"private_sibling", "public_first"}.
+        # Absent means "private_sibling" -- every pre-C5 map (with no such
+        # field at all) keeps validating exactly as it did before this block
+        # existed. A "public_first" source mints its opaque work id from the
+        # C5 approval artifact alone (scripts/discovery_public_first_identity.py)
+        # rather than from a private counterpart, so it carries an
+        # ``identity_key`` (a ``pf-####``-shaped key into that artifact)
+        # instead of a ``mappings`` list, and it can never be a container (a
+        # container's whole point is stitching sources onto ONE PRIVATE
+        # target). A "private_sibling" (or identity_mode-absent) source is
+        # the mirror image: it must never carry an ``identity_key``.
+        identity_mode = source.get("identity_mode")
+        if identity_mode is not None and identity_mode not in IDENTITY_MODES:
+            raise ValueError(
+                f"source {key} has an invalid identity_mode: {identity_mode!r}"
+            )
+        is_public_first = identity_mode == IDENTITY_MODE_PUBLIC_FIRST
+        identity_key = source.get("identity_key")
+        if is_public_first:
+            if not isinstance(identity_key, str) or not IDENTITY_KEY_RE.fullmatch(
+                identity_key
+            ):
+                raise ValueError(
+                    f"public_first source {key} has an invalid identity_key: "
+                    f"{identity_key!r}"
+                )
+            if identity_key in seen_identity_keys:
+                raise ValueError(f"duplicate identity_key: {identity_key}")
+            seen_identity_keys.add(identity_key)
+            if "mappings" in source:
+                raise ValueError(
+                    f"public_first source {key} must not carry mappings -- it "
+                    "has no private target"
+                )
+            if source.get("container"):
+                raise ValueError(f"public_first source {key} cannot be a container")
+        elif identity_key is not None:
+            raise ValueError(
+                f"source {key} has identity_mode {identity_mode!r} but carries "
+                f"an identity_key ({identity_key!r}); only public_first sources may"
+            )
+
         if source.get("container"):
             # Multi-text container (discovery-v4.2 C7): a FROZEN ordered list of
             # independent Sefaria index refs stitched into one target work. The
@@ -228,6 +286,10 @@ def load_source_config(path: str | Path) -> dict:
                     raise ValueError(
                         f"source {key} has an insane daf_range: {daf_range!r}"
                     )
+        if is_public_first:
+            # No private target, no mappings to validate (already confirmed
+            # absent above).
+            continue
         mappings = source.get("mappings")
         if not isinstance(mappings, list) or not mappings:
             raise ValueError(f"source {key} must have mappings")
@@ -274,9 +336,12 @@ def resolve_namespace(config: dict, requested: str | None) -> str:
 
 
 def source_target_ids(config: dict) -> set[str]:
+    # public_first sources have no private target and no mappings list at
+    # all -- skipped rather than iterated (discovery-v4.2 C5).
     return {
         mapping["target_work_id"]
         for source in config["sources"]
+        if source.get("identity_mode") != IDENTITY_MODE_PUBLIC_FIRST
         for mapping in source["mappings"]
     }
 
