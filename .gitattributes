@@ -14,3 +14,4 @@ scripts/discovery_v4_sources.json text eol=lf
 scripts/discovery_v4_1_sources.json text eol=lf
 scripts/discovery_v4_2_sources.json text eol=lf
 scripts/discovery_v4_2_public_first_identities.json text eol=lf
+scripts/discovery_identification_eligibility.json text eol=lf
