@@ -68,13 +68,85 @@ OPAQUE_RE = re.compile(r"w[0-9]{6}")
 _PRIVATE_SIBLING = "private_sibling"
 _PUBLIC_FIRST = "public_first"
 assert {_PRIVATE_SIBLING, _PUBLIC_FIRST} == set(IDENTITY_MODES)
-# The reconcile step's raw-id namespace filter (any REF<digits>: prefix),
-# generalized from the V4-era hardcoded 'REF4:%' SQL LIKE clause so a V4.2
-# combined manifest's REF6 rows are read too (C2 reconcile side). Byte-
-# compatible with the old behavior: a match DB carrying only REF4: rows
-# (every existing fixture and the pinned test) selects exactly the same rows
-# either way.
+# Recognizes a public-reference raw id (any REF<digits>: prefix). This decides
+# only whether a row is a REFERENCE row at all -- WHICH reference namespaces
+# this run reconciles comes from the manifest bundle, never from the prefix
+# shape. Selecting on the shape alone was a real defect: it swept in REF2
+# (legacy, reconciled under the fitted gen-2 decisions) and REF4 (minted in
+# the V4 bake), both of which a REF5/REF6 manifest cannot describe, so the
+# first real multi-namespace match table failed the manifest-coverage check.
 _RAW_ID_NAMESPACE_RE = re.compile(r"^REF[0-9]+:")
+
+
+def _namespace_of(raw_id: str) -> str:
+    return raw_id.split(":", 1)[0] if ":" in raw_id else ""
+
+
+def _as_list(value) -> list:
+    """One-or-many CLI input as a list; a bare scalar is a one-stage bundle.
+
+    Callers that hand-build an ``argparse.Namespace`` (the pinned tests do)
+    pass scalars, and the V4-era command line passed a single manifest. Both
+    stay valid.
+    """
+    if value is None:
+        return []
+    return list(value) if isinstance(value, (list, tuple)) else [value]
+
+
+def load_manifest_bundle(args: argparse.Namespace) -> tuple[list[dict], dict]:
+    """The ORDERED reference-manifest bundle (V4.2 plan C2) and its entries.
+
+    C2 requires consumers to take the complete ordered bundle rather than one
+    manifest, because a consumer must never assume the manifest it was handed
+    describes every reference row it can see. The V4.2 match table carries
+    four namespaces (REF2, REF4, REF5, REF6) and no single producer manifest
+    covers more than one.
+
+    REF4 is deliberately NOT part of reconcile's bundle even though it is part
+    of the chain: its identities were minted in the V4 bake and live in the
+    base crosswalk, so passing it would (correctly) trip the crosswalk
+    collision guard. Reconcile's bundle is the stages whose identities THIS
+    run mints.
+    """
+    paths = _as_list(getattr(args, "reference_manifest", None))
+    shas = _as_list(getattr(args, "reference_manifest_sha256", None))
+    if not paths:
+        raise ValueError("at least one --reference-manifest is required")
+    if len(paths) != len(shas):
+        raise ValueError(
+            "each --reference-manifest needs exactly one "
+            "--reference-manifest-sha256, given in the same order"
+        )
+    stages: list[dict] = []
+    entries: dict[str, dict] = {}
+    for path, expected_sha in zip(paths, shas):
+        manifest_path = Path(path).resolve()
+        require_hash(manifest_path, expected_sha, "V4 reference manifest")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("schema_version") != "discovery-v4-reference-manifest-v1":
+            raise ValueError("unsupported V4 reference manifest")
+        stage_entries = manifest["entries"]
+        if not stage_entries:
+            raise ValueError(f"reference manifest describes no references: {manifest_path}")
+        for entry in stage_entries:
+            raw_id = entry["raw_reference_id"]
+            if raw_id in entries:
+                raise ValueError(
+                    f"reference manifest bundle describes {raw_id} more than once"
+                )
+            entries[raw_id] = entry
+        stages.append(
+            {
+                "namespaces": sorted(
+                    {_namespace_of(entry["raw_reference_id"]) for entry in stage_entries}
+                ),
+                "reference_manifest_sha256": sha256_file(manifest_path),
+                "acquisition_manifest_sha256": manifest["acquisition_manifest_sha256"],
+                "reference_count": len(stage_entries),
+            }
+        )
+    return stages, entries
 
 
 def curated_content_hash(payload: list[dict]) -> str:
@@ -123,22 +195,10 @@ def update_domain_counts(document: dict) -> None:
 
 
 def run(args: argparse.Namespace) -> dict:
-    reference_manifest_path = Path(args.reference_manifest).resolve()
-    require_hash(
-        reference_manifest_path,
-        args.reference_manifest_sha256,
-        "V4 reference manifest",
-    )
-    reference_manifest = json.loads(
-        reference_manifest_path.read_text(encoding="utf-8")
-    )
-    if reference_manifest.get("schema_version") != "discovery-v4-reference-manifest-v1":
-        raise ValueError("unsupported V4 reference manifest")
-    entries = {
-        entry["raw_reference_id"]: entry for entry in reference_manifest["entries"]
+    stages, entries = load_manifest_bundle(args)
+    bundle_namespaces = {
+        namespace for stage in stages for namespace in stage["namespaces"]
     }
-    if len(entries) != len(reference_manifest["entries"]):
-        raise ValueError("reference manifest contains duplicate raw ids")
     for raw_id, entry in entries.items():
         mode = entry.get("identity_mode", _PRIVATE_SIBLING)
         if mode not in IDENTITY_MODES:
@@ -196,13 +256,32 @@ def run(args: argparse.Namespace) -> dict:
                 WHERE shadowed_by IS NULL
                 GROUP BY work_id ORDER BY work_id"""
         ).fetchall()
-    match_rows = [row for row in all_rows if _RAW_ID_NAMESPACE_RE.match(row[0])]
+    # Scope: the namespaces THIS bundle describes. Reference rows from any
+    # other namespace belong to an earlier bake (REF4) or to the legacy cohort
+    # (REF2) -- out of scope here, and counted into the report rather than
+    # dropped quietly.
+    match_rows = [row for row in all_rows if _namespace_of(row[0]) in bundle_namespaces]
+    out_of_scope: dict[str, dict] = {}
+    for row in all_rows:
+        namespace = _namespace_of(row[0])
+        if namespace in bundle_namespaces or not _RAW_ID_NAMESPACE_RE.match(row[0]):
+            continue
+        bucket = out_of_scope.setdefault(namespace, {"references": 0, "live_rows": 0})
+        bucket["references"] += 1
+        bucket["live_rows"] += row[4]
     live_raw_ids = [row[0] for row in match_rows]
     if not live_raw_ids:
         raise ValueError("V4 rematch produced no live public-reference rows")
     unknown = set(live_raw_ids) - set(entries)
     if unknown:
         raise ValueError("V4 rematch contains raw ids absent from its reference manifest")
+    in_scope: dict[str, dict] = {}
+    for row in match_rows:
+        bucket = in_scope.setdefault(
+            _namespace_of(row[0]), {"references": 0, "live_rows": 0}
+        )
+        bucket["references"] += 1
+        bucket["live_rows"] += row[4]
 
     if public_first_artifact is None:
         for raw_id in live_raw_ids:
@@ -325,12 +404,23 @@ def run(args: argparse.Namespace) -> dict:
     ]
     merges = copy.deepcopy(base_merges)
     merges["release_contract_version"] = V4_MERGE_CONTRACT
+    # ACCUMULATE, exactly as ``merges["merges"]`` does below. The public
+    # sidecar checks `approve_count == _EXPECTED_APPROVE_MERGES +
+    # len(v4_public_reference_canonical_ids)`, so a second expansion that
+    # OVERWROTE this list with only its own mints would leave the earlier
+    # bake's approve groups counted on one side of that equation and not the
+    # other -- a hard error at sidecar-build time, far from its cause.
     merges["v4_public_reference_canonical_ids"] = [
-        minted[raw_id] for raw_id in private_sibling_raw_ids
+        *base_merges.get("v4_public_reference_canonical_ids", []),
+        *(minted[raw_id] for raw_id in private_sibling_raw_ids),
     ]
-    merges["v4_source_manifest_sha256"] = reference_manifest[
-        "acquisition_manifest_sha256"
-    ]
+    # REF4-SPECIFIC BY DOWNSTREAM CONTRACT: the excerpt bake compares this pin
+    # (via the sidecar's `canonical_merges_v4_source_manifest_sha256`) against
+    # REF4's acquisition manifest. A later expansion must PRESERVE it, not
+    # replace it with its own stage's hash. It is established only when the
+    # base carries none, which is what the V4 bake did.
+    if not base_merges.get("v4_source_manifest_sha256"):
+        merges["v4_source_manifest_sha256"] = stages[0]["acquisition_manifest_sha256"]
     merges["source"] = "Discovery V4 public-reference expansion"
     merges["merges"] = [*base_merges["merges"], *new_groups]
     if public_first_standalone_canonical_ids:
@@ -378,8 +468,16 @@ def run(args: argparse.Namespace) -> dict:
 
     report = {
         "schema_version": "discovery-v4-reconciliation-v1",
-        "reference_manifest_sha256": sha256_file(reference_manifest_path),
-        "source_manifest_sha256": reference_manifest["acquisition_manifest_sha256"],
+        # The two scalars name the NEWEST stage, so a one-manifest call reports
+        # exactly what it always did; `reference_bundle` carries every stage in
+        # order, which is the honest record when there is more than one.
+        "reference_manifest_sha256": stages[-1]["reference_manifest_sha256"],
+        "source_manifest_sha256": stages[-1]["acquisition_manifest_sha256"],
+        "reference_bundle": stages,
+        "live_by_namespace": in_scope,
+        # Recorded, never silently dropped: reference rows this bundle does not
+        # describe (REF2 legacy, REF4 minted in the V4 bake).
+        "out_of_scope_namespaces": out_of_scope,
         "live_public_reference_count": len(private_sibling_raw_ids),
         "quarantined_or_unmatched_reference_count": len(entries) - len(live_raw_ids),
         "live_match_rows": sum(row[4] for row in match_rows),
@@ -421,8 +519,11 @@ def run(args: argparse.Namespace) -> dict:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--reference-manifest", required=True)
-    parser.add_argument("--reference-manifest-sha256", required=True)
+    # Repeatable and ORDERED (V4.2 plan C2): pass one --reference-manifest per
+    # chain stage this run mints, each with its own --reference-manifest-sha256
+    # in the same order.
+    parser.add_argument("--reference-manifest", action="append", required=True)
+    parser.add_argument("--reference-manifest-sha256", action="append", required=True)
     parser.add_argument("--match-db", required=True)
     parser.add_argument("--base-crosswalk", required=True)
     parser.add_argument("--base-crosswalk-sha256", required=True)

@@ -156,13 +156,26 @@ def _reconcile_namespace(
     domains_doc=None,
     omit_pf_sha256=False,
     prefix="",
+    bundle=None,
+    acquisition_shas=None,
 ):
-    manifest = {
-        "schema_version": "discovery-v4-reference-manifest-v1",
-        "acquisition_manifest_sha256": "a" * 64,
-        "entries": entries,
-    }
-    manifest_path = _write_json(tmp_path / f"{prefix}manifest.json", manifest)
+    # `bundle` gives one entry-list per chain stage (C2). Absent, a single
+    # manifest is written, which is the V4-era shape every other test uses.
+    entry_sets = bundle if bundle is not None else [entries]
+    manifest_paths = []
+    for index, stage_entries in enumerate(entry_sets):
+        acquisition = (acquisition_shas or [])[index] if acquisition_shas else "a" * 64
+        manifest_paths.append(
+            _write_json(
+                tmp_path / f"{prefix}manifest{index}.json",
+                {
+                    "schema_version": "discovery-v4-reference-manifest-v1",
+                    "acquisition_manifest_sha256": acquisition,
+                    "entries": stage_entries,
+                },
+            )
+        )
+    manifest_path = manifest_paths[0] if len(manifest_paths) == 1 else manifest_paths
     crosswalk_path = _write_json(
         tmp_path / f"{prefix}crosswalk.json", crosswalk or _base_crosswalk()
     )
@@ -180,7 +193,11 @@ def _reconcile_namespace(
 
     kwargs = dict(
         reference_manifest=manifest_path,
-        reference_manifest_sha256=sha256_file(manifest_path),
+        reference_manifest_sha256=(
+            sha256_file(manifest_path)
+            if isinstance(manifest_path, str)
+            else [sha256_file(path) for path in manifest_path]
+        ),
         match_db=str(match_db),
         base_crosswalk=crosswalk_path,
         base_crosswalk_sha256=sha256_file(crosswalk_path),
@@ -697,6 +714,15 @@ def test_reconcile_artifact_absent_path_is_byte_compatible(tmp_path):
         "work_domains_content_hash",
         "work_domain_assignments",
         "raw_to_opaque",
+        # C2 manifest-bundle facts. Unconditional and unrelated to C5: they
+        # describe which chain stages this run reconciled and which reference
+        # namespaces it left out of scope. Emitting them only for multi-stage
+        # runs would make the report's shape depend on how it was invoked,
+        # which is the very implicitness that let the namespace-scoping defect
+        # through -- so they are always present, and this pin grew by three.
+        "reference_bundle",
+        "live_by_namespace",
+        "out_of_scope_namespaces",
     }
 
     merged = json.loads(out_merges.read_text(encoding="utf-8"))
@@ -917,3 +943,186 @@ def test_repo_public_first_artifact_splits_and_licenses_are_pinned():
     assert sorted(provisional) == sorted(
         ["מחזור ויטרי", "שבלי הלקט", 'סידור רש"י', "מבחר הפנינים"]
     )
+
+
+# ===========================================================================
+# discovery_v4_reconcile.py -- the C2 ordered manifest bundle
+# ===========================================================================
+#
+# The V4.2 match table carries FOUR reference namespaces: REF2 (legacy), REF4
+# (minted in the V4 bake), REF5 and REF6. No producer manifest covers more
+# than one, so a consumer that selects rows by prefix SHAPE and then demands
+# its single manifest describe all of them cannot reconcile a real combined
+# bake at all -- which is what happened on the first attempt. Scope comes from
+# the bundle; anything outside it is recorded, not silently dropped.
+
+
+def _ref5_stage() -> list:
+    return [
+        {
+            "raw_reference_id": "REF5:sibling",
+            "identity_mode": "private_sibling",
+            "target_private_work_id": "w000001",
+            "title": "Five Sibling",
+        }
+    ]
+
+
+def _ref6_stage() -> list:
+    return [
+        {
+            "raw_reference_id": "REF6:pf_live",
+            "identity_mode": "public_first",
+            "identity_key": "pf-0001",
+        },
+        {
+            "raw_reference_id": "REF6:sibling",
+            "identity_mode": "private_sibling",
+            "target_private_work_id": "w000002",
+            "title": "Six Sibling",
+        },
+    ]
+
+
+def test_reconcile_bundle_mints_every_stage_and_scopes_out_other_namespaces(tmp_path):
+    ns = _reconcile_namespace(
+        tmp_path,
+        entries=None,
+        bundle=[_ref5_stage(), _ref6_stage()],
+        match_rows=[
+            ("REF2:legacy", "L", "A", "G", "s0", "p0", None, "[[0,5]]"),
+            ("REF4:already_minted", "M", "A", "G", "s0", "p1", None, "[[0,5]]"),
+            ("REF5:sibling", "Five Sibling", "A", "G", "s1", "p2", None, "[[0,5]]"),
+            ("REF6:pf_live", "Provider", "A", "G", "s2", "p3", None, "[[0,5]]"),
+            ("REF6:sibling", "Six Sibling", "A", "G", "s3", "p4", None, "[[0,5]]"),
+            # A non-reference row must stay invisible to all of this.
+            ("M:private", "P", "A", "G", "s4", "p5", None, "[[0,5]]"),
+        ],
+        pf_entries=[_pf_entry("pf-0001", title_he="חיבור בדוי א")],
+    )
+    report = reconcile_v4(ns)
+
+    assert set(report["raw_to_opaque"]) == {
+        "REF5:sibling",
+        "REF6:pf_live",
+        "REF6:sibling",
+    }
+    assert report["live_by_namespace"] == {
+        "REF5": {"references": 1, "live_rows": 1},
+        "REF6": {"references": 2, "live_rows": 2},
+    }
+    # Out of scope, and SAID SO -- a legacy or already-minted namespace must
+    # neither crash the run nor vanish from the record.
+    assert report["out_of_scope_namespaces"] == {
+        "REF2": {"references": 1, "live_rows": 1},
+        "REF4": {"references": 1, "live_rows": 1},
+    }
+    assert [stage["namespaces"] for stage in report["reference_bundle"]] == [
+        ["REF5"],
+        ["REF6"],
+    ]
+    assert report["reference_bundle"][0]["reference_count"] == 1
+    assert report["reference_bundle"][1]["reference_count"] == 2
+
+
+def test_reconcile_still_rejects_an_in_scope_row_its_manifest_omits(tmp_path):
+    """The coverage guard must survive the scoping fix, not be widened away."""
+    ns = _reconcile_namespace(
+        tmp_path,
+        entries=None,
+        bundle=[_ref6_stage()],
+        match_rows=[
+            ("REF6:pf_live", "Provider", "A", "G", "s1", "p1", None, "[[0,5]]"),
+            ("REF6:undescribed", "X", "A", "G", "s2", "p2", None, "[[0,5]]"),
+        ],
+        pf_entries=[_pf_entry("pf-0001", title_he="חיבור בדוי א")],
+    )
+    with pytest.raises(ValueError, match="absent from its reference manifest"):
+        reconcile_v4(ns)
+
+
+def test_reconcile_bundle_rejects_a_raw_id_described_twice(tmp_path):
+    ns = _reconcile_namespace(
+        tmp_path,
+        entries=None,
+        bundle=[_ref6_stage(), _ref6_stage()],
+        match_rows=[("REF6:pf_live", "P", "A", "G", "s1", "p1", None, "[[0,5]]")],
+        pf_entries=[_pf_entry("pf-0001", title_he="חיבור בדוי א")],
+    )
+    with pytest.raises(ValueError, match="more than once"):
+        reconcile_v4(ns)
+
+
+def test_reconcile_bundle_requires_one_hash_per_manifest(tmp_path):
+    ns = _reconcile_namespace(
+        tmp_path,
+        entries=None,
+        bundle=[_ref5_stage(), _ref6_stage()],
+        match_rows=[("REF5:sibling", "F", "A", "G", "s1", "p1", None, "[[0,5]]")],
+    )
+    ns.reference_manifest_sha256 = ns.reference_manifest_sha256[:1]
+    with pytest.raises(ValueError, match="same order"):
+        reconcile_v4(ns)
+
+
+def test_reconcile_accumulates_the_v4_canonical_id_list(tmp_path):
+    """The public sidecar checks approve_count == 16 + len(that list).
+
+    A second expansion that overwrote the list with only its own mints would
+    leave the earlier bake's approve GROUPS (which do accumulate, one line
+    below in the same function) counted on one side of that equation only --
+    surfacing as a sidecar-build failure far from its cause.
+    """
+    base_merges = {
+        "merges": [
+            {
+                "members_w": ["w000001", "w000900"],
+                "canonical_w": "w000900",
+                "owner_verdict": "approve",
+            }
+        ],
+        "v4_public_reference_canonical_ids": ["w000900"],
+        "v4_source_manifest_sha256": "b" * 64,
+    }
+    ns = _reconcile_namespace(
+        tmp_path,
+        entries=None,
+        bundle=[_ref6_stage()],
+        merges_doc=base_merges,
+        match_rows=[
+            ("REF6:pf_live", "P", "A", "G", "s1", "p1", None, "[[0,5]]"),
+            ("REF6:sibling", "Six Sibling", "A", "G", "s2", "p2", None, "[[0,5]]"),
+        ],
+        pf_entries=[_pf_entry("pf-0001", title_he="חיבור בדוי א")],
+    )
+    report = reconcile_v4(ns)
+    merged = json.loads(Path(ns.output_merges).read_text(encoding="utf-8"))
+
+    new_sibling = report["raw_to_opaque"]["REF6:sibling"]
+    assert merged["v4_public_reference_canonical_ids"] == ["w000900", new_sibling]
+    approve_groups = [g for g in merged["merges"] if g["owner_verdict"] == "approve"]
+    # The invariant the sidecar actually enforces, stated locally.
+    assert len(approve_groups) == 1 + len(
+        merged["v4_public_reference_canonical_ids"]
+    ) - len(["w000900"])
+    # ... and the pin the excerpt bake compares against REF4's acquisition
+    # manifest is REF4's, so a later expansion PRESERVES it.
+    assert merged["v4_source_manifest_sha256"] == "b" * 64
+
+
+def test_reconcile_establishes_the_source_pin_only_when_the_base_has_none(tmp_path):
+    ns = _reconcile_namespace(
+        tmp_path,
+        entries=None,
+        bundle=[_ref5_stage(), _ref6_stage()],
+        acquisition_shas=["c" * 64, "d" * 64],
+        match_rows=[
+            ("REF5:sibling", "Five Sibling", "A", "G", "s1", "p1", None, "[[0,5]]"),
+            ("REF6:sibling", "Six Sibling", "A", "G", "s2", "p2", None, "[[0,5]]"),
+        ],
+    )
+    reconcile_v4(ns)
+    merged = json.loads(Path(ns.output_merges).read_text(encoding="utf-8"))
+    # The FIRST stage in chain order, not the last: the pin means "the earliest
+    # public-source manifest this expansion chain rests on".
+    assert merged["v4_source_manifest_sha256"] == "c" * 64
