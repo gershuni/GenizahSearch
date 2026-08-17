@@ -1,0 +1,44 @@
+{
+  "content_hash": "sha256:8909d6cd05834b2ccd82064a8874237884804f4b3e6bd9098e8ae22fcbcf7e7b",
+  "entries": [
+    {
+      "basis": "owner ruling drop-vitry-siddur-rashi-shibolei-haleket-and-except-mt-ahavah-prayer-order (2026-08-17)",
+      "classification": "order of prayer",
+      "rationale": "A machzor: the work as a whole transmits a performable order of prayer, with halakhic material arranged around it. 84% of its matches arose in its service divisions and it shadowed more rows than it earned, including rows of the dedicated Amidah reference.",
+      "raw_reference_id": "REF6:machzor_vitry",
+      "scope": "work"
+    },
+    {
+      "basis": "owner ruling drop-vitry-siddur-rashi-shibolei-haleket-and-except-mt-ahavah-prayer-order (2026-08-17)",
+      "classification": "order of prayer",
+      "rationale": "A siddur of the school of Rashi; same function as the machzor above. Its matches concentrated 14.7% in a single siman and the liturgy masks removed none of them.",
+      "raw_reference_id": "REF6:siddur_rashi",
+      "scope": "work"
+    },
+    {
+      "basis": "owner ruling drop-vitry-siddur-rashi-shibolei-haleket-and-except-mt-ahavah-prayer-order (2026-08-17)",
+      "classification": "liturgical compendium",
+      "rationale": "A liturgical-halakhic compendium arranged around the order of the year; 31% of its matches arose in one 55,155-letter division interleaving the Haggadah with its own discussion, which cannot be separated at division granularity. Dropped in full by ruling rather than split.",
+      "raw_reference_id": "REF6:shibolei_haleket",
+      "scope": "work"
+    },
+    {
+      "basis": "owner ruling drop-vitry-siddur-rashi-shibolei-haleket-and-except-mt-ahavah-prayer-order (2026-08-17)",
+      "classification": "order of prayer",
+      "divisions": [
+        {
+          "end_offset": 133995,
+          "label_he": "משנה תורה, ספר אהבה, משנה תורה, סדר התפילה",
+          "start_offset": 107213
+        }
+      ],
+      "rationale": "A volume of the Mishneh Torah, kept as a reference: its six halakhic divisions are ordinary identifying material (~517 matches). Only the appended סדר התפילה is a performable order of prayer, and it drew 1,767 of the volume's 2,284 matches -- 77.4% -- while the liturgy masks reached 2 of them, because it is Maimonides' own recension of the prayers rather than a quotation of an attested authority. הלכות תפילה וברכת כהנים stays ELIGIBLE: laws about prayer are not an order of prayer.",
+      "raw_reference_id": "REF6:mishneh_torah_sefer_ahavah",
+      "scope": "divisions"
+    }
+  ],
+  "reference_corpus_sha256": "16135648f133b1a130509fc37d81279edf917bc91126b3c09b359f61dca2816e",
+  "rule": "A structurally delimited division whose primary function is to transmit a performable order of prayer or liturgical sequence is ineligible to originate ordinary source identifications. The rule applies corpus-wide, regardless of work, rite, author, or observed match yield. Mixed expository/liturgical divisions are not excluded wholesale. A reference whose work AS A WHOLE serves that function is ineligible in full.",
+  "ruled_on": "2026-08-17",
+  "schema_version": "discovery-identification-eligibility-v1"
+}

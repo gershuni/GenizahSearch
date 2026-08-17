@@ -20,12 +20,16 @@ import re
 import sqlite3
 import subprocess
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Iterable
 
 try:
     from scripts.discovery_v4_common import require_hash, sha256_file, stable_json_dump
+    from scripts.discovery_identification_eligibility import (
+        ineligible_reason,
+        load_eligibility_artifact,
+    )
     from scripts.discovery_track1_contract import (
         CONTRACT_V2_SCHEMA_VERSION,
         IDENTITY_MODES,
@@ -37,6 +41,10 @@ try:
     )
 except ModuleNotFoundError:  # direct invocation
     from discovery_v4_common import require_hash, sha256_file, stable_json_dump
+    from discovery_identification_eligibility import (
+        ineligible_reason,
+        load_eligibility_artifact,
+    )
     from discovery_track1_contract import (
         CONTRACT_V2_SCHEMA_VERSION,
         IDENTITY_MODES,
@@ -65,6 +73,15 @@ DEFAULT_COHORT_REGISTRY = Path(__file__).with_name("discovery_routing_cohorts.js
 # left implicit, so a reproduction attempt can tell what order was used
 # without changing ``shadow_rows`` itself (frozen algorithm).
 SHADOW_ALGORITHM_FACT = "track1-shadow-v1/input-order:rowid"
+#: Written into ``shadowed_by`` for a row an eligibility ruling bars from
+#: originating an identification. Deliberately NOT a work id and colon-free, so
+#: it can never be read as a raw id with an unknown namespace; the reason and
+#: the ruling live in ``INELIGIBLE_TABLE`` beside it. Using ``shadowed_by`` is
+#: what keeps every downstream `WHERE shadowed_by IS NULL` read correct without
+#: touching the frozen promoted-column list -- the row is preserved, and it is
+#: simply not in the identification band.
+INELIGIBLE_MARKER = "ineligible"
+INELIGIBLE_TABLE = "track1_identification_ineligible"
 TRACK1_PROMOTED_COLUMNS = (
     "page_id",
     "sys_id",
@@ -536,6 +553,7 @@ def build_release_contract_v2(
     snapshot_rows: int,
     registry: dict,
     registry_path: str | Path,
+    shadow_fact: str = SHADOW_ALGORITHM_FACT,
 ) -> dict:
     """Build and self-validate the v2 release contract (V4.2 plan C3).
 
@@ -561,7 +579,7 @@ def build_release_contract_v2(
         "v2_snapshot_rows": snapshot_rows,
         "missing_ref_offsets": status["missing_ref_offsets"],
         "duplicate_pairs": status["duplicate_pairs"],
-        "shadow_algorithm": SHADOW_ALGORITHM_FACT,
+        "shadow_algorithm": shadow_fact,
         "promoted_columns": list(TRACK1_PROMOTED_COLUMNS),
         "namespaces": namespaces,
     }
@@ -724,6 +742,54 @@ def shadow_rows(
     return shadows
 
 
+def _record_ineligible(
+    conn: sqlite3.Connection, eligibility: dict, rows: list[tuple]
+) -> None:
+    """Mark the rows out of the identification band and say why, per row."""
+    conn.execute(
+        f"CREATE TABLE IF NOT EXISTS {INELIGIBLE_TABLE} ("
+        "page_id TEXT NOT NULL, work_id TEXT NOT NULL, generation TEXT NOT NULL, "
+        "reason TEXT NOT NULL, eligibility_content_hash TEXT NOT NULL, "
+        "PRIMARY KEY (page_id, work_id, generation))"
+    )
+    conn.executemany(
+        "UPDATE track1_matches SET shadowed_by=? WHERE rowid=?",
+        [(INELIGIBLE_MARKER, row[0]) for row in rows],
+    )
+    conn.executemany(
+        f"INSERT OR REPLACE INTO {INELIGIBLE_TABLE} "
+        "(page_id, work_id, generation, reason, eligibility_content_hash) "
+        "VALUES (?, ?, ?, ?, ?)",
+        [
+            (row[1], row[2], GENERATION, row[3], eligibility["content_hash"])
+            for row in rows
+        ],
+    )
+
+
+def load_promotion_eligibility(args: argparse.Namespace, status: dict) -> dict | None:
+    """The eligibility artifact, if this promotion applies one.
+
+    Both-or-neither, and pinned to the reference corpus the run matched
+    against: the artifact's division offsets are positions in a particular
+    letter stream, so applying them to a different corpus would suppress
+    whatever now happens to sit at those offsets.
+    """
+    path = getattr(args, "eligibility", None)
+    sha256 = getattr(args, "eligibility_sha256", None)
+    if bool(path) != bool(sha256):
+        raise ValueError(
+            "--eligibility and --eligibility-sha256 must be supplied together"
+        )
+    if not path:
+        return None
+    return load_eligibility_artifact(
+        path,
+        sha256=sha256,
+        reference_corpus_sha256=status["reference_sha256"],
+    )
+
+
 def promote(args: argparse.Namespace) -> dict:
     status = inspect_stage(args)
     if not status["complete"]:
@@ -740,6 +806,7 @@ def promote(args: argparse.Namespace) -> dict:
         raise RuntimeError(
             f"V4 batch ledger is missing batches, refusing to promote: {missing_batches}"
         )
+    eligibility = load_promotion_eligibility(args, status)
     registry_path = Path(args.cohort_registry)
     registry = load_cohort_registry(registry_path)
     table = status["table"]
@@ -781,13 +848,32 @@ def promote(args: argparse.Namespace) -> dict:
         )
         conn.execute("CREATE INDEX ix_track1_matches_page ON track1_matches(page_id)")
         rows = conn.execute(
-            "SELECT rowid, page_id, work_id, best_density, spans_json "
+            "SELECT rowid, page_id, work_id, best_density, spans_json, ref_spans_json "
             "FROM track1_matches ORDER BY rowid"
         ).fetchall()
-        shadows = shadow_rows(rows)
+        eligible: list[tuple] = []
+        ineligible: list[tuple] = []
+        for rowid, page_id, work_id, density, spans_json, ref_spans_json in rows:
+            reason = (
+                ineligible_reason(eligibility, work_id, ref_spans_json)
+                if eligibility is not None
+                else None
+            )
+            if reason is None:
+                eligible.append((rowid, page_id, work_id, density, spans_json))
+            else:
+                ineligible.append((rowid, page_id, work_id, reason))
+        # The shadow competition runs over the ELIGIBLE rows only. This is the
+        # point of the whole mechanism: a row barred from identifying anything
+        # must not go on taking its page from the reference that CAN identify
+        # it, which is exactly what a prayer-book compendium was doing to the
+        # dedicated liturgy references.
+        shadows = shadow_rows(eligible)
         conn.executemany(
             "UPDATE track1_matches SET shadowed_by=? WHERE rowid=?", shadows
         )
+        if ineligible:
+            _record_ineligible(conn, eligibility, ineligible)
         conn.commit()
         total = conn.execute("SELECT COUNT(*) FROM track1_matches").fetchone()[0]
         live = conn.execute(
@@ -799,6 +885,12 @@ def promote(args: argparse.Namespace) -> dict:
         integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
         # C3: the v2 release contract, built and self-validated against the
         # shared schema BEFORE anything is written to disk.
+        # The shadow ran over an eligibility-FILTERED input, so the contract
+        # says so and names the filter. A contract that claimed the plain
+        # frozen algorithm would misdescribe how these rows were resolved.
+        shadow_fact = SHADOW_ALGORITHM_FACT
+        if eligibility is not None:
+            shadow_fact = f"{SHADOW_ALGORITHM_FACT}/eligibility:{eligibility['content_hash']}"
         contract = build_release_contract_v2(
             status,
             conn,
@@ -807,6 +899,7 @@ def promote(args: argparse.Namespace) -> dict:
             snapshot_rows=snapshot_count,
             registry=registry,
             registry_path=registry_path,
+            shadow_fact=shadow_fact,
         )
     if total != status["row_count"] or snapshot_count != 381_341:
         raise RuntimeError("promoted or preserved Track-1 row count drift")
@@ -823,6 +916,21 @@ def promote(args: argparse.Namespace) -> dict:
         "namespaces": contract["namespaces"],
     }
     report["release_contract"] = contract
+    # Additive, and only when an artifact was applied, so the no-eligibility
+    # report stays byte-identical to what it was before this mechanism existed.
+    if eligibility is not None:
+        by_work: Counter = Counter(row[2] for row in ineligible)
+        report["eligibility"] = {
+            "content_hash": eligibility["content_hash"],
+            "rule": eligibility["rule"],
+            "ruled_on": eligibility["ruled_on"],
+            "ineligible_rows": len(ineligible),
+            "ineligible_rows_by_work": dict(sorted(by_work.items())),
+            "entries": {
+                raw_id: record["scope"]
+                for raw_id, record in sorted(eligibility["by_work"].items())
+            },
+        }
     if args.report:
         stable_json_dump(report, args.report)
     if args.contract:
@@ -850,6 +958,17 @@ def parse_args() -> argparse.Namespace:
             "routing cohort registry (V4.2 plan C4); defaults to the committed "
             "discovery_routing_cohorts.json beside this script"
         ),
+    )
+    parser.add_argument(
+        "--eligibility",
+        help=(
+            "identification-eligibility artifact (promote only): the published "
+            "implementation of the order-of-prayer rule. Rows it bars are kept in the "
+            "table, marked, and excluded from the shadow competition"
+        ),
+    )
+    parser.add_argument(
+        "--eligibility-sha256", help="required alongside --eligibility"
     )
     parser.add_argument("--report")
     parser.add_argument("--contract")
