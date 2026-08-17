@@ -43,10 +43,12 @@ from pathlib import Path
 try:
     from scripts.discovery_v4_common import require_hash, sha256_file, stable_json_dump
     from scripts.discovery_track1_contract import IDENTITY_MODES
+    from scripts.discovery_identification_eligibility import load_eligibility_artifact
     from scripts.discovery_public_first_identity import load_public_first_artifact
 except ModuleNotFoundError:  # direct invocation
     from discovery_v4_common import require_hash, sha256_file, stable_json_dump
     from discovery_track1_contract import IDENTITY_MODES
+    from discovery_identification_eligibility import load_eligibility_artifact
     from discovery_public_first_identity import load_public_first_artifact
 
 
@@ -240,6 +242,22 @@ def run(args: argparse.Namespace) -> dict:
     if public_first_artifact_path:
         public_first_artifact = load_public_first_artifact(
             public_first_artifact_path, sha256=public_first_artifact_sha256,
+        )
+
+    # The eligibility artifact is OPTIONAL here and read for REPORTING only:
+    # reconcile mints from live rows, and a withdrawn work has none, so this
+    # changes no identity decision. It only lets the report say WHY nothing was
+    # minted. Same both-or-neither discipline as the artifact above.
+    eligibility_path = getattr(args, "eligibility", None)
+    eligibility_sha256 = getattr(args, "eligibility_sha256", None)
+    if bool(eligibility_path) != bool(eligibility_sha256):
+        raise ValueError(
+            "--eligibility and --eligibility-sha256 must be supplied together"
+        )
+    eligibility = None
+    if eligibility_path:
+        eligibility = load_eligibility_artifact(
+            eligibility_path, sha256=eligibility_sha256
         )
 
     match_db = Path(args.match_db).resolve()
@@ -497,15 +515,35 @@ def run(args: argparse.Namespace) -> dict:
     # emitted as empty/zero) when no public-first artifact was supplied, so
     # the artifact-absent report is byte-identical to the pre-C5 script's.
     if public_first_artifact is not None:
+        # An approved identity can end up with nothing minted for two very
+        # different reasons, and reporting them as one number would be
+        # misleading: either no source route was ever found for it, or an
+        # eligibility ruling withdrew the work AFTER approval. The artifact
+        # still says "approve" in the second case, and correctly so -- the
+        # approval happened; the ruling came later.
+        withdrawn_keys = {
+            entries[raw_id].get("identity_key")
+            for raw_id, record in (eligibility or {}).get("by_work", {}).items()
+            if record["scope"] == "work" and raw_id in entries
+        }
+        withdrawn_keys.discard(None)
+        unmatched = []
+        withdrawn = []
+        for identity_key, pf_entry in public_first_artifact["entries_by_key"].items():
+            if pf_entry["verdict"] != "approve" or identity_key in public_first_matched_keys:
+                continue
+            row = {"identity_key": identity_key, "verdict": pf_entry["verdict"]}
+            if identity_key in withdrawn_keys:
+                withdrawn.append(row)
+            else:
+                unmatched.append(row)
         public_first_unmatched_approved = sorted(
-            (
-                {"identity_key": identity_key, "verdict": pf_entry["verdict"]}
-                for identity_key, pf_entry in public_first_artifact["entries_by_key"].items()
-                if pf_entry["verdict"] == "approve"
-                and identity_key not in public_first_matched_keys
-            ),
-            key=lambda row: row["identity_key"],
+            unmatched, key=lambda row: row["identity_key"]
         )
+        if withdrawn:
+            report["public_first_withdrawn_by_ruling"] = sorted(
+                withdrawn, key=lambda row: row["identity_key"]
+            )
         report["live_public_first_count"] = len(public_first_raw_ids)
         report["public_first_standalone_canonical_ids"] = (
             public_first_standalone_canonical_ids
@@ -544,6 +582,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--public-first-artifact-sha256",
         help="required alongside --public-first-artifact",
+    )
+    parser.add_argument(
+        "--eligibility",
+        help=(
+            "identification-eligibility artifact; REPORTING only here -- it lets an "
+            "approved identity that a ruling withdrew be reported as withdrawn "
+            "rather than as unmatched"
+        ),
+    )
+    parser.add_argument(
+        "--eligibility-sha256", help="required alongside --eligibility"
     )
     parser.add_argument("--report")
     return parser.parse_args()

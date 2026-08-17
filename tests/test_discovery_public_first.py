@@ -158,6 +158,7 @@ def _reconcile_namespace(
     prefix="",
     bundle=None,
     acquisition_shas=None,
+    eligibility_entries=None,
 ):
     # `bundle` gives one entry-list per chain stage (C2). Absent, a single
     # manifest is written, which is the V4-era shape every other test uses.
@@ -220,6 +221,25 @@ def _reconcile_namespace(
         kwargs["public_first_artifact"] = pf_path
         if not omit_pf_sha256:
             kwargs["public_first_artifact_sha256"] = sha256_file(pf_path)
+    if eligibility_entries is not None:
+        from scripts.discovery_identification_eligibility import (
+            SCHEMA_VERSION as ELIGIBILITY_SCHEMA,
+            content_hash_for_entries as eligibility_content_hash,
+        )
+
+        elig_path = _write_json(
+            tmp_path / f"{prefix}eligibility.json",
+            {
+                "schema_version": ELIGIBILITY_SCHEMA,
+                "rule": "synthetic rule for the test",
+                "ruled_on": "2026-08-17",
+                "reference_corpus_sha256": "a" * 64,
+                "entries": eligibility_entries,
+                "content_hash": eligibility_content_hash(eligibility_entries),
+            },
+        )
+        kwargs["eligibility"] = elig_path
+        kwargs["eligibility_sha256"] = sha256_file(elig_path)
     return argparse.Namespace(**kwargs)
 
 
@@ -1126,3 +1146,109 @@ def test_reconcile_establishes_the_source_pin_only_when_the_base_has_none(tmp_pa
     # The FIRST stage in chain order, not the last: the pin means "the earliest
     # public-source manifest this expansion chain rests on".
     assert merged["v4_source_manifest_sha256"] == "c" * 64
+
+
+# ===========================================================================
+# discovery_v4_reconcile.py -- withdrawn by ruling vs never matched
+# ===========================================================================
+
+
+def _elig_work_entry(raw_id: str) -> dict:
+    return {
+        "raw_reference_id": raw_id,
+        "scope": "work",
+        "classification": "order of prayer",
+        "basis": "owner ruling test-ruling (2026-08-17)",
+        "rationale": "Synthetic: the whole work transmits an order of prayer.",
+    }
+
+
+def test_reconcile_separates_a_withdrawn_identity_from_an_unmatched_one(tmp_path):
+    """Two approved identities mint nothing, for opposite reasons.
+
+    pf-0001's work was WITHDRAWN by an eligibility ruling after approval -- the
+    artifact still says approve, correctly, because the approval did happen.
+    pf-0002 was simply never matched. Reporting both as "approved but unmatched"
+    would read as "we looked and found nothing" for a work nobody looked for.
+    """
+    entries = [
+        {
+            "raw_reference_id": "REF6:prayerbook",
+            "identity_mode": "public_first",
+            "identity_key": "pf-0001",
+        },
+        {
+            "raw_reference_id": "REF6:live_one",
+            "identity_mode": "public_first",
+            "identity_key": "pf-0003",
+        },
+    ]
+    ns = _reconcile_namespace(
+        tmp_path,
+        entries=entries,
+        # The withdrawn work has no live row -- that is what withdrawal means
+        # by the time reconcile runs, since promote already barred it.
+        match_rows=[("REF6:live_one", "T", "A", "G", "s1", "p1", None, "[[0,5]]")],
+        pf_entries=[
+            _pf_entry("pf-0001", title_he="חיבור בדוי א"),
+            _pf_entry("pf-0002", title_he="חיבור בדוי ב"),
+            _pf_entry("pf-0003", title_he="חיבור בדוי ג"),
+        ],
+        eligibility_entries=[_elig_work_entry("REF6:prayerbook")],
+    )
+    report = reconcile_v4(ns)
+
+    assert report["public_first_withdrawn_by_ruling"] == [
+        {"identity_key": "pf-0001", "verdict": "approve"}
+    ]
+    assert report["public_first_unmatched_approved"] == [
+        {"identity_key": "pf-0002", "verdict": "approve"}
+    ]
+
+
+def test_reconcile_omits_the_withdrawn_key_when_no_eligibility_is_supplied(tmp_path):
+    """Without the artifact the report keeps its previous shape exactly."""
+    ns = _reconcile_namespace(
+        tmp_path,
+        entries=[
+            {
+                "raw_reference_id": "REF6:prayerbook",
+                "identity_mode": "public_first",
+                "identity_key": "pf-0001",
+            },
+            {
+                "raw_reference_id": "REF6:live_one",
+                "identity_mode": "public_first",
+                "identity_key": "pf-0003",
+            },
+        ],
+        match_rows=[("REF6:live_one", "T", "A", "G", "s1", "p1", None, "[[0,5]]")],
+        pf_entries=[
+            _pf_entry("pf-0001", title_he="חיבור בדוי א"),
+            _pf_entry("pf-0003", title_he="חיבור בדוי ג"),
+        ],
+    )
+    report = reconcile_v4(ns)
+    assert "public_first_withdrawn_by_ruling" not in report
+    assert report["public_first_unmatched_approved"] == [
+        {"identity_key": "pf-0001", "verdict": "approve"}
+    ]
+
+
+def test_reconcile_requires_the_eligibility_artifact_and_its_hash_together(tmp_path):
+    ns = _reconcile_namespace(
+        tmp_path,
+        entries=[
+            {
+                "raw_reference_id": "REF6:live_one",
+                "identity_mode": "public_first",
+                "identity_key": "pf-0003",
+            }
+        ],
+        match_rows=[("REF6:live_one", "T", "A", "G", "s1", "p1", None, "[[0,5]]")],
+        pf_entries=[_pf_entry("pf-0003", title_he="חיבור בדוי ג")],
+        eligibility_entries=[_elig_work_entry("REF6:prayerbook")],
+    )
+    ns.eligibility_sha256 = None
+    with pytest.raises(ValueError, match="must be supplied together"):
+        reconcile_v4(ns)
