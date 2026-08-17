@@ -132,6 +132,7 @@ def test_fullscan_legacy_routing_is_separate_extrapolation():
         [(P1, "M:legacy-one", 30), (P2, "J:legacy-two", 29)],
         {P1: 100, P2: 100},
         {("old-page", "M:old-work")},
+        excluded_prefixes=_EXCLUDED,
     )
     assert report["same_work"] == 1
     assert report["parallel"] == 1
@@ -140,6 +141,127 @@ def test_fullscan_legacy_routing_is_separate_extrapolation():
         (P1, "M:legacy-one"),
         (P2, "J:legacy-two"),
     }
+
+
+#: What the caller derives from the reviewed cohort registry. Every extrapolated
+#: generation, not just REF4 -- the guard's whole job is to catch a leaked one.
+_EXCLUDED = ("REF4:", "REF5:", "REF6:")
+
+
+def _alias_router():
+    """Two owner-ratified canonical aliases, both live on ONE page, neither with
+    a fitted decision -- the exact shape measured 103 times in the v42lit bake."""
+    return {
+        "route": {},
+        "meta": {"threshold": 0.30},
+        "raw_to_can": {
+            "M:alias-side": "REF2:canonical-side",
+            "REF2:canonical-side": "REF2:canonical-side",
+        },
+        "counts": {},
+    }
+
+
+def test_fullscan_legacy_alias_keeps_the_canonical_decision():
+    """Hazard B: an alias side must NEVER be scored independently.
+
+    The two ids are ONE owner-approved work (`discovery_identification` is
+    UNIQUE (sys_id, canonical_work_id)), so two surfaces for them on one page is
+    a corrupted grain, not a label disagreement. The alias inherits the
+    canonical row's decision verbatim -- surface AND coverage, because a surface
+    paired with the other row's coverage no longer says why it was chosen.
+    """
+    router = _alias_router()
+    report = route_fullscan_legacy_by_coverage(
+        router,
+        # canonical is far above the threshold, alias far below it: an
+        # independent score would put the same work on both surfaces.
+        [(P1, "REF2:canonical-side", 90), (P1, "M:alias-side", 5)],
+        {P1: 100},
+        set(),
+        excluded_prefixes=_EXCLUDED,
+    )
+    assert report["considered"] == 2
+    assert report["added"] == 2
+    assert report["kept_canonical_alias"] == 1
+    assert report["same_work"] == 2
+    assert report["parallel"] == 0
+    assert router["route"][(P1, "M:alias-side")] == router["route"][
+        (P1, "REF2:canonical-side")
+    ]
+
+
+def test_fullscan_legacy_alias_inheritance_is_order_independent():
+    """The defect that halted the v42lit build was the VISIBLE 2%.
+
+    Handed canonical-first, the old code raised. Handed alias-first -- 101 of the
+    103 measured rows -- it silently scored both sides, because the canonical key
+    was not yet written when the alias asked. So the surface a work shipped under
+    depended on an un-ORDER-BY'd SELECT. Both orders must now produce the same
+    table.
+    """
+    canonical_first = _alias_router()
+    route_fullscan_legacy_by_coverage(
+        canonical_first,
+        [(P1, "REF2:canonical-side", 90), (P1, "M:alias-side", 5)],
+        {P1: 100},
+        set(),
+        excluded_prefixes=_EXCLUDED,
+    )
+    alias_first = _alias_router()
+    route_fullscan_legacy_by_coverage(
+        alias_first,
+        [(P1, "M:alias-side", 5), (P1, "REF2:canonical-side", 90)],
+        {P1: 100},
+        set(),
+        excluded_prefixes=_EXCLUDED,
+    )
+    assert canonical_first["route"] == alias_first["route"]
+    assert canonical_first["fullscan_legacy_keys"] == alias_first["fullscan_legacy_keys"]
+
+
+def test_fullscan_legacy_alias_without_its_canonical_row_scores_itself():
+    """An alias whose canonical side has NO row on the page has nothing to
+    inherit; extrapolating its own coverage is the only alternative to halting.
+    Measured: 1,638 such rows, so this path is not hypothetical."""
+    router = _alias_router()
+    report = route_fullscan_legacy_by_coverage(
+        router, [(P1, "M:alias-side", 5)], {P1: 100}, set(),
+        excluded_prefixes=_EXCLUDED
+    )
+    assert report["kept_canonical_alias"] == 0
+    assert report["parallel"] == 1
+    assert router["route"][(P1, "M:alias-side")][0] == SURFACE_PARALLEL
+
+
+def test_fullscan_legacy_rejects_a_predecided_canonical_key():
+    """Inheritance is permitted only from a sibling THIS call decided.
+
+    A pre-existing canonical decision means the caller's own filter (any row
+    `resolve_routing` already answers is excluded) did not hold, so the
+    population contract is broken -- inheriting there would paper over it.
+    """
+    router = _alias_router()
+    router["route"][(P1, "REF2:canonical-side")] = ("same_work", 0.9, 1)
+    with pytest.raises(RoutingRegrainError, match="already has a decision"):
+        route_fullscan_legacy_by_coverage(
+            router, [(P1, "M:alias-side", 5)], {P1: 100}, set(),
+        excluded_prefixes=_EXCLUDED
+        )
+
+
+def test_fullscan_legacy_rejects_an_alias_chain():
+    """`resolve_routing` hops ONCE. A chained alias would therefore resolve to a
+    key nobody wrote, and the inherit-vs-score choice would again depend on which
+    of two aliases arrived first. Measured absent (0 chains over the 16 merges);
+    guarded so it stays a halt rather than a silent re-ordering."""
+    router = _alias_router()
+    router["raw_to_can"]["REF2:canonical-side"] = "M:third-hop"
+    with pytest.raises(RoutingRegrainError, match="chain"):
+        route_fullscan_legacy_by_coverage(
+            router, [(P1, "M:alias-side", 5)], {P1: 100}, set(),
+        excluded_prefixes=_EXCLUDED
+        )
 
 
 def test_fullscan_legacy_routing_rejects_wrong_or_historical_population():
@@ -151,7 +273,8 @@ def test_fullscan_legacy_routing_rejects_wrong_or_historical_population():
     }
     with pytest.raises(RoutingRegrainError, match="outside"):
         route_fullscan_legacy_by_coverage(
-            router, [(P1, "REF4:new", 30)], {P1: 100}, set()
+            router, [(P1, "REF4:new", 30)], {P1: 100}, set(),
+            excluded_prefixes=_EXCLUDED
         )
     with pytest.raises(RoutingRegrainError, match="historical"):
         route_fullscan_legacy_by_coverage(
@@ -159,6 +282,30 @@ def test_fullscan_legacy_routing_rejects_wrong_or_historical_population():
             [(P1, "M:legacy", 30)],
             {P1: 100},
             {(P1, "M:legacy")},
+            excluded_prefixes=_EXCLUDED,
+        )
+
+
+def test_fullscan_legacy_population_guard_covers_every_extrapolated_generation():
+    """The guard used to hard-code `REF4:`, so a REF5/REF6 row -- a generation
+    that did not exist when it was written -- would have been routed by the
+    fitted router that never scored it. Registering the namespace is what must
+    extend the guard."""
+    router = {"route": {}, "meta": {"threshold": 0.30}, "raw_to_can": {}, "counts": {}}
+    for leaked in ("REF4:new", "REF5:new", "REF6:new"):
+        with pytest.raises(RoutingRegrainError, match="outside"):
+            route_fullscan_legacy_by_coverage(
+                router, [(P1, leaked, 30)], {P1: 100}, set(),
+                excluded_prefixes=_EXCLUDED,
+            )
+
+
+def test_fullscan_legacy_refuses_an_empty_population_guard():
+    """A guard that cannot fail is worse than no guard: it reads as coverage."""
+    router = {"route": {}, "meta": {"threshold": 0.30}, "raw_to_can": {}, "counts": {}}
+    with pytest.raises(RoutingRegrainError, match="no excluded namespace prefixes"):
+        route_fullscan_legacy_by_coverage(
+            router, [(P1, "M:legacy", 30)], {P1: 100}, set(), excluded_prefixes=()
         )
 
 

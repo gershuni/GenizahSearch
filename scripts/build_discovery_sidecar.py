@@ -8627,6 +8627,16 @@ def finalize_build(
                     _legacy_unresolved,
                     _page_chars,
                     _historical_keys,
+                    # From the SAME reviewed registry that partitioned the rows
+                    # above, so registering a new reference generation is what
+                    # extends this guard -- not editing a default in the routing
+                    # module. It used to be REF4-only, which meant a leaked
+                    # REF5/REF6 row would have been routed by the fitted router
+                    # that never scored it.
+                    excluded_prefixes=tuple(
+                        f"{_ns}:" for _ns in sorted(
+                            track1_contract.extrapolated_namespaces(_cohort_registry))
+                    ),
                 )
                 if fullscan_legacy_route_report["undecided"]:
                     raise RoutingConflictError(

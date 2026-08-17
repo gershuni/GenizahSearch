@@ -676,7 +676,7 @@ def route_fullscan_legacy_by_coverage(
     page_chars: Dict[str, int],
     historical_keys,
     *,
-    excluded_prefix: str = "REF4:",
+    excluded_prefixes,
 ) -> Dict:
     """Route legacy-reference pairs newly exposed by V4's full-page scan.
 
@@ -690,9 +690,35 @@ def route_fullscan_legacy_by_coverage(
     ``historical_keys`` is the preserved V2 Track-1 snapshot. Any overlap is a
     hard error: an old pair with no fitted/re-grained decision is regression,
     not permission to extrapolate it.
+
+    ``excluded_prefixes`` names the namespaces that must NEVER reach here, and it
+    has no default ON PURPOSE. It was `excluded_prefix="REF4:"` -- a single
+    hard-coded generation -- so once REF5 and REF6 existed the guard could not
+    catch the one thing it is for: an extrapolated-cohort row leaking into the
+    fitted router's population. That is the same shape as the P2 defect the C4
+    cohort registry replaced upstream. The caller derives this from the reviewed
+    registry (`discovery_track1_contract.extrapolated_namespaces`), so a new
+    reference generation is covered by being registered rather than by anyone
+    remembering to edit a default here.
+
+    ANCHORS ARE DECIDED BEFORE ALIASES, and that ordering is load-bearing rather
+    than tidiness. Two owner-ratified canonical aliases can BOTH be live on one
+    page and both be unresolved (measured 103 times in the v42lit bake). Scored
+    row-by-row in the caller's un-ORDER-BY'd order, such a pair behaved two
+    different ways: canonical-first raised here (`resolve_routing` hops to the
+    canonical key the sibling had just written), while alias-first -- 101 of the
+    103 -- silently scored BOTH sides independently, because the canonical key
+    was not yet written when the alias asked. That second outcome is the hazard
+    the module header records as (B): the two ids are ONE owner-approved work and
+    `discovery_identification` is `UNIQUE (sys_id, canonical_work_id)`, so
+    disagreeing surfaces corrupt the identification grain rather than merely
+    labelling it twice. Partitioning first makes the canonical row's decision
+    authoritative for its alias in EITHER order, and leaves the row-count and
+    threshold behaviour of every non-alias row untouched.
     """
     threshold = _router_threshold(router)
     route = router["route"]
+    raw_to_can = router.get("raw_to_can") or {}
     historical_keys = set(historical_keys)
     router.setdefault("fullscan_legacy_keys", set())
     report = {
@@ -700,14 +726,27 @@ def route_fullscan_legacy_by_coverage(
         "added": 0,
         "same_work": 0,
         "parallel": 0,
+        # Alias sides that took their canonical sibling's decision instead of
+        # being scored. Counted apart because they are NOT an extrapolation of
+        # the threshold onto a new row -- they are one decision applied twice.
+        "kept_canonical_alias": 0,
         "undecided": 0,
         "undecided_examples": [],
         "threshold": threshold,
         "historical_key_count": len(historical_keys),
     }
+
+    excluded = tuple(excluded_prefixes)
+    if not excluded:
+        raise RoutingRegrainError(
+            "full-scan legacy routing was given no excluded namespace prefixes -- "
+            "then its population guard cannot fail, and an extrapolated-cohort row "
+            "would be routed by the fitted router that never scored it"
+        )
+    anchors, aliases = [], []
     seen = set()
     for page_id, raw_work, matched_letters in match_rows:
-        if not isinstance(raw_work, str) or raw_work.startswith(excluded_prefix):
+        if not isinstance(raw_work, str) or raw_work.startswith(excluded):
             raise RoutingRegrainError(
                 "full-scan legacy routing received a row outside its population"
             )
@@ -717,15 +756,33 @@ def route_fullscan_legacy_by_coverage(
                 "full-scan legacy routing received a duplicate (page, work) key"
             )
         seen.add(key)
-        report["considered"] += 1
         if key in historical_keys:
             raise RoutingRegrainError(
                 "an unresolved full-scan key exists in the historical Track-1 frame"
             )
-        if resolve_routing(page_id, raw_work, router)[0] is not None:
-            raise RoutingRegrainError(
-                "full-scan legacy routing received a key that already has a decision"
-            )
+        can = raw_to_can.get(raw_work)
+        if can is not None and can != raw_work:
+            # `resolve_routing` hops ONCE, so a chained alias would resolve to a
+            # key no row here ever writes, and the inherit-vs-score choice would
+            # again turn on which of two aliases arrived first. Measured absent
+            # (0 chains over the 16 owner-ratified merges); halt if that changes.
+            onward = raw_to_can.get(can)
+            if onward is not None and onward != can:
+                raise RoutingRegrainError(
+                    "full-scan legacy routing received a canonical alias chain -- "
+                    "the alias's canonical id is itself an alias, so its decision "
+                    "would resolve to a key nobody writes. Halting rather than "
+                    "following an undeclared multi-hop rule. (counts only, D-25)"
+                )
+            aliases.append((page_id, raw_work, matched_letters, can))
+        else:
+            anchors.append((page_id, raw_work, matched_letters))
+
+    written = set()
+
+    def _score_own(page_id: str, raw_work: str, matched_letters) -> None:
+        """Extrapolate the frozen threshold onto this row's own coverage."""
+        key = (page_id, raw_work)
         n_chars = page_chars.get(page_id)
         if not n_chars or matched_letters is None:
             report["undecided"] += 1
@@ -733,7 +790,7 @@ def route_fullscan_legacy_by_coverage(
                 report["undecided_examples"].append(
                     {"page_id": page_id, "work_id": raw_work}
                 )
-            continue
+            return
         if n_chars < 0 or matched_letters < 0:
             raise RoutingRegrainError(
                 "full-scan legacy coverage received a negative numerator or denominator"
@@ -749,10 +806,57 @@ def route_fullscan_legacy_by_coverage(
         surface = SURFACE_SAME_WORK if coverage >= threshold else SURFACE_PARALLEL
         route[key] = (surface, coverage, 1)
         router["fullscan_legacy_keys"].add(key)
+        written.add(key)
         report["added"] += 1
         if surface == SURFACE_SAME_WORK:
             report["same_work"] += 1
         else:
+            report["parallel"] += 1
+
+    for page_id, raw_work, matched_letters in anchors:
+        report["considered"] += 1
+        if resolve_routing(page_id, raw_work, router)[0] is not None:
+            raise RoutingRegrainError(
+                "full-scan legacy routing received a key that already has a decision"
+            )
+        _score_own(page_id, raw_work, matched_letters)
+
+    for page_id, raw_work, matched_letters, can in aliases:
+        report["considered"] += 1
+        key = (page_id, raw_work)
+        if key in route:
+            raise RoutingRegrainError(
+                "full-scan legacy routing received a key that already has a decision"
+            )
+        can_key = (page_id, can)
+        entry = route.get(can_key)
+        if entry is None:
+            # Nothing to inherit: the canonical side has no row on this page
+            # (measured 1,638 rows). Extrapolating its own coverage is the only
+            # alternative to leaving it undecided, which halts the build.
+            _score_own(page_id, raw_work, matched_letters)
+            continue
+        if can_key not in written:
+            # A PRE-EXISTING canonical decision, not a sibling's. Then the
+            # caller's own filter -- every row `resolve_routing` already answers
+            # is excluded from this population -- did not hold, and inheriting
+            # here would paper over a broken population contract.
+            raise RoutingRegrainError(
+                "full-scan legacy routing received a key that already has a decision"
+            )
+        surface, pcov, shipped = entry
+        # Surface AND coverage, verbatim. Pairing this row's own coverage with
+        # the inherited surface would print a number that does not explain the
+        # decision -- the same shape as `regrain_router_to_split`'s owner-ratified
+        # `kept_canonical_alias` step, which also inherits both.
+        route[key] = (surface, pcov, shipped)
+        router["fullscan_legacy_keys"].add(key)
+        written.add(key)
+        report["kept_canonical_alias"] += 1
+        report["added"] += 1
+        if surface == SURFACE_SAME_WORK:
+            report["same_work"] += 1
+        elif surface == SURFACE_PARALLEL:
             report["parallel"] += 1
     return report
 
