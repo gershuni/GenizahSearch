@@ -949,6 +949,88 @@ def test_later_shared_text_evidence_is_pruned_when_its_demotion_cannot_be_publis
     )
 
 
+def test_a_demoter_that_ships_only_privately_cannot_substantiate_a_demotion(tmp_path):
+    """The V4.2 bake's real failure (2026-08-17): a PUBLIC identity that ships
+    nothing publicly.
+
+    `w001461` was one canonical group with two members -- a public work and a
+    private M-source sibling. Its public member kept its identity and its
+    review_only rows; all SIX of its shipped rows sat on the private sibling and
+    were dropped. The audit row therefore passed the old
+    `kept_work_id in public_work_ids` test while the public artifact could not
+    show a single shipped row for the demoter, and
+    `check_demotion_kept_reference_shipped` failed the projection.
+
+    A public identity is not a surviving witness. This is the same 2026-08-03
+    ruling one notch deeper.
+    """
+    path, conn = _new_private_conn(tmp_path)
+    # One canonical group, two members: the public face and the private sibling
+    # that actually carries the shipped witness.
+    _add_work(conn, "W_KEPT_PUB", canonical_work_id="W_KEPT_PUB")
+    _add_work(
+        conn, "W_KEPT_PRIV", canonical_work_id="W_KEPT_PUB",
+        identity_visibility="private", source_corpus="msource",
+    )
+    # The demoter's ONLY shipped row is on the private member -> dropped publicly.
+    _add_claim_with_evidence(
+        conn, claim_id="C_KEPT_PRIV", page_id="P_LST", work_id="W_KEPT_PRIV",
+        evidence_id="E_KEPT_PRIV", sys_id="SYS_A", routing_status="shipped",
+    )
+    # Its public member survives, but review_only only.
+    _add_claim_with_evidence(
+        conn, claim_id="C_KEPT_PUB", page_id="P_LST", work_id="W_KEPT_PUB",
+        evidence_id="E_KEPT_PUB", sys_id="SYS_A", routing_status="review_only",
+    )
+    # The demoted work, citing that demotion as its reason.
+    _add_work(conn, "W_LATE")
+    _add_claim_with_evidence(
+        conn, claim_id="C_LATE", page_id="P_LST", work_id="W_LATE",
+        evidence_id="E_LATE", sys_id="SYS_A", routing_status="review_only",
+    )
+    conn.execute(
+        "UPDATE discovery_evidence SET routing_reason='later_shared_text' "
+        "WHERE evidence_id='E_LATE'"
+    )
+    _insert(
+        conn, "discovery_routing_audit",
+        page_id="P_LST", kept_work_id="W_KEPT_PUB", demoted_work_id="W_LATE",
+        kept_year=900, demoted_year=1400, delta_years=500, decision="demoted",
+    )
+    _add_meta(conn, audience="private", schema_version="discovery-v1")
+    _finalize(conn)
+    conn.close()
+
+    out = tmp_path / "public.db"
+    proj.project(str(path), str(out), masking_patterns=[_DISPOSABLE_PATTERN])
+    out_conn = sqlite3.connect(str(out))
+    try:
+        surviving = {r[0] for r in out_conn.execute(
+            "SELECT evidence_id FROM discovery_evidence")}
+        assert "E_KEEP" not in surviving  # sanity: this test adds no such row
+        assert "E_LATE" not in surviving, (
+            "the demotion's citing evidence survived while the demoter ships "
+            "nothing in this artifact -- the public asset asserts a demotion it "
+            "cannot replay, which is what failed the V4.2 projection"
+        )
+        # BOTH sides of the one decision. Pruning only the evidence leaves the
+        # audit row behind, and the audit row is what the release verifier reads
+        # -- that is why the first attempt at this fix did not clear the artifact.
+        assert not out_conn.execute(
+            "SELECT 1 FROM discovery_routing_audit "
+            "WHERE decision='demoted' AND kept_work_id='W_KEPT_PUB'"
+        ).fetchone(), (
+            "the demoted audit row survived while its demoter ships nothing here "
+            "-- check_demotion_kept_reference_shipped reads exactly this as a "
+            "three-work cascade"
+        )
+        # The private member never appears; the public one may.
+        assert not out_conn.execute(
+            "SELECT 1 FROM works WHERE work_id='W_KEPT_PRIV'").fetchone()
+    finally:
+        out_conn.close()
+
+
 def test_page_with_two_demotions_does_not_vouch_for_the_wrong_work(tmp_path):
     """The false-green the page-only closure key allowed (Codex code review
     2026-08-03, finding 2).

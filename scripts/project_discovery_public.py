@@ -314,13 +314,43 @@ class ProjectionContext:
             # `demoted_work_id` is compared against the claim work's CANONICAL
             # id, because audit rows carry canonical ids. A NULL demoted_work_id
             # substantiates nothing and is therefore excluded -- fail closed.
+            # A PUBLIC IDENTITY IS NOT THE SAME AS A SURVIVING WITNESS, and the
+            # difference is load-bearing (V4.2 bake, 2026-08-17). `w001461`
+            # (canonical group of a public work AND a private M-source sibling)
+            # kept its public identity and its review_only rows, while all SIX of
+            # its shipped rows sat on the private sibling and were dropped. So the
+            # public artifact carried a `demoted` row whose demoter ships nothing
+            # in it -- and `check_demotion_kept_reference_shipped` failed the
+            # projection, correctly: publicly, that demotion cannot be replayed.
+            #
+            # This extends the SAME 2026-08-03 owner ruling one notch, from "the
+            # demoter's identity is public" to "the demoter still ships HERE". The
+            # cascade gate keeps its full force where it can actually distinguish
+            # a real three-work cascade from a visibility artifact -- the PRIVATE
+            # asset, which holds every row. On a public artifact the two are
+            # indistinguishable by construction, so substantiating the citing
+            # evidence is the only honest test available to it.
+            #
+            # Measured on this bake: 1 of 1,257 demoted audit rows, 1 evidence row.
+            #
+            # ONE predicate, shared with `_project_discovery_routing_audit` via
+            # `_shipped_canonical_work_ids`. A looser test here than there would
+            # keep the citing evidence while dropping the audit row that explains
+            # it -- trading this inconsistency for the one the prune exists to
+            # prevent.
+            shipped_canonicals = self._shipped_canonical_work_ids(
+                surviving_evidence_by_claim)
             replayable_page_works = {
                 (r["page_id"], r["demoted_work_id"]) for r in audit_rows
                 if r.get("decision") == "demoted"
                 and r.get("kept_year") is not None and r.get("demoted_year") is not None
                 and r.get("demoted_work_id") is not None
                 and r["demoted_work_id"] in public_work_ids
-                and (r.get("kept_work_id") is None or r["kept_work_id"] in public_work_ids)
+                and (
+                    r.get("kept_work_id") is None
+                    or (r["kept_work_id"] in public_work_ids
+                        and r["kept_work_id"] in shipped_canonicals)
+                )
             }
             doomed: Set[str] = set()
             for cid, rows in surviving_evidence_by_claim.items():
@@ -398,6 +428,34 @@ class ProjectionContext:
             not in self.excluded_canonical_work_ids
         }
 
+        self.shipped_canonical_work_ids: Set[str] = self._shipped_canonical_work_ids(
+            self.surviving_evidence_by_claim)
+
+    def _shipped_canonical_work_ids(
+        self, surviving_evidence_by_claim: Dict[str, List[Dict[str, Any]]]
+    ) -> Set[str]:
+        """Canonical groups that still SHIP, over a given surviving-evidence set.
+
+        `check_demotion_kept_reference_shipped`'s own predicate, evaluated against
+        THIS artifact: a group ships iff one of its claims' display evidence is
+        `shipped`. Display evidence is RE-SELECTED from the surviving rows, never
+        read from the private build's `display_evidence_id` column -- that column
+        can point at a row this artifact does not contain, which would call a group
+        shipped on the strength of evidence the reader cannot see.
+        """
+        out: Set[str] = set()
+        for cid, rows in surviving_evidence_by_claim.items():
+            if not rows:
+                continue
+            chosen = ids.select_display_evidence(rows)
+            row = next((e for e in rows if e["evidence_id"] == chosen), None)
+            if row is None or row.get("routing_status") != ids.ROUTING_STATUS_SHIPPED:
+                continue
+            canonical = self.works_by_id.get(
+                self.claims_by_id[cid]["work_id"], {}).get("canonical_work_id")
+            if canonical is not None:
+                out.add(canonical)
+        return out
 
 
 # ---------------------------------------------------------------------------
@@ -486,6 +544,15 @@ def _project_discovery_routing_audit(ctx: ProjectionContext) -> List[Dict[str, A
         if kept is not None and kept not in ctx.public_work_ids:
             continue
         if demoted is not None and demoted not in ctx.public_work_ids:
+            continue
+        # A `demoted` row whose demoter ships NOTHING here explains nothing here.
+        # The citing evidence is already pruned for the same reason (see the
+        # closure loop's `shipped_canonicals`); leaving the audit row behind would
+        # publish a demotion the artifact cannot show a demoter for, which is
+        # exactly what `check_demotion_kept_reference_shipped` reads as a
+        # three-work cascade. Both sides of one decision must use one predicate.
+        if (row.get("decision") == "demoted" and kept is not None
+                and kept not in ctx.shipped_canonical_work_ids):
             continue
         out.append(row)
     return out
