@@ -2049,6 +2049,13 @@ _LOCUS_DIVISIONS_BY_REFERENCE_SHA256 = {
         "c6cf55d2388585dd2fb8dcf2cb565bbbb386f7def8"
         "a32b710516886c18f0fc40"
     ),
+    # V4.2 combined bake. Restated here rather than imported from the builder ON
+    # PURPOSE: this check exists to catch a builder that wrote the wrong pair, and
+    # sharing the table would make it compare the builder against itself.
+    "16135648f133b1a130509fc37d81279edf917bc91126b3c09b359f61dca2816e": (
+        "bbe2fc46d73858e0e7596a1412a3301f396be425f2"
+        "e01daec56555d9f4bfe853"
+    ),
 }
 
 

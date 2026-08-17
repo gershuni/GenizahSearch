@@ -171,9 +171,24 @@ REFERENCE_CORPUS_V4_SHA256 = (
 LOCUS_DIVISIONS_V4_SHA256 = (
     "c6cf55d2388585dd2fb8dcf2cb565bbbb386f7def8a32b710516886c18f0fc40"
 )
+# V4.2 combined bake (REF5 + REF6 appended in ONE matcher run). The V4.1 stage
+# hash is deliberately absent: no public asset is built at that stage, so
+# registering it would approve a pair nothing produces.
+REFERENCE_CORPUS_V4_2_SHA256 = (
+    "16135648f133b1a130509fc37d81279edf917bc91126b3c09b359f61dca2816e"
+)
+LOCUS_DIVISIONS_V4_2_SHA256 = (
+    "bbe2fc46d73858e0e7596a1412a3301f396be425f2e01daec56555d9f4bfe853"
+)
+# The APPROVED (reference corpus, divisions artifact) pairs. A divisions DB built
+# against a different reference stream indexes different `w_start`/`w_end`, so
+# every citation resolved across the two is unsound -- hence a closed map rather
+# than a supplied argument. `ingest_locus_divisions` independently re-checks the
+# artifact's own `coverage.json` corpus pin, so a wrong pair has to defeat both.
 LOCUS_DIVISIONS_BY_REFERENCE_SHA256 = {
     REFERENCE_CORPUS_V2_SHA256: LOCUS_DIVISIONS_SHA256,
     REFERENCE_CORPUS_V4_SHA256: LOCUS_DIVISIONS_V4_SHA256,
+    REFERENCE_CORPUS_V4_2_SHA256: LOCUS_DIVISIONS_V4_2_SHA256,
 }
 LOCUS_FAMILIES = frozenset({"sefaria", "ja", "msource_header", "msource_daf"})
 LOCUS_STATUSES = ("resolved", "whole_work", "unavailable")
