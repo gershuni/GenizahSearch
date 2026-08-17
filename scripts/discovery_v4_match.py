@@ -572,8 +572,15 @@ def build_release_contract_v2(
 def run_match(args: argparse.Namespace) -> dict:
     report = validate_inputs(args)
     run_id = compute_run_id(report, page_batch=args.page_batch, tag=args.tag)
-    pin_run_identity(report["db"], args.tag, run_id)
+    # ORDER IS LOAD-BEARING: the seed pin HASHES the DB file, every other pin
+    # WRITES to it. Pinning the seed second would hash a file the run-identity
+    # write had already changed, so a fresh research DB could never establish a
+    # seed at all -- and the claim could not be corrected afterwards either,
+    # because run_id is derived FROM the claimed seed hash, so a re-hash
+    # computes a different run_id and trips the write-once identity guard
+    # instead. Seed first, then identity, then geometry.
     pin_source_db_seed(report["db"], args.tag, args.source_db_sha256)
+    pin_run_identity(report["db"], args.tag, run_id)
     pin_batch_geometry(report["db"], args.tag, args.page_batch)
     pilot = Path(report["pilot"])
     env = os.environ.copy()

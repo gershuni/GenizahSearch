@@ -15,11 +15,13 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+import types
 from pathlib import Path
 
 import pytest
 
 import scripts.discovery_v4_match as v4match
+from scripts.discovery_v4_common import sha256_file
 from scripts.discovery_track1_contract import (
     CONTRACT_V2_SCHEMA_VERSION,
     load_cohort_registry,
@@ -409,3 +411,72 @@ def test_release_contract_v2_propagates_unknown_namespace_in_matches(tmp_path):
                 registry=registry,
                 registry_path=registry_path,
             )
+
+
+def test_run_match_establishes_the_seed_on_a_fresh_research_db(tmp_path, monkeypatch):
+    """A fresh research DB must survive its own first ``run``.
+
+    ``pin_run_identity`` WRITES a gen2_meta row; ``pin_source_db_seed`` HASHES
+    the file. Their ORDER therefore decides whether a first run is possible at
+    all -- pinning the identity first changes the very bytes the seed hash
+    pins, and the operator cannot simply re-hash and retry, because run_id is
+    derived FROM the claimed seed hash: a corrected claim computes a different
+    run_id and trips the write-once identity guard instead. The two guards are
+    individually correct and were individually tested; only their composition
+    in ``run_match`` is observable here, which is why this test drives
+    ``run_match`` rather than the pins.
+    """
+    db = _empty_db(tmp_path)
+    seed = sha256_file(db)
+    report = _report(
+        db=str(db),
+        source_db_seed_sha256=seed,
+        reference=str(tmp_path / "ref.pkl"),
+        masks=str(tmp_path / "masks.json"),
+        pilot=str(tmp_path / "pilot.py"),
+    )
+    monkeypatch.setattr(v4match, "validate_inputs", lambda args: report)
+    monkeypatch.setattr(
+        v4match.subprocess, "run", lambda *a, **k: types.SimpleNamespace(returncode=0)
+    )
+    monkeypatch.setattr(
+        v4match,
+        "inspect_stage",
+        lambda args, report=None: _status(complete=True, done_batch=333),
+    )
+    monkeypatch.setattr(v4match, "record_batch_ledger", lambda *a, **k: None)
+    args = argparse.Namespace(
+        db=str(db),
+        tag="fresh",
+        page_batch=2_000,
+        source_db_sha256=seed,
+        probe_root=str(tmp_path),
+    )
+
+    status = v4match.run_match(args)
+
+    assert status["complete"] is True
+    with sqlite3.connect(db) as conn:
+        stored = dict(conn.execute("SELECT key, value FROM gen2_meta"))
+    assert stored[f"discovery_v4_source_db_seed_sha256_fresh_{v4match.GENERATION}"] == seed
+    assert v4match.run_identity_key("fresh") in stored
+
+
+def test_run_match_still_refuses_a_seed_claim_that_never_matched(tmp_path, monkeypatch):
+    """Ordering the pins correctly must not soften the seed guard itself."""
+    db = _empty_db(tmp_path)
+    report = _report(db=str(db), source_db_seed_sha256="9" * 64, pilot=str(tmp_path / "p.py"))
+    monkeypatch.setattr(v4match, "validate_inputs", lambda args: report)
+    monkeypatch.setattr(
+        v4match.subprocess, "run", lambda *a, **k: types.SimpleNamespace(returncode=0)
+    )
+    args = argparse.Namespace(
+        db=str(db),
+        tag="fresh",
+        page_batch=2_000,
+        source_db_sha256="9" * 64,
+        probe_root=str(tmp_path),
+    )
+
+    with pytest.raises(ValueError, match="source research DB seed"):
+        v4match.run_match(args)
