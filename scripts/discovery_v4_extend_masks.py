@@ -29,7 +29,27 @@ except ModuleNotFoundError:  # direct invocation
     )
 
 
-CANONICAL_CATEGORIES = {"Bible", "Mishnah", "Tosefta", "Bavli", "Yerushalmi"}
+#: Works whose text, when quoted inside an edited work, is blanked there so a
+#: fragment of the QUOTED text is never credited to the QUOTING work.
+#:
+#: "Liturgy" joined the set on 2026-08-17 (owner ruling
+#: liturgy-is-a-masking-authority). Without it a prayer-book compendium acts as
+#: a proxy for generic liturgy: מחזור ויטרי earned 6,869 live matches across
+#: 6,227 manuscripts with ~84% of them in its order-of-prayer divisions, and it
+#: SHADOWED 6,948 rows -- more than it earned -- including 220 belonging to the
+#: purpose-built Amidah reference. The corpus already carries 13 dedicated
+#: `Liturgy` references, so this is attribution capture, not a coverage gap.
+#:
+#: NOT in the set, and the same class of shared known text: `Targum` (42
+#: works). Raised with the owner, deliberately not ruled on yet.
+CANONICAL_CATEGORIES = {"Bible", "Mishnah", "Tosefta", "Bavli", "Yerushalmi", "Liturgy"}
+
+#: Which category set produced a mask artifact. Recorded in the report because
+#: the policy is COHORT-SCOPED: references appended before the liturgy ruling
+#: carry v1 masks and are not comparable with v2 ones, so a consumer must be
+#: able to tell which policy a mask set was computed under rather than assume
+#: one corpus-wide answer.
+MASK_POLICY_VERSION = "canonical-mask-policy-v2-liturgy"
 
 
 def run(args: argparse.Namespace) -> dict:
@@ -62,6 +82,20 @@ def run(args: argparse.Namespace) -> dict:
         raise ValueError(
             "reference append set is missing or contains an id outside "
             f"{args.reference_namespace}"
+        )
+    # A masking authority must never be masked against itself or its peers: it
+    # would match itself end to end and come out ~100% blank, i.e. removed from
+    # matching altogether. The append sets so far carry no canonical-category
+    # work, so this is a guard against a future append quietly self-erasing.
+    self_masking = sorted(
+        str(work.get("id"))
+        for work in appended
+        if work.get("cat") in CANONICAL_CATEGORIES
+    )
+    if self_masking:
+        raise ValueError(
+            "appended reference is itself a masking authority and would be "
+            f"masked against its own category: {self_masking[:4]}"
         )
     canonical = [work for work in v4 if work.get("cat") in CANONICAL_CATEGORIES]
     index = build_ref_index(canonical)
@@ -105,6 +139,9 @@ def run(args: argparse.Namespace) -> dict:
         "v4_reference_sha256": sha256_file(v4_reference),
         "base_masks_sha256": sha256_file(base_masks_path),
         "output_masks_sha256": sha256_file(output_path),
+        "mask_policy_version": MASK_POLICY_VERSION,
+        "mask_policy_categories": sorted(CANONICAL_CATEGORIES),
+        "canonical_authority_count": len(canonical),
         "appended_reference_count": len(appended),
         "new_masked_reference_count": len(new_masks),
         "new_masked_letters": sum(
