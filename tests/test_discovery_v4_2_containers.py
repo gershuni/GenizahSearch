@@ -37,9 +37,19 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 V4_MAP = SCRIPTS / "discovery_v4_sources.json"
 V4_1_MAP = SCRIPTS / "discovery_v4_1_sources.json"
 V4_2_MAP = SCRIPTS / "discovery_v4_2_sources.json"
-PROBE = (
-    Path(__file__).resolve().parents[1]
-    / "discovery_builds/discovery_v4/probe_v42/mishneh_torah_container_probe.json"
+#: The Mishneh Torah container children as the live Sefaria probe returned them.
+#:
+#: TRACKED, and read from `tests/fixtures/` rather than from the probe itself.
+#: The probe lives under `discovery_builds/`, which is gitignored (.gitignore:265),
+#: so on a fresh CI checkout it does not exist -- the ubuntu job died with
+#: FileNotFoundError and fail-fast cancelled the windows job with it. Skipping when
+#: the probe is absent was rejected: that makes the pin vacuously green on the only
+#: machine that runs it, which is worse than red. The fixture is a verbatim extract
+#: of the probe (regenerate with `_tmp/extract_mt_probe_fixture.py`), never derived
+#: from the source map it exists to check.
+PROBE_CHILDREN = (
+    Path(__file__).resolve().parent
+    / "fixtures" / "mishneh_torah_container_probe_children.json"
 )
 
 
@@ -489,12 +499,8 @@ def test_v4_2_map_has_exactly_fifteen_containers_and_88_children():
 
 
 def test_v4_2_map_children_are_copied_verbatim_from_the_probe():
-    probe = json.loads(PROBE.read_text(encoding="utf-8"))
-    books = probe["mishneh_torah"]["books"]
-    probe_refs_by_work = {
-        book["private_work_id"]: [child["source_ref"] for child in book["children"]]
-        for book in books
-    }
+    probe_refs_by_work = json.loads(
+        PROBE_CHILDREN.read_text(encoding="utf-8"))["children_by_private_work_id"]
     config = load_source_config(V4_2_MAP)
     map_refs_by_work = {
         source["mappings"][0]["target_work_id"]: [

@@ -1,0 +1,127 @@
+{
+ "_what": "The Mishneh Torah container children, copied VERBATIM out of the live Sefaria ToC probe. This is the pin test_v4_2_map_children_are_copied_verbatim_from_the_probe compares scripts/discovery_v4_2_sources.json against.",
+ "_why_this_file_exists": "The test used to read the probe directly from discovery_builds/, which is gitignored (.gitignore:265) and therefore absent on a fresh CI checkout -- so the ubuntu job died with FileNotFoundError and took the fail-fast windows job with it. Skipping when the probe is missing was rejected: it would make the pin vacuously green on the only machine that runs it. Extracting the 3.9 KB the assertion actually consumes keeps the pin real and tracked.",
+ "_source_probe": "discovery_builds/discovery_v4/probe_v42/mishneh_torah_container_probe.json",
+ "_source_probe_sha256": "ef440ddc9a46af56c5511c2272a43cfbf97ae7bbb47970e29bf299556fe5e13d",
+ "_regenerate": "python _tmp/extract_mt_probe_fixture.py  (re-run only when the probe itself is re-run against Sefaria)",
+ "children_by_private_work_id": {
+  "w000174": [
+   "Mishneh Torah, Transmission of the Oral Law",
+   "Mishneh Torah, Positive Mitzvot",
+   "Mishneh Torah, Negative Mitzvot",
+   "Mishneh Torah, Overview of Mishneh Torah Contents"
+  ],
+  "w000175": [
+   "Mishneh Torah, Foundations of the Torah",
+   "Mishneh Torah, Human Dispositions",
+   "Mishneh Torah, Torah Study",
+   "Mishneh Torah, Foreign Worship and Customs of the Nations",
+   "Mishneh Torah, Repentance"
+  ],
+  "w000176": [
+   "Mishneh Torah, Reading the Shema",
+   "Mishneh Torah, Prayer and the Priestly Blessing",
+   "Mishneh Torah, Tefillin, Mezuzah and the Torah Scroll",
+   "Mishneh Torah, Fringes",
+   "Mishneh Torah, Blessings",
+   "Mishneh Torah, Circumcision",
+   "Mishneh Torah, The Order of Prayer"
+  ],
+  "w000177": [
+   "Mishneh Torah, Sabbath",
+   "Mishneh Torah, Eruvin",
+   "Mishneh Torah, Rest on the Tenth of Tishrei",
+   "Mishneh Torah, Rest on a Holiday",
+   "Mishneh Torah, Leavened and Unleavened Bread",
+   "Mishneh Torah, Shofar, Sukkah and Lulav",
+   "Mishneh Torah, Sheqel Dues",
+   "Mishneh Torah, Sanctification of the New Month",
+   "Mishneh Torah, Fasts",
+   "Mishneh Torah, Scroll of Esther and Hanukkah"
+  ],
+  "w000178": [
+   "Mishneh Torah, Marriage",
+   "Mishneh Torah, Divorce",
+   "Mishneh Torah, Levirate Marriage and Release",
+   "Mishneh Torah, Virgin Maiden",
+   "Mishneh Torah, Woman Suspected of Infidelity"
+  ],
+  "w000179": [
+   "Mishneh Torah, Forbidden Intercourse",
+   "Mishneh Torah, Forbidden Foods",
+   "Mishneh Torah, Ritual Slaughter"
+  ],
+  "w000180": [
+   "Mishneh Torah, Oaths",
+   "Mishneh Torah, Vows",
+   "Mishneh Torah, Nazariteship",
+   "Mishneh Torah, Appraisals and Devoted Property"
+  ],
+  "w000181": [
+   "Mishneh Torah, Diverse Species",
+   "Mishneh Torah, Gifts to the Poor",
+   "Mishneh Torah, Heave Offerings",
+   "Mishneh Torah, Tithes",
+   "Mishneh Torah, Second Tithes and Fourth Year's Fruit",
+   "Mishneh Torah, First Fruits and other Gifts to Priests Outside the Sanctuary",
+   "Mishneh Torah, Sabbatical Year and the Jubilee"
+  ],
+  "w000182": [
+   "Mishneh Torah, The Chosen Temple",
+   "Mishneh Torah, Vessels of the Sanctuary and Those Who Serve Therein",
+   "Mishneh Torah, Admission into the Sanctuary",
+   "Mishneh Torah, Things Forbidden on the Altar",
+   "Mishneh Torah, Sacrificial Procedure",
+   "Mishneh Torah, Daily Offerings and Additional Offerings",
+   "Mishneh Torah, Sacrifices Rendered Unfit",
+   "Mishneh Torah, Service on the Day of Atonement",
+   "Mishneh Torah, Trespass"
+  ],
+  "w000183": [
+   "Mishneh Torah, Paschal Offering",
+   "Mishneh Torah, Festival Offering",
+   "Mishneh Torah, Firstlings",
+   "Mishneh Torah, Offerings for Unintentional Transgressions",
+   "Mishneh Torah, Offerings for Those with Incomplete Atonement",
+   "Mishneh Torah, Substitution"
+  ],
+  "w000184": [
+   "Mishneh Torah, Defilement by a Corpse",
+   "Mishneh Torah, Red Heifer",
+   "Mishneh Torah, Defilement by Leprosy",
+   "Mishneh Torah, Those Who Defile Bed or Seat",
+   "Mishneh Torah, Other Sources of Defilement",
+   "Mishneh Torah, Defilement of Foods",
+   "Mishneh Torah, Vessels",
+   "Mishneh Torah, Immersion Pools"
+  ],
+  "w000185": [
+   "Mishneh Torah, Damages to Property",
+   "Mishneh Torah, Theft",
+   "Mishneh Torah, Robbery and Lost Property",
+   "Mishneh Torah, One Who Injures a Person or Property",
+   "Mishneh Torah, Murderer and the Preservation of Life"
+  ],
+  "w000186": [
+   "Mishneh Torah, Sales",
+   "Mishneh Torah, Ownerless Property and Gifts",
+   "Mishneh Torah, Neighbors",
+   "Mishneh Torah, Agents and Partners",
+   "Mishneh Torah, Slaves"
+  ],
+  "w000187": [
+   "Mishneh Torah, Hiring",
+   "Mishneh Torah, Borrowing and Deposit",
+   "Mishneh Torah, Creditor and Debtor",
+   "Mishneh Torah, Plaintiff and Defendant",
+   "Mishneh Torah, Inheritances"
+  ],
+  "w000188": [
+   "Mishneh Torah, The Sanhedrin and the Penalties within Their Jurisdiction",
+   "Mishneh Torah, Testimony",
+   "Mishneh Torah, Rebels",
+   "Mishneh Torah, Mourning",
+   "Mishneh Torah, Kings and Wars"
+  ]
+ }
+}
