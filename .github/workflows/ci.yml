@@ -7,6 +7,13 @@ on:
 
 jobs:
   lint-and-docs:
+    # Bounded so a hung runner fails in minutes instead of burning GitHub's
+    # 6-hour default. Added 2026-08-18 after a random ubuntu job stalled ~6h on
+    # `apt-get` while the identical step succeeded in two sibling jobs of the
+    # same run -- infrastructure, not this repo, but with no bound it made a
+    # green build indistinguishable from a hung one for a whole working day.
+    # Values are ~3x the observed p100 (slowest measured: tests/windows 21 min).
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -18,6 +25,7 @@ jobs:
       - run: python scripts/check_docs.py
 
   tests:
+    timeout-minutes: 60
     needs: lint-and-docs
     env:
       # PyQt6 tests (e.g. desktop-telemetry consent dialogs) construct a real
@@ -83,6 +91,7 @@ jobs:
   # fabricated needle and needs no secret, so a red run here means exactly one
   # thing: this environment has no pattern set.
   render-smoke-tests:
+    timeout-minutes: 40
     needs: lint-and-docs
     strategy:
       matrix:
@@ -163,6 +172,7 @@ jobs:
   # "fix" a red run here by unsetting that variable -- a gate that can silently
   # not run is worse than no gate, because it is trusted anyway.
   findings-browser-check:
+    timeout-minutes: 20
     needs: lint-and-docs
     runs-on: ubuntu-latest
     env:
@@ -233,6 +243,7 @@ jobs:
           fi
 
   gui-tests:
+    timeout-minutes: 20
     needs: lint-and-docs
     env:
       # Same headless-Qt requirement as the `tests` job: these tests construct a
@@ -263,6 +274,7 @@ jobs:
       - run: pytest tests/ -m gui
 
   slow-tests:
+    timeout-minutes: 30
     needs: lint-and-docs
     runs-on: ubuntu-latest
     steps:
@@ -282,6 +294,7 @@ jobs:
       - run: pytest -m slow tests/
 
   atlas-bake-tests:
+    timeout-minutes: 20
     needs: lint-and-docs
     runs-on: ubuntu-latest
     steps:
