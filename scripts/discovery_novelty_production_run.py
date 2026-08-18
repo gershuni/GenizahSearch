@@ -177,6 +177,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                    help="HARD ceiling in USD on real cumulative spend. Required -- there is no "
                         "default, so an unbounded run cannot happen by omission.")
     p.add_argument("--limit", type=int, default=None, help="smoke only: cap residual candidates")
+    p.add_argument("--max-workers", type=int, default=1,
+                   help="concurrent provider calls (default 1 = serial). Batch SIZE and "
+                        "composition are unchanged, so verdicts are unaffected; the cost "
+                        "ceiling reserves the worst billed batch cost for every request in "
+                        "flight, and the checkpoint is still written on one thread.")
     p.add_argument("--work-witnesses", default=None,
                    help="emit_work_witnesses.py output -- M-source's recorded "
                         "witnesses. Required unless --allow-no-witnesses.")
@@ -249,6 +254,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "batch_prompt_sha256": BATCH_PROMPT_SHA256,
                 "single_prompt_sha256": PROMPT_SHA256,
                 "batch_size": args.batch_size,
+                # Recorded because it is the one knob that changes HOW the run
+                # was executed without changing what was asked -- a reader
+                # comparing two verdict files should be able to see that the
+                # difference was throughput, not framing.
+                "max_workers": args.max_workers,
                 "cost_ceiling_usd": args.cost_ceiling,
                 "residual_size": len(residual),
                 # discovery-v3 (Codex blocker 3): the fingerprint CONTRACT, so a
@@ -294,6 +304,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             batch_size=args.batch_size,
             cost_probe=cost_probe,
             cost_ceiling_usd=args.cost_ceiling,
+            max_workers=args.max_workers,
             single_model_call=single_call,
             progress=log,
         )

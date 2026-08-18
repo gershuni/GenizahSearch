@@ -448,6 +448,10 @@ def run_model_arm_batched(
     single_model_call: Optional[Callable[[NoveltyCandidate], Optional[Mapping[str, Any]]]] = None,
     max_batch_attempts: int = 3,
     progress: Optional[Callable[[str], None]] = None,
+    # 2026-08-18. >1 dispatches this many provider calls concurrently. DEFAULT 1,
+    # which takes the original serial path verbatim -- no executor is created, so
+    # a run that does not ask for concurrency cannot be changed by this argument.
+    max_workers: int = 1,
 ) -> Dict[str, Dict[str, Optional[str]]]:
     """Batched counterpart to `run_model_arm` (owner ruling O), judging
     `batch_size` candidates per provider call instead of one.
@@ -522,50 +526,75 @@ def run_model_arm_batched(
         )
 
     checkpoint_fh = open(checkpoint_path, "a", encoding="utf-8") if checkpoint_path else None
-    try:
-        for start in range(0, len(pending), batch_size):
-            chunk = pending[start:start + batch_size]
-
-            if cost_ceiling_usd is not None and cost_probe is not None:
-                spent = cost_probe()
-                if spent >= cost_ceiling_usd:
-                    raise CostCeilingExceeded(
-                        f"real spend ${spent:.4f} reached the ${cost_ceiling_usd:.2f} ceiling "
-                        f"with {len(pending) - start} candidates still pending; checkpoint is "
-                        "intact and the run resumes from here once a higher ceiling is authorized"
-                    )
-
-            resolved_chunk: Optional[Dict[int, Dict[str, Optional[str]]]] = None
-            last_error: Optional[BaseException] = None
-            for attempt in range(1, max_batch_attempts + 1):
-                try:
-                    raw = batch_model_call(chunk)
-                    resolved_chunk = resolve_batch_model_output(raw, len(chunk))
-                    break
-                except BatchResponseInvalid as exc:
-                    last_error = exc
-                    if progress is not None:
-                        progress(f"batch at offset {start} unaligned (attempt {attempt}): {exc}")
-
-            if resolved_chunk is None:
-                if single_model_call is None:
-                    if progress is not None:
-                        progress(
-                            f"batch at offset {start} left UNRESOLVED after {max_batch_attempts} "
-                            f"attempts ({last_error}); it is not checkpointed and will be retried"
-                        )
-                    continue
+    def _resolve_chunk(chunk, start):
+        """The NETWORK half: call the provider, retry an unaligned reply, degrade
+        to the single-case contract. Pure with respect to `results` and the
+        checkpoint, which is what makes it safe to run in a worker."""
+        resolved_chunk = None
+        last_error = None
+        for attempt in range(1, max_batch_attempts + 1):
+            try:
+                raw = batch_model_call(chunk)
+                resolved_chunk = resolve_batch_model_output(raw, len(chunk))
+                break
+            except BatchResponseInvalid as exc:
+                last_error = exc
+                if progress is not None:
+                    progress(f"batch at offset {start} unaligned (attempt {attempt}): {exc}")
+        if resolved_chunk is None:
+            if single_model_call is None:
                 if progress is not None:
                     progress(
-                        f"batch at offset {start} degrading to the single-case contract "
-                        f"after {max_batch_attempts} unaligned replies"
+                        f"batch at offset {start} left UNRESOLVED after {max_batch_attempts} "
+                        f"attempts ({last_error}); it is not checkpointed and will be retried"
                     )
-                resolved_chunk = {
-                    i + 1: resolve_model_output(single_model_call(c))
-                    for i, c in enumerate(chunk)
-                }
+                return None
+            if progress is not None:
+                progress(
+                    f"batch at offset {start} degrading to the single-case contract "
+                    f"after {max_batch_attempts} unaligned replies"
+                )
+            resolved_chunk = {
+                i + 1: resolve_model_output(single_model_call(c))
+                for i, c in enumerate(chunk)
+            }
+        return resolved_chunk
 
-            for i, candidate in enumerate(chunk):
+    chunks = [
+        (start, pending[start:start + batch_size])
+        for start in range(0, len(pending), batch_size)
+    ]
+    # Worst per-batch cost actually BILLED so far. The concurrent ceiling check
+    # reserves this much for every request in flight; while it is None nothing is
+    # dispatched in parallel, so the reserve is never guessed.
+    worst_batch_cost = [0.0]
+    last_spend = [cost_probe() if cost_probe is not None else 0.0]
+
+    def _check_ceiling(remaining: int, inflight: int) -> None:
+        if cost_ceiling_usd is None or cost_probe is None:
+            return
+        spent = cost_probe()
+        observed = spent - last_spend[0]
+        if observed > worst_batch_cost[0]:
+            worst_batch_cost[0] = observed
+        last_spend[0] = spent
+        reserve = worst_batch_cost[0] * inflight
+        if spent + reserve >= cost_ceiling_usd:
+            raise CostCeilingExceeded(
+                f"real spend ${spent:.4f}"
+                + (f" plus ${reserve:.4f} reserved for {inflight} request(s) in flight"
+                   if inflight else "")
+                + f" reached the ${cost_ceiling_usd:.2f} ceiling "
+                f"with {remaining} candidates still pending; checkpoint is "
+                "intact and the run resumes from here once a higher ceiling is authorized"
+            )
+
+    def _absorb(start, chunk, resolved_chunk) -> None:
+        """The BOOKKEEPING half, always on the main thread: no lock is needed and
+        a partial or interleaved checkpoint line cannot occur."""
+        if resolved_chunk is None:
+            return
+        for i, candidate in enumerate(chunk):
                 key = _candidate_key(candidate.sys_id, candidate.ref_work_id)
                 resolved = dict(resolved_chunk[i + 1])
                 # The fingerprint of the inputs THIS answer came from, recorded
@@ -588,8 +617,33 @@ def run_model_arm_batched(
                         )
                         + "\n"
                     )
-            if checkpoint_fh is not None:
-                checkpoint_fh.flush()
+        if checkpoint_fh is not None:
+            checkpoint_fh.flush()
+
+    try:
+        if max_workers <= 1:
+            for start, chunk in chunks:
+                _check_ceiling(len(pending) - start, inflight=0)
+                _absorb(start, chunk, _resolve_chunk(chunk, start))
+        else:
+            import concurrent.futures as _cf
+            pos = 0
+            with _cf.ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures = {}
+                while pos < len(chunks) or futures:
+                    # Dispatch while the ceiling still admits another request,
+                    # counting the ones already outstanding.
+                    while pos < len(chunks) and len(futures) < max_workers:
+                        if futures and worst_batch_cost[0] <= 0.0:
+                            break   # nothing billed yet: stay serial
+                        _check_ceiling(len(chunks) - pos, inflight=len(futures))
+                        start, chunk = chunks[pos]
+                        futures[pool.submit(_resolve_chunk, chunk, start)] = (start, chunk)
+                        pos += 1
+                    done, _ = _cf.wait(list(futures), return_when=_cf.FIRST_COMPLETED)
+                    for fut in done:
+                        start, chunk = futures.pop(fut)
+                        _absorb(start, chunk, fut.result())
     finally:
         if checkpoint_fh is not None:
             checkpoint_fh.close()

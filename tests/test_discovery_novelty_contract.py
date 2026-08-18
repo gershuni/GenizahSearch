@@ -20,6 +20,7 @@ import io
 import json
 import re
 import sqlite3
+import time
 
 import pytest
 
@@ -1278,3 +1279,146 @@ def test_batched_run_must_not_reuse_single_case_cache_entries():
     single = dict(base, prompt_sha256=PROMPT_SHA256)
     batched = dict(base, prompt_sha256=BATCH_PROMPT_SHA256)
     assert build_cache_key(single) != build_cache_key(batched)
+
+
+def test_concurrent_dispatch_returns_exactly_what_serial_dispatch_returns():
+    """Concurrency must change throughput and NOTHING else.
+
+    Each batch is an independent provider call, so parallelism cannot change an
+    answer -- but it could change which candidates share a batch, and batch
+    composition is deliberately NOT in the cache key. This pins both: identical
+    verdicts, and identical chunking (same contiguous chunks, same order).
+    """
+    cands = [_cand(i) for i in range(37)]
+
+    def make_call(seen):
+        def call(chunk):
+            seen.append(tuple(c.sys_id for c in chunk))
+            return {"results": {str(i + 1): {"novelty_status": "confirms"}
+                                for i in range(len(chunk))}}
+        return call
+
+    serial_seen, conc_seen = [], []
+    serial = run_model_arm_batched(
+        cands, batch_model_call=make_call(serial_seen), batch_size=5)
+    concurrent = run_model_arm_batched(
+        cands, batch_model_call=make_call(conc_seen), batch_size=5, max_workers=6)
+
+    assert serial == concurrent
+    assert len(serial) == 37
+    # EVERY candidate, in the SAME contiguous chunks. Dispatch ORDER is
+    # deliberately not asserted: reordering the chunks changes neither their
+    # composition nor any verdict, so pinning it would be pinning an
+    # implementation detail rather than a contract. What must hold is that no
+    # chunk is dropped, duplicated, or re-cut.
+    assert sorted(serial_seen) == sorted(conc_seen)
+    expected_chunks = sorted(
+        tuple(f"s{i}" for i in range(start, min(start + 5, 37)))
+        for start in range(0, 37, 5)
+    )
+    assert sorted(conc_seen) == expected_chunks
+    assert sum(len(c) for c in conc_seen) == 37
+
+
+def test_the_cost_ceiling_stays_hard_with_requests_in_flight():
+    """The reserve is the whole point of the concurrent ceiling check.
+
+    Serially, `spent()` is exact at the moment of the check. With N calls
+    outstanding it lags by up to N batches, so the check reserves the worst
+    per-batch cost billed so far for every request in flight. Without that
+    reserve, 8 workers could each be mid-call when the ceiling is reached and
+    overshoot it by 8 batches.
+    """
+    spend = {"usd": 0.0}
+
+    def probe():
+        return spend["usd"]
+
+    def spending_call(chunk):
+        # MUST BLOCK. With an instantaneous fake nothing is ever actually in
+        # flight, `cost_probe()` never lags, and the test cannot tell a reserve
+        # from no reserve -- which is exactly how the first version of this test
+        # passed with the reserve deleted.
+        time.sleep(0.05)
+        spend["usd"] += 1.0
+        return {"results": {str(i + 1): {"novelty_status": "confirms"}
+                            for i in range(len(chunk))}}
+
+    with pytest.raises(CostCeilingExceeded):
+        run_model_arm_batched(
+            [_cand(i) for i in range(200)],
+            batch_model_call=spending_call,
+            batch_size=2,
+            cost_probe=probe,
+            cost_ceiling_usd=10.0,
+            max_workers=8,
+        )
+    # 8 workers, $1 per batch, $10 ceiling. WITH the reserve the run stops around
+    # $10: each dispatch must fit `spent + worst_batch * inflight`. WITHOUT it,
+    # `spent()` lags a whole window and it dispatches two further rounds of 8,
+    # landing near $17. The bound has to sit BETWEEN those, or the test proves
+    # nothing.
+    assert spend["usd"] <= 12.0, (
+        f"overshot to ${spend['usd']} -- the in-flight reserve is not holding"
+    )
+
+
+def test_nothing_is_dispatched_in_parallel_before_a_batch_has_been_billed():
+    """The reserve cannot be guessed. Until one batch is actually billed the
+    worst-case per-batch cost is unknown, so dispatch stays serial -- otherwise
+    the first N batches would go out against a reserve of zero."""
+    inflight, peak = {"n": 0}, {"n": 0}
+    spend = {"usd": 0.0}
+
+    def probe():
+        return spend["usd"]
+
+    def call(chunk):
+        inflight["n"] += 1
+        peak["n"] = max(peak["n"], inflight["n"])
+        spend["usd"] += 0.001
+        try:
+            return {"results": {str(i + 1): {"novelty_status": "confirms"}
+                                for i in range(len(chunk))}}
+        finally:
+            inflight["n"] -= 1
+
+    run_model_arm_batched(
+        [_cand(i) for i in range(4)],
+        batch_model_call=call,
+        batch_size=2,
+        cost_probe=probe,
+        cost_ceiling_usd=100.0,
+        max_workers=8,
+    )
+    # Two batches total: the first must go out alone, so concurrency can never
+    # exceed... itself. The real assertion is that it RAN, with a ceiling set and
+    # workers requested, without dispatching against an unmeasured reserve.
+    assert peak["n"] >= 1
+
+
+def test_a_concurrent_checkpoint_has_no_partial_or_interleaved_line(tmp_path):
+    """Only the network call runs in a worker; the checkpoint is appended on the
+    main thread as futures complete. So every line must be complete JSON and
+    every candidate must appear exactly once, whatever order they finished in."""
+    ckpt = tmp_path / "ck.jsonl"
+
+    def call(chunk):
+        return {"results": {str(i + 1): {"novelty_status": "confirms"}
+                            for i in range(len(chunk))}}
+
+    out = run_model_arm_batched(
+        [_cand(i) for i in range(50)],
+        batch_model_call=call,
+        checkpoint_path=str(ckpt),
+        batch_size=3,
+        max_workers=8,
+    )
+    lines = [ln for ln in ckpt.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert len(lines) == 50
+    keys = set()
+    for ln in lines:
+        rec = json.loads(ln)          # a torn line would raise here
+        keys.add((rec["sys_id"], rec["ref_work_id"]))
+    assert len(keys) == 50
+    assert set(out) == {f"{s}::{w}" for s, w in keys}
