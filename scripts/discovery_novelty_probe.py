@@ -68,6 +68,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 import sys
 import time
 from collections import defaultdict
@@ -282,6 +283,45 @@ def load_work_attributions(
     return out
 
 
+#: A work's own original-language title, used as an ALIAS of the claim.
+#:
+#: Judeo-Arabic works carry both a Hebrew scholarly title and the title the work
+#: uses for itself (`locus_edition.title_original`, 80 of 85 such works). Genizah
+#: catalogues routinely name these works by the ARABIC title, so a claim carrying
+#: only the Hebrew one can look unidentified when the aid names it plainly.
+#: Measured on the v42lit asset: supplying it resolves 387 candidates to a
+#: mechanical `confirms` that would otherwise have gone to the model.
+#:
+#: MINIMUM SPECIFICITY. `_claim_appears_in_text` is a containment match with no
+#: author check, so a one-word alias would confirm against any aid that happens
+#: to use the word. Two of the 80 are bare genre words -- מסאיל ("questions") and
+#: רסאלה ("epistle") -- accounting for 20 of the 387. They are excluded: the
+#: remaining 367 rest on multi-word titles. This is a floor, not a judgement about
+#: those two works.
+_MIN_ALIAS_WORDS = 2
+
+
+def load_work_title_aliases(conn: sqlite3.Connection) -> Dict[str, Tuple[str, ...]]:
+    """`{work_id: (alias, ...)}` from `locus_edition.title_original`.
+
+    Empty when the asset predates the locus tables -- absence is a real state
+    here, never an error: the alias only ever ADDS a spelling to look for.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT work_id, title_original FROM locus_edition "
+            "WHERE title_original IS NOT NULL AND title_original <> ''"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+    out: Dict[str, Tuple[str, ...]] = {}
+    for work_id, original in rows:
+        if len(str(original).split()) < _MIN_ALIAS_WORDS:
+            continue
+        out[work_id] = (str(original),)
+    return out
+
+
 def build_all_candidates(
     asset_path: str,
     libraries_csv: str,
@@ -306,6 +346,7 @@ def build_all_candidates(
     """
     conn = connect_readonly(asset_path)
     works = load_works(conn)
+    title_aliases = load_work_title_aliases(conn)
     claims = load_claims(conn)
 
     best = _best_claim_all_types(claims)
@@ -349,6 +390,7 @@ def build_all_candidates(
                 ref_work_id=wid,
                 claimed_title=w.get("neutral_title") or "",
                 claimed_author=w.get("author"),
+                claimed_aliases=title_aliases.get(wid, ()),
                 catalogue_text=cat_text or None,
                 bibliography_rows=bib_rows,
                 pgp_description=pgp.get("description") or None,
@@ -595,7 +637,7 @@ def build_instrument_rows(
                 **_row_evidence(c),
                 "reason": (
                     "MODEL PATH: this row failed the mechanical heuristic name-match (it is part of "
-                    "the residual) and the pinned gate (gemini-3.6-flash, effort=low) classified it "
+                    "the residual) and the pinned gate (gemini-3.7-flash, effort=low) classified it "
                     f"`{CANDIDATE_STATUS}` -- it WOULD ship as a 'Candidate for new finds' in production."
                 ),
             }
@@ -809,7 +851,7 @@ def write_instrument_xlsx(rows: List[Dict[str, Any]], path: str, meta: Dict[str,
     ws2.append([])
     _note(
         f"MODEL PATH ({meta['n_model_path']} rows): a real residual candidate (failed the mechanical "
-        "heuristic name-match) that the real pinned gate (gemini-3.6-flash, effort=low, called for "
+        "heuristic name-match) that the real pinned gate (gemini-3.7-flash, effort=low, called for "
         "real via OpenRouter) classified `fills_gap`."
     )
     _note(

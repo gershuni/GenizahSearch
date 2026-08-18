@@ -66,6 +66,7 @@ from scripts.discovery_novelty_funnel import (  # noqa: E402
     run_model_arm_batched,
 )
 from scripts.discovery_novelty_probe import (
+    _MIN_ALIAS_WORDS as _ALIAS_MIN_WORDS,  # noqa: E402
     load_work_witnesses,  # noqa: E402
     DEFAULT_ASSET,
     DEFAULT_FGP_DB,
@@ -259,6 +260,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "input_normalization_sha256": INPUT_NORMALIZATION_SHA256,
                 "input_fingerprint_fields": list(CACHE_KEY_FIELDS),
                 "heuristically_resolved": len(resolved),
+                # 2026-08-18. The FUNNEL's configuration, recorded here rather
+                # than in the per-pair cache key. An alias changes which pairs the
+                # mechanical pass resolves, so two verdict sets produced with and
+                # without it are not interchangeable -- but it never changes the
+                # question the MODEL is asked (`render_case` does not send it),
+                # and the heuristic re-runs before any cache lookup, so putting it
+                # in the cache key would invalidate every entry for a reason the
+                # model never saw. The manifest is where a reader can tell which
+                # funnel produced a verdict file.
+                "claim_alias_source": "locus_edition.title_original",
+                "claim_alias_min_words": _ALIAS_MIN_WORDS,
+                "candidates_carrying_an_alias": sum(
+                    1 for c in candidates if c.claimed_aliases),
                 "started": time.strftime("%Y-%m-%dT%H:%M:%S"),
             },
             fh,

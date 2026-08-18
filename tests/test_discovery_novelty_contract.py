@@ -15,9 +15,11 @@ sections E, E', F, G, H, I, J.
 
 from __future__ import annotations
 
+import dataclasses
 import io
 import json
 import re
+import sqlite3
 
 import pytest
 
@@ -49,6 +51,7 @@ from shared.discovery_novelty import (
     resolve_model_output,
 )
 
+from scripts.discovery_novelty_probe import load_work_title_aliases
 from scripts.discovery_novelty_funnel import (
     NoOwnerProvenanceLabels,
     LabelHashMismatch,
@@ -389,8 +392,95 @@ def test_pinned_constants_are_string_literals():
 
 
 def test_pinned_model_matches_owner_ruling_b():
-    assert LLM_MODEL == "gemini-3.6-flash"
+    """The model is a PINNED owner decision, not a tuning knob.
+
+    Ruling B originally pinned `gemini-3.6-flash`. Superseded 2026-08-18 by owner
+    approval of `gemini-3.7-flash`, on evidence rather than price: the owner
+    adjudicated all 127 disagreements from a fixed-cohort 2x2 pilot BLIND (models
+    hidden, A/B order shuffled per case) and preferred 3.7 on 64 vs 27, i.e. 70%
+    of 91 decided cases, two-sided p<0.001 -- and 71% (p=0.007) restricted to the
+    `fills_gap`/divergence shades the owner called the ones that matter. 3.7 is
+    also 0.48x the cost, measured on identical batches, but that was not the
+    argument. Reasoning effort is unchanged.
+
+    This assertion exists so the pin cannot move again without someone editing
+    this line and saying why.
+    """
+    assert LLM_MODEL == "gemini-3.7-flash"
+    assert LLM_MODEL_VERSION == "gemini-3.7-flash"
     assert LLM_REASONING_EFFORT == "low"
+
+
+def test_a_works_own_original_title_is_supplied_as_a_claim_alias(tmp_path):
+    """A Judeo-Arabic work names itself in Arabic, and the aids often follow it.
+
+    Measured on the v42lit asset: supplying `locus_edition.title_original` as an
+    alias resolves 367 candidates to a mechanical `confirms` that would otherwise
+    have been sent to the model -- the catalogue named the work plainly, just not
+    under the Hebrew title we claim it by.
+    """
+    db = tmp_path / "a.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute("CREATE TABLE locus_edition (work_id TEXT, title_original TEXT)")
+    conn.executemany(
+        "INSERT INTO locus_edition VALUES (?,?)",
+        [("w1", "כתאב אלהדאיה אלי פראיץ אלקלוב"), ("w2", ""), ("w3", None)],
+    )
+    conn.commit()
+    aliases = load_work_title_aliases(conn)
+    conn.close()
+    assert aliases == {"w1": ("כתאב אלהדאיה אלי פראיץ אלקלוב",)}, (
+        "a blank or NULL original title must yield no alias -- an empty alias "
+        "would match every text under containment"
+    )
+
+
+def test_a_one_word_alias_is_refused_as_too_generic(tmp_path):
+    """`_claim_appears_in_text` is containment with no author check, so a bare
+    genre word confirms against any aid that happens to use it. Two of the 80
+    real Arabic titles are exactly that -- מסאיל ("questions") and רסאלה
+    ("epistle") -- and they accounted for 20 of the 387 matches before this floor.
+    """
+    db = tmp_path / "b.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute("CREATE TABLE locus_edition (work_id TEXT, title_original TEXT)")
+    conn.executemany(
+        "INSERT INTO locus_edition VALUES (?,?)",
+        [("generic", "מסאיל"), ("specific", "עשר מסאיל")],
+    )
+    conn.commit()
+    aliases = load_work_title_aliases(conn)
+    conn.close()
+    assert "generic" not in aliases, "a one-word alias must be refused"
+    assert aliases["specific"] == ("עשר מסאיל",)
+
+
+def test_the_alias_reaches_the_heuristic_and_resolves_a_catalogue_match():
+    """The end the alias exists for: an aid naming the work in Arabic while we
+    claim it in Hebrew must resolve to `confirms` WITHOUT a model call."""
+    without = NoveltyCandidate(
+        sys_id="s1", ref_work_id="w1",
+        claimed_title="תורת חובות הלבבות",
+        catalogue_text="כתאב אלהדאיה אלי פראיץ אלקלוב, קטע",
+    )
+    assert not run_heuristic_pass(without).resolved, (
+        "precondition: without the alias this pair goes to the model"
+    )
+    with_alias = dataclasses.replace(
+        without, claimed_aliases=("כתאב אלהדאיה אלי פראיץ אלקלוב",))
+    result = run_heuristic_pass(with_alias)
+    assert result.resolved and result.novelty_status == "confirms"
+    assert result.reason == "mechanical_name_match:catalogue"
+
+
+def test_an_asset_without_the_locus_tables_yields_no_aliases(tmp_path):
+    """Absence is a real state: a pre-locus asset simply has no alias to add."""
+    db = tmp_path / "c.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute("CREATE TABLE unrelated (x TEXT)")
+    conn.commit()
+    assert load_work_title_aliases(conn) == {}
+    conn.close()
 
 
 def test_grep_finds_each_pinned_constant_in_the_module_source():

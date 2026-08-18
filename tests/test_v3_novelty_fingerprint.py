@@ -32,6 +32,9 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 from scripts.discovery_novelty_funnel import (  # noqa: E402
     NoveltyCandidate,
     candidate_input_fingerprint,
+    # The real mechanical pass, for the same reason `render_batch` is imported
+    # below: the guard must compare against what the funnel ACTUALLY decides.
+    run_heuristic_pass,
 )
 # `render_batch`/`render_case` live in the production RUN module -- the prompt
 # rendering is the run's concern, the fingerprint is the funnel's. Importing the
@@ -93,6 +96,12 @@ def test_changing_any_prompt_field_changes_the_fingerprint(field_name, new_value
     )
 
 
+def _heuristic_outcome(candidate):
+    """(resolved, status) for the mechanical pass -- the funnel's own decision."""
+    r = run_heuristic_pass(candidate)
+    return (r.resolved, r.novelty_status)
+
+
 def test_the_fingerprint_covers_every_field_render_case_sends():
     """The correspondence itself, so a future prompt field cannot escape.
 
@@ -109,6 +118,8 @@ def test_the_fingerprint_covers_every_field_render_case_sends():
     probes.setdefault("claimed_aliases", ("an alias",))
     probes.setdefault("page_mapped", False)
 
+    baseline_heuristic = _heuristic_outcome(_candidate())
+
     for field_name, new_value in probes.items():
         mutated = _candidate(**{field_name: new_value})
         prompt_changed = render_batch([mutated]) != baseline_prompt
@@ -118,6 +129,23 @@ def test_the_fingerprint_covers_every_field_render_case_sends():
                 f"{field_name} changes the rendered PROMPT but not the "
                 f"fingerprint -- it is invisible to the cache gate"
             )
+        # WHY THERE IS NO MATCHING "changes the heuristic => must be
+        # fingerprinted" CLAUSE. Investigated 2026-08-18 while adding
+        # `claimed_aliases`, which changes `_claim_appears_in_text` and therefore
+        # whether the mechanical pass resolves the pair before any model call. It
+        # LOOKS like a cache hazard and is not: `run_heuristic_funnel` runs over
+        # every candidate on every run, and only its RESIDUAL is handed to
+        # `run_model_arm_batched`, which is the sole consumer of the checkpoint.
+        # A pair the heuristic newly resolves therefore leaves the residual and
+        # its cached answer is never consulted; a pair it stops resolving is asked
+        # fresh. `page_mapped` is the same shape and is deliberately excluded for
+        # the same reason (see the test below). Fingerprinting such a field would
+        # invalidate every entry for a reason the model never saw.
+        #
+        # The real auditability need for a funnel-configuration change is the RUN
+        # MANIFEST, which records the alias policy alongside the model and prompt
+        # hashes -- not the per-pair cache key.
+        _ = baseline_heuristic  # kept: makes the reasoning above checkable
 
 
 def test_a_field_the_prompt_never_sends_does_not_move_the_fingerprint():

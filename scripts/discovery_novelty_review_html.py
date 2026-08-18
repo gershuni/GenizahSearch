@@ -606,7 +606,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             r["page_html"] = highlight(texts.get(r["page"], ""), *r["span"])
 
     meta = {"total": len(verdicts), "sampled": n_sampled,
-            "model": "gemini-3.6-flash (effort=low, batch 10)", "cost": args.cost}
+            "model": "gemini-3.7-flash (effort=low, batch 10)", "cost": args.cost}
     with open(args.out, "w", encoding="utf-8") as fh:
         fh.write(render(staged, counts, meta))
     print(f"wrote {args.out} ({os.path.getsize(args.out)/1024:.0f} KB)")

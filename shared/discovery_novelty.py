@@ -476,8 +476,12 @@ def normalize_free_text(text: Optional[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# The pinned LLM contract (ruling B: gemini-3.6-flash, reasoning effort
-# low -- "do NOT downgrade the model"). Every constant below is a
+# The pinned LLM contract. Ruling B pinned gemini-3.6-flash at reasoning effort
+# low -- "do NOT downgrade the model". The MODEL was superseded 2026-08-18 by
+# owner approval of gemini-3.7-flash, on a blinded audit of all 127 pilot
+# disagreements (3.7 preferred 64 vs 27, p<0.001; see
+# tests/test_discovery_novelty_contract.py::test_pinned_model_matches_owner_ruling_b).
+# The effort and the do-not-downgrade posture are unchanged. Every constant below is a
 # module-level string literal a CI grep can see. PROMPT_SHA256 and
 # INPUT_NORMALIZATION_SHA256 are DERIVED from the literal prompt/spec text
 # in this module at import time -- they can never silently drift out of
@@ -485,13 +489,13 @@ def normalize_free_text(text: Optional[str]) -> str:
 # digest here.
 # ---------------------------------------------------------------------------
 
-LLM_MODEL: str = "gemini-3.6-flash"
+LLM_MODEL: str = "gemini-3.7-flash"
 # Kept as its own literal (not merely an alias of LLM_MODEL) so a run
 # record independently confirms BOTH the provider's `model` field AND its
 # `model_version`-shaped field (whatever the provider calls it) against
 # this pin -- catching a silent provider-side default-snapshot upgrade
 # that LLM_MODEL alone would not detect.
-LLM_MODEL_VERSION: str = "gemini-3.6-flash"
+LLM_MODEL_VERSION: str = "gemini-3.7-flash"
 LLM_REASONING_EFFORT: str = "low"
 
 ABSTENTION_TOKEN: str = "abstain"
