@@ -357,6 +357,31 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             f"(e.g. {sorted(overlap)[:3]}) -- the two arms must partition the candidate set. "
             "Refusing to write an output whose provenance is ambiguous."
         )
+    # THE OUTPUT COVERS THE CURRENT CANDIDATE SET, AND ONLY IT.
+    #
+    # `verdicts` is loaded from the CHECKPOINT, which accumulates across runs, so it
+    # holds answers for pairs that were candidates when they were asked and are not
+    # any more. The V4.2 bake made 377 of them: works minted without composition
+    # dates were candidates, the owner then dated them, and D-17 correctly demoted
+    # the pairs out of candidacy. Those answers are not wrong -- they are about
+    # questions no longer being asked -- and carrying them into the output is what
+    # the release build then reports as `verdict_entries_fingerprint_mismatch`,
+    # because the fingerprint file (emitted from the CURRENT asset) has no entry to
+    # compare them against.
+    #
+    # They are dropped here rather than tolerated, for two reasons. The coverage
+    # assertion below compares COUNTS, so a surplus of stale keys can mask a deficit
+    # of real ones -- 331 stale entries and 331 missing answers pass a `!=` check
+    # that exists to catch exactly the second thing. And every drop is COUNTED and
+    # logged: a filter that silently discarded model answers somebody paid for would
+    # be the more expensive version of the same mistake.
+    candidate_keys = set(heuristic_fingerprints)
+    superseded = sorted(set(verdicts) - candidate_keys)
+    if superseded:
+        log(f"dropping {len(superseded):,} checkpointed answer(s) for pairs that are "
+            f"no longer candidates (e.g. {superseded[:2]})")
+        verdicts = {key: value for key, value in verdicts.items()
+                    if key in candidate_keys}
     merged.update(verdicts)
 
     covered, expected = len(merged), len(candidates)

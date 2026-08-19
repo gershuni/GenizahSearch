@@ -712,6 +712,21 @@ def test_parse_seftja_dates_real_frozen_artifact_smoke_parse():
 
     Count history, each an owner-ratified append rather than drift:
       407 -> 410  135-07, three Tannaitic works at year 150.
+      416 -> 430  2026-08-19, fourteen composition years for the works the
+                  `source_label` fix restored to the bake. Owner ruling "1250 is
+                  good for the Sefer Mitzvot Gadol. apply as proposed": four inherit
+                  a year already in this table for the SAME work or author (the
+                  three remaining Tur sections at 1343, Torat ha-Adam at 1270) and
+                  ten are scholarly dates with no precedent -- SeMaG 1250, which
+                  accounted for 543 of the 694 unresolved pairs on its own; the
+                  three parts of the Zohar at 1290 (the REDACTION, not the ascribed
+                  Tannaitic setting); Yad Ramah 1210; Ran al ha-Rif and Drashot
+                  ha-Ran at 1350, deliberately NOT the Nissim Gaon = 1057 entry
+                  already here, which is a different person some 300 years earlier;
+                  Baal ha-Turim on the Torah 1300, deliberately NOT its author's own
+                  Tur year, because D-17 compares works; Rashbam on the Torah 1150;
+                  and Seder Tannaim ve-Amoraim 887, which the text dates itself.
+                  None is pre-500, so the classical-strata count is unchanged.
       410 -> 416  2026-08-18, six REF6 composition years the V4.2 release D-17
                   gate required (pair coverage was 0.9240 against a 0.99 floor
                   because 27 newly minted public-first works had no dated sibling
@@ -729,7 +744,7 @@ def test_parse_seftja_dates_real_frozen_artifact_smoke_parse():
     if not p.exists():
         pytest.skip("frozen seftja artifact not present on this box")
     out = sidecar_build.parse_seftja_dates(str(p))
-    assert len(out) == 416
+    assert len(out) == 430
     assert all(type(v) is int for v in out.values())
     assert min(out.values()) == 150
     assert max(out.values()) == 1470

@@ -10,7 +10,8 @@ from scripts import build_discovery_sidecar as builder
 REF_SHA = "a" * 64
 
 
-def _source_fixture(tmp_path, *, bad_ordinal=False, invariant_problems=None):
+def _source_fixture(tmp_path, *, bad_ordinal=False, invariant_problems=None,
+                    labels=("פרק א", "פרק ב")):
     path = tmp_path / "work_divisions.db"
     conn = sqlite3.connect(path)
     conn.executescript(
@@ -39,8 +40,8 @@ def _source_fixture(tmp_path, *, bad_ordinal=False, invariant_problems=None):
     conn.executemany(
         "INSERT INTO locus_unit VALUES (?, ?, ?, ?, ?, ?)",
         [
-            ("raw:kept", 0, 0, "ch:1", "פרק א", 1),
-            ("raw:kept", second_ord, 100, "ch:2", "פרק ב", 2),
+            ("raw:kept", 0, 0, "ch:1", labels[0], 1),
+            ("raw:kept", second_ord, 100, "ch:2", labels[1], 2),
             ("raw:unmapped", 0, 0, "ch:1", "פרק א", 1),
             ("raw:unmapped", 1, 100, "ch:2", "פרק ב", 2),
         ],
@@ -60,12 +61,13 @@ def _source_fixture(tmp_path, *, bad_ordinal=False, invariant_problems=None):
     return path, digest
 
 
-def _asset():
+def _asset(title="Synthetic Work"):
     conn = sqlite3.connect(":memory:")
     builder.create_schema(conn)
     conn.execute(
         "INSERT INTO works VALUES "
-        "('w000001','w000001','Synthetic Work',NULL,NULL,'sefaria','public')"
+        "(?,'w000001',?,NULL,NULL,'sefaria','public')",
+        ("w000001", title),
     )
     return conn
 
@@ -121,6 +123,49 @@ def test_locus_import_rejects_noncontiguous_ordinals(tmp_path):
             _asset(), str(path), {"raw:kept": "w000001"}, REF_SHA,
             expected_sha256=digest,
         )
+
+
+def test_locus_import_strips_the_work_title_from_the_stored_address(tmp_path):
+    """The ASSET carries the reader's address, not the input's qualified one.
+
+    The divisions database stores `ארבעה טורים, יורה דעה א` because
+    `discovery_v4_build_reference.py::_locus_label` prepends the work title to every
+    chapter address. Every surface that renders a locus renders the work title
+    beside it, so shipping that verbatim gives a reader the title twice -- and once
+    per rendered run (owner report, 2026-08-19).
+
+    Asserted on `locus_unit.label_he` in the ASSET rather than on the pure helper's
+    return value, because the helper passing while the ingestion ignored it is
+    exactly the failure this is here to catch: the column is ALSO published directly
+    by `get_locus_units_enveloped` for the findings page's address filter.
+    """
+    path, digest = _source_fixture(
+        tmp_path, labels=("ארבעה טורים, יורה דעה א", "ארבעה טורים, יורה דעה ב"))
+    conn = _asset(title="ארבעה טורים, יורה דעה")
+    builder.ingest_locus_divisions(
+        conn, str(path), {"raw:kept": "w000001"}, REF_SHA, expected_sha256=digest
+    )
+    assert conn.execute(
+        "SELECT label_he FROM locus_unit ORDER BY unit_ord"
+    ).fetchall() == [("א",), ("ב",)]
+
+
+def test_locus_import_stores_an_unqualified_address_verbatim(tmp_path):
+    """The strip is a no-op on the 571 works whose addresses were already clean.
+
+    The partner of the test above, and the reason it is not enough on its own: an
+    ingestion that blanket-shortened every label would satisfy the first assertion
+    while destroying `פרק א` for the M-source and REF2 works, which are most of the
+    corpus.
+    """
+    path, digest = _source_fixture(tmp_path)
+    conn = _asset(title="רד\"ק על ישעיה")
+    builder.ingest_locus_divisions(
+        conn, str(path), {"raw:kept": "w000001"}, REF_SHA, expected_sha256=digest
+    )
+    assert conn.execute(
+        "SELECT label_he FROM locus_unit ORDER BY unit_ord"
+    ).fetchall() == [("פרק א",), ("פרק ב",)]
 
 
 def test_materializer_resolves_claim_and_identification_and_fails_closed_out_of_range():

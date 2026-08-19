@@ -82,6 +82,7 @@ from shared.discovery_locus import (  # noqa: E402
     render_locus_label,
     select_locus_work,
     select_primary_alignment,
+    strip_work_title_prefix,
     units_for_span,
 )
 # Deliberate re-export: this error was raised from this module before the parsing moved
@@ -2231,7 +2232,11 @@ def ingest_locus_divisions(
     if any(row[0] not in source_refs for row in edition_rows):
         raise ValueError("locus edition rows contain an unknown reference key")
 
-    asset_work_ids = {row[0] for row in conn.execute("SELECT work_id FROM works")}
+    asset_titles = {
+        row[0]: row[1]
+        for row in conn.execute("SELECT work_id, neutral_title FROM works")
+    }
+    asset_work_ids = set(asset_titles)
     mapped: Dict[str, str] = {}
     for raw_ref in source_refs:
         opaque = crosswalk.get(raw_ref)
@@ -2249,11 +2254,36 @@ def ingest_locus_divisions(
         "VALUES (?, ?, ?, ?, ?)",
         [(mapped[row[0]], *row[1:]) for row in work_rows if row[0] in mapped],
     )
+    # THE STORED LABEL IS QUALIFIED; THE SERVED ONE IS NOT.
+    # `discovery_v4_build_reference.py::_locus_label` composes each chapter/section
+    # address as `f"{locus_title} {numeral}"`, so the input carries
+    # `ארבעה טורים, חושן משפט קנג` -- correct for the divisions database, which is a
+    # hash-pinned input whose labels are how a reviewer traces a unit back to the
+    # publisher's own reference. It is wrong for a READER, because every surface
+    # showing a locus shows the work title right beside it, so the title arrives
+    # twice and once per rendered run (owner report, 2026-08-19). The title comes off
+    # HERE, on the way into the asset, which is also why `locus_unit.label_he` is
+    # fixed for the findings page's address filter -- `get_locus_units_enveloped`
+    # publishes that column directly -- and not only for the composed `locus_label`.
+    unit_rows_by_ref: Dict[str, List[Tuple]] = {}
+    for row in unit_rows:
+        if row[0] in mapped:
+            unit_rows_by_ref.setdefault(row[0], []).append(row)
+    locus_unit_values = []
+    for raw_ref, rows in unit_rows_by_ref.items():
+        work_id = mapped[raw_ref]
+        # Ordered by (locus_ref_id, unit_ord) in the SELECT above, so index i here is
+        # unit_ord i -- the same alignment `_locus_table_index` re-asserts on read.
+        served = strip_work_title_prefix(
+            [row[4] for row in rows], asset_titles.get(work_id))
+        for row, label in zip(rows, served):
+            locus_unit_values.append(
+                (work_id, row[1], row[2], row[3], label, row[5]))
     conn.executemany(
         "INSERT INTO locus_unit "
         "(work_id, unit_ord, start_offset, part_key, label_he, citation_pos) "
         "VALUES (?, ?, ?, ?, ?, ?)",
-        [(mapped[row[0]], *row[1:]) for row in unit_rows if row[0] in mapped],
+        locus_unit_values,
     )
     conn.executemany(
         "INSERT INTO locus_edition "
