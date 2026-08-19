@@ -401,6 +401,13 @@ def make_mark_tolerant_pattern(escaped_term: str) -> str:
 # rank. k=60 is the Cormack/Clarke (2009) default.
 RRF_K = 60
 
+# Progress PHASES, reported through the optional `phase_callback` that
+# execute_search / _query_local_index accept.  Deliberately a small closed
+# vocabulary of stable codes, NOT free text: the UI maps the code to a
+# translated label and switches the progress bar to indeterminate, so it must
+# never have to pattern-match on prose.  A phase is not a status message.
+PHASE_LOCAL_SEARCH = 'local_search'
+
 
 class SearchEngine:
     """Run searches, build queries, and provide browsing utilities."""
@@ -760,7 +767,8 @@ class SearchEngine:
         return LabEngine.lab_index_normalize(content)
 
     def _query_local_index(self, query_str: str, mode: str, gap: int,
-                           limit=None, regex=None, tantivy_query_str=None):
+                           limit=None, regex=None, tantivy_query_str=None,
+                           progress_callback=None, phase_callback=None):
         """Query the LOCAL side-index. Returns [] if local_searcher is None (D-37).
 
         MEDIUM-1 note: this uses a simplified parse_query (not the full Responsa
@@ -841,7 +849,28 @@ class SearchEngine:
             hits = res_obj.hits if hasattr(res_obj, "hits") else res_obj
             pattern_str = regex.pattern if regex is not None else ""
             results = []
-            for score, doc_address in hits:
+            # The LOCAL pass is a distinct phase, not more of the Genizah one: its
+            # hit counts are unrelated, so reporting them on the same numeric
+            # channel would rewind the bar. Announce the phase and let the UI go
+            # indeterminate; the ticks below are then only a cancel/pause carrier.
+            if phase_callback:
+                try:
+                    phase_callback(PHASE_LOCAL_SEARCH)
+                except (InterruptedError, KeyboardInterrupt):
+                    raise
+                except Exception:
+                    pass
+            _local_total = len(hits) if hasattr(hits, '__len__') else 0
+            for _i_loc, (score, doc_address) in enumerate(hits):
+                # Until now this loop had no callback at all, so a LOCAL or ALL
+                # scope search ignored Stop entirely.
+                if progress_callback and _i_loc % 5 == 0:
+                    try:
+                        progress_callback(_i_loc, _local_total)
+                    except (InterruptedError, KeyboardInterrupt):
+                        raise
+                    except Exception:
+                        pass  # progress is advisory; cancellation is not
                 doc = self.local_searcher.doc(doc_address)
                 hit = self._build_local_result_dict(
                     doc, score, regex=regex, pattern_str=pattern_str
@@ -852,6 +881,11 @@ class SearchEngine:
                     continue
                 results.append(hit)
             return results
+        except InterruptedError:
+            # MUST precede the broad handler: otherwise the cancel degrades into
+            # `return []`, silently dropping the LOCAL contribution AND eating the
+            # cancellation so the caller never learns the run was abandoned.
+            raise
         except Exception as e:
             LOGGER.warning("LOCAL index query failed: %r", e)
             return []
@@ -2174,65 +2208,74 @@ class SearchEngine:
         results = []
         total_ids = len(sys_ids)
 
-        for i, sid in enumerate(sys_ids):
-            if progress_callback and i % 5 == 0:
-                progress_callback(i, total_ids)
+        # Wrapped so a cancel returns what was gathered instead of nothing.
+        # This was the ONLY search loop without it: the raise escaped all the way
+        # to SearchThread's `except InterruptedError` -> results_signal.emit([]),
+        # so a stopped Title/Shelfmark search threw away every row it had, while
+        # every other mode returned partial results.
+        try:
+            for i, sid in enumerate(sys_ids):
+                if progress_callback and i % 5 == 0:
+                    progress_callback(i, total_ids)
 
-            # Try to get transcription text from Tantivy
-            text, head, src, uid = '', '', '', ''
-            if self.searcher:
-                text, head, src, uid = self._get_best_text_for_id(sid)
+                # Try to get transcription text from Tantivy
+                text, head, src, uid = '', '', '', ''
+                if self.searcher:
+                    text, head, src, uid = self._get_best_text_for_id(sid)
 
-            metadata_only = not text
+                metadata_only = not text
 
-            if metadata_only:
-                # Build display from csv_bank metadata (no Tantivy needed)
-                meta_info = self.meta_mgr.get_meta_for_id(sid)
-                if isinstance(meta_info, tuple):
-                    # get_meta_for_id returns (shelfmark, title) tuple
-                    shelfmark, title = meta_info
-                    meta_info = {'shelfmark': shelfmark, 'title': title}
-                display = {
-                    'shelfmark': meta_info.get('shelfmark', f'ID: {sid}'),
-                    'title': meta_info.get('title', ''),
-                    'img': '',
-                    'source': '',
-                    'id': sid,
-                    'library_code': meta_info.get('library_code', '') if isinstance(meta_info, dict) else '',
-                }
-                # For tuple returns, get library_code from csv_bank directly
-                if isinstance(meta_info, dict) and not display['library_code']:
-                    display['library_code'] = self.meta_mgr.get_library_for_id(sid)
-                elif not display['library_code']:
-                    display['library_code'] = self.meta_mgr.get_library_for_id(sid)
-                results.append({
-                    'display': display,
-                    'snippet': '',
-                    'full_text': '',
-                    'uid': '',
-                    'raw_header': '',
-                    'raw_file_hl': '',
-                    'highlight_pattern': None,
-                    'metadata_only': True,
-                })
-            else:
-                meta = self.meta_mgr.get_display_data(head, src or "V0.8")
-                snippet = text[:300] + "..." if len(text) > 300 else text
-                results.append({
-                    'display': meta,
-                    'snippet': snippet,
-                    'full_text': text,
-                    'uid': uid,
-                    'raw_header': head,
-                    'raw_file_hl': text,
-                    'highlight_pattern': None,
-                    'metadata_only': False,
-                })
+                if metadata_only:
+                    # Build display from csv_bank metadata (no Tantivy needed)
+                    meta_info = self.meta_mgr.get_meta_for_id(sid)
+                    if isinstance(meta_info, tuple):
+                        # get_meta_for_id returns (shelfmark, title) tuple
+                        shelfmark, title = meta_info
+                        meta_info = {'shelfmark': shelfmark, 'title': title}
+                    display = {
+                        'shelfmark': meta_info.get('shelfmark', f'ID: {sid}'),
+                        'title': meta_info.get('title', ''),
+                        'img': '',
+                        'source': '',
+                        'id': sid,
+                        'library_code': meta_info.get('library_code', '') if isinstance(meta_info, dict) else '',
+                    }
+                    # For tuple returns, get library_code from csv_bank directly
+                    if isinstance(meta_info, dict) and not display['library_code']:
+                        display['library_code'] = self.meta_mgr.get_library_for_id(sid)
+                    elif not display['library_code']:
+                        display['library_code'] = self.meta_mgr.get_library_for_id(sid)
+                    results.append({
+                        'display': display,
+                        'snippet': '',
+                        'full_text': '',
+                        'uid': '',
+                        'raw_header': '',
+                        'raw_file_hl': '',
+                        'highlight_pattern': None,
+                        'metadata_only': True,
+                    })
+                else:
+                    meta = self.meta_mgr.get_display_data(head, src or "V0.8")
+                    snippet = text[:300] + "..." if len(text) > 300 else text
+                    results.append({
+                        'display': meta,
+                        'snippet': snippet,
+                        'full_text': text,
+                        'uid': uid,
+                        'raw_header': head,
+                        'raw_file_hl': text,
+                        'highlight_pattern': None,
+                        'metadata_only': False,
+                    })
+
+        except InterruptedError:
+            pass  # cancelled mid-scan — fall through to the sort and return partials
 
         results.sort(key=lambda r: natural_sort_key(r.get('display', {}).get('shelfmark', '')))
         return results
 
-    def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None, corpus_scope: str = "all"):
+    def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None, corpus_scope: str = "all", phase_callback=None):
         search_started = time.perf_counter()
         # R2-#1: discard any stale per-thread downgrade signal from a prior
         # invocation (e.g., a prior request that crashed before consuming).
@@ -2274,6 +2317,8 @@ class SearchEngine:
                         return self._query_local_index(
                             query_str, mode, gap,
                             regex=_resp_regex, tantivy_query_str=_resp_q,
+                            progress_callback=progress_callback,
+                            phase_callback=phase_callback,
                         )
                 # Phase 96 D-F5: build regex here so LOCAL-only path also gets
                 # D-04.1 filter-out + highlight_pattern, same as the RRF merge path.
@@ -2282,7 +2327,16 @@ class SearchEngine:
                 else:
                     _local_terms = query_str.split()
                 _local_regex = self.build_regex_pattern(_local_terms, mode, gap)
-                return self._query_local_index(query_str, mode, gap, regex=_local_regex or None)
+                return self._query_local_index(
+                    query_str, mode, gap, regex=_local_regex or None,
+                    progress_callback=progress_callback,
+                    phase_callback=phase_callback,
+                )
+            except InterruptedError:
+                # Propagate so SearchThread takes its InterruptedError branch
+                # (no perf emit, correct telemetry) instead of reporting a normal
+                # empty result set for a run the user stopped.
+                raise
             except Exception as _le:
                 LOGGER.warning("LOCAL-only search failed: %r", _le)
                 return []
@@ -2700,9 +2754,21 @@ class SearchEngine:
                     local_hits = self._query_local_index(
                         query_str, mode, gap, regex=regex,
                         tantivy_query_str=_local_responsa_query,
+                        progress_callback=progress_callback,
+                        phase_callback=phase_callback,
                     )
                 else:
-                    local_hits = self._query_local_index(query_str, mode, gap, regex=regex)
+                    local_hits = self._query_local_index(
+                        query_str, mode, gap, regex=regex,
+                        progress_callback=progress_callback,
+                        phase_callback=phase_callback,
+                    )
+            except InterruptedError:
+                # Deliberately NOT a re-raise: the Genizah results already in
+                # `deduped` are real, so partial is the right semantics here. The
+                # explicit clause keeps a user cancel out of the "index query
+                # failed" warning log below.
+                local_hits = []
             except Exception as _e:
                 LOGGER.warning(
                     "LOCAL side-index query failed; main results unaffected: %r", _e
@@ -3102,7 +3168,19 @@ class SearchEngine:
                     # re-deriving query/regex per chunk.  The diacritic-folded
                     # local_query_str / compiled_regex_local were computed in the
                     # pre-pass above (SEED-006 M1 fold already applied).
+                    _total_scl = len(chunk_plans)
                     for _i_scl, _plan_scl in enumerate(chunk_plans):
+                        # Every chunk, no modulo: one chunk is a parse_query + a
+                        # 50-hit search + up to 50 materializations, far too coarse
+                        # to skip. Outside the per-chunk try below, whose broad
+                        # handler would swallow the cancel.
+                        if progress_callback:
+                            try:
+                                progress_callback(_i_scl, _total_scl)
+                            except (InterruptedError, KeyboardInterrupt):
+                                raise
+                            except Exception:
+                                pass  # progress is advisory; cancellation is not
                         _token_idx_scl = _plan_scl.token_idx
                         _chunk_scl = _plan_scl.chunk
                         _chunk_crossed_scl = _plan_scl.chunk_crossed_bounds
@@ -3203,6 +3281,11 @@ class SearchEngine:
                                         )
                         except Exception:
                             pass
+            except InterruptedError:
+                # MUST precede the broad handler AND must set the flag: otherwise
+                # the returned payload's 'partial' key reports False for a run the
+                # user cancelled — a lie, not just a missing detail.
+                was_cancelled = True
             except Exception as _scl_exc:
                 LAB_LOGGER.warning(
                     "search_composition_logic: LOCAL (regular-index) scan failed: %r", _scl_exc

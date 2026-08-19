@@ -1238,7 +1238,18 @@ class LabEngine:
                 if local_lab_index is not None and local_lab_searcher is not None:
                     # SEED-011 (125a): consume pre-built lab_chunk_plans — fingerprint
                     # prep is index-independent and was already computed above.
+                    _total_llb = len(lab_chunk_plans)
                     for _i, _plan in enumerate(lab_chunk_plans):
+                        # Every chunk (see the LOCAL post-pass in
+                        # search_composition_logic for why no modulo). Before the
+                        # None-skip so a run of weak chunks still yields checkpoints.
+                        if progress_callback:
+                            try:
+                                progress_callback(_i, _total_llb)
+                            except (InterruptedError, KeyboardInterrupt):
+                                raise
+                            except Exception:
+                                pass  # progress is advisory; cancellation is not
                         if _plan is None:
                             continue  # pre-pass marked this chunk as weak/too-short
                         _token_start_idx = _plan.token_start_idx
@@ -1328,6 +1339,10 @@ class LabEngine:
                                     "lab_composition_search: skipped LOCAL-LAB chunk-hit dedup entry: %r",
                                     _dedup_llb_exc,
                                 )
+            except InterruptedError:
+                # Precedes the broad handler and sets the flag, so the returned
+                # payload's 'partial' key stays truthful on a cancelled run.
+                was_interrupted = True
             except Exception as _local_lab_exc:
                 logging.getLogger(__name__).warning(
                     "lab_composition_search: LOCAL LAB scan failed: %r", _local_lab_exc,
