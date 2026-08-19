@@ -46,6 +46,7 @@ if _CORE_IMPORT_ERROR:
         sys.exit(1)
     else:
         raise _CORE_IMPORT_ERROR
+from shared.search_engine import PHASE_LOCAL_SEARCH
 from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, PuzzleMetaLoaderThread, FilterCountWorker, RefinementReplayThread
 from desktop.widgets import (
     ActionsHoverWidget, _format_add_to_list_label,
@@ -127,6 +128,96 @@ def space_scroll_action(current_column: int, checkbox_column: int, is_shift: boo
     if current_column == checkbox_column:
         return None
     return 'page_up' if is_shift else 'page_down'
+
+
+# ---------------------------------------------------------------------------
+# Pause/Resume: pure timing helpers + the per-operation UI context
+# ---------------------------------------------------------------------------
+
+def paused_seconds(paused_total: float, pause_started: float, mono_now: float) -> float:
+    """Seconds spent parked, INCLUDING a pause that is still in progress.
+
+    Including the in-progress term is what freezes the displayed elapsed time:
+    recomputing mid-pause adds the same amount to both sides of the subtraction
+    in effective_elapsed(), so the number it returns is mathematically constant
+    for as long as the worker stays parked.
+
+    Pure (no Qt, no side effects) so it can be tested without a QApplication.
+    """
+    total = paused_total or 0.0
+    if pause_started:
+        total += max(0.0, mono_now - pause_started)
+    return total
+
+
+def effective_elapsed(mono_now: float, mono_start: float, paused: float) -> float:
+    """Working seconds elapsed: monotonic span minus parked time, never negative.
+
+    Both arguments must come from time.monotonic(), NOT time.time(). An earlier
+    revision of this feature kept a wall-clock base and only measured the paused
+    term monotonically, which fixes nothing: `time.time() - start` jumps with any
+    NTP or DST correction, so a five-minute clock step would add five minutes to
+    the elapsed display and wreck the composition ETA derived from it. Pausing
+    invites exactly the long/overnight searches where that happens.
+    """
+    if not mono_start:
+        return 0.0
+    return max(0.0, (mono_now - mono_start) - (paused or 0.0))
+
+
+class _PauseCtx:
+    """Pause UI state for ONE operation (the search tab, or the composition tab).
+
+    The two tabs are independently runnable — separate threads, separate
+    is_searching / is_comp_running flags, no mutual exclusion — so a single set
+    of _pause_* attributes on the window would let a composition pause clobber a
+    live search pause. One context each, passed explicitly to every handler.
+    """
+
+    __slots__ = ('button', 'state', 'run_id', 'epoch', 'mono_start',
+                 'paused_total', 'pause_started', 'local_phase_active')
+
+    def __init__(self):
+        self.button = None
+        self.state = 'idle'          # idle | running | pausing | paused
+        self.run_id = 0              # identity of the worker being tracked
+        self.epoch = 0               # pause cycle within that run
+        self.mono_start = 0.0        # time.monotonic() at run start
+        self.paused_total = 0.0
+        self.pause_started = 0.0
+        self.local_phase_active = False
+
+    def reset_for_run(self, run_id: int, mono_start: float) -> None:
+        self.state = 'running'
+        self.run_id = run_id
+        self.epoch = 0
+        self.mono_start = mono_start
+        self.paused_total = 0.0
+        self.pause_started = 0.0
+        self.local_phase_active = False
+
+    def elapsed(self, mono_now: float) -> float:
+        """Working-time elapsed for this operation, excluding parked time."""
+        return effective_elapsed(
+            mono_now, self.mono_start,
+            paused_seconds(self.paused_total, self.pause_started, mono_now),
+        )
+
+    def accepts_ack(self, run_id: int, epoch: int) -> bool:
+        """Whether a queued pause acknowledgement belongs to the live pause.
+
+        All three conditions are load-bearing:
+          * run_id  — a worker's ack can be queued while a blocking stop keeps the
+            UI from processing it, and epoch numbering restarts each run, so
+            without this a stale ack could re-enter a later run with matching
+            numbers.
+          * epoch   — rejects an ack from an earlier pause cycle of THIS run
+            (pause -> resume -> pause, cycle 1's ack arriving during cycle 2).
+          * state   — rejects an ack that arrives after the user already resumed.
+        """
+        return (self.state == 'pausing'
+                and run_id == self.run_id
+                and epoch == self.epoch)
 
 
 # ---------------------------------------------------------------------------
@@ -1341,6 +1432,12 @@ class GenizahGUI(QMainWindow):
         self.group_thread = None
         self.is_searching = False
         self.is_comp_running = False
+        # Pause/Resume: one context per independently-runnable operation, plus a
+        # monotonic run counter stamped onto each worker so a queued pause
+        # acknowledgement from a stopped run can never repaint a later one.
+        self._run_seq = 0
+        self._pause_search = _PauseCtx()
+        self._pause_comp = _PauseCtx()
         self.last_browse_field = None
         self.current_browse_sid = None
         self.current_browse_p = None
@@ -4629,6 +4726,27 @@ class GenizahGUI(QMainWindow):
 
         row1.addWidget(self.btn_search)
 
+        # Pause/Resume. Deliberately NOT setCheckable: a checkable button flips its
+        # checked state on the click, before the worker has agreed to anything —
+        # which is exactly the "Pausing..." window this design has to be honest
+        # about. btn_lab_mode_toggle is checkable because it is a persistent
+        # preference; pause is transient worker state.
+        self.btn_search_pause = QPushButton(tr("Pause"))
+        self.btn_search_pause.clicked.connect(
+            lambda: self._on_pause_clicked(self._pause_search))
+        self.btn_search_pause.setFixedWidth(90)
+        # Keep the slot reserved while hidden, so starting a search cannot shift
+        # btn_search sideways under a cursor that is about to click Stop.
+        _sp = self.btn_search_pause.sizePolicy()
+        _sp.setRetainSizeWhenHidden(True)
+        self.btn_search_pause.setSizePolicy(_sp)
+        self._pause_search.button = self.btn_search_pause
+        self._apply_pause_state(self._pause_search, 'hidden')
+        # Appended AFTER btn_search, never inserted before it: line ~4888 does
+        # row1.insertWidget(row1.indexOf(self.btn_search), ...) and that lookup
+        # must keep resolving to the same widget.
+        row1.addWidget(self.btn_search_pause)
+
         # Phase 95 smoke-fix (item 2): pre-search corpus selector.
         # Determines which index(es) are queried: Genizah-only / Local-only / ALL.
         self.corpus_scope_combo = QComboBox()
@@ -5437,6 +5555,19 @@ class GenizahGUI(QMainWindow):
         cr.addWidget(self.btn_lab_mode_toggle_comp)
         cr.addWidget(self.chk_lab_deep_comp)
         cr.addWidget(self.btn_comp_run)
+
+        # Pause/Resume for the composition scan — same contract as the search tab.
+        self.btn_comp_pause = QPushButton(tr("Pause"))
+        self.btn_comp_pause.clicked.connect(
+            lambda: self._on_pause_clicked(self._pause_comp))
+        self.btn_comp_pause.setFixedWidth(90)
+        _cp = self.btn_comp_pause.sizePolicy()
+        _cp.setRetainSizeWhenHidden(True)
+        self.btn_comp_pause.setSizePolicy(_cp)
+        self._pause_comp.button = self.btn_comp_pause
+        self._apply_pause_state(self._pause_comp, 'hidden')
+        cr.addWidget(self.btn_comp_pause)
+
         cr.addWidget(self.btn_comp_recursive)
         cr.addWidget(self.btn_reset_comp)
 
@@ -16127,6 +16258,35 @@ class GenizahGUI(QMainWindow):
         self._comp_corpus_scope = combo.currentData() or 'genizah'
         self._save_session()
 
+    def _drain_previous_worker(self, attr, ctx):
+        """Refuse to rebind a worker slot while the old worker is still alive.
+
+        start_search / run_composition rebind self.search_thread / self.comp_thread
+        with no stop of the previous thread. The Search<->Stop toggle normally
+        makes that window ~zero, but a PAUSED worker lives indefinitely, and
+        dropping the last reference to a live QThread is a hard crash
+        ("QThread: Destroyed while thread is still running").
+
+        Returns True when the slot is safe to rebind.
+        """
+        prev = getattr(self, attr, None)
+        if prev is None or not prev.isRunning():
+            return True
+        try:
+            prev.request_cancel()
+        except Exception:
+            logger.warning("request_cancel() failed on previous worker", exc_info=True)
+        prev.wait(2000)
+        if prev.isRunning():
+            # Do NOT rebind: two live workers would emit into the same window.
+            logger.warning("previous %s still running; refusing to start a new run", attr)
+            self.status_label.setText(tr("Still stopping the previous search — try again in a moment."))
+            return False
+        if ctx is not None:
+            self._apply_pause_state(ctx, 'hidden')
+            ctx.state = 'idle'
+        return True
+
     def toggle_search(self):
         # PGP Tags mode — execute tag search instead of text search
         if self.mode_combo.currentIndex() == self.MODE_PGP_TAGS:
@@ -16218,6 +16378,12 @@ class GenizahGUI(QMainWindow):
             self._refinement_scope_sig = ''
             self._update_refinement_strip()
 
+        if not self._drain_previous_worker('search_thread', self._pause_search):
+            return
+        self._run_seq += 1
+        _run_id = self._run_seq
+        self._pause_search.reset_for_run(_run_id, time.monotonic())
+
         self.is_searching = True; self.btn_search.setText(tr("Stop")); self.btn_search.setStyleSheet("background-color: #c0392b; color: white;")
         self.search_within_btn.setVisible(False)  # Hide during search
         self.search_start_time = time.time()
@@ -16228,6 +16394,7 @@ class GenizahGUI(QMainWindow):
             self._search_elapsed_timer = QTimer(self)
             self._search_elapsed_timer.timeout.connect(self._update_search_elapsed)
         self._search_elapsed_timer.start(1000)
+        self._apply_pause_state(self._pause_search, 'pause')
 
         # Stop any previous metadata loading to prevent race conditions
         if self.meta_loader and self.meta_loader.isRunning():
@@ -16272,17 +16439,22 @@ class GenizahGUI(QMainWindow):
             _lab_corpus_scope = "genizah"
             if hasattr(self, 'corpus_scope_combo'):
                 _lab_corpus_scope = self.corpus_scope_combo.currentData() or "genizah"
-            self.search_thread = LabSearchThread(self.lab_engine, query, mode, gap, deep_scan=deep, scan_limit=limit, corpus_scope=_lab_corpus_scope)
+            self.search_thread = LabSearchThread(self.lab_engine, query, mode, gap, deep_scan=deep, scan_limit=limit, corpus_scope=_lab_corpus_scope, run_id=_run_id)
         else:
             text_position = self._text_position_from_index(self.text_position_combo.currentIndex())
             # Phase 95 smoke-fix (item 2): read corpus scope from pre-search dropdown.
             _corpus_scope = "genizah"
             if hasattr(self, 'corpus_scope_combo'):
                 _corpus_scope = self.corpus_scope_combo.currentData() or "genizah"
-            self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words, responsa_options=responsa_options, restrict_sys_ids=compute_effective_restrict(getattr(self, 'pre_search_restrict_sys_ids', None), self.refinement_restrict_sys_ids), text_position=text_position, corpus_scope=_corpus_scope)
+            self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words, responsa_options=responsa_options, restrict_sys_ids=compute_effective_restrict(getattr(self, 'pre_search_restrict_sys_ids', None), self.refinement_restrict_sys_ids), text_position=text_position, corpus_scope=_corpus_scope, run_id=_run_id)
 
         self.search_thread.results_signal.connect(self.on_search_finished)
         self.search_thread.progress_signal.connect(self._on_search_progress)
+        if hasattr(self.search_thread, 'pause_ack_signal'):
+            self.search_thread.pause_ack_signal.connect(
+                lambda rid, ep: self._on_pause_ack(self._pause_search, rid, ep))
+        if hasattr(self.search_thread, 'phase_signal'):
+            self.search_thread.phase_signal.connect(self._on_search_phase)
 
         if hasattr(self.search_thread, 'status_signal'):
              self.search_thread.status_signal.connect(self.status_label.setText)
@@ -16362,10 +16534,166 @@ class GenizahGUI(QMainWindow):
         except Exception:
             pass
 
+    # ------------------------------------------------------------------
+    # Pause / Resume
+    # ------------------------------------------------------------------
+
+    def _pause_worker_for(self, ctx):
+        """The live worker a pause context is tracking, or None."""
+        if ctx is getattr(self, '_pause_comp', None):
+            return getattr(self, 'comp_thread', None)
+        return getattr(self, 'search_thread', None)
+
+    def _apply_pause_state(self, ctx, state):
+        """Single owner of every Pause/Resume widget mutation.
+
+        state: 'hidden' | 'pause' | 'pausing' | 'resume'
+
+        Takes the context as an argument (rather than reading self.btn_*) so both
+        tabs share one implementation AND the method is callable against a plain
+        stub with no QApplication in tests.
+
+        tr() is called HERE, at swap time, not at construction: language switching
+        is restart-based, so a label captured when the button was built would be
+        stale for the rest of the session.
+        """
+        if ctx is None:
+            return
+        btn = getattr(ctx, 'button', None)
+        if btn is None:
+            return
+        if state == 'hidden':
+            btn.setVisible(False)
+            btn.setEnabled(True)
+            # Reset the label so a re-shown button never opens on "Resume".
+            btn.setText(tr("Pause"))
+            return
+        if state == 'pause':
+            btn.setText(tr("Pause"))
+            btn.setToolTip(tr("Pause — the search stops at the next checkpoint and keeps what it found"))
+            # The :disabled rule is NOT optional. Every button in this file sets a
+            # literal background-color, which overrides the disabled palette — without
+            # it the 'pausing' state renders as a full-strength, apparently-clickable
+            # orange button that ignores clicks.
+            btn.setStyleSheet(
+                "QPushButton { background-color: #e67e22; color: white; font-weight: bold; }"
+                "QPushButton:disabled { background-color: #9e9e9e; color: #e8e8e8; }"
+            )
+            btn.setEnabled(True)
+        elif state == 'pausing':
+            btn.setText(tr("Pausing..."))
+            btn.setToolTip(tr("Waiting for the search to reach a checkpoint..."))
+            btn.setEnabled(False)   # a second click has no meaning
+        elif state == 'resume':
+            btn.setText(tr("Resume"))
+            btn.setToolTip(tr("Resume the search from where it paused"))
+            btn.setStyleSheet(
+                "QPushButton { background-color: #27ae60; color: white; font-weight: bold; }"
+                "QPushButton:disabled { background-color: #9e9e9e; color: #e8e8e8; }"
+            )
+            btn.setEnabled(True)
+        btn.setVisible(True)
+
+    def _pause_elapsed_str(self, ctx):
+        elapsed = ctx.elapsed(time.monotonic())
+        return f"{int(elapsed // 60)}:{int(elapsed % 60):02d}"
+
+    def _paint_pause_status(self, ctx, label_key):
+        """Write the paused/pausing wording onto whichever surface owns this run."""
+        elapsed_str = self._pause_elapsed_str(ctx)
+        if ctx is getattr(self, '_pause_comp', None):
+            # Composition has no status label — the progress bar IS its status
+            # surface, exactly as the existing tr("Cancelling...") does.
+            if label_key == 'Paused':
+                self.comp_progress.setFormat(
+                    f"{elapsed_str} \u2014 {tr('Paused')} \u2014 "
+                    f"{self.comp_chunks_processed}/{self.comp_chunks_total} {tr('chunks')}"
+                )
+            else:
+                self.comp_progress.setFormat(tr(label_key))
+            return
+        self.search_progress.setFormat(f"{elapsed_str}  {tr(label_key)}")
+        self.status_label.setText(f"{tr(label_key)} {elapsed_str}")
+
+    def _on_pause_clicked(self, ctx):
+        """Pause <-> Resume. The click owns 'pausing'/'running'; only an accepted
+        acknowledgement from the worker may set 'paused'."""
+        worker = self._pause_worker_for(ctx)
+        if worker is None or not worker.isRunning():
+            return
+        if ctx.state == 'running':
+            ctx.epoch += 1
+            try:
+                worker.pause()
+            except Exception:
+                logger.warning("pause() failed on worker", exc_info=True)
+                ctx.epoch -= 1
+                return
+            ctx.state = 'pausing'
+            self._apply_pause_state(ctx, 'pausing')
+            # Ticker keeps running: the worker is still doing real work until it
+            # reaches a checkpoint, and that time counts.
+            self._paint_pause_status(ctx, 'Pausing...')
+        elif ctx.state == 'paused':
+            if ctx.pause_started:
+                ctx.paused_total += max(0.0, time.monotonic() - ctx.pause_started)
+                ctx.pause_started = 0.0
+            ctx.state = 'running'
+            try:
+                worker.resume()
+            except Exception:
+                logger.warning("resume() failed on worker", exc_info=True)
+            self._apply_pause_state(ctx, 'pause')
+            if ctx is getattr(self, '_pause_comp', None):
+                # Next on_comp_progress repaints the bar naturally.
+                self.comp_progress.setFormat(tr("Scanning chunks..."))
+            else:
+                self.search_progress.setFormat("%p%")
+                if hasattr(self, '_search_elapsed_timer'):
+                    self._search_elapsed_timer.start(1000)
+
+    def _on_pause_ack(self, ctx, run_id, epoch):
+        """Queued acknowledgement from a worker that has actually parked."""
+        if not ctx.accepts_ack(run_id, epoch):
+            return  # stale: wrong run, earlier pause cycle, or already resumed
+        ctx.state = 'paused'
+        # Start the pause clock at the ACK, not at the click: during "Pausing..."
+        # the worker is still doing real work toward the result, and with a coarse
+        # checkpoint that window is seconds, not milliseconds.
+        ctx.pause_started = time.monotonic()
+        self._apply_pause_state(ctx, 'resume')
+        self._paint_pause_status(ctx, 'Paused')
+        if ctx is not getattr(self, '_pause_comp', None):
+            if hasattr(self, '_search_elapsed_timer'):
+                self._search_elapsed_timer.stop()
+
+    def _on_search_phase(self, phase):
+        """A search entered a new phase whose progress is not comparable to the last.
+
+        Currently only the LOCAL (My Library) pass. Its hit counts are unrelated to
+        the Genizah loop's, so reporting them on the numeric channel would rewind
+        the bar; pinning at (total, total) instead would read as 100% complete with
+        a zero ETA while a long phase is still running. Go indeterminate and say
+        which phase it is.
+        """
+        ctx = getattr(self, '_pause_search', None)
+        if phase != PHASE_LOCAL_SEARCH:
+            return
+        if ctx is not None:
+            # Durable, not a one-shot repaint: _on_search_progress consults this so
+            # a numeric tick already queued from the Genizah loop cannot land
+            # afterwards and make the bar determinate again.
+            ctx.local_phase_active = True
+        self.search_progress.setRange(0, 0)
+        self.search_progress.setFormat(tr("Searching My Library..."))
+        self.status_label.setText(tr("Searching My Library..."))
+
     def stop_search(self):
+        self._apply_pause_state(self._pause_search, 'hidden')
+        self._pause_search.state = 'idle'
         if self.search_thread.isRunning():
             self._search_was_cancelled = True
-            self.search_thread.cancel_flag = True
+            self.search_thread.request_cancel()  # flag + un-park in one call (a parked worker never reaches its callback)
             self.search_thread.wait(5000)
             if self.search_thread.isRunning():
                 self.search_thread.terminate()
@@ -16379,6 +16707,10 @@ class GenizahGUI(QMainWindow):
 
     def reset_ui(self):
         self.is_searching = False; self.btn_search.setText(tr("Search")); self.btn_search.setStyleSheet("background-color: #27ae60; color: white;")
+        # reset_ui is the single funnel every search exit path reaches, so hiding
+        # here guarantees no orphaned visible Pause button on any of them.
+        self._apply_pause_state(self._pause_search, 'hidden')
+        self._pause_search.state = 'idle'
         self.search_progress.setVisible(False)
         if hasattr(self, '_search_elapsed_timer'):
             self._search_elapsed_timer.stop()
@@ -16387,7 +16719,8 @@ class GenizahGUI(QMainWindow):
         """Tick every 1s to keep elapsed time updating during search."""
         if not getattr(self, 'is_searching', False):
             return
-        elapsed = time.time() - self.search_start_time if getattr(self, 'search_start_time', 0) else 0
+        # Monotonic and pause-discounted: see effective_elapsed().
+        elapsed = self._pause_search.elapsed(time.monotonic())
         elapsed_str = f"{int(elapsed // 60)}:{int(elapsed % 60):02d}"
         pct = self.search_progress.value()
         max_val = self.search_progress.maximum()
@@ -16403,11 +16736,13 @@ class GenizahGUI(QMainWindow):
     def _reset_search(self):
         """Clear all search state and start fresh."""
         # 1. Stop any running search thread
+        self._apply_pause_state(self._pause_search, 'hidden')
+        self._pause_search.state = 'idle'
         if getattr(self, 'search_thread', None) and self.search_thread.isRunning():
             # CR-114-02: mirror stop_search — set _search_was_cancelled BEFORE cancel_flag
             # so any cooperative on_search_finished sees the cancellation flag.
             self._search_was_cancelled = True
-            self.search_thread.cancel_flag = True
+            self.search_thread.request_cancel()  # flag + un-park in one call (a parked worker never reaches its callback)
             self.search_thread.wait(3000)
             if self.search_thread.isRunning():
                 self.search_thread.terminate()
@@ -16512,6 +16847,12 @@ class GenizahGUI(QMainWindow):
         self._schedule_session_save()
 
     def _on_search_progress(self, current, total):
+        # Once the LOCAL phase is announced the bar is indeterminate on purpose.
+        # A numeric tick already queued from the Genizah loop must not land after
+        # it and restore a determinate range — hence a durable flag rather than a
+        # one-shot repaint in _on_search_phase.
+        if getattr(self, '_pause_search', None) is not None and self._pause_search.local_phase_active:
+            return
         """Handle regular search progress: update bar and show elapsed timer."""
         self.search_progress.setMaximum(total)
         self.search_progress.setValue(current)
@@ -16780,7 +17121,8 @@ class GenizahGUI(QMainWindow):
     def on_search_finished(self, results):
         # Show processing phase — keep progress bar visible with elapsed timer running
         self.search_progress.setRange(0, 0)  # Indeterminate
-        elapsed = time.time() - self.search_start_time if getattr(self, 'search_start_time', 0) else 0
+        # Monotonic and pause-discounted: see effective_elapsed().
+        elapsed = self._pause_search.elapsed(time.monotonic())
         elapsed_str = f"{int(elapsed // 60)}:{int(elapsed % 60):02d}"
         self.search_progress.setFormat(f"{elapsed_str}  {tr('Processing')}...")
         self.status_label.setText(f"{tr('Processing')}... {elapsed_str}")
@@ -16955,7 +17297,7 @@ class GenizahGUI(QMainWindow):
         # Phase 55: Reapply "all terms" filter if checkbox is checked
         if self._all_terms_filter and self.refinement_chain:
             self._apply_all_terms_filter_and_rerender()
-        search_elapsed = time.time() - self.search_start_time if getattr(self, 'search_start_time', 0) else 0
+        search_elapsed = self._pause_search.elapsed(time.monotonic())
         elapsed_str = f"{int(search_elapsed // 60)}:{int(search_elapsed % 60):02d}"
         partial_tag = f" ({tr('Partial results')})" if was_cancelled else ""
         if not getattr(self, '_restoring_session', False):
@@ -21497,6 +21839,8 @@ class GenizahGUI(QMainWindow):
 
     def toggle_composition(self):
         if self.is_comp_running:
+            self._apply_pause_state(self._pause_comp, 'hidden')
+            self._pause_comp.state = 'idle'
             if getattr(self, 'group_thread', None) and self.group_thread.isRunning():
                 # Disconnect signals to prevent race conditions during stop
                 try: self.group_thread.finished_signal.disconnect()
@@ -21512,7 +21856,7 @@ class GenizahGUI(QMainWindow):
                 self.display_comp_results(self.comp_raw_items or [], {}, {}, self.comp_raw_filtered or [], {}, {})
             elif getattr(self, 'comp_thread', None) and self.comp_thread.isRunning():
                 # Signal thread to cancel gracefully -- partial results will be emitted
-                self.comp_thread.cancel_flag = True
+                self.comp_thread.request_cancel()  # flag + un-park in one call (a parked worker never reaches its callback)
                 self.comp_progress.setFormat(tr("Cancelling..."))
                 # Don't reset UI yet -- wait for scan_finished_signal with partial results
                 return
@@ -21524,21 +21868,27 @@ class GenizahGUI(QMainWindow):
 
     def cancel_composition(self):
         """Cancel composition search gracefully (called by Escape shortcut)."""
+        self._apply_pause_state(self._pause_comp, 'hidden')
+        self._pause_comp.state = 'idle'
         if self.is_comp_running and getattr(self, 'comp_thread', None) and self.comp_thread.isRunning():
-            self.comp_thread.cancel_flag = True
+            self.comp_thread.request_cancel()  # flag + un-park in one call (a parked worker never reaches its callback)
             self.comp_progress.setFormat(tr("Cancelling..."))
         
     def reset_comp_ui(self):
         self.is_comp_running = False; self.btn_comp_run.setText(tr("Analyze Composition"))
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white;")
+        self._apply_pause_state(self._pause_comp, 'hidden')
+        self._pause_comp.state = 'idle'
         self.comp_progress.setVisible(False)
         self.comp_summary_text = ""  # Clear persistent summary on reset
 
     def _reset_composition(self):
         """Clear all composition search state and start fresh."""
+        self._apply_pause_state(self._pause_comp, 'hidden')
+        self._pause_comp.state = 'idle'
         # 1. Stop any running composition thread
         if getattr(self, 'comp_thread', None) and self.comp_thread.isRunning():
-            self.comp_thread.cancel_flag = True
+            self.comp_thread.request_cancel()  # flag + un-park in one call (a parked worker never reaches its callback)
             self.comp_thread.wait(3000)
             if self.comp_thread.isRunning():
                 self.comp_thread.terminate()
@@ -21701,6 +22051,12 @@ class GenizahGUI(QMainWindow):
                 auto_title += "..."
             self.comp_title_input.setText(auto_title)
 
+        if not self._drain_previous_worker('comp_thread', self._pause_comp):
+            return
+        self._run_seq += 1
+        _comp_run_id = self._run_seq
+        self._pause_comp.reset_for_run(_comp_run_id, time.monotonic())
+
         self.is_comp_running = True
         self.comp_search_start_time = time.time()
         self.comp_chunks_processed = 0
@@ -21718,6 +22074,7 @@ class GenizahGUI(QMainWindow):
         self.comp_progress.setValue(0)
         self.comp_tree.clear()
         self.comp_progress.setFormat(tr("Scanning chunks..."))
+        self._apply_pause_state(self._pause_comp, 'pause')
         
         # איפוס נתונים
         self.comp_raw_items = []
@@ -21818,7 +22175,8 @@ class GenizahGUI(QMainWindow):
                 boundary_boost=boundary_boost,
                 min_boundary_matches=min_boundary_matches,
                 min_delimiter_distance=min_delimiter_distance,
-                corpus_scope=_comp_scope
+                corpus_scope=_comp_scope,
+                run_id=_comp_run_id
             )
             self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
 
@@ -21844,7 +22202,8 @@ class GenizahGUI(QMainWindow):
                 min_boundary_matches=min_boundary_matches,
                 min_delimiter_distance=min_delimiter_distance,
                 restrict_sys_ids=getattr(self, 'pre_search_restrict_sys_ids', None),
-                corpus_scope=_comp_scope
+                corpus_scope=_comp_scope,
+                run_id=_comp_run_id
             )
             if hasattr(self.comp_thread, 'scan_finished_signal'):
                  self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
@@ -21852,6 +22211,9 @@ class GenizahGUI(QMainWindow):
                  self.comp_thread.finished_signal.connect(self.on_comp_search_finished)
 
         self.comp_thread.progress_signal.connect(self.on_comp_progress)
+        if hasattr(self.comp_thread, 'pause_ack_signal'):
+            self.comp_thread.pause_ack_signal.connect(
+                lambda rid, ep: self._on_pause_ack(self._pause_comp, rid, ep))
 
         if hasattr(self.comp_thread, 'status_signal'):
              self.comp_thread.status_signal.connect(self.on_comp_status_update)
@@ -21936,7 +22298,10 @@ class GenizahGUI(QMainWindow):
         self.comp_chunks_processed = curr
         self.comp_chunks_total = total
 
-        elapsed = time.time() - self.comp_search_start_time if self.comp_search_start_time else 0
+        # Monotonic and pause-discounted. This one fixes the ETA too: rate is
+        # curr/elapsed just below, so parked time would otherwise halve the
+        # reported chunk rate and inflate "remaining" for minutes after a resume.
+        elapsed = self._pause_comp.elapsed(time.monotonic())
         elapsed_str = f"{int(elapsed // 60)}:{int(elapsed % 60):02d}"
 
         # Compute ETA with smoothing (update every 2s)
@@ -21973,7 +22338,10 @@ class GenizahGUI(QMainWindow):
             is_partial = result_obj.get('partial', False)
 
         # Show completion summary in progress bar (stays visible until next search)
-        elapsed = time.time() - self.comp_search_start_time if self.comp_search_start_time else 0
+        # Monotonic and pause-discounted. This one fixes the ETA too: rate is
+        # curr/elapsed just below, so parked time would otherwise halve the
+        # reported chunk rate and inflate "remaining" for minutes after a resume.
+        elapsed = self._pause_comp.elapsed(time.monotonic())
         elapsed_str = f"{int(elapsed // 60)}:{int(elapsed % 60):02d}"
 
         known_raw = []
@@ -22048,6 +22416,14 @@ class GenizahGUI(QMainWindow):
         self.start_grouping(manuscripts, filtered_manuscripts)
 
     def start_grouping(self, items, filtered_items=None):
+        # Grouping runs on GroupingThread, which is deliberately outside the pause
+        # design (it has its own interruption model and emits no terminal signal on
+        # cancel). Hide the button rather than grey it out: a disabled Pause sitting
+        # next to a live Stop claims a capability that does not exist, at exactly
+        # the slow tail where the user most wants it. The bar already switches to
+        # "Grouping compositions..." so the phase change still reads honestly.
+        self._apply_pause_state(self._pause_comp, 'hidden')
+        self._pause_comp.state = 'idle'
         self.is_comp_running = True
         self.comp_has_grouped_results = False
         self.btn_comp_run.setText(tr("Stop"))
@@ -25816,7 +26192,7 @@ class GenizahGUI(QMainWindow):
                 self.meta_loader.wait()
 
             if getattr(self, 'search_thread', None) and self.search_thread.isRunning():
-                self.search_thread.cancel_flag = True
+                self.search_thread.request_cancel()  # flag + un-park in one call (a parked worker never reaches its callback)
                 self.search_thread.wait(2000)
                 if self.search_thread.isRunning():
                     self.search_thread.terminate()

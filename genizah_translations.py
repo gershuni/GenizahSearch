@@ -4924,3 +4924,28 @@ TRANSLATIONS.update({
     "Text matching": "התאמת טקסט",
     "Requires review": "טעון בדיקה",
 })
+
+# --- Pause/Resume for desktop searches -------------------------------------
+# "Resume" is deliberately a NEW key and NOT the existing "Resume Search", which
+# titles the session-restore "a composition search was interrupted last time"
+# dialog and means something else entirely.
+# ASCII "..." (not U+2026) to match the dominant "Stopping..." / "Cancelling..."
+# forms already in this file.
+# Forms follow the existing Stop family: imperative for the buttons (like "עצור"),
+# present participle while it is happening (like "עוצר..."), passive participle
+# for the settled state (like "נעצר").
+TRANSLATIONS.update({
+    "Pause": "השהה",
+    "Resume": "המשך",
+    "Pausing...": "משהה...",
+    "Paused": "מושהה",
+    "Searching My Library...": "מחפש בספרייה שלי...",
+    "Pause — the search stops at the next checkpoint and keeps what it found":
+        "השהיית החיפוש — הוא ייעצר בנקודת הביקורת הבאה והתוצאות שנמצאו יישמרו",
+    "Resume the search from where it paused":
+        "המשך את החיפוש מהנקודה שבה הושהה",
+    "Waiting for the search to reach a checkpoint...":
+        "ממתין שהחיפוש יגיע לנקודת ביקורת...",
+    "Still stopping the previous search — try again in a moment.":
+        "עדיין עוצר את החיפוש הקודם — נסו שוב בעוד רגע.",
+})

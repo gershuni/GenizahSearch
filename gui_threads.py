@@ -7,6 +7,7 @@ import time
 import requests
 from PyQt6.QtCore import QThread, pyqtSignal
 from genizah_core import SearchEngine, Indexer, MetadataManager, VariantManager, get_logger
+from shared.pause_gate import PauseGate  # noqa: F401 — re-exported for callers/tests
 
 logger = get_logger(__name__)
 
@@ -78,7 +79,98 @@ class RefinementReplayThread(QThread):
             self.error_signal.emit(str(e))
 
 
-class SearchThread(QThread):
+class PausableSearchMixin:
+    """Cancel + pause plumbing shared by the four desktop search workers.
+
+    List it FIRST in the bases (``class X(PausableSearchMixin, QThread)``). It has
+    no cooperative ``__init__`` on purpose — each worker calls
+    ``self._init_pause_support(run_id)`` explicitly, so there is zero interaction
+    with sip's metaclass MRO handling.
+
+    Each worker must ALSO declare ``pause_ack_signal = pyqtSignal(int, int)`` on
+    its own class: PyQt does not register signals declared on a plain mixin.
+
+    Division of labour: the gate knows about pause epochs, this mixin knows about
+    run identity and Qt, and the engines know about neither.
+    """
+
+    def _init_pause_support(self, run_id=0):
+        self.cancel_flag = False
+        # Identity of the run this worker serves. The UI rejects an ack whose
+        # run_id is not the one it is currently tracking, so a late ack from a
+        # stopped worker can never repaint a later run.
+        self.run_id = run_id
+        self.pause_gate = PauseGate(on_ack=self._emit_pause_ack)
+        # SetThreadExecutionState is PER-THREAD, so the sleep-block must be
+        # released and reacquired on the worker — which is exactly where the
+        # gate invokes these. A user who pauses and walks away should not keep
+        # the machine awake all night.
+        self.pause_gate.on_park = _allow_sleep
+        self.pause_gate.on_unpark = _prevent_sleep
+
+    # ------------------------------------------------------------- UI thread
+    def pause(self):
+        return self.pause_gate.pause()
+
+    def resume(self):
+        return self.pause_gate.resume()
+
+    def is_pause_pending(self):
+        return self.pause_gate.is_pause_pending()
+
+    def request_cancel(self):
+        """The one stop entry point: set the flag AND un-park, atomically.
+
+        Every cancel path in the app calls this. Doing it in one place is what
+        keeps "flag before un-park" from being an ordering rule six call sites
+        have to remember — a parked worker never reaches its progress callback,
+        so a flag alone would leave it parked until QThread.terminate().
+        """
+        self.cancel_flag = True
+        self.pause_gate.abort()
+
+    def requestInterruption(self):
+        """Route Qt's own interruption request into request_cancel().
+
+        closeEvent calls comp_thread.requestInterruption(), which the composition
+        threads never polled — a silent no-op since it was written. Overriding it
+        here fixes that call site without editing it.
+        """
+        self.cancel_flag = True
+        self.pause_gate.abort()
+        super().requestInterruption()
+
+    # --------------------------------------------------------- worker thread
+    def _emit_pause_ack(self, epoch):
+        try:
+            self.pause_ack_signal.emit(self.run_id, epoch)
+        except RuntimeError:
+            pass  # wrapped C++ object already deleted during shutdown
+
+    def _should_abort(self):
+        if self.cancel_flag:
+            return True
+        # getattr rather than a direct call so _checkpoint stays exercisable
+        # against a plain SimpleNamespace in Qt-free tests.
+        req = getattr(self, 'isInterruptionRequested', None)
+        try:
+            return bool(req()) if callable(req) else False
+        except RuntimeError:
+            return True  # object going away — treat as cancelled
+
+    def _checkpoint(self):
+        """Cooperative checkpoint: raises to cancel, blocks to pause.
+
+        Called from inside each worker's progress callback — the only place the
+        engines yield control.
+        """
+        if self._should_abort():
+            raise InterruptedError("Search cancelled by user")
+        if self.pause_gate.wait_if_paused(self._should_abort):
+            raise InterruptedError("Search cancelled by user")
+
+
+class SearchThread(PausableSearchMixin, QThread):
     """Execute a search query asynchronously."""
 
     results_signal = pyqtSignal(list)
@@ -87,7 +179,12 @@ class SearchThread(QThread):
     # Phase 115: performance signal — (elapsed_ms: float, result_count: int)
     # (float, int) is distinct from progress_signal's (int, int) — no confusion possible.
     perf_signal = pyqtSignal(float, int)
-    def __init__(self, searcher, query, mode, gap, exclude_words=None, responsa_options=None, restrict_sys_ids=None, text_position=None, corpus_scope="all"):
+    # (run_id, pause_epoch) — see PausableSearchMixin and _PauseCtx in genizah_app.
+    pause_ack_signal = pyqtSignal(int, int)
+    # Phase marker (e.g. 'local_search'); distinct from progress_signal so a phase
+    # change can never be mistaken for numeric progress.
+    phase_signal = pyqtSignal(str)
+    def __init__(self, searcher, query, mode, gap, exclude_words=None, responsa_options=None, restrict_sys_ids=None, text_position=None, corpus_scope="all", run_id=0):
         super().__init__()
         self.searcher = searcher; self.query = query; self.mode = mode; self.gap = gap
         self.exclude_words = exclude_words
@@ -95,16 +192,20 @@ class SearchThread(QThread):
         self.restrict_sys_ids = restrict_sys_ids
         self.text_position = text_position
         self.corpus_scope = corpus_scope  # Phase 95 smoke-fix: 'all'|'genizah'|'local'
-        self.cancel_flag = False
+        self._init_pause_support(run_id)
 
     def run(self):
         _prevent_sleep()
         t0 = time.perf_counter()  # Phase 115: must be first line (Pitfall 2); perf_counter for sub-ms resolution on Windows
         try:
             def cb(curr, total):
-                if self.cancel_flag:
-                    raise InterruptedError("Search cancelled by user")
+                # Checkpoint BEFORE emitting: a parked worker must publish no
+                # progress, so the bar freezes at its pre-pause value.
+                self._checkpoint()
                 self.progress_signal.emit(curr, total)
+
+            def phase_cb(phase):
+                self.phase_signal.emit(str(phase))
             results = self.searcher.execute_search(
                 self.query,
                 self.mode,
@@ -115,19 +216,29 @@ class SearchThread(QThread):
                 restrict_sys_ids=self.restrict_sys_ids,
                 text_position=self.text_position,
                 corpus_scope=self.corpus_scope,
+                phase_callback=phase_cb,
             )
 
             self.results_signal.emit(results)
             # Phase 115: emit perf signal — ONLY on success path (D-08 / Pitfall 3)
-            self.perf_signal.emit((time.perf_counter() - t0) * 1000.0, len(results))
+            # Phase 115 D-08 says perf is emitted for COMPLETED runs only, but the
+            # core swallows InterruptedError and returns partial results normally,
+            # so this line was reached for cancelled runs too. cancel_flag is the
+            # only reliable signal that the run was abandoned.
+            if not self.cancel_flag:
+                self.perf_signal.emit(
+                    (time.perf_counter() - t0 - self.pause_gate.total_paused_s) * 1000.0, len(results))
         except InterruptedError:
             # Cancelled — do NOT emit perf_signal (Pitfall 3 / D-08 "completed runs only")
             self.results_signal.emit([])
         except Exception as e: self.error_signal.emit(str(e))
         finally:
+            # Releases a pause still pending at completion, so a run that finishes
+            # during "Pausing..." cannot strand the UI in that state.
+            self.pause_gate.finish()
             _allow_sleep()
 
-class LabSearchThread(QThread):
+class LabSearchThread(PausableSearchMixin, QThread):
     """Execute a Lab Mode search query."""
 
     results_signal = pyqtSignal(list)
@@ -136,9 +247,11 @@ class LabSearchThread(QThread):
     error_signal = pyqtSignal(str)
     # Phase 115: performance signal — (elapsed_ms: float, result_count: int)
     perf_signal = pyqtSignal(float, int)
+    # (run_id, pause_epoch) — see PausableSearchMixin and _PauseCtx in genizah_app.
+    pause_ack_signal = pyqtSignal(int, int)
 
     def __init__(self, lab_engine, query, mode, gap=0, deep_scan=False, scan_limit=50000,
-                 corpus_scope='genizah'):
+                 corpus_scope='genizah', run_id=0):
         super().__init__()
         self.lab_engine = lab_engine
         self.query = query
@@ -152,7 +265,7 @@ class LabSearchThread(QThread):
         # This class had NO cancel_flag until now, so stop_search's
         # `self.search_thread.cancel_flag = True` (genizah_app.py) set a dead
         # attribute and Lab Mode searches could only ever be terminate()d.
-        self.cancel_flag = False
+        self._init_pause_support(run_id)
 
     def run(self):
         _prevent_sleep()
@@ -160,8 +273,9 @@ class LabSearchThread(QThread):
         try:
             # Helper to handle different callback signatures
             def cb(arg1, arg2=None):
-                if self.cancel_flag:
-                    raise InterruptedError("Search cancelled by user")
+                # First statement, ahead of the str/int demux, so it covers both
+                # protocols _execute_batched_search uses.
+                self._checkpoint()
                 if isinstance(arg1, str):
                     self.status_signal.emit(arg1)
                 elif isinstance(arg1, int) and arg2 is not None:
@@ -178,7 +292,13 @@ class LabSearchThread(QThread):
             )
             self.results_signal.emit(results)
             # Phase 115: emit perf signal — ONLY on success path (D-08 / Pitfall 3)
-            self.perf_signal.emit((time.perf_counter() - t0) * 1000.0, len(results))
+            # Phase 115 D-08 says perf is emitted for COMPLETED runs only, but the
+            # core swallows InterruptedError and returns partial results normally,
+            # so this line was reached for cancelled runs too. cancel_flag is the
+            # only reliable signal that the run was abandoned.
+            if not self.cancel_flag:
+                self.perf_signal.emit(
+                    (time.perf_counter() - t0 - self.pause_gate.total_paused_s) * 1000.0, len(results))
         except InterruptedError:
             # MUST precede `except Exception`: InterruptedError is an OSError
             # subclass, so the broad handler would route a user cancel into
@@ -187,9 +307,12 @@ class LabSearchThread(QThread):
             self.results_signal.emit([])
         except Exception as e: self.error_signal.emit(str(e))
         finally:
+            # Releases a pause still pending at completion, so a run that finishes
+            # during "Pausing..." cannot strand the UI in that state.
+            self.pause_gate.finish()
             _allow_sleep()
 
-class CompositionThread(QThread):
+class CompositionThread(PausableSearchMixin, QThread):
     """Scan compositions in background to keep UI responsive."""
 
     progress_signal = pyqtSignal(int, int)
@@ -198,11 +321,13 @@ class CompositionThread(QThread):
     error_signal = pyqtSignal(str)
     # Phase 115: performance signal — (elapsed_ms: float, result_count: int)
     perf_signal = pyqtSignal(float, int)
+    # (run_id, pause_epoch) — see PausableSearchMixin and _PauseCtx in genizah_app.
+    pause_ack_signal = pyqtSignal(int, int)
 
     def __init__(self, searcher, text, chunk, freq, mode, filter_text=None, threshold=5,
                  boundary_mode='full', boundary_delimiter='\n', boundary_boost=1.5,
                  min_boundary_matches=0, min_delimiter_distance=3, restrict_sys_ids=None,
-                 corpus_scope='genizah'):
+                 corpus_scope='genizah', run_id=0):
         super().__init__()
         self.searcher = searcher
         self.text = text
@@ -211,7 +336,7 @@ class CompositionThread(QThread):
         self.mode = mode
         self.filter_text = filter_text
         self.threshold = threshold
-        self.cancel_flag = False
+        self._init_pause_support(run_id)
         self.restrict_sys_ids = restrict_sys_ids
         # Phase 110 (COMP-LOC-01): corpus selector — 'genizah'|'local'|'all'.
         # Default 'genizah' (NOT SearchThread's 'all') so existing callers keep
@@ -230,8 +355,8 @@ class CompositionThread(QThread):
         try:
             self.status_signal.emit("Scanning chunks...")
             def cb(curr, total):
-                if self.cancel_flag:
-                    raise InterruptedError("Search cancelled by user")
+                # Checkpoint before emitting — see SearchThread.cb.
+                self._checkpoint()
                 self.progress_signal.emit(curr, total)
 
             # Returns dict {'main': [], 'filtered': []} or list [] (legacy safety)
@@ -253,12 +378,21 @@ class CompositionThread(QThread):
                 (len(result.get('main', [])) + len(result.get('filtered', [])))
                 if isinstance(result, dict) else len(result)
             )
-            self.perf_signal.emit((time.perf_counter() - t0) * 1000.0, _rc)
+            # Phase 115 D-08 says perf is emitted for COMPLETED runs only, but the
+            # core swallows InterruptedError and returns partial results normally,
+            # so this line was reached for cancelled runs too. cancel_flag is the
+            # only reliable signal that the run was abandoned.
+            if not self.cancel_flag:
+                self.perf_signal.emit(
+                    (time.perf_counter() - t0 - self.pause_gate.total_paused_s) * 1000.0, _rc)
         except Exception as e: self.error_signal.emit(str(e))
         finally:
+            # Releases a pause still pending at completion, so a run that finishes
+            # during "Pausing..." cannot strand the UI in that state.
+            self.pause_gate.finish()
             _allow_sleep()
 
-class LabCompositionThread(QThread):
+class LabCompositionThread(PausableSearchMixin, QThread):
     """Execute Lab Composition Search (Broad-to-Narrow)."""
 
     progress_signal = pyqtSignal(int, int)
@@ -267,11 +401,13 @@ class LabCompositionThread(QThread):
     error_signal = pyqtSignal(str)
     # Phase 115: performance signal — (elapsed_ms: float, result_count: int)
     perf_signal = pyqtSignal(float, int)
+    # (run_id, pause_epoch) — see PausableSearchMixin and _PauseCtx in genizah_app.
+    pause_ack_signal = pyqtSignal(int, int)
 
     def __init__(self, lab_engine, text, mode, chunk_size=None, excluded_ids=None, filter_text=None,
                  deep_scan=False, scan_limit=50000, boundary_mode='full', boundary_delimiter='\n',
                  boundary_boost=1.5, min_boundary_matches=0, min_delimiter_distance=3,
-                 corpus_scope='genizah'):
+                 corpus_scope='genizah', run_id=0):
         super().__init__()
         self.lab_engine = lab_engine
         self.text = text
@@ -281,7 +417,7 @@ class LabCompositionThread(QThread):
         self.filter_text = filter_text
         self.deep_scan = deep_scan
         self.scan_limit = scan_limit
-        self.cancel_flag = False
+        self._init_pause_support(run_id)
         # Phase 110 (COMP-LOC-01): corpus selector — 'genizah'|'local'|'all'.
         # Default 'genizah' so existing callers keep Genizah-only behavior (D-13).
         self.corpus_scope = corpus_scope
@@ -300,8 +436,8 @@ class LabCompositionThread(QThread):
 
             # Callback handler that supports both (int, int) and (str)
             def cb(arg1, arg2=None):
-                if self.cancel_flag:
-                    raise InterruptedError("Search cancelled by user")
+                # First statement, ahead of the str/int demux — see LabSearchThread.
+                self._checkpoint()
                 if isinstance(arg1, str):
                     self.status_signal.emit(arg1)
                 elif isinstance(arg1, int) and arg2 is not None:
@@ -330,9 +466,18 @@ class LabCompositionThread(QThread):
                 (len(result.get('main', [])) + len(result.get('filtered', [])))
                 if isinstance(result, dict) else len(result)
             )
-            self.perf_signal.emit((time.perf_counter() - t0) * 1000.0, _rc)
+            # Phase 115 D-08 says perf is emitted for COMPLETED runs only, but the
+            # core swallows InterruptedError and returns partial results normally,
+            # so this line was reached for cancelled runs too. cancel_flag is the
+            # only reliable signal that the run was abandoned.
+            if not self.cancel_flag:
+                self.perf_signal.emit(
+                    (time.perf_counter() - t0 - self.pause_gate.total_paused_s) * 1000.0, _rc)
         except Exception as e: self.error_signal.emit(str(e))
         finally:
+            # Releases a pause still pending at completion, so a run that finishes
+            # during "Pausing..." cannot strand the UI in that state.
+            self.pause_gate.finish()
             _allow_sleep()
 
 class GroupingThread(QThread):
