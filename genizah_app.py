@@ -16282,7 +16282,14 @@ class GenizahGUI(QMainWindow):
         if prev.isRunning():
             # Do NOT rebind: two live workers would emit into the same window.
             logger.warning("previous %s still running; refusing to start a new run", attr)
-            self.status_label.setText(tr("Still stopping the previous search — try again in a moment."))
+            _msg = tr("Still stopping the previous search — try again in a moment.")
+            # Report on whichever surface owns this run — composition has no status
+            # label, its progress bar is the status surface.
+            if ctx is getattr(self, '_pause_comp', None):
+                self.comp_progress.setVisible(True)
+                self.comp_progress.setFormat(_msg)
+            else:
+                self.status_label.setText(_msg)
             return False
         if ctx is not None:
             self._apply_pause_state(ctx, 'hidden')
