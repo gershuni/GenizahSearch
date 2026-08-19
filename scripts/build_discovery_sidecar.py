@@ -82,6 +82,7 @@ from shared.discovery_locus import (  # noqa: E402
     render_locus_label,
     select_locus_work,
     select_primary_alignment,
+    strip_work_title_prefix,
     units_for_span,
 )
 # Deliberate re-export: this error was raised from this module before the parsing moved
@@ -2231,7 +2232,11 @@ def ingest_locus_divisions(
     if any(row[0] not in source_refs for row in edition_rows):
         raise ValueError("locus edition rows contain an unknown reference key")
 
-    asset_work_ids = {row[0] for row in conn.execute("SELECT work_id FROM works")}
+    asset_titles = {
+        row[0]: row[1]
+        for row in conn.execute("SELECT work_id, neutral_title FROM works")
+    }
+    asset_work_ids = set(asset_titles)
     mapped: Dict[str, str] = {}
     for raw_ref in source_refs:
         opaque = crosswalk.get(raw_ref)
@@ -2249,11 +2254,36 @@ def ingest_locus_divisions(
         "VALUES (?, ?, ?, ?, ?)",
         [(mapped[row[0]], *row[1:]) for row in work_rows if row[0] in mapped],
     )
+    # THE STORED LABEL IS QUALIFIED; THE SERVED ONE IS NOT.
+    # `discovery_v4_build_reference.py::_locus_label` composes each chapter/section
+    # address as `f"{locus_title} {numeral}"`, so the input carries
+    # `ארבעה טורים, חושן משפט קנג` -- correct for the divisions database, which is a
+    # hash-pinned input whose labels are how a reviewer traces a unit back to the
+    # publisher's own reference. It is wrong for a READER, because every surface
+    # showing a locus shows the work title right beside it, so the title arrives
+    # twice and once per rendered run (owner report, 2026-08-19). The title comes off
+    # HERE, on the way into the asset, which is also why `locus_unit.label_he` is
+    # fixed for the findings page's address filter -- `get_locus_units_enveloped`
+    # publishes that column directly -- and not only for the composed `locus_label`.
+    unit_rows_by_ref: Dict[str, List[Tuple]] = {}
+    for row in unit_rows:
+        if row[0] in mapped:
+            unit_rows_by_ref.setdefault(row[0], []).append(row)
+    locus_unit_values = []
+    for raw_ref, rows in unit_rows_by_ref.items():
+        work_id = mapped[raw_ref]
+        # Ordered by (locus_ref_id, unit_ord) in the SELECT above, so index i here is
+        # unit_ord i -- the same alignment `_locus_table_index` re-asserts on read.
+        served = strip_work_title_prefix(
+            [row[4] for row in rows], asset_titles.get(work_id))
+        for row, label in zip(rows, served):
+            locus_unit_values.append(
+                (work_id, row[1], row[2], row[3], label, row[5]))
     conn.executemany(
         "INSERT INTO locus_unit "
         "(work_id, unit_ord, start_offset, part_key, label_he, citation_pos) "
         "VALUES (?, ?, ?, ?, ?, ?)",
-        [(mapped[row[0]], *row[1:]) for row in unit_rows if row[0] in mapped],
+        locus_unit_values,
     )
     conn.executemany(
         "INSERT INTO locus_edition "
@@ -4232,27 +4262,69 @@ def load_approved_works(approved_csv_path, *, valid_work_ids: Optional[Iterable[
     """
     valid_ids = set(valid_work_ids) if valid_work_ids is not None else None
     approved = []
+    # Every exclusion is COUNTED and reported, and an owner-APPROVED row that
+    # falls out for a reason other than the owner's own verdict is FATAL.
+    #
+    # This is not defensive style. On 2026-08-19 the owner noticed a work
+    # missing from the V4.2 artifact; the cause was the `source_label`
+    # validation below raising on a legitimate new provider (`hewikisource`)
+    # and this loop swallowing it with a bare `continue`. 14 owner-approved
+    # works -- 9,715 claims, 5,517 tier-A witnesses, ~30% of the REF6 append,
+    # including sef"g, all three Tur sections and all three parts of the Zohar
+    # -- produced no work, claim or evidence row. The build exited 0, the
+    # release verifier passed (the artifact was internally consistent, it
+    # simply lacked 14 works), and nothing counted the loss. A drop of that
+    # size must be impossible to miss, so: rejects/suppresses are counted and
+    # printed, and anything else is a halt.
+    # Severity is per-reason and explicit, because the two classes are
+    # genuinely different and collapsing them would either weaken the gate or
+    # break a documented rule:
+    #   BENIGN -- the row cannot or must not ship, by a rule that is specified
+    #             and tested (the owner's own verdict; the D-07 no-title rule).
+    #             Counted and printed, never fatal.
+    #   FATAL  -- a build INPUT disagrees with this consumer: an unrecognised
+    #             `source_label`, a work_id missing from the crosswalk, a
+    #             malformed row. Those mean content is being lost for a reason
+    #             nobody chose, which is exactly what happened on 2026-08-19.
+    dropped: Dict[str, List[str]] = {}
+    fatal_reasons: set = set()
+
+    def _drop(reason: str, work_id: str, *, fatal: bool = False) -> None:
+        dropped.setdefault(reason, []).append(work_id or "<no work_id>")
+        if fatal:
+            fatal_reasons.add(reason)
+
     with open(approved_csv_path, encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
         _validate_csv_header(reader.fieldnames, APPROVED_HEADER, "APPROVED")
         for row in reader:
+            work_id = (row.get("work_id") or "").strip()
             verdict = (row.get("owner_verdict") or "").strip()
             if verdict not in _SHIP_OWNER_VERDICTS:
+                # The owner's own decision, or a row never adjudicated. The
+                # ONLY benign exclusion, and still counted.
+                _drop(f"owner_verdict={verdict or '<blank>'}", work_id)
                 continue
             owner_title = (row.get("owner_title") or "").strip()
             candidate_title = (row.get("candidate_title") or "").strip()
             neutral_title = owner_title or candidate_title
             if not neutral_title:
+                _drop("empty resolved title", work_id)
                 continue
-            work_id = (row.get("work_id") or "").strip()
             if not work_id:
+                _drop("empty work_id", work_id, fatal=True)
                 continue
             if valid_ids is not None and work_id not in valid_ids:
+                _drop("work_id absent from the crosswalk", work_id, fatal=True)
                 continue
             source_corpus = row.get("source_label")
             try:
                 ids.validate_source_corpus_code(source_corpus)
-            except ValueError:
+            except ValueError as exc:
+                # NEVER a silent skip: the code is a build input, so an
+                # unrecognised one means the producer and this vocabulary have
+                # diverged, not that the work should be discarded.
+                _drop(f"source_label rejected ({exc})", work_id, fatal=True)
                 continue
             approved.append({
                 "work_id": work_id,
@@ -4261,6 +4333,28 @@ def load_approved_works(approved_csv_path, *, valid_work_ids: Optional[Iterable[
                 "genre": (row.get("genre") or None),
                 "source_corpus": source_corpus,
             })
+
+    for reason in sorted(dropped):
+        work_ids = dropped[reason]
+        print(f"load_approved_works: excluded {len(work_ids)} row(s) -- {reason}",
+              flush=True)
+    fatal = {reason: work_ids for reason, work_ids in dropped.items()
+             if reason in fatal_reasons}
+    if fatal:
+        detail = "; ".join(
+            f"{reason}: {len(work_ids)} row(s) ({', '.join(sorted(work_ids)[:8])}"
+            f"{', …' if len(work_ids) > 8 else ''})"
+            for reason, work_ids in sorted(fatal.items()))
+        raise ValueError(
+            "load_approved_works: an owner-APPROVED row was excluded for a "
+            "reason other than the owner's verdict, which means a build INPUT "
+            "is wrong -- halting rather than shipping an artifact that is "
+            f"quietly missing content. {detail}. "
+            "If a rejected source_label names a legitimate new provider, add "
+            "it to scripts/discovery_ids.py::SOURCE_CORPUS_CODES; do NOT "
+            "relabel the acquisition to a provider it did not come from."
+        )
+    print(f"load_approved_works: {len(approved)} work(s) will ship", flush=True)
     return approved
 
 
@@ -8750,15 +8844,32 @@ def finalize_build(
         approved = load_approved_works(from_approved_path, valid_work_ids=valid_work_ids)
         raw_by_opaque = {c["work_id"]: c["raw_work_id"] for c in candidates}
         works = []
+        # Counted, for the same reason `load_approved_works` counts: this loop
+        # is the second place an approved work can disappear without trace.
+        # Unlike that one this exclusion is EXPECTED and benign -- an approved
+        # work whose raw id produced no surviving candidate row in THIS bake --
+        # so it reports rather than halts, but it never passes in silence.
+        no_candidate, drop_listed = [], []
         for a in approved:
             raw_work_id = raw_by_opaque.get(a["work_id"])
             if raw_work_id is None:
+                no_candidate.append(a["work_id"])
                 continue
             # v2 drop-list (bake plan §4.2): a dropped opaque work_id emits NO
             # works/claim/evidence rows -- excluded BEFORE claim-gen sees it.
             if a["work_id"] in dropped_work_ids:
+                drop_listed.append(a["work_id"])
                 continue
             works.append({**a, "raw_work_id": raw_work_id})
+        if no_candidate:
+            print(f"build: {len(no_candidate)} approved work(s) have no surviving "
+                  f"candidate row in this bake and emit nothing: "
+                  f"{', '.join(sorted(no_candidate))}", flush=True)
+        if drop_listed:
+            print(f"build: {len(drop_listed)} approved work(s) excluded by the "
+                  f"canonical-merge drop-list: {', '.join(sorted(drop_listed))}",
+                  flush=True)
+        print(f"build: {len(works)} work(s) enter claim generation", flush=True)
 
         # v2 D-17 year resolution (bake plan §4.3): join the hash-pinned date
         # tables to canonical_work_id via the crosswalk + census map. numeric

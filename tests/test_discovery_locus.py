@@ -39,6 +39,7 @@ from shared.discovery_locus import (
     select_primary_alignment,
     shorten_range_tail,
     split_at_citation_breaks,
+    strip_work_title_prefix,
     stream_offset_for_raw,
     units_for_span,
     MIN_UNIT_OVERLAP,
@@ -503,6 +504,30 @@ class TestShortenRangeTail:
 
     def test_a_daf_range_within_one_leaf_keeps_only_the_column(self):
         assert shorten_range_tail('יד ע"א', 'יד ע"ב') == 'ע"ב'
+
+    def test_a_repeated_address_LEVEL_is_dropped(self):
+        """`/` is a word boundary here, because it is how an address states a level.
+
+        The owner's report (2026-08-19): `בעל הטורים על התורה` rendered
+        `ויקרא/כ–ויקרא/כג; ויקרא/כה–ויקרא/כז; במדבר/ב–במדבר/ז`, repeating the book in
+        both ends of every run. Splitting on whitespace alone left it whole, because
+        `ויקרא/כ` is one word by that measure.
+        """
+        assert shorten_range_tail("ויקרא/כ", "ויקרא/כג") == "כג"
+        assert shorten_range_tail("שבת/פרק א", "שבת/פרק ב") == "ב"
+
+    def test_a_dropped_level_keeps_the_separators_of_what_survives(self):
+        """The rejoin is a slice of the original tokens, not `" ".join(words)`.
+
+        Under the whitespace-only split this returned `ד ה` -- a flat two-word label
+        where the address had two LEVELS. The bug was latent (no shipped label had a
+        multi-level remainder) and would have surfaced the moment one did, as a
+        citation quietly pointing somewhere else.
+        """
+        assert shorten_range_tail("א/ב/ג", "א/ד/ה") == "ד/ה"
+
+    def test_a_differing_level_is_not_elided(self):
+        assert shorten_range_tail("בראשית/יד", "שמות/ב") == "שמות/ב"
 
     def test_nothing_shared_means_nothing_dropped(self):
         assert shorten_range_tail('צג ע"ב', 'צד ע"א') == 'צד ע"א'
@@ -1042,3 +1067,152 @@ class TestRenderLocusLabel:
     def test_invalid_unit_tables_fail_closed(self, starts, labels, positions):
         with pytest.raises(ValueError):
             render_locus_label(starts, labels, positions, [(0, 10)])
+
+class TestStripWorkTitlePrefix:
+    """`_locus_label` qualifies every chapter/section address with the work title,
+    and every surface renders that title beside the address -- so the reader gets it
+    twice, once per rendered run (owner report, 2026-08-19).
+
+    The cases below are the real shapes, taken from the 679 locus works of the served
+    artifact: 107 of them move, and the four that must NOT move are here too.
+    """
+
+    def test_a_chapter_address_keeps_only_its_numeral(self):
+        assert strip_work_title_prefix(
+            ["ארבעה טורים, יורה דעה א", "ארבעה טורים, יורה דעה ב"],
+            "ארבעה טורים, יורה דעה",
+        ) == ["א", "ב"]
+
+    def test_a_hierarchical_address_sheds_only_the_title_levels(self):
+        assert strip_work_title_prefix(
+            ["בעל הטורים על התורה/בראשית/א", "בעל הטורים על התורה/ויקרא/כ"],
+            "בעל הטורים על התורה",
+        ) == ["בראשית/א", "ויקרא/כ"]
+
+    def test_a_title_repeated_twice_in_one_address_comes_off_twice(self):
+        """Word membership, not a literal title prefix.
+
+        `משנה תורה, ספר קדושה` addresses its units
+        `משנה תורה, ספר קדושה, משנה תורה, הלכות איסורי ביאה` -- the title, then the
+        title's own head again. Stripping the literal title would leave the second
+        `משנה תורה` and the address would still read doubled.
+        """
+        assert strip_work_title_prefix(
+            ["משנה תורה, ספר קדושה, משנה תורה, הלכות איסורי ביאה",
+             "משנה תורה, ספר קדושה, משנה תורה, הלכות שחיטה"],
+            "משנה תורה, ספר קדושה",
+        ) == ["הלכות איסורי ביאה", "הלכות שחיטה"]
+
+    def test_an_abbreviation_matches_its_parenthesised_form_in_the_title(self):
+        assert strip_work_title_prefix(
+            ['ספר מצוות גדול (סמ"ג), סמ"ג לאו א',
+             'ספר מצוות גדול (סמ"ג), סמ"ג עשה ב'],
+            'ספר מצוות גדול (סמ"ג)',
+        ) == ["לאו א", "עשה ב"]
+
+    def test_an_already_clean_address_is_returned_unchanged(self):
+        assert strip_work_title_prefix(
+            ["פרק א", "פרק ב"], 'רד"ק על ישעיה'
+        ) == ["פרק א", "פרק ב"]
+
+    def test_the_prefix_is_the_works_and_never_each_labels(self):
+        """The Zohar regression, pinned.
+
+        Its addresses are daf/amud, `ג` is a word of `ספר הזוהר, חלק ג`, and an
+        earlier draft consumed title words greedily per label -- so the ONE daf out
+        of 596 that happened to be ג lost it and rendered `ע"א`, while the other 595
+        were untouched.
+        """
+        assert strip_work_title_prefix(
+            ['ב ע"א', 'ג ע"א', 'ג ע"ב'], "ספר הזוהר, חלק ג"
+        ) == ['ב ע"א', 'ג ע"א', 'ג ע"ב']
+
+    def test_a_lone_division_word_is_not_a_title(self):
+        """`ספר המצוות לחפץ בן יצליח` numbers its units `ספר ג` -- "book 3", not the
+        title's first word. This was the one wrong strip of the 108 the rule first
+        produced, and the guard is why it is 107.
+        """
+        assert strip_work_title_prefix(
+            ["ספר ג, עמ' 121", "ספר ד, עמ' 200"],
+            "ספר המצוות לחפץ בן יצליח",
+        ) == ["ספר ג, עמ' 121", "ספר ד, עמ' 200"]
+
+    def test_a_one_word_title_that_names_the_work_does_come_off(self):
+        """The partner of the guard above: `רי"ף` names the work, so the daf address
+        under `רי"ף חולין` sheds it. 24 live works carry this shape.
+        """
+        assert strip_work_title_prefix(
+            ['רי"ף א ע"א', 'רי"ף א ע"ב'], 'רי"ף חולין'
+        ) == ['א ע"א', 'א ע"ב']
+
+    def test_an_address_made_only_of_title_words_keeps_its_last_word(self):
+        assert strip_work_title_prefix(
+            ["מסכת אבות דרבי נתן, נוסח א א", "מסכת אבות דרבי נתן, נוסח א ב"],
+            "מסכת אבות דרבי נתן, נוסח א",
+        ) == ["א", "ב"]
+
+    def test_a_unit_equal_to_the_shared_prefix_keeps_every_label_uniform(self):
+        """The clamp that keeps one word in every label, stated as what it protects.
+
+        SYNTHETIC, and said so: no work in the served artifact has a unit whose
+        address is exactly the prefix its siblings share while differing from the
+        whole title (which the guard above already reverts). The shape is reachable
+        though -- a title carrying a volume designation over units addressed by an
+        inner level, one of them unnumbered -- and without the clamp that one unit
+        falls back to its address WHOLE (`remainder or label`) while every sibling
+        sheds the prefix. Uniformity across a work is the property being defended,
+        so a fallback that applies to one unit and not its siblings is the defect.
+        """
+        assert strip_work_title_prefix(
+            ["אור זרוע חלק", "אור זרוע חלק ב"], "אור זרוע חלק א"
+        ) == ["חלק", "חלק ב"]
+
+    def test_a_label_that_IS_the_title_is_left_alone(self):
+        """A one-unit work's address is the whole work; there is no citation
+        underneath to uncover, and stripping would leave the meaningless tail `שבת`.
+        """
+        assert strip_work_title_prefix(
+            ["קידוש ליל שבת"], "קידוש ליל שבת"
+        ) == ["קידוש ליל שבת"]
+
+    def test_a_strip_that_would_collapse_two_addresses_reverts_the_work(self):
+        """Distinctness is what makes word membership safe to apply blind: a
+        citation that no longer identifies its unit is worse than a repetitive one.
+
+        Two units distinguished ONLY by the punctuation inside the part being removed
+        are the case that reaches the guard -- the surviving words are identical, so
+        the trimmed remainders are equal and one address would answer for both. The
+        WHOLE work reverts, so its units stay distinguishable.
+        """
+        assert strip_work_title_prefix(
+            ["דבר אחד, א", "דבר אחד א"], "דבר אחד"
+        ) == ["דבר אחד, א", "דבר אחד א"]
+        assert strip_work_title_prefix(
+            ["דבר אחד א", "דבר אחד ב"], "דבר אחד"
+        ) == ["א", "ב"]
+
+    @pytest.mark.parametrize("title", [None, "", "   ", 123])
+    def test_a_missing_title_strips_nothing(self, title):
+        labels = ["ארבעה טורים, יורה דעה א", "ארבעה טורים, יורה דעה ב"]
+        assert strip_work_title_prefix(labels, title) == labels
+
+    def test_the_input_list_is_never_mutated(self):
+        labels = ["ארבעה טורים, יורה דעה א", "ארבעה טורים, יורה דעה ב"]
+        before = list(labels)
+        strip_work_title_prefix(labels, "ארבעה טורים, יורה דעה")
+        assert labels == before
+
+    def test_a_stripped_range_renders_as_the_citation_alone(self):
+        """The end-to-end shape the owner reported: nine runs of the Tur rendered
+        `ארבעה טורים, חושן משפט קנג–קנה; ארבעה טורים, חושן משפט קנז; ...`.
+        """
+        labels = strip_work_title_prefix(
+            ["ארבעה טורים, חושן משפט קנג", "ארבעה טורים, חושן משפט קנד",
+             "ארבעה טורים, חושן משפט קנה", "ארבעה טורים, חושן משפט קנו",
+             "ארבעה טורים, חושן משפט קנז"],
+            "ארבעה טורים, חושן משפט",
+        )
+        assert render_locus_label(
+            [0, 100, 200, 300, 400], labels, [1, 2, 3, 4, 5],
+            [(0, 250), (410, 450)],
+        ) == f"קנג{RANGE_SEP}קנה{PIECE_SEP}קנז"

@@ -504,7 +504,15 @@ def test_reconcile_mixed_manifest_mints_standalone_public_first_and_sibling(tmp_
     assert pf_row["candidate_title"] == "חיבור בדוי א"
     assert pf_row["author"] == ""
     assert pf_row["genre"] == "הלכה"
-    assert pf_row["source_label"] == "hewikisource"
+    # The MASKED code, never the acquisition provider. This line asserted
+    # `"hewikisource"` -- the provider name the reconciler used to write straight
+    # through -- until 2026-08-19, when that turned out to be why 14 owner-approved
+    # works vanished from the artifact: `load_approved_works` rejects any value
+    # outside the frozen `{sefaria, ja, msource}` vocabulary, and it had survived two
+    # appends only because 35 of REF6's 50 providers are literally NAMED `sefaria`.
+    # `public_first_source_label` now maps provider -> code at the producer, so both
+    # branches of the reconciler emit the same masked vocabulary.
+    assert pf_row["source_label"] == "sefaria"
     assert pf_row["owner_verdict"] == "approve"
     assert "pf-0001" in pf_row["owner_note"]
     sibling_row = next(r for r in approved_rows if r["work_id"] == "w000003")

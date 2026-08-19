@@ -337,3 +337,190 @@ def test_v4_reconciliation_mints_and_merges_only_a_live_public_reference(
     )
     assert copied["domain_parent"] == "Parent"
     assert copied["provenance"] == "v4-public-reference-inherits:w000001"
+
+
+# ---------------------------------------------------------------------------
+# public_first_source_label -- the 2026-08-19 silent-content-loss defect.
+# ---------------------------------------------------------------------------
+
+def test_public_first_source_label_maps_a_provider_to_a_MASKED_code():
+    """The `source_label` column holds a masked `source_corpus` code, never the
+    acquisition provider's name.
+
+    Both open providers map to the SAME masked code, and that is the point:
+    `sefaria` passing before this fix was a coincidence of the provider being
+    literally named after the code, while `hewikisource` -- 15 of REF6's 50
+    sources -- was silently discarded downstream along with 14 owner-approved
+    works and 9,715 claims.
+    """
+    from scripts import discovery_ids as ids
+    from scripts.discovery_v4_reconcile import public_first_source_label
+
+    assert public_first_source_label("sefaria") == ids.SOURCE_CORPUS_SEFARIA
+    assert public_first_source_label("hewikisource") == ids.SOURCE_CORPUS_SEFARIA
+    # Whatever it returns must be a code the consumer accepts -- asserted
+    # against the consumer's own validator rather than against a literal, so
+    # the two cannot drift apart again.
+    for provider in ("sefaria", "hewikisource"):
+        ids.validate_source_corpus_code(public_first_source_label(provider))
+
+
+def test_public_first_source_label_HALTS_on_an_unknown_provider():
+    """An unrecognised provider must halt, not default to the open code.
+
+    Defaulting is the one error this must never make: a provider that is not an
+    open corpus would be labelled `sefaria` and become publicly visible.
+    """
+    from scripts.discovery_v4_reconcile import public_first_source_label
+
+    with pytest.raises(ValueError) as excinfo:
+        public_first_source_label("some-new-archive")
+    message = str(excinfo.value)
+    assert "some-new-archive" in message
+    assert "_OPEN_PROVIDER_SOURCE_LABELS" in message, (
+        "the halt must name where a legitimate open provider gets added, or "
+        "the next reader's cheapest fix is to write the provider name straight "
+        "into the column again")
+
+
+def test_public_first_source_label_refuses_blank_and_non_string_providers():
+    from scripts.discovery_v4_reconcile import public_first_source_label
+
+    for bad in ("", "   ", None):
+        with pytest.raises(ValueError):
+            public_first_source_label(bad)
+
+
+def test_v4_reconcile_writes_a_MASKED_source_label_for_a_hewikisource_public_first_entry(
+    tmp_path: Path,
+):
+    """THE CALL SITE, not just the helper.
+
+    Written after a mutation test caught the first version of this fix being
+    unguarded: reverting `discovery_v4_reconcile.py` to
+    `"source_label": pf_entry["provider"]` left every unit test above passing,
+    because none of them ran the reconcile. That is the shape of a gate that
+    cannot fail. This test runs the real `reconcile_v4` over a `public_first`
+    entry whose provider is `hewikisource` and asserts the EMITTED CSV cell.
+    """
+    from scripts.discovery_public_first_identity import content_hash_for_entries
+
+    manifest = tmp_path / "reference-manifest.json"
+    manifest.write_text(
+        json.dumps({
+            "schema_version": "discovery-v4-reference-manifest-v1",
+            "acquisition_manifest_sha256": "a" * 64,
+            "entries": [{
+                "raw_reference_id": "REF6:tur_probe",
+                "identity_mode": "public_first",
+                "identity_key": "pf-9001",
+                "title": "ignored -- metadata comes from the artifact",
+            }],
+        }),
+        encoding="utf-8",
+    )
+    pf_entries = [{
+        "identity_key": "pf-9001",
+        "title_he": "ארבעה טורים, יורה דעה",
+        "author": "יעקב בן אשר",
+        "genre": "Halakhic / Halakhic- Rishonim and Aharonim",
+        "domain_parent": "Halakhic",
+        "domain_leaf": "Halakhic- Rishonim and Aharonim",
+        "provider": "hewikisource",
+        "source_ref": "probe",
+        "license": "CC-BY-SA",
+        "verdict": "approve",
+        "note": "probe entry",
+    }]
+    pf_artifact = tmp_path / "public-first.json"
+    pf_artifact.write_text(
+        json.dumps({
+            "schema_version": "discovery-public-first-identities-v1",
+            "ruled_on": "2026-08-19",
+            "entries": pf_entries,
+            "content_hash": content_hash_for_entries(pf_entries),
+        }, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    crosswalk = tmp_path / "crosswalk.json"
+    crosswalk.write_text(json.dumps({"PRIVATE:one": "w000001"}), encoding="utf-8")
+    approved = tmp_path / "approved.csv"
+    with approved.open("w", encoding="utf-8-sig", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=(
+            "work_id", "candidate_title", "author", "genre", "source_label",
+            "confidence_basis", "tier_a_witnesses", "claim_count",
+            "owner_title", "owner_verdict", "owner_note"))
+        writer.writeheader()
+        writer.writerow({
+            "work_id": "w000001", "candidate_title": "Private One",
+            "author": "Author", "genre": "Genre", "source_label": "msource",
+            "confidence_basis": "none-owner-supplies", "tier_a_witnesses": "1",
+            "claim_count": "1", "owner_title": "", "owner_verdict": "approve",
+            "owner_note": "",
+        })
+    merges = tmp_path / "merges.json"
+    merges.write_text(json.dumps({"merges": []}), encoding="utf-8")
+    domain_rows = [{
+        "canonical_work_id": "w000001", "domain_parent": "Parent",
+        "domain_leaf": "Leaf", "confidence": "high", "provenance": "test",
+    }]
+    domains = tmp_path / "domains.json"
+    domains.write_text(
+        json.dumps({
+            "artifact": "work_domains", "artifact_version": "v1",
+            "assignments": domain_rows,
+            "content_hash": curated_content_hash(domain_rows),
+        }),
+        encoding="utf-8",
+    )
+    match_db = tmp_path / "matches.db"
+    with sqlite3.connect(match_db) as conn:
+        conn.execute(
+            "CREATE TABLE track1_matches (work_id TEXT, title TEXT, author TEXT, "
+            "genre TEXT, sys_id TEXT, page_id TEXT, shadowed_by TEXT, "
+            "ref_spans_json TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO track1_matches VALUES "
+            "('REF6:tur_probe', 'T', '', 'Genre', 's1', 'p1', NULL, '[[0,5]]')"
+        )
+
+    out_crosswalk = tmp_path / "out-crosswalk.json"
+    out_approved = tmp_path / "out-approved.csv"
+    out_merges = tmp_path / "out-merges.json"
+    out_domains = tmp_path / "out-domains.json"
+    reconcile_v4(argparse.Namespace(
+        reference_manifest=str(manifest),
+        reference_manifest_sha256=sha256_file(manifest),
+        public_first_artifact=str(pf_artifact),
+        public_first_artifact_sha256=sha256_file(pf_artifact),
+        match_db=str(match_db),
+        base_crosswalk=str(crosswalk),
+        base_crosswalk_sha256=sha256_file(crosswalk),
+        base_approved=str(approved),
+        base_approved_sha256=sha256_file(approved),
+        base_merges=str(merges),
+        base_merges_sha256=sha256_file(merges),
+        base_work_domains=str(domains),
+        base_work_domains_sha256=sha256_file(domains),
+        output_crosswalk=str(out_crosswalk),
+        output_approved=str(out_approved),
+        output_merges=str(out_merges),
+        output_work_domains=str(out_domains),
+        report=None,
+    ))
+
+    rows = list(csv.DictReader(out_approved.open(encoding="utf-8-sig")))
+    minted = [r for r in rows if r["candidate_title"] == "ארבעה טורים, יורה דעה"]
+    assert len(minted) == 1, "the public-first identity was not minted at all"
+    assert minted[0]["source_label"] == "sefaria", (
+        "the emitted source_label is the raw provider name, not a masked "
+        "source_corpus code. That is the 2026-08-19 defect: the sidecar build "
+        "rejects the value, and before the accompanying fix it dropped the work "
+        "silently -- 14 works and 9,715 claims in the real bake."
+    )
+    # And the value must be one the downstream consumer actually accepts,
+    # asserted through its own validator rather than a literal.
+    from scripts import discovery_ids as ids
+    ids.validate_source_corpus_code(minted[0]["source_label"])

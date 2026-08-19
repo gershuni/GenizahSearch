@@ -975,6 +975,68 @@ A major overhaul of how LOCAL Hebrew PDFs are read into the My Library index, dr
 
 ## [Unreleased]
 
+### Discovery V4.2 sidecar — 14 restored works, and citations that stop repeating themselves (2026-08-19, web; built, not yet deployed)
+
+A rebuilt discovery artifact. **708 works / 58,602 computed identifications /
+30,528 in the main pool / 51,571 passage excerpts**; the corpus-wide figure a reader
+sees on the homepage goes 555 → 646. Frame hash unchanged from the previous
+candidate, which is the point: everything below changes what a reader is *told*, not
+which manuscripts were matched. Deployed by the owner (`_tmp/deploy_v42_discovery.sh`);
+this entry records the build, not a live change.
+
+- **14 owner-approved works were silently missing, including all three Tur sections, the
+  SeMaG and all three parts of the Zohar.** `scripts/discovery_v4_reconcile.py` wrote the
+  ACQUISITION PROVIDER into `source_label`, a column that holds a masked, provider-agnostic
+  code frozen to `{sefaria, ja, msource}`. It survived two appends because 35 of the
+  append's 50 providers are literally named `sefaria`; the 15 Hebrew Wikisource sources
+  arrived as `hewikisource`, the consumer rejected the value, and a bare `continue`
+  discarded **9,715 claims and 5,517 tier-A witnesses — about 30% of the append — at exit
+  code 0**. The release verifier passed, because the artifact was internally consistent; it
+  simply lacked 14 works. `load_approved_works` now counts and prints every exclusion, and
+  an exclusion meaning a build INPUT disagrees with this consumer is fatal and names the
+  lost ids. Restored: Tur Yoreh Deah 91 identifications / 36 main pool, SeMaG 408/75, the
+  Zohar 416/320 across its three parts.
+
+- **A citation no longer repeats the work title printed beside it.** A fragment witnessing
+  nine passages of the Tur rendered `ארבעה טורים, חושן משפט קנג–קנה; ארבעה טורים, חושן משפט
+  קנז; …` — the title once per run, with the citation buried in it. Measured over the
+  artifact: **107 of 679 works with citation addresses, 4,708 identifications, and 44 of
+  those works have been live since the REF4 append** — so this was never specific to the
+  works restored above. `shared/discovery_locus.py::strip_work_title_prefix` removes the
+  title on the way into the asset, which fixes both the composed citation and the findings
+  page's address-range filter (they read the same column). The prefix is computed once per
+  work from what all its units share, never per label: a per-label draft corrupted the
+  Zohar, where `ג` is a word of `ספר הזוהר, חלק ג` and the one daf out of 596 that happened
+  to *be* ג rendered as a bare column letter.
+
+- **A range no longer repeats an address level.** `shorten_range_tail` now treats `/` as a
+  word boundary, so `ויקרא/כ–ויקרא/כג` reads `ויקרא/כ–כג`. It also slices the original
+  tokens instead of rejoining words with a space, fixing a latent bug that would have
+  flattened `א/ד/ה` to `א ד ה` — a different address, silently.
+
+- **Two work-display rulings.** Tur Orach Chaim is renamed `ארבעה טורים, אורח חיים` so the
+  four sections of one work are named the same way, and the Zohar's authorship line is
+  cleared rather than shortened (383 of 708 works already carry no author, so this is
+  the normal shape). Both applied through the approved review CSV's `owner_title` / `author`
+  columns, so no pinned build input moves.
+
+- **Composition dates for the restored works.** 14 owner-ratified years — four inheriting a
+  year already recorded for the same work or author, ten scholarly dates with no precedent.
+  Unresolved date comparisons fall **694 → 6** (the six pre-existing undated Tosefta
+  tractates). The SeMaG alone accounted for 543 of the 694.
+
+- **The novelty axis is cleaner than the previous candidate.** `verdict_entries_failed_closed`
+  377 → 0 and fingerprint mismatches 377 → 0. Two producer defects behind that:
+  `scripts/discovery_novelty_production_run.py` merged its whole checkpoint into its output,
+  including answers for pairs that are no longer candidates — and its coverage assertion
+  compares counts, so a surplus of stale keys could mask a deficit of real ones. The output
+  is now restricted to the current candidate set with every drop counted.
+
+- **Gates.** Nine mutations of the new guards, each caught by a named test; the assertions
+  read the built asset's own stored labels rather than a helper's return value. Two stale
+  test assertions were found and closed in passing — one still pinned the `source_label`
+  defect, one pinned the pre-ratification date count.
+
 ### Pause/Resume for desktop searches (2026-08-19, desktop)
 
 A long search can now be parked and picked back up instead of being thrown away.

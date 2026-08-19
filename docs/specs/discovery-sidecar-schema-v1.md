@@ -545,7 +545,34 @@ router-cleaned non-impure).
 ## 8. `source_corpus` Codes, Source-Extensibility, Reserved Future Pathway
 
 `source_corpus in {sefaria, ja, msource}` — masked codes; internal-only;
-NEVER displayed (D-03a). The sidecar is built source-extensible (D-03): a
+NEVER displayed (D-03a).
+
+> **Amendment 2026-08-19 (source_corpus is a MASKED CODE, never an acquisition
+> provider).** The vocabulary stays at three values, and a fourth was drafted
+> and withdrawn the same day. Recorded because the withdrawal is the load-bearing
+> part: `scripts/discovery_v4_reconcile.py` was writing an acquisition
+> provider's NAME (`hewikisource`) into the review artifact's `source_label`
+> column, which this schema specifies as the masked code. It went unnoticed
+> across two appends because 35 of REF6's 50 providers are literally named
+> `sefaria`, so the wrong value happened to be a legal one. On the 15 Hebrew
+> Wikisource sources it was not, and `load_approved_works` swallowed the
+> resulting `ValueError` with a bare `continue`: **14 owner-approved works,
+> 9,715 claims and 5,517 tier-A witnesses — about 30% of the REF6 append,
+> including סמ"ג, all three Tur sections and all three parts of the Zohar —
+> emitted no work, claim or evidence row, in a build that exited 0 and passed
+> this document's own release verifier.**
+>
+> Adding a fourth code would NOT have fixed it and was measured, not assumed:
+> `discovery_claim.source_corpus` is derived independently from the matcher's
+> own `cat` (`_map_cat_to_source_corpus`), so a work row reading `hewikisource`
+> fails **F4** (§1.2, `check_source_corpus_consistency`); and
+> `shared/discovery_visibility.py::_OPEN_SOURCE_CORPORA` is `{sefaria, ja}`, so
+> the fourth code fails CLOSED to `private` and the works would still never
+> reach a public surface. The provider is therefore mapped to a masked code at
+> the PRODUCER (`discovery_v4_reconcile.py::public_first_source_label`), an
+> unrecognised provider HALTS there, and `load_approved_works` now COUNTS every
+> exclusion and treats an unrecognised `source_label`, a work_id missing from
+> the crosswalk, or a malformed row as FATAL. Both halts are mutation-proven. The sidecar is built source-extensible (D-03): a
 gen-2 refresh (adding R-source + the deferred M-source piyyut/documentary
 works) is a **versioned REBUILD, never a schema migration** — the masked
 `source_corpus` field and the `canonical_work_id` cross-corpus dedup key

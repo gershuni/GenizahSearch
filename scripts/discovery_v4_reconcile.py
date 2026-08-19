@@ -41,11 +41,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
+    from scripts.discovery_ids import SOURCE_CORPUS_SEFARIA
     from scripts.discovery_v4_common import require_hash, sha256_file, stable_json_dump
     from scripts.discovery_track1_contract import IDENTITY_MODES
     from scripts.discovery_identification_eligibility import load_eligibility_artifact
     from scripts.discovery_public_first_identity import load_public_first_artifact
 except ModuleNotFoundError:  # direct invocation
+    from discovery_ids import SOURCE_CORPUS_SEFARIA
     from discovery_v4_common import require_hash, sha256_file, stable_json_dump
     from discovery_track1_contract import IDENTITY_MODES
     from discovery_identification_eligibility import load_eligibility_artifact
@@ -69,6 +71,51 @@ V4_MERGE_CONTRACT = "discovery-v4-public-reference-merges-v1"
 OPAQUE_RE = re.compile(r"w[0-9]{6}")
 _PRIVATE_SIBLING = "private_sibling"
 _PUBLIC_FIRST = "public_first"
+
+#: Acquisition PROVIDERS that are open corpora, and therefore map to the masked
+#: `sefaria` (open-corpus) `source_corpus` code.
+#:
+#: This mapping exists because of a defect found on 2026-08-19: the public-first
+#: branch below wrote `pf_entry["provider"]` straight into `source_label`, a
+#: column contractually holding "the masked `source_corpus` code only". It
+#: looked correct for two appends because 35 of REF6's 50 providers are
+#: literally named `sefaria` -- and silently cost 14 owner-approved works,
+#: 9,715 claims and about 30% of the REF6 append when 15 Hebrew Wikisource
+#: sources arrived labelled `hewikisource`, a value outside the frozen
+#: three-code vocabulary. `load_approved_works` swallowed the resulting
+#: ValueError with a bare `continue`, so the build exited 0 and the release
+#: verifier passed over an artifact quietly missing סמ"ג, all three Tur
+#: sections and all three parts of the Zohar.
+#:
+#: An UNKNOWN provider halts rather than defaulting: guessing `sefaria` for
+#: something that might be restricted is the one error this must never make.
+_OPEN_PROVIDER_SOURCE_LABELS = {
+    "sefaria": SOURCE_CORPUS_SEFARIA,
+    "hewikisource": SOURCE_CORPUS_SEFARIA,
+}
+
+
+def public_first_source_label(provider: str) -> str:
+    """The masked `source_corpus` code for a public-first acquisition provider.
+
+    Never the provider name: `source_corpus` is a masked, provider-agnostic
+    code, `discovery_claim.source_corpus` is derived independently from the
+    matcher's own `cat`, and F4
+    (`verify_discovery_sidecar.py::check_source_corpus_consistency`) requires
+    the two to be equal -- so a provider name here fails the release verifier
+    even when it survives the vocabulary check.
+    """
+    code = _OPEN_PROVIDER_SOURCE_LABELS.get((provider or "").strip())
+    if code is None:
+        raise ValueError(
+            f"unknown public-first acquisition provider {provider!r}: cannot "
+            "derive a masked source_corpus code. Add it to "
+            "_OPEN_PROVIDER_SOURCE_LABELS if it is an OPEN corpus; a provider "
+            "that is not open must not be minted as a public-first identity."
+        )
+    return code
+
+
 assert {_PRIVATE_SIBLING, _PUBLIC_FIRST} == set(IDENTITY_MODES)
 # Recognizes a public-reference raw id (any REF<digits>: prefix). This decides
 # only whether a row is a REFERENCE row at all -- WHICH reference namespaces
@@ -376,7 +423,7 @@ def run(args: argparse.Namespace) -> dict:
                     "candidate_title": pf_entry["title_he"],
                     "author": pf_entry["author"],
                     "genre": pf_entry["genre"],
-                    "source_label": pf_entry["provider"],
+                    "source_label": public_first_source_label(pf_entry["provider"]),
                     "confidence_basis": "v4-public-first-owner-authorized",
                     "tier_a_witnesses": str(witnesses),
                     "claim_count": str(claims),

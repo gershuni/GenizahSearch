@@ -48,6 +48,7 @@ __all__ = [
     "RANGE_SEP",
     "PIECE_SEP",
     "label_segments",
+    "strip_work_title_prefix",
     "shorten_range_tail",
     "RefAlignment",
     "RefSpanProjectionError",
@@ -655,6 +656,178 @@ def label_segments(label: str) -> List[str]:
     return [p for p in parts if p != ""] or [label]
 
 
+#: Where one word of a citation label ends. `/` counts because a hierarchical
+#: address arrives as `בעל הטורים על התורה/בראשית/א` -- one "word" by whitespace,
+#: four by address level -- and the leading levels are exactly what has to go.
+_LABEL_WORD_SPLIT = re.compile(r"[\s/]+")
+
+#: Separators and dashes a stripped label must not open with. `,` and `;` end the
+#: part that was removed, not the part that survives.
+_LABEL_LEAD_TRIM = re.compile(r"^[\s,;:./–—-]+")
+
+#: Punctuation round a word, dropped before comparing it to the title. The title
+#: writes the abbreviation parenthesised -- `ספר מצוות גדול (סמ"ג)` -- and the unit
+#: label writes it bare -- `סמ"ג עשה רמד`. Those are the same word.
+_LABEL_WORD_PUNCT = re.compile(
+    r"^[\s(\[{,;:.–—-]+|[\s)\]},;:.–—-]+$")
+
+#: Hebrew and ASCII quote/apostrophe forms folded together, so `רשב״ם` and `רשב"ם`
+#: compare equal. Kept here rather than reached for in `scripts/`: this is a fact
+#: about how the corpus spells an abbreviation, not a shared policy, and the module
+#: already keeps `_FINAL_FOLD` private for the same reason.
+_QUOTE_FOLD = str.maketrans({
+    "״": '"', "׳": "'", "“": '"', "”": '"',
+    "‘": "'", "’": "'",
+})
+
+
+#: A label split into words AND the separators between them, both kept. Used by
+#: `shorten_range_tail`, which has to REJOIN what it did not remove: splitting on
+#: whitespace alone and rejoining with `" "` turned `א/ד/ה` into `א ד ה`, and
+#: including `/` in the split without keeping it would do the same. Capturing the
+#: separator makes the rejoin exact -- words land on even indices, the separator that
+#: follows each on the odd index after it.
+_RANGE_TOKEN_SPLIT = re.compile(r"([\s/]+)")
+
+
+#: Words that DESIGNATE a division rather than name a work, and so may never be
+#: stripped on their own. Measured need, not caution: of the 108 works the strip
+#: below moves, exactly one was wrong -- `ספר המצוות לחפץ בן יצליח` addresses its
+#: units `ספר ג, עמ' 121`, where `ספר` is "book 3" and not the title's first word,
+#: and dropping it left `ג, עמ' 121`. The guard is deliberately narrow: it applies
+#: ONLY when the whole consumed prefix is a SINGLE word, so `ספר יצירה א -> א` and
+#: `מסכת סופרים א -> א` still shorten, and `רי"ף א ע"א -> א ע"א` is untouched
+#: because `רי"ף` names the work.
+_GENERIC_DIVISION_WORDS = frozenset({
+    "ספר", "פרק", "חלק", "שער", "מאמר", "סימן", "דף", "עמוד", "כרך",
+    "הלכות", "מסכת", "סדר", "מדרש", "מהדורה", "שאלה", "תשובה", "דרוש",
+})
+
+
+def _label_word_key(word: str) -> str:
+    """A citation word folded for comparison against a title word."""
+    return (_LABEL_WORD_PUNCT.sub("", word.translate(_QUOTE_FOLD))
+            .translate(_FINAL_FOLD)
+            .strip())
+
+
+def strip_work_title_prefix(labels: Sequence[str],
+                            title: Optional[str]) -> List[str]:
+    """`labels` with the work's own title removed from the head of each one.
+
+    THE DEFECT THIS EXISTS FOR. `scripts/discovery_v4_build_reference.py::
+    _locus_label` composes every chapter/section label as
+    `f"{locus_title} {numeral}"` / `f"{locus_title}, {unit_label}"`, so the stored
+    address for the Tur is `ארבעה טורים, חושן משפט קנג`. Every surface that shows a
+    locus shows the work title immediately beside it, so a reader gets the title
+    twice -- and once per RUN, because a fragment witnessing nine passages renders
+    as `ארבעה טורים, חושן משפט קנג–קנה; ארבעה טורים, חושן משפט קנז; ...`, where the
+    citation is what the repetition buries (owner report, 2026-08-19). 83 of the
+    679 locus works carry the shape and 3,433 identifications render it; 44 of
+    those works have been live since the REF4 append, so this is not a V4.2
+    regression -- it is the first time the shape landed on a work prominent enough
+    to be noticed.
+
+    WHY THE FIX IS HERE AND NOT AT THE PRODUCER. The fully-qualified label is the
+    right thing to STORE: the divisions database is a hash-pinned build input whose
+    labels are how a reviewer traces a unit back to the publisher's own reference,
+    and rewriting it would mean rebuilding a pinned chain (V6 <- V5 <- V4 <- ...)
+    to change a display string. So the qualified form stays in the input, the ASSET
+    carries the reader's form, and `_locus_label` keeps its own contract.
+
+    THE RULE. Take the leading words EVERY unit of the work shares, consume those
+    that also occur in the title, stop at the first that does not, and drop the
+    separators that followed. Word MEMBERSHIP rather than a literal title prefix,
+    because the repetition is not always verbatim:
+    `משנה תורה, ספר קדושה` labels a unit
+    `משנה תורה, ספר קדושה, משנה תורה, הלכות איסורי ביאה` -- the title, then the
+    title's own head again -- and a literal-prefix strip leaves it still doubled.
+
+    THREE GUARDS, each closing a case measured over the real 679 locus works:
+
+    * **One prefix per work, never per label.** The shared prefix is computed once
+      from what all units have in common. Consuming title words label-by-label
+      corrupted the Zohar: `ג` is a word of `ספר הזוהר, חלק ג`, so the single daf
+      out of 596 that happened to BE ג lost it and rendered `ע"א`.
+    * **A lone division word is not a title.** A single-word prefix that merely
+      DESIGNATES a division (`_GENERIC_DIVISION_WORDS`) is left in place, because
+      `ספר המצוות לחפץ בן יצליח` numbers its units `ספר ג, עמ' 121` -- "book 3", not
+      the title's first word -- and this was the one wrong strip of the 108.
+    * **Never empty.** Stripping stops while one word remains in every label, so
+      `מסכת אבות דרבי נתן, נוסח א א` -- whose every word is a title word -- yields
+      `א`, not `""`.
+    * **A whole-work label is not a prefix.** When a label's word sequence IS the
+      title's (`קידוש ליל שבת`, a one-unit work) there is no citation underneath to
+      uncover, and stripping would leave the meaningless tail `שבת`. Left alone.
+    * **Distinctness is preserved, per work.** If the stripped labels collapse two
+      addresses into one, the WHOLE work reverts to its stored labels. This is the
+      guard that makes word-membership safe to apply blind: it cannot silently
+      merge two units into one address, and a repetitive citation is better than a
+      citation that no longer identifies its unit.
+
+    Returns a NEW list; `labels` is never mutated. A blank title, or a title
+    sharing no leading word with any label, returns the labels unchanged -- so this
+    is a no-op on the 596 works whose addresses were already clean, and on any
+    future append that stops qualifying them.
+    """
+    original = [label if isinstance(label, str) else "" for label in labels]
+    if not title or not isinstance(title, str) or not original:
+        return list(original)
+    title_keys = [key for key in (_label_word_key(word)
+                                  for word in _LABEL_WORD_SPLIT.split(title))
+                  if key]
+    title_words = set(title_keys)
+    if not title_words:
+        return list(original)
+
+    split = [[word for word in _LABEL_WORD_SPLIT.split(label) if word.strip()]
+             for label in original]
+    keyed = [[_label_word_key(word) for word in words] for words in split]
+
+    # SEQUENCE, not set: `מסכת אבות דרבי נתן, נוסח א א` has the same word SET as its
+    # title -- the trailing `א` repeats the one in `נוסח א` -- while being a chapter
+    # address inside it. A unit whose word SEQUENCE is the title's is a whole-work
+    # address with no citation underneath, and the whole work is left alone rather
+    # than that one label, so the strip stays uniform across it.
+    if any([key for key in keys if key] == title_keys for keys in keyed):
+        return list(original)
+
+    # THE PREFIX IS THE WORK'S, NOT EACH LABEL'S. An earlier draft consumed title
+    # words greedily per label, and corrupted the Zohar: its addresses are daf/amud
+    # (`ג ע"א`), `ג` is a word of `ספר הזוהר, חלק ג`, and so the label whose daf
+    # happened to be ג -- and only that one, out of 596 -- lost its daf and rendered
+    # `ע"א`. The repetition being removed is a property of the WORK, so the prefix is
+    # computed once from what every unit shares and applied identically. A work whose
+    # units do not share a leading word has no title prefix to remove.
+    common = 0
+    if keyed:
+        shortest = min(len(keys) for keys in keyed)
+        while common < shortest and len({keys[common] for keys in keyed}) == 1:
+            common += 1
+    consumed = 0
+    while consumed < common and keyed[0][consumed] in title_words:
+        consumed += 1
+    # Leave at least one word in every label, so a unit made entirely of title words
+    # shortens instead of vanishing.
+    consumed = min(consumed, min((len(keys) for keys in keyed), default=0) - 1)
+    if consumed <= 0:
+        return list(original)
+    if consumed == 1 and keyed[0][0] in _GENERIC_DIVISION_WORDS:
+        return list(original)
+
+    stripped: List[str] = []
+    for label, words in zip(original, split):
+        remainder = label
+        for word in words[:consumed]:
+            remainder = remainder[remainder.index(word) + len(word):]
+        remainder = _LABEL_LEAD_TRIM.sub("", remainder).strip()
+        stripped.append(remainder or label)
+
+    if len(set(stripped)) < len(set(original)):
+        return list(original)
+    return stripped
+
+
 def shorten_range_tail(head: str, tail: str) -> str:
     """The tail of a range, with whatever it already shares with the head removed.
 
@@ -662,6 +835,11 @@ def shorten_range_tail(head: str, tail: str) -> str:
     covers every family at once, because a repeated leading part is the normal shape
     of a compound label: `פרק ג, משנה ה–פרק ג, משנה ז` shortens to `פרק ג, משנה ה–ז`,
     and `יד ע"א–יד ע"ב` to `יד ע"א–ע"ב`.
+
+    A WORD BOUNDARY HERE INCLUDES `/`, because a hierarchical address states its
+    levels with one: `בראשית/יד–בראשית/טו` (owner report, 2026-08-19) repeats a level
+    the reader has already read, exactly as a repeated `עמ'` would. Splitting on
+    whitespace alone left it whole.
 
     Two stages, and the second is CONDITIONAL on the first having consumed
     everything before it. Whole leading parts go first; then, only if the two labels
@@ -682,13 +860,18 @@ def shorten_range_tail(head: str, tail: str) -> str:
     if not rest:
         return tail
     if shared == len(head_parts) - 1:
-        head_words, tail_words = head_parts[shared].split(), rest[0].split()
+        head_tokens = _RANGE_TOKEN_SPLIT.split(head_parts[shared])
+        tail_tokens = _RANGE_TOKEN_SPLIT.split(rest[0])
+        head_words, tail_words = head_tokens[0::2], tail_tokens[0::2]
         common = 0
         while (common < min(len(head_words), len(tail_words)) - 1
                and head_words[common] == tail_words[common]):
             common += 1
         if common:
-            rest = [" ".join(tail_words[common:])] + rest[1:]
+            # Slice the ORIGINAL token list rather than rejoining words with a
+            # space: `/` is a word boundary here (an address level), so a rejoin
+            # would flatten `א/ד/ה` to `א ד ה` -- a different address, silently.
+            rest = ["".join(tail_tokens[2 * common:])] + rest[1:]
     return ", ".join(p for p in rest if p) or tail
 
 
