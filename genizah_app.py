@@ -150,7 +150,7 @@ def paused_seconds(paused_total: float, pause_started: float, mono_now: float) -
     return total
 
 
-def effective_elapsed(mono_now: float, mono_start: float, paused: float) -> float:
+def effective_elapsed(mono_now: float, mono_start, paused: float) -> float:
     """Working seconds elapsed: monotonic span minus parked time, never negative.
 
     Both arguments must come from time.monotonic(), NOT time.time(). An earlier
@@ -160,7 +160,9 @@ def effective_elapsed(mono_now: float, mono_start: float, paused: float) -> floa
     the elapsed display and wreck the composition ETA derived from it. Pausing
     invites exactly the long/overnight searches where that happens.
     """
-    if not mono_start:
+    # `is None`, not falsiness: time.monotonic()'s zero point is arbitrary, so
+    # 0.0 is a legitimate reading and must not be read as "no run yet".
+    if mono_start is None:
         return 0.0
     return max(0.0, (mono_now - mono_start) - (paused or 0.0))
 
@@ -182,7 +184,7 @@ class _PauseCtx:
         self.state = 'idle'          # idle | running | pausing | paused
         self.run_id = 0              # identity of the worker being tracked
         self.epoch = 0               # pause cycle within that run
-        self.mono_start = 0.0        # time.monotonic() at run start
+        self.mono_start = None       # time.monotonic() at run start; None = no run
         self.paused_total = 0.0
         self.pause_started = 0.0
         self.local_phase_active = False

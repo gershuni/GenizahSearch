@@ -975,6 +975,70 @@ A major overhaul of how LOCAL Hebrew PDFs are read into the My Library index, dr
 
 ## [Unreleased]
 
+### Pause/Resume for desktop searches (2026-08-19, desktop)
+
+A long search can now be parked and picked back up instead of being thrown away.
+A **Pause** button sits beside Search on the Search tab and beside Analyze on the
+Composition tab, appears only while a run is in flight, and covers all four
+workers — regular search, composition scan, and both Lab Mode variants.
+
+- **The button never claims more than it can do.** Clicking Pause shows a
+  disabled "Pausing…" until the worker actually reaches a checkpoint and
+  acknowledges; only then does it become "Resume". Grouping runs on a different
+  thread that is not pausable, so the button is hidden for that phase rather
+  than shown greyed-out beside a live Stop.
+- **Elapsed time and the composition ETA now exclude parked time**, and are
+  computed from `time.monotonic()`. They were `time.time() - start`, so a pause
+  inflated elapsed and halved the reported chunk rate — and a wall-clock base is
+  wrong regardless, since an NTP or DST step moves it under a running search.
+  The ETA is derived from elapsed, so one fix corrects both.
+- **New `shared/pause_gate.py`** — `PauseGate`, plain stdlib, no Qt and no
+  policy: it blocks and returns a bool, leaving the `InterruptedError` raise in
+  `gui_threads` beside every other cancel. `PausableSearchMixin` adds
+  `pause()` / `resume()` / `request_cancel()` and a `_checkpoint()` called as the
+  first statement of each progress callback, so a parked worker publishes no
+  progress and the bar freezes where it was.
+- **`request_cancel()` is now the single stop entry point** for all six cancel
+  paths: it sets the flag *and* un-parks in one call. A parked worker never
+  reaches the code that reads `cancel_flag`, so a flag alone would have left it
+  parked until the `wait()` budget expired and `QThread.terminate()` fired.
+
+**Fixed along the way** (each was live before this change):
+
+- **Lab Mode searches were never cancellable.** `LabSearchThread` had no
+  `cancel_flag`, so Stop set a dead attribute; `lab_search`'s `batch_cb`
+  swallowed the cancel in a bare `except Exception` (`InterruptedError` is an
+  `OSError` subclass); and a non-deep Lab search never ticked progress at all.
+- **The LOCAL (My Library) passes ignored Stop entirely** — `_query_local_index`
+  and the two LOCAL post-passes had no callback and no cancel check.
+- **A stopped Title/Shelfmark search discarded its partial results.**
+  `_execute_metadata_search` was the one loop with no `try/except`, so the raise
+  escaped and became an empty result set, unlike every other mode.
+- **`perf_signal` fired for cancelled runs**, contradicting its own comment: the
+  core swallows `InterruptedError` and returns normally, so that line was
+  reached anyway.
+- **`closeEvent`'s `comp_thread.requestInterruption()` was a no-op** since it was
+  written — the composition threads only ever polled `cancel_flag`. The mixin's
+  `requestInterruption()` override repairs that call site in place.
+- The LOCAL phase now reports on a dedicated `phase_signal` and switches the bar
+  to indeterminate, instead of pushing unrelated hit counts down the numeric
+  channel (which rewinds the bar) or pinning at `(total, total)` (which reads as
+  100% complete while a long phase is still running).
+
+**Stop itself is unchanged.** It still blocks briefly and still falls back to a
+hard thread kill for a worker caught *between* checkpoints; a paused worker is
+specifically never in that state, and the wider non-blocking-stop rework is
+recorded in `docs/OPEN_ISSUES.md` rather than smuggled in here.
+
+Tests: `test_pause_gate.py`, `test_pause_ack_epoch.py`, `test_pause_elapsed_math.py`,
+`test_pause_resume_ui.py`, `test_pause_phase_signal.py`, `test_pause_core_ticks.py`,
+`test_pause_worker_wiring.py`, `test_pause_stop_lifecycle.py`,
+`test_pause_resume_i18n.py` (all Qt-free), plus `test_pause_integration_qt.py`
+in the `gui` lane for what needs a live event loop — thread affinity,
+queued-vs-direct delivery, a stale acknowledgement crossing a run boundary, and
+real `wait()` timing. New EN/HE keys: Pause / Resume / Pausing… / Paused.
+
+
 ### Web memory — allocator-ratchet attribution + remediation (2026-07-08, web)
 
 The recurring "web process at 13.4G" was definitively attributed with live under-load probes: the bulk of RSS is **dead-but-resident allocator high-water** (pymalloc/glibc arenas absorbing per-request transient churn, never returned to the OS — smaps showed ~12G across ~300 arena-class anon regions while live Python allocations grew single-digit MB in a traced window), driven to the systemd `MemoryHigh` cap within ~12h of every restart by **SemrushBot** crawling `/browse` 24/7 (~7K req/day, 41% of traffic). Remediation shipped in two tiers (Codex pre-flight: APPROVE-WITH-CHANGES ×4, `_tmp/codex-tier2-critique-2026-07-08.md`):

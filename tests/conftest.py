@@ -96,6 +96,11 @@ _GUI_TEST_FILES = {
     "test_seed022_desktop_badge.py",
     "test_space_scroll_gui.py",
     "test_telemetry_consent_ux.py",
+    # Pause/Resume: starts real QThreads and pumps the event loop to observe
+    # queued acknowledgements. The rest of that feature's suite is Qt-free by
+    # design; this file holds only what genuinely needs a live loop (thread
+    # affinity, queued-vs-direct delivery, real wait() timing).
+    "test_pause_integration_qt.py",
 }
 
 
