@@ -1010,7 +1010,10 @@ workers — regular search, composition scan, and both Lab Mode variants.
   swallowed the cancel in a bare `except Exception` (`InterruptedError` is an
   `OSError` subclass); and a non-deep Lab search never ticked progress at all.
 - **The LOCAL (My Library) passes ignored Stop entirely** — `_query_local_index`
-  and the two LOCAL post-passes had no callback and no cancel check.
+  and the two LOCAL post-passes had no callback and no cancel check. Stopping one
+  now keeps the hits it had already materialised, like every other mode; an
+  earlier revision of this branch re-raised instead and cost the user every LOCAL
+  row under a label reading "(Partial results)".
 - **A stopped Title/Shelfmark search discarded its partial results.**
   `_execute_metadata_search` was the one loop with no `try/except`, so the raise
   escaped and became an empty result set, unlike every other mode.

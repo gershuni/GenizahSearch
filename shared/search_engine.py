@@ -803,6 +803,9 @@ class SearchEngine:
 
         if self.local_searcher is None or self.local_index is None:
             return []
+        # Declared before the try so every handler below can hand back whatever
+        # was materialised — a cancel must never cost the user their partial hits.
+        results = []
         try:
             # Use self.local_index (kept alongside local_searcher) for parse_query.
             # tantivy.Searcher has no .index attribute — Index must be stored separately.
@@ -848,7 +851,6 @@ class SearchEngine:
             res_obj = self.local_searcher.search(tantivy_q, search_limit)
             hits = res_obj.hits if hasattr(res_obj, "hits") else res_obj
             pattern_str = regex.pattern if regex is not None else ""
-            results = []
             # The LOCAL pass is a distinct phase, not more of the Genizah one: its
             # hit counts are unrelated, so reporting them on the same numeric
             # channel would rewind the bar. Announce the phase and let the UI go
@@ -861,31 +863,42 @@ class SearchEngine:
                 except Exception:
                     pass
             _local_total = len(hits) if hasattr(hits, '__len__') else 0
-            for _i_loc, (score, doc_address) in enumerate(hits):
-                # Until now this loop had no callback at all, so a LOCAL or ALL
-                # scope search ignored Stop entirely.
-                if progress_callback and _i_loc % 5 == 0:
-                    try:
-                        progress_callback(_i_loc, _local_total)
-                    except (InterruptedError, KeyboardInterrupt):
-                        raise
-                    except Exception:
-                        pass  # progress is advisory; cancellation is not
-                doc = self.local_searcher.doc(doc_address)
-                hit = self._build_local_result_dict(
-                    doc, score, regex=regex, pattern_str=pattern_str
-                )
-                # D-04.1 filter-out: skip candidates whose regex didn't match.
-                # _build_local_result_dict returns None for those.
-                if hit is None:
-                    continue
-                results.append(hit)
+            # Scoped tightly to the loop: a cancel here means "stop scanning
+            # and keep what you found", matching _execute_metadata_search,
+            # search_composition_logic and lab_search. Before this the raise
+            # travelled all the way out to SearchThread, which emitted [] — so
+            # a stopped My Library search showed nothing under a UI label that
+            # explicitly reads "(Partial results)".
+            try:
+                for _i_loc, (score, doc_address) in enumerate(hits):
+                    # Until now this loop had no callback at all, so a LOCAL or ALL
+                    # scope search ignored Stop entirely.
+                    if progress_callback and _i_loc % 5 == 0:
+                        try:
+                            progress_callback(_i_loc, _local_total)
+                        except (InterruptedError, KeyboardInterrupt):
+                            raise
+                        except Exception:
+                            pass  # progress is advisory; cancellation is not
+                    doc = self.local_searcher.doc(doc_address)
+                    hit = self._build_local_result_dict(
+                        doc, score, regex=regex, pattern_str=pattern_str
+                    )
+                    # D-04.1 filter-out: skip candidates whose regex didn't match.
+                    # _build_local_result_dict returns None for those.
+                    if hit is None:
+                        continue
+                    results.append(hit)
+            except InterruptedError:
+                return results  # cancelled mid-scan — keep the hits we built
             return results
         except InterruptedError:
-            # MUST precede the broad handler: otherwise the cancel degrades into
-            # `return []`, silently dropping the LOCAL contribution AND eating the
-            # cancellation so the caller never learns the run was abandoned.
-            raise
+            # Still not an index failure, so still ahead of the broad handler —
+            # but hand back what was gathered instead of re-raising. Telemetry
+            # correctness does NOT depend on the exception escaping: perf_signal
+            # is suppressed by the worker's cancel_flag, and the "(Partial
+            # results)" suffix comes from the UI's own _search_was_cancelled.
+            return results
         except Exception as e:
             LOGGER.warning("LOCAL index query failed: %r", e)
             return []
@@ -2332,11 +2345,6 @@ class SearchEngine:
                     progress_callback=progress_callback,
                     phase_callback=phase_callback,
                 )
-            except InterruptedError:
-                # Propagate so SearchThread takes its InterruptedError branch
-                # (no perf emit, correct telemetry) instead of reporting a normal
-                # empty result set for a run the user stopped.
-                raise
             except Exception as _le:
                 LOGGER.warning("LOCAL-only search failed: %r", _le)
                 return []
@@ -2764,10 +2772,12 @@ class SearchEngine:
                         phase_callback=phase_callback,
                     )
             except InterruptedError:
-                # Deliberately NOT a re-raise: the Genizah results already in
-                # `deduped` are real, so partial is the right semantics here. The
-                # explicit clause keeps a user cancel out of the "index query
-                # failed" warning log below.
+                # Defensive only: _query_local_index now returns its partial hits
+                # rather than raising, so a cancel arrives here as a short list and
+                # gets merged. Kept so that if it ever raises again, a user cancel
+                # still does not get logged below as an index failure — and NOT a
+                # re-raise, because the Genizah results already in `deduped` are
+                # real and partial is the right semantics at this point.
                 local_hits = []
             except Exception as _e:
                 LOGGER.warning(

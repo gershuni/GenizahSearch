@@ -22,7 +22,6 @@ import types
 import pytest
 
 from shared import lab_engine as lab_mod
-from shared import search_engine as se_mod
 from shared.search_engine import PHASE_LOCAL_SEARCH, SearchEngine
 
 
@@ -147,19 +146,73 @@ def test_query_local_index_announces_its_phase():
     assert phases == [PHASE_LOCAL_SEARCH]
 
 
-def test_query_local_index_propagates_cancellation_instead_of_returning_empty():
-    """The broad `except Exception: return []` at the tail would otherwise turn a
-    user cancel into a silent empty LOCAL contribution AND eat the cancel."""
+def test_query_local_index_returns_partials_on_cancel():
+    """A stopped My Library search must keep the hits it already materialised.
+
+    The first version of this change re-raised instead, on the reasoning that
+    SearchThread needed the exception to suppress completed-run telemetry. That
+    stopped being true once perf_signal was guarded by cancel_flag, and the
+    re-raise then cost the user every LOCAL row — under a UI label that reads
+    "(Partial results)". Codex caught it on PR #321.
+    """
     eng = _engine_with_local(50)
 
     def cb(i, total):
         if i >= 10:
             raise InterruptedError('cancel')
 
-    with pytest.raises(InterruptedError):
-        eng._query_local_index('q', 'literal', 0, progress_callback=cb)
+    out = eng._query_local_index('q', 'literal', 0, progress_callback=cb)
 
-    assert eng.local_searcher.docs_built < 50, 'loop ran to completion after cancel'
+    assert isinstance(out, list), 'cancel escaped instead of yielding partials'
+    assert out, 'partial LOCAL results were discarded'
+    assert len(out) < 50, 'loop ran to completion after cancel'
+    assert eng.local_searcher.docs_built < 50
+
+
+def test_query_local_index_never_raises_cancellation_at_its_callers():
+    """The contract both call sites depend on.
+
+    execute_search's LOCAL-only branch returns this function's value straight to
+    SearchThread, so a raise here becomes results_signal.emit([]).
+    """
+    eng = _engine_with_local(20)
+
+    def cb_immediately(i, total):
+        raise InterruptedError('cancel on the very first tick')
+
+    out = eng._query_local_index('q', 'literal', 0, progress_callback=cb_immediately)
+    assert out == [], 'cancelled before any hit — empty is correct, raising is not'
+
+
+def test_local_only_call_site_does_not_reraise_cancellation():
+    """Guards the other half: even with the function behaving, a re-raise at the
+    call site would put us straight back to emitting []."""
+    src = inspect.getsource(SearchEngine.execute_search)
+    head = src[:src.index('if not self.searcher:')]      # the LOCAL-only branch
+    assert 'except InterruptedError' not in head, (
+        'the LOCAL-only branch re-raises cancellation again; partial results are lost')
+
+
+def test_local_only_execute_search_yields_partials_on_cancel():
+    """The whole path Codex flagged, end to end.
+
+    execute_search(corpus_scope='local') returns straight to SearchThread, so if
+    anything along the way re-raises, the user gets an empty table labelled
+    "(Partial results)". This is the test that would have caught it.
+    """
+    eng = _engine_with_local(50)
+    eng.build_regex_pattern = lambda terms, mode, gap: None
+    eng.searcher = None
+
+    def cb(i, total):
+        if i >= 10:
+            raise InterruptedError('cancel')
+
+    out = eng.execute_search('q', 'literal', 0, progress_callback=cb, corpus_scope='local')
+
+    assert isinstance(out, list), 'cancellation escaped execute_search'
+    assert out, 'a stopped My Library search returned nothing'
+    assert len(out) < 50
 
 
 def test_query_local_index_survives_a_broken_progress_callback():

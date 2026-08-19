@@ -13,8 +13,6 @@ it lands afterwards it would restore a determinate range and undo the switch.
 
 import types
 
-import pytest
-
 import genizah_app as app
 from genizah_app import _PauseCtx
 from shared.search_engine import PHASE_LOCAL_SEARCH
