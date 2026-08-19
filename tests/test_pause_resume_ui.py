@@ -8,6 +8,8 @@ Kept out of the `gui` lane deliberately: none of this needs a real widget, and
 the fragile lane should hold only what genuinely needs Qt.
 """
 
+import itertools
+import time
 import types
 
 import pytest
@@ -80,6 +82,30 @@ def _stub():
     for name in _METHODS:
         setattr(s, name, getattr(app.GenizahGUI, name).__get__(s, types.SimpleNamespace))
     return s
+
+
+@pytest.fixture
+def controlled_clock(monkeypatch):
+    """A monotonic clock that provably advances, 0.5 s per read.
+
+    Do not delete this as ceremony — CI on windows-latest caught the bug it
+    exists for, and it cannot fail on Linux.
+
+    On Windows, CPython 3.11's time.monotonic() is GetTickCount64-based with
+    ~15.6 ms granularity. pause -> ack -> resume executed back-to-back all land
+    inside one tick, so `monotonic() - pause_started` is exactly 0.0 and nothing
+    is banked. That is CORRECT behaviour — nobody pauses and resumes inside
+    16 ms, and any human-length pause spans many ticks — but it means a test
+    that asserts on real elapsed time is testing the platform's clock
+    resolution, not the arithmetic it means to check. Linux's nanosecond
+    clock_gettime hid that for the whole of local development.
+
+    Driving the clock ourselves makes the assertion about the code again, and
+    is robust whatever a given platform's resolution turns out to be.
+    """
+    ticks = itertools.count(1000.0, 0.5)
+    monkeypatch.setattr(time, 'monotonic', lambda: next(ticks))
+    return ticks
 
 
 @pytest.fixture
@@ -160,7 +186,12 @@ def test_stale_acks_are_ignored(running_search, run_id, epoch):
 
 # ------------------------------------------------------------ resume -> running
 
-def test_resume_banks_the_parked_time_and_restarts_the_ticker(running_search):
+def test_resume_banks_the_parked_time_and_restarts_the_ticker(running_search, controlled_clock):
+    """Resuming must bank the time spent parked.
+
+    Takes controlled_clock: with a real clock this asserts on the platform's
+    timer resolution rather than on the banking arithmetic, and fails on Windows.
+    """
     s = running_search
     s._on_pause_clicked(s._pause_search)
     s._on_pause_ack(s._pause_search, 1, 1)
@@ -172,6 +203,52 @@ def test_resume_banks_the_parked_time_and_restarts_the_ticker(running_search):
     assert s._pause_search.pause_started == 0.0
     assert s._pause_search.button.text == 'Pause'
     assert s._search_elapsed_timer.running is True
+
+
+def test_banking_is_correct_under_a_coarse_clock(monkeypatch):
+    """The code — not the clock — under Windows-like timer granularity.
+
+    Feeds an explicit reading sequence instead of a real clock, so this asserts
+    the same thing on every platform. The handlers read time.monotonic() in this
+    order (measured, not assumed): pause-click repaint, ack stamp, ack repaint,
+    resume. Holding the first three inside one 15.6 ms tick and letting the
+    fourth land on the next one is exactly what a real pause looks like on
+    Windows, and the banked total must come out as the tick boundary.
+    """
+    readings = iter([1000.0, 1000.0, 1000.0, 1015.6])
+    monkeypatch.setattr(time, 'monotonic', lambda: next(readings))
+
+    s = _stub()
+    s._pause_search.reset_for_run(1, mono_start=0.0)
+    s._apply_pause_state(s._pause_search, 'pause')
+
+    s._on_pause_clicked(s._pause_search)
+    s._on_pause_ack(s._pause_search, 1, 1)       # pause_started = 1000.0
+    s._on_pause_clicked(s._pause_search)         # resume reads 1015.6
+
+    assert s._pause_search.paused_total == pytest.approx(15.6)
+
+
+def test_a_sub_tick_pause_banks_nothing_and_that_is_correct(monkeypatch):
+    """The behaviour that broke the original test, pinned as intended.
+
+    A pause and resume inside a single clock tick bank exactly 0.0. No user can
+    do that by hand, and treating it as a bug would mean inventing time that was
+    never spent — so the contract is that it is a no-op, not that it is positive.
+    """
+    monkeypatch.setattr(time, 'monotonic', lambda: 1234.5)   # frozen: one tick
+
+    s = _stub()
+    s._pause_search.reset_for_run(1, mono_start=0.0)
+    s._apply_pause_state(s._pause_search, 'pause')
+
+    s._on_pause_clicked(s._pause_search)
+    s._on_pause_ack(s._pause_search, 1, 1)
+    s._on_pause_clicked(s._pause_search)
+
+    assert s._pause_search.state == 'running'
+    assert s._pause_search.paused_total == 0.0
+    assert s._pause_search.pause_started == 0.0
 
 
 def test_a_cycle_one_ack_arriving_during_cycle_two_is_ignored(running_search):
