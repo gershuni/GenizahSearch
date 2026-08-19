@@ -149,6 +149,10 @@ class LabSearchThread(QThread):
         # Phase 110 (UAT bug #2): corpus selector — 'genizah'|'local'|'all'.
         # Default 'genizah' so existing callers keep Genizah-only behavior.
         self.corpus_scope = corpus_scope
+        # This class had NO cancel_flag until now, so stop_search's
+        # `self.search_thread.cancel_flag = True` (genizah_app.py) set a dead
+        # attribute and Lab Mode searches could only ever be terminate()d.
+        self.cancel_flag = False
 
     def run(self):
         _prevent_sleep()
@@ -156,6 +160,8 @@ class LabSearchThread(QThread):
         try:
             # Helper to handle different callback signatures
             def cb(arg1, arg2=None):
+                if self.cancel_flag:
+                    raise InterruptedError("Search cancelled by user")
                 if isinstance(arg1, str):
                     self.status_signal.emit(arg1)
                 elif isinstance(arg1, int) and arg2 is not None:
@@ -173,6 +179,12 @@ class LabSearchThread(QThread):
             self.results_signal.emit(results)
             # Phase 115: emit perf signal — ONLY on success path (D-08 / Pitfall 3)
             self.perf_signal.emit((time.perf_counter() - t0) * 1000.0, len(results))
+        except InterruptedError:
+            # MUST precede `except Exception`: InterruptedError is an OSError
+            # subclass, so the broad handler would route a user cancel into
+            # error_signal -> QMessageBox.critical. lab_search now returns partial
+            # results itself, so this only catches a raise from outside its wrapper.
+            self.results_signal.emit([])
         except Exception as e: self.error_signal.emit(str(e))
         finally:
             _allow_sleep()
