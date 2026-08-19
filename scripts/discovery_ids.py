@@ -192,6 +192,31 @@ MERGE_BASES = frozenset({MERGE_BASIS_OXFORD_PART, MERGE_BASIS_PHYSICAL_JOIN})
 SOURCE_CORPUS_SEFARIA = "sefaria"
 SOURCE_CORPUS_JA = "ja"
 SOURCE_CORPUS_MSOURCE = "msource"
+#
+# THIS SET STAYS AT THREE. A fourth `hewikisource` code was drafted on
+# 2026-08-19, after the V4.2 bake silently dropped 14 owner-approved works
+# whose `source_label` arrived as `hewikisource`, and then WITHDRAWN because it
+# would not have worked and was fixing the wrong layer:
+#
+#   * `source_label` is contractually "the masked `source_corpus` code only"
+#     (`build_discovery_sidecar.py::_emit_enriched_review_artifact`, which
+#     writes the candidate's own mapped code). The provider name got into that
+#     column from ONE line in `discovery_v4_reconcile.py`, whose sibling branch
+#     three lines earlier correctly writes the masked code. It only ever looked
+#     right because 35 of REF6's 50 providers are literally named `sefaria`.
+#   * A work row reading `hewikisource` would FAIL verification: claim rows
+#     derive their code from the matcher's own `cat` via
+#     `_map_cat_to_source_corpus` (`cat='Sefaria'` -> `sefaria`), and F4
+#     (`verify_discovery_sidecar.py::check_source_corpus_consistency`) requires
+#     `discovery_claim.source_corpus == works.source_corpus`.
+#   * `shared/discovery_visibility.py::_OPEN_SOURCE_CORPORA` is `{sefaria, ja}`,
+#     so a fourth code fails CLOSED to `private` -- the works would exist in
+#     the private artifact and still never reach the public site.
+#
+# These codes are deliberately MASKED and provider-agnostic; a real provider
+# name does not belong in them. A new open provider maps to `sefaria` at the
+# producer (`discovery_v4_reconcile.py::public_first_source_label`), and an
+# unrecognised one HALTS there.
 SOURCE_CORPUS_CODES = frozenset({SOURCE_CORPUS_SEFARIA, SOURCE_CORPUS_JA, SOURCE_CORPUS_MSOURCE})
 
 

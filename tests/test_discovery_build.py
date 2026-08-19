@@ -795,6 +795,15 @@ def test_load_approved_works_ships_edit_with_owner_title_wins(tmp_path):
 
 
 def test_load_approved_works_rejection_rules(tmp_path):
+    """The BENIGN exclusions, which are specified rules and stay silent-but-counted.
+
+    Split from the input-divergence cases below on 2026-08-19. This test used
+    to bundle both classes and assert that all seven rows excluded quietly;
+    that contract is what let 14 owner-approved works -- 9,715 claims -- leave
+    the V4.2 bake without a trace when a legitimate new provider label arrived.
+    An unrecognised `source_label` and a work_id missing from the crosswalk now
+    HALT, and each has its own test below.
+    """
     approved_csv = tmp_path / "approved.csv"
     _write_approved_csv(approved_csv, [
         _candidate_row(work_id="w000001", candidate_title="Good Title", owner_verdict="approve"),  # kept
@@ -802,14 +811,78 @@ def test_load_approved_works_rejection_rules(tmp_path):
         _candidate_row(work_id="w000003", candidate_title="Suppressed", owner_verdict="suppress"),  # excluded
         _candidate_row(work_id="w000004", candidate_title="Unverdicted", owner_verdict=""),  # excluded: blank verdict
         _candidate_row(work_id="w000005", candidate_title="", owner_title="",
-                       owner_verdict="approve"),  # excluded: empty resolved title
-        _candidate_row(work_id="w000999", candidate_title="Not In Crosswalk", owner_verdict="approve"),  # unknown id
-        _candidate_row(work_id="w000006", candidate_title="Bad Corpus", source_label="not-a-real-code",
-                       owner_verdict="approve"),  # excluded: bad source_label code
+                       owner_verdict="approve"),  # excluded: empty resolved title (D-07)
     ])
-    valid_work_ids = {"w000001", "w000002", "w000003", "w000004", "w000005", "w000006"}
+    valid_work_ids = {"w000001", "w000002", "w000003", "w000004", "w000005"}
     approved = sidecar_build.load_approved_works(approved_csv, valid_work_ids=valid_work_ids)
     assert [a["work_id"] for a in approved] == ["w000001"]
+
+
+def test_load_approved_works_HALTS_on_an_unrecognised_source_label(tmp_path):
+    """The 2026-08-19 defect, as a regression test.
+
+    An approved row whose `source_label` is not in the frozen vocabulary means
+    the producer and this consumer have diverged -- NOT that the work should be
+    discarded. Silently dropping it cost 14 owner-approved works and ~30% of
+    the REF6 append, in a build that exited 0 and passed the release verifier.
+    """
+    approved_csv = tmp_path / "approved.csv"
+    _write_approved_csv(approved_csv, [
+        _candidate_row(work_id="w000001", candidate_title="Fine", owner_verdict="approve"),
+        _candidate_row(work_id="w000006", candidate_title="New Provider",
+                       source_label="not-a-real-code", owner_verdict="approve"),
+    ])
+    with pytest.raises(ValueError) as excinfo:
+        sidecar_build.load_approved_works(
+            approved_csv, valid_work_ids={"w000001", "w000006"})
+    message = str(excinfo.value)
+    assert "source_label rejected" in message
+    assert "w000006" in message, (
+        "the halt must name the work that was lost -- a count alone does not "
+        "tell the reader what is missing from their artifact")
+    assert "SOURCE_CORPUS_CODES" in message, (
+        "the halt must say where a legitimate new provider gets added, or the "
+        "next reader's cheapest fix is to relabel the acquisition and lie "
+        "about its provenance")
+
+
+def test_load_approved_works_HALTS_on_a_work_id_absent_from_the_crosswalk(tmp_path):
+    """Same class: an approved work_id the crosswalk does not know is a build
+    input disagreeing with this consumer, not a work to discard."""
+    approved_csv = tmp_path / "approved.csv"
+    _write_approved_csv(approved_csv, [
+        _candidate_row(work_id="w000999", candidate_title="Not In Crosswalk",
+                       owner_verdict="approve"),
+    ])
+    with pytest.raises(ValueError) as excinfo:
+        sidecar_build.load_approved_works(approved_csv, valid_work_ids={"w000001"})
+    assert "crosswalk" in str(excinfo.value)
+    assert "w000999" in str(excinfo.value)
+
+
+def test_load_approved_works_HALTS_on_a_raw_provider_name_as_source_label(tmp_path):
+    """A PROVIDER name in `source_label` halts -- it is not a masked code.
+
+    This is the exact shape of the 2026-08-19 defect:
+    `discovery_v4_reconcile.py` wrote `pf_entry["provider"]` into a column
+    contractually holding "the masked `source_corpus` code only", and it looked
+    correct for two appends because 35 of REF6's 50 providers are literally
+    named `sefaria`. `hewikisource` is deliberately NOT added to the frozen
+    vocabulary: a work row carrying it would fail F4 against claim rows, whose
+    code is derived independently from the matcher's `cat`, and would fail
+    closed to `private` in `discovery_visibility`. The provider is mapped to a
+    masked code at the producer instead, so this consumer must keep refusing
+    the raw name.
+    """
+    approved_csv = tmp_path / "approved.csv"
+    _write_approved_csv(approved_csv, [
+        _candidate_row(work_id="w000001", candidate_title="Tur Yoreh Deah",
+                       source_label="hewikisource", owner_verdict="approve"),
+    ])
+    with pytest.raises(ValueError) as excinfo:
+        sidecar_build.load_approved_works(approved_csv, valid_work_ids={"w000001"})
+    assert "source_label rejected" in str(excinfo.value)
+    assert "w000001" in str(excinfo.value)
 
 
 def test_load_approved_works_excludes_reject_suppress_blank_and_empty_title(tmp_path):
