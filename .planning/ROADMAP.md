@@ -405,10 +405,47 @@ with the surfaces staying live under an explicit beta label**:
 | VIS-02 reconciliation | Open | A Phase 139 requirement by original registration; stays in 139a. The Phase 136 VIS-01 public projection — the one that actually gates what leaves the building — did ship and is enforced at build time. |
 | Browser-check record | Open | The CI `findings-browser-check` job exists and runs; what is missing is the recorded attestation, not the check. |
 
-**One item is NOT waived and is carried as a live obligation:** the cross-surface masking sweep was
-last attested on 2026-08-05 (`136-19`). Three surfaces shipped after it — the beta reviews, the
-excerpt view, and the homepage promotion — and **none has been swept**. This is a safety check
-rather than a copy or policy debt, and it is the first task of Phase 139a.
+**One item was NOT waived and was carried as a live obligation — now CLOSED (2026-08-19):** the
+cross-surface masking sweep was last attested on 2026-08-05 (`136-19`). Three surfaces shipped after
+it — the beta reviews, the excerpt view, and the homepage promotion. The artifact half was re-run on
+2026-08-16 and the surface half on 2026-08-19; see the two notes below. One of the three
+(the excerpt view) was already covered and the entry was stale in saying otherwise.
+
+> **CLOSED, 2026-08-19 — the SURFACE half, and the list was stale by one.** The three surfaces
+> were checked against the sweep rather than against this entry, and the excerpt view turned out to
+> be **already swept**: `test_discovery_masking_sweep.py::_excerpt_loader` drives
+> `render_excerpt_disclosure` through six states (direct / reprojected / nowork / empty / raise /
+> busy), dated with the surface on 2026-08-13, and the line-coverage gate over `findings_rows.py`
+> keeps it driven. The other two were genuinely unswept and are now covered by
+> **`tests/render_smoke/test_discovery_masking_sweep_reviews_home.py`** (21 tests, green):
+>
+> * **Beta identification reviews** — three egress classes, two of which no existing sweep modelled:
+>   a **mailto link target** carrying `identification_id` + `sidecar_version` (the four-class sweep's
+>   copy/export inventory asserts an absence over four modules and this was not one of them, so the
+>   absence was true of the scanned set and false of the product), and the **outbound Supabase
+>   write**, captured by intercepting the storage boundary and driving the dialog to actually submit.
+>   Rendered in both languages, dialog opened (it is built lazily, so an unopened action paints none
+>   of the form), plus `aria-label`/tooltip text, which is where the published-review provenance and
+>   each verdict live.
+> * **Homepage discovery promotion** — all four gated entry points by MARKER (the promotion navigates
+>   from a click handler, not an `href`, and its title goes through `tr()`, so route- and
+>   English-title assertions were both wrong about the capture rather than the page), with the
+>   DEFERRED count driven. The stronger finding: `home.py` reads the artifact in exactly one place
+>   and renders exactly one value from it, `meta.work_total`, behind
+>   `isinstance(total, int) and total > 0` — so **no artifact string can reach that surface**, which
+>   is asserted directly rather than inferred from a clean scan.
+>
+> **Mutation-proven at two levels**, per the standing rule that a gate must be watched failing: at
+> the DATA level a seeded needle enters through the same dict shape the panel hands the component and
+> the shipped renderer puts it on screen — each class's scan fires, *and so does the exact
+> `--strict --scan-repo --scan-asset` invocation the gate runs; and at the CODE level an unreached
+> renderer added to `identification_review.py` made the coverage derivation fail by name
+> (`['_mutation_probe_renderer']`), then was reverted. Three defects in the first draft were found by
+> the gate rather than by reading it: an empty outbound-write capture (the dialog needs the loop
+> yielded to while the client is still alive), a `pytest.skip` substring check that failed on its own
+> forbidden-names list (fixed by reusing the sweep's AST walk — whose docstring predicts exactly that
+> mistake), and an unset-pattern-file test that passed for the wrong reason because on Windows
+> `Path('nul').parent` resolves to the repository and finds the real pattern file.
 
 > **Partial progress, 2026-08-16 — the ARTIFACT half only.** Recording the deployed V4 build
 > (`528f6d36…`) revealed that the obligation was in worse shape than written: the sweep's scan
