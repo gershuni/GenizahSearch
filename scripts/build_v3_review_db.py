@@ -64,6 +64,16 @@ DEFAULT_STAGING = os.path.join(REPO_ROOT, "same_work_spike", "probe", "refs_stag
 DEFAULT_LIBRARIES_CSV = os.path.join(REPO_ROOT, "libraries.csv")
 DEFAULT_OUT = os.path.join(REPO_ROOT, "discovery_data", "discovery-v3-REVIEW.db")
 
+# The V4-era acquisitions, whose raw ids are REF4:/REF5:/REF6:. Each tree holds
+# sources/manifest.json + sources/normalized/<key>.json. Prefix -> its own tree;
+# a key missing there is looked up in the others, because a re-fetch can land in
+# a later tree than the namespace it was minted under.
+V4_SOURCE_TREES = {
+    "REF4": os.path.join(REPO_ROOT, "discovery_builds", "discovery_v4", "sources"),
+    "REF5": os.path.join(REPO_ROOT, "discovery_builds", "discovery_v4_1", "sources"),
+    "REF6": os.path.join(REPO_ROOT, "discovery_builds", "discovery_v4_2", "sources"),
+}
+
 # Context kept either side of the match, in RAW characters. Enough to judge the
 # span in its setting without storing whole works 194,000 times over.
 CONTEXT = 320
@@ -171,10 +181,52 @@ def build_source_map(staging: str) -> dict:
         for fn in sorted(os.listdir(ja_dir)):
             if fn.endswith(".txt"):
                 src["J:" + fn[:-4]] = ("J", os.path.join(ja_dir, fn))
+    # FALLBACK when the two env vars are unset (2026-08-19): ask the spike's own
+    # review module for its map instead of duplicating the derivation. Without it
+    # the two masked corpora map to nothing and every one of their rows renders as
+    # a space-free letter stream -- 124,179 of 142,211 rows on the V4.2 build.
+    # `build_track1_review` is where the e1l deck gets its readable spaced text, so
+    # this is the same source of truth rather than a second one. `setdefault`, so
+    # an explicit env override still wins. Its map is REQUESTED, never its constant
+    # names or paths: those name the restricted corpus and must not appear here.
+    if not (m_dir and ja_dir):
+        try:
+            import build_track1_review as _btr  # spike module, gitignored tree
+            for _k, _v in _btr.build_source_map().items():
+                src.setdefault(_k, _v)
+        except Exception as _exc:  # noqa: BLE001 -- absence is not an error here
+            print("build_source_map: no readable-source fallback (%s)" % _exc)
+
     man = os.path.join(staging, "manifest.json")
     if os.path.exists(man):
         for e in json.load(open(man, encoding="utf-8"))["entries"]:
             src["REF2:" + e["key"]] = ("R", os.path.join(staging, e["body_file"]))
+
+    # REF4/REF5/REF6 acquired sources (2026-08-19). Without these every appended
+    # work -- the Mishneh Torah books, Tanhuma, Pesikta, Esther Rabbah, Hizkuni,
+    # Sefer ha-Mitzvot, Teshuvot ha-Geonim -- renders as an unspaced letter stream.
+    key_to_path = {}
+    for _prefix, _tree in V4_SOURCE_TREES.items():
+        _man = os.path.join(_tree, "manifest.json")
+        if not os.path.exists(_man):
+            continue
+        for e in json.load(open(_man, encoding="utf-8")).get("entries", []):
+            nf = e.get("normalized_file")
+            if not nf:
+                continue
+            p = os.path.join(_tree, "normalized", nf)
+            if os.path.exists(p):
+                key_to_path.setdefault(_prefix, {})[e["key"]] = p
+    for _prefix in V4_SOURCE_TREES:
+        own = key_to_path.get(_prefix, {})
+        for _k, _p in own.items():
+            src[_prefix + ":" + _k] = ("V4JSON", _p)
+        # A key that is not in this namespace's own tree, but is in another.
+        for _other, _m in key_to_path.items():
+            if _other == _prefix:
+                continue
+            for _k, _p in _m.items():
+                src.setdefault(_prefix + ":" + _k, ("V4JSON", _p))
     return src
 
 
@@ -232,6 +284,13 @@ def load_raw(kind: str, path: str):
     genuinely over-MAX_PATH cases it was introduced for.
     """
     global _HEADER_RE
+    if kind == "V4JSON":
+        # See module note: the frozen stream is the units' text concatenated with
+        # NO separator, so the readable text is the same concatenation unnormalized.
+        doc = json.load(open(path, encoding="utf-8"))
+        raw = "".join(u.get("text") or "" for u in (doc.get("units") or []))
+        stream, offs = norm_stream(raw)
+        return raw, stream, offs
     if _HEADER_RE is None:
         import re
         _HEADER_RE = re.compile(r"##[^#]*##")
