@@ -32,6 +32,16 @@ from typing import Optional
 PSEUDO_DOC_PREFIXES = ('sys:', 'part:')
 
 
+def eligible_record_ids(index) -> frozenset:
+    """The shared document set: every record the passage index actually holds.
+
+    Applying this to the incumbent is what makes the two methods answer over
+    the same corpus. Without it the incumbent searches 246,083 records the
+    other cannot see.
+    """
+    return frozenset(index.record_id(i) for i in range(index.n_records))
+
+
 def is_page_row(row: dict) -> bool:
     """False for continuous pseudo-document hits.
 
@@ -44,17 +54,34 @@ def is_page_row(row: dict) -> bool:
 
 @dataclass
 class ChunkRetriever:
-    """The incumbent: SearchEngine.search_composition_logic, page-scoped."""
+    """The incumbent: SearchEngine.search_composition_logic, page-scoped.
+
+    `eligible` is the EQUAL-ELIGIBILITY control and it matters more than it
+    looks. The Tantivy corpus holds 948,549 page records; the passage index
+    holds 702,466, because Stage-0 excludes 246,083 (short pages, microfilm
+    target sheets, library ownership stamps). Unfiltered, the incumbent can
+    return records the passage engine structurally cannot, which makes any
+    comparison a measurement of two different document sets rather than of two
+    methods.
+
+    Two legitimate framings, and they answer different questions:
+      * eligible set applied   -> compares the METHODS (the plan's primary)
+      * eligible set omitted   -> compares the PRODUCTS as they ship today
+    Whichever is used must be declared, because the difference is 26% of the
+    corpus.
+    """
     engine: object
     chunk_size: int = 5
     mode: str = 'exact'
     max_freq: int = 100
     include_filtered: bool = False
+    eligible: Optional[frozenset] = None
 
     @property
     def config_id(self) -> str:
         return (f'chunk-c{self.chunk_size}-{self.mode}-f{self.max_freq}'
-                f'{"-incl" if self.include_filtered else ""}')
+                f'{"-incl" if self.include_filtered else ""}'
+                f'{"-elig" if self.eligible is not None else "-alldocs"}')
 
     def retrieve(self, text: str) -> list:
         res = self.engine.search_composition_logic(
@@ -67,9 +94,12 @@ class ChunkRetriever:
             if not is_page_row(r):
                 continue
             rid = str(r.get('raw_header') or '')
-            if rid and rid not in seen:
-                seen.add(rid)
-                out.append(rid)
+            if not rid or rid in seen:
+                continue
+            if self.eligible is not None and rid not in self.eligible:
+                continue
+            seen.add(rid)
+            out.append(rid)
         return out
 
 

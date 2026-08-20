@@ -59,7 +59,8 @@ function render(){
    `<button class="${g===k?'sel':''}" onclick="grade('${k}')">${lab}</button>`).join("");
  document.getElementById("app").innerHTML = `
   <div class="card">
-   <div class="meta">קטע חופף: <b>${d.letters}</b> אותיות</div>
+   <div class="meta">${d.aligned ? `קטע חופף: <b>${d.letters}</b> אותיות`
+     : `<b style="color:#c62828">לא נמצא קטע חופף</b> — התוצאה הוחזרה על ידי אחת השיטות; מוצגות תחילות שני הטקסטים`}</div>
    <div class="cols">${pane("הטקסט שחיפשתי", d.q_before, d.q_match, d.q_after)}${pane("מה שהוחזר", d.r_before, d.r_match, d.r_after)}</div>
    <div class="grades">${btns}</div>
    <div class="nav"><button onclick="move(-1)">→ הקודם</button><button onclick="move(1)">הבא ←</button></div>

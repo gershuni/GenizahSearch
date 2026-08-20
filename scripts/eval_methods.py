@@ -27,7 +27,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.passage_index import open_index  # noqa: E402
 from shared.passage_policy import get_preset  # noqa: E402
-from shared.retrieval_adapters import ChunkRetriever, PassageRetriever  # noqa: E402
+from shared.retrieval_adapters import (  # noqa: E402
+    ChunkRetriever, PassageRetriever, eligible_record_ids,
+)
 from shared.retrieval_eval import (  # noqa: E402
     SPLIT_HOLDOUT, SPLIT_TUNE, EvalLedger, EvalQuery, evaluate, non_inferior,
     split_queries, summarize, summarize_by_stratum,
@@ -48,11 +50,19 @@ def load_queries(path: str) -> list:
     return out
 
 
-def build_retrievers(spec: str, index_dir: str) -> list:
-    """spec: comma-separated 'passage:<preset>' / 'chunk:<size>:<mode>:<freq>'."""
+def build_retrievers(spec: str, index_dir: str,
+                     equal_eligibility: bool = True) -> list:
+    """spec: comma-separated 'passage:<preset>' / 'chunk:<size>:<mode>:<freq>'.
+
+    equal_eligibility restricts the incumbent to the records the passage index
+    actually holds. Without it the two methods search different corpora --
+    948,549 records against 702,466 -- and the comparison measures document
+    sets rather than methods.
+    """
     out = []
     engine = None
     idx = None
+    eligible = None
     for item in spec.split(','):
         item = item.strip()
         if not item:
@@ -74,9 +84,18 @@ def build_retrievers(spec: str, index_dir: str) -> list:
                     raise SystemExit(
                         'Tantivy index failed to open -- composition search '
                         'would return empty results SILENTLY')
+            if equal_eligibility and eligible is None:
+                if idx is None:
+                    idx = open_index(index_dir)
+                    if idx is None:
+                        raise SystemExit(f'index will not open: {index_dir}')
+                eligible = eligible_record_ids(idx)
+                print(f'equal-eligibility set: {len(eligible):,} records',
+                      flush=True)
             size, mode, freq = (rest.split(':') + ['exact', '100'])[:3]
             out.append(ChunkRetriever(engine=engine, chunk_size=int(size),
-                                      mode=mode, max_freq=int(freq)))
+                                      mode=mode, max_freq=int(freq),
+                                      eligible=eligible))
         else:
             raise SystemExit(f'unknown retriever kind: {kind!r}')
     return out
@@ -96,6 +115,10 @@ def main() -> int:
     ap.add_argument('--baseline', default=None,
                     help='config_id to treat as incumbent for non-inferiority')
     ap.add_argument('--force', action='store_true')
+    ap.add_argument('--all-docs', action='store_true',
+                    help='do NOT restrict the incumbent to the '
+                         'shared document set (compares products, '
+                         'not methods)')
     args = ap.parse_args()
 
     queries = load_queries(args.queries)
@@ -110,7 +133,8 @@ def main() -> int:
 
     ledger = EvalLedger(args.ledger) if args.ledger else None
     results = {}
-    for r in build_retrievers(args.configs, args.index):
+    for r in build_retrievers(args.configs, args.index,
+                              equal_eligibility=not args.all_docs):
         cid = r.config_id
         t0 = time.time()
         outs = evaluate(chosen, r.retrieve, k_values=K_VALUES)
