@@ -122,6 +122,7 @@ Detailed specifications for complex features:
 | [discovery-novelty-v1.md](specs/discovery-novelty-v1.md) | Novelty axis design, LLM gate contract, run cost/authorization |
 | [atlas-asset-schema-v1.md](specs/atlas-asset-schema-v1.md) | Baked Atlas binary asset schema |
 | [v3-review-viewer-spec.md](specs/v3-review-viewer-spec.md) | Owner-only LOCAL discovery-v3 grading server (never deployed) |
+| [passage-matching-algorithm.md](specs/passage-matching-algorithm.md) | **The character-level passage matcher** — normalization, 5-gram indexing, diagonal two-hit seeding, the two acceptance boundaries, Stage-0 hygiene, and the interactive posting budget. Tracked authority for the algorithm |
 
 ---
 
