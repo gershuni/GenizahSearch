@@ -29,7 +29,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.passage_builder import (  # noqa: E402
-    build_index, codes_from_letter_indices, df_band_edges,
+    build_index, codes_from_letter_indices,
 )
 from shared.passage_index import (  # noqa: E402
     GRAM_OFFSETS_NAME, MAX_RECORD_LETTERS, POSTINGS_NAME, RECORDS_NAME,
