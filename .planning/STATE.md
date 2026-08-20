@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
-stopped_at: "Discovery beta LIVE in production since 2026-08-08 (DISCOVERY_ENABLED=1). Phases 133-136 CLOSED. Roadmap reconciled 2026-08-16 under the owner's ratify-reality ruling; the five open REL-01 gate items are waived in writing, EXCEPT the cross-surface masking re-sweep over the three post-2026-08-05 surfaces, which is a live obligation and the first task of Phase 139a."
-last_updated: "2026-08-16T00:00:00.000Z"
-last_activity: 2026-08-16
+stopped_at: "Roadmap RE-MAPPED 2026-08-20: 10 phases -> 19. Phase Details had never been updated to match the 2026-08-16 checkbox list, so GSD read a retired Phase 139 and reported 136 incomplete and 139 complete - exactly inverted. Added the passage-matching lane (141-147, owner-planned outside GSD, built on an unmerged branch) and the discovery data lane (148-149) for ~85 post-ratification commits that had no phase. Discovery beta still LIVE in production (DISCOVERY_ENABLED=1 since 2026-08-08). Phases 133-136 CLOSED, now with retrospective VERIFICATION.md attestations. The REL-01 masking re-sweep that was the one un-waived gate item is CLOSED (2026-08-19)."
+last_updated: "2026-08-20T00:00:00.000Z"
+last_activity: 2026-08-20
 progress:
-  total_phases: 10
+  total_phases: 19
   completed_phases: 4
   total_plans: 45
-  completed_plans: 45
-  percent: 40
+  completed_plans: 43
+  percent: 21
 ---
 
 # Project State
@@ -21,9 +21,35 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-20)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 136 — read-surfaces-connections-panel-work-witnesses
+**Current focus:** three parallel lanes — passage matching (Phase 144, evaluation, in progress on an unmerged branch), discovery data (Phases 148-149), discovery surfaces (Phase 136.1 next). See `.planning/ROADMAP.md` § Progress for the lane table.
 
 ## Current Position
+
+> ### ⚠ RE-MAPPED 2026-08-20 — read this first, then the 2026-08-16 banner below it
+>
+> A second reconciliation ran on 2026-08-20. The 2026-08-16 ratification below is still accurate
+> about everything it covers; what it left behind were three mechanical faults and four days of
+> unrecorded work.
+>
+> **Fixed by the re-map:** `ROADMAP.md`'s `## Phase Details` had never been updated to match the
+> checkbox list the ratification rewrote, so `init.manager` read a retired **Phase 139**, reported
+> **136 as incomplete** (its own Progress table said 22/22 Complete) and **139 as complete** (the
+> atlas explorer is unbuilt) — exactly inverted. Phase Details is rebuilt, 136 is ticked, 139 is
+> split into 139a/139b in both halves of the file, and phases 140-149 have detail blocks.
+>
+> **Added:** the **passage-matching lane (141-147)** — owner-planned outside GSD, 20 commits on the
+> unmerged branch `claude/computed-id-parallels-search-a7c8fd`, placed inside v9.0.0 as the desktop
+> release's headline — and the **discovery data lane (148-149)** for the V4.1/V4.2 reference
+> expansion and the serving-performance work. Requirements PASS-01..09 and OPS-01..03 were added so
+> that work has something to be verified against.
+>
+> **Corrected here:** `completed_plans` read 45 against 43 actual summaries (`134-07` and `136-13`
+> have no SUMMARY); `total_phases` read 10 against 19; and this file's own "Current focus: Phase 136"
+> line sat directly above its SUPERSEDED banner.
+>
+> **Do not read `completed_phases: 4` as a verifier result.** The four closed phases now carry
+> `VERIFICATION.md` files, but those are **retrospective attestations** written 2026-08-20 from
+> production evidence and commit references — not `gsd-verifier` runs. Each says so in its first line.
 
 > ### ⚠ SUPERSEDED 2026-08-16 — read this before the paragraph below
 >
