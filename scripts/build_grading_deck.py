@@ -71,14 +71,21 @@ def neutral_span(query_text: str, record_text: str) -> dict:
     """
     q_stream, q_off = norm_stream(query_text)
     r_stream, r_off = norm_stream(record_text)
+    blank = {
+        'q': ('', unicodedata.normalize('NFC', query_text)[:CONTEXT_CHARS], ''),
+        'r': ('', unicodedata.normalize('NFC', record_text)[:CONTEXT_CHARS], ''),
+        'score': 0.0, 'letters': 0, 'aligned': False,
+    }
     if not q_stream or not r_stream:
-        return {}
-    # Needle capped: partial_ratio cost grows with needle length, and a very
-    # long query would otherwise dominate deck build time.
+        return blank
+    # NO SCORE CUTOFF, deliberately. A cutoff of 40 silently dropped the
+    # WORST-aligning results -- precisely the false positives a precision
+    # measurement exists to count. A pair a method RETURNED is part of what it
+    # returned; the grader decides whether it is junk, not this builder.
     needle = q_stream[:400]
-    a = partial_ratio_alignment(needle, r_stream, score_cutoff=40)
+    a = partial_ratio_alignment(needle, r_stream)
     if not a:
-        return {}
+        return blank
     q_nfc = unicodedata.normalize('NFC', query_text)
     r_nfc = unicodedata.normalize('NFC', record_text)
 
@@ -94,6 +101,7 @@ def neutral_span(query_text: str, record_text: str) -> dict:
         'r': cut(r_off, r_nfc, a.dest_start, a.dest_end),
         'score': round(a.score, 1),
         'letters': int(a.dest_end - a.dest_start),
+        'aligned': True,
     }
 
 
@@ -123,7 +131,8 @@ def draw_queries(all_queries: list, n: int, salt: str) -> list:
 
 def build(args) -> int:
     from shared.passage_policy import get_preset
-    from shared.retrieval_adapters import ChunkRetriever, PassageRetriever
+    from shared.retrieval_adapters import (
+        ChunkRetriever, PassageRetriever, eligible_record_ids)
     from shared.retrieval_eval import EvalQuery, split_queries
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -164,6 +173,13 @@ def build(args) -> int:
     idx = open_index(args.index)
     if idx is None:
         raise SystemExit(f'index will not open: {args.index}')
+    # EQUAL ELIGIBILITY. The Tantivy corpus holds 948,549 page records; the
+    # passage index holds 702,466, because Stage-0 removes 246,083 short
+    # pages, target sheets and ownership stamps. Unfiltered, the incumbent
+    # returns records the passage engine structurally cannot, and the deck
+    # would grade two different corpora rather than two methods.
+    eligible = eligible_record_ids(idx)
+    print(f'equal-eligibility set: {len(eligible):,} records', flush=True)
     text_of = {}
     retrievers = {}
     for spec in args.configs.split(','):
@@ -180,7 +196,8 @@ def build(args) -> int:
                 raise SystemExit('Tantivy index failed to open')
             size, mode, freq = (rest.split(':') + ['exact', '100'])[:3]
             retrievers[spec] = ChunkRetriever(engine=eng, chunk_size=int(size),
-                                              mode=mode, max_freq=int(freq))
+                                              mode=mode, max_freq=int(freq),
+                                              eligible=eligible)
 
     rid_index = {idx.record_id(i): i for i in range(idx.n_records)}
     pairs: dict = {}
@@ -201,8 +218,6 @@ def build(args) -> int:
             continue
         rec_text = idx.stream(ri)          # normalized; display-safe fallback
         span = neutral_span(qtext[qid]['text'], rec_text)
-        if not span:
-            continue
         card_id = sha({'q': qid, 'r': rid})[:16]
         cards.append({
             'id': card_id,
@@ -211,6 +226,7 @@ def build(args) -> int:
             'r_before': span['r'][0], 'r_match': span['r'][1],
             'r_after': span['r'][2],
             'letters': span['letters'],
+            'aligned': span['aligned'],
             'r_sys': rid.split('_', 1)[0],
             'is_source_ms': rid.split('_', 1)[0] == qtext[qid]['meta']['sys_id']
             if 'meta' in qtext[qid] else None,
@@ -242,7 +258,14 @@ def build(args) -> int:
     out_html = os.path.join(args.out_dir, 'grading_deck.html')
     with open(out_html, 'w', encoding='utf-8') as fh:
         fh.write(html)
-    print(f'\ncards {len(cards)} from {len(drawn)} queries')
+    n_unaligned = sum(1 for c in cards if not c['aligned'])
+    print()
+    print(f'pairs returned   {len(pairs)}')
+    print(f'cards rendered   {len(cards)}')
+    print(f'  unrenderable   {len(pairs) - len(cards)}'
+          f'  (must be 0 under equal eligibility)')
+    print(f'  unmarked       {n_unaligned}'
+          f'  (no alignment computed; still graded)')
     print(f'deck  {out_html} ({len(html)//1024} KB)')
     print(f'key   deck_key.json (hash {manifest["key_hash"][:16]}) '
           f'-- do NOT open before grading')
