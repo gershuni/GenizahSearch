@@ -11,7 +11,6 @@ from __future__ import annotations
 import os
 import sys
 
-import numpy as np
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -22,7 +21,7 @@ from shared.passage_normalize import norm_stream_fast  # noqa: E402
 from shared.passage_policy import (  # noqa: E402
     DEFAULT_POLICY, FLAT_25, PRESETS, STANDARD_40, PassagePolicy, get_preset,
 )
-from shared.passage_search import QueryReport, search_passage  # noqa: E402
+from shared.passage_search import search_passage  # noqa: E402
 
 ALEF = 0x05D0
 TRANSCRIPTIONS = os.environ.get(
