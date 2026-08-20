@@ -17,7 +17,7 @@
 |---|---------|----------|-------|
 | 1 | The citation-range filter on `/computed-identifications` always times out | **P1 — was live, user-facing** | **CLOSED 2026-08-20** — deployed (`4f6e31f4`), 10,478 ms → 97 ms on production, owner-confirmed in a browser. See the note under Problem 1. |
 | 2 | `/computed-identifications` takes ~2 s; only ~0.9 s is accounted for | P2 | Open. Partly diagnosed; ~1.1–3.0 s unmeasured. |
-| 3 | `bench_discovery.py` is not a smoke test, and it hung the V4.2 deploy | P2 | Open. Fix designed, not written. |
+| 3 | `bench_discovery.py` is not a smoke test, and it hung the V4.2 deploy | P2 | **CLOSED 2026-08-20** — all four parts written; see the note under Problem 3. |
 | 4 | The checked-in V4.2 recipe cannot rebuild the artifact in production | P2 | Open. |
 | 5 | A second index candidate on `discovery_identification` | P3 | Open, non-urgent. |
 | — | perf-watch misattributed every slow request | (was P2) | **Fixed 2026-08-19**, not deployed. |
@@ -267,6 +267,42 @@ Optimising the ~0.9 s we can see while ignoring the ~2 s we cannot would be the 
 ---
 
 ## Problem 3 — `bench_discovery.py` is not a smoke test, and it hung the deploy (P2)
+
+> **FIXED 2026-08-20.** All four parts:
+>
+> 1. **Off the deploy path.** `scripts/smoke_discovery_readiness.py` is new and is what
+>    §2.6 and the deploy script now run: it answers "can the app load what it now serves,
+>    and does that asset answer real reads" in about a second, through the real
+>    `load_discovery_state()` and `web.discovery` paths. It deliberately includes a
+>    citation-range read over the heaviest locus-bearing work, because a smoke that only
+>    fetched the default page did not see Problem 1. §2.7's "or run `bench_discovery.py`
+>    and read its added RSS" is gone too — the RSS now comes from `/proc/<pid>/status`.
+>    Every surviving mention of the benchmark in the runbook is a warning, and a test
+>    asserts no `python scripts/bench_discovery.py` command line remains in it.
+> 2. **Every statement bounded.** A `BoundedConnection` wrapper installs a
+>    `set_progress_handler` deadline, so all four connection sites are covered rather than
+>    the three call sites the assessment named — wrapping the connection was chosen
+>    precisely because a budget that must be remembered at eighteen `conn.execute` sites
+>    is one that gets missed at the nineteenth. `--query-timeout-s` defaults to **30 s and
+>    is ON**; an abort raises a named `QueryBudgetExceeded`, never confusable with a cap
+>    breach (that means the statement finished, only too slowly). Proven firing at 20 ms
+>    against a 0.02 s budget.
+> 3. **ssh keepalive.** Both `Invoke-Box` helpers pass
+>    `-o ServerAliveInterval=15 -o ServerAliveCountMax=8`.
+> 4. **Divergence-correct picks.** `_coherent_bucket_pick` draws from
+>    `_build_findings_filter`'s real predicate for the bucket, so the picks match the
+>    population the timed query measures. Both parameter-order traps the assessment named
+>    are handled per call site, and the builder's `"WHERE "` prefix is stripped once in
+>    one helper rather than at six call sites. Measured on the V4.2 artifact: the
+>    divergence default removes **12.6%** of main and **38.8%** of "more" —  the
+>    assessment's 12.6%/38.7%, confirmed. `_state_skip`'s `keys` map gained `suppressed`
+>    and `sys_id`.
+>
+> 7 tests; 9 mutations each watched failing. One of those mutations exposed a gap in the
+> tests themselves: asserting `_bucket_predicate` in isolation left the consumer free to
+> stop calling it, so a behavioural test now builds an asset whose raw-heaviest work is not
+> its divergence-filtered heaviest and asserts the pick chooses the latter.
+
 
 `_tmp/deploy_v42_discovery.ps1` step 8 called it as a "readiness smoke". It is not one.
 

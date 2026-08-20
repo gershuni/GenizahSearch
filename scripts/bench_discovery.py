@@ -52,6 +52,132 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
 # ---------------------------------------------------------------------------
+# PER-STATEMENT WALL-CLOCK BUDGET
+#
+# Nothing in this file used to bound any query. That is how a single pathological
+# statement turned a benchmark into an unbounded job: on 2026-08-19 the V4.2
+# deploy called this script as a "readiness smoke" (step 8), the locus filter
+# states were hitting the correlated-EXISTS outage at ~10-19 s each, and the run
+# was still going more than an hour later when the ssh connection reset and the
+# deploy recorded a failure it had not actually had.
+#
+# A per-statement budget is the guard that would have named that on the day it
+# landed, instead of a year's worth of "the benchmark is slow".
+#
+# `set_progress_handler` is the right mechanism on this repo: it is checked on
+# the CALLING thread, needs no signals or threads, and therefore works
+# identically on Windows and Linux -- `signal.alarm` is POSIX-only and
+# `Connection.interrupt` from a watchdog thread would need one thread per
+# connection. Returning non-zero from the handler aborts the running statement
+# with `sqlite3.OperationalError("interrupted")`, which is translated here into
+# a NAMED failure so it can never be confused with a cap breach: a cap breach
+# means "the asset is slower than the budget says it may be", while this means
+# "the statement did not finish at all", and those call for different actions.
+# ---------------------------------------------------------------------------
+
+#: How often the progress handler runs, in SQLite VM instructions. Small enough
+#: that a runaway statement is caught within milliseconds, large enough that the
+#: check itself is not measurable in the timings this script exists to produce.
+_PROGRESS_INSTRUCTIONS = 5_000
+
+#: 0 disables the budget. Deliberately NOT the default: an unbounded benchmark is
+#: exactly what hung the deploy.
+DEFAULT_QUERY_TIMEOUT_S = 30.0
+
+
+class QueryBudgetExceeded(RuntimeError):
+    """One statement outran the per-statement budget and was aborted.
+
+    Distinct from `ShapeContradiction` (the statement returned the wrong shape)
+    and from an ordinary cap failure (it finished, but too slowly). This one
+    means the statement was killed mid-flight, so there is no timing to report.
+    """
+
+
+class BoundedConnection:
+    """A read-only connection on which EVERY statement is wall-clock bounded.
+
+    Wrapping the connection rather than each call site is deliberate: this file
+    executes SQL from eighteen places, and a budget that has to be remembered at
+    each one is a budget that will be missed at the nineteenth. `execute` re-arms
+    the deadline, so the bound covers the statement AND the row fetching that
+    follows it -- SQLite steps lazily, so most of the time in a slow read is
+    spent inside `fetchall`, not inside `execute`.
+
+    Consequence worth knowing: the deadline stays armed after `execute` returns,
+    so a caller that holds a cursor and fetches from it much later would be
+    aborted. Every use in this file is execute-then-fetch immediately.
+    """
+
+    def __init__(self, conn: sqlite3.Connection, timeout_s: float) -> None:
+        self._conn = conn
+        self._timeout_s = float(timeout_s or 0.0)
+        self._deadline: Optional[float] = None
+        self._label = "(unlabelled statement)"
+        if self._timeout_s > 0:
+            conn.set_progress_handler(self._tick, _PROGRESS_INSTRUCTIONS)
+
+    # -- the handler ------------------------------------------------------
+    def _tick(self) -> int:
+        if self._deadline is not None and time.perf_counter() > self._deadline:
+            return 1                        # non-zero aborts the statement
+        return 0
+
+    # -- the wrapped surface ---------------------------------------------
+    def execute(self, sql: str, params: Any = ()) -> sqlite3.Cursor:
+        if self._timeout_s > 0:
+            self._deadline = time.perf_counter() + self._timeout_s
+            self._label = " ".join(str(sql).split())[:160]
+        try:
+            return self._conn.execute(sql, params)
+        except sqlite3.OperationalError as exc:
+            raise self._translate(exc) from exc
+
+    def _translate(self, exc: sqlite3.OperationalError) -> BaseException:
+        if "interrupted" in str(exc).lower():
+            return QueryBudgetExceeded(
+                f"a statement exceeded the {self._timeout_s:g}s per-statement "
+                f"budget and was aborted: {self._label}"
+            )
+        return exc
+
+    def __getattr__(self, name: str) -> Any:
+        # row_factory, close, cursor, execute_many, ... pass straight through.
+        return getattr(self._conn, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name.startswith("_") or name in {"execute"}:
+            object.__setattr__(self, name, value)
+        else:
+            setattr(self._conn, name, value)
+
+
+#: The process-wide budget, set once from the CLI. A module global rather than a
+#: parameter on six signatures: the point of this guard is that NO statement is
+#: unbounded, and a value that must be threaded is a value that gets dropped.
+_QUERY_TIMEOUT_S: float = DEFAULT_QUERY_TIMEOUT_S
+
+
+def set_query_timeout(seconds: Optional[float]) -> float:
+    """Set the process-wide per-statement budget. Returns the value in force."""
+    global _QUERY_TIMEOUT_S
+    _QUERY_TIMEOUT_S = max(0.0, float(seconds)) if seconds is not None else 0.0
+    return _QUERY_TIMEOUT_S
+
+
+def connect_bounded(db_path: str,
+                    timeout_s: Optional[float] = None) -> BoundedConnection:
+    """Open ``db_path`` read-only with every statement bounded by ``timeout_s``.
+
+    The ONLY way this script should open the artifact. `mode=ro` is not a
+    substitute for the budget and the budget is not a substitute for `mode=ro`.
+    """
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    return BoundedConnection(
+        conn, _QUERY_TIMEOUT_S if timeout_s is None else timeout_s)
+
+
+# ---------------------------------------------------------------------------
 # Portable current-RSS reader (stdlib-first; guards Windows dev-box vs Linux
 # prod box). Returns bytes, or -1 if no method is available.
 # ---------------------------------------------------------------------------
@@ -133,8 +259,7 @@ def _pct(values: List[float], p: float) -> float:
 # ---------------------------------------------------------------------------
 
 def pick_live_keys(db_path: str, sample: int) -> Dict[str, List[Any]]:
-    uri = f"file:{db_path}?mode=ro"
-    conn = sqlite3.connect(uri, uri=True)
+    conn = connect_bounded(db_path)
     conn.row_factory = sqlite3.Row
     try:
         # Pages with a SHIPPED display-evidence witness/quote claim -> get_claims_for_page.
@@ -253,7 +378,7 @@ def findings_probe_readiness(db_path: str) -> Dict[str, Any]:
     That is an expected state, not a crash: this returns a structured skip with
     the missing table names so the caller can say exactly which shapes it did
     not measure and why."""
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn = connect_bounded(db_path)
     try:
         present = {
             r[0] for r in conn.execute(
@@ -331,6 +456,56 @@ def pick_findings_filters(conn: sqlite3.Connection) -> Dict[str, Any]:
     return out
 
 
+def _bucket_predicate(main_pool: bool) -> Tuple[str, List[Any]]:
+    """The bucket's REAL filter, as a bare boolean, from the shipped builder.
+
+    Returns ``(boolean_sql, params)`` where ``boolean_sql`` can be dropped
+    straight into ``WHERE {bucket_sql}`` or ``WHERE {bucket_sql} AND ...``.
+
+    THIS USED TO BE A HAND-WRITTEN ``"di.main_pool = 1"``, and that was a real
+    defect. The timed queries default to ``divergence=DIVERGENCE_HIDDEN``, which
+    subtracts the hidden novelty shades -- **12.6% of the main bucket and 38.7%
+    of "more"** on the V4.2 artifact. So a value could be drawn from a
+    population the timed query then filtered away, the state would measure
+    nothing, and F14's loud abort would fire naming an asset fact that is really
+    a probe bug. `_state_skip`'s single-axis carve-out explicitly does NOT
+    verify those states, so nothing else caught it. Drawing the picks from the
+    exact population the timed query filters to closes the gap by construction.
+    (It did not fire on the V4.2 artifact -- all 12 single-axis states were
+    re-checked non-empty -- so this is a latent defect being closed, not an
+    outage being fixed.)
+
+    Two traps, both live in this file:
+
+    * **The builder returns a full ``"WHERE ..."`` string, or ``""``** -- never a
+      bare boolean. Substituting it into ``WHERE {x} AND y`` would emit
+      ``WHERE WHERE ...``. The prefix is stripped here, once, so no call site
+      has to remember.
+    * **Parameter order is positional and the builder's params are not always
+      first.** Several picking queries below carry a ``?`` in the ``SELECT`` or
+      ``ORDER BY``. Where that placeholder precedes the ``WHERE`` textually its
+      value must be bound BEFORE these params; where it follows, after. Each
+      call site states which it is.
+    """
+    from shared.discovery_service import (
+        BUCKET_MAIN,
+        BUCKET_MORE,
+        _build_findings_filter,
+    )
+
+    where_sql, params = _build_findings_filter(
+        bucket=BUCKET_MAIN if main_pool else BUCKET_MORE)
+    prefix = "WHERE "
+    if where_sql.startswith(prefix):
+        return where_sql[len(prefix):], list(params)
+    # A builder that stopped emitting any bucket predicate must not silently
+    # widen every pick to the whole corpus.
+    raise AssertionError(
+        "the findings filter emitted no WHERE clause for "
+        f"bucket main_pool={main_pool!r}; the picks would be drawn from the "
+        "entire corpus rather than the bucket the timed query measures")
+
+
 def _coherent_bucket_pick(conn: sqlite3.Connection, *, main_pool: bool,
                           prefer_novelty: Optional[str]) -> Dict[str, Any]:
     """One representative identification per bucket -- domain, author and work
@@ -354,7 +529,7 @@ def _coherent_bucket_pick(conn: sqlite3.Connection, *, main_pool: bool,
     probe bug rather than an asset fact. Only the CO-OCCURRENCE of two or more
     axes is an asset fact, and only that is settled by an EXISTS probe.
     """
-    bucket_sql = "di.main_pool = 1" if main_pool else "di.main_pool = 0"
+    bucket_sql, bucket_params = _bucket_predicate(main_pool)
     out: Dict[str, Any] = {"work_id": None, "domain": None, "author": None,
                            "novelty_status": None, "locus_from": None,
                            "locus_to": None, "locus_filter_enabled": False,
@@ -377,7 +552,9 @@ def _coherent_bucket_pick(conn: sqlite3.Connection, *, main_pool: bool,
                      n DESC
             LIMIT 1
             """,
-            (prefer_novelty,),
+            # `prefer_novelty` fills the placeholder in the SELECT list, which
+            # precedes the WHERE clause textually, so it binds FIRST.
+            (prefer_novelty, *bucket_params),
         ).fetchone()
         # The novelty status is picked for the BUCKET, not globally: the
         # candidate status the page's headline switch selects may be absent from
@@ -386,7 +563,8 @@ def _coherent_bucket_pick(conn: sqlite3.Connection, *, main_pool: bool,
         statuses = conn.execute(
             f"SELECT di.novelty_status, COUNT(*) n FROM discovery_identification di "
             f"WHERE {bucket_sql} AND di.novelty_status IS NOT NULL "
-            f"AND di.novelty_status != '' GROUP BY di.novelty_status ORDER BY n DESC"
+            f"AND di.novelty_status != '' GROUP BY di.novelty_status ORDER BY n DESC",
+            tuple(bucket_params),
         ).fetchall()
     except sqlite3.Error:                                    # pragma: no cover
         return out
@@ -414,7 +592,9 @@ def _coherent_bucket_pick(conn: sqlite3.Connection, *, main_pool: bool,
             WHERE {bucket_sql} AND di.display_work_id = ?
               AND lu.citation_pos IS NOT NULL
             """,
-            (out.get("work_id"),),
+            # The work placeholder sits INSIDE the WHERE, after the bucket
+            # predicate, so it binds last.
+            (*bucket_params, out.get("work_id")),
         ).fetchone()
         if locus is None or locus[0] is None or locus[1] is None:
             locus_work = conn.execute(
@@ -433,7 +613,8 @@ def _coherent_bucket_pick(conn: sqlite3.Connection, *, main_pool: bool,
                 GROUP BY di.display_work_id
                 ORDER BY n DESC
                 LIMIT 1
-                """
+                """,
+                tuple(bucket_params),
             ).fetchone()
             if locus_work is not None:
                 out.update({"work_id": locus_work[0],
@@ -455,7 +636,8 @@ def _coherent_bucket_pick(conn: sqlite3.Connection, *, main_pool: bool,
     try:
         hidden = conn.execute(
             f"SELECT di.identification_id FROM discovery_identification di "
-            f"WHERE {bucket_sql} LIMIT 1"
+            f"WHERE {bucket_sql} LIMIT 1",
+            tuple(bucket_params),
         ).fetchone()
     except sqlite3.Error:                                    # pragma: no cover
         hidden = None
@@ -473,7 +655,9 @@ def _coherent_bucket_pick(conn: sqlite3.Connection, *, main_pool: bool,
             f"WHERE {bucket_sql} AND di.sys_id IS NOT NULL AND di.sys_id != '' "
             f"GROUP BY di.sys_id ORDER BY (di.display_work_id = ?) DESC, n DESC "
             f"LIMIT 1",
-            (out.get("work_id"),),
+            # The ORDER BY placeholder follows the WHERE clause textually, so
+            # the bucket params bind before it.
+            (*bucket_params, out.get("work_id")),
         ).fetchone()
     except sqlite3.Error:                                    # pragma: no cover
         ms = None
@@ -776,7 +960,7 @@ def artifact_provenance(db_path: str) -> Dict[str, Any]:
     out = {"basename": os.path.basename(db_path), "audience": None,
            "sidecar_version": None, "data_as_of": None,
            "size_mb": round(_mb(os.path.getsize(db_path)), 1)}
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn = connect_bounded(db_path)
     try:
         rows = conn.execute("SELECT key, value FROM meta").fetchall()
     except sqlite3.Error:                                # pragma: no cover
@@ -1019,9 +1203,19 @@ def _findings_combination_specs(conn, *, page_size: int, deep_page: int,
         # where it matters: `ONLY` selects ~6% of the grain, so a combination
         # that pairs it with a domain or an author really can be empty in this
         # asset, and that is a genuine asset fact rather than a probe bug.
+        #
+        # `suppressed` and `sys_id` ARE picked values and belong here. They were
+        # missing until 2026-08-20, so a state turning either of them on alone
+        # fell through the single-axis carve-out below completely unverified:
+        # `_coherent_bucket_pick` can legitimately return `None` for both (the
+        # sys_id pick is guarded on `sys_id IS NOT NULL AND sys_id != ''`, and an
+        # asset with no identifications in the bucket yields no suppressed id),
+        # and a `None` there builds a predicate that excludes nothing or selects
+        # nothing while the timing is recorded as if it measured the axis.
         keys = {"novelty": "novelty", "domain": "domain",
                 "author": "author", "work": "work_id",
-                "locus_from": "locus_from", "locus_to": "locus_to"}
+                "locus_from": "locus_from", "locus_to": "locus_to",
+                "suppressed": "suppressed", "sys_id": "sys_id"}
         missing = [axis for axis in on
                    if axis in keys and (
                        kwargs.get(keys[axis]) is None
@@ -1294,7 +1488,7 @@ def bench_findings_page(
             "failures": [],
         }
 
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn = connect_bounded(db_path)
     try:
         (total_rows,) = conn.execute(
             "SELECT COUNT(*) FROM discovery_identification"
@@ -1533,6 +1727,15 @@ def main() -> int:
              "(including the findings-page actuals table; caps are never rewritten)",
     )
     parser.add_argument(
+        "--query-timeout-s", type=float, default=DEFAULT_QUERY_TIMEOUT_S,
+        help=(f"per-statement wall-clock budget in seconds (default "
+              f"{DEFAULT_QUERY_TIMEOUT_S:g}); 0 disables it. A statement that "
+              "outruns this is ABORTED and reported as QueryBudgetExceeded, "
+              "which is a different failure from a cap breach: the statement "
+              "did not finish, so there is no timing. Do not set 0 on any "
+              "automated path -- an unbounded run is what hung the V4.2 deploy."),
+    )
+    parser.add_argument(
         "--findings-repeats", type=int, default=5,
         help="timed repeats per corpus-wide findings shape (default 5)",
     )
@@ -1559,6 +1762,16 @@ def main() -> int:
              "browse/work benchmark, which requires a manifest-resolved sidecar)",
     )
     args = parser.parse_args()
+
+    # ARM THE PER-STATEMENT BUDGET BEFORE ANY CONNECTION IS OPENED. Every
+    # `connect_bounded` reads the process-wide value, so setting it after the
+    # first connection would leave that connection unbounded.
+    in_force = set_query_timeout(args.query_timeout_s)
+    if in_force <= 0:
+        print("WARNING: the per-statement budget is DISABLED "
+              "(--query-timeout-s 0). A single pathological statement can now "
+              "run without limit; this is what turned the V4.2 deploy's "
+              "'readiness smoke' into an hour-long hang.", file=sys.stderr)
 
     # The repo root goes on sys.path BEFORE any branch: the findings probe
     # imports the SHIPPED query builder from `shared/`, and it must be able to

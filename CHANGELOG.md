@@ -975,6 +975,56 @@ A major overhaul of how LOCAL Hebrew PDFs are read into the My Library index, dr
 
 ## [Unreleased]
 
+### The deploy path no longer runs an hour-long benchmark as its "smoke test" (2026-08-20)
+
+Four fixes to the discovery deploy path and its benchmark, none of them runtime code.
+
+- **A readiness smoke that takes a second.** `docs/specs/discovery-deploy.md` §2.6 told the
+  operator to run `scripts/bench_discovery.py --sample 50 --warm-passes 1`. Neither flag
+  bounds `bench_findings_page()`, which is invoked unconditionally and expands to ~15,363
+  filter/unit/sort combinations x 5 repeats — about **76,815 timed statements, one to two
+  hours**. On 2026-08-19 that hung the V4.2 deploy until the ssh connection reset, and the
+  deploy was recorded as **failed** when steps 0–7 had succeeded and the swap was live and
+  healthy. New `scripts/smoke_discovery_readiness.py` answers the actual question — can the
+  app load what it now serves, and does that asset answer real reads — through the real
+  `load_discovery_state()` and `web.discovery` paths, including a citation-range read over
+  the heaviest locus-bearing work. §2.7's "or read the benchmark's added RSS" is gone too;
+  the RSS comes from `/proc/<pid>/status`.
+- **Every statement in the benchmark is now wall-clock bounded.** Nothing in that file
+  bounded any query, which is how one pathological statement became an unbounded job. A
+  `BoundedConnection` installs a `set_progress_handler` deadline, so all four connection
+  sites are covered rather than each of eighteen `conn.execute` calls. `--query-timeout-s`
+  defaults to **30 s and is ON**; an abort raises a named `QueryBudgetExceeded`, distinct
+  from a cap breach — a cap breach means the statement finished, only too slowly.
+- **ssh keepalive.** Both deploy-script helpers pass `ServerAliveInterval=15
+  ServerAliveCountMax=8`. A silent reset is indistinguishable from a real failure, which is
+  precisely how the V4.2 outcome was misread.
+- **The benchmark's bucket picks now match the population it times.** They were drawn with a
+  hand-written `di.main_pool = 1` while the timed queries applied the default divergence
+  filter, which removes **12.6%** of the main pool and **38.8%** of "more". A pick could
+  therefore be emptied by the real query and the loud F14 abort would name a probe bug as an
+  asset fact. Picks now come from `_build_findings_filter`. `_state_skip`'s skip table also
+  gained `suppressed` and `sys_id`, which had been falling through its single-axis carve-out
+  entirely unverified.
+
+7 tests; 9 mutations each watched failing. One mutation exposed a gap in the tests
+themselves — asserting the new helper in isolation left the caller free to stop using it — so
+a behavioural test builds an asset whose raw-heaviest work is not its divergence-filtered
+heaviest and asserts the pick chooses the latter.
+
+### A CI timing gate that was a coin flip on Windows (2026-08-20)
+
+`tests/test_local_indexer_incremental.py::test_second_scan_fast` failed CI on a commit that
+changed one SQL predicate and one comment, neither of which that module imports. Its budget
+was `max(first_scan * 0.05, 0.5s)`; the Windows runner measured a 1.100 s second scan against
+the 0.5 s floor while taking **23m21s** for the suite versus ubuntu's **5m36s**. Both halves
+of that budget were wrong for a slow filesystem: per-scan overhead the cache cannot remove
+(opening the Tantivy index, the commit, 100 stat calls) does not shrink, so a percentage of a
+quick first scan falls below the fixed floor, and the 0.5 s constant was chosen against one
+machine's speed. The mechanism is proven deterministically by the same test's existing
+`indexed == 0` / `skipped == 100` assertions; the stopwatch only needs to catch pathology, so
+it is now `max(first * 0.75, 5.0)`.
+
 ### The citation-range filter works (2026-08-20, web; DEPLOYED `4f6e31f4`)
 
 > Measured on production after deploy, through the real loader and service: the locus-filtered

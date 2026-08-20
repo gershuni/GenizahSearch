@@ -4824,3 +4824,269 @@ def test_pair_coverage_arithmetic_is_unchanged_by_the_kept_tie_fix():
     r, u, cov = sidecar_build.compute_pair_coverage(audit)
     assert (r, u) == (2, 3)
     assert cov == pytest.approx(2 / 3)
+
+import inspect as _inspect  # noqa: E402 -- source-text guards below
+
+
+# ---------------------------------------------------------------------------
+# PROBLEM 3 (docs/specs/discovery-performance-situation-2026-08-20.md): the
+# benchmark was not a smoke test, nothing in it bounded any statement, and its
+# bucket picks were drawn from a population the timed queries then filtered away.
+# ---------------------------------------------------------------------------
+
+def _tiny_identification_db(tmp_path, name="bench-budget.db"):
+    """The smallest asset `_bucket_predicate`'s consumers can query."""
+    from scripts import build_discovery_sidecar as sidecar_build
+
+    db_path = tmp_path / name
+    conn = sqlite3.connect(str(db_path))
+    try:
+        sidecar_build.create_schema(conn)
+        conn.commit()
+    finally:
+        conn.close()
+    return db_path
+
+
+def test_the_bucket_pick_predicate_is_the_SHIPPED_filter_not_a_hand_written_one():
+    """The picks must be drawn from the population the timed query measures.
+
+    `_coherent_bucket_pick` used to build `di.main_pool = 1` by hand while the
+    timed queries defaulted to `divergence=DIVERGENCE_HIDDEN`. That default
+    subtracts the hidden novelty shades -- 12.6% of the main bucket and 38.8% of
+    "more" on the V4.2 artifact -- so a picked value could survive the pick and
+    be filtered away by the real query, and F14 would then abort naming an asset
+    fact that was really a probe bug.
+    """
+    from scripts import bench_discovery
+
+    for main_pool in (True, False):
+        boolean, params = bench_discovery._bucket_predicate(main_pool)
+        assert boolean.startswith(f"di.main_pool = {1 if main_pool else 0}"), (
+            f"the bucket predicate no longer pins main_pool: {boolean!r}")
+        # THE POINT OF THE FIX: the divergence predicate is present, so the pick
+        # population equals the timed population.
+        assert "novelty_status NOT IN" in boolean, (
+            "the bucket predicate carries no divergence clause, so picks are "
+            f"drawn from a wider population than the timed query: {boolean!r}")
+        assert boolean.count("?") == len(params), (
+            "placeholder count and parameter count disagree, which binds values "
+            "to the wrong slots silently")
+        # It must be a BARE boolean: the call sites interpolate it into
+        # `WHERE {x}` and `WHERE {x} AND ...`.
+        assert not boolean.startswith("WHERE"), (
+            "the predicate still carries its WHERE keyword, so every call site "
+            "would emit `WHERE WHERE ...`")
+
+
+def test_the_bucket_predicate_refuses_to_widen_to_the_whole_corpus(monkeypatch):
+    """An empty filter must raise, not silently select everything.
+
+    If the builder ever stopped emitting a bucket clause, a bare `""` would make
+    every pick query read `WHERE ` / `WHERE  AND ...` -- either a syntax error or,
+    worse, a pick drawn from the entire corpus.
+    """
+    from scripts import bench_discovery
+    from shared import discovery_service
+
+    monkeypatch.setattr(discovery_service, "_build_findings_filter",
+                        lambda **kwargs: ("", []))
+    with pytest.raises(AssertionError, match="entire corpus"):
+        bench_discovery._bucket_predicate(True)
+
+
+def test_the_skip_table_covers_the_suppressed_and_sys_id_axes():
+    """Both are PICKED values, so both can be absent from an asset.
+
+    They were missing from `_state_skip`'s `keys` map, so a state turning either
+    on alone fell through the single-axis carve-out entirely unverified -- the
+    timing was recorded as if it had measured the axis when the predicate could
+    exclude nothing (`suppressed=None`) or select nothing (`sys_id=None`).
+    """
+    from scripts import bench_discovery
+
+    source = _inspect.getsource(bench_discovery._findings_combination_specs)
+    for axis in ("suppressed", "sys_id"):
+        assert f'"{axis}": "{axis}"' in source, (
+            f"the {axis!r} axis is absent from `_state_skip`'s keys map, so a "
+            "single-axis state for it is never verified")
+    # And every axis the benchmark enumerates is either in the table or has a
+    # documented reason not to be (`divergence` is a mode, not a picked value).
+    for axis in bench_discovery._FINDINGS_FILTER_AXES:
+        key = "work_id" if axis == "work" else axis
+        assert (f'"{axis}": "{key}"' in source or axis == "divergence"), (
+            f"axis {axis!r} is enumerated by the benchmark but is neither in the "
+            "skip table nor the documented `divergence` exception")
+
+
+def test_every_statement_is_wall_clock_bounded_and_the_abort_is_NAMED(tmp_path):
+    """The guard that would have caught the citation-range outage on day one.
+
+    Nothing in this file bounded any query, which is how one pathological
+    statement turned a benchmark into an hour-long hang that reset the deploy's
+    ssh connection and got recorded as a deploy failure.
+    """
+    from scripts import bench_discovery
+
+    db_path = _tiny_identification_db(tmp_path)
+
+    # A trivial statement is unaffected by the budget.
+    conn = bench_discovery.connect_bounded(str(db_path), 30.0)
+    try:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM discovery_identification").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+    # A deliberately unbounded statement against a tiny budget is ABORTED, and
+    # the failure is its own named type -- never confusable with a cap breach
+    # (which means the statement finished, only too slowly).
+    conn = bench_discovery.connect_bounded(str(db_path), 0.02)
+    try:
+        with pytest.raises(bench_discovery.QueryBudgetExceeded) as excinfo:
+            # EXPENSIVE BUT FINITE, and that distinction is the whole point.
+            # This was first written as an unterminated `SELECT n + 1 FROM
+            # forever`, and the mutation that disables the progress handler then
+            # made the test HANG instead of fail -- a hanging test proves
+            # nothing and is worse than a red one, because it looks like slow CI.
+            # A bounded recursion still blows a 0.02s budget by orders of
+            # magnitude, and still terminates in seconds if the budget is gone.
+            conn.execute(
+                "WITH RECURSIVE counter(n) AS ("
+                "  SELECT 1 UNION ALL SELECT n + 1 FROM counter WHERE n < 3000000"
+                ") SELECT COUNT(*) FROM counter").fetchall()
+        assert "per-statement budget" in str(excinfo.value)
+        assert not isinstance(excinfo.value, bench_discovery.ShapeContradiction)
+    finally:
+        conn.close()
+
+    # 0 disables the budget. Asserted so nobody "simplifies" the guard into
+    # something that cannot be turned off for a deliberate long run.
+    conn = bench_discovery.connect_bounded(str(db_path), 0)
+    try:
+        assert conn.execute("SELECT 1").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_the_default_budget_is_ON_because_an_unbounded_run_hung_a_deploy():
+    """A guard that defaults to off is not a guard."""
+    from scripts import bench_discovery
+
+    assert bench_discovery.DEFAULT_QUERY_TIMEOUT_S > 0
+    parser_src = _inspect.getsource(bench_discovery.main)
+    assert "--query-timeout-s" in parser_src
+    assert "set_query_timeout(args.query_timeout_s)" in parser_src, (
+        "the budget must be armed from the CLI BEFORE any connection is opened; "
+        "a connection built earlier would be unbounded")
+
+
+def test_the_deploy_runbook_no_longer_prescribes_the_benchmark_as_a_smoke():
+    """`docs/specs/discovery-deploy.md` §2.6 used to run `bench_discovery.py`.
+
+    That is what hung the V4.2 deploy. The runbook is the durable artifact here --
+    the deploy script itself is gitignored -- so this asserts on the runbook.
+    """
+    spec = (Path(__file__).resolve().parents[1]
+            / "docs" / "specs" / "discovery-deploy.md").read_text(encoding="utf-8")
+    assert "scripts/smoke_discovery_readiness.py" in spec, (
+        "the readiness step no longer names a smoke to run")
+    # Every surviving mention of the benchmark must be a WARNING, never an
+    # instruction: no `python scripts/bench_discovery.py` command line.
+    assert "python scripts/bench_discovery.py" not in spec, (
+        "the runbook still tells an operator to run the benchmark on the deploy "
+        "path; that is the one-to-two-hour step that reset the ssh connection")
+
+
+def _divergence_trap_db(tmp_path):
+    """An asset where the RAW heaviest work is not the FILTERED heaviest.
+
+    Work `wRaw` carries 10 main-pool identifications and every one of them is a
+    hidden-by-default divergent shade, so the timed query's default
+    `divergence=DIVERGENCE_HIDDEN` removes all ten. Work `wReal` carries 5 that
+    survive it. So:
+
+        picked by raw `di.main_pool = 1`            -> wRaw  (10 > 5)
+        picked by the SHIPPED filter for the bucket -> wReal (5 > 0)
+
+    A pick of `wRaw` would then be timed by a query that matches nothing, F14
+    would abort, and the abort would name an asset fact that is really a probe
+    bug. Everything else about the two works is identical so that only the
+    `n DESC` tiebreak can decide, and `prefer_novelty` is a status neither work
+    carries so the candidates tiebreak cannot decide it instead.
+    """
+    from scripts import build_discovery_sidecar as sidecar_build
+
+    db_path = tmp_path / "divergence-trap.db"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        sidecar_build.create_schema(conn)
+        conn.executemany(
+            "INSERT INTO works (work_id, canonical_work_id, neutral_title, "
+            "author, genre, source_corpus, identity_visibility) "
+            "VALUES (?, ?, ?, 'A', 'G', 'sefaria', 'public')",
+            [("wRaw", "wRaw", "Raw Heaviest"), ("wReal", "wReal", "Real Heaviest")],
+        )
+        # Every enum value below is a real member of this table's CHECK
+        # vocabularies -- `diverges_work` additionally REQUIRES a
+        # `divergence_correctness`, and the two are constrained in both
+        # directions, so the visible rows must leave it NULL.
+        rows = []
+        for index in range(10):
+            rows.append((f"raw{index}", f"sysRaw{index}", "wRaw", "wRaw", 1,
+                         "main_full_coverage", 1, 1, "direct_witness",
+                         "diverges_work", "catalogue_correct", "public",
+                         "public", "none", "direct_witness", "unavailable"))
+        for index in range(5):
+            rows.append((f"real{index}", f"sysReal{index}", "wReal", "wReal", 1,
+                         "main_full_coverage", 1, 1, "direct_witness",
+                         "fills_gap", None, "public",
+                         "public", "none", "direct_witness", "unavailable"))
+        conn.executemany(
+            "INSERT INTO discovery_identification ("
+            "  identification_id, sys_id, canonical_work_id, display_work_id,"
+            "  main_pool, main_pool_reason, best_band_rank, page_count,"
+            "  relation_kind, novelty_status, divergence_correctness,"
+            "  assertion_visibility, identity_visibility, routing_reason,"
+            "  rendered_relation, locus_status)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            rows,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return db_path
+
+
+def test_the_bucket_pick_is_DRAWN_FROM_the_population_the_timing_measures(tmp_path):
+    """The consumer must actually use the shipped filter, not just possess it.
+
+    Asserting `_bucket_predicate` in isolation is not enough: reverting
+    `_coherent_bucket_pick` to a hand-written `di.main_pool = 1` leaves that
+    helper perfectly correct and unused. Watched failing against exactly that
+    mutation.
+    """
+    from scripts import bench_discovery
+
+    db_path = _divergence_trap_db(tmp_path)
+    conn = bench_discovery.connect_bounded(str(db_path), 30.0)
+    try:
+        # Sanity: the trap is really a trap, or this test proves nothing.
+        raw_heaviest = conn.execute(
+            "SELECT display_work_id, COUNT(*) n FROM discovery_identification "
+            "WHERE main_pool = 1 GROUP BY 1 ORDER BY n DESC LIMIT 1").fetchone()
+        assert raw_heaviest[0] == "wRaw", (
+            "the fixture cannot distinguish the two predicates: the raw-heaviest "
+            f"work is already {raw_heaviest[0]!r}")
+
+        pick = bench_discovery._coherent_bucket_pick(
+            conn, main_pool=True, prefer_novelty="no_such_status")
+    finally:
+        conn.close()
+
+    assert pick["work_id"] == "wReal", (
+        "the bucket pick chose "
+        f"{pick['work_id']!r}, the work that is heaviest ONLY before the "
+        "divergence filter the timed query applies. Every timing for that work "
+        "would measure an empty population and trip F14's abort, naming a probe "
+        "bug as an asset fact.")

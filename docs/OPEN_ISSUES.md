@@ -4,11 +4,11 @@
 > filter is fixed and live (`4f6e31f4`): a correlated `EXISTS` became an uncorrelated `IN (SELECT ...)`,
 > 10,478 ms -> 97 ms measured on production, and a second bug found by review (the row expansion dropped
 > the range) shipped with it. Still open: the findings page has ~1-3 s unaccounted for,
-> `bench_discovery.py` hung the V4.2 deploy, and the V4.2 recipe can no longer rebuild what production
-> serves. Full assessment with evidence grades:
+> serves. `bench_discovery.py` is off the deploy path as of 2026-08-20 (real smoke, bounded
+> statements, ssh keepalive, divergence-correct picks). Still open: the findings page has ~1-3 s
+> unaccounted for, and the V4.2 recipe can no longer rebuild what production serves. Full assessment:
 > [`specs/discovery-performance-situation-2026-08-20.md`](specs/discovery-performance-situation-2026-08-20.md).
 > See `docs/archive/OPEN_ISSUES_ARCHIVE.md` for the dated header log; this tracker holds only what is still open.
-
 
 ---
 
@@ -157,7 +157,6 @@ Move to "Completed Issues" section at bottom with date
 - ❌ **Open (2026-08-04) — two JA-corpus works carry Latin-script author strings; one of them is a probable mis-attribution, and both split the author facet.** Found while curating the 58 NULL-genre works. **Exactly 2 of 610 authored canonical works** write the author in Latin script; both are `source_corpus='ja'`. Every other one of the 608 follows the corpus norm — Hebrew with the acronym in parentheses, e.g. `משה בן מימון (רמב"ם)`.
 
 
-
 - ❌ **Open (2026-08-04) — `_band_measurements` reads the artifact path before it is assigned; staleness is unbounded, not one call.** `shared/discovery_service.py::_band_measurements` (~line 1154) reads `self._last_path` to key its cache, but `_get_conn()` is what assigns that attribute (~line 832). Reported during Phase 136 pre-flight as a one-call window; **Codex confirmed it is worse** — on a direct call a cache hit returns before `_get_conn()` is ever reached, so the stale path can persist indefinitely rather than self-correcting on the next call. **Production impact is effectively nil today**: the artifact only swaps on a manifest change plus a process restart, which resets the instance. Deliberately NOT fixed in Phase 136 — `shared/discovery_service.py` is owned by plans 136-21 and 136-22, and an out-of-plan edit to a file two concurrent waves write is a collision no file-list check can see. Phase 136 pins the ordering with a mutation control asserted on the FIRST post-switch call, so a regression is caught; the fix itself belongs to a maintenance plan.
 - ❌ **Open (2026-08-04) — `_browse_cached_call`'s cache key is path-blind for every enveloped read.** The same class as the entry above, but general: the shared caching wrapper keys on call arguments without including the resolved artifact path, so *any* enveloped read can return a previous artifact's rows after a swap. Same near-zero production exposure and the same reason for deferral (file ownership during Phase 136 waves 7–8). Fix both together: derive the key from the path `_get_conn()` actually opened, and assign that path before any cache lookup rather than after.
 - 📋 **Recorded (2026-08-05) — six discovery sidecars scanned with BOTH masking modes; a manifest-derived check found three the executor's remembered list had missed.** `--strict --scan-repo --scan-asset <db> --scan-sqlite <db>` over every artifact any `discovery_data/manifest*.json` resolves — the deployed public artifact, the public projection, the private 136 rebuild, the artifact the repo's own `manifest.json` still resolves (i.e. what a LOCAL run serves), and two superseded bakes still reachable through backup manifests. **All six clean**, 46–55 s each. The clean runs are shown non-vacuous: a value read OUT of the deployed artifact and fed back as the whole pattern set is reported (11 hits from a cell, 26,480 from a deep column, 1 from a table name via the schema pass), so the walk is a walk that happened. `--scan-asset` alone is proved INSUFFICIENT by construction — a value straddling a SQLite overflow-page boundary is invisible to the byte scan and visible to the cell scan, with a non-straddling offset as the control that the byte scan works at all. **These scans are executor-run evidence, NOT a CI gate**: the artifacts are gitignored and 390–470 MB, so no runner holds them; re-run before any public flip.
@@ -170,7 +169,6 @@ Move to "Completed Issues" section at bottom with date
 ---
 
 ## 2026-06-23 Audit (product-quality fan-out + Codex verification)
-
 
 
 ## 2026-05-29 Audit Follow-up (fan-out codebase audit + Codex review)
@@ -210,7 +208,7 @@ The verbose pre-2026-05-29 "Last Updated" header log is archived at
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
 | **`/computed-identifications` costs ~2 s and only ~0.9 s is accounted for** | `web/pages/findings.py:1172` (`_fetch_approved_review_map`), `:1312`, `:2246-2283` (facet cascade) | ❌ Open (found 2026-08-19) | The event loop is NOT blocked (breach counter stayed at 1 across seven slow requests) — the work is correctly offloaded but serial on the request's await chain. Measured: rows 187 ms + sequential facet cascade 348 ms + element construction 200-350 ms. Prime suspects for the missing 1.1-3.0 s are two uncached Supabase round trips alone on the critical path, one of them the identification-reviews RPC on EVERY render. **Measure those two and take a browser trace before optimising anything.** Trap: do not naively `asyncio.gather` the facets — three concurrent heavy reads plus the rows read consume the whole budget of 4 and the second visitor gets `busy`. Detail: [`docs/specs/discovery-performance-situation-2026-08-20.md`](specs/discovery-performance-situation-2026-08-20.md). |
-| **`bench_discovery.py` is not a smoke test, and it hung the V4.2 deploy** | `scripts/bench_discovery.py`, `_tmp/deploy_v42_discovery.ps1` step 8 | ❌ Open (found 2026-08-19) | `bench_findings_page()` runs unconditionally in `main()`; neither `--sample` nor `--warm-passes` bounds it. 1,024 filter states x 3 units x 3 sorts + deep-page + count = 15,363 combinations x 5 repeats = ~76,815 timed executions — one to two hours today, still ~25 min after the P1 fix. The deploy died as `ssh exit 255` (connection reset under an idle bench) and is recorded FAILED although steps 0-7 succeeded and the swap is live and healthy. Four fixes: take it off the deploy path; bound every statement via `set_progress_handler`; add ssh `ServerAliveInterval`; and make the picks use `_build_findings_filter` (they use `di.main_pool` alone, missing the default divergence predicate that removes 12.6%/38.7% of the buckets — a real defect, though NOT what hung this run). Detail: [`docs/specs/discovery-performance-situation-2026-08-20.md`](specs/discovery-performance-situation-2026-08-20.md). |
+
 | **The checked-in V4.2 recipe cannot rebuild the artifact in production** | `_tmp/build_v42lit_sidecar.ps1`, `_tmp/v42lit_alias_hash.txt` | ❌ Open (found 2026-08-19) | Two of its own hash pins fail against disk — `work_domains_v42lit.json` pinned `4f90ffc7...` vs actual `79c9ea13...`, and `work_author_aliases-v42lit.json` pinned `b2bf3cff...` vs actual `dc94b4b0...`. The loaders fail closed, so the recipe aborts before distillation: **rollback-by-rebuild does not currently exist.** Rollback by atomic manifest repoint is unaffected and remains the primary path. The recipe's own comment names the anti-pattern ("the sha is written by the run, never hand-copied") — the stale one is a hand-copied literal. Fix before any rebuild is needed under pressure, and derive both hashes at run time. Detail: [`docs/specs/discovery-performance-situation-2026-08-20.md`](specs/discovery-performance-situation-2026-08-20.md). |
 | **Two My Library desktop tests fail at HEAD: `reload_local_indexes` is never called after a folder is removed** | `tests/test_my_library_tab.py::test_reload_local_indexes_called_after_remove_folder`, `::test_delete_then_search_no_local_hits` | ❌ Open (found 2026-08-16) | Found incidentally while running the main-job suite selection during the V4 deploy-record work; **not caused by it** — reproduced identically with the working tree stashed to HEAD, and identically again with discovery forced unavailable, so neither the code changes nor the newly staged sidecar is implicated. Both assert `reload_local_indexes` is called; the mock records no call. If the product path matches the test, removing a folder leaves the LOCAL index loaded and a subsequent search still returns hits from the removed folder — the second test's name says exactly that. **Not yet diagnosed**: nobody has established whether the desktop behaviour regressed or the tests drifted, and that is the first question. Unrelated: the batch run also hit a `0xC0000409` in this file, which does NOT reproduce in isolation (8/8 clean) — that is the accumulated-Qt-state crash the `gui` marker already documents, not a third defect. |
 | **The PGP default masks the transcription a search actually matched — the hit is unfalsifiable from the UI** | `web/components/version_selector.py:157-174`, `genizah_app.py:3059-3064` (`_auto_select_pgp_edition`), `shared/fgp_service.py::choose_default_source` | ❌ Open (found 2026-08-12; **SEED-033** — awaiting owner decision, no code yet) | The reading-view cascade auto-selects **any** PGP edition with no coverage or content check — exactly the gap SEED-030 closed for FGP and left open for PGP. Reproduced end-to-end: searching `עצים עליו למודה` yields a hit on `Ms. P. Heid. Hebr. 18` folio 1v whose V0.8 transcription (491 chars) contains the phrase, but the folio renders pgpid **37732** instead — a 73-char Arabic *khidma* address — so the matched text is never displayed. **The FGP analogy is imperfect and this matters for the fix:** that folio genuinely carries both Arabic and Hebrew (PGP's own description notes "on recto there are biblical verses in Hebrew"); PGP transcribed the Arabic *completely* and V0.8 the Hebrew, so neither is "partial" — they cover **different portions of the same leaf**, and a length/coverage ratio would mislabel PGP as worse when it is merely about something else. The signal that matters is "does this source contain what the user searched for". Three design options (A: search-scoped selection via the existing `highlight` param — recommended and narrowest; B: extend the coverage gate to PGP — changes PGP precedence app-wide; C: discoverability cue only) with trade-offs, implementation sketch, and gates are in `.planning/seeds/SEED-033-pgp-default-masks-matched-transcription.md`. Both call sites must stay render-only against the one shared helper (web+desktop parity). |
@@ -291,7 +289,6 @@ These items from `PRE_LAUNCH_CHECKLIST.md` need verification:
 
 
 
-
 ## 4.5 FGP Transcriptions — data ready, integration pending (2026-06-18)
 
 | Item | Status | Notes |
@@ -320,7 +317,6 @@ sidecars. The chooser feature degrades to a no-op until the DB is present AND th
 |-------|------|--------|-----------|
 | Timeouts & retries | `auth_state.py:17-20` | ❌ Deferred | Low priority - defaults are reasonable |
 
-
 ### Input Sanitization
 
 | Issue | File | Status | Notes |
@@ -336,9 +332,7 @@ sidecars. The chooser feature degrades to a no-op until the DB is present AND th
 ## 6. Documentation Gaps
 
 
-
 ## 7. Archive Candidates
-
 
 
 
