@@ -3341,6 +3341,18 @@ async def _fetch_children(state: Dict[str, Any], item: Mapping[str, Any],
         domain=child.get("domain"),
         author=child.get("author"),
         work_id=child.get("work_id"),
+        # THE CITATION RANGE REACHES THE EXPANSION TOO. `_child_state` carries
+        # both bounds over (it copies the whole state dict), but this call did
+        # not read them back out, so a range-filtered parent opened onto
+        # children drawn from an UNFILTERED predicate -- the parent's count and
+        # its own rows disagreeing, which is exactly the wrongness a reader
+        # cannot see and `_child_state`'s docstring promises cannot happen.
+        # Invisible until 2026-08-20 only because the parent query timed out
+        # first (the correlated locus predicate in
+        # `shared/discovery_service.py::_build_findings_filter`), so fixing that
+        # query is what made this reachable.
+        locus_from=child.get("locus_from"),
+        locus_to=child.get("locus_to"),
         # THE MANUSCRIPT AXIS (2026-08-07). `_child_state` pins whichever axis the
         # parent's unit names, so this reads the same `child` dict `work_id` does --
         # only one of the two is ever set for a given parent.

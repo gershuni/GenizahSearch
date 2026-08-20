@@ -975,6 +975,43 @@ A major overhaul of how LOCAL Hebrew PDFs are read into the My Library index, dr
 
 ## [Unreleased]
 
+### The citation-range filter works (2026-08-20, web)
+
+Two fixes to the same reader action — narrowing `/computed-identifications` to one part of
+one work. Code only: no artifact rebuild, no manifest change.
+
+- **The citation-range filter returned nothing on every heavy work, every time.** It was not
+  slow — it was non-functional. The locus predicate in
+  `shared/discovery_service.py::_build_findings_filter` was a **correlated** `EXISTS`, so
+  SQLite re-ran an interval search once per candidate row. Measured on the served artifact
+  for תנ"ך, תהלים over half its chapters: **10,478 ms against a 5.0 s findings timeout**, so
+  the reader always got "This took longer than expected." Pre-existing, and worse than one
+  slow page: `run_in_executor` threads cannot be cancelled, so a read that gave up at 5 s
+  kept its heavy worker for the remaining ~5–14 s, and four concurrent range readers pushed
+  other heavy reads to `busy`. Rewritten as an **uncorrelated `IN (SELECT …)`** driven from
+  `locus_unit` — `CORRELATED SCALAR SUBQUERY` becomes `LIST SUBQUERY`, evaluated once:
+  **61.3 ms, byte-identical result sets** across 15 probed work × bound-shape cases. The
+  predicate stays inside the `WHERE` clause, so the parameter order and every call site are
+  unchanged. A `WITH … AS MATERIALIZED` CTE measured the same (62.6 ms) and was rejected: it
+  cannot live in the filter, and its placeholders would precede the SELECT-list params — an
+  un-spliced params list returned wrong result sets on 6 of those 15 cases and silently
+  correct ones on the other 9, because those were empty.
+
+- **A range-filtered row expanded into children that ignored the range.**
+  `web/pages/findings.py::_fetch_children` never read `locus_from` / `locus_to` back out of
+  the child state, though `_child_state` copies them and its docstring promises "every axis
+  is carried over unchanged … its count and the rows underneath it come from ONE predicate
+  and cannot contradict each other". So a parent counted under a range opened onto an
+  unfiltered list. This was unreachable until now only because the parent query timed out
+  first — fixing the query above is what exposed it, and shipping that fix alone would have
+  turned a broken feature into a silently wrong one.
+
+Nine new tests. The three semantic ones cannot distinguish the two SQL forms by design, so
+the gate is a structural check that the subquery references the outer row nowhere, plus a
+query-plan and a wall-clock guard on the served artifact. All six mutations in the matrix
+were watched failing — reverting to the correlated form ran that test set for **3m28s**,
+which is the outage reproducing itself inside the gate.
+
 ### Discovery V4.2 sidecar — 14 restored works, and citations that stop repeating themselves (2026-08-19, web; built, not yet deployed)
 
 A rebuilt discovery artifact. **708 works / 58,602 computed identifications /

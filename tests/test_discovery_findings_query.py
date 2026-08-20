@@ -32,7 +32,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import pathlib
+import re
 import sqlite3
+import time
 
 import pytest
 
@@ -55,6 +57,7 @@ from shared.discovery_service import (
     FINDINGS_UNIT_WORK,
     FINDINGS_UNITS,
     DiscoveryService,
+    _build_findings_filter,
     _build_findings_query,
 )
 from shared.discovery_surface_projection import STATUS_OK, SURFACE_FINDING_FIELDS
@@ -1335,3 +1338,325 @@ def test_an_out_of_vocabulary_unit_is_refused_by_the_cascade(service):
     for rejected in ("claim", "", "manuscripts"):
         with pytest.raises(ValueError):
             service.get_findings_facets_enveloped("domain", unit=rejected)
+
+
+# ---------------------------------------------------------------------------
+# The citation-range ("locus") predicate: uncorrelated, and provably so.
+#
+# The predicate shipped as a CORRELATED `EXISTS`, which re-ran an interval
+# search once per candidate row: 10,478 ms on the served artifact for
+# `w000112` over citation range 1..75, against a 5.0 s findings timeout. The
+# range filter therefore returned NOTHING for every heavy work, every time --
+# a non-functional feature, not a slow one. Rewritten to an UNCORRELATED
+# `IN (SELECT ...)` driven from `locus_unit`: 61.3 ms, same result set.
+#
+# The three SEMANTIC tests below by design cannot distinguish the two forms
+# (they are equivalent -- that is the whole point of the rewrite). Only the
+# structural guard and the real-artifact query-plan guard can.
+# ---------------------------------------------------------------------------
+
+_LOCUS_TABLES = ("locus_unit", "locus_work", "discovery_locus_piece")
+
+
+def _locus_range_db(tmp_path, name="findings-locus-shapes.db"):
+    """A locus-capable fixture with a KNOWN unit->identification mapping.
+
+    `citation_pos` is deliberately NOT monotone in `unit_ord`: unit 3 carries
+    citation position 5 and unit 4 carries 4. A rejected optimisation
+    (precomputing per-piece citation bounds) is correct only where it is
+    monotone, so the inversion is baked into the fixture rather than described
+    in a comment.
+    """
+    db_path = _build_findings_db(tmp_path, name=name)
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("INSERT INTO locus_work VALUES ('wA','sefaria','chapter',500,5)")
+    conn.executemany(
+        "INSERT INTO locus_unit VALUES ('wA',?,?,?,?,?)",
+        [
+            (0, 0, "ch:1", "Chapter 1", 1),
+            (1, 100, "ch:2", "Chapter 2", 2),
+            (2, 200, "ch:3", "Chapter 3", 3),
+            # THE INVERSION: unit_ord 3 sits at citation_pos 5, unit_ord 4 at 4.
+            (3, 300, "ch:5", "Chapter 5", 5),
+            (4, 400, "ch:4", "Chapter 4", 4),
+        ],
+    )
+    rows = conn.execute(
+        "SELECT identification_id, sys_id FROM discovery_identification "
+        "WHERE display_work_id='wA' ORDER BY sys_id"
+    ).fetchall()
+    # One piece each. s1 SPANS units 0..2 -- a multi-unit piece is the case an
+    # interval join can get wrong while a point lookup still looks correct.
+    spans = {"s1": (0, 2), "s2": (3, 3), "s6": (4, 4)}
+    placed = {}
+    for identification_id, sys_id in rows:
+        start, end = spans[sys_id]
+        conn.execute(
+            "UPDATE discovery_identification SET locus_status='resolved', "
+            "locus_work_id='wA', locus_label='L' WHERE identification_id=?",
+            (identification_id,),
+        )
+        conn.execute(
+            "INSERT INTO discovery_locus_piece VALUES (?,?,?,?,?)",
+            (identification_id, "wA", 0, start, end),
+        )
+        placed[sys_id] = identification_id
+    conn.executemany(
+        "INSERT INTO meta(key,value) VALUES (?,?)",
+        [
+            ("locus_display_version", "locus-display-v1"),
+            ("locus_filter_version", "locus-filter-v1"),
+            ("expected_rows_discovery_locus_piece", str(len(placed))),
+        ],
+    )
+    conn.commit()
+    conn.close()
+    return db_path, placed
+
+
+def test_locus_range_all_three_bound_shapes_select_the_witnessed_sets(tmp_path):
+    """`locus_from` alone, `locus_to` alone, and both -- as SETS, not counts."""
+    db_path, _ = _locus_range_db(tmp_path)
+    service = _service_for(db_path)
+
+    def ids(**kwargs):
+        env = service.get_findings_enveloped(
+            bucket=BUCKET_ALL, work_id="wA", **kwargs)
+        assert env["status"] == STATUS_OK
+        return set(_values(env, "sys_id"))
+
+    assert ids() == {"s1", "s2", "s6"}, (
+        "the fixture cannot distinguish a working range filter from a no-op "
+        "unless the unfiltered set is the full three"
+    )
+
+    # BOTH bounds. Units 1..2 fall inside s1's span (0..2) and nothing else.
+    assert ids(locus_from=1, locus_to=2) == {"s1"}
+    # `locus_from` ALONE: citation_pos >= 4 reaches unit 3 (pos 5) and unit 4 (pos 4).
+    assert ids(locus_from=4) == {"s2", "s6"}
+    # `locus_to` ALONE: citation_pos <= 3 reaches units 0..2 only.
+    assert ids(locus_to=3) == {"s1"}
+
+    # An empty window is an honest empty result, not an error.
+    empty = service.get_findings_enveloped(
+        bucket=BUCKET_ALL, work_id="wA", locus_from=0, locus_to=0)
+    assert empty["status"] == STATUS_OK and empty["items"] == []
+
+    # A narrower window is a STRICT subset of a wider one containing it.
+    assert ids(locus_from=1, locus_to=2) < ids(locus_from=1, locus_to=5)
+
+
+def test_locus_range_is_correct_where_citation_pos_is_NOT_monotone(tmp_path):
+    """The rejected per-piece-bounds optimisation would false-positive here.
+
+    Units 3 and 4 carry citation positions 5 and 4, so a piece's min/max over
+    `unit_ord` does not bracket its citation positions. Selecting citation 4
+    must return ONLY the identification witnessing unit_ord 4.
+    """
+    db_path, _ = _locus_range_db(tmp_path, name="findings-locus-nonmonotone.db")
+    service = _service_for(db_path)
+    at_four = service.get_findings_enveloped(
+        bucket=BUCKET_ALL, work_id="wA", locus_from=4, locus_to=4)
+    assert set(_values(at_four, "sys_id")) == {"s6"}
+    at_five = service.get_findings_enveloped(
+        bucket=BUCKET_ALL, work_id="wA", locus_from=5, locus_to=5)
+    assert set(_values(at_five, "sys_id")) == {"s2"}
+
+
+def test_locus_range_binds_work_then_from_then_to_in_that_order():
+    """Positional parameters, asserted positionally.
+
+    The locus params are the LAST ones the filter appends, and their order is
+    the contract: transposing `from` and `to` filters the wrong window rather
+    than raising.
+    """
+    _both, params = _build_findings_filter(
+        work_id="wZ", locus_from=11, locus_to=22, locus_enabled=True)
+    assert params[-3:] == ["wZ", 11, 22]
+    # `work_id` binds TWICE when a range is active: once for the plain
+    # `display_work_id` equality, once inside the subquery.
+    assert params.count("wZ") == 2
+
+    only_from, from_params = _build_findings_filter(
+        work_id="wZ", locus_from=11, locus_enabled=True)
+    assert from_params[-2:] == ["wZ", 11]
+    only_to, to_params = _build_findings_filter(
+        work_id="wZ", locus_to=22, locus_enabled=True)
+    assert to_params[-2:] == ["wZ", 22]
+    assert "citation_pos <= ?" not in only_from
+    assert "citation_pos >= ?" not in only_to
+
+    # The predicate is OFF unless switched on. This is the guard against a
+    # structural assertion that passes against SQL carrying no locus clause.
+    off, _off_params = _build_findings_filter(
+        work_id="wZ", locus_from=11, locus_to=22)
+    assert "discovery_locus_piece" not in off
+
+
+def _locus_subquery_slice(sql):
+    """The locus `IN (...)` subquery ONLY, by balanced parenthesis.
+
+    Scoped deliberately: the outer statement references `di.` throughout, so a
+    statement-wide search for the outer alias could never tell a correlated
+    subquery from an uncorrelated one.
+    """
+    match = re.search(r"\bdi\.identification_id\s+IN\s*\(", sql)
+    assert match, "the locus predicate is absent from this statement"
+    start = sql.index("(", match.start())
+    depth = 0
+    for index in range(start, len(sql)):
+        if sql[index] == "(":
+            depth += 1
+        elif sql[index] == ")":
+            depth -= 1
+            if depth == 0:
+                return sql[start:index + 1]
+    raise AssertionError("unbalanced parentheses in the locus predicate")
+
+
+def test_the_locus_subquery_is_UNCORRELATED_by_construction():
+    """It must not reference the outer row at all.
+
+    Asserting the PROPERTY, not one spelling of its negation: a substring check
+    for `p.identification_id=di.identification_id` is defeated by re-adding the
+    same equality with spaces around the `=`.
+    """
+    sql, _params = _build_findings_query(
+        work_id="wZ", locus_from=1, locus_to=9, locus_filter_enabled=True)
+    subquery = _locus_subquery_slice(sql)
+    assert "di." not in subquery, (
+        "the locus subquery references the outer row, so SQLite must re-run it "
+        f"per candidate row -- that is the 10.5 s outage. Subquery: {subquery}"
+    )
+    # Positively: it drives from the units table and reaches the pieces table.
+    for table in ("locus_unit", "discovery_locus_piece"):
+        assert table in subquery, f"{table} missing from the locus subquery"
+
+
+# ---------------------------------------------------------------------------
+# The two REAL-ARTIFACT guards. `resolve_guard_artifact()` alone is not enough:
+# it validates audience and `_REQUIRED_TABLES`, and the locus tables are not
+# among those requirements -- so an artifact predating the locus feature would
+# resolve and then raise `no such table: locus_unit`.
+# ---------------------------------------------------------------------------
+
+def _locus_capable_artifact():
+    """`(path, skip_reason)` for a locus-capable served artifact.
+
+    Reuses the SERVICE's own capability predicates rather than re-deriving what
+    "locus-capable" means, so the gate and the runtime cannot disagree. They are
+    instance methods taking a connection and they read `meta` only, so the three
+    tables are checked separately.
+    """
+    from tests.test_discovery_launch_stats import resolve_guard_artifact
+
+    path, reason = resolve_guard_artifact()
+    if path is None:
+        if reason:
+            # An explicitly-named artifact that does not resolve is a NAMED
+            # failure, never a silent green.
+            raise AssertionError(reason)
+        return None, "no discovery artifact resolves"
+
+    probe = _service_for(path)
+    conn = probe._get_conn()
+    if conn is None:
+        return None, f"{path!r} could not be opened through the service"
+    if not (probe._has_locus_filter(conn) and probe._has_locus_display(conn)):
+        return None, f"{path!r} does not advertise the locus filter contract"
+    present = {
+        row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    missing = [table for table in _LOCUS_TABLES if table not in present]
+    if missing:
+        return None, f"{path!r} is missing locus table(s) {missing}"
+    return path, None
+
+
+def _heaviest_locus_probe(conn):
+    """The worst case the served artifact actually offers, chosen at run time.
+
+    Never a hardcoded work id: `w000112` is the heaviest today, but an artifact
+    that dropped it would turn this guard into a query over nothing.
+    """
+    row = conn.execute(
+        "SELECT p.locus_work_id, COUNT(DISTINCT p.identification_id) AS n "
+        "FROM discovery_locus_piece p "
+        "JOIN discovery_identification di "
+        "  ON di.identification_id = p.identification_id "
+        "WHERE di.main_pool = 1 "
+        "GROUP BY p.locus_work_id ORDER BY n DESC LIMIT 1"
+    ).fetchone()
+    if row is None:
+        return None, None, None
+    work_id = row[0]
+    bounds = conn.execute(
+        "SELECT MIN(citation_pos), MAX(citation_pos) FROM locus_unit "
+        "WHERE work_id = ? AND citation_pos IS NOT NULL", (work_id,)
+    ).fetchone()
+    return work_id, bounds[0], bounds[1]
+
+
+def test_the_locus_range_query_stays_UNCORRELATED_on_the_served_artifact():
+    """`EXPLAIN QUERY PLAN` over the statement the service really builds.
+
+    The deterministic half of the regression gate. An index/plan assertion
+    against a hand-retyped near-copy proves nothing, so the SQL comes from
+    `_build_findings_query`. Against the synthetic fixture this assertion could
+    not fail -- there is too little data for the planner to be wrong about --
+    which is why it is gated on the real artifact.
+    """
+    path, skip_reason = _locus_capable_artifact()
+    if path is None:
+        pytest.skip(skip_reason)
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        work_id, low, high = _heaviest_locus_probe(conn)
+        assert work_id, "the artifact advertises locus filtering but offers no pieces"
+        sql, params = _build_findings_query(
+            work_id=work_id, locus_from=low, locus_to=high,
+            locus_filter_enabled=True, count_only=True)
+        plan = "\n".join(
+            str(row[3]) for row in conn.execute("EXPLAIN QUERY PLAN " + sql, params))
+    finally:
+        conn.close()
+    assert "CORRELATED" not in plan, (
+        "the locus predicate is correlated again -- it re-runs per candidate "
+        f"row, which is the multi-second outage. Plan:\n{plan}")
+    assert "LIST SUBQUERY" in plan, (
+        f"the locus subquery is no longer evaluated once. Plan:\n{plan}")
+
+
+def test_the_locus_range_count_stays_far_under_the_findings_timeout():
+    """The wall-clock backstop, warmed first and with a positive control.
+
+    Warm-then-time on purpose: a cold read of a 665 MB file varies about 2x
+    (10.5 s and 19.2 s were both measured for the same pre-fix probe), and this
+    gate exists to catch a return to per-row cost, not to measure disk state.
+    """
+    path, skip_reason = _locus_capable_artifact()
+    if path is None:
+        pytest.skip(skip_reason)
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        work_id, low, high = _heaviest_locus_probe(conn)
+        assert work_id, "the artifact advertises locus filtering but offers no pieces"
+        sql, params = _build_findings_query(
+            work_id=work_id, locus_from=low, locus_to=high,
+            locus_filter_enabled=True, count_only=True)
+        warm = conn.execute(sql, params).fetchone()[0]
+        # POSITIVE CONTROL. A timing assertion over an empty result is a gate
+        # that cannot fail.
+        assert warm > 0, (
+            f"the heaviest locus work {work_id!r} counted zero over its full "
+            "citation range, so this measures nothing")
+        started = time.perf_counter()
+        conn.execute(sql, params).fetchone()
+        elapsed = time.perf_counter() - started
+    finally:
+        conn.close()
+    assert elapsed < 2.0, (
+        f"the locus-filtered count over {work_id!r} took {elapsed:.2f} s "
+        "against a 5.0 s findings timeout; the correlated form measured 10.5 s "
+        "and returned nothing to the reader")

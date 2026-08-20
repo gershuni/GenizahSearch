@@ -4,8 +4,9 @@
 > found on 2026-08-19/20 around the discovery surfaces. Two were fixed and are recorded
 > here only so nobody re-does them. Three are open, one of them a live user-facing outage.
 >
-> **Nothing in the "Open" list has been implemented.** No production change has been made
-> since the V4.2 artifact deploy of 2026-08-19.
+> **Problem 1 was fixed in the working tree on 2026-08-20** (see the note under Problem 1);
+> Problems 2-5 have NOT been implemented. No production change has been made since the V4.2
+> artifact deploy of 2026-08-19.
 >
 > **Read this first, then `docs/specs/discovery-deploy.md`** if any option involving the
 > artifact is on the table.
@@ -14,7 +15,7 @@
 
 | # | Problem | Severity | State |
 |---|---------|----------|-------|
-| 1 | The citation-range filter on `/computed-identifications` always times out | **P1 — live, user-facing** | Open. Fix chosen, not written. |
+| 1 | The citation-range filter on `/computed-identifications` always times out | **P1 — live, user-facing** | **Fixed in the working tree 2026-08-20**, pending production verification. See the note under Problem 1. |
 | 2 | `/computed-identifications` takes ~2 s; only ~0.9 s is accounted for | P2 | Open. Partly diagnosed; ~1.1–3.0 s unmeasured. |
 | 3 | `bench_discovery.py` is not a smoke test, and it hung the V4.2 deploy | P2 | Open. Fix designed, not written. |
 | 4 | The checked-in V4.2 recipe cannot rebuild the artifact in production | P2 | Open. |
@@ -29,6 +30,26 @@
 ---
 
 ## Problem 1 — the citation-range filter is non-functional (P1)
+
+> **FIXED 2026-08-20 (working tree; not yet verified in production).** Everything below is
+> retained as the diagnosis, but two things changed. **(1) Option A was superseded.** The
+> shipped fix keeps the predicate INSIDE the `WHERE` clause as an uncorrelated
+> `di.identification_id IN (SELECT ... FROM locus_unit lu JOIN discovery_locus_piece p ...)`
+> rather than prepending a `WITH ... AS MATERIALIZED` CTE. Both measured the same (61.3 ms
+> vs 62.6 ms, against 10,478 ms correlated), but the WHERE-local form leaves
+> `_build_findings_filter`'s `(where_sql, params)` contract and the parameter ORDER untouched,
+> so no call site changes; the CTE is statement-level and needs its params re-spliced ahead of
+> `_divergence_flag_sql`'s SELECT-list params. That splice is not a theoretical risk: run
+> un-spliced against this artifact it returned WRONG identification sets on 6 of 15 probed
+> (work x bound-shape) cases and SILENTLY CORRECT ones on the other 9, because those 9 were
+> empty anyway. **(2) A second bug was found and fixed with it.**
+> `web/pages/findings.py::_fetch_children` never read `locus_from`/`locus_to` back out of the
+> child state, so a range-filtered parent expanded into UNFILTERED children -- reachable only
+> once the parent query stopped timing out, i.e. this fix is what exposed it. Shipping the SQL
+> alone would have converted a broken feature into a silently wrong one.
+> **Option B and Problem 5 are now near-redundant** -- the rewrite removes most of the margin
+> the index table below implies.
+
 
 ### What a reader experiences
 

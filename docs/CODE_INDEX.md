@@ -945,6 +945,29 @@ Phase 133 (ATLAS-01) — the Visual Atlas Preview page chrome (shared-shell embe
 
 - **Function** `create_atlas_page` — Beta badge + honesty banner + one-line intro (EN/HE + RTL via `tr`/`is_rtl`), a CLS-reserved fixed-dimension `<canvas>` container, and a documented JS injection point the 133-04 Canvas 2D renderer fills in
 
+## web/pages/findings.py
+
+Phase 136 — the corpus-wide "Computed Identifications" page (`/computed-identifications`).
+Partial entry: the filter-state → read paths only, not the whole surface.
+
+- **Filter state lives in per-user `safe_storage`, not the URL** — `_KEY_LOCUS_FROM` /
+  `_KEY_LOCUS_TO` and siblings. Consequence: no page state can be reproduced from a link, so
+  the citation-range filter cannot be exercised by `curl` and a readiness probe must call the
+  service instead
+- **Function** `fetch_findings` — the parent read. Passes every filter axis the builder
+  accepts, including `locus_from` / `locus_to`, with `divergence=SHOWN`
+- **Function** `_child_state` — the child's filter state: the parent's state with `unit`
+  pinned to the leaf grain and the group key replaced. Copies *every* axis by contract
+- **Function** `_fetch_children` — one grouped row's children, through the same shipped read.
+  **The parent/child one-predicate invariant**: whatever axis `fetch_findings` passes, this
+  must pass too, or a parent's count and its own child list describe different populations. A
+  reader cannot see that kind of wrongness, which is what makes it worse than an error they
+  can. `locus_from` / `locus_to` were missing here until 2026-08-20 and are covered by tests
+  in `tests/test_findings_page.py`
+- **Function** `_facet_request` / `fetch_facets` — the domain → author → work cascade. Never
+  passes `work_id` or the locus bounds, so the citation-range predicate is structurally
+  inactive in facet counts
+
 ## web/framework_patches.py
 
 - **Function** `_patch_nicegui_esm_handler` (Line 20) — add is_file() guard to ESM route handler (prevents RuntimeError on directory URLs)
