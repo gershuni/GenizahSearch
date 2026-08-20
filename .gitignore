@@ -349,3 +349,6 @@ pgp_data/pgp-text/
 # cairo-genizah-research skill runtime state (self-throttle bookkeeping).
 # Narrow by design: the state/ directory's tracked .gitkeep must survive.
 skills/*/state/throttle.json
+
+# Passage-matching index sidecar (built locally, never committed)
+passage_index/
