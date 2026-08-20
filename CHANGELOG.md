@@ -4,6 +4,48 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [8.6.0] - 2026-08-20 — Pause/Resume, and Stop that actually stops (desktop)
+
+> **Desktop release.** It continues the desktop line from v8.5.2; 9.0.0 below it is a higher
+> number but a *web-only* release that never shipped a desktop build, which is why this section
+> sits above it by date and below it by number.
+
+### New Features
+
+- **Pause and Resume for long searches** — regular, Lab Mode and Composition. A pause takes
+  effect at the next checkpoint, keeps everything found so far, and Resume continues from exactly
+  that point; nothing is re-scanned. Paused time is excluded from the elapsed clock and from the
+  composition ETA, and a paused search releases the keep-awake block so the machine can sleep.
+  A paused search lives in memory only — closing the program ends it.
+
+### Bug Fixes
+
+- **Stop never worked in Lab Mode**, from three independent causes: the Lab worker had no cancel
+  flag, a bare `except Exception` swallowed the cancellation, and a non-deep Lab search had no
+  checkpoint at all. A cancel could also surface as an error dialog instead of stopping.
+- **Stopping a search discarded its results** in Title, Shelfmark and My Library searches — every
+  row was thrown away while the results header said "Partial results".
+- **My Library searches ignored Stop entirely**; the local scan loop had no checkpoint.
+- **The progress bar rewound to zero** when the My Library pass began. It now names the stage and
+  goes indeterminate.
+- **Elapsed time was read from the wall clock**, so an NTP or DST step could add minutes to the
+  displayed time and to the composition ETA. It is now monotonic.
+- **Escape and window-close during a composition scan** called an interruption request the
+  composition threads never polled — a no-op since it was written.
+- **Starting a search while one was paused could crash** with "QThread: Destroyed while thread is
+  still running"; it now declines and says so.
+- **Performance timings recorded cancelled runs as completed.**
+- **The search toolbar drew on top of itself** on smaller screens — the second row needed 1423 px
+  on a 1440 px display. Gap moved up beside the search box, three redundant labels were dropped,
+  and Search/Stop and Pause now share one fixed-width slot so no button moves when a search starts.
+
+### Web (incidental)
+
+- Stop during a Lab Mode search on genizahsearch.com discarded every hit and logged it as a search
+  error. Fixed by the same shared-engine change; no web deploy is part of this release.
+
+---
+
 ## [9.0.0] - 2026-08-16 — Computed Identifications, the Visual Atlas & Start Here (public beta, web)
 
 > **At a glance.** 55,250 computed identifications across 596 works on 39,341 manuscripts (of

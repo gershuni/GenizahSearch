@@ -4949,3 +4949,16 @@ TRANSLATIONS.update({
     "Still stopping the previous search — try again in a moment.":
         "עדיין עוצר את החיפוש הקודם — נסו שוב בעוד רגע.",
 })
+
+
+# === Desktop What's New — v8.6.0 (2026-08-20 Pause/Resume) ===
+TRANSLATIONS.update({
+    "New: pause and resume long searches":
+        "חדש: אפשר להשהות ולהמשיך חיפושים ארוכים",
+    "Pause and Resume: a long search can be paused at any point and continues from exactly where it stopped — nothing is re-scanned. The clock stops while paused, and a paused search lets the computer sleep. A paused search lives in memory only: closing the program ends it.":
+        "השהיה והמשך: אפשר להשהות חיפוש ארוך בכל שלב, והוא ממשיך בדיוק מהנקודה שבה נעצר — שום דבר לא נסרק מחדש. השעון עוצר בזמן ההשהיה, וחיפוש מושהה מאפשר למחשב להיכנס לשינה. חיפוש מושהה קיים בזיכרון בלבד: סגירת התוכנה מסיימת אותו.",
+    "Stop now works in Lab Mode. It previously did nothing at all, and could show an error message instead of stopping.":
+        "“עצור” עובד עכשיו במצב מעבדה. עד כה הוא לא עשה דבר, ולעתים הציג הודעת שגיאה במקום לעצור.",
+    "Stopping a search keeps what it already found. Title, Shelfmark and My Library searches used to discard every result when stopped, even though the results header said “Partial results”.":
+        "עצירת חיפוש שומרת על מה שנמצא עד כה. חיפושי כותר, סימן מדף ו“הספרייה שלי” השמיטו את כל התוצאות בעצירה, גם כשכותרת התוצאות הכריזה “תוצאות חלקיות”.",
+})
