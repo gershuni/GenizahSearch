@@ -135,7 +135,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("Fixed: the Printed filter in Composition Search had no effect — it now filters correctly."))
+        self.lbl_msg.setText(tr("New: pause and resume long searches"))
         self.show()
 
     def on_learn_more(self):
