@@ -118,17 +118,17 @@ def main() -> int:
         strata = {name: summarize_by_stratum(outs, name, k_values=K_VALUES)
                   for name in STRATA}
         results[cid] = s
-        print(f'\n=== {cid} ===  ({time.time() - t0:.0f}s)')
-        print(f'  n={s["n"]}  found={s["found_any"]}  mrr={s["mrr"]}')
+        print(f'\n=== {cid} ===  ({time.time() - t0:.0f}s)', flush=True)
+        print(f'  n={s["n"]}  found={s["found_any"]}  mrr={s["mrr"]}', flush=True)
         for k in K_VALUES:
             lo, hi = s[f'recall@{k}_ci']
-            print(f'  recall@{k:<3} = {s[f"recall@{k}"]:.3f}  [{lo:.3f}, {hi:.3f}]')
-        print(f'  p50={s["p50_ms"]}ms  p95={s["p95_ms"]}ms')
+            print(f'  recall@{k:<3} = {s[f"recall@{k}"]:.3f}  [{lo:.3f}, {hi:.3f}]', flush=True)
+        print(f'  p50={s["p50_ms"]}ms  p95={s["p95_ms"]}ms', flush=True)
         for name in STRATA:
             cells = '  '.join(
                 f'{key}:{v["recall@50"]:.2f}(n={v["n"]})'
                 for key, v in sorted(strata[name].items()))
-            print(f'  by {name}: {cells}')
+            print(f'  by {name}: {cells}', flush=True)
         if ledger:
             ledger.record(method=cid.split('-')[0], policy_id=cid,
                           split=args.split, query_set=os.path.basename(
@@ -137,7 +137,7 @@ def main() -> int:
 
     if args.baseline and args.baseline in results:
         base = results[args.baseline]
-        print(f'\n--- non-inferiority vs {args.baseline} (margin 3 points) ---')
+        print(f'\n--- non-inferiority vs {args.baseline} (margin 3 points) ---', flush=True)
         for cid, s in results.items():
             if cid == args.baseline:
                 continue
