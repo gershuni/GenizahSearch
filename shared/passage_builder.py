@@ -10,12 +10,26 @@ a test asserts that rather than trusting it:
              mass-balanced slice of the output, in RAM, written out once,
              sequentially. No sort of the full key set, and no spool.
 
-  'spool'    The conventional shape, kept as the honest baseline: mass-
-             partitioned (gram, payload) keys spooled to disk, each partition
-             sorted, CSR written sequentially. Costs scratch disk that
-             'scatter' does not.
+  'spool'    The conventional shape: mass-partitioned (gram, payload) keys
+             spooled to disk, each partition sorted, CSR written sequentially.
+             Costs scratch disk equal to 8 bytes per posting.
 
-Which one ships is a measured decision, not this module's opinion.
+MEASURED, on a 60,000-record slice (51,226 indexed, 86.3M postings), P=4:
+
+    batch_grams   scatter wall / RSS      spool wall / RSS      scratch
+      1,000,000     66.3s / 630 MB          48.8s / 1.1 GB      659 MB
+      4,000,000     88.2s / 820 MB          50.6s / 1.2 GB      659 MB
+     16,000,000    108.4s / 1.8 GB          51.0s / 1.8 GB      659 MB
+
+Artifacts were byte-identical in every configuration. `spool` is the default
+because it is ~1.7x faster and flat in the RAM knob; `scatter` is kept and
+supported because it needs no scratch disk at all, which is the constraint
+that may matter on a user's machine. The choice is purely operational -- it
+cannot change what gets built.
+
+Scatter loses on time for a structural reason worth stating: it re-derives
+every gram once per partition, so its cost is P x derive, and it gets slower
+as P rises. That is the external review's prediction, confirmed.
 
 A design that does NOT work, recorded so it is not re-proposed: a single
 source-order pass scattering into P buffered gram ranges. A source-order scan
@@ -58,7 +72,16 @@ from shared.passage_normalize import (
 
 EXCLUDED_NAME = 'excluded_records.tsv'
 DEFAULT_PARTITIONS = 8
-DEFAULT_BATCH_RECORDS = 20_000
+# Batch by GRAMS, not records. Batching 20,000 records meant ~33.8M grams
+# per batch at the corpus mean of 1,689 letters/record -- 0.8 GB across
+# three uint64 arrays, doubled again by argsort copies. Measured peak RSS
+# was 3.0-3.8 GB and did NOT fall as partitions rose, which is what proved
+# the in-RAM output slice (51-206 MB) was never the driver. Record counts
+# are the wrong unit: record length varies ~100x across this corpus.
+# 1M measured best: scatter ran 66s vs 88s at 4M and 108s at 16M on a
+# 60K-record slice (smaller arrays stay in cache), and peak RSS fell
+# from 1.8 GB to 630 MB. spool is flat in this knob at ~50s.
+DEFAULT_BATCH_GRAMS = 1_000_000
 
 
 @dataclass
@@ -284,39 +307,52 @@ def codes_from_letter_indices(chunk: np.ndarray) -> np.ndarray:
 
 
 def _iter_record_grams(recs: np.ndarray, streams: np.ndarray, *,
-                       batch: int, stride: int):
-    """Yield (codes, record_indices, positions) batched over streams.bin.
+                       batch_grams: int, stride: int):
+    """Yield (codes, record_indices, positions), batched by GRAM COUNT.
+
+    Peak memory is what this controls, and it is the builder's real RAM knob:
+    a batch costs roughly `batch_grams * 24` bytes for the three uint64 arrays,
+    plus about as much again for sort copies downstream. Batching by record
+    count instead let one batch reach 33.8M grams, because record length varies
+    by two orders of magnitude across this corpus.
 
     Stride is applied PER RECORD. Striding a concatenated batch would step
-    across record boundaries and silently index positions that pass 1 never
-    counted, so the histogram and the scatter would disagree.
+    across record boundaries and index positions pass 1 never counted, so the
+    histogram and the scatter would silently disagree.
     """
-    n = len(recs)
-    for start in range(0, n, batch):
-        stop = min(start + batch, n)
-        codes_l, pages_l, pos_l = [], [], []
-        for ri in range(start, stop):
-            off = int(recs[ri]['stream_off'])
-            n_let = int(recs[ri]['n_letters'])
-            c = codes_from_letter_indices(streams[off:off + n_let])
-            if not c.size:
-                continue
-            pos = np.arange(c.size, dtype=np.uint64)
-            if stride > 1:
-                c = c[::stride]
-                pos = pos[::stride]
-            codes_l.append(c)
-            pages_l.append(np.full(c.size, ri, dtype=np.uint64))
-            pos_l.append(pos)
-        if not codes_l:
+    codes_l, pages_l, pos_l = [], [], []
+    held = 0
+
+    def _flush():
+        return (np.concatenate(codes_l), np.concatenate(pages_l),
+                np.concatenate(pos_l))
+
+    for ri in range(len(recs)):
+        off = int(recs[ri]['stream_off'])
+        n_let = int(recs[ri]['n_letters'])
+        c = codes_from_letter_indices(streams[off:off + n_let])
+        if not c.size:
             continue
-        yield (np.concatenate(codes_l), np.concatenate(pages_l),
-               np.concatenate(pos_l))
+        pos = np.arange(c.size, dtype=np.uint64)
+        if stride > 1:
+            c = c[::stride]
+            pos = pos[::stride]
+        codes_l.append(c)
+        pages_l.append(np.full(c.size, ri, dtype=np.uint64))
+        pos_l.append(pos)
+        held += int(c.size)
+        if held >= batch_grams:
+            yield _flush()
+            codes_l, pages_l, pos_l = [], [], []
+            held = 0
+    if codes_l:
+        yield _flush()
 
 
 def _pass2_scatter(index_dir: str, offsets: np.ndarray, recs: np.ndarray,
                    streams: np.ndarray, parts: list, *, stride: int,
-                   batch: int, progress: Callable, stats: BuildStats) -> None:
+                   batch_grams: int, progress: Callable,
+                   stats: BuildStats) -> None:
     """Scatter every posting to its final CSR address, one slice at a time."""
     total = int(offsets[-1])
     postings_path = os.path.join(index_dir, POSTINGS_NAME)
@@ -331,7 +367,7 @@ def _pass2_scatter(index_dir: str, offsets: np.ndarray, recs: np.ndarray,
         stats.peak_slice_bytes = max(stats.peak_slice_bytes, out.nbytes)
         cursor[c0:c1] = 0
         for codes, pages, poss in _iter_record_grams(
-                recs, streams, batch=batch, stride=stride):
+                recs, streams, batch_grams=batch_grams, stride=stride):
             sel = (codes >= c0) & (codes < c1)
             if not sel.any():
                 continue
@@ -379,7 +415,8 @@ def _pass2_scatter(index_dir: str, offsets: np.ndarray, recs: np.ndarray,
 
 def _pass2_spool(index_dir: str, offsets: np.ndarray, recs: np.ndarray,
                  streams: np.ndarray, parts: list, *, stride: int,
-                 batch: int, progress: Callable, stats: BuildStats) -> None:
+                 batch_grams: int, progress: Callable,
+                 stats: BuildStats) -> None:
     """Baseline: spool packed keys per partition, sort, write CSR in order.
 
     Kept so the scatter path is compared against the conventional shape rather
@@ -396,7 +433,7 @@ def _pass2_spool(index_dir: str, offsets: np.ndarray, recs: np.ndarray,
                for i in range(len(parts))]
     try:
         for codes, pages, poss in _iter_record_grams(
-                recs, streams, batch=batch, stride=stride):
+                recs, streams, batch_grams=batch_grams, stride=stride):
             width = offsets[codes + 1] - offsets[codes]
             keep = width > 0
             if not keep.all():
@@ -472,11 +509,11 @@ def df_band_edges(hist: np.ndarray, n_bands: int = 6) -> list:
 
 
 def build_index(records: Iterable, index_dir: str, *,
-                construction: str = 'scatter',
+                construction: str = 'spool',
                 partitions: int = DEFAULT_PARTITIONS,
                 stride: int = 1,
                 df_cap: Optional[int] = None,
-                batch_records: int = DEFAULT_BATCH_RECORDS,
+                batch_grams: int = DEFAULT_BATCH_GRAMS,
                 apply_hygiene: bool = True,
                 source_manifest: Optional[list] = None,
                 corpus_label: str = '',
@@ -524,7 +561,7 @@ def build_index(records: Iterable, index_dir: str, *,
     stats.partitions = len(parts)
     runner = _pass2_scatter if construction == 'scatter' else _pass2_spool
     runner(index_dir, offsets, recs, streams, parts, stride=stride,
-           batch=batch_records, progress=progress, stats=stats)
+           batch_grams=batch_grams, progress=progress, stats=stats)
 
     offsets.tofile(os.path.join(index_dir, GRAM_OFFSETS_NAME))
     del offsets, streams, recs
@@ -549,6 +586,7 @@ def build_index(records: Iterable, index_dir: str, *,
             'df_cap': df_cap,
             'df_capped_codes': stats.df_capped_codes,
             'df_capped_postings': stats.df_capped_postings,
+            'batch_grams': batch_grams,
             'hygiene_applied': apply_hygiene,
             'excluded': stats.excluded,
             'normalizer_version': NORMALIZER_VERSION,

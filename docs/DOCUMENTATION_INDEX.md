@@ -123,6 +123,7 @@ Detailed specifications for complex features:
 | [atlas-asset-schema-v1.md](specs/atlas-asset-schema-v1.md) | Baked Atlas binary asset schema |
 | [v3-review-viewer-spec.md](specs/v3-review-viewer-spec.md) | Owner-only LOCAL discovery-v3 grading server (never deployed) |
 | [passage-matching-algorithm.md](specs/passage-matching-algorithm.md) | **The character-level passage matcher** — normalization, 5-gram indexing, diagonal two-hit seeding, the two acceptance boundaries, Stage-0 hygiene, and the interactive posting budget. Tracked authority for the algorithm |
+| [passage-index-build-measurements.md](specs/passage-index-build-measurements.md) | Measured build cost, artifact size, construction comparison and RAM behaviour for the passage index (Phase 142) |
 
 ---
 

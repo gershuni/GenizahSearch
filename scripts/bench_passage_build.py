@@ -90,13 +90,15 @@ def run_one(records_factory, out_dir, args, construction) -> dict:
     stats = build_index(
         records_factory(), out_dir, construction=construction,
         partitions=args.partitions, stride=args.stride,
-        df_cap=args.df_cap, apply_hygiene=not args.no_hygiene,
+        df_cap=args.df_cap, batch_grams=args.batch_grams,
+        apply_hygiene=not args.no_hygiene,
         corpus_label=f'bench:{args.records}',
         progress=(lambda *a: None) if args.quiet else _progress)
     wall = time.time() - t0
     idx = open_index(out_dir)
     row = stats.as_dict()
     row.update({
+        'batch_grams': args.batch_grams,
         'wall_seconds': round(wall, 2),
         'peak_rss_bytes': peak_rss_bytes(),
         'opens': idx is not None,
@@ -149,6 +151,7 @@ def _report(construction, r) -> None:
           f'distinct codes {r["distinct_codes"]:,}')
     print(f'  pass1 {r["seconds_pass1"]}s   pass2 {r["seconds_pass2"]}s   '
           f'wall {r["wall_seconds"]}s   opens={r["opens"]}')
+    print(f'  batch_grams {r.get("batch_grams", 0):,}')
     print(f'  peak RSS {human(r["peak_rss_bytes"])}   '
           f'peak slice {human(r["peak_slice_bytes"])}   '
           f'scratch {human(r["scratch_bytes"])}')
@@ -179,6 +182,8 @@ def main() -> int:
                     help='build BOTH constructions and diff the artifacts')
     ap.add_argument('--partitions', type=int, default=8)
     ap.add_argument('--stride', type=int, default=1)
+    ap.add_argument('--batch-grams', type=int, default=4_000_000,
+                    help='builder RAM knob: ~24 bytes per gram, plus copies')
     ap.add_argument('--df-cap', type=int, default=None)
     ap.add_argument('--no-hygiene', action='store_true')
     ap.add_argument('--quiet', action='store_true')
