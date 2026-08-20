@@ -722,7 +722,13 @@ from genizah_core import MetadataManager, VariantManager, SearchEngine, LabEngin
 # App configuration
 APP_TITLE = "Dicta Genizah Search | חיפוש גניזת קהיר"
 from version import APP_VERSION
-WHATS_NEW_VERSION = APP_VERSION  # Bump when adding new "What's New" content
+# Pinned, NOT APP_VERSION (2026-08-20). The desktop release line moved to 8.6.0
+# while this banner still describes the 9.0.0 WEB features, and the dismissal
+# check below is a STRING equality against the per-user 'whats_new_dismissed'
+# value -- so following a desktop bump would re-pop the banner for every web
+# reader who had already dismissed it. Bump by hand when the web What's New
+# content itself changes.
+WHATS_NEW_VERSION = "9.0.0"
 APP_PORT = int(os.environ.get('GENIZAH_PORT', 8081))
 
 # Initialize API routes (Image Proxy, Export)

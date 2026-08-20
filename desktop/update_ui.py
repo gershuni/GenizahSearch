@@ -135,7 +135,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("Fixed: the Printed filter in Composition Search had no effect — it now filters correctly."))
+        self.lbl_msg.setText(tr("New: pause and resume long searches"))
         self.show()
 
     def on_learn_more(self):
@@ -269,8 +269,9 @@ class WhatsNewDialog(QDialog):
 
         is_heb = CURRENT_LANG == 'he'
         items = [
-            tr("Composition Search: the Printed filter had no effect \u2014 \u201cOnly printed\u201d hid everything and \u201cExclude printed\u201d hid nothing. Filtering by Library, Shelfmark and Title now works too, including on the fragment rows under a manuscript."),
-            tr("Focus Search: you can no longer confirm before the manuscript count finishes \u2014 that could quietly run a search over the whole corpus instead of the scope you chose."),
+            tr("Pause and Resume: a long search can be paused at any point and continues from exactly where it stopped — nothing is re-scanned. The clock stops while paused, and a paused search lets the computer sleep. A paused search lives in memory only: closing the program ends it."),
+            tr("Stop now works in Lab Mode. It previously did nothing at all, and could show an error message instead of stopping."),
+            tr("Stopping a search keeps what it already found. Title, Shelfmark and My Library searches used to discard every result when stopped, even though the results header said “Partial results”."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)
