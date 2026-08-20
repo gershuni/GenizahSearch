@@ -1,8 +1,11 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-08-20 — four new entries (one P1): the discovery citation-range filter times out on
-> every heavy work, the findings page has ~1-3 s unaccounted for, `bench_discovery.py` hung the V4.2 deploy,
-> and the V4.2 recipe can no longer rebuild what production serves. Full assessment with evidence grades:
+> **Last Updated:** 2026-08-20 — the P1 is CLOSED and three entries remain. The discovery citation-range
+> filter is fixed and live (`4f6e31f4`): a correlated `EXISTS` became an uncorrelated `IN (SELECT ...)`,
+> 10,478 ms -> 97 ms measured on production, and a second bug found by review (the row expansion dropped
+> the range) shipped with it. Still open: the findings page has ~1-3 s unaccounted for,
+> `bench_discovery.py` hung the V4.2 deploy, and the V4.2 recipe can no longer rebuild what production
+> serves. Full assessment with evidence grades:
 > [`specs/discovery-performance-situation-2026-08-20.md`](specs/discovery-performance-situation-2026-08-20.md).
 > See `docs/archive/OPEN_ISSUES_ARCHIVE.md` for the dated header log; this tracker holds only what is still open.
 
@@ -200,7 +203,7 @@ The verbose pre-2026-05-29 "Last Updated" header log is archived at
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
-| **The citation-range filter on `/computed-identifications` always times out — the feature is non-functional, not slow** | `shared/discovery_service.py:1315-1352` (correlated locus `EXISTS`) | ⏳ Fixed in the working tree 2026-08-20, **pending production verification** (found 2026-08-19) | Measured 19.2 s / 38.4 s against a 5.0 s findings timeout, so a reader who picks a work and sets a range gets a timeout every time. Pre-existing (22.4 s on the previous artifact), not caused by the V4.2 deploy. 527 of 550 main-pool works are addressable by the range UI. Worse than one slow page: executor threads are not cancellable, so a timed-out read holds its heavy worker ~14 s and four concurrent readers push other heavy reads to `busy`. **FIXED in the working tree (2026-08-20), not yet verified in production.** Rewritten as an UNCORRELATED `IN (SELECT ...)` driven from `locus_unit` and kept inside the `WHERE` clause: `CORRELATED SCALAR SUBQUERY` becomes `LIST SUBQUERY`, 10,478 ms -> 61.3 ms, result sets byte-identical across 15 probed work x bound-shape cases, parameter order and every call site unchanged. The doc's `WITH ... AS MATERIALIZED` variant measured the same (62.6 ms) and was rejected: statement-level so it cannot live in the filter, and un-spliced params returned WRONG sets on 6 of those 15 cases while looking correct on the 9 that were empty anyway. A SECOND bug was found and fixed with it: `web/pages/findings.py::_fetch_children` dropped `locus_from`/`locus_to`, so a range-filtered parent expanded into unfiltered children -- unreachable until the query was fixed. A composite index on `discovery_locus_piece` (114 ms) is now redundant and needs a new artifact; it rides the next canonical rebuild if at all. Do NOT raise the timeout, and do NOT precompute per-piece citation bounds (citation positions are not monotone within every piece — false positives). Full assessment, evidence grades and verification recipe: [`docs/specs/discovery-performance-situation-2026-08-20.md`](specs/discovery-performance-situation-2026-08-20.md). |
+| _(none open)_ | | | |
 
 ### P2 - Medium
 

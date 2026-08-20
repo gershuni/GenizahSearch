@@ -4,7 +4,7 @@
 > found on 2026-08-19/20 around the discovery surfaces. Two were fixed and are recorded
 > here only so nobody re-does them. Three are open, one of them a live user-facing outage.
 >
-> **Problem 1 was fixed in the working tree on 2026-08-20** (see the note under Problem 1);
+> **Problem 1 is FIXED, DEPLOYED and CONFIRMED (2026-08-20, `4f6e31f4`)** — see the note under Problem 1;
 > Problems 2-5 have NOT been implemented. No production change has been made since the V4.2
 > artifact deploy of 2026-08-19.
 >
@@ -15,7 +15,7 @@
 
 | # | Problem | Severity | State |
 |---|---------|----------|-------|
-| 1 | The citation-range filter on `/computed-identifications` always times out | **P1 — live, user-facing** | **Fixed in the working tree 2026-08-20**, pending production verification. See the note under Problem 1. |
+| 1 | The citation-range filter on `/computed-identifications` always times out | **P1 — was live, user-facing** | **CLOSED 2026-08-20** — deployed (`4f6e31f4`), 10,478 ms → 97 ms on production, owner-confirmed in a browser. See the note under Problem 1. |
 | 2 | `/computed-identifications` takes ~2 s; only ~0.9 s is accounted for | P2 | Open. Partly diagnosed; ~1.1–3.0 s unmeasured. |
 | 3 | `bench_discovery.py` is not a smoke test, and it hung the V4.2 deploy | P2 | Open. Fix designed, not written. |
 | 4 | The checked-in V4.2 recipe cannot rebuild the artifact in production | P2 | Open. |
@@ -31,7 +31,9 @@
 
 ## Problem 1 — the citation-range filter is non-functional (P1)
 
-> **FIXED 2026-08-20 (working tree; not yet verified in production).** Everything below is
+> **FIXED, DEPLOYED AND OWNER-CONFIRMED 2026-08-20 (`4f6e31f4`).** Measured on production through the
+> real loader and service: the locus-filtered read answers in **97 ms** (`status=ok`, 1,231 of 2,433
+> rows), a one-sided bound returns 366, and the journal is clean. Everything below is
 > retained as the diagnosis, but two things changed. **(1) Option A was superseded.** The
 > shipped fix keeps the predicate INSIDE the `WHERE` clause as an uncorrelated
 > `di.identification_id IN (SELECT ... FROM locus_unit lu JOIN discovery_locus_piece p ...)`

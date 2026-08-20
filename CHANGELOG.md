@@ -975,7 +975,12 @@ A major overhaul of how LOCAL Hebrew PDFs are read into the My Library index, dr
 
 ## [Unreleased]
 
-### The citation-range filter works (2026-08-20, web)
+### The citation-range filter works (2026-08-20, web; DEPLOYED `4f6e31f4`)
+
+> Measured on production after deploy, through the real loader and service: the locus-filtered
+> read answers in **97 ms** (`status=ok`, 1,231 of 2,433 rows; a one-sided bound returns 366),
+> the journal carries no error signatures, and the owner confirmed the filter and the row
+> expansion in a browser.
 
 Two fixes to the same reader action — narrowing `/computed-identifications` to one part of
 one work. Code only: no artifact rebuild, no manifest change.
