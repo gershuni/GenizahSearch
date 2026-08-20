@@ -201,6 +201,7 @@ def build(args) -> int:
 
     rid_index = {idx.record_id(i): i for i in range(idx.n_records)}
     pairs: dict = {}
+    original_text: dict = {}
     for n, d in enumerate(drawn, 1):
         for spec, r in retrievers.items():
             for rid in r.retrieve(d['text'])[:args.per_method_k]:
@@ -209,6 +210,23 @@ def build(args) -> int:
             print(f'  {n}/{len(drawn)} queries, {len(pairs)} pairs',
                   flush=True)
 
+    # ---- original transcription text for the records on the deck ----------
+    # The index stores the NORMALIZED stream -- space-free, finals folded --
+    # which is what the matcher compares but NOT something a human can grade.
+    # An earlier deck rendered that stream straight into the manuscript pane
+    # and it came out as unreadable letter soup. One pass over the corpus
+    # fetches the real text for just the records that appear on a card.
+    wanted = {rid for _q, rid in pairs}
+    print(f'fetching original text for {len(wanted):,} records...', flush=True)
+    from shared.passage_corpus import iter_records as _iter
+    for rid, txt in _iter(args.transcriptions):
+        if rid in wanted:
+            original_text[rid] = txt
+            if len(original_text) == len(wanted):
+                break
+    missing = len(wanted) - len(original_text)
+    print(f'  found {len(original_text):,}, missing {missing}', flush=True)
+
     # ---- cards: neutral evidence, no provenance ---------------------------
     qtext = {d['query_id']: d for d in drawn}
     cards, key = [], []
@@ -216,7 +234,7 @@ def build(args) -> int:
         ri = rid_index.get(rid)
         if ri is None:
             continue
-        rec_text = idx.stream(ri)          # normalized; display-safe fallback
+        rec_text = original_text.get(rid) or idx.stream(ri)
         span = neutral_span(qtext[qid]['text'], rec_text)
         card_id = sha({'q': qid, 'r': rid})[:16]
         cards.append({
@@ -283,6 +301,8 @@ def main() -> int:
     ap.add_argument('--queries-n', type=int, default=60)
     ap.add_argument('--per-method-k', type=int, default=3)
     ap.add_argument('--salt', default='deck-v1')
+    ap.add_argument('--transcriptions',
+                    default=r'C:\GenizahSearch\Transcriptions.txt')
     return build(ap.parse_args())
 
 
