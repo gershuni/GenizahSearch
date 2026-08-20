@@ -975,6 +975,98 @@ A major overhaul of how LOCAL Hebrew PDFs are read into the My Library index, dr
 
 ## [Unreleased]
 
+### The deploy path no longer runs an hour-long benchmark as its "smoke test" (2026-08-20)
+
+Four fixes to the discovery deploy path and its benchmark, none of them runtime code.
+
+- **A readiness smoke that takes a second.** `docs/specs/discovery-deploy.md` §2.6 told the
+  operator to run `scripts/bench_discovery.py --sample 50 --warm-passes 1`. Neither flag
+  bounds `bench_findings_page()`, which is invoked unconditionally and expands to ~15,363
+  filter/unit/sort combinations x 5 repeats — about **76,815 timed statements, one to two
+  hours**. On 2026-08-19 that hung the V4.2 deploy until the ssh connection reset, and the
+  deploy was recorded as **failed** when steps 0–7 had succeeded and the swap was live and
+  healthy. New `scripts/smoke_discovery_readiness.py` answers the actual question — can the
+  app load what it now serves, and does that asset answer real reads — through the real
+  `load_discovery_state()` and `web.discovery` paths, including a citation-range read over
+  the heaviest locus-bearing work. §2.7's "or read the benchmark's added RSS" is gone too;
+  the RSS comes from `/proc/<pid>/status`.
+- **Every statement in the benchmark is now wall-clock bounded.** Nothing in that file
+  bounded any query, which is how one pathological statement became an unbounded job. A
+  `BoundedConnection` installs a `set_progress_handler` deadline, so all four connection
+  sites are covered rather than each of eighteen `conn.execute` calls. `--query-timeout-s`
+  defaults to **30 s and is ON**; an abort raises a named `QueryBudgetExceeded`, distinct
+  from a cap breach — a cap breach means the statement finished, only too slowly.
+- **ssh keepalive.** Both deploy-script helpers pass `ServerAliveInterval=15
+  ServerAliveCountMax=8`. A silent reset is indistinguishable from a real failure, which is
+  precisely how the V4.2 outcome was misread.
+- **The benchmark's bucket picks now match the population it times.** They were drawn with a
+  hand-written `di.main_pool = 1` while the timed queries applied the default divergence
+  filter, which removes **12.6%** of the main pool and **38.8%** of "more". A pick could
+  therefore be emptied by the real query and the loud F14 abort would name a probe bug as an
+  asset fact. Picks now come from `_build_findings_filter`. `_state_skip`'s skip table also
+  gained `suppressed` and `sys_id`, which had been falling through its single-axis carve-out
+  entirely unverified.
+
+7 tests; 9 mutations each watched failing. One mutation exposed a gap in the tests
+themselves — asserting the new helper in isolation left the caller free to stop using it — so
+a behavioural test builds an asset whose raw-heaviest work is not its divergence-filtered
+heaviest and asserts the pick chooses the latter.
+
+### A CI timing gate that was a coin flip on Windows (2026-08-20)
+
+`tests/test_local_indexer_incremental.py::test_second_scan_fast` failed CI on a commit that
+changed one SQL predicate and one comment, neither of which that module imports. Its budget
+was `max(first_scan * 0.05, 0.5s)`; the Windows runner measured a 1.100 s second scan against
+the 0.5 s floor while taking **23m21s** for the suite versus ubuntu's **5m36s**. Both halves
+of that budget were wrong for a slow filesystem: per-scan overhead the cache cannot remove
+(opening the Tantivy index, the commit, 100 stat calls) does not shrink, so a percentage of a
+quick first scan falls below the fixed floor, and the 0.5 s constant was chosen against one
+machine's speed. The mechanism is proven deterministically by the same test's existing
+`indexed == 0` / `skipped == 100` assertions; the stopwatch only needs to catch pathology, so
+it is now `max(first * 0.75, 5.0)`.
+
+### The citation-range filter works (2026-08-20, web; DEPLOYED `4f6e31f4`)
+
+> Measured on production after deploy, through the real loader and service: the locus-filtered
+> read answers in **97 ms** (`status=ok`, 1,231 of 2,433 rows; a one-sided bound returns 366),
+> the journal carries no error signatures, and the owner confirmed the filter and the row
+> expansion in a browser.
+
+Two fixes to the same reader action — narrowing `/computed-identifications` to one part of
+one work. Code only: no artifact rebuild, no manifest change.
+
+- **The citation-range filter returned nothing on every heavy work, every time.** It was not
+  slow — it was non-functional. The locus predicate in
+  `shared/discovery_service.py::_build_findings_filter` was a **correlated** `EXISTS`, so
+  SQLite re-ran an interval search once per candidate row. Measured on the served artifact
+  for תנ"ך, תהלים over half its chapters: **10,478 ms against a 5.0 s findings timeout**, so
+  the reader always got "This took longer than expected." Pre-existing, and worse than one
+  slow page: `run_in_executor` threads cannot be cancelled, so a read that gave up at 5 s
+  kept its heavy worker for the remaining ~5–14 s, and four concurrent range readers pushed
+  other heavy reads to `busy`. Rewritten as an **uncorrelated `IN (SELECT …)`** driven from
+  `locus_unit` — `CORRELATED SCALAR SUBQUERY` becomes `LIST SUBQUERY`, evaluated once:
+  **61.3 ms, byte-identical result sets** across 15 probed work × bound-shape cases. The
+  predicate stays inside the `WHERE` clause, so the parameter order and every call site are
+  unchanged. A `WITH … AS MATERIALIZED` CTE measured the same (62.6 ms) and was rejected: it
+  cannot live in the filter, and its placeholders would precede the SELECT-list params — an
+  un-spliced params list returned wrong result sets on 6 of those 15 cases and silently
+  correct ones on the other 9, because those were empty.
+
+- **A range-filtered row expanded into children that ignored the range.**
+  `web/pages/findings.py::_fetch_children` never read `locus_from` / `locus_to` back out of
+  the child state, though `_child_state` copies them and its docstring promises "every axis
+  is carried over unchanged … its count and the rows underneath it come from ONE predicate
+  and cannot contradict each other". So a parent counted under a range opened onto an
+  unfiltered list. This was unreachable until now only because the parent query timed out
+  first — fixing the query above is what exposed it, and shipping that fix alone would have
+  turned a broken feature into a silently wrong one.
+
+Nine new tests. The three semantic ones cannot distinguish the two SQL forms by design, so
+the gate is a structural check that the subquery references the outer row nowhere, plus a
+query-plan and a wall-clock guard on the served artifact. All six mutations in the matrix
+were watched failing — reverting to the correlated form ran that test set for **3m28s**,
+which is the outage reproducing itself inside the gate.
+
 ### Discovery V4.2 sidecar — 14 restored works, and citations that stop repeating themselves (2026-08-19, web; built, not yet deployed)
 
 A rebuilt discovery artifact. **708 works / 58,602 computed identifications /

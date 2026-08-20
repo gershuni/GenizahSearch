@@ -614,3 +614,161 @@ def test_short_circuited_403_is_still_timed():
 
     assert perf_watch.get_stats_snapshot()['requests'] == 1
     perf_watch.reset_stats()
+
+
+# ---------------------------------------------------------------------------
+# 2026-08-19 -- /admin was still doing every Supabase round trip on the loop
+# ---------------------------------------------------------------------------
+#
+# perf-watch logged /admin at 2.0-4.5 s with the loop blocked for most of it.
+# The page build called SEVEN synchronous Supabase round trips inline: pending
+# corrections (x2 queries), the identification-review queue, all users, the
+# corrections count -- and then the Statistics tab re-fetched the users and the
+# pending corrections the other two tabs had already loaded. On a single uvicorn
+# worker each of those stalled every concurrent request, static assets included.
+
+# Every name that performs a Supabase round trip. Calling any of them directly
+# means calling it ON the event loop; the only place that is correct is inside
+# the worker payload itself.
+ADMIN_BLOCKING_CALLS = [
+    'get_pending_corrections',
+    'get_all_users',
+    'get_all_corrections_count',
+    'get_pending_identification_reviews',
+    'update_correction_status',
+    'update_user_role',
+    'delete_user',
+    # The aggregate payload itself: calling it directly is calling all four on
+    # the loop at once, which is precisely the shape being removed here.
+    '_load_admin_data',
+]
+ADMIN_WORKER_PAYLOADS = {'_load_admin_data'}
+
+
+def test_no_admin_supabase_call_is_made_on_the_event_loop():
+    """AST guard: these names may be PASSED to run.io_bound, never CALLED.
+
+    Structural rather than source-text because the failure mode is a call
+    reappearing anywhere in a 900-line file, not a missing keyword in one known
+    function. `run.io_bound(get_all_users)` references the name; it does not
+    call it, so this stays quiet for the correct shape and fires on the wrong one.
+    """
+    import ast
+    import pathlib
+
+    admin = pytest.importorskip('web.pages.admin')
+    tree = ast.parse(pathlib.Path(admin.__file__).read_text(encoding='utf-8'))
+
+    offenders = []
+
+    def walk(node, enclosing):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                walk(child, child.name)
+                continue
+            if (isinstance(child, ast.Call)
+                    and isinstance(child.func, ast.Name)
+                    and child.func.id in ADMIN_BLOCKING_CALLS
+                    and enclosing not in ADMIN_WORKER_PAYLOADS):
+                offenders.append(f'{child.func.id}() called in {enclosing} '
+                                 f'at line {child.lineno}')
+            walk(child, enclosing)
+
+    walk(tree, '<module>')
+    assert not offenders, (
+        'these Supabase round trips run on the event loop and stall every '
+        'concurrent request: ' + '; '.join(offenders))
+
+
+def test_admin_page_builds_the_client_on_the_loop_then_offloads():
+    """The auth half of the fix, which a bare run.io_bound would silently break."""
+    import pathlib
+
+    admin = pytest.importorskip('web.pages.admin')
+    src = pathlib.Path(admin.__file__).read_text(encoding='utf-8')
+    body = src.split('async def create_admin_page', 1)[1][:3000]
+
+    assert 'user_client = get_user_client()' in body, \
+        'create_admin_page must build the authenticated client ON the loop'
+    assert 'run.io_bound(_load_admin_data, user_client)' in body, \
+        'create_admin_page must do its Supabase reads in a worker'
+
+
+def test_admin_payload_fetches_each_source_once_and_threads_the_client(monkeypatch):
+    """Behavioural: no duplicate round trips, and the queue keeps its auth.
+
+    The client assertion is the load-bearing one. get_user_client() reads the
+    auth session through safe_user_get, which returns {} outside the NiceGUI
+    context -- so building it inside the worker would hand the moderation queue
+    an ANONYMOUS client and return an empty queue that reads as "nothing pending".
+    """
+    admin = pytest.importorskip('web.pages.admin')
+
+    calls = []
+    seen = {}
+
+    def _reviews(client=None):
+        calls.append('reviews')
+        seen['client'] = client
+        return ('review',)
+
+    monkeypatch.setattr(admin, 'get_pending_corrections',
+                        lambda: calls.append('pending') or ['correction'])
+    monkeypatch.setattr(admin, 'get_all_users',
+                        lambda: calls.append('users') or ['user'])
+    monkeypatch.setattr(admin, 'get_all_corrections_count',
+                        lambda: calls.append('count') or 7)
+    monkeypatch.setattr(admin, 'get_pending_identification_reviews', _reviews)
+
+    sentinel = object()
+    data = admin._load_admin_data(sentinel)
+
+    assert seen['client'] is sentinel, \
+        'the worker re-derived its own client instead of using the caller\'s'
+    assert calls.count('users') == 1, f'users fetched {calls.count("users")}x: {calls}'
+    assert calls.count('pending') == 1, f'pending fetched {calls.count("pending")}x: {calls}'
+    assert data == {
+        'pending_corrections': ['correction'],
+        'identification_reviews': ('review',),
+        'users': ['user'],
+        'total_corrections': 7,
+    }
+
+
+def test_admin_payload_offloaded_leaves_the_loop_free(monkeypatch):
+    """The whole point: four serial round trips must not stop the world."""
+    import time as real_time
+    from nicegui import run as nicegui_run
+
+    admin = pytest.importorskip('web.pages.admin')
+
+    def _slow(value):
+        def _call(*_a, **_kw):
+            real_time.sleep(0.1)
+            return value
+        return _call
+
+    monkeypatch.setattr(admin, 'get_pending_corrections', _slow([]))
+    monkeypatch.setattr(admin, 'get_all_users', _slow([]))
+    monkeypatch.setattr(admin, 'get_all_corrections_count', _slow(0))
+    monkeypatch.setattr(admin, 'get_pending_identification_reviews', _slow(()))
+
+    ticks = 0
+
+    async def ticker(stop):
+        nonlocal ticks
+        while not stop.is_set():
+            await asyncio.sleep(0.01)
+            ticks += 1
+
+    async def main():
+        stop = asyncio.Event()
+        t = asyncio.create_task(ticker(stop))
+        result = await nicegui_run.io_bound(admin._load_admin_data, None)
+        stop.set()
+        await t
+        return result
+
+    result = asyncio.run(main())
+    assert result['total_corrections'] == 0
+    assert ticks >= 5, f'event loop was starved while /admin loaded (ticks={ticks})'

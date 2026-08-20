@@ -165,10 +165,17 @@ def get_all_corrections_count():
         return 0
 
 
-def update_correction_status(correction_id: int, status: str, review_notes: str = None, rejection_reason: str = None):
-    """Update correction status in Supabase."""
+def update_correction_status(correction_id: int, status: str, review_notes: str = None,
+                             rejection_reason: str = None, client=None):
+    """Update correction status in Supabase.
+
+    Up to four round trips (update, then read + write reputation). Runs in a
+    worker thread, so `client` is resolved by the caller on the event loop --
+    see get_pending_identification_reviews for why building it here would
+    silently produce an anonymous client.
+    """
     try:
-        client = get_user_client()
+        client = get_user_client() if client is None else client
         data = {'status': status}
         if review_notes:
             data['notes'] = review_notes
@@ -206,22 +213,25 @@ def update_correction_status(correction_id: int, status: str, review_notes: str 
         return {'error': str(e)}
 
 
-def update_user_role(user_id: str, new_role: str):
-    """Update user role in Supabase profiles."""
+def update_user_role(user_id: str, new_role: str, client=None):
+    """Update user role in Supabase profiles. `client` per update_correction_status."""
     try:
-        client = get_user_client()
+        client = get_user_client() if client is None else client
         response = client.table('profiles').update({'role': new_role}).eq('id', user_id).execute()
         return {'success': True} if response.data else {'error': 'Update failed'}
     except Exception as e:
         return {'error': str(e)}
 
 
-def delete_user(user_id: str):
-    """Delete user from Supabase (requires service role, typically done via dashboard)."""
+def delete_user(user_id: str, client=None):
+    """Delete user from Supabase (requires service role, typically done via dashboard).
+
+    `client` per update_correction_status.
+    """
     # Note: Deleting auth users requires the service role key
     # For now, we'll just mark them or remove from profiles
     try:
-        client = get_user_client()
+        client = get_user_client() if client is None else client
         # Delete profile (user can't access anything without profile)
         response = client.table('profiles').delete().eq('id', user_id).execute()
         return {'success': True}
@@ -229,13 +239,54 @@ def delete_user(user_id: str):
         return {'error': str(e)}
 
 
-def get_pending_identification_reviews():
-    """Fetch the admin-only queue with the authenticated request client."""
+def get_pending_identification_reviews(client=None):
+    """Fetch the admin-only queue with the authenticated request client.
+
+    `client` is resolved by the CALLER, on the event loop, and passed in. This
+    function now runs inside `run.io_bound`, and `get_user_client()` reads the
+    auth session through `safe_user_get`, which returns {} outside the NiceGUI
+    context -- so building it here would silently downgrade the moderation queue
+    to an ANONYMOUS client and return an empty queue that looks like "nothing
+    pending". The argument stays optional so the function is still usable on the
+    loop, where resolving it here is correct.
+    """
     try:
-        return fetch_pending_identification_reviews(client=get_user_client())
+        return fetch_pending_identification_reviews(
+            client=get_user_client() if client is None else client)
     except Exception as e:
         logger.error("Error fetching identification reviews: %s", type(e).__name__)
         return ()
+
+
+def _load_admin_data(user_client):
+    """Every Supabase round trip the Admin page needs, in ONE worker thread.
+
+    Gathered here rather than inside each tab builder for two reasons, both
+    visible in the 2026-08-19 perf-watch logs where /admin logged 2-4.5 s
+    responses with the event loop blocked for most of it:
+
+    * **Blocking.** These are synchronous round trips to the Supabase cloud, and
+      NiceGUI builds a page ON the event loop. uvicorn runs a single worker, so
+      each one stalled every concurrent request -- including static assets --
+      for its full duration. `run.io_bound` is the same shape the review-decision
+      handler already uses.
+    * **Duplication.** The Statistics tab re-fetched the users and the pending
+      corrections that the Users and Pending tabs had already loaded, so one page
+      build made SIX loader calls -- up to eight queries, since the corrections
+      loader issues two -- to show four numbers. Fetching once and sharing makes
+      it four calls and at most five queries.
+
+    Deliberately sequential inside the single thread rather than four concurrent
+    ones: the anonymous Supabase client is a module-level singleton, and nothing
+    in this repo establishes that concurrent use of it is safe. Serial-but-off-
+    the-loop already removes the defect that mattered.
+    """
+    return {
+        'pending_corrections': get_pending_corrections(),
+        'identification_reviews': get_pending_identification_reviews(user_client),
+        'users': get_all_users(),
+        'total_corrections': get_all_corrections_count(),
+    }
 
 
 async def create_admin_page():
@@ -249,6 +300,16 @@ async def create_admin_page():
             ui.label(tr('You need admin privileges to access this page')).style('color: var(--text-secondary);')
             ui.button(tr('Go Home'), on_click=lambda: ui.navigate.to('/')).props('color=primary')
         return
+
+    # Resolve the authenticated client HERE, on the loop -- see
+    # get_pending_identification_reviews for why it cannot be built in the
+    # worker thread -- then do every round trip off the loop, once.
+    try:
+        user_client = get_user_client()
+    except Exception as e:
+        logger.error("Admin page: no authenticated client (%s)", type(e).__name__)
+        user_client = None
+    data = await run.io_bound(_load_admin_data, user_client)
 
     with ui.column().classes('w-full max-w-6xl mx-auto gap-6 fade-in'):
 
@@ -268,23 +329,31 @@ async def create_admin_page():
         with ui.tab_panels(tabs, value=pending_tab).classes('w-full'):
             # Pending Corrections panel
             with ui.tab_panel(pending_tab):
-                await create_pending_corrections_view()
+                await create_pending_corrections_view(data['pending_corrections'])
 
             with ui.tab_panel(identification_reviews_tab):
-                await create_identification_reviews_view()
+                await create_identification_reviews_view(
+                    data['identification_reviews'])
 
             # All Users panel
             with ui.tab_panel(users_tab):
-                await create_users_list_view()
+                await create_users_list_view(data['users'])
 
             # Statistics panel
             with ui.tab_panel(stats_tab):
-                await create_stats_view()
+                await create_stats_view(
+                    data['users'], data['pending_corrections'],
+                    data['total_corrections'])
 
 
-async def create_pending_corrections_view():
-    """View for reviewing pending corrections."""
-    pending = get_pending_corrections()
+async def create_pending_corrections_view(pending=None):
+    """View for reviewing pending corrections.
+
+    `pending` is preloaded off the event loop by create_admin_page; the fallback
+    keeps the view self-contained if it is ever rendered on its own.
+    """
+    if pending is None:
+        pending = await run.io_bound(get_pending_corrections)
 
     if not pending:
         with ui.column().classes('w-full items-center py-12'):
@@ -298,9 +367,13 @@ async def create_pending_corrections_view():
             await create_pending_correction_card(corr)
 
 
-async def create_identification_reviews_view():
+async def create_identification_reviews_view(pending=None):
     """Moderation queue for the public computed-identification beta."""
-    pending = get_pending_identification_reviews()
+    if pending is None:
+        # get_user_client() on the loop, the fetch off it -- never both in the
+        # worker, or the queue silently comes back anonymous and empty.
+        pending = await run.io_bound(
+            get_pending_identification_reviews, get_user_client())
     lang = get_language()
 
     if not pending:
@@ -648,7 +721,9 @@ async def create_pending_correction_card(corr):
             corr_id = corr.get('id')
 
             async def approve(cid=corr_id, notes=review_notes):
-                result = update_correction_status(cid, 'approved', review_notes=notes.value)
+                result = await run.io_bound(
+                    update_correction_status, cid, 'approved',
+                    review_notes=notes.value, client=get_user_client())
                 if "error" in result:
                     ui.notify(result["error"], type='negative')
                 else:
@@ -657,7 +732,9 @@ async def create_pending_correction_card(corr):
 
             async def reject(cid=corr_id, notes=review_notes):
                 rejection_text = notes.value or tr('Rejected by reviewer')
-                result = update_correction_status(cid, 'rejected', rejection_reason=rejection_text)
+                result = await run.io_bound(
+                    update_correction_status, cid, 'rejected',
+                    rejection_reason=rejection_text, client=get_user_client())
                 if "error" in result:
                     ui.notify(result["error"], type='negative')
                 else:
@@ -669,9 +746,10 @@ async def create_pending_correction_card(corr):
                 ui.button(tr('Reject'), on_click=reject).props('flat color=negative')
 
 
-async def create_users_list_view():
+async def create_users_list_view(users=None):
     """View all users with management options."""
-    users = get_all_users()
+    if users is None:
+        users = await run.io_bound(get_all_users)
 
     if not users:
         ui.label(tr('No users found')).style('color: var(--text-secondary);')
@@ -738,8 +816,9 @@ def create_user_row(user):
             user_id = user.get('id')
 
             with ui.row().classes('gap-1'):
-                def change_role(uid, new_role):
-                    result = update_user_role(uid, new_role)
+                async def change_role(uid, new_role):
+                    result = await run.io_bound(
+                        update_user_role, uid, new_role, client=get_user_client())
                     if "error" in result:
                         ui.notify(result['error'], type='negative')
                     else:
@@ -754,8 +833,9 @@ def create_user_row(user):
                         with ui.row().classes('justify-end gap-2 mt-4'):
                             ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
 
-                            def do_delete():
-                                result = delete_user(uid)
+                            async def do_delete():
+                                result = await run.io_bound(
+                                    delete_user, uid, client=get_user_client())
                                 confirm_dialog.close()
                                 if "error" in result:
                                     ui.notify(result['error'], type='negative')
@@ -778,12 +858,19 @@ def create_user_row(user):
                         ).classes('text-red-500')
 
 
-async def create_stats_view():
-    """Display system statistics."""
-    # Get stats from Supabase
-    users = get_all_users()
-    pending = get_pending_corrections()
-    total_corrections = get_all_corrections_count()
+async def create_stats_view(users=None, pending=None, total_corrections=None):
+    """Display system statistics.
+
+    All three arrive preloaded from create_admin_page. This view used to fetch
+    the users and the pending corrections a SECOND time, duplicating what the
+    other two tabs had already loaded on the same page build.
+    """
+    if users is None:
+        users = await run.io_bound(get_all_users)
+    if pending is None:
+        pending = await run.io_bound(get_pending_corrections)
+    if total_corrections is None:
+        total_corrections = await run.io_bound(get_all_corrections_count)
 
     # Calculate stats
     total_users = len(users)

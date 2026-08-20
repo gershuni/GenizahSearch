@@ -240,6 +240,15 @@ GENIZAH_LOOP_LAG_MS=300               # log event-loop stalls above this — THE
                                        # concurrent request incl. static files, while burning no CPU (so it
                                        # is invisible in load average — prod read 0.03 during multi-second TTFBs)
 GENIZAH_LOOP_LAG_INTERVAL=1.0         # lag monitor tick, seconds (floor 0.1)
+GENIZAH_NOT_SCHEDULED_MS=60000        # (2026-08-19) above this, a tick that burned almost no CPU is
+                                       # reported as "monitor NOT SCHEDULED" and kept OUT of max_lag_ms:
+                                       # the process stopped running (laptop asleep, container throttled,
+                                       # Windows console paused by a QuickEdit selection), it was not
+                                       # blocked. A 3,069,031 ms "event loop BLOCKED" reading was a
+                                       # sleeping laptop, and it poisoned the all-time maximum that every
+                                       # other perf line quotes. Each real stall now also names its KIND
+                                       # from the same CPU measurement — GIL-bound Python (a run.io_bound
+                                       # worker counts) vs blocking I/O on the loop.
 GENIZAH_PERF_SUMMARY_SECONDS=300      # periodic counter summary; 0 disables
 
 # Phase 98 NLI Resilience env knobs (added 2026-05-25)

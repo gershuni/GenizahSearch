@@ -29,6 +29,7 @@ def _clean_env(monkeypatch):
         'GENIZAH_LOOP_LAG_MS',
         'GENIZAH_LOOP_LAG_INTERVAL',
         'GENIZAH_PERF_SUMMARY_SECONDS',
+        'GENIZAH_NOT_SCHEDULED_MS',
     ):
         monkeypatch.delenv(var, raising=False)
     perf_watch.reset_stats()
@@ -240,3 +241,180 @@ def test_monitor_quiet_when_loop_is_free(monkeypatch, caplog):
 
     assert not any('BLOCKED' in r.getMessage() for r in caplog.records)
     assert perf_watch.get_stats_snapshot()['lag_breaches'] == 0
+
+
+# ---------------------------------------------------------------------------
+# Attribution: a slow request must be judged against stalls that OVERLAPPED it
+# ---------------------------------------------------------------------------
+
+def test_slow_request_does_not_borrow_an_unrelated_all_time_stall(monkeypatch, caplog):
+    """The 2026-08-19 misattribution, pinned.
+
+    One 4094 ms stall at startup made EVERY later slow request print "loop lag
+    is comparable to this request, so suspect the loop was blocked elsewhere" --
+    including seven consecutive /computed-identifications builds during which the
+    breach counter never moved off 1, i.e. the loop demonstrably was not blocked
+    and the route really was that slow. The reader was pointed away from the one
+    place worth looking.
+    """
+    import time as real_time
+
+    monkeypatch.setenv('GENIZAH_SLOW_REQUEST_MS', '50')
+
+    # A big stall that happened long ago and has left the ring.
+    perf_watch._stats.max_lag_ms = 4094.0
+
+    async def slow_app(scope, receive, send):
+        real_time.sleep(0.12)
+        await _ok_app(scope, receive, send)
+
+    async def send(message):
+        pass
+
+    mw = perf_watch.SlowRequestTimingMiddleware(slow_app)
+    with caplog.at_level(logging.WARNING, logger='web.perf_watch'):
+        asyncio.run(mw(_http_scope('/computed-identifications'), None, send))
+
+    line = next(r.getMessage() for r in caplog.records if 'slow request' in r.getMessage())
+    assert 'NOT stalled during this request' in line, line
+    assert 'suspect the loop was blocked elsewhere' not in line, line
+
+
+def test_slow_request_names_a_stall_that_overlapped_it(monkeypatch, caplog):
+    """The other direction: a stall inside the request must still be blamed.
+
+    The stall here is real -- the loop is blocked with time.sleep while the
+    request is in flight -- and it is caught by the IN-FLIGHT branch, because the
+    monitor cannot record a stall it is itself stuck behind until after the
+    request has already finished and logged its line.
+    """
+    import time as real_time
+
+    monkeypatch.setenv('GENIZAH_SLOW_REQUEST_MS', '50')
+    monkeypatch.setenv('GENIZAH_LOOP_LAG_INTERVAL', '0.05')
+    monkeypatch.setenv('GENIZAH_LOOP_LAG_MS', '100')
+
+    async def blocking_app(scope, receive, send):
+        real_time.sleep(0.5)
+        await _ok_app(scope, receive, send)
+
+    async def send(message):
+        pass
+
+    async def main():
+        task = perf_watch.start_event_loop_lag_monitor()
+        await asyncio.sleep(0.12)     # let a tick be in flight
+        mw = perf_watch.SlowRequestTimingMiddleware(blocking_app)
+        await mw(_http_scope('/admin'), None, send)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    with caplog.at_level(logging.WARNING, logger='web.perf_watch'):
+        asyncio.run(main())
+
+    line = next(r.getMessage() for r in caplog.records if 'slow request' in r.getMessage())
+    assert 'DURING this request' in line, line
+
+
+# ---------------------------------------------------------------------------
+# A process that stopped running is not a blocked loop
+# ---------------------------------------------------------------------------
+
+def test_a_suspended_process_is_not_reported_as_a_stall(monkeypatch, caplog):
+    """`event loop BLOCKED for 3069031 ms` -- 51 minutes -- was a sleeping laptop.
+
+    Two things must hold: the line must not claim the loop was blocked, and the
+    number must not enter max_lag_ms, which every other diagnostic quotes.
+    """
+    import time as real_time
+
+    monkeypatch.setenv('GENIZAH_LOOP_LAG_INTERVAL', '0.05')
+    monkeypatch.setenv('GENIZAH_LOOP_LAG_MS', '100')
+    monkeypatch.setenv('GENIZAH_NOT_SCHEDULED_MS', '1000')   # the knob's floor
+
+    async def main():
+        task = perf_watch.start_event_loop_lag_monitor()
+        await asyncio.sleep(0.1)
+        real_time.sleep(1.3)          # late, burning no CPU -- as a suspend looks
+        await asyncio.sleep(0.15)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    with caplog.at_level(logging.WARNING, logger='web.perf_watch'):
+        asyncio.run(main())
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert any('NOT SCHEDULED' in m for m in messages), messages
+    assert not any('event loop BLOCKED' in m for m in messages), messages
+    snapshot = perf_watch.get_stats_snapshot()
+    assert snapshot['not_scheduled_events'] == 1, snapshot
+    assert snapshot['lag_breaches'] == 0, snapshot
+    assert snapshot['max_lag_ms'] < 1000, snapshot
+
+
+# ---------------------------------------------------------------------------
+# Which KIND of stall: CPU holding the GIL vs blocking I/O
+# ---------------------------------------------------------------------------
+
+def test_stall_with_no_cpu_is_named_as_blocking_io(monkeypatch, caplog):
+    import time as real_time
+
+    monkeypatch.setenv('GENIZAH_LOOP_LAG_INTERVAL', '0.05')
+    monkeypatch.setenv('GENIZAH_LOOP_LAG_MS', '100')
+
+    async def main():
+        task = perf_watch.start_event_loop_lag_monitor()
+        await asyncio.sleep(0.1)
+        real_time.sleep(0.4)
+        await asyncio.sleep(0.15)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    with caplog.at_level(logging.WARNING, logger='web.perf_watch'):
+        asyncio.run(main())
+
+    line = next(m for m in (r.getMessage() for r in caplog.records)
+                if 'event loop BLOCKED' in m)
+    assert 'BLOCKING I/O' in line, line
+
+
+def test_stall_that_burns_cpu_is_named_as_gil_bound(monkeypatch, caplog):
+    """Startup runs the corpus load in run.io_bound -- a thread in THIS process.
+
+    CPU-bound Python there holds the GIL and starves the loop exactly as a
+    blocking socket would, so the old advice ("look for synchronous Supabase/NLI
+    I/O on the loop") sent the reader looking for the wrong thing.
+    """
+    import time as real_time
+
+    monkeypatch.setenv('GENIZAH_LOOP_LAG_INTERVAL', '0.05')
+    monkeypatch.setenv('GENIZAH_LOOP_LAG_MS', '100')
+
+    async def main():
+        task = perf_watch.start_event_loop_lag_monitor()
+        await asyncio.sleep(0.1)
+        deadline = real_time.perf_counter() + 0.4
+        while real_time.perf_counter() < deadline:
+            pass                      # GIL-bound, no I/O
+        await asyncio.sleep(0.15)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    with caplog.at_level(logging.WARNING, logger='web.perf_watch'):
+        asyncio.run(main())
+
+    line = next(m for m in (r.getMessage() for r in caplog.records)
+                if 'event loop BLOCKED' in m)
+    assert 'ON CPU' in line, line

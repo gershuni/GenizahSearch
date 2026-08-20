@@ -3341,6 +3341,24 @@ async def _fetch_children(state: Dict[str, Any], item: Mapping[str, Any],
         domain=child.get("domain"),
         author=child.get("author"),
         work_id=child.get("work_id"),
+        # THE CITATION RANGE REACHES THE EXPANSION TOO. `_child_state` carries
+        # both bounds over (it copies the whole state dict), but this call did
+        # not read them back out, so a range-filtered parent opened onto
+        # children drawn from an UNFILTERED predicate -- the parent's count and
+        # its own rows disagreeing, which is exactly the wrongness a reader
+        # cannot see and `_child_state`'s docstring promises cannot happen.
+        # Invisible until 2026-08-20 only because the parent query timed out
+        # first (the correlated locus predicate in `_build_findings_filter`), so
+        # fixing that query is what made this reachable.
+        #
+        # That predicate is NOT named by its module path here on purpose. The
+        # layering gate in `tests/test_findings_page.py` asserts this file never
+        # names the shared read layer's module or its private singleton, and it
+        # matches raw SOURCE TEXT -- so a COMMENT quoting that filename turns the
+        # gate red exactly as a real call would. It did, on both CI platforms,
+        # for a comment. Cite the function name alone, never the path.
+        locus_from=child.get("locus_from"),
+        locus_to=child.get("locus_to"),
         # THE MANUSCRIPT AXIS (2026-08-07). `_child_state` pins whichever axis the
         # parent's unit names, so this reads the same `child` dict `work_id` does --
         # only one of the two is ever set for a given parent.

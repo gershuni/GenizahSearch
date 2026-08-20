@@ -114,6 +114,7 @@ Detailed specifications for complex features:
 | [discovery-band-labels-v1.md](specs/discovery-band-labels-v1.md) | Honesty-safe band/label vocabulary (no precision percentages) |
 | [discovery-relation-matrix-v1.md](specs/discovery-relation-matrix-v1.md) | Frozen relation precedence matrix (semantics frozen 2026-08-12) |
 | [discovery-budgets.md](specs/discovery-budgets.md) | Discovery acceptance/performance budgets (PERF-01) |
+| [discovery-performance-situation-2026-08-20.md](specs/discovery-performance-situation-2026-08-20.md) | **Situation assessment for a cold session** — the locus-filter outage, findings-page latency, the benchmark that hung the deploy, and the recipe that can no longer rebuild |
 | [discovery-deploy.md](specs/discovery-deploy.md) | Discovery sidecar deploy / rollback / rebuild runbook (DATA-08) |
 | [discovery-coordination.md](specs/discovery-coordination.md) | Cross-phase discovery coordination notes |
 | [discovery-forward-ledger.md](specs/discovery-forward-ledger.md) | Forward ledger of deferred discovery decisions |

@@ -1332,10 +1332,34 @@ def _build_findings_filter(
         from_ord, to_ord = bounds
         if from_ord is not None and to_ord is not None and from_ord > to_ord:
             raise ValueError("locus_from cannot follow locus_to")
-        overlap = [
-            "p.identification_id=di.identification_id",
-            "p.locus_work_id=?",
-        ]
+        # THE SUBQUERY MUST STAY UNCORRELATED. It was written as a correlated
+        # `EXISTS (... WHERE p.identification_id = di.identification_id ...)`,
+        # which re-runs the interval search ONCE PER CANDIDATE ROW: an
+        # identification carries 1.6 pieces on average, so the inner loop cost
+        # O(all pieces for that work) per outer row. Measured on the served
+        # artifact (`w000112`, citation range 1..75, median of 3 warm runs):
+        # 10,478 ms correlated vs 59.9 ms driven from `locus_unit` -- against a
+        # 5.0 s findings timeout, i.e. the range filter returned NOTHING for
+        # every heavy work, deterministically. `EXPLAIN QUERY PLAN` is the
+        # difference: `CORRELATED SCALAR SUBQUERY` became `LIST SUBQUERY`,
+        # evaluated once.
+        #
+        # Re-introducing `p.identification_id = di.identification_id` inside
+        # this subquery restores that outage. `IN` is set membership, so
+        # duplicate subquery rows cannot duplicate an outer row and no DISTINCT
+        # is needed. Driving from `locus_unit` (equality on `work_id`) is what
+        # lets `ix_discovery_locus_piece_range` satisfy the interval join once
+        # instead of per row.
+        #
+        # A `WITH ... AS MATERIALIZED` CTE measured the same (62.6 ms) and was
+        # REJECTED: statement-level, so it could not live in this filter, and
+        # its placeholders would precede `_divergence_flag_sql`'s SELECT-list
+        # params -- an un-spliced params list returned WRONG result sets on 6 of
+        # 15 probed (work x bound-shape) cases and silently correct ones on the
+        # other 9, because those were empty. Keeping the predicate in the WHERE
+        # clause keeps the parameter order below identical to the correlated
+        # form's, so no call site changes.
+        overlap = ["lu.work_id=?"]
         range_params: List[Any] = [work_id]
         if from_ord is not None:
             overlap.append("lu.citation_pos >= ?")
@@ -1344,10 +1368,11 @@ def _build_findings_filter(
             overlap.append("lu.citation_pos <= ?")
             range_params.append(to_ord)
         where.append(
-            "EXISTS (SELECT 1 FROM discovery_locus_piece p "
-            "JOIN locus_unit lu ON lu.work_id=p.locus_work_id "
-            "AND lu.unit_ord BETWEEN p.start_unit_ord AND p.end_unit_ord WHERE "
-            + " AND ".join(overlap) + ")"
+            "di.identification_id IN (SELECT p.identification_id "
+            "FROM locus_unit lu JOIN discovery_locus_piece p "
+            "ON p.locus_work_id=lu.work_id "
+            "AND p.start_unit_ord<=lu.unit_ord AND p.end_unit_ord>=lu.unit_ord "
+            "WHERE " + " AND ".join(overlap) + ")"
         )
         params.extend(range_params)
 

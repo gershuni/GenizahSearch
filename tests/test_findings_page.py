@@ -7289,3 +7289,85 @@ def test_no_stored_novelty_shade_is_a_literal_in_the_page():
             f"{shade!r} is a literal in the page -- the shade vocabulary "
             "belongs to shared/discovery_service.py, and the page addresses it "
             "through NOVELTY_VIEWS / novelty_view_shades()")
+
+
+# ---------------------------------------------------------------------------
+# The expansion must carry the CITATION RANGE.
+#
+# `_child_state` copies the reader's whole filter state, and its docstring
+# promises "every axis is carried over unchanged ... its count and the rows
+# underneath it come from ONE predicate and cannot contradict each other".
+# `_fetch_children` nonetheless never read `locus_from` / `locus_to` back out of
+# that dict, so a range-filtered parent opened onto children drawn from an
+# UNFILTERED predicate. It was unreachable until 2026-08-20 only because the
+# parent query timed out first (the correlated locus predicate in
+# shared/discovery_service.py), so repairing that query is what exposed it.
+# ---------------------------------------------------------------------------
+
+def _capture_children_request(monkeypatch, state, item, axis_value="wA"):
+    """The kwargs `_fetch_children` hands the shipped read, captured."""
+    seen = {}
+
+    async def _fake_get_findings_enveloped(unit, **kwargs):
+        seen["unit"] = unit
+        seen.update(kwargs)
+        return {"status": "ok", "items": [], "total": 0, "meta": {}}
+
+    monkeypatch.setattr(fp, "get_findings_enveloped", _fake_get_findings_enveloped)
+    asyncio.run(fp._fetch_children(state, item))
+    return seen
+
+
+def _range_state(**overrides):
+    state = {
+        "unit": "work",
+        "bucket": "main",
+        "sort": "band_rank",
+        "page": 1,
+        "domain": None,
+        "author": None,
+        "work_id": "wA",
+        "locus_from": 3,
+        "locus_to": 7,
+        "sys_id": None,
+    }
+    state.update(overrides)
+    return state
+
+
+def test_the_expansion_carries_the_citation_RANGE_not_only_the_work(monkeypatch):
+    """A range-filtered parent must not open onto unfiltered children."""
+    state = _range_state()
+    item = {"unit": "work", "display_work_id": "wA"}
+    seen = _capture_children_request(monkeypatch, state, item)
+
+    assert seen.get("work_id") == "wA", (
+        "the expansion lost the work pin, so this test is not exercising the "
+        "path it claims to")
+    assert seen.get("locus_from") == 3 and seen.get("locus_to") == 7, (
+        "the expansion dropped the citation range: the parent row was counted "
+        "under a range filter and its children were not, so the count above "
+        "the list and the list itself describe different populations")
+
+
+def test_the_expansion_passes_no_range_when_the_reader_set_none(monkeypatch):
+    """The forwarding must be the reader's state, not an invented default.
+
+    Guards the opposite error: hardcoding a range, or defaulting it to
+    something, would narrow an expansion the reader never narrowed.
+    """
+    state = _range_state(locus_from=None, locus_to=None)
+    item = {"unit": "work", "display_work_id": "wA"}
+    seen = _capture_children_request(monkeypatch, state, item)
+    assert seen.get("locus_from") is None and seen.get("locus_to") is None
+
+
+def test_a_one_sided_citation_bound_survives_the_expansion(monkeypatch):
+    """`locus_from` alone and `locus_to` alone are both real reader states."""
+    item = {"unit": "work", "display_work_id": "wA"}
+    only_from = _capture_children_request(
+        monkeypatch, _range_state(locus_to=None), item)
+    assert only_from.get("locus_from") == 3 and only_from.get("locus_to") is None
+    only_to = _capture_children_request(
+        monkeypatch, _range_state(locus_from=None), item)
+    assert only_to.get("locus_from") is None and only_to.get("locus_to") == 7
