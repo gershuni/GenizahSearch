@@ -38,6 +38,9 @@ Env knobs
 ``GENIZAH_LOOP_LAG_MS``         log event-loop stalls above this (default 300).
 ``GENIZAH_LOOP_LAG_INTERVAL``   monitor tick in seconds (default 1.0).
 ``GENIZAH_PERF_SUMMARY_SECONDS`` periodic summary interval (default 300; 0 = off).
+``GENIZAH_NOT_SCHEDULED_MS``    above this, a tick that used almost no CPU is
+                                reported as "not scheduled", not as a stall
+                                (default 60000).
 """
 
 from __future__ import annotations
@@ -46,6 +49,7 @@ import asyncio
 import logging
 import os
 import time
+from collections import deque
 
 logger = logging.getLogger(__name__)
 
@@ -94,9 +98,28 @@ def summary_interval_seconds() -> float:
     return _env_float('GENIZAH_PERF_SUMMARY_SECONDS', 300.0, minimum=0.0)
 
 
+def not_scheduled_threshold_ms() -> float:
+    """Above this, a tick that burned no CPU means the PROCESS stopped running.
+
+    A laptop that sleeps, or a Windows console paused by a QuickEdit selection,
+    suspends the whole process; the monitor then wakes up minutes or hours late
+    and the naive reading is a stall of that length. One such tick was logged as
+    ``event loop BLOCKED for 3069031 ms`` -- 51 minutes, which no handler did.
+    Reporting that as a stall is not a cosmetic problem: it poisons the all-time
+    maximum every other diagnostic line quotes.
+    """
+    return _env_float('GENIZAH_NOT_SCHEDULED_MS', 60_000.0, minimum=1000.0)
+
+
 # ---------------------------------------------------------------------------
 # Rolling counters (process-local; cheap, no locking needed on one event loop)
 # ---------------------------------------------------------------------------
+
+# How many recent stalls to keep for the "was the loop blocked DURING this
+# request?" question. Bounded so the ring can never grow: only the last few
+# seconds matter to an in-flight request, and 64 covers a minute of ticks.
+_STALL_RING_MAX = 64
+
 
 class _Stats:
     def __init__(self) -> None:
@@ -106,6 +129,18 @@ class _Stats:
         self.max_request_path = ''
         self.lag_breaches = 0
         self.max_lag_ms = 0.0
+        self.not_scheduled_events = 0
+        self.max_not_scheduled_ms = 0.0
+        # (window_start, window_end, lag_ms) in loop-clock seconds, one per
+        # breach. Kept so a slow request can ask whether a stall actually
+        # OVERLAPPED it rather than comparing itself to an all-time maximum.
+        self.stalls: deque = deque(maxlen=_STALL_RING_MAX)
+        # The tick currently in flight, in loop-clock seconds. A stall is only
+        # appended to the ring once the monitor wakes up and measures it, and
+        # the monitor cannot run while the loop is blocked -- so a request that
+        # ENDS inside a stall would find an empty ring and wrongly conclude the
+        # route was expensive. This deadline lets that case be read directly.
+        self.tick_deadline = 0.0
 
     def reset(self) -> None:
         self.__init__()  # noqa: PLC2801 - deliberate full reset
@@ -123,11 +158,51 @@ def get_stats_snapshot() -> dict:
         'max_request_path': _stats.max_request_path,
         'lag_breaches': _stats.lag_breaches,
         'max_lag_ms': round(_stats.max_lag_ms, 1),
+        'not_scheduled_events': _stats.not_scheduled_events,
+        'max_not_scheduled_ms': round(_stats.max_not_scheduled_ms, 1),
     }
 
 
 def reset_stats() -> None:
     _stats.reset()
+
+
+def max_lag_overlapping(start: float, end: float) -> float:
+    """Worst stall whose window overlaps ``[start, end]`` on the loop clock.
+
+    This is the number that can answer "was this request slow because the loop
+    was blocked?". The all-time maximum cannot: on 2026-08-19 a single 4094 ms
+    stall at startup made every later slow request advertise "loop lag is
+    comparable to this request, so suspect the loop was blocked elsewhere",
+    including seven consecutive /computed-identifications builds during which
+    the breach counter never moved off 1 -- i.e. the loop was demonstrably NOT
+    blocked and the route really was that expensive. The module already carries
+    a comment saying a diagnostic that misattributes is worse than a quiet one;
+    comparing against a monotonic all-time maximum is that same bug one step in.
+    """
+    worst = 0.0
+    for window_start, window_end, lag_ms in _stats.stalls:
+        overlap = min(window_end, end) - max(window_start, start)
+        if overlap <= 0:
+            continue
+        # A 4 s stall cannot have cost a 1 s request more than 1 s. Take the
+        # smaller of the stall and the intersection, so the reported number can
+        # never exceed the request it is being offered as an explanation for.
+        contribution = min(lag_ms, overlap * 1000.0)
+        if contribution > worst:
+            worst = contribution
+
+    # Plus the stall still in progress, which by definition is not in the ring:
+    # the monitor is itself stuck behind whatever is blocking the loop, so it
+    # cannot have recorded it yet. If the tick is already past its deadline, the
+    # loop has been unresponsive since that deadline.
+    if _stats.tick_deadline > 0.0:
+        overshoot = end - _stats.tick_deadline
+        if overshoot * 1000.0 >= loop_lag_threshold_ms():
+            # Only the part inside the request counts toward explaining it.
+            in_flight_ms = min(overshoot, max(end - start, 0.0)) * 1000.0
+            worst = max(worst, in_flight_ms)
+    return worst
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +226,10 @@ class SlowRequestTimingMiddleware:
             return
 
         started = time.perf_counter()
+        # Loop-clock bounds too: the stall ring is timestamped on the loop clock,
+        # and mixing clocks to test overlap would silently never match.
+        loop = asyncio.get_running_loop()
+        loop_started = loop.time()
         status_code: int | None = None
         finished = False
 
@@ -170,12 +249,14 @@ class SlowRequestTimingMiddleware:
             # instrumentation must never change request outcomes.
             try:
                 elapsed_ms = (time.perf_counter() - started) * 1000.0
-                self._record(scope, elapsed_ms, status_code, finished)
+                self._record(scope, elapsed_ms, status_code, finished,
+                             loop_started, loop.time())
             except Exception:  # pragma: no cover - defensive
                 pass
 
     @staticmethod
-    def _record(scope, elapsed_ms: float, status_code, finished: bool) -> None:
+    def _record(scope, elapsed_ms: float, status_code, finished: bool,
+                loop_started: float = 0.0, loop_ended: float = 0.0) -> None:
         _stats.requests += 1
         path = scope.get('path') or '?'
         if elapsed_ms > _stats.max_request_ms:
@@ -191,15 +272,27 @@ class SlowRequestTimingMiddleware:
         # of explaining it, and a real cause (sequential upstream fetches, each
         # with its own read timeout) went unnamed while the reader was pointed
         # at the loop. A diagnostic that misattributes is worse than a quiet one.
-        if _stats.max_lag_ms >= elapsed_ms * 0.5:
-            hint = ("-- loop lag is comparable to this request, so suspect the loop "
-                    "was blocked elsewhere rather than this route being expensive")
+        #
+        # That fix was half a fix: it still compared against the ALL-TIME maximum
+        # lag, so one stall at startup re-armed the same misattribution for every
+        # slow request afterwards. What decides the question is whether a stall
+        # overlapped THIS request, so that is what is measured.
+        stalled_ms = max_lag_overlapping(loop_started, loop_ended)
+        if stalled_ms >= elapsed_ms * 0.5:
+            hint = ("-- the loop was stalled %.0f ms DURING this request, enough to "
+                    "explain it: suspect whatever blocked the loop, not this route"
+                    % stalled_ms)
+        elif stalled_ms > 0:
+            hint = ("-- the loop stalled only %.0f ms during this request, so most of "
+                    "the time is this route's own (suspect upstream I/O or an "
+                    "expensive query)" % stalled_ms)
         else:
-            hint = ("-- loop lag is far too small to explain this, so this route "
-                    "really did spend the time (suspect upstream I/O or its retries)")
+            hint = ("-- the loop was NOT stalled during this request, so this route "
+                    "really did spend the time (suspect upstream I/O, its retries, "
+                    "or an expensive query)")
         logger.warning(
-            "[perf] slow request %.0f ms  %s %s  status=%s%s  (loop-lag breaches so far: %d, "
-            "max %.0f ms) %s",
+            "[perf] slow request %.0f ms  %s %s  status=%s%s  (all-time: %d lag "
+            "breaches, max %.0f ms) %s",
             elapsed_ms,
             scope.get('method', '?'),
             path,
@@ -226,18 +319,58 @@ async def _loop_lag_monitor() -> None:
     )
     while True:
         before = loop.time()
+        cpu_before = time.process_time()
+        _stats.tick_deadline = before + interval
         await asyncio.sleep(interval)
-        lag_ms = (loop.time() - before - interval) * 1000.0
+        after = loop.time()
+        # Cleared immediately: past this point the tick is no longer in flight,
+        # and leaving a stale deadline behind would make every later request
+        # believe the loop is still stalled.
+        _stats.tick_deadline = 0.0
+        lag_ms = (after - before - interval) * 1000.0
+        # CPU actually consumed by this PROCESS across the tick. This is the
+        # discriminator the first version lacked: it separates the two causes
+        # the warning used to name only one of, and it separates both from a
+        # process that simply was not running.
+        cpu_ms = (time.process_time() - cpu_before) * 1000.0
+        span_ms = (after - before) * 1000.0
+        on_cpu = (cpu_ms / span_ms) if span_ms > 0 else 0.0
 
-        if lag_ms > _stats.max_lag_ms:
-            _stats.max_lag_ms = lag_ms
-        if lag_ms >= loop_lag_threshold_ms():
+        if lag_ms < loop_lag_threshold_ms():
+            # Sub-threshold jitter still moves the maximum, as it always has --
+            # only the suspension case below is kept out of it.
+            if lag_ms > _stats.max_lag_ms:
+                _stats.max_lag_ms = lag_ms
+        elif lag_ms >= not_scheduled_threshold_ms() and on_cpu < 0.05:
+            # Minutes late having burned no CPU: the process was suspended, not
+            # busy. Counted separately so it never inflates max_lag_ms.
+            _stats.not_scheduled_events += 1
+            if lag_ms > _stats.max_not_scheduled_ms:
+                _stats.max_not_scheduled_ms = lag_ms
+            logger.warning(
+                "[perf] monitor NOT SCHEDULED for %.0f s (%.0f ms of CPU used) -- the "
+                "process stopped running rather than the loop being blocked: machine "
+                "asleep, container throttled, or a Windows console paused by a "
+                "QuickEdit selection. Not counted as a loop stall.",
+                lag_ms / 1000.0, cpu_ms,
+            )
+        else:
             _stats.lag_breaches += 1
+            if lag_ms > _stats.max_lag_ms:
+                _stats.max_lag_ms = lag_ms
+            _stats.stalls.append((before, after, lag_ms))
+            if on_cpu >= 0.5:
+                cause = ("the process was ON CPU for %.0f ms of that, so this is "
+                         "CPU-bound Python holding the GIL -- a run.io_bound worker "
+                         "counts, it is the same process" % cpu_ms)
+            else:
+                cause = ("the process used only %.0f ms of CPU, so this is BLOCKING "
+                         "I/O on the loop -- look for a synchronous Supabase/NLI call "
+                         "in an async handler" % cpu_ms)
             logger.warning(
                 "[perf] event loop BLOCKED for %.0f ms -- every concurrent request "
-                "(including static files) waited this long. Single uvicorn worker: "
-                "look for synchronous Supabase/NLI I/O on the loop.",
-                lag_ms,
+                "(including static files) waited this long. Single uvicorn worker; %s.",
+                lag_ms, cause,
             )
 
         summary_every = summary_interval_seconds()
