@@ -48,10 +48,10 @@ import unicodedata
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from rapidfuzz.fuzz import partial_ratio_alignment  # noqa: E402
-
 from shared.passage_index import open_index  # noqa: E402
-from shared.passage_normalize import norm_stream  # noqa: E402
+from shared.passage_normalize import (  # noqa: E402
+    K, gram_codes, norm_stream,
+)
 
 DECK_SCHEMA_VERSION = 1
 CONTEXT_CHARS = 260
@@ -82,10 +82,10 @@ def neutral_span(query_text: str, record_text: str) -> dict:
     # WORST-aligning results -- precisely the false positives a precision
     # measurement exists to count. A pair a method RETURNED is part of what it
     # returned; the grader decides whether it is junk, not this builder.
-    needle = q_stream[:400]
-    a = partial_ratio_alignment(needle, r_stream)
-    if not a:
+    found = precise_shared_span(q_stream, r_stream)
+    if found is None:
         return blank
+    qs, qe, rs, re_ = found
     q_nfc = unicodedata.normalize('NFC', query_text)
     r_nfc = unicodedata.normalize('NFC', record_text)
 
@@ -97,10 +97,10 @@ def neutral_span(query_text: str, record_text: str) -> dict:
                 text[b0:b0 + CONTEXT_CHARS])
 
     return {
-        'q': cut(q_off, q_nfc, a.src_start, a.src_end),
-        'r': cut(r_off, r_nfc, a.dest_start, a.dest_end),
-        'score': round(a.score, 1),
-        'letters': int(a.dest_end - a.dest_start),
+        'q': cut(q_off, q_nfc, qs, qe),
+        'r': cut(r_off, r_nfc, rs, re_),
+        'score': 0.0,
+        'letters': int(re_ - rs),
         'aligned': True,
     }
 
@@ -121,6 +121,68 @@ GRADES = [
 
 TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                              'templates', 'grading_deck.html')
+
+MAX_POSTINGS_PER_CODE = 40
+
+
+def precise_shared_span(q_stream: str, r_stream: str):
+    """Locate the actual shared passage, not merely a good window.
+
+    partial_ratio_alignment returns the best-scoring WINDOW of the needle
+    length, which on a 400-letter needle marked 74% of the query pane and
+    localized nothing -- the grader could not see where the two texts agree,
+    and cards carrying a real but short shared formula looked like noise.
+
+    This finds the strongest alignment DIAGONAL instead: shared 5-grams vote
+    for their offset (qpos - rpos), the busiest diagonal wins, and the span is
+    that diagonal's extent. It is the same seeding idea the engine uses, but
+    applied identically to every card whichever method produced it, so the
+    evidence stays method-neutral.
+
+    Returns (q0, q1, r0, r1) in normalized-stream coordinates, or None.
+    """
+    qc = gram_codes(q_stream)
+    rc = gram_codes(r_stream)
+    if not len(qc) or not len(rc):
+        return None
+    where = {}
+    for i, c in enumerate(rc.tolist()):
+        lst = where.setdefault(c, [])
+        if len(lst) < MAX_POSTINGS_PER_CODE:
+            lst.append(i)
+    diag = {}
+    for qi, c in enumerate(qc.tolist()):
+        for ri in where.get(c, ()):  # noqa: B007
+            d = qi - ri
+            e = diag.get(d)
+            if e is None:
+                diag[d] = [1, qi, qi, ri, ri]
+            else:
+                e[0] += 1
+                if qi < e[1]:
+                    e[1] = qi
+                if qi > e[2]:
+                    e[2] = qi
+                if ri < e[3]:
+                    e[3] = ri
+                if ri > e[4]:
+                    e[4] = ri
+    if not diag:
+        return None
+    # Merge adjacent diagonals (a scribal insertion shifts the offset by a
+    # letter or two); then take the busiest cluster.
+    best_d = max(diag, key=lambda d: diag[d][0])
+    n, q0, q1, r0, r1 = diag[best_d]
+    for d in (best_d - 2, best_d - 1, best_d + 1, best_d + 2):
+        e = diag.get(d)
+        if e:
+            n += e[0]
+            q0, q1 = min(q0, e[1]), max(q1, e[2])
+            r0, r1 = min(r0, e[3]), max(r1, e[4])
+    if n < 2:
+        return None
+    return q0, q1 + K, r0, r1 + K
+
 
 def draw_queries(all_queries: list, n: int, salt: str) -> list:
     """Deterministic, spread draw. Recorded in the prereg before any card."""
