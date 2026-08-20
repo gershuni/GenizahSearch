@@ -208,11 +208,16 @@ clips high-noise true pairs, while a flat 0.45 admits short random near-matches.
 is length-dependent: short evidence must be clean, long evidence may be noisy — a 300-letter
 span at density 0.42 is statistically unreachable by chance against a 0.60 random floor.
 
-**Calibration provenance.** The two-sided thresholds are the 95th percentile of true-pair
+**Calibration provenance, and an asymmetry between the two rows.** The **two-sided** thresholds are the 95th percentile of true-pair
 densities per length band, fitted per ground-truth family and constrained monotone
 non-decreasing. Measured recall at that boundary: catalog joins 1.00, title-groups 0.984,
 liturgical witness pairs 0.974. Human validation on a 164-pair graded sample found the 0.40–0.45
 density band to be **97% real shared text**.
+
+The **one-sided** thresholds are **not** a fit. They are implementation constants in the
+asymmetric matcher, justified by the survival argument above but never calibrated against a
+labelled set. The table presents both rows with equal authority; they do not have it, and the
+one-sided row is the weaker of the two.
 
 ### 7.2 Which boundary an interactive query uses
 
@@ -335,6 +340,23 @@ deleted 103 live identifications. The query-shaped script diagnosed this and rep
 **distinct-work** DF cap that keeps every posting of a surviving code, so a formula repeated 100
 times inside one work has distinct-work count 1 and always survives.
 
+### 10.1a Two different statistics, easily confused
+
+The batch findings above are stated in terms of **document frequency** -- distinct records
+containing a gram. The pair-wise engine computes exactly that, because it deduplicates postings
+to the first position per `(gram, record)` before banding.
+
+The corpus-resident artifact of section 5 does **not** store that. It keeps every position, on
+purpose, because span extents need them, so its per-code count is an **occurrence count**, not a
+document frequency. The two differ by the within-record repetition rate: measured on a
+60,000-record slice, 27.76 postings per held code against 25.49 records per held code.
+
+Record DF is not stored but is cheap to derive, because postings within a code are ordered by
+`(record, position)` -- distinct records equal the number of positions where the record index
+changes, which is one vectorized pass. If a policy ever needs it, it should become a stored
+artifact of `4 x (27^5 + 1)` bytes rather than a per-query scan. Until then, do not describe the
+stored statistic as document frequency.
+
 ### 10.2 What an interactive query needs instead
 
 A single query against a corpus has **no quadratic pair explosion** — cost is linear in postings
@@ -424,6 +446,23 @@ Stated so no reader mistakes any of it for settled.
    unquantified amount.
 7. **Interactive latency for arrangement C is unmeasured.** No research script implements it.
 8. **Stride's recall cost is unmeasured** (section 10.3).
+9. **Post-Stage-0 short-span precision is unmeasured.** The finding that 6 of 8 short-span pairs
+   were microfilm title sheets was recorded before the hygiene filter existed -- the method
+   report says short spans are unusable "until this filter is in place", and it now is. That is
+   not the same as showing those six are excluded, that the other two are safe, or that short
+   spans inside otherwise long records are safe. The narrow claim is that Stage-0 removes a major
+   short-span junk class; residual precision has not been measured.
+10. **The method report's "low-entropy heuristic" for target sheets was never implemented** --
+    not in the research `stage0.py`, and not in the port. Only the template-keyword and length
+    rules exist. The report describes a filter that has never run.
+11. **There is no rarity cliff between 25 and 40 letters.** A corpus-derived deterministic
+    stratified sample of 4,155 real windows per length, over a 60,000-record slice, puts the
+    median record-DF of a window's grams at 152 / 151 / 151 / 151 for lengths 25 / 30 / 35 / 40,
+    and the share of windows whose median gram exceeds 200 records at 36.7% / 36.4% / 35.8% /
+    34.9%. The hypothesis that 25 lands on a formulaic band which 40 clears -- suggested by a
+    table of ten hand-picked formulas -- is **not supported** against the corpus. Any case for 40
+    over 25 must rest on chance-match probability under the length x density rule, not on rarity,
+    and must be measured rather than argued.
 9. **The transcription corpus self-describes as preliminary.** Segmentation and reading-order
    errors are part of the measured noise; an improved release would move every number here.
 
