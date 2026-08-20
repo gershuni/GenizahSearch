@@ -59,15 +59,6 @@ def _find_loop(fn, target_names):
     return None
 
 
-def _has_interrupt_handler(fn):
-    for node in ast.walk(_fn_tree(fn)):
-        if isinstance(node, ast.Try):
-            for h in node.handlers:
-                if 'InterruptedError' in _handler_names(h):
-                    return True
-    return False
-
-
 # ------------------------------------------- lab_search's swallowed cancel (bug 1)
 
 def test_lab_search_batch_cb_reraises_cancellation():
@@ -101,8 +92,33 @@ def test_lab_search_batch_cb_reraises_cancellation():
 
 
 def test_lab_search_returns_partials_on_cancel():
-    """Sections 3+3b are wrapped so a cancel falls through to sort/dedup."""
-    assert _has_interrupt_handler(lab_mod.LabEngine.lab_search)
+    """Sections 3+3b are wrapped so a cancel falls through to sort/dedup.
+
+    Deliberately stronger than "a handler exists somewhere in the function":
+    the handler must ENCLOSE the scan loop and must SWALLOW rather than
+    re-raise. Both halves are load-bearing on web as well as desktop --
+    web/pages/search.py wraps its lab_search call in
+    `except Exception: ... return []`, so an escaping InterruptedError (an
+    OSError subclass) throws away every hit the scan had found and logs the
+    user's Stop as a "Search Error".
+    """
+    tree = _fn_tree(lab_mod.LabEngine.lab_search)
+    wrapping = [
+        t for t in ast.walk(tree)
+        if isinstance(t, ast.Try)
+        and any('InterruptedError' in _handler_names(h) for h in t.handlers)
+        and any(isinstance(n, ast.For)
+                and '_i_lab' in [x.id for x in ast.walk(n.target)
+                                 if isinstance(x, ast.Name)]
+                for n in ast.walk(t))
+    ]
+    assert wrapping, 'no InterruptedError handler encloses the Genizah scan loop'
+    for t in wrapping:
+        for h in t.handlers:
+            if 'InterruptedError' in _handler_names(h):
+                assert not any(isinstance(n, ast.Raise) for n in ast.walk(h)), (
+                    'the wrapper re-raises, so the cancel escapes to the caller '
+                    'instead of returning the partial results')
 
 
 # ------------------------------------- _query_local_index propagates (bug 2)

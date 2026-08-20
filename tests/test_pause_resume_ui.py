@@ -25,12 +25,14 @@ class _FakeButton:
         self.enabled = None
         self.style = ''
         self.tooltip = ''
+        self.accessible_name = None
 
     def setText(self, t): self.text = t
     def setVisible(self, v): self.visible = v
     def setEnabled(self, e): self.enabled = e
     def setStyleSheet(self, s): self.style = s
     def setToolTip(self, t): self.tooltip = t
+    def setAccessibleName(self, t): self.accessible_name = t
 
 
 class _FakeWorker:
@@ -125,7 +127,7 @@ def test_click_requests_a_pause_and_disables_the_button(running_search):
     assert s.search_thread.calls == ['pause']
     assert s._pause_search.state == 'pausing'
     assert s._pause_search.epoch == 1
-    assert s._pause_search.button.text == 'Pausing...'
+    assert s._pause_search.button.text == app.PAUSING_GLYPH
     assert s._pause_search.button.enabled is False
 
 
@@ -168,7 +170,7 @@ def test_valid_ack_flips_to_resume_and_stops_the_ticker(running_search):
     s._on_pause_ack(s._pause_search, 1, 1)
 
     assert s._pause_search.state == 'paused'
-    assert s._pause_search.button.text == 'Resume'
+    assert s._pause_search.button.text == app.RESUME_GLYPH
     assert s._pause_search.button.enabled is True
     assert s._pause_search.pause_started > 0.0
     assert s._search_elapsed_timer.running is False
@@ -181,7 +183,7 @@ def test_stale_acks_are_ignored(running_search, run_id, epoch):
     s._on_pause_ack(s._pause_search, run_id, epoch)
 
     assert s._pause_search.state == 'pausing'
-    assert s._pause_search.button.text == 'Pausing...'
+    assert s._pause_search.button.text == app.PAUSING_GLYPH
 
 
 # ------------------------------------------------------------ resume -> running
@@ -201,7 +203,7 @@ def test_resume_banks_the_parked_time_and_restarts_the_ticker(running_search, co
     assert s._pause_search.state == 'running'
     assert s._pause_search.paused_total > 0.0
     assert s._pause_search.pause_started == 0.0
-    assert s._pause_search.button.text == 'Pause'
+    assert s._pause_search.button.text == app.PAUSE_GLYPH
     assert s._search_elapsed_timer.running is True
 
 
@@ -266,14 +268,31 @@ def test_a_cycle_one_ack_arriving_during_cycle_two_is_ignored(running_search):
 # ------------------------------------------------------------------- painting
 
 def test_hidden_resets_the_label_so_it_never_reopens_on_resume(running_search):
+    """Asserted against the glyph constants, not literals: the face is a symbol
+    because the button only has 34 px, and a hardcoded word here would just
+    re-encode the old design."""
     s = running_search
     s._on_pause_clicked(s._pause_search)
     s._on_pause_ack(s._pause_search, 1, 1)
-    assert s._pause_search.button.text == 'Resume'
+    assert s._pause_search.button.text == app.RESUME_GLYPH
 
     s._apply_pause_state(s._pause_search, 'hidden')
     assert s._pause_search.button.visible is False
-    assert s._pause_search.button.text == 'Pause'
+    assert s._pause_search.button.text == app.PAUSE_GLYPH
+
+
+def test_a_glyph_face_still_carries_a_readable_label(running_search):
+    """A symbol alone is not a label. Every state must set an accessible name,
+    or the button is unreadable to a screen reader and to anyone who does not
+    recognise the glyph."""
+    s = running_search
+    for state, expected in (('pause', 'Pause'),
+                            ('pausing', 'Pausing...'),
+                            ('resume', 'Resume'),
+                            ('hidden', 'Pause')):
+        s._apply_pause_state(s._pause_search, state)
+        assert s._pause_search.button.accessible_name == expected, state
+        assert s._pause_search.button.tooltip, state
 
 
 def test_both_stylesheets_carry_a_disabled_rule(running_search):

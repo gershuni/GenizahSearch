@@ -33,13 +33,19 @@ class _FakeSearcher:
     def __init__(self, n=100000):
         self.n = n
         self.ticks = 0
+        # `seen` and `entries` exist so a resume can be distinguished from a
+        # restart: the tick counter alone grows either way.
+        self.seen = []
+        self.entries = 0
 
     def execute_search(self, *a, **kw):
+        self.entries += 1
         cb = kw.get('progress_callback')
         for i in range(self.n):
             self.ticks += 1
             if cb:
                 cb(i, self.n)
+            self.seen.append(i)
             time.sleep(0.001)
         return ['result'] * 3
 
@@ -114,14 +120,30 @@ def test_paused_cancellation_completes_before_the_existing_timeout():
 
 @pytest.mark.gui
 def test_resume_lets_the_worker_continue():
+    """Continues at the next index -- it does not start the scan over.
+
+    A cumulative tick counter growing is NOT evidence of that: a worker that
+    re-entered execute_search and began again at 0 would satisfy it too. The
+    engine is never re-entered and the index sequence stays contiguous, so both
+    are asserted here directly.
+    """
     searcher, thread, acks = _start()
     try:
         thread.pause()
         assert _spin(lambda: acks)
         parked = searcher.ticks
+        at_park = list(searcher.seen)
 
         thread.resume()
         assert _spin(lambda: searcher.ticks > parked), 'worker did not resume'
+        assert _spin(lambda: len(searcher.seen) > len(at_park))
+
+        assert searcher.entries == 1, (
+            'execute_search was re-entered: that is a restart, not a resume')
+        resumed = searcher.seen[len(at_park):]
+        assert resumed[0] == at_park[-1] + 1, (
+            f'resumed at {resumed[0]} after parking at {at_park[-1]} '
+            f'-- the scan restarted instead of continuing')
     finally:
         _stop(thread)
 

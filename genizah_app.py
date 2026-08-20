@@ -134,6 +134,20 @@ def space_scroll_action(current_column: int, checkbox_column: int, is_shift: boo
 # Pause/Resume: pure timing helpers + the per-operation UI context
 # ---------------------------------------------------------------------------
 
+# Search/Stop and Pause share ONE fixed-width slot (see search_btn_box), which
+# leaves Pause 34 px of the Search button's 96. Measured text widths: "Pause"
+# needs 45 px and "Pausing..." more, a glyph needs 17. So the face is a glyph and
+# the translated word moves to setAccessibleName plus the tooltip -- still
+# reachable by a screen reader and on hover, and the tr() keys stay live.
+# Module-level, not attributes: _apply_pause_state is exercised against a plain
+# SimpleNamespace in tests/test_pause_resume_ui.py.
+PAUSE_BTN_W = 34
+PAUSE_GLYPH = "⏸"      # pause bars
+PAUSING_GLYPH = "⏳"    # hourglass -- honest about "asked, not parked yet"
+RESUME_GLYPH = "▶"     # play triangle
+
+
+
 def paused_seconds(paused_total: float, pause_started: float, mono_now: float) -> float:
     """Seconds spent parked, INCLUDING a pause that is still in progress.
 
@@ -4726,8 +4740,6 @@ class GenizahGUI(QMainWindow):
         self.refine_cancel_btn.clicked.connect(self._exit_refine_mode)
         row1.addWidget(self.refine_cancel_btn)
 
-        row1.addWidget(self.btn_search)
-
         # Pause/Resume. Deliberately NOT setCheckable: a checkable button flips its
         # checked state on the click, before the worker has agreed to anything —
         # which is exactly the "Pausing..." window this design has to be honest
@@ -4736,18 +4748,40 @@ class GenizahGUI(QMainWindow):
         self.btn_search_pause = QPushButton(tr("Pause"))
         self.btn_search_pause.clicked.connect(
             lambda: self._on_pause_clicked(self._pause_search))
-        self.btn_search_pause.setFixedWidth(90)
-        # Keep the slot reserved while hidden, so starting a search cannot shift
-        # btn_search sideways under a cursor that is about to click Stop.
-        _sp = self.btn_search_pause.sizePolicy()
-        _sp.setRetainSizeWhenHidden(True)
-        self.btn_search_pause.setSizePolicy(_sp)
+        self.btn_search_pause.setFixedWidth(PAUSE_BTN_W)
         self._pause_search.button = self.btn_search_pause
         self._apply_pause_state(self._pause_search, 'hidden')
-        # Appended AFTER btn_search, never inserted before it: line ~4888 does
-        # row1.insertWidget(row1.indexOf(self.btn_search), ...) and that lookup
-        # must keep resolving to the same widget.
-        row1.addWidget(self.btn_search_pause)
+
+        # Search/Stop and Pause share ONE fixed-width slot, measured from the Search
+        # button's own natural width (96 px here). Idle: Pause hidden, Stop fills all
+        # 96. Running: Stop 60 + spacing 2 + Pause 34 = 96. The box's width is the
+        # same in both states, so nothing in row 1 moves when a search starts AND no
+        # empty slot is reserved -- the two problems the earlier revisions traded
+        # against each other. RetainSizeWhenHidden is deliberately NOT set: the box,
+        # not the button, is what holds the width.
+        # Measured WHILE the stylesheet's min-width still applies -- that is what makes
+        # this button 96 px instead of Qt's 81 px floor, and 96 is the width the pair
+        # has to add up to. Read it before stripping the rule below or the box comes
+        # out 15 px narrower than the button it is meant to match.
+        _search_w = self.btn_search.sizeHint().width()
+        self.search_btn_box = QWidget()
+        self.search_btn_box.setFixedWidth(_search_w)
+        _btn_box = QHBoxLayout(self.search_btn_box)
+        _btn_box.setContentsMargins(0, 0, 0, 0)
+        _btn_box.setSpacing(2)
+        # Both floors have to come off now that the width is banked: the stylesheet's
+        # min-width (which QStyleSheetStyle feeds into minimumSizeHint, where an
+        # explicit setMinimumWidth(0) cannot outvote it) and Qt's own ~80 px button
+        # floor. Otherwise btn_search refuses to yield the glyph's 34 px and the two
+        # buttons are drawn on top of each other. reset_ui/start_search restyle this
+        # button without min-width anyway, so this is also what they already assume.
+        self.btn_search.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
+        self.btn_search.setMinimumWidth(0)
+        self.btn_search.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.btn_search_pause.setMinimumWidth(PAUSE_BTN_W)
+        _btn_box.addWidget(self.btn_search)
+        _btn_box.addWidget(self.btn_search_pause)
+        row1.addWidget(self.search_btn_box)
 
         # Phase 95 smoke-fix (item 2): pre-search corpus selector.
         # Determines which index(es) are queried: Genizah-only / Local-only / ALL.
@@ -4899,23 +4933,42 @@ class GenizahGUI(QMainWindow):
 
         # Search params container (Gap, Exclude, settings, Lab, Deep) — hidden in PGP Tags mode
         self.search_params_container = QWidget()
-        self.search_params_container.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+        # Minimum, not Fixed: Fixed pins the box at its sizeHint, so when row 2 is
+        # over-subscribed the shortfall is taken out of the children below and Qt
+        # draws them on top of each other instead of letting the box grow.
+        self.search_params_container.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred)
         params_layout = QHBoxLayout(self.search_params_container)
         params_layout.setContentsMargins(0, 0, 0, 0)
 
         self.gap_input = QLineEdit(); self.gap_input.setPlaceholderText(tr("Gap")); self.gap_input.setFixedWidth(50)
         self.gap_input.setToolTip(tr("Maximum word distance (0 = Exact phrase)"))
+        # Gap lives on row 1 (2026-08-20). Measured: row 2 needed 1423 px minimum on
+        # a 1440 px logical screen, so its fixed-width children were compressed below
+        # their minimum and overlapped. Row 1's minimum is 795 px with Gap added and
+        # its query field expands, so row 1 has the 50 px to spare and row 2 does not.
+        # No label: the field's own "Gap" placeholder says it, and a label here cost
+        # width twice over -- QBoxLayout shares slack with Preferred siblings, so a
+        # label+field container grew from a 78 px hint to 208 px and left a 134 px hole
+        # between the two. gap_input's setFixedWidth(50) cannot absorb slack, so it
+        # goes into row 1 bare.
+        # Inserted before refine_badge to keep Gap next to the mode selector, using the
+        # same indexOf() idiom as the btn_pre_search_filters insertion further down.
+        # No extra visibility wiring: PGP Tags mode hides search_row1_container whole,
+        # which is exactly the hiding search_params_container used to give it.
+        row1.insertWidget(row1.indexOf(self.refine_badge), self.gap_input)
 
         # Exclude Words Filter (New)
         self.exclude_input = QLineEdit(); self.exclude_input.setPlaceholderText(tr("Exclude Words"))
         self.exclude_input.setToolTip(tr("Results containing these words will be filtered out"))
-        self.exclude_input.setFixedWidth(120)
+        self.exclude_input.setMaximumWidth(120)
+        self.exclude_input.setMinimumWidth(60)   # shrinkable: elide under pressure, never overlap
 
         # Text Position filter (for join detection)
         self.text_position_combo = QComboBox()
         self.text_position_combo.addItems([tr("Anywhere"), tr("Start of text"), tr("End of text"), tr("Line starts"), tr("Line ends")])
         self.text_position_combo.setToolTip(tr("Constrain matches to text boundaries (for join detection)"))
-        self.text_position_combo.setFixedWidth(120)
+        self.text_position_combo.setMaximumWidth(120)
+        self.text_position_combo.setMinimumWidth(60)   # shrinkable: see exclude_input
         # Highlight when set to a non-default position so the user always sees
         # the sticky state in the crowded toolbar row.
         def _highlight_text_position(idx):
@@ -4946,11 +4999,13 @@ class GenizahGUI(QMainWindow):
         self.chk_lab_deep.setEnabled(False) # Enabled only in Lab Mode
         self.chk_lab_deep.toggled.connect(self.on_deep_scan_toggled_search)
 
-        params_layout.addWidget(QLabel(tr("Gap:")))
-        params_layout.addWidget(self.gap_input)
-        params_layout.addWidget(QLabel(tr("Exclude:")))
+        # No text labels here any more: they cost 152 px of a row that was already
+        # 1423 px against a 1440 px screen. exclude_input keeps its "Exclude Words"
+        # placeholder, text_position_combo shows its current value ("Anywhere"), and
+        # both keep the tooltips they already had. tr("Exclude:") / tr("Position:")
+        # stay in genizah_translations.py -- unused entries cost nothing, and
+        # tr("Gap:") is still live on row 1.
         params_layout.addWidget(self.exclude_input)
-        params_layout.addWidget(QLabel(tr("Position:")))
         params_layout.addWidget(self.text_position_combo)
         params_layout.addWidget(self.btn_search_settings)
         params_layout.addWidget(self.btn_lab_mode_toggle)
@@ -5005,7 +5060,10 @@ class GenizahGUI(QMainWindow):
         self.lbl_main_exclude_status.setStyleSheet("color: #8e44ad; font-weight: bold; font-size: 11px;")
 
         # Insert pre-search filter button in row1, right before the Search button
-        row1.insertWidget(row1.indexOf(self.btn_search), self.btn_pre_search_filters)
+        # search_btn_box, NOT btn_search: btn_search now lives inside that box, so
+        # row1.indexOf(self.btn_search) would be -1 and insertWidget(-1, ...) would
+        # quietly append this button to the far end of row 1.
+        row1.insertWidget(row1.indexOf(self.search_btn_box), self.btn_pre_search_filters)
 
         # Translation toggle button (search tab)
         self.btn_search_translations = QPushButton()
@@ -5562,7 +5620,7 @@ class GenizahGUI(QMainWindow):
         self.btn_comp_pause = QPushButton(tr("Pause"))
         self.btn_comp_pause.clicked.connect(
             lambda: self._on_pause_clicked(self._pause_comp))
-        self.btn_comp_pause.setFixedWidth(90)
+        self.btn_comp_pause.setFixedWidth(PAUSE_BTN_W)   # same glyph face as the search tab
         _cp = self.btn_comp_pause.sizePolicy()
         _cp.setRetainSizeWhenHidden(True)
         self.btn_comp_pause.setSizePolicy(_cp)
@@ -16574,11 +16632,13 @@ class GenizahGUI(QMainWindow):
         if state == 'hidden':
             btn.setVisible(False)
             btn.setEnabled(True)
-            # Reset the label so a re-shown button never opens on "Resume".
-            btn.setText(tr("Pause"))
+            # Reset the face so a re-shown button never opens on Resume.
+            btn.setText(PAUSE_GLYPH)
+            btn.setAccessibleName(tr("Pause"))
             return
         if state == 'pause':
-            btn.setText(tr("Pause"))
+            btn.setText(PAUSE_GLYPH)
+            btn.setAccessibleName(tr("Pause"))
             btn.setToolTip(tr("Pause — the search stops at the next checkpoint and keeps what it found"))
             # The :disabled rule is NOT optional. Every button in this file sets a
             # literal background-color, which overrides the disabled palette — without
@@ -16590,11 +16650,13 @@ class GenizahGUI(QMainWindow):
             )
             btn.setEnabled(True)
         elif state == 'pausing':
-            btn.setText(tr("Pausing..."))
+            btn.setText(PAUSING_GLYPH)
+            btn.setAccessibleName(tr("Pausing..."))
             btn.setToolTip(tr("Waiting for the search to reach a checkpoint..."))
             btn.setEnabled(False)   # a second click has no meaning
         elif state == 'resume':
-            btn.setText(tr("Resume"))
+            btn.setText(RESUME_GLYPH)
+            btn.setAccessibleName(tr("Resume"))
             btn.setToolTip(tr("Resume the search from where it paused"))
             btn.setStyleSheet(
                 "QPushButton { background-color: #27ae60; color: white; font-weight: bold; }"
