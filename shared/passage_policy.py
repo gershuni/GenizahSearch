@@ -73,9 +73,18 @@ class PassagePolicy:
     regime: str = REGIME_ONE_SIDED
     density_scale: float = 1.0         # multiplies the boundary; 1.0 = spec
     budget_policy: str = BUDGET_BAND
-    posting_budget: int = 2_000_000    # postings admitted per query
-    candidate_cap: int = 200_000       # diagonal clusters verified at most
-    verify_cap: int = 50_000           # Levenshtein calls at most
+    # Defaults MEASURED on the full 702,466-record index (2026-08-20), warm,
+    # with strength-ordered verification. Sweeping verify_cap 50K->1K and
+    # posting_budget 2M->500K changed self-retrieval NOT AT ALL -- verbatim
+    # (7/10, 8/10, 9/10 per length band) and 20%-corrupted two-sided
+    # (7/10, 5/10, 10/10) identical in every row -- while p50 fell from
+    # 1.0-4.8 s to 0.09-0.7 s. True matches carry tens of distinct anchors,
+    # so strength ordering keeps them inside even a small cap; the old
+    # generous caps bought nothing but Levenshtein calls on junk. 3K keeps
+    # 3x headroom over the smallest cap tested.
+    posting_budget: int = 500_000      # postings admitted per query
+    candidate_cap: int = 200_000       # diagonal clusters kept at most
+    verify_cap: int = 3_000            # Levenshtein calls at most
     min_anchors: int = 2               # distinct gram codes per cluster
     schema_version: int = POLICY_SCHEMA_VERSION
 

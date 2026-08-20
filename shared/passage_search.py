@@ -207,6 +207,16 @@ def _candidates(idx: PassageIndex, codes: np.ndarray, qpos: np.ndarray,
     keep = distinct >= policy.min_anchors
     report.candidates = int(keep.sum())
     kept_groups = np.flatnonzero(keep)
+    # Order candidates by EVIDENCE STRENGTH (distinct anchors, descending),
+    # tie-broken by (record, bucket) for determinism. The first version
+    # ordered by (record, bucket) alone, which under a firing verify cap
+    # meant low record indices always won and later records were never
+    # verified at all -- measured on the full corpus as self-retrieval
+    # collapsing to 5/12 at 1,000-letter queries purely by catalog position.
+    # Strength ordering makes the caps keep the best-evidenced candidates,
+    # which is what a cap is for.
+    strength_order = np.lexsort((kept_groups, -distinct[kept_groups]))
+    kept_groups = kept_groups[strength_order]
     if kept_groups.size > policy.candidate_cap:
         report.candidates_truncated = True
         kept_groups = kept_groups[:policy.candidate_cap]
@@ -225,8 +235,10 @@ def _verify_and_merge(idx: PassageIndex, qstream: str, cand, policy:
     """Extend, align, accept, and merge per record.
 
     Returns record -> [(q0, q1, r0, r1, density), ...] merged spans. The
-    verification order is the candidate order (record, bucket), so verify_cap
-    cuts deterministically; when it fires the envelope says so.
+    verification order is the candidate order -- anchor strength descending,
+    then (record, bucket) -- so verify_cap keeps the best-evidenced
+    candidates and cuts deterministically; when it fires the envelope says
+    so.
     """
     g_rec, min_q, max_q, min_r, max_r = cand
     by_record: dict = {}

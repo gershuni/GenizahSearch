@@ -106,3 +106,59 @@ region of it. The full-corpus figure must be measured, not carried over.
   they are set by the tunable batch and slice rather than by the machine.
 - **DF cap and stride.** Both are implemented and tested but not yet swept for
   their recall cost, which is the Phase 142 decision they exist for.
+
+---
+
+## 6. Full-corpus build (2026-08-20) — projections confirmed
+
+`spool`, P=8, `batch_grams` 1M, dev box:
+
+| | projected from the slice | **measured, full corpus** |
+|---|---|---|
+| records indexed | — | **702,466** of 948,549 (26.0% excluded — the slice's 14.6% was indeed regional, §4) |
+| postings | 601.2M | **593,785,092** |
+| artifact | 3.5 GB | **3.5 GB** (postings 2.8 GB) |
+| wall | ~6 min | **9.2 min** (pass 1 347 s, pass 2 203 s) |
+| scratch | ~4.6 GB | **4.4 GB** |
+| peak RSS | ~1 GB | **3.5 GB** — the spool sort holds one whole partition (594M/8 × 8 B plus sort workspace); P=16 halves it. A desktop build should use more partitions, not more RAM. |
+
+## 7. Query latency (Phase 142, part 2) — the caps were pure waste
+
+All measurements warm, on the full index, 12 deterministic self-retrieval
+queries per length (each query is a cut of a real record, so its own record is
+a guaranteed positive).
+
+**Defect found and fixed first.** Verification originally ran in
+`(record, bucket)` order, so when the verify cap fired, low record indices
+always won — measured as self-retrieval collapsing to 5/12 at 1,000 letters
+purely by catalog position. Verification now runs in **anchor-strength order**
+(distinct anchors descending, then record/bucket): the cap keeps the
+best-evidenced candidates, which is what a cap is for.
+
+**Cap sweep, verbatim and 20%-corrupted queries.** Sweeping
+`verify_cap` 50,000 → 1,000 and `posting_budget` 2M → 500K changed
+self-retrieval **not at all** — identical scores in every row, verbatim
+(7/10, 8/10, 9/10 per length band) and noisy two-sided (7/10, 5/10, 10/10) —
+while p50 fell from 1.0–4.8 s to 0.09–0.7 s. True matches carry tens of
+distinct anchors, so strength ordering keeps them inside even a small cap;
+the generous caps bought nothing but Levenshtein calls on junk.
+
+**Adopted defaults** (`posting_budget` 500K, `verify_cap` 3,000 — 3× headroom
+over the smallest cap tested), full corpus, warm:
+
+| query letters | p50 | p95 | p99 | self@rank-0 |
+|---|---|---|---|---|
+| 50 | 159 ms | 284 ms | 316 ms | 9/12 |
+| 100 | 331 ms | 402 ms | 514 ms | 9/12 |
+| 200 | 525 ms | 685 ms | 759 ms | 10/12 |
+| 400 | 618 ms | 713 ms | 849 ms | 9/12 |
+| 1,000 | 607 ms | 724 ms | 842 ms | 10/12 |
+| 2,000 | 656 ms | 704 ms | 704 ms | 4/4 |
+
+The sub-perfect rank-0 rates at short lengths are not established as failures:
+a short verbatim cut can legitimately appear in another manuscript at equal
+score (ties break toward the lower record index). Characterizing them is the
+comparison instruments' job, not this table's.
+
+Still owed: cold-cache numbers (the decoy-read approximation in
+`bench_passage_query.py --cold-touch-gb`), concurrency, and the web box.
