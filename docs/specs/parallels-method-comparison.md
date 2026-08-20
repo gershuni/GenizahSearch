@@ -29,6 +29,67 @@ measured cross-language retrieval while claiming to measure noise robustness.
 
 ---
 
+## CORRECTION (2026-08-20): the earlier tables compared different corpora
+
+Everything below the next heading was measured with the two methods searching
+**different document sets** — the Tantivy corpus holds 948,549 page records,
+the passage index holds 702,466, because Stage-0 excludes 246,083 short pages,
+microfilm target sheets and library ownership stamps. The incumbent could
+return records the passage engine structurally cannot. That measured document
+sets, not methods.
+
+Re-measured with the incumbent restricted to the same 702,466 records
+(`-elig`), same 120 tuning queries:
+
+| method | recall@1 | recall@10 | recall@50 | MRR | p50 |
+|---|---|---|---|---|---|
+| passage `standard-40` | **0.592** | **0.708** | **0.750** [0.666, 0.819] | **0.639** | **391 ms** |
+| chunk `c3-exact-f100-elig` | 0.550 | 0.675 | 0.725 [0.639, 0.797] | 0.589 | ~20,500 ms |
+
+**The incumbent got BETTER under equal eligibility, not worse** — recall@1
+0.467 → 0.550, MRR 0.533 → 0.589, recall@50 0.708 → 0.725. I had assumed the
+unequal comparison flattered it; the opposite was true. Removing junk records
+(target sheets, stamps, near-empty pages) from its ranked list pushes correct
+answers *up*. The passage engine was already immune, having never indexed them.
+
+**On accuracy the two methods are now indistinguishable at this sample size.**
+Recall@50 0.750 against 0.725 with intervals [0.666, 0.819] and [0.639, 0.797]
+— almost entirely overlapping. Recall@1 favours passage by 4 points, well
+inside noise at n=120. **No accuracy claim is supportable from this data.**
+
+The difference that survives is **speed**: roughly 50× (391 ms against 14.6–20.5
+seconds). Caveat on the incumbent's figure: this run overlapped a second heavy
+process, so 20.5 s is inflated; its clean earlier reading was 14.6 s. Either
+way the ratio is decisive and the direction is not in doubt.
+
+By query length, both on the shared record set:
+
+| normalized letters | passage | chunk `c3-elig` |
+|---|---|---|
+| < 200 (n=13) | 0.54 | **0.62** |
+| < 400 (n=34) | **0.76** | 0.65 |
+| < 800 (n=24) | 0.71 | **0.75** |
+| < 1600 (n=25) | **0.88** | 0.76 |
+| ≥ 1600 (n=24) | 0.75 | **0.83** |
+
+The crossing persists and still favours the incumbent at both extremes, but
+per-cell n is 13–34 and the cells alternate — this is noise-shaped, and should
+not be read as a routing rule.
+
+### What this changes
+
+The honest current position is: **comparable accuracy, ~50× faster, on this
+instrument at n=120.** Speed is a real and sufficient product argument on its
+own. An accuracy claim needs the larger pre-registered run, and the grading
+deck is needed before anything can be said about precision at all.
+
+---
+
+## SUPERSEDED — original results, unequal document sets
+
+*Kept for the record. The incumbent here searched 246,083 records the passage
+engine could not.*
+
 ## Results, n = 120, tuning split
 
 | method | recall@1 | recall@10 | recall@50 | MRR | p50 | p95 |
