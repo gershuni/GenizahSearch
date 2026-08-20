@@ -36,11 +36,24 @@ measured cross-language retrieval while claiming to measure noise robustness.
 | passage `standard-40` | 0.592 | 0.708 | **0.750** [0.666, 0.819] | 0.639 | 391 ms | 508 ms |
 | passage `flat-25` | 0.592 | 0.708 | **0.750** [0.666, 0.819] | 0.639 | 346 ms | 421 ms |
 | chunk `c5-exact-f100` | 0.383 | 0.542 | **0.575** [0.486, 0.660] | 0.440 | 22,262 ms | 195,143 ms |
-| chunk `c3-exact-f100` | *running* | | | | | |
+| chunk `c3-exact-f100` | 0.467 | 0.658 | **0.708** [0.622, 0.782] | 0.533 | 14,565 ms | — |
 | chunk `c5-variants-f100` | *running* | | | | | |
 
-The recall@50 intervals do not overlap, so the gap is unlikely to be sampling
-noise even at n=120.
+**The incumbent's chunk size matters more than the method gap, and sweeping it
+changed the conclusion.** At `chunk_size=5` the incumbent scores 0.575 and its
+interval does not overlap passage's. At `chunk_size=3` it scores **0.708
+[0.622, 0.782]**, and the intervals now overlap heavily — passage's lower bound
+(0.666) sits below the incumbent's point estimate. **On recall@50 there is no
+longer a demonstrated difference at n=120.**
+
+Reporting `c5` alone would have claimed a decisive win that the evidence does
+not support. This is precisely why both methods are swept, and it is worth
+recording as the clearest vindication of that decision so far.
+
+Where passage does still separate is in RANKING rather than retrieval:
+recall@1 0.592 against 0.467, MRR 0.639 against 0.533. It puts the right
+manuscript higher, on the same queries, at 37x the speed (391 ms against
+14,565 ms).
 
 ### The incumbent's score is its own, not an artifact of a known bug
 
@@ -53,19 +66,23 @@ this check would have credited the loss to the method.
 
 ### Where each method wins — by query length
 
-| normalized letters | passage | chunk `c5-exact` |
-|---|---|---|
-| < 200 (n=13) | **0.54** | 0.31 |
-| < 400 (n=34) | **0.76** | 0.35 |
-| < 800 (n=24) | **0.71** | 0.54 |
-| < 1600 (n=25) | **0.88** | 0.84 |
-| ≥ 1600 (n=24) | 0.75 | **0.79** |
+| normalized letters | passage | chunk `c5-exact` | chunk `c3-exact` |
+|---|---|---|---|
+| < 200 (n=13) | 0.54 | 0.31 | **0.62** |
+| < 400 (n=34) | **0.76** | 0.35 | 0.62 |
+| < 800 (n=24) | **0.71** | 0.54 | **0.71** |
+| < 1600 (n=25) | **0.88** | 0.84 | 0.76 |
+| ≥ 1600 (n=24) | 0.75 | 0.79 | **0.83** |
 
-The methods **cross**. Token matching strengthens as the query lengthens —
-more text means more chances that some five-word window survives intact — and
-on the longest queries the incumbent edges ahead. This is the shape the plan
-predicted would be the routing signal, appearing in real data. Per-cell n is
-13–34, so the crossing point is suggestive, not established.
+The methods **cross**, but not in the simple way `c5` alone suggested. Against
+the better-configured incumbent, passage wins the middle of the range
+(400–1600 letters) while `c3` wins at **both extremes**. Any story of the form
+"passage wins short queries, token matching wins long ones" is contradicted by
+its own strongest configuration.
+
+Per-cell n is 13–34. These cells are too small to support a routing rule, and
+the crossing pattern should be treated as a hypothesis for a properly powered
+run, not as a finding.
 
 ### The span floor did not bind here, and this instrument cannot test it
 
@@ -84,11 +101,11 @@ reach them. It needs its own instrument.
    the ledger enforces one scoring per (method, config).
 2. **n = 120.** Intervals span roughly ±0.08. Adequate to see a 0.175 gap,
    nowhere near adequate for a 3-point non-inferiority decision.
-3. **The incumbent's best configuration is unknown.** `c5-exact-f100` is one
-   point in its space; `c3` should help precisely where the incumbent is
-   weakest (shorter queries mean shorter chunks are easier to match intact).
-   Calling a winner before it runs would be the rigged comparison this design
-   exists to avoid.
+3. **The incumbent's best configuration is still unknown**, and it has already
+   moved once: `c3` beat `c5` by 13 points of recall@50 and erased the gap.
+   `c5-variants` has not finished. Until its space is properly explored, no
+   winner can be called — the first sweep step already overturned the first
+   conclusion.
 4. **Manuscript grain, not folio grain** (above).
 5. **FGP transcriptions are not the user task.** They are long, clean editions
    of a manuscript's own text. A user pasting a printed edition to find
