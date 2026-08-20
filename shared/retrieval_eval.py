@@ -120,6 +120,17 @@ def summarize(outcomes: list, *, k_values=(1, 10, 50, 200)) -> dict:
     lat = sorted(o.seconds * 1000 for o in outcomes)
     res['p50_ms'] = round(lat[len(lat) // 2], 1)
     res['p95_ms'] = round(lat[min(len(lat) - 1, int(0.95 * len(lat)))], 1)
+    # RESULT-SET SIZE. Not precision -- precision is not computable from a
+    # self-retrieval instrument, because a returned manuscript that is not the
+    # query's own may be a GENUINE parallel, which is the whole point of the
+    # feature. What this does bound is the reader's burden: two methods at
+    # equal recall are not equivalent if one hands back 5 candidates and the
+    # other 500. Real precision needs the pooled blinded deck.
+    sizes = sorted(o.n_returned for o in outcomes)
+    res['returned_p50'] = sizes[len(sizes) // 2]
+    res['returned_p95'] = sizes[min(len(sizes) - 1, int(0.95 * len(sizes)))]
+    res['returned_max'] = sizes[-1]
+    res['returned_mean'] = round(sum(sizes) / len(sizes), 1)
     return res
 
 
