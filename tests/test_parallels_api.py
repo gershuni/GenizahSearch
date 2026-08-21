@@ -103,6 +103,16 @@ def _reset_heavy_semaphore():
     _HeavySemaphoreState.reset(DEFAULT_HEAVY_CONCURRENCY)
 
 
+@pytest.fixture(autouse=True)
+def _reset_passage_semaphore():
+    """Phase 145: same hygiene as _reset_heavy_semaphore, for the passage
+    budget's semaphore + its own ThreadPoolExecutor."""
+    from web.search_api import _PassageSemaphoreState, DEFAULT_PASSAGE_CONCURRENCY
+    _PassageSemaphoreState.reset(DEFAULT_PASSAGE_CONCURRENCY)
+    yield
+    _PassageSemaphoreState.reset(DEFAULT_PASSAGE_CONCURRENCY)
+
+
 def _make_main_row(uid='IE99_P3_FL12345', sys_id='99001', score=5.0, chunk_index=0):
     """Build one search_composition_logic row matching the post-Plan-77-05 shape."""
     return {
@@ -195,6 +205,8 @@ def test_parallels_request_default_values():
     assert req.max_freq is None
     assert req.boundary_mode == 'full'
     assert req.filters is None
+    # Phase 145: default 'chunk' keeps every existing caller byte-compatible.
+    assert req.method == 'chunk'
 
 
 def test_parallels_request_chunk_size_bounds():
@@ -906,8 +918,8 @@ def test_parallels_envelope_contains_request_echo(client, mock_searcher, clean_e
     """81A AC8 / D-07 — /api/parallels envelope gains a `request` echo block.
     Field name is `mode` (NOT `search_mode`) per D-07; no `responsa_options`
     (parallels never used Responsa); no `gap` (ParallelsRequest has no gap).
-    Exactly 6 keys: mode, chunk_size, max_freq, boundary_options,
-    limit_effective, filters."""
+    Exactly 7 keys: mode, chunk_size, max_freq, boundary_options,
+    limit_effective, filters, method (method added Phase 145)."""
     payload = {'text': 'hello world', 'mode': 'exact'}
     resp = client.post('/api/parallels', json=payload)
     assert resp.status_code == 200, resp.text
@@ -916,10 +928,79 @@ def test_parallels_envelope_contains_request_echo(client, mock_searcher, clean_e
     echo = body['request']
     assert set(echo.keys()) == {
         'mode', 'chunk_size', 'max_freq', 'boundary_options',
-        'limit_effective', 'filters',
+        'limit_effective', 'filters', 'method',
     }, echo
     # D-07: parallels keeps `mode`, not `search_mode`.
     assert 'search_mode' not in echo
     assert 'responsa_options' not in echo
     # Echo's `mode` matches what the client sent.
     assert echo['mode'] == 'exact'
+    # Phase 145: `method` defaults to 'chunk' when the client omits it --
+    # the pre-Phase-145 request shape stays byte-compatible.
+    assert echo['method'] == 'chunk'
+
+
+# ---------------------------------------------------------------------------
+# Phase 145 — method='passage' validation (scope restriction + availability)
+# ---------------------------------------------------------------------------
+
+def test_parallels_method_passage_unavailable_returns_503(client, mock_searcher, clean_env):
+    """method='passage' with no loaded index (the default test environment --
+    this worktree carries no real passage_index/) is a clean 503, never a
+    silent fallback to the chunk engine. passage_available() is False here
+    for TWO independent reasons (PASSAGE_PARALLELS_ENABLED defaults off, AND
+    no index was ever loaded), either of which must produce this result."""
+    r = client.post('/api/parallels', json={'text': 'hello world', 'method': 'passage'})
+    assert r.status_code == 503, r.text
+    assert r.json()['error']['code'] == 'passage_unavailable'
+
+
+def test_parallels_method_passage_scope_unsupported_returns_400(client, mock_searcher, clean_env, monkeypatch):
+    """method='passage' + filters.library=['LOCAL'] (include mode, the
+    default) is rejected as a structural scope mismatch -- the passage index
+    holds no Local-corpus records by construction -- rather than silently
+    degrading to an empty result indistinguishable from "no matches found".
+    Availability is mocked True here so this test isolates the SCOPE check
+    from the (separately tested) availability check above."""
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    r = client.post('/api/parallels', json={
+        'text': 'hello world', 'method': 'passage',
+        'filters': {'library': ['LOCAL']},
+    })
+    assert r.status_code == 400, r.text
+    assert r.json()['error']['code'] == 'passage_scope_unsupported'
+
+
+def test_parallels_method_passage_scope_exclude_local_is_not_rejected(
+    client, mock_searcher, clean_env, monkeypatch,
+):
+    """Excluding 'LOCAL' (library_filter_mode='exclude') is a no-op for
+    passage -- it never had Local records to exclude -- and must NOT be
+    rejected; the request proceeds and returns 200."""
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    monkeypatch.setattr(
+        'web.passage_assets.get_passage_searcher',
+        lambda text_fetcher: mock_searcher,
+    )
+    r = client.post('/api/parallels', json={
+        'text': 'hello world', 'method': 'passage',
+        'filters': {'library': ['LOCAL'], 'library_filter_mode': 'exclude'},
+    })
+    assert r.status_code == 200, r.text
+
+
+def test_parallels_method_passage_happy_path_routes_to_passage_searcher(
+    client, mock_searcher, clean_env, monkeypatch,
+):
+    """method='passage', available, no scope conflict -> 200, and the
+    envelope's request echo names 'passage' (not silently 'chunk')."""
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    monkeypatch.setattr(
+        'web.passage_assets.get_passage_searcher',
+        lambda text_fetcher: mock_searcher,
+    )
+    r = client.post('/api/parallels', json={'text': 'hello world', 'method': 'passage'})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body['request']['method'] == 'passage'
+    mock_searcher.search_composition_logic.assert_called_once()
