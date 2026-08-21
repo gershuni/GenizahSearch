@@ -44,6 +44,10 @@ ERROR_CODES = frozenset({
     'composition_too_long',     # D-06: len(text.strip()) > COMPOSITION_LENGTH_CAP (20000)
     # P9X heavy-mode concurrency additions:
     'heavy_search_busy',        # 503 — heavy-mode concurrency budget (SEARCH_API_HEAVY_CONCURRENCY) exhausted; fail-fast, Retry-After set
+    # Phase 145 (/api/parallels method='passage') additions:
+    'passage_unavailable',        # 503 — PASSAGE_PARALLELS_ENABLED off, or the passage index did not load
+    'passage_scope_unsupported',  # 400 — method='passage' + filters.library includes 'LOCAL' (include mode); the passage index has no Local-corpus records
+    'passage_search_busy',        # 503 — passage-matching concurrency budget (SEARCH_API_PASSAGE_CONCURRENCY) exhausted; fail-fast, Retry-After set
 })
 
 # Surfaced in top-level `warnings: []` arrays (D-07), NOT as errors.
