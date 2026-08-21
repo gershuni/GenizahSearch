@@ -1017,6 +1017,37 @@ A major overhaul of how LOCAL Hebrew PDFs are read into the My Library index, dr
 
 ## [Unreleased]
 
+### Download the computed identifications as a spreadsheet (2026-08-21)
+
+`/computed-identifications` now has a download control. It returns **the reader's whole
+filtered set** — not just the page on screen — as a bilingual xlsx, with the matched
+passages on the finding's own row.
+
+- **The evidence travels with the claim.** Five columns carry the manuscript passage, the
+  edition passage and their notes, with the matched words in **red and bold** — the same
+  highlighting the parallels export uses. The first draft put the passages on a second
+  sheet, which meant judging any single match required joining two sheets on a shelfmark
+  that repeats.
+- **"One row per work" and "one row per manuscript" now export what their expander opens
+  onto.** Those views are grouped, so the grouped row itself carries no manuscript and no
+  text — on the page you open it, but a spreadsheet has nothing to open. The export takes
+  its ORDER from the grouping and its ROWS from the identifications underneath, so the
+  grouping survives as columns you can sort and pivot on.
+- **A warning before a large download, and a card that clears after it.** Above 2,000 rows
+  the control asks first — with a different sentence for the grouped views, where a row
+  count would be the wrong number. The "Preparing your file" card now clears on every
+  outcome, including the failures.
+- **The file says where it came from.** An About sheet names the artifact it was built
+  from, credits the MiDRASH automatic transcriptions (Stoekl Ben Ezra et al., 2025) rather
+  than carrying thousands of lines of someone else's dataset anonymously, and marks which
+  passages are machine-read rather than a scholar's transcription. Where the artifact had
+  already abbreviated a passage, the sheet says so instead of leaving an unexplained
+  ellipsis inside a quotation.
+
+No confidence score, band or precision figure reaches a cell: the only number in the file
+is page coverage in matched letters, with its qualifier attached, exactly as the page
+renders it. Measured against the real artifact — 28,635 rows in 66 s, a 5.8 MB file.
+
 ### The deploy path no longer runs an hour-long benchmark as its "smoke test" (2026-08-20)
 
 Four fixes to the discovery deploy path and its benchmark, none of them runtime code.

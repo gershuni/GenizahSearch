@@ -106,11 +106,55 @@ DISCOVERY_MAX_CONCURRENT_BROWSE_QUERIES=24 # the BROWSE budget (added 2026-08-04
 DISCOVERY_BROWSE_LRU_MAX_ENTRIES=5000
 DISCOVERY_PAGE_SIZE_DEFAULT=50
 DISCOVERY_PAGE_SIZE_MAX=200              # hard ceiling; never overridable above this
+DISCOVERY_MAX_CONCURRENT_EXPORT_QUERIES=2  # the EXPORT budget (added 2026-08-20, Phase 136.2)
+DISCOVERY_EXPORT_TIMEOUT=300.0             # seconds; a whole-set walk, not an interactive read
+DISCOVERY_EXPORT_EXCERPT_CHUNK=500         # ids per IN (...) batch in the export's excerpt read
 ```
+
+### 3.1 The THIRD budget class (added 2026-08-20, Phase 136.2)
+
+The findings xlsx export takes its own budget rather than the heavy one, and
+its own `ThreadPoolExecutor` sized to that budget, for the reason §2/§3 already
+give for splitting heavy from browse: **two semaphores over one pool are two
+names for one budget.**
+
+Why not simply `heavy=True`:
+
+* An export holds its slot for the length of a WHOLE-CORPUS WALK, not for one
+  query. Measured on the served artifact (2026-08-20, dev box): the default
+  view is **28,635 rows** collected in **52.9 s**, walking 144 pages at the
+  frozen 200-row ceiling plus 58 chunked excerpt batches.
+* Sharing the heavy cap of 4 would let two concurrent exports occupy half the
+  budget every corpus-wide interactive query draws on, for a minute at a time.
+
+The export is **uncapped in ROWS by owner decision (2026-08-20)** — the file is
+the whole filtered set, not the visible page — so it is bounded on every OTHER
+axis instead: 2 concurrent exports, one timeout for the whole build, a
+`write_only` streaming workbook, and a chunked excerpt read in place of the
+per-identification one (`_query_excerpt_for_identification` is 1 query per row;
+uncapped that would be 28,635 serialized round trips on a single-worker box).
 
 None of these env vars exist in code yet -- this section only fixes the
 NAMES and DEFAULTS 134-06 must implement against, so this artifact and the
 DiscoveryService code stay in lockstep from the first line of that plan.
+
+
+**Measured build cost after the 2026-08-20 rework (highlighted passages).** At
+28,635 rows with the live artifact's own text lengths (context 90 chars a side,
+span averaging 480 characters, ~14 highlight intervals per span) the workbook
+build takes **66.3 s** and produces a **5.8 MB** file; the same rows written as
+plain text take **14.0 s**. Rich text therefore costs about **+23 s**, linear in
+row count (checked at 4,000 and 28,635 rows), and peak traced allocation stays
+in single-digit MB because `write_only=True` streams rows to the archive rather
+than holding a cell graph. Added to the walk, a default-view export runs at
+roughly a third of `DISCOVERY_EXPORT_TIMEOUT` — down from about a fifth before
+the rework. Worth re-measuring when the corpus grows: the honest failure here is
+a 504, never a short file, so a build that outgrows the timeout fails loudly,
+but it fails for the reader too.
+
+*Measurement note:* a first reading of 374 s was **tracemalloc's own overhead**
+(about 5.6× on this allocation-heavy path), not the builder. Benchmark this
+build without a tracing profiler attached.
 
 ## 4. Measured Actuals — dev-box measured (prod-box PENDING)
 

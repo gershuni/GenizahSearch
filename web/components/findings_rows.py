@@ -86,6 +86,7 @@ from shared.discovery_service import (
     FINDINGS_UNIT_WORK,
     LAUNCH_CONTRIBUTION_SHADES,
     _build_findings_filter,
+    EXPANSION_KEY_BY_UNIT as _EXPANSION_KEY_BY_UNIT,
 )
 from shared.discovery_surface_projection import is_outage
 from web.components import discovery_links as links
@@ -1814,11 +1815,13 @@ def _render_row_meta(item: Mapping[str, Any], lang: str, unit: str,
 #: and the pair below is admitted BY THE SAME DERIVED CHECK that previously refused
 #: it -- `EXPANSION_SUPPORTED_AXES` reads the builder's signature, so this table
 #: cannot claim an axis the query lacks.
-EXPANSION_KEY_BY_UNIT: Dict[str, Optional[Tuple[str, str]]] = {
-    FINDINGS_UNIT_IDENTIFICATION: None,
-    FINDINGS_UNIT_MANUSCRIPT: ("sys_id", "sys_id"),
-    FINDINGS_UNIT_WORK: ("display_work_id", "work_id"),
-}
+#:
+#: MOVED to `shared/discovery_service.py` on 2026-08-21 and imported here. The
+#: findings EXPORT has to flatten the same grouping this table expands, and it
+#: lives below the layering guard that forbids `shared/` importing `web/`. The
+#: name, the value and the checks below are unchanged -- this is one object with
+#: two readers, not two tables that must be kept equal.
+EXPANSION_KEY_BY_UNIT = _EXPANSION_KEY_BY_UNIT
 
 
 #: The filter axes an expansion may legitimately pin, READ FROM the shipped

@@ -365,10 +365,22 @@ def granularity_subline(other_work_title: str, lang: str = "en") -> str:
     return _pick(_GRANULARITY_SUBLINE, lang).format(other_work_title=other_work_title)
 
 
-def locus_subline(locus_label: str, lang: str = "en") -> str:
-    """The baked scholarly address, with one language-neutral structural cue."""
+def locus_subline(locus_label: str, lang: str = "en", *, cue: bool = True) -> str:
+    """The baked scholarly address, with one language-neutral structural cue.
+
+    `cue=False` returns the address ALONE. The `↳` is LAYOUT, not vocabulary:
+    on a row it says "this line belongs to the title above it", which is a
+    relationship a spreadsheet already states in its column header. Carried
+    into a cell it is noise that also breaks sorting and copy-paste, and it
+    reached every locus cell of the first export (owner report, 2026-08-20).
+
+    A parameter rather than "the export reads `locus_label` itself": one
+    function still owns what a locus looks like, so a later change to the
+    address -- a separator, a normalisation -- reaches the workbook without
+    anyone remembering it exists.
+    """
     del lang  # the citation itself is source vocabulary, not translated copy
-    return f"↳ {locus_label}"
+    return f"↳ {locus_label}" if cue else locus_label
 
 
 _MISSING_TITLE: Dict[str, str] = {
@@ -845,6 +857,19 @@ _EXCERPT_STRINGS: Dict[str, Dict[str, str]] = {
     "multi_span": {
         "en": "The strongest of {count} matching passages.",
         "he": "הקטע המובהק מתוך {count} קטעים תואמים.",
+    },
+    # THE BAKE ALREADY ABBREVIATES A LONG PASSAGE, and until now nothing said
+    # so. `pieces()` caps a span at `excerpt_span_cap` stream letters, keeps
+    # its head and tail joined by a visible U+22EF, and flags the row
+    # (`frag_clipped` / `work_clipped`). In the live artifact that is 10,968 of
+    # 48,270 fragment spans (22.7%) and 12,212 work spans (25.3%). The mark is
+    # visible in the text; what was missing is the sentence telling a reader
+    # what it means -- and in a downloaded file, an unexplained ellipsis inside
+    # a quoted passage is worse than on a page, because the file travels
+    # without the page that could have explained it.
+    "clipped_note": {
+        "en": "Long passage — the middle is omitted (⋯).",
+        "he": "קטע ארוך — האמצע הושמט (⋯).",
     },
     "failed": {
         "en": "The excerpt could not be loaded.",
