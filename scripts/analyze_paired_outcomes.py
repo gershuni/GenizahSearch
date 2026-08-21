@@ -107,24 +107,67 @@ def cluster_bootstrap_diff(a: dict, b: dict, qids: list, k: int,
     def q_(p: float) -> float:
         return stats[min(len(stats) - 1, int(p * len(stats)))]
 
+    lb_raw = q_(0.05)
     return {
         'diff': round(point, 4),
         'ci95_two_sided': [round(q_(0.025), 4), round(q_(0.975), 4)],
-        'lb95_one_sided': round(q_(0.05), 4),
+        'lb95_one_sided': round(lb_raw, 4),
+        # UNROUNDED lower bound, kept alongside the rounded one above. Any
+        # pass/fail comparison against --margin MUST use this value: rounding
+        # to 4 decimals before comparing can flip a verdict (e.g. a true LB of
+        # -0.03004 rounds to -0.0300, which reads as passing a 0.03 margin
+        # when the real bootstrap quantile does not). Round only for display.
+        'lb95_one_sided_raw': lb_raw,
         'n_groups': len(keys),
     }
 
 
 def analyze(a: dict, b: dict, k: int, margin: float, resamples: int,
-            seed: int, min_stratum_n: int) -> dict:
+            seed: int, min_stratum_n: int, strict: bool = False,
+            expect_cells: list = None) -> dict:
+    """strict: the holdout mode (Codex C3 fail-closed fix).
+
+    Non-strict (tune) behaviour is UNCHANGED: a mismatched query_id set
+    triggers a WARNING and the analysis proceeds on the intersection.
+
+    Under strict, an intersection fallback would silently let the two
+    configs' dumps disagree about what was even run and still emit a
+    verdict, so it is fatal instead: (a) the query_id sets must be IDENTICAL,
+    no fallback; (b) every shared query's strata dict must match between A
+    and B (a stratum that differs between the two dumps means at least one
+    of them is not describing this query correctly).
+
+    expect_cells (independent of strict, so it is unit-testable on its own):
+    a list of {'stratum', 'value', 'min_n'} dicts, each checked for EXISTENCE
+    (n > 0) and SUFFICIENCY (n >= min_n) over the shared-query set -- always
+    computed for exactly these declared cells, never substituted with
+    whatever strata happen to be dynamically discovered in the data. Any
+    missing/undersized cell fails the whole set closed: 'all_cells_pass' is
+    False and 'overall_verdict' is INSUFFICIENT-BLOCKED, never a silent
+    partial pass.
+    """
     qids = sorted(set(a) & set(b))
     missing = sorted(set(a) ^ set(b))
+    if strict and missing:
+        raise SystemExit(
+            f'STRICT: {len(missing)} query_id(s) present in only one config '
+            f'-- refusing the intersection fallback under --strict '
+            f'(first few: {missing[:5]})')
     if missing:
         print(f'WARNING: {len(missing)} queries present in only one config '
               f'-- analysed on the {len(qids)}-query intersection',
               file=sys.stderr)
     if not qids:
         raise SystemExit('no shared queries between the two configs')
+
+    if strict:
+        for q in qids:
+            sa = a[q].get('strata') or {}
+            sb = b[q].get('strata') or {}
+            if sa != sb:
+                raise SystemExit(
+                    f'STRICT: strata mismatch for query {q!r} -- A={sa} '
+                    f'B={sb} (the two dumps disagree about this query)')
 
     def recall(cfg: dict) -> float:
         return sum(1 for q in qids if hit(cfg[q], k)) / len(qids)
@@ -135,11 +178,12 @@ def analyze(a: dict, b: dict, k: int, margin: float, resamples: int,
         'k': k,
         'margin': margin,
         'seed': seed,
+        'strict': strict,
         'recall_a': round(recall(a), 4),
         'recall_b': round(recall(b), 4),
         'paired': paired_table(a, b, qids, k),
         'bootstrap': boot,
-        'non_inferior_a_vs_b': boot['lb95_one_sided'] >= -margin,
+        'non_inferior_a_vs_b': boot['lb95_one_sided_raw'] >= -margin,
     }
 
     strata_keys = sorted({sk for q in qids
@@ -164,8 +208,36 @@ def analyze(a: dict, b: dict, k: int, margin: float, resamples: int,
                 'recall_b': round(sum(1 for q in sub if hit(b[q], k))
                                   / len(sub), 4),
                 'bootstrap': sboot,
-                'non_inferior': sboot['lb95_one_sided'] >= -margin,
+                'non_inferior': sboot['lb95_one_sided_raw'] >= -margin,
             }
+
+    if expect_cells is not None:
+        cells_out = []
+        for cell in expect_cells:
+            st, val, min_n = cell['stratum'], cell['value'], cell['min_n']
+            sub = [q for q in qids
+                   if (a[q].get('strata') or {}).get(st) == val]
+            n = len(sub)
+            sufficient = n > 0 and n >= min_n
+            entry = {'stratum': st, 'value': val, 'min_n': min_n, 'n': n,
+                     'sufficient': sufficient}
+            if sufficient:
+                cboot = cluster_bootstrap_diff(a, b, sub, k, resamples, seed)
+                entry['bootstrap'] = cboot
+                entry['non_inferior'] = (
+                    cboot['lb95_one_sided_raw'] >= -margin)
+            cells_out.append(entry)
+        res['expect_cells'] = cells_out
+        # Computed over EXACTLY the declared cells above -- never over
+        # res['strata'], which reflects whatever strata the data happens to
+        # carry and could silently omit a pre-registered class this run.
+        res['all_cells_pass'] = all(c['sufficient'] for c in cells_out)
+        if not res['all_cells_pass']:
+            res['overall_verdict'] = 'INSUFFICIENT-BLOCKED'
+        else:
+            res['overall_verdict'] = (
+                'NON-INFERIOR' if all(c['non_inferior'] for c in cells_out)
+                else 'NOT SHOWN')
     return res
 
 
@@ -180,8 +252,29 @@ def main() -> int:
     ap.add_argument('--resamples', type=int, default=RESAMPLES_DEFAULT)
     ap.add_argument('--seed', type=int, default=SEED_DEFAULT)
     ap.add_argument('--min-stratum-n', type=int, default=MIN_STRATUM_N)
+    ap.add_argument('--strict', action='store_true',
+                    help='holdout mode: no intersection fallback on a '
+                         'query_id mismatch, strata must match between A '
+                         'and B, and --expect-cells becomes required')
+    ap.add_argument('--expect-cells', default=None,
+                    help='JSON file: a list of {"stratum","value","min_n"} '
+                         'cells that must all exist and be sufficiently '
+                         'sized, else the run is INSUFFICIENT-BLOCKED. '
+                         'Required when --strict is set.')
     ap.add_argument('--out', default=None)
     args = ap.parse_args()
+
+    if args.strict and not args.expect_cells:
+        raise SystemExit('--strict requires --expect-cells FILE '
+                         '(the holdout mode has no undeclared cells)')
+
+    expect_cells = None
+    if args.expect_cells:
+        with open(args.expect_cells, encoding='utf-8') as fh:
+            expect_cells = json.load(fh)
+        if not isinstance(expect_cells, list):
+            raise SystemExit('--expect-cells must be a JSON list of '
+                             '{"stratum","value","min_n"} objects')
 
     merged = collections.defaultdict(dict)
     for path in args.dump:
@@ -197,7 +290,8 @@ def main() -> int:
                          f'need both {args.a!r} and {args.b!r}')
 
     res = analyze(merged[args.a], merged[args.b], args.k, args.margin,
-                  args.resamples, args.seed, args.min_stratum_n)
+                  args.resamples, args.seed, args.min_stratum_n,
+                  strict=args.strict, expect_cells=expect_cells)
 
     p = res['paired']
     print(f"n={res['n']}  k={res['k']}  A={args.a}  B={args.b}")
@@ -220,6 +314,19 @@ def main() -> int:
                       f"A={s['recall_a']:.3f} B={s['recall_b']:.3f} "
                       f"LB={s['bootstrap']['lb95_one_sided']:+.3f} "
                       f"-> {'NON-INFERIOR' if s['non_inferior'] else 'NOT SHOWN'}")
+
+    if 'expect_cells' in res:
+        print()
+        for c in res['expect_cells']:
+            if not c['sufficient']:
+                print(f"  [expect {c['stratum']}={c['value']}] n={c['n']} "
+                      f"min_n={c['min_n']}  MISSING/UNDERSIZED")
+            else:
+                print(f"  [expect {c['stratum']}={c['value']}] n={c['n']} "
+                      f"LB={c['bootstrap']['lb95_one_sided']:+.3f} "
+                      f"-> {'NON-INFERIOR' if c['non_inferior'] else 'NOT SHOWN'}")
+        print(f"  all_cells_pass={res['all_cells_pass']}  "
+              f"overall_verdict={res['overall_verdict']}")
 
     if args.out:
         with open(args.out, 'w', encoding='utf-8') as fh:
