@@ -3526,7 +3526,19 @@ class DiscoveryService:
             # predicate returns must not spin forever on a single-worker box.
             # Tripping it marks the walk INCOMPLETE rather than ending it
             # quietly.
-            if page > _export_page_guard(total, page_size):
+            #: THE CAPPED TOTAL IS NOT A BOUND. When the count is
+            #: approximate, `total` is a CEILING the counter stopped at,
+            #: not a measurement -- deriving the guard from it stops the
+            #: walk a few pages past the cap and returns an `ok` envelope
+            #: for a file the reader asked to be whole (Codex review of
+            #: PR #322, P1). The stopping condition above already drops
+            #: it for exactly this reason; the guard was left behind,
+            #: which made this code contradict its own comment. Falls
+            #: back to the flat no-total ceiling, which is still a
+            #: liveness bound and still marks the walk INCOMPLETE if it
+            #: ever trips.
+            if page > _export_page_guard(
+                    None if approximate_total else total, page_size):
                 guard_tripped = True
                 logger.error(
                     "DiscoveryService export walk exceeded its page guard "

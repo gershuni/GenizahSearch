@@ -2692,7 +2692,20 @@ def init_api_routes(app_override=None):
                 headers={"Content-Disposition": encode_filename_for_header(filename)},
             )
 
-        return stamp_download_done(await _build(), dl)
+        # EVERY EXIT PASSES THE STAMP, including the ones nobody planned.
+        # The handshake was reached only on the paths that RETURN, so an
+        # unexpected SQLite, projection or openpyxl error produced an
+        # unstamped 500 and left the page waiting out its full timeout
+        # with the progress card up (Codex review of PR #322, P2). A
+        # handshake that only fires on success has the same shape as the
+        # spinner defect it was written to fix.
+        try:
+            built = await _build()
+        except Exception:
+            logger.exception(
+                'Computed-identifications export failed unexpectedly')
+            built = Response('Export failed', status_code=500)
+        return stamp_download_done(built, dl)
 
     @target_app.get('/api/export/word')
     def export_word():

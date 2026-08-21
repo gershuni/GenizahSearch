@@ -7540,6 +7540,49 @@ def test_the_route_signals_completion_and_ignores_a_forged_token():
             f"a forged token {forged!r} reached Set-Cookie")
 
 
+def test_an_unexpected_build_failure_still_signals_the_page():
+    """The completion cookie must ride on EVERY exit, including the unplanned.
+
+    `stamp_download_done` was reached only on the paths that return, so an
+    error past the handled `ValueError` -- SQLite, a projection failure,
+    openpyxl -- produced an unstamped 500 and the page waited out its whole
+    330-second timeout with the progress card still up (Codex review of PR
+    #322, P2). A handshake that only fires on success is the same defect as a
+    spinner that only stops on success, one layer down.
+
+    Driven through the REAL route on a disposable app rather than by reading
+    the source: the property is what reaches the wire. The route resolves its
+    imports at CALL time, so patching the defining modules is what the handler
+    actually sees.
+    """
+    from unittest import mock as _mock
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import web.discovery as wd
+    import web.discovery_assets as _da
+    from web.api import init_api_routes
+
+    bare = FastAPI()
+    init_api_routes(app_override=bare)
+
+    async def _explode(**kwargs):
+        raise RuntimeError("the artifact fell over mid-walk")
+
+    with _mock.patch.object(_da, "discovery_available", lambda: True),             _mock.patch.object(wd, "collect_and_build_export", _explode):
+        client = TestClient(bare, raise_server_exceptions=False)
+        response = client.get(
+            "/api/export/computed-identifications",
+            params={"dl": "abcdef0123"})
+
+    assert response.status_code == 500, response.status_code
+    cookie = response.headers.get("set-cookie") or ""
+    assert "gs_dl_abcdef0123=1" in cookie, (
+        "an unexpected failure left the page waiting for a cookie that never "
+        f"came; Set-Cookie was {cookie!r}")
+
+
 @pytest.mark.parametrize("total,expected", (
     (None, False), ("", False), (0, False), (1999, False), (2000, True),
     (28635, True),

@@ -808,6 +808,51 @@ def test_a_group_walk_that_trips_its_page_guard_leaves_the_order_uncertified(
     assert "appear at the end" not in body
 
 
+
+def test_a_capped_total_does_not_bound_the_walk(monkeypatch):
+    """`DISCOVERY_FINDINGS_COUNT_MAX` must not silently halve an export.
+
+    A capped `total` is a CEILING the counter stopped at, not a measurement.
+    `_export_walk` already drops it as the STOPPING CONDITION and says so in a
+    comment -- but the runaway page guard was still derived from it, so a cap of
+    N stopped the walk about eight pages past N and returned an `ok` envelope
+    for a file the reader asked to be whole (Codex review of PR #322, P1).
+
+    Here the cap is 1 and 13 pages match. Under the old bound the walk stopped
+    at 9 pages and reported a tripped guard; it must now collect every row.
+    """
+    svc = DiscoveryService(path_provider=lambda: ":memory:",
+                           availability_callable=lambda: True)
+    pages = 13
+
+    def _enveloped(unit="identification", page=1, page_size=200, **kw):
+        # Full pages until the last, which is short -- the only honest end.
+        count = page_size if page < pages else 5
+        rows = [{"identification_id": "i-%d-%d" % (page, i)}
+                for i in range(count)]
+        return {"status": STATUS_OK, "items": rows,
+                # The CAP, flagged. Deliberately far below the real count.
+                "total": 1,
+                "meta": {"unit": unit, "approximate_total": True}}
+
+    monkeypatch.setattr(svc, "get_findings_enveloped", _enveloped)
+    monkeypatch.setattr(svc, "_export_artifact_identity", lambda: ("p", "v"))
+    monkeypatch.setattr(svc, "_query_excerpts_for_identifications", lambda ids: {})
+
+    env = svc.collect_findings_for_export(unit="identification",
+                                          with_excerpts=False)
+    expected = 200 * (pages - 1) + 5
+    assert len(env["items"]) == expected, (
+        f"the walk stopped at {len(env['items'])} of {expected} rows -- the "
+        "capped total is bounding it again")
+    # `None`, not True: the rows cannot be checked against a number that was
+    # never a count. What must NOT appear is False, which would mean the guard
+    # tripped and the file is knowingly short.
+    assert env["meta"]["walk_complete"] is None, (
+        "a capped total must leave completeness UNVERIFIED, never asserted "
+        "either way")
+
+
 def test_the_page_and_the_export_group_on_one_table():
     """The page opens a grouped row onto its children with
     `EXPANSION_KEY_BY_UNIT`; the export flattens the same grouping with it.
