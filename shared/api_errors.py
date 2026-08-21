@@ -48,6 +48,7 @@ ERROR_CODES = frozenset({
     'passage_unavailable',        # 503 — PASSAGE_PARALLELS_ENABLED off, or the passage index did not load
     'passage_scope_unsupported',  # 400 — method='passage' + filters.library includes 'LOCAL' (include mode); the passage index has no Local-corpus records
     'passage_search_busy',        # 503 — passage-matching concurrency budget (SEARCH_API_PASSAGE_CONCURRENCY) exhausted; fail-fast, Retry-After set
+    'passage_option_unsupported', # 400 — method='passage' + boundary_mode != 'full'; passage has no cross-paragraph/token-boundary concept
 })
 
 # Surfaced in top-level `warnings: []` arrays (D-07), NOT as errors.

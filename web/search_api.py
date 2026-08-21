@@ -393,86 +393,116 @@ def _resolve_fuzzy_max_limit() -> int:
     return min(DEFAULT_FUZZY_MAX_LIMIT, FUZZY_HARD_MAX)
 
 
-class _HeavySemaphoreState:
-    """Module-level mutable state for the heavy-mode concurrency semaphore.
+class _SemaphoreBudget:
+    """Generic bounded-concurrency budget: a rebuildable asyncio.Semaphore,
+    re-read from its own env var on every acquire, fail-fast 503 when no
+    slot is free.
 
-    asyncio.Semaphore is fixed-size at construction.  We keep the semaphore
-    plus a record of its configured capacity so we can rebuild it when the
-    env changes AND the semaphore is fully idle (all slots free).
+    Parameterized entirely by subclass class attributes (`_env_var`,
+    `_default_capacity`, `_busy_code`, `_busy_message`) -- this used to be
+    two near-identical copies (`_HeavySemaphoreState` /
+    `_PassageSemaphoreState`, ~40 lines each); code review flagged the
+    duplication (Phase 145 adversarial review, finding #7). `_HeavySemaphoreState`
+    is now a THIN alias subclass with zero behavior change -- its existing
+    tests (which reach into `.sem` / `._capacity` / `.reset()` directly, e.g.
+    tests/test_search_api_v2.py asserting `_HeavySemaphoreState._capacity`
+    across a rebuild) still pass unmodified, because those attributes and
+    that method are exactly what this base class provides under the same
+    names.
 
     All accesses are on the event-loop thread (the semaphore is an asyncio
     primitive), so no thread lock is needed around the rebuild.
     """
-    sem: asyncio.Semaphore = asyncio.Semaphore(DEFAULT_HEAVY_CONCURRENCY)
-    _capacity: int = DEFAULT_HEAVY_CONCURRENCY
+    _env_var: str = ''
+    _default_capacity: int = 1
+    _busy_code: str = 'busy'
+    _busy_message: str = 'concurrency limit reached; retry shortly'
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # Per-subclass mutable state -- each budget (heavy, passage, ...)
+        # gets its OWN semaphore/capacity, never shared across subclasses.
+        cls.sem = asyncio.Semaphore(cls._default_capacity)
+        cls._capacity = cls._default_capacity
 
     @classmethod
     def reset(cls, capacity: int) -> None:
-        """Rebuild the semaphore to the given capacity.  Only safe to call
+        """Rebuild the semaphore to the given capacity. Only safe to call
         when the semaphore is fully idle (tests use this directly)."""
         cls.sem = asyncio.Semaphore(capacity)
         cls._capacity = capacity
 
+    @classmethod
+    async def acquire(cls):
+        """Acquire one slot. Re-reads this budget's own env var on every
+        call; rebuilds the semaphore if the configured size changed AND it
+        is currently fully idle.
+
+        Returns:
+            A zero-argument callable that releases the slot. Callers MUST
+            invoke this in a ``finally`` block so a timeout/exception cannot
+            strand a slot.
+
+        Raises:
+            APIError(cls._busy_code, ..., 503): if no slot is available
+                right now (non-blocking acquire failed).
+        """
+        raw = os.environ.get(cls._env_var) if cls._env_var else None
+        desired = cls._default_capacity
+        if raw:
+            try:
+                desired = max(1, int(raw))
+            except (ValueError, TypeError):
+                pass
+
+        # Rebuild only when the size changed AND fully idle (no held slots);
+        # if partially held, keep the current semaphore so we never strand a
+        # held slot. "Fully idle" means the counter is back at capacity;
+        # asyncio exposes no public API for that, so the internal counter is
+        # read defensively via getattr -- if the attribute is ever
+        # renamed/removed, current_value is None, the rebuild is skipped, and
+        # the gate keeps working at the old capacity (fail-safe, never raises).
+        if desired != cls._capacity:
+            current_value = getattr(cls.sem, '_value', None)
+            if current_value == cls._capacity:
+                cls.reset(desired)
+
+        sem = cls.sem
+        # Non-blocking acquire via the public API. On a single-threaded event
+        # loop, sem.locked() (True iff no slot is free) followed by
+        # sem.acquire() cannot race: when not locked, acquire() decrements the
+        # counter and returns WITHOUT awaiting a Future, so the loop never
+        # switches between the check and the acquire. We do NOT use
+        # asyncio.wait_for(sem.acquire(), timeout=0): in Python 3.11 that
+        # always raises TimeoutError before the coroutine runs a single step,
+        # regardless of slot availability.
+        if sem.locked():
+            raise APIError(
+                cls._busy_code,
+                cls._busy_message,
+                http_status=503,
+                headers={'Retry-After': '5'},
+            )
+        await sem.acquire()
+
+        def _release():
+            sem.release()
+
+        return _release
+
+
+class _HeavySemaphoreState(_SemaphoreBudget):
+    """The pre-existing heavy-mode budget (variants/fuzzy/parallels
+    method='chunk') -- unchanged behavior, thin alias over _SemaphoreBudget."""
+    _env_var = 'SEARCH_API_HEAVY_CONCURRENCY'
+    _default_capacity = DEFAULT_HEAVY_CONCURRENCY
+    _busy_code = 'heavy_search_busy'
+    _busy_message = 'heavy search concurrency limit reached; retry shortly'
+
 
 async def _acquire_heavy_slot():
-    """Acquire one slot from the heavy-mode semaphore.
-
-    Re-reads SEARCH_API_HEAVY_CONCURRENCY on every call; rebuilds the
-    semaphore if the configured size changed AND it is currently fully idle.
-
-    Returns:
-        A zero-argument callable that releases the slot.  Callers MUST
-        invoke this in a ``finally`` block so a timeout/exception cannot
-        strand a slot.
-
-    Raises:
-        APIError('heavy_search_busy', ..., 503): if no slot is available
-            right now (non-blocking acquire failed).
-    """
-    # Re-read the desired concurrency from env.
-    raw = os.environ.get('SEARCH_API_HEAVY_CONCURRENCY')
-    desired = DEFAULT_HEAVY_CONCURRENCY
-    if raw:
-        try:
-            desired = max(1, int(raw))
-        except (ValueError, TypeError):
-            pass
-
-    # Rebuild semaphore only when the size changed AND it is fully idle
-    # (no held slots).  If partially held, keep the current semaphore so we
-    # never strand held slots.  "Fully idle" means the counter is back at
-    # capacity; asyncio exposes no public API for that, so we read the
-    # internal counter defensively via getattr — if the attribute is ever
-    # renamed/removed, current_value is None, we skip the rebuild, and the
-    # gate keeps working at the old capacity (fail-safe, never raises).
-    if desired != _HeavySemaphoreState._capacity:
-        current_value = getattr(_HeavySemaphoreState.sem, '_value', None)
-        if current_value == _HeavySemaphoreState._capacity:
-            _HeavySemaphoreState.reset(desired)
-
-    sem = _HeavySemaphoreState.sem
-    # Non-blocking acquire via the public API.  On a single-threaded event
-    # loop, sem.locked() (True iff no slot is free) followed by sem.acquire()
-    # cannot race: when not locked, acquire() decrements the counter and
-    # returns WITHOUT awaiting a Future, so the loop never switches between
-    # the check and the acquire.  release() in the returned callable keeps the
-    # acquire/release pair symmetric (no manual counter manipulation).
-    # We do NOT use asyncio.wait_for(sem.acquire(), timeout=0): in Python 3.11
-    # that always raises TimeoutError before the coroutine runs a single step,
-    # regardless of slot availability.
-    if sem.locked():
-        raise APIError(
-            'heavy_search_busy',
-            'heavy search concurrency limit reached; retry shortly',
-            http_status=503,
-            headers={'Retry-After': '5'},
-        )
-    await sem.acquire()
-
-    def _release():
-        sem.release()
-
-    return _release
+    """Thin alias -- see _SemaphoreBudget.acquire / _HeavySemaphoreState."""
+    return await _HeavySemaphoreState.acquire()
 
 
 # ---------------------------------------------------------------------------
@@ -485,88 +515,57 @@ async def _acquire_heavy_slot():
 # jobs) can occupy or queue ahead of every worker while the heavy semaphore
 # still reports capacity. So passage gets its OWN ThreadPoolExecutor,
 # max_workers == its own semaphore's capacity (a small budget: capacity 4),
-# never the default executor _acquire_heavy_slot's caller (fetch_parallels_
-# results via _run_sync) uses today.
+# never the default executor the chunk path (method='chunk', via
+# fetch_parallels_results's `executor=None` default) uses today.
 DEFAULT_PASSAGE_CONCURRENCY = 4
 
 
-class _PassageSemaphoreState:
-    """Mirrors _HeavySemaphoreState exactly, plus its OWN ThreadPoolExecutor
-    (the heavy budget above has none -- it dispatches into the default
-    run_in_executor pool; passage must not repeat that gap)."""
-    sem: asyncio.Semaphore = asyncio.Semaphore(DEFAULT_PASSAGE_CONCURRENCY)
-    _capacity: int = DEFAULT_PASSAGE_CONCURRENCY
+class _PassageSemaphoreState(_SemaphoreBudget):
+    """Same semaphore machinery as _HeavySemaphoreState (inherited), plus its
+    OWN ThreadPoolExecutor (the heavy budget has none -- it dispatches into
+    the default run_in_executor pool; passage must not repeat that gap)."""
+    _env_var = 'SEARCH_API_PASSAGE_CONCURRENCY'
+    _default_capacity = DEFAULT_PASSAGE_CONCURRENCY
+    _busy_code = 'passage_search_busy'
+    _busy_message = 'passage-matching search concurrency limit reached; retry shortly'
     _executor: Optional['ThreadPoolExecutor'] = None
 
     @classmethod
     def reset(cls, capacity: int) -> None:
-        """Rebuild the semaphore AND retire the executor. Only safe to call
-        when the semaphore is fully idle (tests use this directly) -- mirrors
-        _HeavySemaphoreState.reset, plus the executor teardown that class
-        does not need (it has none)."""
-        cls.sem = asyncio.Semaphore(capacity)
-        cls._capacity = capacity
+        """Rebuild the semaphore (via the base class) AND retire the
+        executor -- only safe under the same idle guard the base class's
+        `acquire` already applies before calling this."""
+        super().reset(capacity)
         if cls._executor is not None:
             cls._executor.shutdown(wait=False)
             cls._executor = None
 
+    @classmethod
+    def executor(cls) -> 'ThreadPoolExecutor':
+        """This budget's OWN threadpool, max_workers == its capacity.
+
+        Built lazily -- a process that never serves a passage request pays
+        no threads. Called between `acquire()` and `run_in_executor` (via
+        shared.parallels_service.fetch_parallels_results's `executor` kwarg),
+        mirroring shared/discovery_service.py::_executor_for exactly.
+        """
+        if cls._executor is None:
+            from concurrent.futures import ThreadPoolExecutor
+            cls._executor = ThreadPoolExecutor(
+                max_workers=max(1, int(cls._capacity)),
+                thread_name_prefix='passage-search',
+            )
+        return cls._executor
+
 
 async def _acquire_passage_slot():
-    """Acquire one slot from the passage-matching semaphore.
-
-    Same shape as _acquire_heavy_slot (re-read env, rebuild-when-idle,
-    non-blocking acquire, fail-fast 503 + Retry-After) but its own env knob
-    and its own overload error code, so a passage overload is distinguishable
-    from a chunk-path 'heavy_search_busy' in logs/PostHog.
-    """
-    raw = os.environ.get('SEARCH_API_PASSAGE_CONCURRENCY')
-    desired = DEFAULT_PASSAGE_CONCURRENCY
-    if raw:
-        try:
-            desired = max(1, int(raw))
-        except (ValueError, TypeError):
-            pass
-
-    if desired != _PassageSemaphoreState._capacity:
-        current_value = getattr(_PassageSemaphoreState.sem, '_value', None)
-        if current_value == _PassageSemaphoreState._capacity:
-            # Rebuild the executor WITH the semaphore, under the same idle
-            # guard -- otherwise the two sizes drift apart and a held slot
-            # stops guaranteeing a worker (shared/discovery_service.py's
-            # _acquire_slot precedent).
-            _PassageSemaphoreState.reset(desired)
-
-    sem = _PassageSemaphoreState.sem
-    if sem.locked():
-        raise APIError(
-            'passage_search_busy',
-            'passage-matching search concurrency limit reached; retry shortly',
-            http_status=503,
-            headers={'Retry-After': '5'},
-        )
-    await sem.acquire()
-
-    def _release():
-        sem.release()
-
-    return _release
+    """Thin alias -- see _SemaphoreBudget.acquire / _PassageSemaphoreState."""
+    return await _PassageSemaphoreState.acquire()
 
 
 def _passage_executor() -> 'ThreadPoolExecutor':
-    """This budget class's OWN threadpool, max_workers == its capacity.
-
-    Built lazily -- a process that never serves a passage request pays no
-    threads. Called between _acquire_passage_slot and run_in_executor (via
-    shared.parallels_service.fetch_parallels_results's `executor` kwarg),
-    mirroring shared/discovery_service.py::_executor_for exactly.
-    """
-    if _PassageSemaphoreState._executor is None:
-        from concurrent.futures import ThreadPoolExecutor
-        _PassageSemaphoreState._executor = ThreadPoolExecutor(
-            max_workers=max(1, int(_PassageSemaphoreState._capacity)),
-            thread_name_prefix='passage-search',
-        )
-    return _PassageSemaphoreState._executor
+    """Thin alias -- see _PassageSemaphoreState.executor."""
+    return _PassageSemaphoreState.executor()
 
 
 # Phase 79 D-11 / R-08 -- transcription char cap.
@@ -1743,6 +1742,15 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
         #       special-casing here. `library_filter_mode='exclude'` with
         #       'LOCAL' listed is fine (excluding a corpus passage never had
         #       is a no-op, not a request for it).
+        #     - `boundary_mode != 'full'` -> 400 'passage_option_unsupported'
+        #       (adversarial review finding #2). PassageSearcher has no
+        #       cross-paragraph/token-boundary concept over a letter stream
+        #       and raises ValueError for this itself (defense in depth for
+        #       ANY caller, not just this endpoint); silently degrading
+        #       'boundary'/'combined' to 'full' would be exactly the silent-
+        #       degradation failure mode this project's fail-closed posture
+        #       exists to prevent, so it is rejected here BEFORE a slot is
+        #       ever acquired.
         if req.method == 'passage':
             from web.passage_assets import passage_available as _passage_available
             if not _passage_available():
@@ -1761,6 +1769,15 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     "(include mode): the passage index holds no Local-corpus "
                     "records. Use method='chunk', or drop 'LOCAL' from "
                     "filters.library.",
+                    http_status=400,
+                )
+            if req.boundary_mode != 'full':
+                raise APIError(
+                    'passage_option_unsupported',
+                    f"method='passage' only supports boundary_mode='full' "
+                    f"(got {req.boundary_mode!r}); passage-matching has no "
+                    f"cross-paragraph/token-boundary concept over a letter "
+                    f"stream. Use method='chunk' for boundary-aware search.",
                     http_status=400,
                 )
 
@@ -1816,7 +1833,6 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                         max_freq=req.max_freq,
                         boundary_mode=req.boundary_mode,
                         restrict_sys_ids=restrict_sys_ids,
-                        method='passage',
                         executor=_passage_executor(),
                     )
                 )
@@ -1835,7 +1851,19 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                         f'{passage_ceiling}s; try a shorter text',
                         http_status=504,
                     )
-                bundle = _pg_task.result()
+                try:
+                    bundle = _pg_task.result()
+                except ValueError as exc:
+                    # Defense in depth: step 4b already rejects
+                    # boundary_mode != 'full' before a slot is acquired, so
+                    # PassageSearcher's own ValueError (raised for the same
+                    # reason) should never actually fire through this
+                    # endpoint -- but if some future caller reaches this
+                    # branch without going through step 4b, map it to the
+                    # SAME stable 400 rather than an uncaught 500.
+                    raise APIError(
+                        'passage_option_unsupported', str(exc), http_status=400,
+                    ) from exc
             finally:
                 if _pg_release is not None:
                     _pg_release()
