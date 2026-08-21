@@ -1,11 +1,21 @@
-# Pre-registration: parallels holdout run — v2 DRAFT, NOT YET FROZEN
+# Pre-registration: parallels holdout run — SHELVED BY OWNER RULING, holdout unspent
 
-**Status: DRAFT (v2, post-Codex).** Becomes FROZEN by a dedicated commit that
-fills the freeze block at the bottom. v1 was reviewed externally (Codex,
-CHANGES-REQUIRED); every blocking finding is resolved in this revision or in
-the code it pins. Until frozen, nothing here licenses anything; the ledger's
-reservation discipline enforces the one-shot property mechanically
-(`shared/retrieval_eval.py::EvalLedger.reserve`, mutation-proven).
+**Status: SHELVED (owner ruling, 2026-08-21).** The owner decided the public
+wording for the passage method will be QUALITATIVE rules of thumb — (a) it is
+fast; (b) it can potentially find witnesses the incumbent misses and/or be
+more precise per result; (c) the two methods complement each other — hedged
+language that does not require certified measurement. No certified claim is
+planned, so this pre-registration is NOT scheduled to run.
+
+Everything below is kept intact and current: the holdout split is UNSPENT,
+the ledger's reservation discipline is live, and the tooling (strict paired
+analyzer, hardened scorer, sys-grain deck builder, depth probe) is committed
+and tested. If a certified claim is ever wanted, freezing this document is
+the only sanctioned path — do not design a new one.
+
+Historical status line: v2 DRAFT, post-Codex; v1 was reviewed externally
+(CHANGES-REQUIRED) and every blocking finding is resolved in this revision or
+in the code it pins.
 
 ## What this run decides — and what it deliberately does not
 
