@@ -853,6 +853,44 @@ def test_a_capped_total_does_not_bound_the_walk(monkeypatch):
         "either way")
 
 
+
+def test_a_leaf_walk_that_trips_its_guard_refuses_rather_than_shipping_short(
+        monkeypatch):
+    """FAILS WHOLE, NEVER SHORT -- including when the runaway guard is what
+    stopped it.
+
+    A tripped guard on the LEAF walk means rows are missing. The collector used
+    to return `ok` and let the file download with "NO -- this file is
+    incomplete" on the About sheet, which is not enough for an endpoint whose
+    contract is the whole filtered set: a reader who never opens that sheet
+    cannot tell a truncated download from a small result set, and the file
+    outlives the request that made it (Codex review of PR #323).
+    """
+    svc = DiscoveryService(path_provider=lambda: ":memory:",
+                           availability_callable=lambda: True)
+
+    def _runaway(unit="identification", page=1, page_size=200, **kw):
+        # NEVER a short page: the walk can only ever end on the guard.
+        return {"status": STATUS_OK,
+                "items": [{"identification_id": "i-%d-%d" % (page, i)}
+                          for i in range(page_size)],
+                "total": 1, "meta": {"unit": unit}}
+
+    monkeypatch.setattr(svc, "get_findings_enveloped", _runaway)
+    monkeypatch.setattr(svc, "_export_artifact_identity", lambda: ("p", "v"))
+    monkeypatch.setattr(svc, "_query_excerpts_for_identifications", lambda ids: {})
+
+    env = svc.collect_findings_for_export(unit="identification",
+                                          with_excerpts=False)
+    assert env["status"] != STATUS_OK, (
+        "a knowingly truncated walk produced a downloadable workbook")
+    assert env["meta"]["reason"] == "export_walk_incomplete"
+    assert not env.get("content"), "a refused export must carry no bytes"
+    # The builder is the second line of defence and must also refuse it.
+    with pytest.raises(ValueError):
+        des.build_findings_workbook(env)
+
+
 def test_the_page_and_the_export_group_on_one_table():
     """The page opens a grouped row onto its children with
     `EXPANSION_KEY_BY_UNIT`; the export flattens the same grouping with it.

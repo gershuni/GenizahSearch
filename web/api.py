@@ -406,14 +406,28 @@ _api_test_seam: dict = {}
 #: arbitrary text there is header injection. Anything else is IGNORED rather
 #: than rejected -- the handshake is a convenience, and a malformed token should
 #: cost the reader a spinner that times out, not their download.
-_DL_TOKEN_RE = re.compile(r'^[0-9a-f]{8,64}$')
+#: NO `^...$`. In Python `$` also matches immediately before a FINAL
+#: NEWLINE, so `dl=abcdef12%0A` satisfied an anchored pattern, put a
+#: newline into the cookie NAME and made `set_cookie` raise
+#: `CookieError` -- discarding a successful, expensive build as a 500
+#: (Codex review of PR #323). Matched with `fullmatch`, which has no
+#: such affordance.
+_DL_TOKEN_RE = re.compile(r'[0-9a-f]{8,64}')
 
 
 def stamp_download_done(response, token):
     """Mark this response as the end of the download `token` was minted for."""
-    if token and _DL_TOKEN_RE.match(str(token)):
-        response.set_cookie(f'gs_dl_{token}', '1', max_age=900, path='/',
-                            samesite='lax', httponly=False)
+    if token and _DL_TOKEN_RE.fullmatch(str(token)):
+        try:
+            response.set_cookie(f'gs_dl_{token}', '1', max_age=900,
+                                path='/', samesite='lax', httponly=False)
+        except Exception:
+            # THE HANDSHAKE NEVER COSTS THE READER THE FILE. It is a
+            # convenience that closes a progress card; the worst a
+            # failure here may do is leave that card to time out. This
+            # runs outside the route's own handler, so without the
+            # catch a stamping error discards a finished workbook.
+            logger.warning('download completion stamp failed', exc_info=True)
     return response
 
 

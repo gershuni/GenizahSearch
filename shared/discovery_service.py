@@ -3659,6 +3659,22 @@ class DiscoveryService:
             self._export_walk(unit=leaf_unit, **filters))
         if err is not None:
             return err
+        if guard_tripped:
+            # FAILS WHOLE, NEVER SHORT -- this module's stated rule, and a
+            # tripped guard on the LEAF walk is the one case that was
+            # still shipping a file it knew was missing rows. Saying so on
+            # the About sheet is not enough for an endpoint whose contract
+            # is the whole filtered set: a reader who does not open that
+            # sheet cannot tell a truncated download from a small one
+            # (Codex review of PR #323). The GROUP walk's guard is NOT
+            # this -- there every leaf is present and only the ordering is
+            # uncertified, which is a presentation degradation and stays
+            # disclosed rather than fatal.
+            logger.error(
+                "DiscoveryService export: the leaf walk tripped its page "
+                "guard -- refusing a knowingly partial workbook")
+            return unavailable_envelope(
+                meta={"reason": "export_walk_incomplete"})
 
         if group_pair is not None:
             group_field = group_pair[0]
@@ -3753,6 +3769,11 @@ class DiscoveryService:
             #: `None`. With the cap branch first, a guard-tripped export
             #: reported itself merely "unverified" while shipping a file it
             #: knew was truncated.
+            #: `guard_tripped` returns above, so the `False` arm is now
+            #: reachable only through the count disagreement below. Kept
+            #: rather than simplified: if that early return is ever
+            #: removed, this key must not silently start claiming a
+            #: truncated walk was complete.
             "walk_complete": (
                 False if guard_tripped
                 else None if approximate_total

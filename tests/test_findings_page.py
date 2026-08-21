@@ -7534,10 +7534,62 @@ def test_the_route_signals_completion_and_ignores_a_forged_token():
 
     ok = api.stamp_download_done(Response("x"), "deadbeef01")
     assert "gs_dl_deadbeef01=1" in (ok.headers.get("set-cookie") or "")
-    for forged in ("nothex", "dead; injected=1", "DEADBEEF", "", None, "a" * 200):
-        bad = api.stamp_download_done(Response("x"), forged)
+    # A TRAILING NEWLINE IS THE INTERESTING ONE. Python's `$` matches
+    # immediately before a final newline, so an anchored `^...$` accepted
+    # "abcdef12\n", the newline reached the cookie NAME, and `set_cookie`
+    # raised `CookieError` -- discarding a successful, expensive build as a
+    # 500, because the stamp happens outside the route's handler (Codex
+    # review of PR #323). `%0a` and `%0d` are the wire forms.
+    forged_tokens = ("nothex", "dead; injected=1", "DEADBEEF", "", None,
+                     "a" * 200, "abcdef12\n", "abcdef12\r\n", "\nabcdef12",
+                     "abcdef12\n\n", "abcdef12 ")
+    # RECORDS THE ATTEMPT, not just the outcome. `stamp_download_done` also
+    # catches anything `set_cookie` raises, so a rejected token and a token
+    # that reaches the cookie layer and blows up there look identical from the
+    # headers -- and a test that reads only the headers cannot tell a working
+    # anchor from a broken one the safety net is rescuing. It must never be
+    # TOUCHED.
+    class _Recorder(Response):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            self.attempts = []
+
+        def set_cookie(self, key, *a, **k):
+            self.attempts.append(key)
+            return super().set_cookie(key, *a, **k)
+
+    for forged in forged_tokens:
+        rec = _Recorder("x")
+        bad = api.stamp_download_done(rec, forged)
         assert bad.headers.get("set-cookie") is None, (
             f"a forged token {forged!r} reached Set-Cookie")
+        assert rec.attempts == [], (
+            f"a forged token {forged!r} reached the cookie layer as "
+            f"{rec.attempts!r} -- it was only stopped by the safety net")
+
+    good = _Recorder("x")
+    api.stamp_download_done(good, "deadbeef01")
+    assert good.attempts == ["gs_dl_deadbeef01"], (
+        "the recorder is not observing the real call path")
+
+
+def test_the_completion_stamp_can_never_cost_the_reader_the_file():
+    """The handshake is a CONVENIENCE, and its own contract says a bad token
+    "should cost a spinner that times out, not the reader's download". It runs
+    after the route's handler, so anything it raises discards a finished
+    workbook. The response comes back whatever the cookie layer does."""
+    from starlette.responses import Response
+
+    import web.api as api
+
+    class _Hostile(Response):
+        def set_cookie(self, *a, **k):
+            raise RuntimeError("the cookie layer fell over")
+
+    original = _Hostile("payload")
+    returned = api.stamp_download_done(original, "deadbeef01")
+    assert returned is original, "a stamping failure swallowed the response"
+    assert returned.body == b"payload"
 
 
 def test_an_unexpected_build_failure_still_signals_the_page():
