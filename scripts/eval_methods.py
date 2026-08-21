@@ -36,7 +36,10 @@ from shared.retrieval_eval import (  # noqa: E402
 )
 
 K_VALUES = (1, 10, 50, 200)
-STRATA = ('length_band', 'pages_in_sys')
+# Strata are derived from the query set, not hardcoded: the FGP set
+# carries pages_in_sys and the witness set carries witness_band, and a
+# hardcoded tuple silently reports nothing for whichever it is not.
+STRATA_FALLBACK = ('length_band',)
 
 
 def load_queries(path: str) -> list:
@@ -130,6 +133,11 @@ def main() -> int:
         chosen = [chosen[int(i * step)] for i in range(args.limit)]
     print(f'{len(queries):,} queries loaded; split={args.split}; '
           f'running {len(chosen):,}')
+    # Every stratum key the chosen queries actually carry, so a query
+    # set's own protected classes are reported without a code change.
+    stratum_names = (sorted({k for q in chosen for k in q.strata})
+                     or list(STRATA_FALLBACK))
+    print(f'strata: {", ".join(stratum_names)}')
 
     ledger = EvalLedger(args.ledger) if args.ledger else None
     results = {}
@@ -140,7 +148,7 @@ def main() -> int:
         outs = evaluate(chosen, r.retrieve, k_values=K_VALUES)
         s = summarize(outs, k_values=K_VALUES)
         strata = {name: summarize_by_stratum(outs, name, k_values=K_VALUES)
-                  for name in STRATA}
+                  for name in stratum_names}
         results[cid] = s
         print(f'\n=== {cid} ===  ({time.time() - t0:.0f}s)', flush=True)
         print(f'  n={s["n"]}  found={s["found_any"]}  mrr={s["mrr"]}', flush=True)
@@ -148,7 +156,7 @@ def main() -> int:
             lo, hi = s[f'recall@{k}_ci']
             print(f'  recall@{k:<3} = {s[f"recall@{k}"]:.3f}  [{lo:.3f}, {hi:.3f}]', flush=True)
         print(f'  p50={s["p50_ms"]}ms  p95={s["p95_ms"]}ms', flush=True)
-        for name in STRATA:
+        for name in stratum_names:
             cells = '  '.join(
                 f'{key}:{v["recall@50"]:.2f}(n={v["n"]})'
                 for key, v in sorted(strata[name].items()))
