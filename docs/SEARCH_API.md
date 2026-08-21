@@ -509,15 +509,24 @@ the two apart from the envelope shape alone.
   bounded re-normalization. The row set this engine renders and the row set it returns are
   always identical — grouped and capped at 200 manuscripts by the same rule `/api/parallels`
   applies to every method, applied internally rather than left to the caller.
-- **Filtering.** `filters` (domains/authors/works/materials/dates/other libraries) applies
-  as a plain sys_id restriction, same as `chunk`. `mode` (exact/variants/fuzzy) and
-  `max_freq` have no passage-matching equivalent and are accepted but ignored;
-  `filtered[]` is always `[]` for this method (via the public API — this endpoint never
-  submits a "known source text" to filter against; see below). `boundary_mode` is NOT
-  silently ignored: only `"full"` (the default) is supported, since passage-matching has no
-  cross-paragraph/token-boundary concept over a letter stream. `boundary_mode: "boundary"` or
-  `"combined"` together with `method='passage'` returns 400 `passage_option_unsupported`
-  rather than quietly behaving as `"full"`.
+- **No silently-ignored knobs.** `chunk_size`, `mode` and `max_freq` have no passage-matching
+  equivalent (no sliding-window chunk, no morphological-variant matching, no per-chunk
+  frequency signal), and neither does `boundary_mode` other than `"full"` (no cross-
+  paragraph/token-boundary concept over a letter stream). Rather than silently ignoring a
+  non-default value while the client believes it was applied, `method='passage'` together
+  with a non-default `chunk_size` (≠5), `mode` (≠`"exact"`), `max_freq` (≠`null`), or
+  `boundary_mode` (≠`"full"`) returns 400 `passage_option_unsupported`. The response envelope
+  correspondingly nulls out `chunk_size`/`mode`/`max_freq`/`boundary_options` (both at the
+  top level and inside `request`) and adds `request.passage_policy` — the actual policy
+  (`policy_id`, `min_span`, `regime`, `posting_budget`, ...) that drove the search — so nothing
+  in the envelope reads as "this knob was applied" when it was not.
+- **Filtering.** `filters` (domains/authors/works/materials/dates/other libraries) applies as
+  a plain sys_id restriction, same as `chunk`. `filtered[]` is always `[]` via the public API
+  specifically: `filter_text` (the "known source text" a row's match can be checked against,
+  routing it to `filtered` rather than `results[]`) is a web-page-only concept (the page's
+  "Filter Sources" panel) that this endpoint never populates. A row whose display-text lookup
+  fails is DROPPED (never returned in either bucket) and counted in a `passage_text_lookup_
+  failed` warning (see Warnings Array) rather than coming back with blank text.
 - **Timeout.** Its own ceiling, `SEARCH_API_PASSAGE_TIMEOUT` (default 30s; see Environment
   Variables below) — separate from `SEARCH_API_PARALLELS_TIMEOUT`, since the two engines'
   cost models are unrelated. Exceeding it returns 504 `core_timeout`.
@@ -723,6 +732,7 @@ outcome, or a per-source enrichment soft failure — none of which are item-scop
 | `enrichment_timeout` | browse | per-source PGP/FJMS/NLI fetch hit `SEARCH_API_BROWSE_TIMEOUT` (default 1.0s); soft failure; partial bundle returned with the corresponding `metadata.<source>` set to `null`. |
 | `enrichment_failed` | browse | per-source PGP/FJMS/NLI fetch raised an exception; soft failure; partial bundle returned (same null-out behavior). |
 | `truncated_to_200` | parallels | group count exceeded 200; top 200 returned (Phase 80 D-07). |
+| `passage_text_lookup_failed` | parallels (`method='passage'`) | one or more matched rows were DROPPED (never returned in `results[]`/`filtered[]`) because their display-text lookup failed -- never a silently blank row. Object-shaped (not a bare string, unlike `truncated_to_200`): `{"code": "passage_text_lookup_failed", "count": N}`. |
 
 **Worked Responsa cascade case.** A `/api/search` response showing both signals
 simultaneously:
