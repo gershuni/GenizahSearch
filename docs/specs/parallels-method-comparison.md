@@ -365,9 +365,69 @@ manuscripts — 47.5% of the queries that hit at all.** So the instrument is
 unambiguously cross-witness for about half its hits and ambiguous for the rest.
 The multi-witness subset is available as a conservative stratum.
 
-### What Instrument 2 still does not cover
+### What Instrument 2 does not cover, and where the missing stratum was found
 
-**Judeo-Arabic.** The oracle's 15,072 rows are entirely from the Hebrew
-reference corpus — 0 rows from the Judeo-Arabic collection. The plan names
-language as a protected class for the flip decision, and this instrument cannot
-supply that stratum. It remains owed, and no flip can be licensed without it.
+**Judeo-Arabic is absent from this oracle.** All 15,072 rows come from the
+Hebrew reference corpus; 0 from the Judeo-Arabic collection. Instrument 2
+cannot supply that stratum.
+
+It did not have to. The plan called building a Judeo-Arabic stratum "real work
+inside Phase 144"; in fact **37.4% of the FGP query set is already
+Judeo-Arabic** (7,142 of 19,090 queries) and had simply never been labelled.
+Corrected for classifier error the true share is about 42.6%.
+
+---
+
+## The language stratum, and how it was validated
+
+`scripts/detect_query_language.py`. Judeo-Arabic is written in Hebrew script,
+so script detection is useless; the discriminating signal is the Arabic
+definite article written as a Hebrew-letter prefix. Geresh-marked letters were
+measured too and rejected (F1 0.776), because Hebrew uses the geresh for
+abbreviation and numerals.
+
+Two corrections were needed before the classifier could be believed, and both
+are worth recording because the first version of each looked fine.
+
+**Precision here is not a property of the classifier.** The first validation
+sample was 80% Judeo-Arabic by construction, which reported precision 0.980, a
+number that describes the sample's balance rather than the rule. No query set
+has that balance. What is asserted instead is **recall and the false-positive
+rate**, which are prior-free, with precision derived at a stated prior.
+
+**The rule fired on Hebrew words that merely begin with the same two letters**
+(the divine name, demonstratives, several common names). That was the entire
+false-positive channel. Excluding the head of that distribution cut the
+false-positive rate roughly tenfold *at higher recall*:
+
+| rule | threshold | recall | false-positive rate |
+|---|---|---|---|
+| bare prefix | 0.02674 | 0.886 | 0.0744 |
+| **prefix minus stoplist** | **0.019** | **0.868** | **0.0076** |
+
+Measured on 28,644 Judeo-Arabic and 6,946 Hebrew 600-character windows: the
+query length in use, not document length, because the rate is noisier in short
+passages and a document-level validation would describe a different input.
+
+Implied precision by true Judeo-Arabic share: 0.991 at 50%, 0.987 at 40%,
+0.966 at 20%, 0.927 at 10%, 0.857 at 5%. Robust across the plausible range,
+which the first version was not.
+
+### Out-of-sample control
+
+The witness query set is drawn entirely from the Hebrew reference corpus, so a
+correct classifier must label it Judeo-Arabic at approximately its
+false-positive rate and no more. Measured: **21 of 2,258 = 0.9%**, against a
+fitted false-positive rate of **0.76%**. The control lands on the prediction.
+
+### Resulting strata
+
+| query set | n | Hebrew | Judeo-Arabic | unlabelled |
+|---|---|---|---|---|
+| FGP | 19,090 | 62.3% | **37.4%** (7,142) | 0.3% |
+| witness | 2,258 | 99.1% | 0.9% | 0% |
+
+The Judeo-Arabic protected class is therefore available on the FGP instrument
+at ample n, and unavailable on the witness instrument. Both methods must be
+re-run with `language` in the stratum set before the flip decision; every run
+recorded above predates the label.
