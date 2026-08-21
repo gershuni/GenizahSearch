@@ -112,19 +112,27 @@ class ParallelsResultBundle:
     truncated_to_200: bool = False
 
 
-async def _run_sync(func, *args, **kwargs):
-    """Run blocking sync work in the default executor.
+async def _run_sync(func, *args, _executor=None, **kwargs):
+    """Run blocking sync work in an executor.
 
     R-09 note: asyncio.wait_for() applied around this WOULD cancel the awaiting
     coroutine but NOT the underlying thread; v7.10 imposes no fan-out timeout
     (rate limiter is the load shield).
+
+    Phase 145: `_executor` (keyword-only, named with a leading underscore so
+    it can never collide with a `func` kwarg) selects which
+    ThreadPoolExecutor `run_in_executor` dispatches into. Defaulting to None
+    (the default executor) is what makes the chunk path byte-for-byte
+    unchanged -- every existing caller omits it. The passage path's own
+    bounded executor is passed in by `web/search_api.py` (per-request, so
+    this module stays framework-agnostic and never constructs one itself).
     """
     loop = asyncio.get_event_loop()
     if kwargs:
         # run_in_executor signature is (executor, func, *args). Wrap kwargs.
         from functools import partial
-        return await loop.run_in_executor(None, partial(func, *args, **kwargs))
-    return await loop.run_in_executor(None, func, *args)
+        return await loop.run_in_executor(_executor, partial(func, *args, **kwargs))
+    return await loop.run_in_executor(_executor, func, *args)
 
 
 def _cap_main_results_by_group(
@@ -192,6 +200,8 @@ async def fetch_parallels_results(
     max_freq: Optional[float] = None,
     boundary_mode: str = 'full',
     restrict_sys_ids: Optional[set] = None,
+    method: str = 'chunk',
+    executor=None,
 ) -> ParallelsResultBundle:
     """Run search_composition_logic via run_in_executor + apply group cap.
 
@@ -206,7 +216,12 @@ async def fetch_parallels_results(
 
     Args:
         searcher: process-singleton SearchEngine exposing
-                  search_composition_logic. Injected by the caller.
+                  search_composition_logic, OR (Phase 145, method='passage') a
+                  `shared.passage_parallels.PassageSearcher` exposing the same
+                  method. Injected by the caller -- this function does not
+                  care which concrete object it is, only that `method` and
+                  `searcher` agree (the caller's responsibility; see
+                  web/search_api.py).
         meta_mgr: process-singleton MetadataManager exposing
                   parse_full_id_components (used by the group cap). Injected by
                   the caller.
@@ -226,6 +241,22 @@ async def fetch_parallels_results(
                           to nothing (handler short-circuits before calling
                           this function -- service should never receive an
                           explicit empty set in practice).
+        method: 'chunk' (default) | 'passage' (Phase 145). Purely a ROUTING
+                hint here -- it does NOT change which `searcher` is called
+                (the caller already picked the right one); it only selects
+                the executor `_run_sync` dispatches into (see `executor`
+                below). 'chunk' or omitted is BYTE-FOR-BYTE identical to the
+                pre-Phase-145 behavior: `executor` stays unused unless the
+                caller also passes one.
+        executor: Optional[concurrent.futures.Executor] (Phase 145). Passed
+                  straight through to `_run_sync`'s `_executor` kwarg. The
+                  chunk path never sets this (stays on the default executor,
+                  preserving pre-Phase-145 behavior exactly); the passage path
+                  is expected to pass its own dedicated, bounded executor
+                  (web/search_api.py's own budget -- see the two-budgets
+                  lesson in docs/specs/discovery-budgets.md SS2/SS3: two
+                  semaphores over one shared pool are two names for one
+                  budget).
 
     Returns:
         ParallelsResultBundle with main_results / filtered_results / boundary_options
@@ -259,7 +290,14 @@ async def fetch_parallels_results(
             restrict_sys_ids=restrict_sys_ids,
         )
 
-    result = await _run_sync(_sync_call)
+    # `method` never changes WHICH object gets called (the caller already
+    # picked `searcher`); it only decides whether `_run_sync` dispatches into
+    # the caller-supplied `executor` or the default one. For method='chunk'
+    # (the default), `executor` is None unless a caller explicitly passes one
+    # (none do today), so this line is a no-op change from pre-Phase-145
+    # behavior -- `_run_sync(_sync_call)` dispatched into the default executor
+    # then and still does now.
+    result = await _run_sync(_sync_call, _executor=executor if method == 'passage' else None)
 
     main_results = (result or {}).get('main') or []
     filtered_results = (result or {}).get('filtered') or []
