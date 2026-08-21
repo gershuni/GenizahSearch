@@ -1037,3 +1037,248 @@ def test_parallels_method_passage_happy_path_routes_to_passage_searcher(
     body = r.json()
     assert body['request']['method'] == 'passage'
     mock_searcher.search_composition_logic.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Codex review finding #13 -- passage mode must not silently ignore
+# chunk_size/mode/max_freq, and the envelope must echo the EFFECTIVE
+# (passage) policy instead of the ignored chunk knobs.
+# ---------------------------------------------------------------------------
+
+def _fake_passage_policy() -> dict:
+    """A realistic PassagePolicy.as_dict() shape (shared/passage_policy.py)
+    for envelope-echo assertions -- NOT a bare MagicMock, which
+    FastAPI's jsonable_encoder silently degrades to {} rather than raising
+    (verified: json.dumps(MagicMock()) raises, but jsonable_encoder does
+    not -- a real dict here is what makes these tests actually exercise the
+    echo content, not merely "the response was 200")."""
+    return {
+        'name': 'standard-40', 'min_span': 40, 'regime': 'one_sided',
+        'density_scale': 1.0, 'budget_policy': 'band',
+        'posting_budget': 500_000, 'candidate_cap': 200_000,
+        'verify_cap': 3_000, 'min_anchors': 2, 'schema_version': 1,
+        'policy_id': 'pp1-0000000000000000',
+    }
+
+
+@pytest.mark.parametrize('chunk_size', [2, 4, 6, 20])
+def test_parallels_method_passage_nondefault_chunk_size_returns_400(
+    client, mock_searcher, clean_env, monkeypatch, chunk_size,
+):
+    """Finding #13(a): chunk_size has no passage-matching equivalent (no
+    sliding-window chunk) -- a non-default value must be REJECTED, never
+    silently ignored while the client believes it was applied."""
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    r = client.post('/api/parallels', json={
+        'text': 'hello world', 'method': 'passage', 'chunk_size': chunk_size,
+    })
+    assert r.status_code == 400, r.text
+    assert r.json()['error']['code'] == 'passage_option_unsupported'
+    mock_searcher.search_composition_logic.assert_not_called()
+
+
+@pytest.mark.parametrize('mode', ['variants', 'fuzzy'])
+def test_parallels_method_passage_nondefault_mode_returns_400(
+    client, mock_searcher, clean_env, monkeypatch, mode,
+):
+    """Finding #13(a): mode (variants/fuzzy) has no passage-matching
+    equivalent (character-level Levenshtein has no morphological-variant
+    concept) -- rejected, not silently ignored."""
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    r = client.post('/api/parallels', json={
+        'text': 'hello world', 'method': 'passage', 'mode': mode,
+    })
+    assert r.status_code == 400, r.text
+    assert r.json()['error']['code'] == 'passage_option_unsupported'
+    mock_searcher.search_composition_logic.assert_not_called()
+
+
+def test_parallels_method_passage_nondefault_max_freq_returns_400(
+    client, mock_searcher, clean_env, monkeypatch,
+):
+    """Finding #13(a): max_freq has no passage-matching equivalent (no
+    per-chunk frequency signal) -- rejected, not silently ignored."""
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    r = client.post('/api/parallels', json={
+        'text': 'hello world', 'method': 'passage', 'max_freq': 0.05,
+    })
+    assert r.status_code == 400, r.text
+    assert r.json()['error']['code'] == 'passage_option_unsupported'
+    mock_searcher.search_composition_logic.assert_not_called()
+
+
+def test_parallels_method_passage_default_chunk_knobs_are_not_rejected(
+    client, mock_searcher, clean_env, monkeypatch,
+):
+    """The request's OWN declared defaults (chunk_size=5, mode='exact',
+    max_freq=None) must still pass for method='passage' -- only a
+    NON-default value is rejected."""
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    monkeypatch.setattr(
+        'web.passage_assets.get_passage_searcher',
+        lambda text_fetcher: mock_searcher,
+    )
+    mock_searcher.policy.as_dict.return_value = _fake_passage_policy()
+    r = client.post('/api/parallels', json={
+        'text': 'hello world', 'method': 'passage',
+        'chunk_size': 5, 'mode': 'exact', 'max_freq': None,
+    })
+    assert r.status_code == 200, r.text
+
+
+def test_parallels_method_passage_echo_nulls_ignored_chunk_knobs(
+    client, mock_searcher, clean_env, monkeypatch,
+):
+    """Finding #13(b): the response envelope must not echo chunk_size/mode/
+    max_freq/boundary_options as though they were applied -- they are
+    nulled for method='passage', both at the top level (Phase 77 fields)
+    and inside the `request` echo block (Phase 81A)."""
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    monkeypatch.setattr(
+        'web.passage_assets.get_passage_searcher',
+        lambda text_fetcher: mock_searcher,
+    )
+    mock_searcher.policy.as_dict.return_value = _fake_passage_policy()
+    r = client.post('/api/parallels', json={'text': 'hello world', 'method': 'passage'})
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    # Top-level Phase 77 fields.
+    assert body['chunk_size'] is None
+    # shared/search_serializer.py::serialize_parallels_payload has its OWN
+    # pre-existing `mode or 'exact'` fallback (predates Phase 145 and is out
+    # of scope to change here -- web/api.py's export path also depends on
+    # it), so a null mode floors to 'exact' at the TOP level specifically.
+    # This happens to coincide with the only mode value method='passage' can
+    # ever reach this point with (a non-default mode is already rejected by
+    # step 4b's 400), so it never actually echoes an ignored CHOICE -- but
+    # the authoritative place a consumer should read "was mode applied" is
+    # the `request` echo block below, where None means exactly that.
+    assert body['mode'] == 'exact'
+    assert body['max_freq'] is None
+    assert body['boundary_options'] is None
+
+    # The `request` echo block -- the authoritative Phase 81A source, with
+    # no such legacy fallback.
+    echo = body['request']
+    assert echo['chunk_size'] is None
+    assert echo['mode'] is None
+    assert echo['max_freq'] is None
+    assert echo['boundary_options'] is None
+    assert echo['method'] == 'passage'
+
+    # The EFFECTIVE policy that actually drove the search.
+    assert echo['passage_policy'] == _fake_passage_policy()
+
+
+def test_parallels_method_chunk_echo_has_no_passage_policy_key(
+    client, mock_searcher, clean_env,
+):
+    """Regression pin: method='chunk' (the default) must not gain a
+    passage_policy key at all -- not even set to None -- so the
+    pre-existing 7-key echo shape stays byte-for-byte identical."""
+    r = client.post('/api/parallels', json={'text': 'hello world'})
+    assert r.status_code == 200, r.text
+    echo = r.json()['request']
+    assert 'passage_policy' not in echo
+    assert set(echo.keys()) == {
+        'mode', 'chunk_size', 'max_freq', 'boundary_options',
+        'limit_effective', 'filters', 'method',
+    }
+    assert echo['mode'] == 'exact'
+    assert echo['chunk_size'] == 5
+    assert echo['boundary_options'] is not None
+
+
+# ---------------------------------------------------------------------------
+# Codex review finding #15 -- web/pages/parallels.py must route passage
+# searches through the SAME bounded execution budget POST /api/parallels
+# uses (run_through_passage_budget / run_passage_search), never NiceGUI's
+# generic, unbounded run.io_bound.
+# ---------------------------------------------------------------------------
+
+def test_run_passage_search_dispatches_on_the_dedicated_executor():
+    """run_passage_search (the page's entry point into the shared budget)
+    must run the sync callable on the SAME dedicated executor
+    (_PassageSemaphoreState.executor()) the API's own passage branch uses --
+    verified by thread name, a real executor, no mocking."""
+    import asyncio
+    import threading
+
+    from web.search_api import run_passage_search
+
+    names = {}
+
+    def _capture():
+        names['thread'] = threading.current_thread().name
+        return 'ok'
+
+    result = asyncio.run(run_passage_search(_capture))
+    assert result == 'ok'
+    assert 'passage-search' in names['thread']
+
+
+def test_run_through_passage_budget_busy_when_semaphore_exhausted(monkeypatch):
+    """The core primitive both surfaces share: exhausting the semaphore via
+    ANY caller must make the NEXT caller see passage_search_busy -- proving
+    the budget is genuinely ONE shared resource, not one per call site.
+
+    Sets SEARCH_API_PASSAGE_CONCURRENCY=1 via the env (not merely
+    _PassageSemaphoreState.reset(1)) -- acquire() re-reads this env var on
+    every call and auto-corrects the capacity back to its class default
+    whenever the semaphore is fully idle, which would silently undo a bare
+    .reset(1) the instant the FIRST acquire() ran, defeating the "exhausted"
+    setup before the test's own second acquire ever happened."""
+    import asyncio
+
+    from web.search_api import (
+        run_through_passage_budget, _PassageSemaphoreState,
+        DEFAULT_PASSAGE_CONCURRENCY,
+    )
+
+    monkeypatch.setenv('SEARCH_API_PASSAGE_CONCURRENCY', '1')
+
+    async def _run():
+        release = await _PassageSemaphoreState.acquire()  # takes the only slot
+        try:
+            assert _PassageSemaphoreState._capacity == 1
+            never_done = asyncio.get_event_loop().create_future()
+            with pytest.raises(APIError) as exc_info:
+                await run_through_passage_budget(never_done)
+            assert exc_info.value.code == 'passage_search_busy'
+            assert exc_info.value.http_status == 503
+        finally:
+            release()
+
+    asyncio.run(_run())
+    _PassageSemaphoreState.reset(DEFAULT_PASSAGE_CONCURRENCY)
+
+
+def test_run_through_passage_budget_times_out(monkeypatch):
+    """A slow awaitable that exceeds SEARCH_API_PASSAGE_TIMEOUT surfaces as
+    APIError('core_timeout', ..., 504) -- the slot is still held/released
+    correctly (no leak) via the done-callback, same discipline as the
+    chunk-path heavy budget."""
+    import asyncio
+
+    from web.search_api import run_through_passage_budget, _PassageSemaphoreState
+
+    monkeypatch.setenv('SEARCH_API_PASSAGE_TIMEOUT', '0.05')
+
+    async def _run():
+        async def _slow():
+            await asyncio.sleep(2.0)
+            return 'too late'
+
+        with pytest.raises(APIError) as exc_info:
+            await run_through_passage_budget(_slow())
+        assert exc_info.value.code == 'core_timeout'
+        assert exc_info.value.http_status == 504
+        # The slot must be free again once the slow task's done-callback has
+        # had a chance to run (it releases on eventual completion, not on
+        # the timeout itself -- run_in_executor/asyncio tasks cannot be
+        # cancelled out from under a real thread).
+        await asyncio.sleep(2.2)
+        assert not _PassageSemaphoreState.sem.locked()
+
+    asyncio.run(_run())

@@ -568,6 +568,81 @@ def _passage_executor() -> 'ThreadPoolExecutor':
     return _PassageSemaphoreState.executor()
 
 
+async def run_through_passage_budget(awaitable):
+    """Acquire the passage-matching budget slot, await `awaitable` with the
+    passage timeout ceiling (SEARCH_API_PASSAGE_TIMEOUT), release the slot
+    via a done-callback. This is the ONE function that owns the
+    semaphore/timeout/release discipline for passage-matching -- both this
+    endpoint's own passage branch AND web/pages/parallels.py's direct call
+    path now go through it (Codex review finding #15: the page previously
+    bypassed the budget entirely via NiceGUI's generic run.io_bound, with no
+    semaphore, no dedicated executor and no timeout ceiling at all, so
+    concurrent GUI users could overwhelm the single-worker host's thread
+    pool and the passage index's mmap with no bound whatsoever).
+
+    Deliberately agnostic to WHAT is being awaited (a coroutine, or a Future
+    from `loop.run_in_executor`) so each caller supplies whichever shape
+    fits its own work -- this endpoint already has an async coroutine
+    (`fetch_parallels_results`, which does its OWN run_in_executor dispatch
+    internally via its `executor` kwarg); the page has a plain sync
+    callable and wraps it via `run_passage_search` below. Either way there
+    is exactly ONE execution budget for passage-matching, not one per
+    surface (repeating the two-budgets lesson -- docs/specs/discovery-
+    budgets.md SS2/SS3 -- would have meant a second, separate accidental
+    budget here).
+
+    Must be awaited from the caller's OWN event-loop coroutine -- never from
+    inside a NiceGUI run.io_bound body. Callers are responsible for keeping
+    ALL ui.*/safe_user_* interaction on their own side of this await; this
+    function performs neither itself (repo memory: NiceGUI background
+    execution loses context -- ui.* calls made from a raw executor thread
+    RAISE, and safe_user_* reads silently degrade to {}).
+
+    Returns:
+        The awaited value on success.
+    Raises:
+        APIError('passage_search_busy', ..., 503): no slot is free right now.
+        APIError('core_timeout', ..., 504): did not finish within the
+            timeout ceiling (the slot/executor worker keep running the
+            search to completion regardless -- run_in_executor cannot
+            cancel a thread; the done-callback is the sole releaser).
+        Any other exception `awaitable` itself raises, unchanged.
+    """
+    ceiling = _resolve_passage_timeout()
+    release = await _acquire_passage_slot()
+    try:
+        task = asyncio.ensure_future(awaitable)
+        task.add_done_callback(lambda _t, _r=release: _r())
+        release = None  # ownership -> done-callback
+        _done, pending = await asyncio.wait({task}, timeout=ceiling)
+        if task in pending:
+            logger.warning('passage-matching core_timeout after %ss', ceiling)
+            raise APIError(
+                'core_timeout',
+                f'passage-matching search did not complete within {ceiling}s; '
+                f'try a shorter text',
+                http_status=504,
+            )
+        return task.result()
+    finally:
+        if release is not None:
+            release()
+
+
+async def run_passage_search(sync_fn, *args, **kwargs):
+    """Convenience wrapper for a plain SYNC passage-matching callable (what
+    web/pages/parallels.py has -- PassageSearcher.search_composition_logic
+    is not a coroutine): dispatches it onto the passage-dedicated
+    ThreadPoolExecutor and routes it through run_through_passage_budget, so
+    the page gets the identical semaphore, executor and timeout this
+    endpoint's own passage branch uses.
+    """
+    from functools import partial
+    loop = asyncio.get_event_loop()
+    fut = loop.run_in_executor(_passage_executor(), partial(sync_fn, *args, **kwargs))
+    return await run_through_passage_budget(fut)
+
+
 # Phase 79 D-11 / R-08 -- transcription char cap.
 DEFAULT_BROWSE_TEXT_CAP = 4000
 MIN_BROWSE_TEXT_CAP = 100
@@ -648,7 +723,15 @@ class ParallelsRequest(BaseModel):
       (the passage index holds no Local-corpus records); requesting it with
       `filters.library` including 'LOCAL' in include mode is rejected with
       400 'passage_scope_unsupported' rather than silently degrading to an
-      empty result that would look identical to "no matches found".
+      empty result that would look identical to "no matches found". Passage
+      matching has no equivalent for `chunk_size`, `mode` or `max_freq`
+      (no sliding-window chunk, no morphological-variant matching, no
+      per-chunk frequency signal) or for `boundary_mode` values other than
+      'full' (no cross-paragraph/token-boundary concept) -- a non-default
+      value of any of these together with method='passage' is rejected with
+      400 'passage_option_unsupported' rather than silently ignored, and the
+      response envelope echoes the EFFECTIVE passage policy (`request.
+      passage_policy`) in place of these now-inapplicable knobs.
     """
     model_config = ConfigDict(extra='forbid')
 
@@ -1780,11 +1863,52 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     f"stream. Use method='chunk' for boundary-aware search.",
                     http_status=400,
                 )
+            # Codex review finding #13(a): chunk_size/mode/max_freq are
+            # likewise inert for passage -- there is no sliding-window
+            # chunk (chunk_size), no morphological-variant matching
+            # (mode: 'variants'/'fuzzy' are a Tantivy-term-expansion
+            # concept), and no per-chunk frequency signal (max_freq).
+            # Accepting a non-default value silently would let a client
+            # believe it changed the search when it did not -- the same
+            # silent-degradation failure mode boundary_mode was fixed for
+            # above. Only the request's OWN declared defaults pass; a
+            # client that wants those knobs must use method='chunk'.
+            if req.chunk_size != 5:
+                raise APIError(
+                    'passage_option_unsupported',
+                    f"method='passage' does not use chunk_size (got "
+                    f"{req.chunk_size}; passage matches character spans, not "
+                    f"sliding word windows). Omit it, or use method='chunk'.",
+                    http_status=400,
+                )
+            if req.mode != 'exact':
+                raise APIError(
+                    'passage_option_unsupported',
+                    f"method='passage' does not use mode (got {req.mode!r}; "
+                    f"passage's character-level Levenshtein matching has no "
+                    f"morphological-variant concept). Omit it, or use "
+                    f"method='chunk'.",
+                    http_status=400,
+                )
+            if req.max_freq is not None:
+                raise APIError(
+                    'passage_option_unsupported',
+                    f"method='passage' does not use max_freq (got "
+                    f"{req.max_freq}; passage has no per-chunk frequency "
+                    f"signal, so it never routes rows to filtered[] on "
+                    f"that basis). Omit it, or use method='chunk'.",
+                    http_status=400,
+                )
 
         # 5. Statelessness check (D-20). Forbidden reads — none below.
 
         # 6. Execute via service layer OR short-circuit on empty intersection.
         warnings_list: list = []
+        # Codex review finding #13(b): the EFFECTIVE passage policy (never
+        # populated for method='chunk'), used to replace the ignored chunk
+        # knobs in the envelope below rather than echoing them as if they
+        # had done anything.
+        passage_policy_echo: Optional[dict] = None
         if short_circuit_empty:
             bundle = ParallelsResultBundle(
                 main_results=[],
@@ -1802,28 +1926,31 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             # Phase 145: passage's OWN bounded budget (semaphore capacity 4 +
             # its own dedicated ThreadPoolExecutor), never the chunk path's
             # heavy semaphore/default-executor pair -- the two-budgets
-            # lesson (docs/specs/discovery-budgets.md SS2/SS3). Same
-            # done-callback-releases-the-slot shape as the chunk branch below
-            # (asyncio.wait, NEVER wait_for, over run_in_executor -- executor
-            # threads are not cancellable, so a timed-out search keeps its
-            # slot/worker until it truly finishes).
+            # lesson (docs/specs/discovery-budgets.md SS2/SS3). Routed
+            # through run_through_passage_budget, the SAME function
+            # web/pages/parallels.py's direct call path uses (Codex review
+            # finding #15) -- exactly one execution budget for passage-
+            # matching, not one per surface.
             from web.passage_assets import get_passage_searcher
-            passage_ceiling = _resolve_passage_timeout()
-            _pg_release = await _acquire_passage_slot()
+            _pg_searcher = get_passage_searcher(state.searcher)
+            if _pg_searcher is None:
+                # Availability was already checked in step 4b; a flip
+                # between that check and here (index unloaded mid-request)
+                # is the only way to reach this, and it must fail the
+                # same way, not fall back to chunk silently.
+                raise APIError(
+                    'passage_unavailable',
+                    "method='passage' became unavailable while the "
+                    "request was in flight",
+                    http_status=503,
+                )
+            # The REAL knobs that drove this search (finding #13(b)) --
+            # policy_id is a content hash over every field, so this also
+            # doubles as a stable identifier of exactly which policy
+            # produced the result, for anyone reproducing a query later.
+            passage_policy_echo = _pg_searcher.policy.as_dict()
             try:
-                _pg_searcher = get_passage_searcher(state.searcher)
-                if _pg_searcher is None:
-                    # Availability was already checked in step 4b; a flip
-                    # between that check and here (index unloaded mid-request)
-                    # is the only way to reach this, and it must fail the
-                    # same way, not fall back to chunk silently.
-                    raise APIError(
-                        'passage_unavailable',
-                        "method='passage' became unavailable while the "
-                        "request was in flight",
-                        http_status=503,
-                    )
-                _pg_task = asyncio.ensure_future(
+                bundle = await run_through_passage_budget(
                     fetch_parallels_results(
                         searcher=_pg_searcher,
                         meta_mgr=state.meta_mgr,
@@ -1836,37 +1963,16 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                         executor=_passage_executor(),
                     )
                 )
-                _pg_task.add_done_callback(lambda _t, _r=_pg_release: _r())
-                _pg_release = None  # ownership -> done-callback
-                _done, _pending = await asyncio.wait(
-                    {_pg_task}, timeout=passage_ceiling,
-                )
-                if _pg_task in _pending:
-                    logger.warning(
-                        'passage parallels core_timeout after %ss', passage_ceiling,
-                    )
-                    raise APIError(
-                        'core_timeout',
-                        f'passage-matching search did not complete within '
-                        f'{passage_ceiling}s; try a shorter text',
-                        http_status=504,
-                    )
-                try:
-                    bundle = _pg_task.result()
-                except ValueError as exc:
-                    # Defense in depth: step 4b already rejects
-                    # boundary_mode != 'full' before a slot is acquired, so
-                    # PassageSearcher's own ValueError (raised for the same
-                    # reason) should never actually fire through this
-                    # endpoint -- but if some future caller reaches this
-                    # branch without going through step 4b, map it to the
-                    # SAME stable 400 rather than an uncaught 500.
-                    raise APIError(
-                        'passage_option_unsupported', str(exc), http_status=400,
-                    ) from exc
-            finally:
-                if _pg_release is not None:
-                    _pg_release()
+            except ValueError as exc:
+                # Defense in depth: step 4b already rejects boundary_mode !=
+                # 'full' before a slot is acquired, so PassageSearcher's own
+                # ValueError (raised for the same reason) should never
+                # actually fire through this endpoint -- but if some future
+                # caller reaches this branch without going through step 4b,
+                # map it to the SAME stable 400 rather than an uncaught 500.
+                raise APIError(
+                    'passage_option_unsupported', str(exc), http_status=400,
+                ) from exc
         else:
             # P9X: parallels are always heavy — gate on the concurrency budget
             # and wrap the fetch in a timeout. As with /api/search, the slot is
@@ -1922,24 +2028,52 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
         # 7. Surface group-cap warning (D-07).
         if bundle.truncated_to_200:
             warnings_list.append('truncated_to_200')
+        # Codex review finding #16(b): a row dropped because its display-text
+        # lookup failed is counted, never silently blank -- surfaced here so
+        # the count is never lost between the searcher and the client (this
+        # repo's rule: no silent truncation, every exclusion counted). 0 for
+        # the chunk path always (see ParallelsResultBundle's docstring).
+        if bundle.dropped_text_lookup_failures:
+            warnings_list.append({
+                'code': 'passage_text_lookup_failed',
+                'count': bundle.dropped_text_lookup_failures,
+            })
 
         # 81A D-07 — request echo for /api/parallels. Field name `mode` is
         # PRESERVED here (NOT renamed to search_mode); the rename is deferred
         # to v7.11. ParallelsRequest at web/search_api.py has no `gap` field
         # and no `responsa_options` (parallels never used Responsa), so the
-        # echo has 7 keys: mode, chunk_size, max_freq, boundary_options,
-        # limit_effective, filters, method (Phase 145). limit_effective
-        # mirrors the post-truncation group count (D-07: 200-group cap
-        # surfaced via warnings_list).
+        # echo has EXACTLY 7 keys for method='chunk' (byte-for-byte
+        # unchanged): mode, chunk_size, max_freq, boundary_options,
+        # limit_effective, filters, method. limit_effective mirrors the
+        # post-truncation group count (D-07: 200-group cap surfaced via
+        # warnings_list).
+        #
+        # Codex review finding #13(b): for method='passage', mode/chunk_size/
+        # max_freq/boundary_options describe knobs the passage engine never
+        # reads (step 4b above already rejects any non-default value of the
+        # first three; boundary_mode is rejected too), so echoing them back
+        # would read as "these were applied" when they were not -- nulled
+        # out, with an 8th key, passage_policy, carrying the knobs that
+        # ACTUALLY drove the search. passage_policy is present ONLY for
+        # method='passage' (a dict key, not merely a None value), so the
+        # pre-existing 7-key shape is untouched for method='chunk'.
+        _is_passage = req.method == 'passage'
+        echo_mode = None if _is_passage else req.mode
+        echo_chunk_size = None if _is_passage else req.chunk_size
+        echo_max_freq = None if _is_passage else req.max_freq
+        echo_boundary_options = None if _is_passage else bundle.boundary_options
         parallels_echo = {
-            'mode': req.mode,
-            'chunk_size': req.chunk_size,
-            'max_freq': req.max_freq,
-            'boundary_options': bundle.boundary_options,
+            'mode': echo_mode,
+            'chunk_size': echo_chunk_size,
+            'max_freq': echo_max_freq,
+            'boundary_options': echo_boundary_options,
             'method': req.method,
             'limit_effective': len(bundle.main_results),
             'filters': filters_dict,
         }
+        if _is_passage:
+            parallels_echo['passage_policy'] = passage_policy_echo
 
         # 8. Serialize — Phase 77 D-14 SOLE producer of envelope shape.
         envelope = serialize_parallels_payload(
@@ -1947,10 +2081,10 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             bundle.filtered_results,
             meta_mgr=state.meta_mgr,
             source_text=text,
-            chunk_size=req.chunk_size,
-            mode=req.mode,
-            max_freq=req.max_freq,
-            boundary_options=bundle.boundary_options,
+            chunk_size=echo_chunk_size,
+            mode=echo_mode,
+            max_freq=echo_max_freq,
+            boundary_options=echo_boundary_options,
             warnings=warnings_list,
             request_echo=parallels_echo,
         )
