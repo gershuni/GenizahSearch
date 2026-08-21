@@ -389,6 +389,18 @@ def build(args) -> int:
                   flush=True)
     pairs = dedupe_to_grain(retrieved, args.grain)
     print(f'grain={args.grain}: {len(pairs)} cards after dedup', flush=True)
+    if args.delta_only:
+        configs = [cfg.strip() for cfg in args.configs.split(',')]
+        if len(configs) != 2:
+            raise SystemExit('--delta-only needs exactly two configs '
+                             '(baseline first, candidate second)')
+        before = len(pairs)
+        pairs = {k: m for k, m in pairs.items() if m == {configs[1]}}
+        print(f'delta-only: {len(pairs)} of {before} cards are exclusive '
+              f'to {configs[1]}', flush=True)
+        if not pairs:
+            raise SystemExit('delta is empty -- the candidate adds nothing '
+                             'on these queries; no deck to build')
 
     # ---- original transcription text for the records on the deck ----------
     # The index stores the NORMALIZED stream -- space-free, finals folded --
@@ -489,6 +501,12 @@ def main() -> int:
                          'best-ranked record kept, cross-method-credited. '
                          'record: one card per (query, record_id), no '
                          'cross-record dedup (the old deck_v5 shape).')
+    ap.add_argument('--delta-only', action='store_true',
+                    help='keep ONLY cards returned exclusively by the SECOND '
+                         'config in --configs. The delta deck: grades what a '
+                         'candidate configuration ADDS over the baseline, '
+                         'nothing else -- the cheapest way to answer "are '
+                         'the extra returns discoveries or noise".')
     ap.add_argument('--salt', default='deck-v1')
     ap.add_argument('--transcriptions',
                     default=r'C:\GenizahSearch\Transcriptions.txt')

@@ -93,7 +93,7 @@ def test_policy_is_frozen_and_validated():
 def test_presets_are_registered_and_default_is_standard_40():
     assert DEFAULT_POLICY is STANDARD_40
     assert get_preset('flat-25') is FLAT_25
-    assert set(PRESETS) == {'standard-40', 'standard-40-noisy',
+    assert set(PRESETS) == {'standard-40', 'standard-40-noisy', 'wide-40',
                             'flat-25', 'flat-25-noisy'}
     with pytest.raises(ValueError):
         get_preset('slider-17')

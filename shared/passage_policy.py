@@ -147,8 +147,18 @@ FLAT_25 = PassagePolicy(name='flat-25', min_span=25)
 FLAT_25_NOISY = PassagePolicy(name='flat-25-noisy', min_span=25,
                               regime=REGIME_TWO_SIDED)
 
+# wide-40: the recall-leaning operating point from the 2026-08-21 tradeoff
+# sweep (full tune sample, n=300 per instrument): density_scale 1.3 buys
+# +9.0/+9.3 recall@50 points over standard-40 on the FGP/witness instruments
+# with strict precision on the graded labeled pairs unchanged; median result
+# size 4 (p90 139) against standard's 2 (p90 47); latency flat. 1.45 climbs
+# further on FGP but doubles the burden again and shows the first precision
+# dent -- past the knee. What the wide point's NEW returns are (discovery or
+# noise) is measured by the delta grading deck, not assumed.
+WIDE_40 = PassagePolicy(name='wide-40', density_scale=1.3)
+
 PRESETS = {p.name: p for p in
-           (STANDARD_40, STANDARD_40_NOISY, FLAT_25, FLAT_25_NOISY)}
+           (STANDARD_40, STANDARD_40_NOISY, FLAT_25, FLAT_25_NOISY, WIDE_40)}
 DEFAULT_POLICY = STANDARD_40
 
 

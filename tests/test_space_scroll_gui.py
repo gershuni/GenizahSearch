@@ -11,6 +11,11 @@ Do NOT skip or stub this test.
 """
 from __future__ import annotations
 
+import pytest
+
+pytestmark = pytest.mark.gui  # imports PyQt6: gui bucket only -- Qt in the mixed non-GUI run
+# segfaults after thousands of NiceGUI/asyncio tests share the process (2026-08-21).
+
 # NOTE: QApplication is created INSIDE the test (not at module scope) so that the
 # bulk `-m "not gui"` slice — which still imports this file during collection before
 # marker deselection — does not initialize Qt at import time (Codex CODE review LOW;
