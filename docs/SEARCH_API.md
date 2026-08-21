@@ -477,8 +477,44 @@ mode is `mode`, NOT `search_mode` — see "Naming Inconsistency" below.
 | `max_freq` | float \| null | `null` disables high-frequency filtering (no chunks routed to `filtered`) | `null` | |
 | `boundary_mode` | enum | `full \| boundary \| combined` | `"full"` | only boundary knob exposed in v7.10 (Phase 80 D-03) |
 | `filters` | object \| null | reuses Phase 78 `FiltersModel` verbatim | `null` | same shape as `/api/search.filters` |
+| `method` | enum | `chunk \| passage` | `"chunk"` | Phase 145 (beta). `chunk` is the pre-Phase-145 sliding-window Tantivy engine described above, byte-for-byte unchanged. `passage` is a character-level matching engine, tolerant of OCR/HTR noise and reflowed line breaks — see "`method='passage'` (beta)" below. |
 
 The Lab Engine extended-parallels path is OUT OF SCOPE for v7.10 (Phase 80 D-02).
+
+### `method='passage'` (beta, Phase 145)
+
+An alternative matching engine over the SAME response shape (`results[]`/`filtered[]`/
+`matches[]`/`locator` unchanged) — a client that does not read `request.method` cannot tell
+the two apart from the envelope shape alone.
+
+- **Availability.** Requires the deployment to have `PASSAGE_PARALLELS_ENABLED=1` AND a
+  successfully-loaded passage index (`web/passage_assets.py::passage_available()`). When
+  either is false, `method='passage'` returns 503 `passage_unavailable` — never a silent
+  fallback to `chunk`.
+- **Genizah-only scope.** The passage index is built ONLY from the Genizah transcription
+  corpus; it holds zero records for `LOCAL` (My-Library) provenance. Requesting
+  `method='passage'` together with `filters.library` containing `"LOCAL"` under the default
+  `library_filter_mode="include"` returns 400 `passage_scope_unsupported` rather than a
+  silently-empty result that would look identical to "no matches found". Excluding `"LOCAL"`
+  (`library_filter_mode="exclude"`) is a no-op for passage and is NOT rejected.
+- **Span-shaped `matches[]`.** Each accepted contiguous span of matched text on a manuscript
+  page is one `matches[]` entry (`chunk_count` = number of spans, unlike the incumbent's
+  Tantivy-hit-derived count). `score` is the span's matched-letter count — directly
+  comparable to the `chunk` engine's merged-span character score, not a Tantivy relevance
+  score. `manuscript_snippet` / `source_chunk_text` are still `*term*`-marked highlight text
+  (same markup the `chunk` engine emits), built via a bounded re-normalization of only the
+  top-ranked rendered rows.
+- **Filtering.** `filters` (domains/authors/works/materials/dates/other libraries) applies
+  as a plain sys_id restriction, same as `chunk`. `mode` (exact/variants/fuzzy), `max_freq`,
+  and the cross-paragraph `boundary_mode`/`boundary_*` knobs have no passage-matching
+  equivalent and are accepted but ignored; `filtered[]` is always `[]` for this method.
+- **Timeout.** Its own ceiling, `SEARCH_API_PASSAGE_TIMEOUT` (default 30s; see Environment
+  Variables below) — separate from `SEARCH_API_PARALLELS_TIMEOUT`, since the two engines'
+  cost models are unrelated. Exceeding it returns 504 `core_timeout`.
+- **Busy envelope.** Passage requests are gated by their OWN bounded concurrency budget
+  (`SEARCH_API_PASSAGE_CONCURRENCY`, default 4) — separate from the `chunk`/`variants`/
+  `fuzzy` heavy-mode budget (`SEARCH_API_HEAVY_CONCURRENCY`). Exhausting it returns 503
+  `passage_search_busy` with a `Retry-After` header, mirroring `heavy_search_busy`'s shape.
 
 ### Response example
 
@@ -521,6 +557,7 @@ The Lab Engine extended-parallels path is OUT OF SCOPE for v7.10 (Phase 80 D-02)
       "min_boundary_matches": 1,
       "min_delimiter_distance": 0
     },
+    "method": "chunk",
     "limit_effective": 1,
     "filters": {"domains": ["Liturgy"]}
   }
@@ -539,11 +576,11 @@ The response is hard-capped at 200 result groups (Phase 80 D-07). When a query p
 more than 200 groups, the top 200 are returned and a `{"code": "truncated_to_200", ...}`
 entry is added to `warnings[]`.
 
-### 6-key request echo
+### 7-key request echo
 
-The parallels response echoes exactly six keys (no more, no fewer). Explicitly NOT echoed:
-`search_mode` (parallels uses `mode`), `gap` (a search-only concept), `responsa_options`
-(parallels never used Responsa).
+The parallels response echoes exactly seven keys (no more, no fewer; six before Phase 145
+added `method`). Explicitly NOT echoed: `search_mode` (parallels uses `mode`), `gap` (a
+search-only concept), `responsa_options` (parallels never used Responsa).
 
 | Echo key | Source | Notes |
 | -------- | ------ | ----- |
@@ -551,6 +588,7 @@ The parallels response echoes exactly six keys (no more, no fewer). Explicitly N
 | `chunk_size` | `req.chunk_size` | unmodified |
 | `max_freq` | `req.max_freq` | `null` permitted |
 | `boundary_options` | server-resolved 5-key dict (`boundary_mode`, `boundary_delimiter`, `boundary_boost`, `min_boundary_matches`, `min_delimiter_distance`) | includes service-layer defaults |
+| `method` | `req.method` | Phase 145; `"chunk"` when omitted — always present, so a caller never has to guess which engine served the response |
 | `limit_effective` | `len(bundle.main_results)` | post-truncation group count |
 | `filters` | model-dumped `FiltersModel` (exclude_none) or `null` | |
 
@@ -652,9 +690,12 @@ public API surface — renaming any is a breaking change).
 | `internal_error` | 500 | unhandled exception in handler |
 | `locator_conflict` | 400 | uid malformed; uid disagrees with sys_id/p_num/fl_id/volume_ie |
 | `manuscript_page_not_found` | 404 | core fetch returned `bundle.page is None`; or post-resolution `bundle.page.uid != requested_uid` |
-| `core_timeout` | 504 | `/api/browse`: BrowsePage exceeded `SEARCH_API_BROWSE_CORE_TIMEOUT` (2.0s). `/api/search`: per-mode ceiling exceeded — exact/title/shelfmark/responsa→30s (`SEARCH_API_CORE_TIMEOUT`), variants→60s (`SEARCH_API_VARIANTS_TIMEOUT`), fuzzy→300s (`SEARCH_API_FUZZY_TIMEOUT`). `/api/parallels`→300s (`SEARCH_API_PARALLELS_TIMEOUT`). Message names the ceiling and mode. |
+| `core_timeout` | 504 | `/api/browse`: BrowsePage exceeded `SEARCH_API_BROWSE_CORE_TIMEOUT` (2.0s). `/api/search`: per-mode ceiling exceeded — exact/title/shelfmark/responsa→30s (`SEARCH_API_CORE_TIMEOUT`), variants→60s (`SEARCH_API_VARIANTS_TIMEOUT`), fuzzy→300s (`SEARCH_API_FUZZY_TIMEOUT`). `/api/parallels`→300s (`SEARCH_API_PARALLELS_TIMEOUT`) for `method='chunk'`, 30s (`SEARCH_API_PASSAGE_TIMEOUT`) for `method='passage'`. Message names the ceiling and mode. |
 | `composition_required` | 400 | `text.strip()` empty |
 | `composition_too_long` | 400 | `len(text.strip()) > 20000` |
+| `passage_unavailable` | 503 | Phase 145: `method='passage'` requested but `PASSAGE_PARALLELS_ENABLED` is off, or the passage index did not load |
+| `passage_scope_unsupported` | 400 | Phase 145: `method='passage'` + `filters.library` includes `"LOCAL"` in include mode — the passage index holds no Local-corpus records |
+| `passage_search_busy` | 503 + `Retry-After` | Phase 145: passage-matching concurrency budget (`SEARCH_API_PASSAGE_CONCURRENCY`, default 4) exhausted; fail-fast; retry shortly |
 
 See [shared/api_errors.py](../shared/api_errors.py) for the authoritative frozenset.
 
@@ -708,8 +749,10 @@ Every server-side var that affects the three endpoints, plus the two skill-side 
 | `SEARCH_API_CORE_TIMEOUT` | `30.0` | server | Interactive baseline timeout for `/api/search` (exact/title/shelfmark/responsa modes), in seconds. Re-read per request. |
 | `SEARCH_API_VARIANTS_TIMEOUT` | `60.0` | server | Heavy-tier timeout for `/api/search` with `search_mode=variants`, in seconds. Re-read per request. |
 | `SEARCH_API_FUZZY_TIMEOUT` | `300.0` | server | Heavy-tier timeout for `/api/search` with `search_mode=fuzzy`, in seconds. Fuzzy (variants_maximum) is inherently slow. Re-read per request. |
-| `SEARCH_API_PARALLELS_TIMEOUT` | `300.0` | server | Timeout for `/api/parallels` composition search, in seconds. Re-read per request. |
-| `SEARCH_API_HEAVY_CONCURRENCY` | `2` | server | Maximum simultaneous in-flight heavy requests (variants/fuzzy/parallels). Beyond this, new requests fail fast with 503 `heavy_search_busy` + `Retry-After: 5`. Re-read per request (semaphore rebuilt when config changes and all slots are free). |
+| `SEARCH_API_PARALLELS_TIMEOUT` | `300.0` | server | Timeout for `/api/parallels` composition search with `method='chunk'` (default), in seconds. Re-read per request. |
+| `SEARCH_API_PASSAGE_TIMEOUT` | `30.0` | server | Phase 145. Timeout for `/api/parallels` with `method='passage'`, in seconds — its own ceiling, unrelated to `SEARCH_API_PARALLELS_TIMEOUT`. Re-read per request. |
+| `SEARCH_API_HEAVY_CONCURRENCY` | `2` | server | Maximum simultaneous in-flight heavy requests (variants/fuzzy/`method='chunk'` parallels). Beyond this, new requests fail fast with 503 `heavy_search_busy` + `Retry-After: 5`. Re-read per request (semaphore rebuilt when config changes and all slots are free). |
+| `SEARCH_API_PASSAGE_CONCURRENCY` | `4` | server | Phase 145. Maximum simultaneous in-flight `method='passage'` requests — its OWN bounded budget (semaphore + its own dedicated `ThreadPoolExecutor(max_workers=4)`, never the default executor `method='chunk'` dispatches into; docs/specs/discovery-budgets.md SS2/SS3's two-budgets lesson). Beyond this, 503 `passage_search_busy` + `Retry-After: 5`. Re-read per request. |
 | `SEARCH_API_FUZZY_MAX_LIMIT` | `500` | server | Result-count ceiling for `fuzzy` mode (recall over precision). Bounded `[1, 2000]` (FUZZY_HARD_MAX). Non-fuzzy modes keep MAX_LIMIT=100. Re-read per request. |
 | `SEARCH_API_BROWSE_TEXT_CAP` | `4000` | server | Default character cap for transcription text on `/api/browse`. Per-request override via `?text_cap=N`, bounded `[100, 10000]`. |
 | `SEARCH_API_POSTHOG_SAMPLE_N` | `1` | server | Capture every Nth request to PostHog. `1` = every request. Applies to all three search-helper endpoints. |
@@ -717,8 +760,8 @@ Every server-side var that affects the three endpoints, plus the two skill-side 
 | `GENIZAH_API_BASE` | `https://genizahsearch.com` | skill | Base URL for all skill API calls. Per Phase 81B D-09, precedence is **env var > `--base-url` CLI flag > default** — an inversion of typical CLI convention; the env var ALWAYS wins. |
 | `GENIZAH_SKILL_REQ_PER_MIN` | `96` | skill | Per-bucket throttle ceiling for the skill's token-bucket. Default leaves 24 rpm headroom under the server's 120 rpm `SEARCH_API_RATE_LIMIT`. |
 
-The CLAUDE.md env-var block at [CLAUDE.md](../CLAUDE.md) currently documents all seven
-server-side vars; the two skill-side vars are documented in
+The CLAUDE.md env-var block at [CLAUDE.md](../CLAUDE.md) documents every server-side var
+above; the two skill-side vars are documented in
 [skills/cairo-genizah-research/SKILL.md](../skills/cairo-genizah-research/SKILL.md).
 
 ## Rate Limiting & Buckets

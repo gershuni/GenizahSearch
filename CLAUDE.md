@@ -98,6 +98,11 @@ The **standalone** backend service (the separate `genizah-backend` process on po
 - `web/components/discovery_panel.py` / `findings_rows.py` / `identification_review.py` - Panel, rows, review dialog
 - `web/components/discovery_links.py` - The one folio-correct link builder (AST-guarded: no surface may hand-build a `/browse` URL)
 
+### Passage-Matching Parallels Search (web beta, Phase 145 — `method='passage'` on `/api/parallels`)
+- `shared/passage_index.py` / `passage_search.py` / `passage_normalize.py` / `passage_policy.py` - The engine (fail-closed mmap reader, seed-and-extend query, versioned normalizer, frozen policy presets)
+- `shared/passage_parallels.py` - `PassageSearcher`, a `CompositionSearcher` wrapper; bounded re-normalization builds highlight text for only the top-rendered rows
+- `web/passage_assets.py` - Fail-closed index loader + `passage_available()` (flag AND index readiness)
+
 ### Browser Extension (GenizahSearch Image Helper)
 - `extension/manifest.json` - Chrome MV3 manifest with NLI host permissions
 - `extension/manifest.firefox.json` - Firefox MV3 manifest
@@ -199,6 +204,8 @@ V3_REVIEW_M_DIR=/path/to/dir  /  V3_REVIEW_JA_DIR=/path/to/dir   # dev/owner-onl
 DISCOVERY_BROWSE_LRU_MAX_ENTRIES=...   # dev/bench-only. Read by scripts/ benchmarking, not by the web app.
 FGP_TRANSCRIPTIONS_ENABLED=true   # shared (both apps): show FGP transcriptions as a distinct, selectable source in the version chooser. Default ON (2026-06-22 go-live) — surfaces wherever the gitignored fgp_data/fgp_transcriptions.db is present; graceful no-op when the DB is absent. Kill-switch: set to 0/false/no/off. Read live in shared/fgp_service.py.
 WEB_FGP_ENABLED=...               # optional web-only override of the above (web/feature_flags.py::web_fgp_enabled); defaults to FGP_TRANSCRIPTIONS_ENABLED (ON). Disable on web only with WEB_FGP_ENABLED=0.
+PASSAGE_PARALLELS_ENABLED=false   # web-only (Phase 145). Gates method='passage' on /api/parallels + the parallels-page method selector. Necessary but NOT sufficient: web/passage_assets.py::passage_available() ANDs it with the passage index's startup-loaded readiness (shared/passage_index.py::open_index is itself fail-closed: manifest, layout/normalizer version, bit budgets, byte order, CSR sanity, declared-vs-actual file sizes). Flag-ON + index-missing/corrupt hides cleanly.
+GENIZAH_PASSAGE_DATA_DIR=/path/to/dir   # dev/CI-only. Overrides the dir web/passage_assets.py opens the passage index from (default: repo-root passage_index/current/, gitignored, multi-GB, machine-local). Read ONCE at import.
 PUZZLE_UPLOAD_SECRET=xxx (optional - HMAC secret for puzzle upload tokens; auto-generated if unset)
 POSTHOG_IP_SALT=xxx (optional - HMAC salt for hashing client IPs; auto-generated if unset, production should set explicitly so hashes survive restarts)
 
@@ -212,7 +219,9 @@ SEARCH_API_CORE_TIMEOUT=30.0          # interactive baseline (exact/title/shelfm
 SEARCH_API_VARIANTS_TIMEOUT=60        # /api/search variants-mode core timeout (s); heavy tier
 SEARCH_API_FUZZY_TIMEOUT=300          # /api/search fuzzy-mode core timeout (s); heaviest mode
 SEARCH_API_PARALLELS_TIMEOUT=300      # /api/parallels composition core timeout (s)
-SEARCH_API_HEAVY_CONCURRENCY=2        # max concurrent heavy (variants/fuzzy/parallels) requests; over -> 503 heavy_search_busy + Retry-After
+SEARCH_API_HEAVY_CONCURRENCY=2        # max concurrent heavy (variants/fuzzy/parallels method=chunk) requests; over -> 503 heavy_search_busy + Retry-After
+SEARCH_API_PASSAGE_TIMEOUT=30         # /api/parallels method='passage' core timeout (s); own ceiling, unrelated to SEARCH_API_PARALLELS_TIMEOUT (Phase 145)
+SEARCH_API_PASSAGE_CONCURRENCY=4      # max concurrent method='passage' requests; its OWN semaphore + ThreadPoolExecutor(max_workers=4), never the default executor -> 503 passage_search_busy + Retry-After
 SEARCH_API_FUZZY_MAX_LIMIT=500        # fuzzy result-cap ceiling (recall over precision; non-fuzzy stays 100)
 SEARCH_API_BROWSE_TEXT_CAP=4000       # default char cap for transcription text; ?text_cap=N override bounded [100, 10000]
 
