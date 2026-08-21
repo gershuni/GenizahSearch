@@ -56,6 +56,8 @@ WARNING_CODES = frozenset({
     'query_downgraded',
     # Phase 80 (/api/parallels) additions:
     'truncated_to_200',         # D-07: parallels group count exceeds 200; top 200 returned
+    # Phase 145 (method='passage') additions:
+    'passage_text_lookup_failed',  # a row was DROPPED (never rendered) because its display-text lookup failed; carries a `count` field
 })
 
 

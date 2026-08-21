@@ -47,19 +47,44 @@ site:
   This makes the API path's own downstream call to the same function a
   no-op (already <= cap groups) rather than a second, different selection,
   and makes the page's direct call path bounded for the first time (it
-  applied no cap before). `filtered_results` (source-text filtered, below)
-  is explicitly NOT subject to this cap, mirroring
-  `shared/parallels_service.py`'s documented v7.10 decision that the
-  filtered bucket is never capped.
-* `filtered_results` now happens: `filter_text` (the page's "Filter
-  Sources" text) is honored with the SAME semantics
-  `SearchEngine.search_composition_logic` uses (adversarial review finding
-  #3) -- if the query-side text of ANY span matched on a record also
-  appears (letter-stream-normalized) inside `filter_text`, the WHOLE row is
-  routed to `filtered` rather than `main` (per-RECORD granularity, matching
-  `rec['is_filtered']` in search_engine.py, not per-span). `max_freq` has no
-  passage equivalent (passage's own posting budget already bounds retrieval
-  internally) and stays unused.
+  applied no cap before).
+* Codex review finding #16(a): `filtered_results` is now group-capped TOO,
+  by the SAME function and the SAME cap, not left unbounded. The incumbent
+  (shared/parallels_service.py's documented v7.10 decision) leaves ITS
+  filtered bucket uncapped on the stated assumption that it is "typically
+  small, driven by the user's max_freq threshold" -- passage has no
+  max_freq-shaped signal at all; its filtered bucket is driven by
+  `filter_text` substring matches, which has no such size guarantee (a
+  large pasted "known source" blob could match most of the corpus). Without
+  a cap, EVERY verified candidate up to `policy.verify_cap` (default 3,000)
+  could land in `filtered` and get its own live, uncapped Tantivy lookup --
+  exactly the unbounded-cost risk the render cap exists to prevent for
+  `main`. So filtered rows go through the identical
+  `_cap_main_results_by_group` call, capped and rendered the same way.
+* Codex review finding #16(b): a FAILED text lookup no longer produces a
+  silently blank row. Previously a row that survived the cap but whose
+  `get_full_text_by_header` call returned nothing (or raised) still made it
+  into the output with `text=''`/`source_ctx=''`/`chunk_hits=[]` --
+  indistinguishable from "this row survived the cap but genuinely has
+  nothing to highlight." Now `_render_highlights` reports success/failure;
+  a failed row is DROPPED from the returned list entirely and counted in
+  the new `dropped_text_lookup_failures` key of this method's return dict
+  (mirrors this project's "no silent truncation -- count every exclusion"
+  rule). `shared/parallels_service.py::fetch_parallels_results` reads this
+  count into `ParallelsResultBundle.dropped_text_lookup_failures`, and
+  web/search_api.py surfaces it as a `passage_text_lookup_failed` warning
+  in the public envelope when non-zero. web/pages/parallels.py's direct
+  call path receives the same count in its own result dict but does not
+  yet display it -- a documented, deliberately out-of-scope gap for this
+  fix (no UI surface for a warnings array exists on that page today).
+* `filter_text` (the page's "Filter Sources" text) is honored with the SAME
+  semantics `SearchEngine.search_composition_logic` uses (adversarial
+  review finding #3) -- if the query-side text of ANY span matched on a
+  record also appears (letter-stream-normalized) inside `filter_text`, the
+  WHOLE row is routed to `filtered` rather than `main` (per-RECORD
+  granularity, matching `rec['is_filtered']` in search_engine.py, not
+  per-span). `max_freq` has no passage equivalent (passage's own posting
+  budget already bounds retrieval internally) and stays unused.
 * `chunk_hits[i][0]` (`chunk_index`) is the ordinal of the span's query-side
   start offset among ALL distinct start offsets across every surviving hit
   for this query -- computed ONCE, shared across every record (adversarial
@@ -78,15 +103,16 @@ site:
   not, and a literal asterisk in manuscript text would otherwise be
   indistinguishable from marker syntax downstream).
 * Highlight text (`text`, `source_ctx`, and each `chunk_hits` tuple's
-  `manuscript_snippet`) is built for exactly the returned rows (both
-  `main` after the group cap, and `filtered`, which is never capped) -- a
-  BOUNDED re-normalization per the plan's display-span contract. Row count
-  is itself bounded upstream by `policy.verify_cap` (default 3,000 --
-  shared/passage_policy.py: at most one hit per verified candidate); at a
-  measured ~1.3 ms/row render cost, a worst-case full cap is a few seconds,
-  comfortably inside `SEARCH_API_PASSAGE_TIMEOUT` (30s default). This is an
-  ACCEPTED cost, not further sub-capped, specifically so "rendered == kept"
-  holds even in that worst case.
+  `manuscript_snippet`) is built for exactly the rows this method RETURNS
+  (both `main` and `filtered`, each capped independently to `render_cap`
+  groups) -- a BOUNDED re-normalization per the plan's display-span
+  contract. Row count per bucket is itself bounded upstream by
+  `policy.verify_cap` (default 3,000 -- shared/passage_policy.py: at most
+  one hit per verified candidate); at a measured ~1.3 ms/row render cost, a
+  worst-case full cap on BOTH buckets is a handful of seconds, comfortably
+  inside `SEARCH_API_PASSAGE_TIMEOUT` (30s default). This is an ACCEPTED
+  cost, not further sub-capped, specifically so "rendered == kept" holds
+  even in that worst case.
 * Two costs are deliberately NOT optimized away (adversarial review,
   "deliberately skipped" items): (1) `nfc()` runs twice per rendered row's
   manuscript text -- once explicitly here, once again inside
@@ -94,8 +120,9 @@ site:
   normalizer's own contract (shared/passage_normalize.py), which is out of
   proportion to the cost; (2) `get_full_text_by_header` issues one live
   Tantivy query PER rendered row rather than a batch fetch -- bounded by
-  the same render-cap/verify-cap chain as the render cost above, so it is
-  documented rather than restructured.
+  the same render-cap/verify-cap chain as the render cost above (and now
+  ALSO applied to `filtered`, finding #16(a)), so it is documented rather
+  than restructured.
 * `mode` (exact/variants/fuzzy), `progress_callback`, `boundary_delimiter`,
   `boundary_boost` and `min_delimiter_distance` are accepted (for
   call-shape compatibility with the real `SearchEngine.search_composition_
@@ -262,6 +289,14 @@ class PassageSearcher:
         See the module docstring for which parameters are honored vs
         accepted-but-ignored.
 
+        Returns:
+            ``{'main': [...], 'filtered': [...],
+            'dropped_text_lookup_failures': int}`` -- the third key is
+            additive (existing consumers that only read 'main'/'filtered'
+            are unaffected); it counts rows that survived the group cap but
+            were DROPPED (never rendered, never returned) because
+            `get_full_text_by_header` failed for them (finding #16(b)).
+
         Raises:
             ValueError: if `boundary_mode != 'full'` -- passage-matching has
                 no cross-paragraph/token-boundary concept over a letter
@@ -310,7 +345,7 @@ class PassageSearcher:
         span_index_of_q0 = {q0: i for i, q0 in enumerate(all_q_starts)}
 
         eligible_rows: list = []
-        filtered_rows: list = []
+        filtered_candidate_rows: list = []
         hit_by_header: dict = {}
         for hit in hits:
             hit_by_header[hit.record_id] = hit
@@ -331,26 +366,47 @@ class PassageSearcher:
                 # Matches SearchEngine.search_composition_logic's filter_text
                 # semantics: a record is routed to `filtered` (never `main`)
                 # when the composition text it matched is itself known/
-                # printed source text -- and, like the incumbent, filtered
-                # rows are NOT subject to the render/group cap below.
-                self._render_highlights(row, hit, q_nfc, q_offsets, span_index_of_q0)
-                filtered_rows.append(row)
+                # printed source text.
+                filtered_candidate_rows.append(row)
             else:
                 eligible_rows.append(row)
 
-        # Finding #1 ("THE BIG ONE"): apply the SAME group-cap rule the API
-        # path applies downstream, so rendered rows == kept rows always --
-        # see the module docstring for the full rationale.
-        capped_rows, _truncated = _cap_main_results_by_group(
+        # Finding #1 ("THE BIG ONE") + finding #16(a): apply the SAME
+        # group-cap rule to BOTH buckets, so rendered rows == kept rows
+        # always -- see the module docstring for the full rationale on why
+        # `filtered` is capped too (unlike the incumbent's own filtered
+        # bucket, which is documented as "typically small" on an assumption
+        # passage's filter_text mechanism does not share).
+        capped_main_candidates, _truncated = _cap_main_results_by_group(
             eligible_rows, _RegexSysIdParser(), cap=self.render_cap)
+        capped_filtered_candidates, _truncated_f = _cap_main_results_by_group(
+            filtered_candidate_rows, _RegexSysIdParser(), cap=self.render_cap)
+
+        # Finding #16(b): a row whose text lookup fails is DROPPED and
+        # COUNTED, never returned half-blank.
+        dropped = 0
 
         main_results = []
-        for row in capped_rows:
+        for row in capped_main_candidates:
             hit = hit_by_header[row['raw_header']]
-            self._render_highlights(row, hit, q_nfc, q_offsets, span_index_of_q0)
-            main_results.append(row)
+            if self._render_highlights(row, hit, q_nfc, q_offsets, span_index_of_q0):
+                main_results.append(row)
+            else:
+                dropped += 1
 
-        return {'main': main_results, 'filtered': filtered_rows}
+        filtered_results = []
+        for row in capped_filtered_candidates:
+            hit = hit_by_header[row['raw_header']]
+            if self._render_highlights(row, hit, q_nfc, q_offsets, span_index_of_q0):
+                filtered_results.append(row)
+            else:
+                dropped += 1
+
+        return {
+            'main': main_results,
+            'filtered': filtered_results,
+            'dropped_text_lookup_failures': dropped,
+        }
 
     # -- filter_text parity (finding #3) -------------------------------------
 
@@ -376,11 +432,10 @@ class PassageSearcher:
     # -- bounded re-normalization (display path only) -----------------------
 
     def _render_highlights(self, row: dict, hit, q_nfc: str, q_offsets,
-                            span_index_of_q0: dict) -> None:
+                            span_index_of_q0: dict) -> bool:
         """Fill in `text` / `source_ctx` / `chunk_hits` for ONE row (either a
-        surviving `main` row post-cap, or a `filtered` row -- filtered rows
-        are never capped, matching shared/parallels_service.py's documented
-        v7.10 decision).
+        surviving `main` row or a surviving `filtered` row -- both are
+        group-capped identically, finding #16(a)).
 
         Per-render work, deliberately -- the display-span contract
         (docs/specs/passage-matching-algorithm.md) requires re-normalizing
@@ -390,6 +445,12 @@ class PassageSearcher:
         row (not batched) and one redundant nfc() pass (`norm_stream` below
         calls it again internally) are both accepted costs -- see the
         module docstring's "deliberately NOT optimized away" note.
+
+        Returns:
+            True if the row was successfully rendered (caller should keep
+            it); False if the text lookup failed (caller must DROP the row
+            and count it -- finding #16(b): never return a silently blank
+            row that survived the cap but has no real content).
         """
         orig_text = None
         try:
@@ -400,7 +461,11 @@ class PassageSearcher:
                 hit.record_id, exc_info=True,
             )
         if not orig_text:
-            return
+            logger.warning(
+                'passage_parallels: dropping record %s -- text lookup failed '
+                '(counted, not returned as a blank row)', hit.record_id,
+            )
+            return False
 
         r_nfc = nfc(orig_text)  # redundant with norm_stream's internal nfc() -- accepted cost
         _r_stream, r_offsets = norm_stream(orig_text)
@@ -417,3 +482,4 @@ class PassageSearcher:
         row['source_ctx'] = "\n\n".join(src_snips)
         row['text'] = "\n...\n".join(ms_snips)
         row['chunk_hits'] = chunk_hits
+        return True

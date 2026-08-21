@@ -100,16 +100,32 @@ class ParallelsResultBundle:
     'truncated_to_200' to the envelope warnings[] list in this case.
 
     NOTE on filtered_results: filtered_results is NOT subject to
-    PARALLELS_GROUP_CAP in v7.10. filtered_results is the set of chunks whose
-    frequency exceeds the user's max_freq threshold -- typical max_freq values
-    produce small filtered sets, making capping unnecessary for v7.10. This is
-    an explicit v7.10 decision, not an oversight. v7.11 may add a filtered cap
-    if load testing reveals large filtered payloads.
+    PARALLELS_GROUP_CAP in v7.10 for the CHUNK path. filtered_results is the
+    set of chunks whose frequency exceeds the user's max_freq threshold --
+    typical max_freq values produce small filtered sets, making capping
+    unnecessary for v7.10. This is an explicit v7.10 decision, not an
+    oversight. v7.11 may add a filtered cap if load testing reveals large
+    filtered payloads. (Phase 145's PassageSearcher does NOT share this
+    assumption for its own filtered bucket -- see
+    shared/passage_parallels.py's module docstring, finding #16(a) -- and
+    caps it internally before this bundle is ever built, so nothing here
+    needs to special-case the passage searcher.)
+
+    dropped_text_lookup_failures (Codex review finding #16(b)): count of
+    rows a searcher dropped (never rendered, never returned in either
+    bucket) because its display-text lookup failed. 0 for the chunk path
+    (search_composition_logic reads `content` from the SAME Tantivy
+    document it just matched -- there is no separate lookup that can fail).
+    Populated from PassageSearcher's result dict when present. The route
+    handler surfaces a non-zero count as a `passage_text_lookup_failed`
+    warning rather than letting it disappear silently (this repo's rule:
+    no silent truncation, every exclusion counted).
     """
     main_results: list[dict]
     filtered_results: list[dict]
     boundary_options: dict
     truncated_to_200: bool = False
+    dropped_text_lookup_failures: int = 0
 
 
 async def _run_sync(func, *args, _executor=None, **kwargs):
@@ -291,12 +307,18 @@ async def fetch_parallels_results(
 
     main_results = (result or {}).get('main') or []
     filtered_results = (result or {}).get('filtered') or []
-    # NOTE: filtered_results is intentionally NOT capped here (v7.10 decision).
-    # filtered_results is driven by the user's max_freq threshold and is typically
-    # small. The primary response-size concern (large main result sets) is addressed
-    # by the 200-group cap on main_results above. Capping filtered in v7.10 adds
-    # implementation complexity for a rare edge case. v7.11 can add a filtered cap
-    # if load testing reveals large filtered payloads.
+    # NOTE: filtered_results is intentionally NOT capped HERE (v7.10 decision,
+    # chunk path only). filtered_results is driven by the user's max_freq
+    # threshold and is typically small. The primary response-size concern
+    # (large main result sets) is addressed by the 200-group cap on
+    # main_results above. Capping filtered in v7.10 adds implementation
+    # complexity for a rare edge case. v7.11 can add a filtered cap if load
+    # testing reveals large filtered payloads. PassageSearcher's OWN filtered
+    # bucket does not share this "typically small" assumption and caps
+    # itself internally BEFORE this function ever sees it (finding #16(a)) --
+    # nothing here needs to know which searcher produced `result`.
+    dropped_text_lookup_failures = int(
+        (result or {}).get('dropped_text_lookup_failures') or 0)
 
     # D-07 cap on main groups only.
     capped_main, truncated = _cap_main_results_by_group(main_results, meta_mgr)
@@ -317,4 +339,5 @@ async def fetch_parallels_results(
         filtered_results=filtered_results,
         boundary_options=boundary_options,
         truncated_to_200=truncated,
+        dropped_text_lookup_failures=dropped_text_lookup_failures,
     )

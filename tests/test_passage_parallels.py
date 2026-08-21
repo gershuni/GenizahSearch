@@ -178,8 +178,12 @@ _ROW_KEYS = {
 def test_row_contract_keys_and_types(searcher, synthetic_corpus):
     _idx, _originals, motif = synthetic_corpus
     result = searcher.search_composition_logic(full_text=motif)
-    assert set(result.keys()) == {'main', 'filtered'}
+    # 'dropped_text_lookup_failures' (finding #16(b)) is ADDITIVE -- existing
+    # consumers that only read 'main'/'filtered' (shared/parallels_service.py
+    # via .get()) are unaffected by its presence.
+    assert set(result.keys()) == {'main', 'filtered', 'dropped_text_lookup_failures'}
     assert result['filtered'] == []
+    assert result['dropped_text_lookup_failures'] == 0
     assert result['main'], 'the motif carrier was not found'
 
     row = result['main'][0]
@@ -450,6 +454,82 @@ def test_filter_text_non_matching_leaves_main_untouched(searcher, synthetic_corp
         full_text=motif, filter_text=unrelated_filter_text)
     assert result['main'], 'unrelated filter_text must not filter real matches'
     assert result['filtered'] == []
+
+
+def test_filtered_bucket_is_group_capped_too(grouped_corpus):
+    """Finding #16(a): the incumbent's OWN filtered bucket is documented as
+    "typically small" (driven by max_freq) and left uncapped on that
+    assumption -- passage's filtered bucket is driven by filter_text
+    substring matches instead, which has no such size guarantee. It must be
+    capped by the SAME group-cap rule as main, not left to grow to the
+    verify_cap ceiling (3,000) with one live Tantivy lookup each."""
+    idx, originals, motif = grouped_corpus
+    capped_searcher = PassageSearcher(
+        index=idx, text_fetcher=_FakeTextFetcher(originals), render_cap=2)
+    # filter_text == the motif itself -> every one of the 12 hits' sole span
+    # matches it, so ALL 12 would land in `filtered` if it were uncapped.
+    result = capped_searcher.search_composition_logic(
+        full_text=motif, filter_text=motif)
+    assert result['main'] == []
+    assert result['filtered'], 'fixture precondition: at least one filtered hit'
+
+    kept_sys_ids = {_extract_sys_id(r['raw_header']) for r in result['filtered']}
+    assert 1 <= len(kept_sys_ids) <= 2, kept_sys_ids
+    assert len(result['filtered']) < 12, (
+        'the filtered bucket was not actually capped -- all 12 hits came back')
+    # And "rendered == kept" holds for filtered rows too.
+    for row in result['filtered']:
+        assert row['text'], f"filtered row {row['raw_header']} was kept but never rendered"
+        assert row['chunk_hits']
+
+
+# ---------------------------------------------------------------------------
+# Finding #16(b): a failed text lookup drops-and-counts the row, never a
+# silent blank one.
+# ---------------------------------------------------------------------------
+
+class _FlakyTextFetcher:
+    """Like _FakeTextFetcher, but returns None for one chosen record_id --
+    simulating a failed display-text lookup on an otherwise-healthy search."""
+
+    def __init__(self, mapping: dict, fail_for: str):
+        self._mapping = mapping
+        self._fail_for = fail_for
+
+    def get_full_text_by_header(self, full_header: str):
+        if full_header == self._fail_for:
+            return None
+        return self._mapping.get(full_header)
+
+
+def test_failed_text_lookup_drops_and_counts_the_row_not_blank(grouped_corpus):
+    """Exercises the FULL render path (real synthetic index, real
+    search_passage call, real group cap) with a text_fetcher that fails for
+    exactly one record: that row must be ABSENT from the output (never a
+    blank-text row masquerading as a real result) and counted in
+    dropped_text_lookup_failures."""
+    idx, originals, motif = grouped_corpus
+    failing_record_id = _grouped_record_id(0, 0)
+    flaky_fetcher = _FlakyTextFetcher(originals, fail_for=failing_record_id)
+    searcher_ = PassageSearcher(index=idx, text_fetcher=flaky_fetcher, render_cap=200)
+
+    result = searcher_.search_composition_logic(full_text=motif)
+
+    all_raw_headers = {r['raw_header'] for r in result['main']} | \
+        {r['raw_header'] for r in result['filtered']}
+    assert failing_record_id not in all_raw_headers, (
+        'the row with a failed text lookup must be DROPPED, not returned blank')
+    # No blank rows anywhere -- every returned row (main or filtered) is
+    # fully rendered, per "rendered == kept."
+    for row in result['main'] + result['filtered']:
+        assert row['text'] != '', f"row {row['raw_header']} has blank text"
+
+    assert result['dropped_text_lookup_failures'] == 1, (
+        f"expected exactly 1 dropped row, got "
+        f"{result['dropped_text_lookup_failures']}")
+    # Without the fix, this record would have appeared in `main` with
+    # text=='' -- one fewer row overall is the visible, counted difference.
+    assert len(result['main']) == 11
 
 
 # ---------------------------------------------------------------------------
