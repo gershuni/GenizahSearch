@@ -299,12 +299,22 @@ confirming it.
 
 1. **Tuning split, exploratory** (`prereg.json: exploratory = true`). The
    holdout is untouched.
-2. **n = 100 of 240.** The remaining 140 cards narrow the intervals; they
-   cannot change the non-overlap, which is already wide.
+2. **n = 100 of 240.** The remaining 140 cards would move both estimates and
+   both intervals; the non-overlap is wide but not immune to more data.
+   (An earlier phrasing here claimed they "cannot change the non-overlap" --
+   that was an overclaim, corrected on external review.)
 3. **Depth 3, not depth 50.** Precision deeper in the incumbent's list is
    unmeasured (and, by the asymmetry above, likely worse).
 4. **FGP queries.** Same distribution caveat as the recall instrument.
 5. **One grader, unreplicated.** No second-grader agreement measurement.
+6. **A share of the cards are self-retrieval** (the returned record belongs to
+   the query's own FGP source manuscript): 18 of 42 passage cards, 17 of 77
+   chunk cards. Splitting them out (external review, 2026-08-21) STRENGTHENS
+   the finding rather than weakening it -- on non-source manuscripts alone,
+   the externally valid subset, strict precision is **passage 23/24 = 0.958
+   vs chunk 27/60 = 0.450**; on source-manuscript cards it is 18/18 = 1.000
+   vs 14/17 = 0.824. The holdout deck reports the two populations separately
+   by design.
 
 ---
 
@@ -356,8 +366,11 @@ Two deliberate design points:
    a yardstick, never acceptance evidence.
 
 Both apply to identical queries and identical positive sets, so the
-between-method difference is unaffected; only the absolute level is
-uninterpretable.
+comparison is fair ON THE OBSERVED ORACLE. That is weaker than "the true
+between-method difference is unaffected" (an earlier overclaim, corrected on
+external review): witnesses the oracle does not list can be retrieved at
+different rates by the two methods, and nothing here measures that. The
+instrument compares the methods against the attested slice only.
 
 ### Passage-side result, 300 tune queries
 
