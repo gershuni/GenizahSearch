@@ -664,3 +664,65 @@ Also flagged for correction: the union and 5+5 recall rows computed on
 2026-08-21 are **record-grain** calculations, while the product and the next
 deck are manuscript-grain. They must be recomputed at sys grain before being
 used for any decision.
+
+
+---
+
+## The display-policy deck (`deck_display_v1`), built 2026-08-21
+
+Built per the external-review design, over the same 300 FGP tune queries whose
+recall numbers are recorded above. Three candidate display views, manuscript
+grain, depth 10:
+
+| view | policy | N_display (manuscript cards shown across the panel) | queries showing anything |
+|---|---|---|---|
+| `S` | `standard-40`, top 10 | 975 | 251 / 300 |
+| `W` | `wide-40`, top 10 | 1,456 | 276 / 300 |
+| `C5` | `wide-40` + incumbent, 5 each alternating | 2,312 | 298 / 300 |
+
+Stratified by visible rank band x aligned-span band (12 cells), census at 8
+per cell plus 24 extra draws spread over the deep bands: **121 view-selections
+-> 120 unique cards** to grade, of which 13 are source-manuscript returns and
+one card is shown by two views (graded once, counted for both).
+
+Every invariant reconciles: per-query display counts sum exactly to each
+view's `N_display`, and each view's stratum `N_h` values sum to the same
+number. A blind check of the HTML confirms no view, rank, stratum, method
+name, or `is_source` value reaches the grader.
+
+### The all-strict control
+
+Scoring a synthetic deck in which every card is graded `same_text` must return
+precision exactly 1.000 and yield exactly `N_display / 300`. It does, on all
+three views: 1.000 [1.000, 1.000], and 7.707 / 3.250 / 4.853 — matching
+2312/300, 975/300, 1456/300 to the digit. The estimator recovers a known
+truth before it is trusted with an unknown one.
+
+### What the numbers will and will not support
+
+Interval widths at 120 cards are roughly +/-0.08 (C5) to +/-0.16 (S) on the
+non-source columns, because 120 sampled cards stand in for ~4,700 displayed
+ones and a single card in the largest stratum carries about 3% of its view's
+estimate. That resolution separates large differences between views and will
+NOT separate small ones. If the three views land close together, "no clear
+winner" is the finding, not a reason to grade more.
+
+### Three defects the instrument found in itself before use
+
+Each was caught by running the real pipeline and reading its output, not by
+unit tests on fixtures:
+
+1. **Impossible intervals.** A precision CI upper bound of 1.486 — the
+   query-clustered bootstrap held `N_display` fixed while resampling the
+   numerator. Fixed by giving the manifest per-query display counts.
+2. **An invalid variance estimator.** The prescribed query-clustered
+   bootstrap does not compose with stratification that cuts across queries:
+   weights calibrated per stratum do not decompose per query, and 6-8 of
+   every ~12 graded queries had a weighted numerator exceeding their own
+   display count. Replaced with a stratified bootstrap, which bounds
+   precision at 1 by construction.
+3. **A point estimate outside its own interval.** The non-source column
+   filtered the sampling POOL while the bootstrap still drew `n_h` items,
+   re-inflating the numerator to the unfiltered maximum (0.868 with a
+   [1.000, 1.000] interval). Replaced with domain estimation — membership in
+   the indicator, every unit kept in the pool.
