@@ -44,6 +44,10 @@ from shared.browse_map_utils import (
     library_codes_with_manuscripts,
 )
 
+# Phase 145: passage-matching parallels search (fail-closed -- flag AND
+# a loaded index; see web/passage_assets.py).
+from web.passage_assets import passage_available, get_passage_searcher
+
 
 def get_source_display_name(ref: str) -> str:
     """Get a display name for a source reference."""
@@ -633,6 +637,19 @@ def create_parallels_page(initial_text: str = None):
                         deep_scan = ui.checkbox(tr('Deep Scan')).style('display: none;')
                         deep_scan.tooltip(tr('Exhaustive search - slower but finds more results'))
 
+                        # Phase 145: passage-matching method selector. Visible ONLY when
+                        # passage_available() (flag AND a loaded index) -- a clean hide,
+                        # not a disabled control, when the beta index is not deployed.
+                        # Mutually exclusive with Lab Mode (both are "pick a different
+                        # backend" toggles; a request can only use one at a time).
+                        passage_mode = ui.checkbox(tr('Passage matching (beta)'))
+                        passage_mode.tooltip(tr(
+                            'Character-level matching, tolerant of OCR noise and reflowed '
+                            'line breaks. Genizah corpus only.'
+                        ))
+                        if not passage_available():
+                            passage_mode.style('display: none;')
+
                     # === Boundary Search Settings ===
                     with ui.row().classes('w-full items-center gap-4 flex-wrap mt-2'):
                         # Paragraph delimiter (always editable - affects display even in full mode)
@@ -774,6 +791,11 @@ def create_parallels_page(initial_text: str = None):
                             freq_threshold_row.style('display: none;')
                             # Higher default for composition/lab mode
                             min_chunks_input.value = 3
+                            # Phase 145: Lab Mode and passage matching are two
+                            # different backends -- mutually exclusive, like the
+                            # incumbent-vs-Lab choice already is.
+                            if passage_mode.value:
+                                passage_mode.value = False
                         else:
                             deep_scan.style('display: none;')
                             freq_threshold_row.style('display: block;')
@@ -781,6 +803,15 @@ def create_parallels_page(initial_text: str = None):
                             min_chunks_input.value = 1
 
                     lab_mode.on('update:model-value', on_lab_mode_change)
+
+                    # Phase 145: passage-matching toggle handler -- reciprocal
+                    # mutual exclusivity with Lab Mode.
+                    def on_passage_mode_change():
+                        if passage_mode.value and lab_mode.value:
+                            lab_mode.value = False
+                            on_lab_mode_change()
+
+                    passage_mode.on('update:model-value', on_passage_mode_change)
 
                     # Initialize help text
                     update_boundary_help()
@@ -2591,6 +2622,10 @@ def create_parallels_page(initial_text: str = None):
 
         # Capture search mode settings in main thread
         captured_lab_mode = lab_mode.value
+        # Phase 145: re-check passage_available() here too (not just at widget
+        # build time) -- a request in flight when the passage index becomes
+        # unavailable must degrade to "not selected", never crash run_search().
+        captured_passage_mode = bool(passage_mode.value) and passage_available() and not captured_lab_mode
         captured_freq_threshold = int(freq_threshold.value) if freq_threshold.value else 50
         captured_deep_scan = deep_scan.value if captured_lab_mode else False
         captured_chunk_size = int(chunk_size.value) if chunk_size.value else 5
@@ -2689,6 +2724,29 @@ def create_parallels_page(initial_text: str = None):
                         min_boundary_matches=captured_min_boundary_matches,
                         min_delimiter_distance=captured_min_delimiter_distance
                     )
+                elif captured_passage_mode:
+                    # PASSAGE MATCHING (Phase 145, beta): character-level engine,
+                    # tolerant of OCR noise / reflowed line breaks. Constructed
+                    # fresh here (cheap -- no I/O, the index is already open) and
+                    # never when the index is unavailable, per
+                    # web/passage_assets.py::get_passage_searcher's contract.
+                    passage_searcher = get_passage_searcher(state.searcher)
+                    if passage_searcher is None:
+                        return None
+                    result = passage_searcher.search_composition_logic(
+                        text,
+                        chunk_size=captured_chunk_size,
+                        max_freq=captured_freq_threshold,
+                        mode=captured_mode,
+                        filter_text=captured_filter_text or None,
+                        progress_callback=progress_cb,
+                        boundary_mode=captured_boundary_mode,
+                        boundary_delimiter=captured_boundary_delimiter,
+                        boundary_boost=captured_boundary_boost,
+                        min_boundary_matches=captured_min_boundary_matches,
+                        min_delimiter_distance=captured_min_delimiter_distance,
+                        restrict_sys_ids=captured_restrict_sys_ids,
+                    )
                 else:
                     # STANDARD MODE: Use direct Tantivy search (faster, simpler)
                     result = state.searcher.search_composition_logic(
@@ -2751,6 +2809,11 @@ def create_parallels_page(initial_text: str = None):
                     'duration_seconds': round(total_elapsed, 1),
                     'is_partial': is_partial,
                     'mode': captured_mode,
+                    # Phase 145: which backend actually served this search --
+                    # 'lab' / 'passage' / 'chunk' (the pre-existing default).
+                    'engine': 'lab' if captured_lab_mode else (
+                        'passage' if captured_passage_mode else 'chunk'
+                    ),
                 })
 
                 try:
@@ -2829,6 +2892,13 @@ def create_parallels_page(initial_text: str = None):
                         params={
                             'chunk_size': int(chunk_size.value) if chunk_size.value else 5,
                             'mode': mode_select.value or 'exact',
+                            # Phase 145: record-only (history restore does not
+                            # re-select any engine toggle today -- lab_mode
+                            # included -- so this is observability, not a
+                            # restore contract).
+                            'engine': 'lab' if captured_lab_mode else (
+                                'passage' if captured_passage_mode else 'chunk'
+                            ),
                             'filters': {
                                 'domains': p_state.filter_domains,
                                 'authors': p_state.filter_authors,
