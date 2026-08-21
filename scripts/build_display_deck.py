@@ -303,10 +303,21 @@ def main() -> int:
             'letters': sp['letters'], 'aligned': sp['aligned'],
             'r_sys': rid.split('_', 1)[0],
         })
+        # is_source must be a real boolean. compute_is_source returns None
+        # when a query row has no meta.sys_id, and a None would land in the
+        # "non-source" bucket -- the population the externally-valid figure is
+        # computed over -- silently mixing unknowns into it. Measured: 0 of
+        # 19,090 FGP queries lack meta.sys_id, so this cannot fire on this
+        # panel; it fails loudly rather than contaminating a future one.
+        is_source = compute_is_source(rid, qrow[qid])
+        if is_source is None:
+            raise SystemExit(
+                f'query {qid!r} has no meta.sys_id, so is_source is unknown '
+                f'for record {rid!r}; refusing to file it as non-source')
         key.append({
             'id': card_id, 'query_id': qid, 'record_id': rid,
             'sys_id': rid.split('_', 1)[0],
-            'is_source': compute_is_source(rid, qrow[qid]),
+            'is_source': is_source,
             'selections': [
                 {k: v for k, v in s.items()
                  if k in ('view', 'rank', 'rank_band', 'span_band',
@@ -319,10 +330,24 @@ def main() -> int:
     for view in ('S', 'W', 'C5'):
         strata = {st: {'N_h': len(population[st]), 'n_h': alloc[st]}
                   for st in population if st.startswith(view + '|')}
+        # Per-query display counts. Needed because a cluster bootstrap that
+        # resamples QUERIES while holding N_display fixed produces impossible
+        # intervals -- the integration smoke returned a precision CI upper
+        # bound of 1.486. Precision here is a RATIO estimator, so a resample
+        # must recompute its denominator from the same resampled queries.
+        by_q = collections.Counter()
+        for qid, syss in views[view].items():
+            n = sum(1 for s in syss if (qid, s) in first_rec)
+            if n:
+                by_q[qid] = n
         view_meta[view] = {
             'N_display': sum(v['N_h'] for v in strata.values()),
+            'display_counts_by_query': dict(sorted(by_q.items())),
             'strata': strata,
         }
+        assert sum(by_q.values()) == view_meta[view]['N_display'], (
+            f'{view}: per-query display counts {sum(by_q.values())} do not '
+            f'sum to N_display {view_meta[view]["N_display"]}')
     prereg = {
         'prereg_id': sha({'salt': args.salt, 'panel': sorted(cand)})[:16],
         'purpose': 'stratified display-policy precision, IPW-weighted',
