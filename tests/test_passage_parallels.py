@@ -637,4 +637,51 @@ def test_passage_available_false_when_flag_off_even_with_real_index(synthetic_co
     monkeypatch.setattr(passage_assets, '_state',
                          passage_assets._PassageState(ready=True, index=idx))
     assert passage_assets.passage_available() is False
+
+
+def test_load_passage_state_flag_off_never_touches_the_filesystem(tmp_path, monkeypatch):
+    """Codex review finding #14: the flag must be checked FIRST, before
+    anything else runs. open_index() memory-maps multi-GB files and reads
+    real bytes during its own validation -- unconditionally calling it
+    (with only a LATER, separate passage_available() check ANDing the flag
+    in) defeats the flag's entire operational purpose on a memory-
+    constrained production host. This test proves open_index is never even
+    CALLED when the flag is off, regardless of what sits at PASSAGE_DATA_DIR
+    -- not merely that the end result happens to read as unavailable.
+
+    Records calls in a list rather than raising from the probe: an earlier
+    version of this test raised instead, and load_passage_state's own
+    `except Exception` around the open_index call silently swallowed that
+    raise -- both "never called" (the fix) and "called, then its exception
+    was caught" (the bug) produced the identical ready=False outcome, so a
+    raising probe could not actually tell the two apart. Verified in this
+    session: reverting the fix (removing the flag-first check) made THIS
+    version of the test fail (calls list non-empty) while the raising
+    version still passed -- the raising version was proven vacuous first.
+    """
+    import web.passage_assets as passage_assets
+    import shared.passage_index as passage_index_module
+
+    calls: list = []
+
+    def _record_call(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise RuntimeError('open_index reached (test probe) -- see calls list')
+
+    monkeypatch.setattr(passage_index_module, 'open_index', _record_call)
+    monkeypatch.setattr(passage_assets, 'PASSAGE_PARALLELS_ENABLED', False)
+
+    # A "real-looking" directory -- present, non-empty, with a manifest --
+    # so a pass here proves the flag check happens before ANY inspection of
+    # what is at PASSAGE_DATA_DIR, not merely that a missing directory
+    # degrades gracefully.
+    fake_index_dir = tmp_path / 'real-looking-index'
+    fake_index_dir.mkdir()
+    (fake_index_dir / 'manifest.json').write_text('{}', encoding='utf-8')
+    monkeypatch.setattr(passage_assets, 'PASSAGE_DATA_DIR', str(fake_index_dir))
+
+    ready = passage_assets.load_passage_state()
+    assert calls == [], f'open_index was called {len(calls)} time(s) while the flag was off'
+    assert ready is False
+    assert passage_assets.passage_available() is False
     assert passage_assets.get_passage_searcher(text_fetcher=None) is None

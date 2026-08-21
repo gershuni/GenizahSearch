@@ -78,19 +78,46 @@ _lock = threading.Lock()
 
 
 def load_passage_state() -> bool:
-    """Open + validate the passage index ONCE at startup.
+    """Open + validate the passage index ONCE at startup -- but ONLY when
+    ``PASSAGE_PARALLELS_ENABLED`` is on.
 
-    ``shared.passage_index.open_index`` IS the fail-closed validator and is
-    documented to return ``None`` -- never raise -- on anything it does not
-    fully recognise. The ``except Exception`` below is a defensive belt
-    matching the discovery loader's posture (nothing escapes startup load),
-    not a sign that ``open_index`` is expected to raise.
+    Codex review finding #14: the flag is checked FIRST, before anything
+    else runs. A disabled deployment gets ZERO filesystem/mmap footprint
+    from this module: ``shared.passage_index.open_index`` memory-maps
+    multi-GB files (``gram_offsets.bin``, ``postings.bin``, ``streams.bin``,
+    ``records.bin``) and reads real bytes during its own validation (CSR
+    sanity checks touch the first and last CSR entries), which defeats the
+    flag's entire operational purpose on a memory-constrained production
+    host -- this project has a recorded precedent
+    (docs/OPEN_ISSUES.md) of a 7.8 GB index getting evicted on a 15.8 GB
+    host by just a 1.4 GB read/write; unconditionally mapping a similarly
+    large passage index while the feature is supposed to be OFF is the same
+    class of incident. Previously ``open_index`` ran regardless of the flag
+    and only ``passage_available()`` (a SEPARATE, later check) ANDed it in
+    -- the mapping itself, and its I/O, had already happened by then.
 
-    Safe to call more than once (a rebuild + restart, or a test re-point of
-    ``PASSAGE_DATA_DIR``) -- it atomically replaces the module state under a
-    lock, mirroring ``web/discovery_assets.py::load_discovery_state()``.
+    When the flag is on, ``shared.passage_index.open_index`` IS the
+    fail-closed validator and is documented to return ``None`` -- never
+    raise -- on anything it does not fully recognise. The ``except
+    Exception`` below is a defensive belt matching the discovery loader's
+    posture (nothing escapes startup load), not a sign that ``open_index``
+    is expected to raise.
+
+    Safe to call more than once (a rebuild + restart, a flag flip, or a test
+    re-point of ``PASSAGE_DATA_DIR``) -- it atomically replaces the module
+    state under a lock, mirroring
+    ``web/discovery_assets.py::load_discovery_state()``.
     """
     global _state
+    if not PASSAGE_PARALLELS_ENABLED:
+        with _lock:
+            _state = _PassageState(ready=False, index=None)
+        logger.info(
+            "Passage index load skipped: PASSAGE_PARALLELS_ENABLED is off "
+            "-- the index directory is never even opened."
+        )
+        return False
+
     from shared.passage_index import open_index  # local import: keep this a light web/ import
     try:
         idx = open_index(PASSAGE_DATA_DIR)
