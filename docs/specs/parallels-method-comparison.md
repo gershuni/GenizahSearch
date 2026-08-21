@@ -577,3 +577,67 @@ never labeled. `deck_delta_v1` (46 cards, manuscript grain, blinded,
 `--delta-only`) contains exactly those -- everything `wide-40` adds over
 `standard-40` on the 60 tune deck queries and nothing else. Its grading
 decides whether wide becomes the default or an option.
+
+
+---
+
+## The delta deck: what `wide-40` actually adds (46 cards, all graded)
+
+`deck_delta_v1`, cards_hash `188d3d1c73327f44`: every card that
+`passage:wide-40` returns and `passage:standard-40` does not, on the 60 tune
+deck queries, at manuscript grain, blinded and hash-shuffled. Owner graded
+**46 of 46**. Scored by the hardened scorer (deck-id + key-hash verified,
+`--min-graded 40` satisfied).
+
+| | n | strict (`same_text`+`paraphrase`) | useful (any real relation) |
+|---|---|---|---|
+| the delta | 46 | **0.543** [0.372, 0.745] query-clustered | **1.000** [1.000, 1.000] |
+
+Relation mix: **24 `same_text`, 1 `paraphrase`, 14 `canonical`, 7
+`shared_formula`, 0 `unrelated`, 0 `junk`.** By source status: 1.000 on
+source-manuscript cards, **0.500 [0.355, 0.645]** on non-source ones — the
+externally valid population.
+
+So the answer to "discoveries or noise" is neither, in a measured ratio:
+**about half of what widening adds is genuinely the same text, the other half
+is scriptural quotation or liturgical formula, and none of it is junk.** For
+comparison, the incumbent's exclusive yield on the earlier deck was 59%
+formula/quotation; widening the passage engine is cleaner than that, and
+dirtier than the passage engine's own default output.
+
+### Widening loses nothing — the top-3 "losses" are pure display displacement
+
+At top-3 per query the two configurations look like they trade: 84 shared
+cells, 46 wide-only, and 25 that only STANDARD shows. Tracing all 180 of
+standard's top-3 finds through wide's **full** ranked list:
+
+| where standard's top-3 finds sit in wide's list | n |
+|---|---|
+| still in wide's top 3 | 99 |
+| wide rank 4–10 | 14 |
+| wide rank 11–50 | 8 |
+| wide rank 51+ | 1 |
+| **absent from wide entirely** | **0** |
+
+Nothing is lost — widening only re-ranks, and the displaced finds land mostly
+at ranks 4–10. **The apparent tradeoff is an artefact of a 3-deep display, not
+a property of the retrieval.** Consequences:
+
+- With a display list of ~10 or deeper, `wide-40` dominates `standard-40`
+  outright: every standard find is still there, plus 46 more per 60 queries,
+  half of them same-text.
+- Per-result precision does fall, because the additions are 46%
+  quotation/formula: blended top-3 strict ≈ **0.82** for wide against ≈ 0.98
+  for standard (the standard figure is carried over from the tune deck, a
+  different deck — an estimate, not a measurement of this population).
+- Result-set size at top-3 grows 109 → 130 cells (+19%); at depth the
+  medians are 4 against 2.
+
+### Bearing on the default
+
+Recall improves at depth (+9.0/+9.3 points recall@50) and nothing is lost, so
+the case for `wide-40` as the default rests on one product question: **how deep
+is the list the reader actually sees.** Deep list → widen. Three-deep list →
+the gain is invisible and the extra quotations are the only visible change.
+This is a UI decision informed by measurement, and it is recorded here rather
+than settled unilaterally.
