@@ -47,6 +47,11 @@ from shared.browse_map_utils import (
 # Phase 145: passage-matching parallels search (fail-closed -- flag AND
 # a loaded index; see web/passage_assets.py).
 from web.passage_assets import passage_available, get_passage_searcher
+# Codex review finding #15: route the page's passage search through the
+# SAME bounded execution budget POST /api/parallels uses -- one semaphore,
+# one dedicated ThreadPoolExecutor, one timeout ceiling, for BOTH surfaces.
+from web.search_api import run_passage_search
+from shared.api_errors import APIError
 
 
 def get_source_display_name(ref: str) -> str:
@@ -827,8 +832,27 @@ def create_parallels_page(initial_text: str = None):
                             # that rejection.
                             boundary_mode.value = 'full'
                             boundary_mode.disable()
+                            # Codex review finding #13(c): chunk_size/mode/
+                            # max_freq are likewise inert for passage (no
+                            # sliding-window chunk, no morphological-variant
+                            # matching, no per-chunk frequency signal) --
+                            # web/search_api.py rejects a non-default value of
+                            # any of them with the same 400
+                            # 'passage_option_unsupported', so these must be
+                            # forced to their defaults and disabled too,
+                            # exactly like boundary_mode above.
+                            chunk_size.value = 5
+                            chunk_size.disable()
+                            mode_select.value = 'exact'
+                            on_mode_change()  # hide variant_controls_col if it was showing
+                            mode_select.disable()
+                            freq_threshold.value = 50
+                            freq_threshold.disable()
                         else:
                             boundary_mode.enable()
+                            chunk_size.enable()
+                            mode_select.enable()
+                            freq_threshold.enable()
 
                     passage_mode.on('update:model-value', on_passage_mode_change)
 
@@ -2749,29 +2773,6 @@ def create_parallels_page(initial_text: str = None):
                         min_boundary_matches=captured_min_boundary_matches,
                         min_delimiter_distance=captured_min_delimiter_distance
                     )
-                elif captured_passage_mode:
-                    # PASSAGE MATCHING (Phase 145, beta): character-level engine,
-                    # tolerant of OCR noise / reflowed line breaks. Constructed
-                    # fresh here (cheap -- no I/O, the index is already open) and
-                    # never when the index is unavailable, per
-                    # web/passage_assets.py::get_passage_searcher's contract.
-                    passage_searcher = get_passage_searcher(state.searcher)
-                    if passage_searcher is None:
-                        return None
-                    result = passage_searcher.search_composition_logic(
-                        text,
-                        chunk_size=captured_chunk_size,
-                        max_freq=captured_freq_threshold,
-                        mode=captured_mode,
-                        filter_text=captured_filter_text or None,
-                        progress_callback=progress_cb,
-                        boundary_mode=captured_boundary_mode,
-                        boundary_delimiter=captured_boundary_delimiter,
-                        boundary_boost=captured_boundary_boost,
-                        min_boundary_matches=captured_min_boundary_matches,
-                        min_delimiter_distance=captured_min_delimiter_distance,
-                        restrict_sys_ids=captured_restrict_sys_ids,
-                    )
                 else:
                     # STANDARD MODE: Use direct Tantivy search (faster, simpler)
                     result = state.searcher.search_composition_logic(
@@ -2797,7 +2798,73 @@ def create_parallels_page(initial_text: str = None):
                 logger.exception(f"Parallels Error: {e}")
                 return None
 
-        result_data = await run.io_bound(run_search)
+        def _run_passage_search_sync():
+            """PASSAGE MATCHING (Phase 145, beta): character-level engine,
+            tolerant of OCR noise / reflowed line breaks. Constructed fresh
+            here (cheap -- no I/O, the index is already open) and never when
+            the index is unavailable, per
+            web/passage_assets.py::get_passage_searcher's contract.
+
+            Deliberately NOT wrapped in its own try/except -- run_search()
+            above swallows InterruptedError/Exception itself because it
+            dispatches via run.io_bound with no other error channel; this
+            function instead lets exceptions propagate through
+            run_passage_search so the await site below (still on THIS
+            coroutine, not a background thread) can distinguish a budget
+            APIError (busy/timeout -> a translated notification) from any
+            other failure.
+            """
+            passage_searcher = get_passage_searcher(state.searcher)
+            if passage_searcher is None:
+                return None
+            return passage_searcher.search_composition_logic(
+                text,
+                chunk_size=captured_chunk_size,
+                max_freq=captured_freq_threshold,
+                mode=captured_mode,
+                filter_text=captured_filter_text or None,
+                progress_callback=progress_cb,
+                boundary_mode=captured_boundary_mode,
+                boundary_delimiter=captured_boundary_delimiter,
+                boundary_boost=captured_boundary_boost,
+                min_boundary_matches=captured_min_boundary_matches,
+                min_delimiter_distance=captured_min_delimiter_distance,
+                restrict_sys_ids=captured_restrict_sys_ids,
+            )
+
+        if captured_passage_mode:
+            # Codex review finding #15: route through the SAME bounded
+            # execution budget POST /api/parallels uses for method='passage'
+            # (semaphore capacity 4 + its own dedicated ThreadPoolExecutor +
+            # SEARCH_API_PASSAGE_TIMEOUT) -- never run.io_bound's generic,
+            # unbounded pool. run_passage_search is awaited directly from
+            # THIS coroutine (it manages its own off-loop dispatch via
+            # run_in_executor internally); all ui.*/safe_user_* interaction
+            # stays on THIS side of the await (repo memory: NiceGUI
+            # background execution loses context -- ui.* calls from a raw
+            # executor thread RAISE, and safe_user_* reads silently degrade
+            # to {} -- _run_passage_search_sync itself does neither).
+            try:
+                result_data = await run_passage_search(_run_passage_search_sync)
+            except APIError as exc:
+                if exc.code == 'passage_search_busy':
+                    ui.notify(
+                        tr('Passage matching is busy right now — please try again in a moment.'),
+                        type='warning',
+                    )
+                elif exc.code == 'core_timeout':
+                    ui.notify(
+                        tr('Passage matching search timed out — try a shorter text.'),
+                        type='negative',
+                    )
+                else:
+                    ui.notify(tr('Passage matching search failed.'), type='negative')
+                result_data = None
+            except Exception as e:
+                logger.exception(f"Parallels Error (passage): {e}")
+                result_data = None
+        else:
+            result_data = await run.io_bound(run_search)
 
         p_state.is_running = False
         p_state.progress = 1.0
