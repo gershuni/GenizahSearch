@@ -229,15 +229,33 @@ def main() -> int:
             d = json.loads(line[0])
         except json.JSONDecodeError:
             d = {'error': r.stdout[-300:] + r.stderr[-300:]}
+        # A worker that died is a FAILED trial, never a quietly odd one
+        # (external review, Codex #19: this loop used to ignore the exit
+        # code and return success on garbage).
+        if r.returncode != 0 and 'error' not in d:
+            d = {'error': f'cold worker exit {r.returncode}: '
+                          + (r.stderr or '')[-300:]}
         colds.append(d)
         print(f'cold-ish trial {i + 1}: {d}', flush=True)
     report['cold_ish'] = colds
+
+    # Fail loudly, never a silent green (Codex #19): requested cold trials
+    # that were skipped (missing pressure dir) or errored make the whole
+    # bench exit nonzero, so this script can never pass as a gate while
+    # measuring less than it was asked to.
+    failed = [d for d in colds if 'error' in d]
+    if args.cold_runs > 0 and (len(colds) < args.cold_runs or failed):
+        print(f'BENCH FAILED: {args.cold_runs} cold trials requested, '
+              f'{len(colds) - len(failed)} succeeded '
+              f'({len(failed)} errored, '
+              f'{args.cold_runs - len(colds)} skipped)', file=sys.stderr)
+        report['failed'] = True
 
     if args.out:
         with open(args.out, 'w', encoding='utf-8') as fh:
             json.dump(report, fh)
         print(f'wrote {args.out}')
-    return 0
+    return 1 if report.get('failed') else 0
 
 
 if __name__ == '__main__':

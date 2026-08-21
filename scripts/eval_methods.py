@@ -146,11 +146,37 @@ def main() -> int:
     print(f'strata: {", ".join(stratum_names)}')
 
     ledger = EvalLedger(args.ledger) if args.ledger else None
+
+    # Holdout discipline (external review, Codex #1/#2/#5). All of it runs
+    # BEFORE the first query: the old order evaluated first and let the
+    # ledger refuse only after the holdout had already been consumed.
+    retrievers = build_retrievers(args.configs, args.index,
+                                  equal_eligibility=not args.all_docs)
+    if args.split == SPLIT_HOLDOUT:
+        if ledger is None:
+            raise SystemExit('--split holdout requires --ledger: an '
+                             'unledgered holdout run is unaccountable')
+        if args.baseline:
+            raise SystemExit('--baseline is refused on the holdout split: '
+                             'its unpaired Wilson-vs-point comparison is NOT '
+                             'the pre-registered analysis. Use '
+                             'scripts/analyze_paired_outcomes.py --strict '
+                             'on the outcome dump.')
+        if args.dump_outcomes and os.path.exists(args.dump_outcomes):
+            raise SystemExit(f'refusing to overwrite existing outcome dump '
+                             f'{args.dump_outcomes} on a holdout run')
+        qs_name = os.path.basename(args.queries)
+        for r in retrievers:
+            ledger.reserve(method=r.config_id.split('-')[0],
+                           policy_id=r.config_id, split=args.split,
+                           query_set=qs_name)
+        print(f'holdout reservations recorded for '
+              f'{len(retrievers)} config(s)')
+
     dump = (open(args.dump_outcomes, 'w', encoding='utf-8')
             if args.dump_outcomes else None)
     results = {}
-    for r in build_retrievers(args.configs, args.index,
-                              equal_eligibility=not args.all_docs):
+    for r in retrievers:
         cid = r.config_id
         t0 = time.time()
         outs = evaluate(chosen, r.retrieve, k_values=K_VALUES)

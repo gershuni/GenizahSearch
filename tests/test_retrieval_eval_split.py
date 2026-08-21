@@ -71,17 +71,47 @@ def test_split_queries_partitions_without_loss():
     assert len(ids) == len(queries)
 
 
-def test_holdout_is_write_once_per_config(tmp_path):
+def test_holdout_requires_reservation_then_is_write_once(tmp_path):
     path = str(tmp_path / 'ledger.jsonl')
     led = EvalLedger(path)
+    # Recording without a reservation is itself a violation (Codex #1: the
+    # runner must reserve BEFORE any query is issued).
+    with pytest.raises(HoldoutReuse):
+        led.record(method='passage', policy_id='p1', split=SPLIT_HOLDOUT,
+                   query_set='qs.jsonl', summary={'n': 1}, strata={})
+    led.reserve(method='passage', policy_id='p1', split=SPLIT_HOLDOUT,
+                query_set='qs.jsonl')
     led.record(method='passage', policy_id='p1', split=SPLIT_HOLDOUT,
                query_set='qs.jsonl', summary={'n': 1}, strata={})
-    # Same (config, split, query set) again must raise, and force must not be
-    # the default path.
+    # Persistence: a fresh ledger instance still refuses a second look --
+    # both a second reservation and a second record.
     led2 = EvalLedger(path)
+    with pytest.raises(HoldoutReuse):
+        led2.reserve(method='passage', policy_id='p1', split=SPLIT_HOLDOUT,
+                     query_set='qs.jsonl')
     with pytest.raises(HoldoutReuse):
         led2.record(method='passage', policy_id='p1', split=SPLIT_HOLDOUT,
                     query_set='qs.jsonl', summary={'n': 1}, strata={})
-    # Tune stays freely re-recordable.
+    # Tune stays freely re-recordable, no reservation needed.
     led2.record(method='passage', policy_id='p1', split=SPLIT_TUNE,
                 query_set='qs.jsonl', summary={'n': 1}, strata={})
+
+
+def test_holdout_key_includes_query_set(tmp_path):
+    # Codex #2: after the FGP holdout, the SAME configs must still be able to
+    # run the witness holdout -- one shared ledger, two instruments.
+    path = str(tmp_path / 'ledger.jsonl')
+    led = EvalLedger(path)
+    led.reserve(method='passage', policy_id='p1', split=SPLIT_HOLDOUT,
+                query_set='fgp.jsonl')
+    led.record(method='passage', policy_id='p1', split=SPLIT_HOLDOUT,
+               query_set='fgp.jsonl', summary={'n': 1}, strata={})
+    # Same config, DIFFERENT query set: allowed.
+    led.reserve(method='passage', policy_id='p1', split=SPLIT_HOLDOUT,
+                query_set='witness.jsonl')
+    led.record(method='passage', policy_id='p1', split=SPLIT_HOLDOUT,
+               query_set='witness.jsonl', summary={'n': 1}, strata={})
+    # Same config, SAME query set again: refused at reservation time.
+    with pytest.raises(HoldoutReuse):
+        led.reserve(method='passage', policy_id='p1', split=SPLIT_HOLDOUT,
+                    query_set='fgp.jsonl')

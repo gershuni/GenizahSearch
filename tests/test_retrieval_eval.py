@@ -104,12 +104,18 @@ def test_strata_summaries_split_the_population():
 def test_holdout_is_write_once_per_method_and_policy(tmp_path):
     led = EvalLedger(str(tmp_path / 'l.jsonl'))
     summary = {'recall@50': 0.9, 'recall@50_ci': [0.85, 0.95], 'n': 100}
+    # Holdout scorings must reserve first (Codex #1) -- reservation is part
+    # of the write-once discipline, not an optional extra.
+    led.reserve(method='passage', policy_id='pp1-a', split=SPLIT_HOLDOUT,
+                query_set='fgp')
     led.record(method='passage', policy_id='pp1-a', split=SPLIT_HOLDOUT,
                query_set='fgp', summary=summary)
     with pytest.raises(HoldoutReuse):
         led.record(method='passage', policy_id='pp1-a', split=SPLIT_HOLDOUT,
                    query_set='fgp', summary=summary)
     # a different policy is a different estimand -- allowed
+    led.reserve(method='passage', policy_id='pp1-b', split=SPLIT_HOLDOUT,
+                query_set='fgp')
     led.record(method='passage', policy_id='pp1-b', split=SPLIT_HOLDOUT,
                query_set='fgp', summary=summary)
 
@@ -126,18 +132,24 @@ def test_forced_holdout_reuse_is_recorded_as_forced(tmp_path):
     p = str(tmp_path / 'l.jsonl')
     led = EvalLedger(p)
     s = {'n': 1}
+    led.reserve(method='m', policy_id='p', split=SPLIT_HOLDOUT,
+                query_set='q')
     led.record(method='m', policy_id='p', split=SPLIT_HOLDOUT,
                query_set='q', summary=s)
     e = led.record(method='m', policy_id='p', split=SPLIT_HOLDOUT,
                    query_set='q', summary=s, force=True)
     assert e['forced'] is True
-    assert sum(1 for x in EvalLedger(p).entries if x['forced']) == 1
+    # .get: reservation entries carry no 'forced' key, only records do.
+    assert sum(1 for x in EvalLedger(p).entries if x.get('forced')) == 1
 
 
 def test_ledger_survives_a_new_process(tmp_path):
     p = str(tmp_path / 'l.jsonl')
-    EvalLedger(p).record(method='m', policy_id='p', split=SPLIT_HOLDOUT,
-                         query_set='q', summary={'n': 1})
+    led = EvalLedger(p)
+    led.reserve(method='m', policy_id='p', split=SPLIT_HOLDOUT,
+                query_set='q')
+    led.record(method='m', policy_id='p', split=SPLIT_HOLDOUT,
+               query_set='q', summary={'n': 1})
     with pytest.raises(HoldoutReuse):
         EvalLedger(p).record(method='m', policy_id='p', split=SPLIT_HOLDOUT,
                              query_set='q', summary={'n': 1})

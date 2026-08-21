@@ -188,20 +188,65 @@ class EvalLedger:
                     if line:
                         self.entries.append(json.loads(line))
 
-    def _holdout_keys(self) -> set:
-        return {(e['method'], e.get('policy_id', ''))
-                for e in self.entries if e['split'] == SPLIT_HOLDOUT}
+    def _holdout_keys(self, entry_type: str) -> set:
+        """Keys of holdout entries of one type ('reservation' or 'record').
+
+        The key includes query_set (external review, Codex #2): keyed on
+        (method, policy_id) alone, scoring the FGP holdout would have locked
+        the SAME configs out of the witness holdout -- one shared ledger
+        could not execute the pre-registered two-instrument plan.
+        """
+        return {(e['method'], e.get('policy_id', ''), e.get('query_set', ''))
+                for e in self.entries
+                if e['split'] == SPLIT_HOLDOUT
+                and e.get('type', 'record') == entry_type}
+
+    def reserve(self, *, method: str, policy_id: str, split: str,
+                query_set: str) -> Optional[dict]:
+        """Durable pre-run reservation (external review, Codex #1).
+
+        The defect this closes: the runner used to evaluate and write the
+        outcome dump BEFORE the ledger got a chance to refuse, so a duplicate
+        holdout run consumed the holdout and only then learned it should not
+        have. Now the runner must reserve BEFORE any query is issued; a
+        second reservation of the same (method, policy_id, query_set) raises
+        while the holdout is still untouched. Tune reservations are a no-op.
+        """
+        if split != SPLIT_HOLDOUT:
+            return None
+        key = (method, policy_id, query_set)
+        if key in self._holdout_keys('reservation') \
+                or key in self._holdout_keys('record'):
+            raise HoldoutReuse(
+                f'{method} / {policy_id} / {query_set} is already reserved '
+                f'or scored on the holdout split -- refusing before any '
+                f'query runs.')
+        entry = {'type': 'reservation', 'method': method,
+                 'policy_id': policy_id, 'split': split,
+                 'query_set': query_set}
+        self.entries.append(entry)
+        with open(self.path, 'a', encoding='utf-8') as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False,
+                                sort_keys=True) + '\n')
+        return entry
 
     def record(self, *, method: str, policy_id: str, split: str,
                query_set: str, summary: dict, strata: Optional[dict] = None,
                force: bool = False) -> dict:
         if split == SPLIT_HOLDOUT and not force:
-            if (method, policy_id) in self._holdout_keys():
+            key = (method, policy_id, query_set)
+            if key in self._holdout_keys('record'):
                 raise HoldoutReuse(
-                    f'{method} / {policy_id} has already been scored on the '
-                    f'holdout split. A second look invalidates the '
-                    f'pre-registered margin; pass force=True to record it '
-                    f'anyway, and it will be flagged in the ledger.')
+                    f'{method} / {policy_id} / {query_set} has already been '
+                    f'scored on the holdout split. A second look invalidates '
+                    f'the pre-registered margin; pass force=True to record '
+                    f'it anyway, and it will be flagged in the ledger.')
+            if key not in self._holdout_keys('reservation'):
+                raise HoldoutReuse(
+                    f'{method} / {policy_id} / {query_set}: no reservation. '
+                    f'Holdout scorings must call reserve() BEFORE running -- '
+                    f'recording without one means the run consumed the '
+                    f'holdout outside the ledger discipline.')
         entry = {
             'method': method, 'policy_id': policy_id, 'split': split,
             'query_set': query_set, 'summary': summary,
