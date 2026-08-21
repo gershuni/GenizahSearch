@@ -438,10 +438,20 @@ def stratum_pools(key: dict, graded: dict, view: str, predicate,
     for cid, card in key.items():
         if cid not in graded:
             continue
-        if non_source_only and card.get('is_source'):
-            continue
+        # DOMAIN ESTIMATION, not pool filtering. Removing source cards from
+        # the pool while the bootstrap still draws n_h items with replacement
+        # re-inflates the numerator to the UNFILTERED maximum: a stratum whose
+        # pool shrank from 5 graded to 4 still contributed weight*5, so the
+        # non-source interval came back [1.000, 1.000] around a point of
+        # 0.868 -- an interval that does not contain its own estimate. The
+        # standard survey treatment is to keep every sampled unit in the pool
+        # and fold domain membership into the indicator: y = 1 only for a
+        # card that is BOTH the relation we are counting AND in the domain.
+        # Draw counts, weights, and the <= N_display bound are then all
+        # unchanged, and the domain estimate is coherent with its interval.
         grade = graded[cid]
-        y = 1 if predicate(grade) else 0
+        in_domain = not (non_source_only and card.get('is_source'))
+        y = 1 if (predicate(grade) and in_domain) else 0
         for sel in card.get('selections') or []:
             if sel.get('view') != view:
                 continue

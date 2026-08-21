@@ -243,6 +243,47 @@ def test_non_source_restricted_precision_uses_same_fixed_denominator(tmp_path):
     assert s['precision']['non_source']['point'] == 0.25
 
 
+def test_a_domain_estimate_lies_inside_its_own_interval(tmp_path):
+    """The non-source column was filtering the POOL, not the indicator.
+
+    Removing source cards from a stratum's pool while the bootstrap still
+    drew n_h items with replacement re-inflated the numerator to the
+    UNFILTERED maximum. Observed on the real smoke deck: non-source
+    precision 0.868 with an interval of [1.000, 1.000] -- an interval that
+    does not contain its own point estimate, and a yield of 3.890 with
+    [4.480, 4.480]. The fix folds domain membership into the indicator
+    (y = 1 only when the card is both the counted relation AND in the
+    domain), keeping every sampled unit in the pool.
+
+    Fixture: a NON-census stratum (n_h=2 of N_h=4, weight 2.0) with one
+    source and one non-source card, both strict. Under the defect the
+    non-source replicate could draw the non-source card twice and reach
+    the overall maximum; the interval then sat entirely above the point.
+    """
+    key_list = [
+        _card('c1', 'q1', 'r1', 's1', [_sel('S', 'A', 0.5, 4, 2)],
+              is_source=True),
+        _card('c2', 'q2', 'r2', 's2', [_sel('S', 'A', 0.5, 4, 2)],
+              is_source=False),
+    ]
+    views_manifest = _views_manifest({'S': {'A': {'N_h': 4, 'n_h': 2}}})
+    deck_dir, deck_id = _write_deck(tmp_path, key_list, views_manifest,
+                                    panel_n_queries=2)
+    verdicts = _write_verdicts(tmp_path, deck_id,
+                               [{'id': 'c1', 'grade': 'same_text'},
+                                {'id': 'c2', 'grade': 'same_text'}])
+    s = sdd.score(deck_dir, verdicts)['views']['S']
+    for metric in ('precision', 'yield'):
+        for column in ('overall', 'non_source'):
+            cell = s[metric][column]
+            lo, hi = cell['ci95']
+            assert lo - 1e-9 <= cell['point'] <= hi + 1e-9, (
+                f'{metric}/{column}: point {cell["point"]} outside '
+                f'[{lo}, {hi}]')
+    # and the domain estimate must be strictly below the overall one here
+    assert s['precision']['non_source']['point'] <         s['precision']['overall']['point']
+
+
 def test_relation_mix_by_rank_band(tmp_path):
     key_list = [
         _card('c1', 'q1', 'r1', 's1',
