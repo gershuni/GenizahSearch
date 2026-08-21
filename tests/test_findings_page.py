@@ -1195,6 +1195,17 @@ def test_module_adds_no_nested_offload_and_no_direct_service_call():
         if not isinstance(value, ast.Call):
             continue
         func = value.func
+        # `await ui.<something>()` is a CLIENT round trip, not a read: it can
+        # only reach the browser, so it cannot be the nested offload or the
+        # direct service call this check exists to forbid. Admitted
+        # STRUCTURALLY -- the receiver must be the name `ui` -- rather than by
+        # listing method names, so the exception cannot widen into "anything
+        # with a familiar-looking attribute". (Added 2026-08-21 with the
+        # export's download-completion handshake, which awaits
+        # `ui.run_javascript` to learn when the file actually arrived.)
+        if (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
+                and func.value.id == "ui"):
+            continue
         name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
         if name is None:
             continue
@@ -7289,3 +7300,367 @@ def test_no_stored_novelty_shade_is_a_literal_in_the_page():
             f"{shade!r} is a literal in the page -- the shade vocabulary "
             "belongs to shared/discovery_service.py, and the page addresses it "
             "through NOVELTY_VIEWS / novelty_view_shades()")
+
+
+# ---------------------------------------------------------------------------
+# The expansion must carry the CITATION RANGE.
+#
+# `_child_state` copies the reader's whole filter state, and its docstring
+# promises "every axis is carried over unchanged ... its count and the rows
+# underneath it come from ONE predicate and cannot contradict each other".
+# `_fetch_children` nonetheless never read `locus_from` / `locus_to` back out of
+# that dict, so a range-filtered parent opened onto children drawn from an
+# UNFILTERED predicate. It was unreachable until 2026-08-20 only because the
+# parent query timed out first (the correlated locus predicate in
+# shared/discovery_service.py), so repairing that query is what exposed it.
+# ---------------------------------------------------------------------------
+
+def _capture_children_request(monkeypatch, state, item, axis_value="wA"):
+    """The kwargs `_fetch_children` hands the shipped read, captured."""
+    seen = {}
+
+    async def _fake_get_findings_enveloped(unit, **kwargs):
+        seen["unit"] = unit
+        seen.update(kwargs)
+        return {"status": "ok", "items": [], "total": 0, "meta": {}}
+
+    monkeypatch.setattr(fp, "get_findings_enveloped", _fake_get_findings_enveloped)
+    asyncio.run(fp._fetch_children(state, item))
+    return seen
+
+
+def _range_state(**overrides):
+    state = {
+        "unit": "work",
+        "bucket": "main",
+        "sort": "band_rank",
+        "page": 1,
+        "domain": None,
+        "author": None,
+        "work_id": "wA",
+        "locus_from": 3,
+        "locus_to": 7,
+        "sys_id": None,
+    }
+    state.update(overrides)
+    return state
+
+
+def test_the_expansion_carries_the_citation_RANGE_not_only_the_work(monkeypatch):
+    """A range-filtered parent must not open onto unfiltered children."""
+    state = _range_state()
+    item = {"unit": "work", "display_work_id": "wA"}
+    seen = _capture_children_request(monkeypatch, state, item)
+
+    assert seen.get("work_id") == "wA", (
+        "the expansion lost the work pin, so this test is not exercising the "
+        "path it claims to")
+    assert seen.get("locus_from") == 3 and seen.get("locus_to") == 7, (
+        "the expansion dropped the citation range: the parent row was counted "
+        "under a range filter and its children were not, so the count above "
+        "the list and the list itself describe different populations")
+
+
+def test_the_expansion_passes_no_range_when_the_reader_set_none(monkeypatch):
+    """The forwarding must be the reader's state, not an invented default.
+
+    Guards the opposite error: hardcoding a range, or defaulting it to
+    something, would narrow an expansion the reader never narrowed.
+    """
+    state = _range_state(locus_from=None, locus_to=None)
+    item = {"unit": "work", "display_work_id": "wA"}
+    seen = _capture_children_request(monkeypatch, state, item)
+    assert seen.get("locus_from") is None and seen.get("locus_to") is None
+
+
+def test_a_one_sided_citation_bound_survives_the_expansion(monkeypatch):
+    """`locus_from` alone and `locus_to` alone are both real reader states."""
+    item = {"unit": "work", "display_work_id": "wA"}
+    only_from = _capture_children_request(
+        monkeypatch, _range_state(locus_to=None), item)
+    assert only_from.get("locus_from") == 3 and only_from.get("locus_to") is None
+    only_to = _capture_children_request(
+        monkeypatch, _range_state(locus_from=None), item)
+    assert only_to.get("locus_from") is None and only_to.get("locus_to") == 7
+
+# ===========================================================================
+# Owner reports 2026-08-21 (2) the progress card that never went away, and
+# (3) no warning before a very large download.
+# ===========================================================================
+
+#: A complete view, as `export_query_params` expects one. Written out rather
+#: than trimmed to the keys that happen to be read today: a state missing a key
+#: raises inside `start_export`, and the first version of these tests hid that
+#: behind the handshake's own `except`.
+_VIEW = {"unit": "identification", "bucket": "main", "sort": "band_rank"}
+
+
+class _FakeNotification:
+    def __init__(self, *a, **kw):
+        self.kwargs = kw
+        self.dismissed = 0
+
+    def dismiss(self):
+        self.dismissed += 1
+
+
+def _patched_download(monkeypatch, *, js):
+    """Patch the three `ui` calls `start_export` makes and record them."""
+    seen = {"downloads": [], "notes": [], "js": []}
+
+    def _notification(*a, **kw):
+        note = _FakeNotification(*a, **kw)
+        seen["notes"].append(note)
+        return note
+
+    async def _run_javascript(code, **kw):
+        seen["js"].append(code)
+        return js()
+
+    monkeypatch.setattr(fp.ui, "notification", _notification)
+    monkeypatch.setattr(fp.ui, "download", lambda url: seen["downloads"].append(url))
+    monkeypatch.setattr(fp.ui, "run_javascript", _run_javascript)
+    return seen
+
+
+@pytest.mark.parametrize("js,label", (
+    (lambda: "done", "the handshake resolved"),
+    (lambda: "timeout", "the handshake timed out"),
+    (lambda: (_ for _ in ()).throw(RuntimeError("socket gone")), "the client vanished"),
+))
+def test_the_progress_card_is_dismissed_on_every_path(monkeypatch, js, label):
+    """A `ui.download` is a browser navigation: nothing reports back, so the old
+    `type="ongoing"` notify (Quasar `timeout: 0`) had no event that could close
+    it and stayed on screen after the file had landed.
+
+    THE PROPERTY IS "DISMISSED ON EVERY PATH", so all three are driven --
+    including the one where the client goes away mid-wait, which is where a
+    `try/except` around the wrong statement would leave the card up.
+    """
+    seen = _patched_download(monkeypatch, js=js)
+    asyncio.run(fp.start_export(dict(_VIEW), "en"))
+
+    assert len(seen["notes"]) == 1, "no progress card was raised"
+    note = seen["notes"][0]
+    assert note.kwargs.get("timeout") is None, (
+        "a card with its own timeout is a card that lies about how long the "
+        "build takes")
+    assert note.dismissed == 1, f"the card survived {label}"
+
+
+def test_a_download_that_cannot_start_clears_the_card_and_still_reports(
+        monkeypatch):
+    """The card must come down, and the failure must NOT come down with it.
+
+    The first version wrapped `ui.download` in the same `except` that makes the
+    handshake best-effort, so a download that never started tidied its own
+    spinner away and told nobody -- a reader watching a card disappear with no
+    file has no way to know anything went wrong. Only the WAIT is best-effort.
+    """
+    seen = _patched_download(monkeypatch, js=lambda: "done")
+
+    def _boom(url):
+        raise RuntimeError("no client")
+
+    monkeypatch.setattr(fp.ui, "download", _boom)
+    with pytest.raises(RuntimeError):
+        asyncio.run(fp.start_export(dict(_VIEW), "en"))
+    assert seen["notes"][0].dismissed == 1, "the card outlived the failure"
+
+
+def test_declining_the_large_download_warning_starts_nothing(monkeypatch):
+    """The other half of the warning. Asked directly because the rendered
+    capture never paints it: a reader who says no must get NO download and NO
+    progress card, and a confirmation that proceeds anyway is worse than no
+    confirmation at all."""
+    seen = _patched_download(monkeypatch, js=lambda: "done")
+    started = []
+
+    async def _decline(state, lang, rows):
+        return False
+
+    async def _start(state, lang):
+        started.append((state, lang))
+
+    monkeypatch.setattr(fp, "_confirm_large_export", _decline)
+    monkeypatch.setattr(fp, "start_export", _start)
+
+    async def _drive():
+        # THE REAL DECISION FUNCTION, not a copy of its condition: a test that
+        # rebuilt the branch beside the code would agree with itself for
+        # exactly as long as the two happened to match.
+        if await fp.should_start_export(dict(_VIEW), "en", 50_000):
+            await fp.start_export(dict(_VIEW), "en")
+
+    asyncio.run(_drive())
+    assert started == [], "a declined confirmation started the download anyway"
+    assert seen["downloads"] == [] and seen["notes"] == []
+
+    # ... and a small view goes straight through, or the warning is a wall.
+    async def _small():
+        assert await fp.should_start_export(dict(_VIEW), "en", 10) is True
+
+    asyncio.run(_small())
+
+
+def test_the_download_carries_a_handshake_token_the_watcher_looks_for(monkeypatch):
+    """The token is the only thing tying the response back to this page, so the
+    URL and the poll must agree on it. A test that checked either alone would
+    pass with the two out of step, which is the silent version of the bug."""
+    seen = _patched_download(monkeypatch, js=lambda: "done")
+    asyncio.run(fp.start_export(dict(_VIEW), "en"))
+
+    url = seen["downloads"][0]
+    token = _re.search(r"[?&]dl=([0-9a-f]+)", url)
+    assert token, f"no handshake token in {url}"
+    code = seen["js"][0]
+    assert f"gs_dl_{token.group(1)}=" in code, (
+        "the watcher is polling for a different cookie than the URL minted")
+    assert "__TOKEN__" not in code and "__MS__" not in code, (
+        "a placeholder survived into the script")
+    # It clears the cookie after seeing it: a sticky cookie would dismiss the
+    # NEXT download's card instantly.
+    assert "Max-Age=0" in code
+
+
+def test_the_route_signals_completion_and_ignores_a_forged_token():
+    """The cookie name is built from a query parameter, so the token has to be
+    anchored hex or it is header injection. Ignored rather than rejected: the
+    handshake is a convenience, and a malformed token should cost a spinner
+    that times out, not the reader's download."""
+    from starlette.responses import Response
+
+    import web.api as api
+
+    ok = api.stamp_download_done(Response("x"), "deadbeef01")
+    assert "gs_dl_deadbeef01=1" in (ok.headers.get("set-cookie") or "")
+    # A TRAILING NEWLINE IS THE INTERESTING ONE. Python's `$` matches
+    # immediately before a final newline, so an anchored `^...$` accepted
+    # "abcdef12\n", the newline reached the cookie NAME, and `set_cookie`
+    # raised `CookieError` -- discarding a successful, expensive build as a
+    # 500, because the stamp happens outside the route's handler (Codex
+    # review of PR #323). `%0a` and `%0d` are the wire forms.
+    forged_tokens = ("nothex", "dead; injected=1", "DEADBEEF", "", None,
+                     "a" * 200, "abcdef12\n", "abcdef12\r\n", "\nabcdef12",
+                     "abcdef12\n\n", "abcdef12 ")
+    # RECORDS THE ATTEMPT, not just the outcome. `stamp_download_done` also
+    # catches anything `set_cookie` raises, so a rejected token and a token
+    # that reaches the cookie layer and blows up there look identical from the
+    # headers -- and a test that reads only the headers cannot tell a working
+    # anchor from a broken one the safety net is rescuing. It must never be
+    # TOUCHED.
+    class _Recorder(Response):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            self.attempts = []
+
+        def set_cookie(self, key, *a, **k):
+            self.attempts.append(key)
+            return super().set_cookie(key, *a, **k)
+
+    for forged in forged_tokens:
+        rec = _Recorder("x")
+        bad = api.stamp_download_done(rec, forged)
+        assert bad.headers.get("set-cookie") is None, (
+            f"a forged token {forged!r} reached Set-Cookie")
+        assert rec.attempts == [], (
+            f"a forged token {forged!r} reached the cookie layer as "
+            f"{rec.attempts!r} -- it was only stopped by the safety net")
+
+    good = _Recorder("x")
+    api.stamp_download_done(good, "deadbeef01")
+    assert good.attempts == ["gs_dl_deadbeef01"], (
+        "the recorder is not observing the real call path")
+
+
+def test_the_completion_stamp_can_never_cost_the_reader_the_file():
+    """The handshake is a CONVENIENCE, and its own contract says a bad token
+    "should cost a spinner that times out, not the reader's download". It runs
+    after the route's handler, so anything it raises discards a finished
+    workbook. The response comes back whatever the cookie layer does."""
+    from starlette.responses import Response
+
+    import web.api as api
+
+    class _Hostile(Response):
+        def set_cookie(self, *a, **k):
+            raise RuntimeError("the cookie layer fell over")
+
+    original = _Hostile("payload")
+    returned = api.stamp_download_done(original, "deadbeef01")
+    assert returned is original, "a stamping failure swallowed the response"
+    assert returned.body == b"payload"
+
+
+def test_an_unexpected_build_failure_still_signals_the_page():
+    """The completion cookie must ride on EVERY exit, including the unplanned.
+
+    `stamp_download_done` was reached only on the paths that return, so an
+    error past the handled `ValueError` -- SQLite, a projection failure,
+    openpyxl -- produced an unstamped 500 and the page waited out its whole
+    330-second timeout with the progress card still up (Codex review of PR
+    #322, P2). A handshake that only fires on success is the same defect as a
+    spinner that only stops on success, one layer down.
+
+    Driven through the REAL route on a disposable app rather than by reading
+    the source: the property is what reaches the wire. The route resolves its
+    imports at CALL time, so patching the defining modules is what the handler
+    actually sees.
+    """
+    from unittest import mock as _mock
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import web.discovery as wd
+    import web.discovery_assets as _da
+    from web.api import init_api_routes
+
+    bare = FastAPI()
+    init_api_routes(app_override=bare)
+
+    async def _explode(**kwargs):
+        raise RuntimeError("the artifact fell over mid-walk")
+
+    with _mock.patch.object(_da, "discovery_available", lambda: True),             _mock.patch.object(wd, "collect_and_build_export", _explode):
+        client = TestClient(bare, raise_server_exceptions=False)
+        response = client.get(
+            "/api/export/computed-identifications",
+            params={"dl": "abcdef0123"})
+
+    assert response.status_code == 500, response.status_code
+    cookie = response.headers.get("set-cookie") or ""
+    assert "gs_dl_abcdef0123=1" in cookie, (
+        "an unexpected failure left the page waiting for a cookie that never "
+        f"came; Set-Cookie was {cookie!r}")
+
+
+@pytest.mark.parametrize("total,expected", (
+    (None, False), ("", False), (0, False), (1999, False), (2000, True),
+    (28635, True),
+))
+def test_only_a_large_view_asks_before_downloading(total, expected):
+    """Pure, so the threshold is assertable without a browser. Chosen from the
+    measurement rather than from taste: a 28,635-row build takes ~66 s plus its
+    walk and the cost is close to linear."""
+    assert fp._export_is_large(total) is expected
+
+
+@pytest.mark.parametrize("lang", ("en", "he"))
+def test_the_grouped_warning_never_calls_the_group_count_a_row_count(lang):
+    """"{rows} rows" is FALSE on a grouped view: the file is one row per
+    identification, so a view of 3,000 works is tens of thousands of rows.
+    The two sentences are deliberately different, and this is the difference."""
+    plain = fp.copy_text("export_confirm_body", lang)
+    grouped = fp.copy_text("export_confirm_body_grouped", lang)
+    assert plain and grouped and plain != grouped
+    assert "{rows}" in plain and "{rows}" in grouped
+    assert "{unit}" in grouped and "{unit}" not in plain
+    # The grouped sentence must say the file is BIGGER than the number it
+    # quotes -- otherwise quoting the number at all is misleading.
+    bigger = {"en": ("more rows",), "he": ("הרבה יותר",)}[lang]
+    assert any(phrase in grouped for phrase in bigger), (
+        f"the grouped warning does not say the file exceeds {{rows}}: {grouped!r}")
+    for key in ("export_confirm_title", "export_confirm_go",
+                "export_confirm_cancel"):
+        assert fp.copy_text(key, lang), f"{key} is empty in {lang}"

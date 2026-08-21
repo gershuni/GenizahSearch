@@ -190,21 +190,53 @@ reads real rows:
 ```bash
 # restart per the standard web-app restart (see reference_server_operations)
 export PYTHONUTF8=1
-python scripts/bench_discovery.py --sample 50 --warm-passes 1
+python scripts/smoke_discovery_readiness.py
 ```
 
-`bench_discovery.py` uses the benchmark-only readiness predicate
-(`_state.ready`, NOT the UI flag) and asserts nonzero rows — a clean run proves
-the swapped-in sidecar loaded and queries return real data on the box. Confirm
-the app log shows NO "Discovery sidecar not loaded (fail-closed)" line. The
-public site shows nothing new (flag OFF) — correct for Phase 134.
+> **CHANGED 2026-08-20 — this step used to run `scripts/bench_discovery.py
+> --sample 50 --warm-passes 1`, and that was wrong.** Neither of those flags
+> bounds `bench_findings_page()`, which is invoked unconditionally and expands to
+> ~15,363 filter/unit/sort combinations x 5 repeats — about **76,815 timed
+> statements, one to two hours**. On 2026-08-19 it turned the V4.2 deploy into an
+> hour-plus hang that ended in `client_loop: send disconnect: Connection reset`,
+> and the deploy was recorded as **failed** when steps 0–7 had in fact succeeded
+> and the swap was live and healthy. Depth belongs to
+> `verify_discovery_sidecar.py` (already run pre-swap, §2.5) and breadth belongs
+> to the benchmark, run deliberately and **never on a deploy path**.
+
+`smoke_discovery_readiness.py` answers the one question this step exists to ask —
+can the app load the asset it is now serving, and does that asset answer real
+reads — in **about a second**. It goes through the real `load_discovery_state()`
+and `web.discovery` paths, not just the file, so a fail-closed sidecar, a hash
+mismatch, a wrong audience or a loader-rejected schema all surface here. It also
+reads a **citation range over the heaviest locus-bearing work**, deliberately:
+that read was silently broken from before 2026-08-19 until `4f6e31f4`, and a
+smoke that only fetched the default page did not see it. Exit 0 means ready;
+non-zero names the reason.
+
+Confirm the app log shows NO "Discovery sidecar not loaded (fail-closed)" line.
+
+**If the deploy runs over ssh, the long-step lesson applies to every step:** give
+the client `-o ServerAliveInterval=15 -o ServerAliveCountMax=8`. A silent
+connection reset is indistinguishable from a real failure, which is exactly how
+the V4.2 outcome was misread.
 
 ### 2.7 Record the prod-box RSS (Task 3)
 
-While the process is warm, sample its RSS (or run `bench_discovery.py` on the box
-and read its `added RSS`) and record the number in
-`docs/specs/discovery-budgets.md` §4 as **MEASURED ACTUALS (prod-box)** vs the
-≤ 250 MB cap.
+While the process is warm, sample the SERVING process's RSS directly and record
+the number in `docs/specs/discovery-budgets.md` §4 as
+**MEASURED ACTUALS (prod-box)** vs the ≤ 250 MB cap:
+
+```bash
+systemctl show -p MainPID --value genizah-web | xargs -I{} grep VmRSS /proc/{}/status
+```
+
+Read it from the live process, **not** by running `bench_discovery.py` on the box
+(as this section used to suggest). That is the same trap as §2.6: the benchmark's
+`added RSS` figure costs a one-to-two-hour run to obtain, and the number wanted
+here is the RSS of the process actually serving readers — which the command above
+reports in milliseconds. Run the benchmark deliberately, off the deploy path,
+when a benchmark is what you want.
 
 ---
 
@@ -217,7 +249,7 @@ manifest repoint — no file deletion, no re-upload:
 ```bash
 mv -f  discovery_data/manifest.prev.json  discovery_data/manifest.json   # ATOMIC repoint to prior asset
 # restart the web process
-python scripts/bench_discovery.py --sample 50 --warm-passes 1            # confirm the app is fully up on the prior frame
+python scripts/smoke_discovery_readiness.py                              # confirm the app is fully up on the prior frame
 ```
 
 The app comes back on the prior frame; the new asset sibling stays on disk,

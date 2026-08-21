@@ -350,5 +350,7 @@ pgp_data/pgp-text/
 # Narrow by design: the state/ directory's tracked .gitkeep must survive.
 skills/*/state/throttle.json
 
-# Passage-matching index sidecar (built locally, never committed)
+# Local passage-index build + evaluation output (parallel-search work). Multi-GB and
+# machine-local; added 2026-08-20 after a release-time `git add -A` would have staged
+# 3.6 GB of it from the repo root while a job was still writing to it.
 passage_index/

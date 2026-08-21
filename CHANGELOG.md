@@ -4,6 +4,48 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [8.6.0] - 2026-08-20 — Pause/Resume, and Stop that actually stops (desktop)
+
+> **Desktop release.** It continues the desktop line from v8.5.2; 9.0.0 below it is a higher
+> number but a *web-only* release that never shipped a desktop build, which is why this section
+> sits above it by date and below it by number.
+
+### New Features
+
+- **Pause and Resume for long searches** — regular, Lab Mode and Composition. A pause takes
+  effect at the next checkpoint, keeps everything found so far, and Resume continues from exactly
+  that point; nothing is re-scanned. Paused time is excluded from the elapsed clock and from the
+  composition ETA, and a paused search releases the keep-awake block so the machine can sleep.
+  A paused search lives in memory only — closing the program ends it.
+
+### Bug Fixes
+
+- **Stop never worked in Lab Mode**, from three independent causes: the Lab worker had no cancel
+  flag, a bare `except Exception` swallowed the cancellation, and a non-deep Lab search had no
+  checkpoint at all. A cancel could also surface as an error dialog instead of stopping.
+- **Stopping a search discarded its results** in Title, Shelfmark and My Library searches — every
+  row was thrown away while the results header said "Partial results".
+- **My Library searches ignored Stop entirely**; the local scan loop had no checkpoint.
+- **The progress bar rewound to zero** when the My Library pass began. It now names the stage and
+  goes indeterminate.
+- **Elapsed time was read from the wall clock**, so an NTP or DST step could add minutes to the
+  displayed time and to the composition ETA. It is now monotonic.
+- **Escape and window-close during a composition scan** called an interruption request the
+  composition threads never polled — a no-op since it was written.
+- **Starting a search while one was paused could crash** with "QThread: Destroyed while thread is
+  still running"; it now declines and says so.
+- **Performance timings recorded cancelled runs as completed.**
+- **The search toolbar drew on top of itself** on smaller screens — the second row needed 1423 px
+  on a 1440 px display. Gap moved up beside the search box, three redundant labels were dropped,
+  and Search/Stop and Pause now share one fixed-width slot so no button moves when a search starts.
+
+### Web (incidental)
+
+- Stop during a Lab Mode search on genizahsearch.com discarded every hit and logged it as a search
+  error. Fixed by the same shared-engine change; no web deploy is part of this release.
+
+---
+
 ## [9.0.0] - 2026-08-16 — Computed Identifications, the Visual Atlas & Start Here (public beta, web)
 
 > **At a glance.** 55,250 computed identifications across 596 works on 39,341 manuscripts (of
@@ -975,6 +1017,129 @@ A major overhaul of how LOCAL Hebrew PDFs are read into the My Library index, dr
 
 ## [Unreleased]
 
+### Download the computed identifications as a spreadsheet (2026-08-21)
+
+`/computed-identifications` now has a download control. It returns **the reader's whole
+filtered set** — not just the page on screen — as a bilingual xlsx, with the matched
+passages on the finding's own row.
+
+- **The evidence travels with the claim.** Five columns carry the manuscript passage, the
+  edition passage and their notes, with the matched words in **red and bold** — the same
+  highlighting the parallels export uses. The first draft put the passages on a second
+  sheet, which meant judging any single match required joining two sheets on a shelfmark
+  that repeats.
+- **"One row per work" and "one row per manuscript" now export what their expander opens
+  onto.** Those views are grouped, so the grouped row itself carries no manuscript and no
+  text — on the page you open it, but a spreadsheet has nothing to open. The export takes
+  its ORDER from the grouping and its ROWS from the identifications underneath, so the
+  grouping survives as columns you can sort and pivot on.
+- **A warning before a large download, and a card that clears after it.** Above 2,000 rows
+  the control asks first — with a different sentence for the grouped views, where a row
+  count would be the wrong number. The "Preparing your file" card now clears on every
+  outcome, including the failures.
+- **The file says where it came from.** An About sheet names the artifact it was built
+  from, credits the MiDRASH automatic transcriptions (Stoekl Ben Ezra et al., 2025) rather
+  than carrying thousands of lines of someone else's dataset anonymously, and marks which
+  passages are machine-read rather than a scholar's transcription. Where the artifact had
+  already abbreviated a passage, the sheet says so instead of leaving an unexplained
+  ellipsis inside a quotation.
+
+No confidence score, band or precision figure reaches a cell: the only number in the file
+is page coverage in matched letters, with its qualifier attached, exactly as the page
+renders it. Measured against the real artifact — 28,635 rows in 66 s, a 5.8 MB file.
+
+### The deploy path no longer runs an hour-long benchmark as its "smoke test" (2026-08-20)
+
+Four fixes to the discovery deploy path and its benchmark, none of them runtime code.
+
+- **A readiness smoke that takes a second.** `docs/specs/discovery-deploy.md` §2.6 told the
+  operator to run `scripts/bench_discovery.py --sample 50 --warm-passes 1`. Neither flag
+  bounds `bench_findings_page()`, which is invoked unconditionally and expands to ~15,363
+  filter/unit/sort combinations x 5 repeats — about **76,815 timed statements, one to two
+  hours**. On 2026-08-19 that hung the V4.2 deploy until the ssh connection reset, and the
+  deploy was recorded as **failed** when steps 0–7 had succeeded and the swap was live and
+  healthy. New `scripts/smoke_discovery_readiness.py` answers the actual question — can the
+  app load what it now serves, and does that asset answer real reads — through the real
+  `load_discovery_state()` and `web.discovery` paths, including a citation-range read over
+  the heaviest locus-bearing work. §2.7's "or read the benchmark's added RSS" is gone too;
+  the RSS comes from `/proc/<pid>/status`.
+- **Every statement in the benchmark is now wall-clock bounded.** Nothing in that file
+  bounded any query, which is how one pathological statement became an unbounded job. A
+  `BoundedConnection` installs a `set_progress_handler` deadline, so all four connection
+  sites are covered rather than each of eighteen `conn.execute` calls. `--query-timeout-s`
+  defaults to **30 s and is ON**; an abort raises a named `QueryBudgetExceeded`, distinct
+  from a cap breach — a cap breach means the statement finished, only too slowly.
+- **ssh keepalive.** Both deploy-script helpers pass `ServerAliveInterval=15
+  ServerAliveCountMax=8`. A silent reset is indistinguishable from a real failure, which is
+  precisely how the V4.2 outcome was misread.
+- **The benchmark's bucket picks now match the population it times.** They were drawn with a
+  hand-written `di.main_pool = 1` while the timed queries applied the default divergence
+  filter, which removes **12.6%** of the main pool and **38.8%** of "more". A pick could
+  therefore be emptied by the real query and the loud F14 abort would name a probe bug as an
+  asset fact. Picks now come from `_build_findings_filter`. `_state_skip`'s skip table also
+  gained `suppressed` and `sys_id`, which had been falling through its single-axis carve-out
+  entirely unverified.
+
+7 tests; 9 mutations each watched failing. One mutation exposed a gap in the tests
+themselves — asserting the new helper in isolation left the caller free to stop using it — so
+a behavioural test builds an asset whose raw-heaviest work is not its divergence-filtered
+heaviest and asserts the pick chooses the latter.
+
+### A CI timing gate that was a coin flip on Windows (2026-08-20)
+
+`tests/test_local_indexer_incremental.py::test_second_scan_fast` failed CI on a commit that
+changed one SQL predicate and one comment, neither of which that module imports. Its budget
+was `max(first_scan * 0.05, 0.5s)`; the Windows runner measured a 1.100 s second scan against
+the 0.5 s floor while taking **23m21s** for the suite versus ubuntu's **5m36s**. Both halves
+of that budget were wrong for a slow filesystem: per-scan overhead the cache cannot remove
+(opening the Tantivy index, the commit, 100 stat calls) does not shrink, so a percentage of a
+quick first scan falls below the fixed floor, and the 0.5 s constant was chosen against one
+machine's speed. The mechanism is proven deterministically by the same test's existing
+`indexed == 0` / `skipped == 100` assertions; the stopwatch only needs to catch pathology, so
+it is now `max(first * 0.75, 5.0)`.
+
+### The citation-range filter works (2026-08-20, web; DEPLOYED `4f6e31f4`)
+
+> Measured on production after deploy, through the real loader and service: the locus-filtered
+> read answers in **97 ms** (`status=ok`, 1,231 of 2,433 rows; a one-sided bound returns 366),
+> the journal carries no error signatures, and the owner confirmed the filter and the row
+> expansion in a browser.
+
+Two fixes to the same reader action — narrowing `/computed-identifications` to one part of
+one work. Code only: no artifact rebuild, no manifest change.
+
+- **The citation-range filter returned nothing on every heavy work, every time.** It was not
+  slow — it was non-functional. The locus predicate in
+  `shared/discovery_service.py::_build_findings_filter` was a **correlated** `EXISTS`, so
+  SQLite re-ran an interval search once per candidate row. Measured on the served artifact
+  for תנ"ך, תהלים over half its chapters: **10,478 ms against a 5.0 s findings timeout**, so
+  the reader always got "This took longer than expected." Pre-existing, and worse than one
+  slow page: `run_in_executor` threads cannot be cancelled, so a read that gave up at 5 s
+  kept its heavy worker for the remaining ~5–14 s, and four concurrent range readers pushed
+  other heavy reads to `busy`. Rewritten as an **uncorrelated `IN (SELECT …)`** driven from
+  `locus_unit` — `CORRELATED SCALAR SUBQUERY` becomes `LIST SUBQUERY`, evaluated once:
+  **61.3 ms, byte-identical result sets** across 15 probed work × bound-shape cases. The
+  predicate stays inside the `WHERE` clause, so the parameter order and every call site are
+  unchanged. A `WITH … AS MATERIALIZED` CTE measured the same (62.6 ms) and was rejected: it
+  cannot live in the filter, and its placeholders would precede the SELECT-list params — an
+  un-spliced params list returned wrong result sets on 6 of those 15 cases and silently
+  correct ones on the other 9, because those were empty.
+
+- **A range-filtered row expanded into children that ignored the range.**
+  `web/pages/findings.py::_fetch_children` never read `locus_from` / `locus_to` back out of
+  the child state, though `_child_state` copies them and its docstring promises "every axis
+  is carried over unchanged … its count and the rows underneath it come from ONE predicate
+  and cannot contradict each other". So a parent counted under a range opened onto an
+  unfiltered list. This was unreachable until now only because the parent query timed out
+  first — fixing the query above is what exposed it, and shipping that fix alone would have
+  turned a broken feature into a silently wrong one.
+
+Nine new tests. The three semantic ones cannot distinguish the two SQL forms by design, so
+the gate is a structural check that the subquery references the outer row nowhere, plus a
+query-plan and a wall-clock guard on the served artifact. All six mutations in the matrix
+were watched failing — reverting to the correlated form ran that test set for **3m28s**,
+which is the outage reproducing itself inside the gate.
+
 ### Discovery V4.2 sidecar — 14 restored works, and citations that stop repeating themselves (2026-08-19, web; built, not yet deployed)
 
 A rebuilt discovery artifact. **708 works / 58,602 computed identifications /
@@ -1036,6 +1201,73 @@ this entry records the build, not a live change.
   read the built asset's own stored labels rather than a helper's return value. Two stale
   test assertions were found and closed in passing — one still pinned the `source_label`
   defect, one pinned the pre-ratification date count.
+
+### Pause/Resume for desktop searches (2026-08-19, desktop)
+
+A long search can now be parked and picked back up instead of being thrown away.
+A **Pause** button sits beside Search on the Search tab and beside Analyze on the
+Composition tab, appears only while a run is in flight, and covers all four
+workers — regular search, composition scan, and both Lab Mode variants.
+
+- **The button never claims more than it can do.** Clicking Pause shows a
+  disabled "Pausing…" until the worker actually reaches a checkpoint and
+  acknowledges; only then does it become "Resume". Grouping runs on a different
+  thread that is not pausable, so the button is hidden for that phase rather
+  than shown greyed-out beside a live Stop.
+- **Elapsed time and the composition ETA now exclude parked time**, and are
+  computed from `time.monotonic()`. They were `time.time() - start`, so a pause
+  inflated elapsed and halved the reported chunk rate — and a wall-clock base is
+  wrong regardless, since an NTP or DST step moves it under a running search.
+  The ETA is derived from elapsed, so one fix corrects both.
+- **New `shared/pause_gate.py`** — `PauseGate`, plain stdlib, no Qt and no
+  policy: it blocks and returns a bool, leaving the `InterruptedError` raise in
+  `gui_threads` beside every other cancel. `PausableSearchMixin` adds
+  `pause()` / `resume()` / `request_cancel()` and a `_checkpoint()` called as the
+  first statement of each progress callback, so a parked worker publishes no
+  progress and the bar freezes where it was.
+- **`request_cancel()` is now the single stop entry point** for all six cancel
+  paths: it sets the flag *and* un-parks in one call. A parked worker never
+  reaches the code that reads `cancel_flag`, so a flag alone would have left it
+  parked until the `wait()` budget expired and `QThread.terminate()` fired.
+
+**Fixed along the way** (each was live before this change):
+
+- **Lab Mode searches were never cancellable.** `LabSearchThread` had no
+  `cancel_flag`, so Stop set a dead attribute; `lab_search`'s `batch_cb`
+  swallowed the cancel in a bare `except Exception` (`InterruptedError` is an
+  `OSError` subclass); and a non-deep Lab search never ticked progress at all.
+- **The LOCAL (My Library) passes ignored Stop entirely** — `_query_local_index`
+  and the two LOCAL post-passes had no callback and no cancel check. Stopping one
+  now keeps the hits it had already materialised, like every other mode; an
+  earlier revision of this branch re-raised instead and cost the user every LOCAL
+  row under a label reading "(Partial results)".
+- **A stopped Title/Shelfmark search discarded its partial results.**
+  `_execute_metadata_search` was the one loop with no `try/except`, so the raise
+  escaped and became an empty result set, unlike every other mode.
+- **`perf_signal` fired for cancelled runs**, contradicting its own comment: the
+  core swallows `InterruptedError` and returns normally, so that line was
+  reached anyway.
+- **`closeEvent`'s `comp_thread.requestInterruption()` was a no-op** since it was
+  written — the composition threads only ever polled `cancel_flag`. The mixin's
+  `requestInterruption()` override repairs that call site in place.
+- The LOCAL phase now reports on a dedicated `phase_signal` and switches the bar
+  to indeterminate, instead of pushing unrelated hit counts down the numeric
+  channel (which rewinds the bar) or pinning at `(total, total)` (which reads as
+  100% complete while a long phase is still running).
+
+**Stop itself is unchanged.** It still blocks briefly and still falls back to a
+hard thread kill for a worker caught *between* checkpoints; a paused worker is
+specifically never in that state, and the wider non-blocking-stop rework is
+recorded in `docs/OPEN_ISSUES.md` rather than smuggled in here.
+
+Tests: `test_pause_gate.py`, `test_pause_ack_epoch.py`, `test_pause_elapsed_math.py`,
+`test_pause_resume_ui.py`, `test_pause_phase_signal.py`, `test_pause_core_ticks.py`,
+`test_pause_worker_wiring.py`, `test_pause_stop_lifecycle.py`,
+`test_pause_resume_i18n.py` (all Qt-free), plus `test_pause_integration_qt.py`
+in the `gui` lane for what needs a live event loop — thread affinity,
+queued-vs-direct delivery, a stale acknowledgement crossing a run boundary, and
+real `wait()` timing. New EN/HE keys: Pause / Resume / Pausing… / Paused.
+
 
 ### Web memory — allocator-ratchet attribution + remediation (2026-07-08, web)
 

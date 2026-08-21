@@ -375,6 +375,39 @@
 - [ ] **OBS-02**: Operational metrics cover query timeouts, result truncation, sidecar unavailable/incompatible events, atlas payload sizes, and judgment rate-limit/moderation activity
 - [ ] **REL-01**: Release order is gated: claim semantics + masked schema → validated title map + sidecar + frozen-frame artifact → certificate card draw → read surfaces (panel/work) → Supabase migration + security smoke → judgment UI → leads → bounded atlas → public promotion; the feature flag, sitemap/SEO discovery, and homepage band stay OFF until: the CERT-01 measurement is graded to completion, the BAND-05 immutable methods report is published, the CERT-02 outcome-specific copy is applied (tier-A goes public WITH its measured number), and the masking (DATA-05), RTL (I18N-02), accessibility (A11Y-01/02), performance (PERF-01), and deployment (DATA-08) checks pass. ATLAS-PREVIEW EXCEPTION (owner, 2026-07-20): the static atlas overview (ATLAS-01) may deploy EARLY as a standalone beta page, before the certificate and the claim surfaces, PROVIDED it displays no claim-level statements (no work–witness identifications, no bands, no precision numbers — cluster/shelfmark-level visualization only), region/cluster labels come only from our own catalogue titles (libraries.csv — masking-safe catalogue metadata, distinct from the DATA-04 reviewed neutral WORK titles), reviewed neutral titles, or are omitted, an asset-level masking scan passes, its PERF/i18n basics hold, and it sits behind a DEDICATED atlas-preview feature flag distinct from the main discovery flag (the main discovery flag, the full homepage discovery band, and sitemap/SEO discovery stay OFF until the full gate). The exception EXTENDS (Phase 133 discuss, owner 2026-07-20) to a claim-free homepage TEASER card linking to the /atlas beta: same claim-free + masking + i18n/RTL conditions, CLS-safe, gated by the atlas-preview flag, and noindex until the full REL-01 gate; the full homepage discovery band (promoting claims) still waits for Phase 139.
 
+### Findings Export (phase 136.2)
+
+*Added 2026-08-20 at owner request, before implementation.*
+
+- [ ] **EXPORT-01**: `/computed-identifications` offers an .xlsx download over the reader's CURRENT filter and sort state, covering the whole filtered set rather than the rendered page, with bilingual headers and conditional RTL. The workbook is a PROJECTION OF WHAT THE SURFACE RENDERS — same rows, same labels, same excerpt text, and the same honest "not available for display" state where the sidecar carries no work-side pieces. No column may require reaching past `shared/discovery_surface_projection.py`'s allowlist
+- [ ] **EXPORT-02**: The masking sweep's copy/export class converts from an asserted ABSENCE to a scoped inventory naming the one expected egress, with the export builder module added to the scanned surface set, and the capture opening the workbook to read CELL VALUES rather than scanning bytes — a deflated-XML byte scan sees nothing. No precision figure reaches a cell; every band and relation label comes from the frozen vocabulary helpers and is asserted present, not merely non-crashing
+- [ ] **EXPORT-03**: The export is bounded without being capped: excerpts are read in chunked batches rather than one query per identification, the path takes its OWN concurrency budget backed by its OWN `ThreadPoolExecutor` sized to that budget, and it degrades honestly on timeout or overload rather than returning a short file that looks complete
+
+### Passage Matching (phases 141-147)
+
+*Added 2026-08-20. A second selectable parallels method — the discovery pipeline's character-level
+seed-and-extend matcher brought to composition search. Owner-planned outside GSD; entered here so the
+work has requirement IDs to be verified against.*
+
+- [ ] **PASS-01**: One tracked, self-contained algorithm specification exists — versioned normalizer, gram coding, index orientation, diagonal-keyed candidate generation, BOTH verification boundaries with the reason there are two, ONE minimum-span number in normalized letters classified as query policy rather than an artifact input, mandatory Stage-0 hygiene with its measured precision/recall, a parameter table with a provenance column, and an explicit "what is not established" section. Implementable without access to the gitignored research tree, and passing the masking scan with `MASKING_SCAN_PATTERNS_FILE` configured
+- [ ] **PASS-02**: Artifact and builder integrity is proven by reconstruction, not accounting — artifact hash, per-page stream hashes, page-boundary assertions so grams never cross a page, byte-for-byte parity against an in-memory reference builder, and a check that re-derives sampled postings from the stream to their CSR location; the layout version is in the manifest and load refuses on mismatch; overflow fails the build loudly; the swap is atomic
+- [ ] **PASS-03**: Query behaviour is deterministic and bounded — a versioned posting-budget policy with a stable total order, a pass/fail acceptance rule for query-prefix monotonicity (a bounded regression tolerance on held-out positives, or the monotonicity claim is dropped), declared candidate and verification caps, and every cap that fires reported in the envelope. Nothing truncates silently
+- [ ] **PASS-04**: The two methods are compared on equal terms — a page-scoped incumbent comparator (composition search passes no scope filter and otherwise also matches `sys:`/`part:` pseudo-documents), ONE frozen eligible-page manifest applied to both, and stratification by per-method rank quantile rather than pooled raw score, which is not numerically comparable across methods
+- [ ] **PASS-05**: The default-flip decision runs against pre-declared endpoints — recall@50 primary, precision@k secondary, a one-sided 95% CI lower bound no worse than 3 points versus the incumbent in EVERY named protected class (query-length band, genre, language, page-CER band), multiplicity handled, sample sizes declared before drawing, and tuning and evaluation splits kept separate. A class whose sample cannot support that precision blocks the flip by insufficiency
+- [ ] **PASS-06**: Both methods are selectable in both apps (`chunk` | `passage`) through the existing `CompositionSearcher` contract, and passage is disabled with a translated explanation whenever scope is `local` or `all` — enforced in API validation and in session/history restore, not only in the widget. My Library passage search is deferred and the UI says so
+- [ ] **PASS-07**: The web asset loader is fail-closed on flag AND manifest AND input-hash AND layout-version; the passage path has its OWN `ThreadPoolExecutor` sized to its semaphore capacity; highlight markup has a safe contract with an RTL+LTR DOM test matrix; and cold-cache SLOs (cold p95, concurrency target, RSS/page-cache residency, executor saturation, loop-lag ceiling) are declared and met before deploy
+- [ ] **PASS-08**: The desktop index builds on the user's machine in a background worker — never from `__init__`, never on the UI thread — with progress, a resumable checkpoint and a free-space preflight; a stale-index rebuild prompt fires from the artifact's input manifest; and changing the minimum-span number does NOT trigger a rebuild
+- [ ] **PASS-09**: Passage mode on regular search ships only if gated on its OWN comparison against `execute_search(..., mode="fuzzy")`, with the eligibility floor expressed as a minimum span in normalized letters rather than a word count
+
+### Data Operability (phases 148-149)
+
+*Added 2026-08-20 for the reference-expansion and serving work that shipped after the 2026-08-16
+ratification with no requirement to be verified against.*
+
+- [ ] **OPS-01**: The checked-in recipe rebuilds the artifact production serves, with every input hash derived at run time from the files rather than hand-copied. Byte-identity is explicitly not the target (`build_date` is written into `meta` before the file hash is computed — `frame_content_hash` exists to route around that), but rollback-by-rebuild must exist as a real path alongside rollback by atomic manifest repoint
+- [ ] **OPS-02**: Adding reference material never silently deletes live identifications — every append diffs against live before ship, and that diff is a gate, not a report. The Track-1 posting cap drops ALL postings of an over-cap code, which is how the V4.2 append removed 103 live identifications
+- [ ] **OPS-03**: Discovery surface latency is attributed to measured components rather than inferred, and every budget or cap that fires is reported; no page reports a capped total as an exact one
+
 ## Future Requirements (deferred)
 
 - **FUT-01**: Text-reuse engine as an alternative/main backend for `/parallels` (desktop: composition) search (user, 2026-07-19)
@@ -401,7 +434,11 @@
 
 ## Traceability
 
-Every v9.0.0 requirement maps to exactly one phase. Phases continue from the previous milestone (last phase 132), starting at 133. Owner revision 2026-07-20: Phase 133 = Visual Atlas Preview (ATLAS-01, the milestone's first deployable artifact under the REL-01 atlas-preview exception); the remaining phases run 134-139.
+Every v9.0.0 requirement maps to exactly one phase. Phases continue from the previous milestone (last phase 132), starting at 133. Owner revision 2026-07-20: Phase 133 = Visual Atlas Preview (ATLAS-01, the milestone's first deployable artifact under the REL-01 atlas-preview exception); the remaining phases run 134-149.
+
+**Re-mapped 2026-08-20.** Phase 139 was split into 139a (release hardening / REL-01 closure) and 139b (atlas drill-down / homepage capstone) on 2026-08-16, but the traceability rows still pointed at the retired Phase 139; they are retargeted above. Twelve requirements were added — PASS-01..09 for the passage-matching track (phases 141-147) and OPS-01..03 for the data-operability track (phases 148-149) — so that roughly 85 commits of post-ratification work have something to be verified against.
+
+**One phase per requirement is the DELIVERY home, not the only phase that touches it.** Phase 142 measures PASS-02/03/04 before Phase 143 delivers them; Phase 146 re-verifies PASS-06 on the desktop side; Phase 139a carries the apply-or-defer decision for CERT-02's outcome copy while CERT-02 itself stays homed in Phase 135; and Phase 149 re-verifies PERF-01, delivered in Phase 134.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
@@ -424,7 +461,7 @@ Every v9.0.0 requirement maps to exactly one phase. Phases continue from the pre
 | CERT-01 | Phase 135 | Pending |
 | CERT-02 | Phase 135 | Pending |
 | VIS-01 | Phase 136 | Complete (136-19) — structural exclusion proved by the cross-surface sweep |
-| VIS-02 | Phase 139 | Pending |
+| VIS-02 | Phase 139a | Pending |
 | NOVEL-01 | Phase 136 (moved IN, owner 2026-07-30) | Pending |
 | NOVEL-02 | Phase 136 (moved IN, owner 2026-07-30) | Complete (136-19) — verdict cache proved absent from all six manifest-named databases |
 | PANEL-01 | Phase 136 | Built, swept, deployed behind an OFF flag ⇒ invisible. NOT shipped until flag-on (six items gate it) |
@@ -432,6 +469,9 @@ Every v9.0.0 requirement maps to exactly one phase. Phases continue from the pre
 | PANEL-03 | Phase 136.1 (moved out of 136, owner 2026-08-02) | Pending |
 | WORK-01 | Phase 136.1 (moved out of 136, owner 2026-08-02) | Pending |
 | WORK-02 | Phase 136.1 (moved out of 136, owner 2026-08-02) | Pending |
+| EXPORT-01 | Phase 136.2 | Complete (2026-08-20; retro-plan owed) |
+| EXPORT-02 | Phase 136.2 | Complete (2026-08-20; retro-plan owed) |
+| EXPORT-03 | Phase 136.2 | Complete (2026-08-20; retro-plan owed) |
 | JUDGE-01 | Phase 137 | Pending |
 | JUDGE-02 | Phase 137 | Pending |
 | JUDGE-03 | Phase 137 | Pending |
@@ -439,18 +479,30 @@ Every v9.0.0 requirement maps to exactly one phase. Phases continue from the pre
 | JUDGE-05 | Phase 137 | Pending |
 | LEADS-01 | Phase 138 | Pending |
 | LEADS-02 | Phase 138 | Pending |
-| ATLAS-02 | Phase 139 | Pending |
-| ATLAS-03 | Phase 139 | Pending |
-| SEO-01 | Phase 139 | Pending |
-| I18N-01 | Phase 139 | Pending |
-| I18N-02 | Phase 139 | Pending |
-| A11Y-01 | Phase 139 | Pending |
-| A11Y-02 | Phase 139 | Pending |
-| OBS-01 | Phase 139 | Pending |
-| OBS-02 | Phase 139 | Pending |
-| REL-01 | Phase 139 | Pending |
+| ATLAS-02 | Phase 139b | Pending |
+| ATLAS-03 | Phase 139b | Pending |
+| SEO-01 | Phase 139b | Pending |
+| I18N-01 | Phase 139b | Pending |
+| I18N-02 | Phase 139b | Pending |
+| A11Y-01 | Phase 139b | Pending |
+| A11Y-02 | Phase 139b | Pending |
+| OBS-01 | Phase 139b | Pending |
+| OBS-02 | Phase 139b | Pending |
+| REL-01 | Phase 139a | Pending |
+| PASS-01 | Phase 141 | Built, unmerged |
+| PASS-02 | Phase 143 | Built, unmerged |
+| PASS-03 | Phase 143 | Built, unmerged |
+| PASS-04 | Phase 144 | In progress — tuning split only |
+| PASS-05 | Phase 144 | Pending — holdout untouched |
+| PASS-06 | Phase 145 | Pending |
+| PASS-07 | Phase 145 | Pending |
+| PASS-08 | Phase 146 | Pending |
+| PASS-09 | Phase 147 | Pending (optional phase) |
+| OPS-01 | Phase 148 | Pending — rollback-by-rebuild does not currently exist |
+| OPS-02 | Phase 148 | Pending — 103-identification loss accepted by ruling; the gate is not built |
+| OPS-03 | Phase 149 | In progress — P1 closed 2026-08-20; ~1.1-3.0 s still unattributed |
 
-**Coverage:** 44 / 44 v9.0.0 requirements mapped ✓ (no orphans, no duplicates). Note: the requirement set skips DATA-09 by design — the Claim Model & Data Spine block runs DATA-01..08 then DATA-10.
+**Coverage:** 59 / 59 v9.0.0 requirements mapped ✓ (no orphans, no duplicates). Note: the requirement set skips DATA-09 by design — the Claim Model & Data Spine block runs DATA-01..08 then DATA-10.
 
 **Cross-cutting note:** I18N-01/02, A11Y-01/02, SEO-01, OBS-01/02, and REL-01 are homed in Phase 139 (the release-hardening capstone) because their completion criterion is a comprehensive cross-surface gate and several explicitly reference graph/atlas labels. Translations, RTL, and accessibility are nonetheless BUILT INTO every UI surface (Phases 133, 136–139) from line one per house convention — Phase 133's atlas-preview page carries its own PERF/i18n basics per the REL-01 atlas-preview exception; Phase 139 owns their final verification. Likewise PERF-01, DATA-05, and DATA-08 are delivered in Phase 134 but re-verified at the REL-01 gate.
 

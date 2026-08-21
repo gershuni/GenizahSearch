@@ -1,10 +1,32 @@
-# Dicta Genizah Search Pro 9.0.0
+# Dicta Genizah Search Pro 8.6.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
 A comprehensive research environment for the Cairo Genizah, featuring a **Web Platform** ([Dicta Genizah Search](https://genizahsearch.com)), **Community Features**, and full **WCAG 2.0 Accessibility**.
 
 > **Web Access:** [genizahsearch.com](https://genizahsearch.com) (אתר הגניזה של דיקטה) - Search, browse, and collaborate from any browser
+
+---
+
+## What's New in Version 8.6.0?
+
+### v8.6.0: Pause/Resume, and Stop that actually stops (desktop)
+
+Long searches can now be paused. A pause takes effect at the next checkpoint, keeps everything
+found so far, and Resume picks up from exactly that point rather than starting over — the elapsed
+clock excludes the time you were paused, and a paused search lets the machine sleep. It works on
+regular searches, Lab Mode and Composition scans alike.
+
+Alongside it, Stop was repaired everywhere it was broken: it did nothing at all in Lab Mode, it
+silently threw away results in Title, Shelfmark and My Library searches, and it was ignored
+outright while My Library was being scanned. Stopping a search now always leaves you with what it
+had found.
+
+- Pause/Resume on the Search and Composition tabs, with paused time excluded from timings and ETAs
+- Stop works in Lab Mode, and no longer reports a user cancellation as an error
+- Stopped searches keep their partial results in every mode
+- A clearer progress bar during the My Library stage, and a search toolbar that no longer overlaps
+  itself on smaller screens
 
 ---
 
@@ -558,7 +580,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Dicta Geniza
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V9.0.0_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V8.6.0_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

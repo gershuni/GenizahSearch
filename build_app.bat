@@ -9,42 +9,15 @@ echo Checkpointing sidecar databases...
 python scripts\checkpoint_sidecars.py
 echo Done.
 
-python -m PyInstaller --noconfirm --noconsole --onedir --clean ^
- --name "GenizahSearchPro" ^
- --icon "icon.ico" ^
- --version-file "version_info.txt" ^
- --hidden-import "tantivy" ^
- --hidden-import "numpy" ^
- --hidden-import "PIL" ^
- --collect-all "tantivy" ^
- --add-data "icon.ico;." ^
- --add-data "Help.html;." ^
- --add-data "oxford_full_db.json;." ^
- --add-data "libraries.csv;." ^
- --add-data "ie_volume_map.json;." ^
- --add-data "bodleian_master_index.csv;." ^
- --add-data "pgp_tag_translations.py;." ^
- --add-data "shared_export_utils.py;." ^
- --add-data "shared\export_utils.py;shared" ^
- --add-data "shared;shared" ^
- --add-data "libraries_translations.db;." ^
- --add-data "fist_data\fjms_enrichment.db;fist_data" ^
- --add-data "fist_data\visual_similarity.db;fist_data" ^
- --add-data "fist_data\vs_manifest.txt;fist_data" ^
- --add-data "nli_data\nli_crossref.db;nli_data" ^
- --add-data "pgp_data\pgp.db;pgp_data" ^
- --add-data "fgp_data\fgp_transcriptions.db;fgp_data" ^
- --exclude-module "tkinter" ^
- --exclude-module "matplotlib" ^
- --exclude-module "scipy" ^
- --exclude-module "pandas" ^
- --exclude-module "notebook" ^
- --exclude-module "ipython" ^
- --exclude-module "jedi" ^
- --exclude-module "curses" ^
- --exclude-module "nicegui" ^
- --noupx ^
- genizah_app.py
+REM Build from the CHECKED-IN spec, never from command-line flags.
+REM Command-line PyInstaller regenerates GenizahSearchPro.spec on every run and
+REM strips the maintained collect_all() calls for pymupdf / zstandard / lxml plus
+REM the fitz, openpyxl and defusedxml hidden imports -- the very things that keep
+REM the C-extensions in the bundle. The spec carries every --add-data and
+REM --exclude-module the old invocation passed, so nothing is lost by using it.
+REM Only --noconfirm and --clean are legal alongside a spec file; every other
+REM flag the old command used is rejected or ignored when building from one.
+python -m PyInstaller --noconfirm --clean GenizahSearchPro.spec
 
 echo.
 echo Build complete! Output in dist\GenizahSearchPro

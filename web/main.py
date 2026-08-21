@@ -712,6 +712,7 @@ from web.atlas_assets import (
     atlas_manifest_etag,
 )
 from web.discovery_assets import load_discovery_state, discovery_available  # noqa: F401 -- discovery_available is the Phase 135+ gating predicate; no surface calls it yet in Phase 134 (NO discovery UI ships this phase), imported now so downstream plans wire it without touching this import block
+from web.passage_assets import load_passage_state  # Phase 145: passage-matching parallels search
 from web.discovery import (  # Phase 135 (BAND-05): /help methods-section wiring — noindex predicate + band-precision/claim-count readers (patched as web.main.* in the render-smoke test)
     discovery_methods_noindex,
     get_all_band_precision,
@@ -722,7 +723,13 @@ from genizah_core import MetadataManager, VariantManager, SearchEngine, LabEngin
 # App configuration
 APP_TITLE = "Dicta Genizah Search | חיפוש גניזת קהיר"
 from version import APP_VERSION
-WHATS_NEW_VERSION = APP_VERSION  # Bump when adding new "What's New" content
+# Pinned, NOT APP_VERSION (2026-08-20). The desktop release line moved to 8.6.0
+# while this banner still describes the 9.0.0 WEB features, and the dismissal
+# check below is a STRING equality against the per-user 'whats_new_dismissed'
+# value -- so following a desktop bump would re-pop the banner for every web
+# reader who had already dismissed it. Bump by hand when the web What's New
+# content itself changes.
+WHATS_NEW_VERSION = "9.0.0"
 APP_PORT = int(os.environ.get('GENIZAH_PORT', 8081))
 
 # Initialize API routes (Image Proxy, Export)
@@ -787,6 +794,15 @@ load_atlas_state()
 # discovery_available() False and every future discovery surface hides
 # cleanly; the rest of the app is completely untouched.
 load_discovery_state()
+
+# Phase 145: load + validate the passage-matching index ONCE at startup from
+# repo-root passage_index/current/ (web.passage_assets.PASSAGE_DATA_DIR),
+# deliberately OUTSIDE STATIC_DIR. Fail-closed, mirroring the two loads
+# above (the atlas one and the one right before this comment): a
+# missing/corrupt/incompatible index just leaves passage_available() False
+# and the parallels page's method selector plus POST /api/parallels's
+# method='passage' branch hide/reject cleanly.
+load_passage_state()
 
 
 def _negotiate_encoding(accept_encoding_header: str, have_br: bool, have_plain: bool):

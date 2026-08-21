@@ -250,7 +250,14 @@ class _Spy:
         self.refuse_before_dispatch: Dict[str, BaseException] = {}
         self.fail_after_dispatch: Dict[str, BaseException] = {}
 
-    async def __call__(self, sync_fn, *args, timeout=None, heavy=False):
+    async def __call__(self, sync_fn, *args, timeout=None, heavy=False,
+                       slot=None):
+        # MIRRORS `DiscoveryService._run_off_loop`, which forwards every
+        # keyword on EVERY crossing -- `slot` included, and `None` for
+        # the browse reads this file drives. A double that omits a
+        # parameter the real method declares raises `TypeError` inside
+        # the surface under test, where it surfaces as "temporarily
+        # unavailable" rather than as a signature problem.
         # NOTE: assigned to the CLASS attribute `_run_off_loop`, but a plain
         # object is not a descriptor, so `self` is NOT passed -- the first
         # positional argument really is the sync callable.

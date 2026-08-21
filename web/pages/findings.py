@@ -84,6 +84,7 @@ import logging
 import math
 import os
 import re
+from uuid import uuid4
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from nicegui import ui
@@ -110,6 +111,7 @@ from web.discovery import (
     DIVERGENCE_MODES,
     DIVERGENCE_ONLY,
     DIVERGENCE_SHOWN,
+    EXPORT_GROUPED_UNITS,
     FACET_LEVELS,
     FINDINGS_BUCKETS,
     FINDINGS_SORT_BAND_RANK,
@@ -277,6 +279,64 @@ _KEY_PAGE = _STORAGE_PREFIX + "page"
 # ---------------------------------------------------------------------------
 
 _FINDINGS_COPY: Dict[str, Dict[str, str]] = {
+    # ---- the xlsx download (EXPORT-01, phase 136.2) ------------------------
+    #
+    # "Download these results" and not "Export all findings": the file carries
+    # the CURRENT filters, and a label promising the corpus over a filtered view
+    # would be the download-shaped version of a count on the wrong basis.
+    "export_label": {
+        "en": "Download (Excel)",
+        "he": "הורדה (Excel)",
+    },
+    # NAMES THE WAIT. The whole filtered set is walked, not the visible page, so
+    # a default-view download is tens of thousands of rows and takes on the
+    # order of a minute. A control that looked instant and then did nothing for
+    # 50 seconds would read as broken -- the same reason every spawn
+    # announcement in this project says silence is expected.
+    "export_tooltip": {
+        "en": "Download every result matching the current filters as an Excel "
+              "file, with the matched passages. Large result sets can take a "
+              "minute to prepare.",
+        "he": "הורדת כל התוצאות התואמות את המסננים הנוכחיים כקובץ Excel, כולל "
+              "קטעי הטקסט התואמים. הכנת מערך תוצאות גדול עשויה להימשך כדקה.",
+    },
+    "export_started": {
+        "en": "Preparing your file. Large result sets can take a minute.",
+        "he": "הקובץ בהכנה. מערך תוצאות גדול עשוי להימשך כדקה.",
+    },
+    # THE WARNING BEFORE A LONG WAIT (owner report, 2026-08-21). A control that
+    # looks instant and then does nothing visible for a minute reads as broken;
+    # a control that says how big the thing is lets a reader narrow the filters
+    # first, which is the action they would actually want.
+    "export_confirm_title": {
+        "en": "This is a large download",
+        "he": "זו הורדה גדולה",
+    },
+    "export_confirm_body": {
+        "en": "The file will contain {rows} rows. Building it can take a "
+              "minute or more, and the download starts on its own when it is "
+              "ready. Narrow the filters first if you want a smaller file.",
+        "he": "הקובץ יכיל {rows} שורות. הכנתו עשויה להימשך דקה או יותר, "
+              "וההורדה תתחיל מעצמה כשיהיה מוכן. אפשר לצמצם קודם את המסננים "
+              "לקובץ קטן יותר.",
+    },
+    # A GROUPED VIEW IS BIGGER THAN IT LOOKS, and saying "{rows} rows" there
+    # would be wrong: the file is one row per identification, so a view of
+    # 3,000 works can be tens of thousands of rows. The honest sentence names
+    # what the number IS rather than pretending it is the row count.
+    "export_confirm_body_grouped": {
+        "en": "You are viewing {rows} grouped rows ({unit}). A spreadsheet has "
+              "no expander, so the file lists every identification behind them "
+              "— considerably more rows than {rows}. Building it can take a "
+              "minute or more, and the download starts on its own when it is "
+              "ready.",
+        "he": "בתצוגה {rows} שורות מקובצות ({unit}). בגיליון אין אפשרות "
+              "הרחבה, ולכן הקובץ יפרט כל זיהוי שמאחוריהן — הרבה יותר "
+              "מ־{rows} שורות. ההכנה עשויה להימשך דקה או יותר, וההורדה תתחיל "
+              "מעצמה כשיהיה מוכן.",
+    },
+    "export_confirm_go": {"en": "Download anyway", "he": "להוריד בכל זאת"},
+    "export_confirm_cancel": {"en": "Cancel", "he": "ביטול"},
     # The permanent caveat. Hand-written prose is exactly where these rules get
     # broken -- the findings sketch's own first draft failed the suite by using
     # a prohibited relation phrase inside a NEGATION, which a grep-based guard
@@ -2893,6 +2953,218 @@ def _render_divergence_basis(meta: Dict[str, Any], lang: str,
         f"{RESULT_BAR_CLASS}-divergence dnote text-xs")
 
 
+#: The export route. A CONSTANT, so the one place a reader's filters become a
+#: URL is greppable and the sweep can assert what the page actually points at.
+_EXPORT_ROUTE = "/api/export/computed-identifications"
+
+
+def export_query_params(state: Dict[str, Any], lang: str) -> Dict[str, str]:
+    """The current view, as the export route's query string.
+
+    STATELESS ON PURPOSE. The route re-runs the reader's filters from these
+    parameters rather than reading the session back, so the URL is reproducible,
+    shareable and cannot pick up another reader's state. `page` is deliberately
+    ABSENT: the file is the whole filtered set, not the page on screen, and
+    sending a page number would invite exactly the "why does my download stop at
+    50 rows" defect.
+
+    Pure and exported so the suite can assert the mapping directly, rather than
+    inferring it from a rendered `href` -- an assertion on the URL is an
+    assertion on what leaves the building.
+    """
+    params: Dict[str, str] = {
+        "unit": str(state["unit"]),
+        "bucket": str(state["bucket"]),
+        "sort": str(state["sort"]),
+        "lang": _lang_key(lang),
+    }
+    shades = _novelty_selection(state)
+    if shades:
+        params["novelty"] = ",".join(str(v) for v in shades)
+    for key in ("domain", "author", "work_id", "sys_id"):
+        value = state.get(key)
+        if value:
+            params[key] = str(value)
+    for key in ("locus_from", "locus_to"):
+        value = state.get(key)
+        if value is not None:
+            params[key] = str(value)
+    return params
+
+
+def export_url(state: Dict[str, Any], lang: str,
+               dl_token: Optional[str] = None) -> str:
+    """`_EXPORT_ROUTE` plus the encoded current view.
+
+    `dl_token` is the download-completion handshake and NOT a filter: the route
+    echoes it back as a cookie so this page can tell when the file has actually
+    arrived. Built here rather than concatenated at the call site so the URL is
+    still assembled in one place and still goes through `urlencode`.
+    """
+    from urllib.parse import urlencode
+    params = export_query_params(state, lang)
+    if dl_token:
+        params["dl"] = dl_token
+    return "{}?{}".format(_EXPORT_ROUTE, urlencode(params))
+
+
+#: Above this many rows in the current view, the download asks first. Chosen
+#: from the measurement, not from taste: a 28,635-row build takes ~66 s plus
+#: its walk, and the cost is close to linear, so a couple of thousand rows is
+#: where the wait stops being instant and starts needing a sentence.
+_EXPORT_CONFIRM_ROWS = 2000
+
+#: How long the page waits for the route's completion cookie. Comfortably past
+#: `DISCOVERY_EXPORT_TIMEOUT` (300 s), because the route answers within that
+#: bound on every path -- including the 504 -- and the card must outlive the
+#: slowest honest answer rather than the fastest.
+_EXPORT_WATCH_MS = 330_000
+
+#: Polls for the one-shot cookie the export route sets, then deletes it.
+#: `__TOKEN__` / `__MS__` are substituted, never formatted: this is JavaScript,
+#: and `str.format` on a body full of braces is a bug waiting for a maintainer.
+_DOWNLOAD_WATCH_JS = """
+return await new Promise((resolve) => {
+  const name = 'gs_dl___TOKEN__=';
+  const started = Date.now();
+  const id = setInterval(() => {
+    if (document.cookie.split('; ').some((c) => c.startsWith(name))) {
+      clearInterval(id);
+      document.cookie = name + '; Max-Age=0; path=/';
+      resolve('done');
+    } else if (Date.now() - started > __MS__) {
+      clearInterval(id);
+      resolve('timeout');
+    }
+  }, 400);
+});
+"""
+
+
+def _export_is_large(total: Any) -> bool:
+    """Whether this view is big enough to be worth a warning. PURE, so the
+    threshold is assertable without a browser."""
+    try:
+        return int(total) >= _EXPORT_CONFIRM_ROWS
+    except (TypeError, ValueError):
+        return False
+
+
+async def _confirm_large_export(state: Dict[str, Any], lang: str,
+                                rows: int) -> bool:
+    """Ask before a long wait. Returns whether to go ahead.
+
+    The GROUPED units get their own sentence, because "{rows} rows" would be
+    false for them: the file is one row per identification, so a view of a few
+    thousand works is tens of thousands of rows. The unit's name comes from
+    `_UNIT_LABEL_KEYS` -- the same label the "Show as" control shows -- so the
+    dialog cannot drift into a second name for the reader's own choice.
+    """
+    grouped = state.get("unit") in EXPORT_GROUPED_UNITS
+    key = "export_confirm_body_grouped" if grouped else "export_confirm_body"
+    with ui.dialog() as dialog, ui.card().classes("gap-3").style("max-width: 32rem"):
+        ui.label(copy_text("export_confirm_title", lang)).classes(
+            "text-subtitle1")
+        ui.label(copy_text(key, lang).format(
+            rows="{:,}".format(rows),
+            unit=tr(_UNIT_LABEL_KEYS.get(state.get("unit"), "")))).classes(
+            "text-sm")
+        with ui.row().classes("w-full justify-end gap-2"):
+            ui.button(copy_text("export_confirm_cancel", lang),
+                      on_click=lambda: dialog.submit(False)).props(
+                "flat no-caps")
+            ui.button(copy_text("export_confirm_go", lang),
+                      on_click=lambda: dialog.submit(True)).props(
+                "unelevated no-caps")
+    try:
+        return bool(await dialog)
+    finally:
+        dialog.delete()
+
+
+async def should_start_export(state: Dict[str, Any], lang: str,
+                              total: Any) -> bool:
+    """Whether to go ahead: straight through for a small view, after a
+    confirmation for a large one.
+
+    MODULE SCOPE so the decision can be driven by a test instead of
+    re-implemented by one. It is the branch the rendered capture never paints
+    -- a reader who declines gets no download -- and a test that rebuilt the
+    condition beside the code would agree with itself for as long as the two
+    happened to match.
+    """
+    return (not _export_is_large(total)
+            or await _confirm_large_export(state, lang, int(total or 0)))
+
+
+async def start_export(state: Dict[str, Any], lang: str) -> None:
+    """Raise the progress card, start the download, and CLEAR THE CARD.
+
+    A `ui.download` is a browser navigation: nothing tells the server the bytes
+    arrived and nothing tells the page either, so the old `type="ongoing"`
+    notify -- which Quasar gives `timeout: 0` -- had no event that could ever
+    dismiss it and stayed on screen after the file had landed (owner report,
+    2026-08-21).
+
+    A cookie is the one signal that crosses from a download response back to the
+    document that asked for it. The token is minted here, the route sets it on
+    EVERY response, and the poll below clears the card. The handshake is
+    best-effort BY DESIGN: it is watching a browser, so it also gives up on its
+    own rather than replacing a stuck card with a differently stuck one.
+
+    MODULE SCOPE, not a closure inside the button, so a test can drive it: the
+    property that matters -- the card is dismissed on every path -- is exactly
+    the kind that a structural check on source text would pass while the code
+    did the opposite.
+    """
+    token = uuid4().hex
+    note = ui.notification(copy_text("export_started", lang),
+                           spinner=True, timeout=None, close_button=False)
+    try:
+        # OUTSIDE the swallowing except, and a test found that it had been
+        # inside it: with the download itself wrapped, a failure to even START
+        # the transfer dismissed the card and reported nothing, so the reader
+        # saw a spinner tidy itself away and no file. Only the WAIT is
+        # best-effort; the download is not.
+        ui.download(export_url(state, lang, dl_token=token))
+        try:
+            await ui.run_javascript(
+                _DOWNLOAD_WATCH_JS.replace("__TOKEN__", token)
+                                  .replace("__MS__", str(_EXPORT_WATCH_MS)),
+                timeout=_EXPORT_WATCH_MS / 1000 + 15)
+        except Exception:
+            # A closed tab, a reload, a dropped socket. The card goes with the
+            # page, and a failed handshake must never be louder than the
+            # download it was watching.
+            pass
+    finally:
+        note.dismiss()
+
+
+def _render_export_button(state: Dict[str, Any], lang: str,
+                          total: Any = None) -> None:
+    """The download control.
+
+    THIS IS THE ONE COPY/EXPORT EGRESS ON THIS SURFACE, and the masking sweep
+    is written to expect exactly it: `_COPY_EXPORT_APIS` was an asserted
+    ABSENCE over this module until phase 136.2, and it is now a scoped
+    inventory naming `ui.download` here. If a second egress is ever added to
+    this page, that test fails -- which is the point of it.
+    """
+    async def _download() -> None:
+        if await should_start_export(state, lang, total):
+            await start_export(state, lang)
+
+    button = ui.button(icon="table_view", on_click=_download).props(
+        "flat dense no-caps")
+    button.classes(f"{RESULT_BAR_CLASS}-export")
+    button.set_text(copy_text("export_label", lang))
+    # An icon-bearing control still needs a name a screen reader can read;
+    # `tooltip` alone is not one (the same note the row's admin control carries).
+    button.props(f'aria-label="{copy_text("export_label", lang)}"')
+    button.tooltip(copy_text("export_tooltip", lang))
+
+
 def _render_result_bar(
     items: List[Dict[str, Any]],
     total: int,
@@ -2937,6 +3209,7 @@ def _render_result_bar(
         with ui.row().classes("w-full gap-3 items-center flex-wrap"):
             _render_unit_select(state, refresh)
             _render_sort_select(state, refresh)
+            _render_export_button(state, lang, total)
 
 
 #: The axes an active-filter chip may represent, in display order, each named
@@ -3341,6 +3614,24 @@ async def _fetch_children(state: Dict[str, Any], item: Mapping[str, Any],
         domain=child.get("domain"),
         author=child.get("author"),
         work_id=child.get("work_id"),
+        # THE CITATION RANGE REACHES THE EXPANSION TOO. `_child_state` carries
+        # both bounds over (it copies the whole state dict), but this call did
+        # not read them back out, so a range-filtered parent opened onto
+        # children drawn from an UNFILTERED predicate -- the parent's count and
+        # its own rows disagreeing, which is exactly the wrongness a reader
+        # cannot see and `_child_state`'s docstring promises cannot happen.
+        # Invisible until 2026-08-20 only because the parent query timed out
+        # first (the correlated locus predicate in `_build_findings_filter`), so
+        # fixing that query is what made this reachable.
+        #
+        # That predicate is NOT named by its module path here on purpose. The
+        # layering gate in `tests/test_findings_page.py` asserts this file never
+        # names the shared read layer's module or its private singleton, and it
+        # matches raw SOURCE TEXT -- so a COMMENT quoting that filename turns the
+        # gate red exactly as a real call would. It did, on both CI platforms,
+        # for a comment. Cite the function name alone, never the path.
+        locus_from=child.get("locus_from"),
+        locus_to=child.get("locus_to"),
         # THE MANUSCRIPT AXIS (2026-08-07). `_child_state` pins whichever axis the
         # parent's unit names, so this reads the same `child` dict `work_id` does --
         # only one of the two is ever set for a given parent.

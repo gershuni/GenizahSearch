@@ -5,6 +5,7 @@ from nicegui import app
 from fastapi import Response
 from fastapi.responses import RedirectResponse
 from starlette.requests import Request
+from typing import Optional
 from web.state import state
 from web.export_service import get_export_service, encode_filename_for_header
 import requests
@@ -386,6 +387,48 @@ def _save_nli_persistent_cache(
 # reads this dict; it exists purely so tests/test_api_nli_breaker_integration.py
 # can monkey-patch and call the breaker-guarded NLI fetch path.
 _api_test_seam: dict = {}
+
+
+#: The download-completion handshake. A browser-initiated download is a
+#: NAVIGATION (the findings page starts one from its export control):
+#: nothing reports back to the server, and nothing reports back to the PAGE
+#: either, so the progress card the click raised had no event that could dismiss
+#: it and sat there after the file had landed (owner report, 2026-08-21).
+#:
+#: A cookie is the one signal that crosses from a download response to the
+#: document that asked for it. The page mints a token, passes it as `dl`, and
+#: polls `document.cookie` for it; the route sets it on EVERY response, so the
+#: card clears on a 503 and a 504 exactly as it does on a workbook -- a spinner
+#: that only stops on success is a spinner that hangs on failure, which is the
+#: same bug with extra steps.
+#:
+#: STRICT, ANCHORED HEX, because the value becomes a Set-Cookie NAME: reflecting
+#: arbitrary text there is header injection. Anything else is IGNORED rather
+#: than rejected -- the handshake is a convenience, and a malformed token should
+#: cost the reader a spinner that times out, not their download.
+#: NO `^...$`. In Python `$` also matches immediately before a FINAL
+#: NEWLINE, so `dl=abcdef12%0A` satisfied an anchored pattern, put a
+#: newline into the cookie NAME and made `set_cookie` raise
+#: `CookieError` -- discarding a successful, expensive build as a 500
+#: (Codex review of PR #323). Matched with `fullmatch`, which has no
+#: such affordance.
+_DL_TOKEN_RE = re.compile(r'[0-9a-f]{8,64}')
+
+
+def stamp_download_done(response, token):
+    """Mark this response as the end of the download `token` was minted for."""
+    if token and _DL_TOKEN_RE.fullmatch(str(token)):
+        try:
+            response.set_cookie(f'gs_dl_{token}', '1', max_age=900,
+                                path='/', samesite='lax', httponly=False)
+        except Exception:
+            # THE HANDSHAKE NEVER COSTS THE READER THE FILE. It is a
+            # convenience that closes a progress card; the worst a
+            # failure here may do is leave that card to time out. This
+            # runs outside the route's own handler, so without the
+            # catch a stamping error discards a finished workbook.
+            logger.warning('download completion stamp failed', exc_info=True)
+    return response
 
 
 def init_api_routes(app_override=None):
@@ -2464,6 +2507,219 @@ def init_api_routes(app_override=None):
         except Exception as e:
             logger.error(f"Export Excel error: {e}")
             return Response("Export failed", status_code=500)
+
+    def _export_public_base_url() -> str:
+        """The canonical origin for links inside an exported workbook.
+
+        Read from `GENIZAH_PUBLIC_BASE_URL`, defaulting to the live site, and
+        validated to be an http(s) origin. Deliberately NOT taken from the
+        request: see the call site.
+        """
+        raw = (os.environ.get('GENIZAH_PUBLIC_BASE_URL')
+               or 'https://genizahsearch.com').strip().rstrip('/')
+        if not raw.startswith(('http://', 'https://')):
+            logger.warning(
+                "GENIZAH_PUBLIC_BASE_URL is not an http(s) origin; exporting "
+                "relative links instead")
+            return ''
+        return raw
+
+    def _export_generated_at() -> str:
+        """UTC, to the second, for the export's provenance sheet."""
+        from datetime import datetime, timezone
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    @target_app.get('/api/export/computed-identifications')
+    async def export_computed_identifications(
+        request: Request,
+        unit: str = 'identification',
+        bucket: str = 'main',
+        sort: str = 'band_rank',
+        novelty: Optional[str] = None,
+        domain: Optional[str] = None,
+        author: Optional[str] = None,
+        work_id: Optional[str] = None,
+        locus_from: Optional[int] = None,
+        locus_to: Optional[int] = None,
+        sys_id: Optional[str] = None,
+        lang: Optional[str] = None,
+        dl: Optional[str] = None,
+    ):
+        """The findings page's result set as an .xlsx (EXPORT-01, phase 136.2).
+
+        STATELESS BY CONSTRUCTION. Every filter arrives as a query parameter
+        rather than being read back out of the session. That is a deliberate
+        departure from `/api/export/excel` directly above, which reads a
+        per-session payload: the pre-Phase-88 version of that pattern leaked
+        one reader's query name into another reader's filename across separate
+        devices, and while the chokepoint fixed the leak, a request that
+        carries its own inputs cannot have the bug at all. It also makes an
+        export URL reproducible and shareable, which is what a researcher
+        actually wants from a citation.
+
+        ASYNC, and the whole walk runs off the event loop on the export budget.
+        This server runs a SINGLE uvicorn worker: a ~50-second synchronous walk
+        on the loop would stall every concurrent request, static files
+        included, while burning no CPU.
+
+        FAILS LOUDLY, NEVER SHORT. Each non-`ok` envelope status maps to its own
+        HTTP status; none of them produces a partial workbook. A truncated
+        spreadsheet is indistinguishable from a small result set once it has
+        been downloaded.
+        """
+
+        # NESTED so every exit -- the 400s, the 503, the 504, the workbook --
+        # goes through one place that stamps the completion cookie. Funnelling
+        # seven `return Response(...)` statements by hand is seven chances to
+        # miss one, and the one that gets missed is a failure path, which is
+        # exactly where a stuck spinner is worst.
+        async def _build() -> Response:
+            from web.discovery_assets import discovery_available, discovery_sidecar_version
+            # The novelty vocabulary comes from its OWN module, not from
+            # `web.discovery`, which does not re-export it -- the same frozen set
+            # `findings_rows.novelty_badge` validates against.
+            from shared.discovery_novelty import NOVELTY_STATUSES
+            from web.discovery import (
+                FINDINGS_BUCKETS,
+                FINDINGS_SORTS,
+                FINDINGS_UNITS,
+                collect_and_build_export,
+                suppressed_identification_ids,
+            )
+            from web.discovery_export_service import (
+                build_findings_workbook,
+                workbook_filename,
+            )
+
+            if not discovery_available():
+                # The same clean hide every other discovery surface performs: the
+                # feature is not "broken" when the flag is off or the sidecar did
+                # not load, it is ABSENT.
+                return Response("Not found", status_code=404)
+
+            # VALIDATED AGAINST THE CLOSED VOCABULARIES BEFORE ANYTHING ELSE.
+            # `unit`, `sort` and `bucket` raise inside the service and are caught
+            # below, but `novelty` did not: it was split on commas and each piece
+            # became its own SQL placeholder, so a caller could send an unbounded
+            # list of junk shades and have the predicate built from it (Codex
+            # review, finding G). A closed enum is checked here, at the edge.
+            if unit not in FINDINGS_UNITS:
+                return Response(f"unknown unit: {unit}", status_code=400)
+            if sort not in FINDINGS_SORTS:
+                return Response(f"unknown sort: {sort}", status_code=400)
+            if bucket not in FINDINGS_BUCKETS:
+                return Response(f"unknown bucket: {bucket}", status_code=400)
+            raw_shades = [v for v in (novelty or '').split(',') if v]
+            unknown = [v for v in raw_shades if v not in NOVELTY_STATUSES]
+            if unknown:
+                return Response(f"unknown novelty shade(s): {','.join(unknown)}",
+                                status_code=400)
+            # DEDUPLICATED, and therefore bounded by the vocabulary itself. Checking
+            # membership alone left the CARDINALITY open: repeating one valid shade
+            # a thousand times built a thousand SQL placeholders and a thousand-item
+            # cell in the About sheet (Codex review round 2, finding 2). Order is
+            # preserved so the same request always produces the same predicate.
+            shades = tuple(dict.fromkeys(raw_shades)) or None
+            ui_lang = 'he' if str(lang or 'en').lower().startswith('he') else 'en'
+
+            try:
+                suppressed = tuple(await suppressed_identification_ids())
+            except Exception:  # pragma: no cover - the accessor fails open itself
+                suppressed = ()
+
+            base = _export_public_base_url()
+
+            # THE CATALOGUE'S OWN TITLE, injected from the same in-memory
+            # `csv_bank` the findings page reads (`state.meta_mgr.csv_bank` is a
+            # plain dict, so a miss costs one lookup). The builder renders and does
+            # not read, exactly like the row component it mirrors.
+            def _catalogue_title(item):
+                key = str(item.get('sys_id') or '')
+                if not key or state.meta_mgr is None:
+                    return ''
+                row = state.meta_mgr.csv_bank.get(key)
+                return (row or {}).get('title') or ''
+
+            filters = {
+                'unit': unit, 'bucket': bucket, 'sort': sort,
+                'novelty': ','.join(shades) if shades else None,
+                'domain filter': ('applied' if domain else None),
+                'author filter': ('applied' if author else None),
+                'work filter': ('applied' if work_id else None),
+                'manuscript filter': ('applied' if sys_id else None),
+                'citation range': ('applied' if (locus_from is not None
+                                                 or locus_to is not None) else None),
+            }
+
+            try:
+                envelope = await collect_and_build_export(
+                    build_findings_workbook,
+                    build_kwargs=dict(
+                        lang=ui_lang, filters=filters,
+                        generated_at=_export_generated_at(),
+                        page_url=((base + '/computed-identifications')
+                                  if base else None),
+                        base_url=base, catalogue_title=_catalogue_title),
+                    unit=unit, bucket=bucket, novelty=shades,
+                    domain=domain, author=author, work_id=work_id,
+                    locus_from=locus_from, locus_to=locus_to, sort=sort,
+                    suppressed=suppressed, sys_id=sys_id)
+            except ValueError as e:
+                # The closed vocabularies (unit / sort / bucket) raise rather than
+                # returning an outage envelope, because an unknown value there is a
+                # bad REQUEST and not a service state -- so it must not be dressed
+                # up as one.
+                return Response(str(e), status_code=400)
+
+            status = envelope.get('status')
+            if status == 'busy':
+                return Response(
+                    "The export service is busy. Try again shortly.",
+                    status_code=503, headers={"Retry-After": "60"})
+            if status == 'timeout':
+                return Response(
+                    "The export took too long to build. Narrow the filters and "
+                    "try again.", status_code=504)
+            if status != 'ok':
+                return Response("Computed identifications are unavailable.",
+                                status_code=503)
+
+            meta = envelope.get('meta') or {}
+            content = envelope.get('content')
+            if content is None:
+                # `collect_and_build_export` returns content only for an `ok`
+                # envelope, so this is unreachable unless the contract changes --
+                # and if it does, an empty download is the one outcome that must
+                # not happen silently.
+                logger.error("Computed-identifications export produced no content "
+                             "for an ok envelope")
+                return Response("Export failed", status_code=500)
+
+            filename = workbook_filename(
+                {'sidecar_version': meta.get('sidecar_version')
+                 or discovery_sidecar_version()})
+            return Response(
+                content=content,
+                media_type=(
+                    "application/vnd.openxmlformats-officedocument"
+                    ".spreadsheetml.sheet"),
+                headers={"Content-Disposition": encode_filename_for_header(filename)},
+            )
+
+        # EVERY EXIT PASSES THE STAMP, including the ones nobody planned.
+        # The handshake was reached only on the paths that RETURN, so an
+        # unexpected SQLite, projection or openpyxl error produced an
+        # unstamped 500 and left the page waiting out its full timeout
+        # with the progress card up (Codex review of PR #322, P2). A
+        # handshake that only fires on success has the same shape as the
+        # spinner defect it was written to fix.
+        try:
+            built = await _build()
+        except Exception:
+            logger.exception(
+                'Computed-identifications export failed unexpectedly')
+            built = Response('Export failed', status_code=500)
+        return stamp_download_done(built, dl)
 
     @target_app.get('/api/export/word')
     def export_word():

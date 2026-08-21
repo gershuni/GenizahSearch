@@ -341,7 +341,14 @@ class _Spy:
         self.results: Dict[str, Any] = {}
         self.fail: Dict[str, BaseException] = {}
 
-    async def __call__(self, sync_fn, *args, timeout=None, heavy=False):
+    async def __call__(self, sync_fn, *args, timeout=None, heavy=False,
+                       slot=None):
+        # MIRRORS `DiscoveryService._run_off_loop`, which forwards every
+        # keyword on EVERY crossing -- `slot` included, and `None` for
+        # the browse reads this file drives. A double that omits a
+        # parameter the real method declares raises `TypeError` inside
+        # the surface under test, where it surfaces as "temporarily
+        # unavailable" rather than as a signature problem.
         name = getattr(sync_fn, '__name__', repr(sync_fn))
         self.calls.append(name)
         if name in self.fail:

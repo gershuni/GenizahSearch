@@ -36,6 +36,11 @@ from shared.discovery_service import (
     FINDINGS_SORTS,  # noqa: F401 -- exported for surfaces to validate against
     FINDINGS_UNIT_IDENTIFICATION,
     FINDINGS_UNITS,  # noqa: F401 -- exported for surfaces to validate against
+    # The units whose page rows are a GROUP with an expander. The findings
+    # page needs it to warn that a grouped view exports MORE rows than it
+    # shows; it reaches it through this boundary like every other service
+    # name, because the page may not name the service module directly.
+    EXPORT_GROUPED_UNITS,  # noqa: F401
     NOVELTY_VIEW_ALL,  # noqa: F401 -- the selector's default, for a surface's fail-open
     NOVELTY_VIEW_CANDIDATES,  # noqa: F401 -- exported for surfaces to label
     NOVELTY_VIEW_DIVERGENT,  # noqa: F401 -- exported for surfaces to label
@@ -280,6 +285,104 @@ async def get_findings_enveloped(
         return busy_envelope(meta={"reason": "bounded_concurrency"})
     except DiscoveryUnavailable:  # pragma: no cover -- the service maps this itself
         return timeout_envelope(meta={"reason": "query_timeout"})
+
+
+async def collect_findings_for_export(
+    unit: str = FINDINGS_UNIT_IDENTIFICATION,
+    *,
+    bucket: str = BUCKET_MAIN,
+    novelty: Optional[Iterable[str]] = None,
+    divergence: str = DIVERGENCE_SHOWN,
+    domain: Optional[str] = None,
+    author: Optional[str] = None,
+    work_id: Optional[str] = None,
+    locus_from: Optional[int] = None,
+    locus_to: Optional[int] = None,
+    sort: str = FINDINGS_SORT_BAND_RANK,
+    suppressed: Optional[Iterable[str]] = None,
+    sys_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """EXPORT-01: the WHOLE filtered set, for the xlsx download (phase 136.2).
+
+    The composition-module wrapper for `collect_findings_for_export_async`,
+    written here rather than letting the route reach `_service` directly, for
+    the reason every other read in this module is: `web/discovery.py` is the
+    one place that gates on `discovery_available()` and maps the two service
+    exceptions onto envelope statuses, so a caller that bypassed it would have
+    to re-implement both and would eventually get one of them wrong.
+
+    `divergence` defaults to `DIVERGENCE_SHOWN` here, NOT to the module's usual
+    `DIVERGENCE_HIDDEN`. That is not a relaxation of ruling F: the findings page
+    itself pins this axis to `SHOWN` unconditionally and expresses ruling F's
+    rows through `novelty` instead, so an export defaulting to `HIDDEN` would
+    silently subtract rows the reader can see on the page it is exporting -- and
+    a downloaded file that quietly holds fewer rows than the screen is the
+    worst-shaped version of that bug.
+    """
+    if not discovery_available():
+        return unavailable_envelope(meta={"reason": "sidecar_not_serving"})
+    try:
+        return await _service.collect_findings_for_export_async(
+            unit=unit, bucket=bucket, novelty=novelty,
+            divergence=divergence, domain=domain, author=author,
+            work_id=work_id, locus_from=locus_from, locus_to=locus_to,
+            sort=sort, suppressed=suppressed, sys_id=sys_id)
+    except DiscoveryOverload:  # pragma: no cover -- the service maps this itself
+        return busy_envelope(meta={"reason": "bounded_concurrency"})
+    except DiscoveryUnavailable:  # pragma: no cover -- the service maps this itself
+        return timeout_envelope(meta={"reason": "query_timeout"})
+
+
+async def collect_and_build_export(build_fn, *, build_kwargs=None, **collect_kwargs):
+    """The whole export -- walk AND workbook -- as ONE bounded unit of work.
+
+    ONE SLOT, ONE TIMEOUT, ONE DISPATCH, and each of those is a correction.
+
+    * The build is not async and is not cheap: openpyxl writes tens of thousands
+      of rows and then zips them, which is seconds of CPU. The first version
+      awaited the collector correctly and then called the builder INLINE on the
+      event loop of a single-uvicorn-worker server, stalling every concurrent
+      request outside any budget at all (round 1, finding H).
+    * Moving the build to its own `_run_off_loop` call fixed that but created a
+      second, independent reservation: a request whose walk had already finished
+      could be refused at build re-entry if newer walks had taken both slots,
+      and one request could occupy up to TWO full export timeouts (round 2,
+      finding 1). A request that has already paid for a slot should not have to
+      win it again to finish.
+
+    So both halves run in ONE sync callable inside ONE executor crossing. The
+    slot is held for the whole request and released once, and the timeout bounds
+    the request rather than each half of it.
+
+    Returns THE ENVELOPE, with the workbook bytes under an extra `content` key
+    (`None` on every non-`ok` status). An envelope rather than a `(envelope,
+    content)` tuple deliberately: every other public read in this module returns
+    the four-key shape, and `tests/test_discovery_assets_audience.py` proves the
+    VIS-01 refusal by CALLING each of them and asking whether a row escaped. A
+    tuple would have made this the one read that proof could not judge -- and
+    the audience boundary is not a good place to be the exception.
+    """
+    if not discovery_available():
+        return {**unavailable_envelope(meta={"reason": "sidecar_not_serving"}),
+                "content": None}
+
+    def _work():
+        envelope = _service.collect_findings_for_export(**collect_kwargs)
+        if envelope.get("status") != STATUS_OK:
+            return {**envelope, "content": None}
+        return {**envelope, "content": build_fn(envelope, **(build_kwargs or {}))}
+
+    try:
+        return await _service._run_off_loop(
+            _work,
+            timeout=_service._export_timeout(),
+            slot=_service._SLOT_EXPORT)
+    except DiscoveryOverload:
+        return {**busy_envelope(meta={"reason": "bounded_concurrency"}),
+                "content": None}
+    except DiscoveryUnavailable:
+        return {**timeout_envelope(meta={"reason": "query_timeout"}),
+                "content": None}
 
 
 async def get_locus_units_enveloped(work_id: str) -> Dict[str, Any]:

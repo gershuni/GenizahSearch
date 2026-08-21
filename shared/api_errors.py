@@ -44,6 +44,11 @@ ERROR_CODES = frozenset({
     'composition_too_long',     # D-06: len(text.strip()) > COMPOSITION_LENGTH_CAP (20000)
     # P9X heavy-mode concurrency additions:
     'heavy_search_busy',        # 503 — heavy-mode concurrency budget (SEARCH_API_HEAVY_CONCURRENCY) exhausted; fail-fast, Retry-After set
+    # Phase 145 (/api/parallels method='passage') additions:
+    'passage_unavailable',        # 503 — PASSAGE_PARALLELS_ENABLED off, or the passage index did not load
+    'passage_scope_unsupported',  # 400 — method='passage' + filters.library includes 'LOCAL' (include mode); the passage index has no Local-corpus records
+    'passage_search_busy',        # 503 — passage-matching concurrency budget (SEARCH_API_PASSAGE_CONCURRENCY) exhausted; fail-fast, Retry-After set
+    'passage_option_unsupported', # 400 — method='passage' + boundary_mode != 'full'; passage has no cross-paragraph/token-boundary concept
 })
 
 # Surfaced in top-level `warnings: []` arrays (D-07), NOT as errors.
@@ -51,6 +56,8 @@ WARNING_CODES = frozenset({
     'query_downgraded',
     # Phase 80 (/api/parallels) additions:
     'truncated_to_200',         # D-07: parallels group count exceeds 200; top 200 returned
+    # Phase 145 (method='passage') additions:
+    'passage_text_lookup_failed',  # a row was DROPPED (never rendered) because its display-text lookup failed; carries a `count` field
 })
 
 

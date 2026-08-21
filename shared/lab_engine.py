@@ -778,60 +778,103 @@ class LabEngine:
 
         # 3. Process — Genizah LAB loop (skipped for corpus_scope='local', and
         # gracefully skipped if the Genizah LAB index was never built).
-        if corpus_scope != 'local' and self.lab_searcher is not None and self.lab_index is not None:
-            query_obj = self._create_lab_query(fp_str, slop, field_name=target_field)
-            if query_obj:
-                if deep_scan:
-                    # Use Deep Scan batched iterator
-                    def batch_cb(*args):
-                        if progress_callback:
-                            try:
-                                progress_callback(*args)
-                            except Exception:
-                                pass  # Progress callback optional — search proceeds without progress updates
+        # Sections 3 and 3b are wrapped so a cancel landing in either loop falls
+        # through to section 4 and returns the partial results gathered so far,
+        # matching execute_search (search_engine.py:2675) and
+        # search_composition_logic (search_engine.py:3054). lab_search had no
+        # partial-results contract before; this path was unreachable until the
+        # checkpoints above existed.
+        try:
+            if corpus_scope != 'local' and self.lab_searcher is not None and self.lab_index is not None:
+                query_obj = self._create_lab_query(fp_str, slop, field_name=target_field)
+                if query_obj:
+                    if deep_scan:
+                        # Use Deep Scan batched iterator
+                        def batch_cb(*args):
+                            if progress_callback:
+                                try:
+                                    progress_callback(*args)
+                                except (InterruptedError, KeyboardInterrupt):
+                                    # Cancellation is NOT an optional-progress failure.
+                                    # Swallowing it here hid the raise from
+                                    # _execute_batched_search's own re-raise guard
+                                    # (lab_engine.py:410-413), so Stop never worked in
+                                    # Lab Mode at all.
+                                    raise
+                                except Exception:
+                                    pass  # Progress callback optional — search proceeds without progress updates
 
-                    iterator = self._execute_batched_search(query_obj, progress_callback=batch_cb, limit_override=scan_limit)
-                else:
-                    # Standard Fast Method
-                    try:
-                        # Limit 5000 for standard scan
-                        res = self.lab_searcher.search(query_obj, 5000)
-                        iterator = res.hits
-                    except Exception as e:
-                        LOGGER.debug('Batched search query failed, falling back to empty: %s', e)
-                        iterator = []
-
-                for score, doc_addr in iterator:
-                    try:
-                        _process_lab_doc(self.lab_searcher.doc(doc_addr), is_local=False)
-                    except Exception as e:
-                        LAB_LOGGER.error(f"Error processing doc: {e}")
-
-        # 3b. LOCAL LAB loop (corpus_scope 'local' or 'all'). Mirrors the LOCAL
-        # extension in lab_composition_search: query the LOCAL LAB side-index with
-        # the same fingerprint field, build LOCAL-shaped hits. The simple/whitespace
-        # tokenizers are registered by reload_local_lab_index (Phase 110 UAT fix) so
-        # parse_query on the fingerprint field no longer raises.
-        if (corpus_scope != 'genizah'
-                and getattr(self, 'local_lab_searcher', None) is not None
-                and getattr(self, '_local_lab_index', None) is not None):
-            _tab = self._my_library_tab_ref() if getattr(self, "_my_library_tab_ref", None) is not None else None
-            _searchable = getattr(_tab, "is_searchable", True) if _tab is not None else True
-            if _searchable:
-                try:
-                    _clauses = [f'{target_field}:{t}' for t in fp_str.split()]
-                    _core_query = " OR ".join(_clauses)
-                    _q_obj = self._local_lab_index.parse_query(_core_query)
-                    _res = self.local_lab_searcher.search(_q_obj, 5000)
-                    for _score, _doc_addr in _res.hits:
+                        iterator = self._execute_batched_search(query_obj, progress_callback=batch_cb, limit_override=scan_limit)
+                    else:
+                        # Standard Fast Method
                         try:
-                            _process_lab_doc(self.local_lab_searcher.doc(_doc_addr), is_local=True)
-                        except Exception as _e:
-                            LAB_LOGGER.error(f"Error processing LOCAL LAB doc: {_e}")
-                except (ValueError, RuntimeError):
-                    pass  # tokenizer/parse issue — skip LOCAL contribution gracefully
-                except Exception as _local_exc:
-                    LAB_LOGGER.warning("lab_search LOCAL LAB scan failed: %r", _local_exc)
+                            # Limit 5000 for standard scan
+                            res = self.lab_searcher.search(query_obj, 5000)
+                            iterator = res.hits
+                        except Exception as e:
+                            LOGGER.debug('Batched search query failed, falling back to empty: %s', e)
+                            iterator = []
+
+                    # Cooperative checkpoint for the NON-deep path: deep scan already
+                    # ticks inside _execute_batched_search, and its iterator is a
+                    # generator with no len(). Without this, a non-deep Lab search had
+                    # no cancel/pause point whatsoever.
+                    _tick_total = 0 if deep_scan else len(iterator)
+                    for _i_lab, (score, doc_addr) in enumerate(iterator):
+                        # Outside the per-doc try below on purpose: a raise from in
+                        # there is caught as "failed to process doc" and the cancel lost.
+                        if progress_callback and _tick_total and _i_lab % 5 == 0:
+                            try:
+                                progress_callback(_i_lab, _tick_total)
+                            except (InterruptedError, KeyboardInterrupt):
+                                raise
+                            except Exception:
+                                pass  # progress is advisory; cancellation is not
+                        try:
+                            _process_lab_doc(self.lab_searcher.doc(doc_addr), is_local=False)
+                        except Exception as e:
+                            LAB_LOGGER.error(f"Error processing doc: {e}")
+
+            # 3b. LOCAL LAB loop (corpus_scope 'local' or 'all'). Mirrors the LOCAL
+            # extension in lab_composition_search: query the LOCAL LAB side-index with
+            # the same fingerprint field, build LOCAL-shaped hits. The simple/whitespace
+            # tokenizers are registered by reload_local_lab_index (Phase 110 UAT fix) so
+            # parse_query on the fingerprint field no longer raises.
+            if (corpus_scope != 'genizah'
+                    and getattr(self, 'local_lab_searcher', None) is not None
+                    and getattr(self, '_local_lab_index', None) is not None):
+                _tab = self._my_library_tab_ref() if getattr(self, "_my_library_tab_ref", None) is not None else None
+                _searchable = getattr(_tab, "is_searchable", True) if _tab is not None else True
+                if _searchable:
+                    try:
+                        _clauses = [f'{target_field}:{t}' for t in fp_str.split()]
+                        _core_query = " OR ".join(_clauses)
+                        _q_obj = self._local_lab_index.parse_query(_core_query)
+                        _res = self.local_lab_searcher.search(_q_obj, 5000)
+                        _local_hits = _res.hits
+                        _local_total = len(_local_hits)
+                        for _i_llab, (_score, _doc_addr) in enumerate(_local_hits):
+                            if progress_callback and _i_llab % 5 == 0:
+                                try:
+                                    progress_callback(_i_llab, _local_total)
+                                except (InterruptedError, KeyboardInterrupt):
+                                    raise
+                                except Exception:
+                                    pass  # progress is advisory; cancellation is not
+                            try:
+                                _process_lab_doc(self.local_lab_searcher.doc(_doc_addr), is_local=True)
+                            except Exception as _e:
+                                LAB_LOGGER.error(f"Error processing LOCAL LAB doc: {_e}")
+                    except (InterruptedError, KeyboardInterrupt):
+                        # MUST precede the broad handlers below: InterruptedError is an
+                        # OSError subclass, so `except Exception` would swallow the cancel.
+                        raise
+                    except (ValueError, RuntimeError):
+                        pass  # tokenizer/parse issue — skip LOCAL contribution gracefully
+                    except Exception as _local_exc:
+                        LAB_LOGGER.warning("lab_search LOCAL LAB scan failed: %r", _local_exc)
+        except InterruptedError:
+            pass  # cancelled mid-scan — fall through and return what we have
 
         # 4. Sort & Dedup (Logic Fixed: Prioritize V0.8 over V0.7)
         v8_map = {r['uid']: r for r in results if r['display']['source'] == "V0.8"}
@@ -1195,7 +1238,18 @@ class LabEngine:
                 if local_lab_index is not None and local_lab_searcher is not None:
                     # SEED-011 (125a): consume pre-built lab_chunk_plans — fingerprint
                     # prep is index-independent and was already computed above.
+                    _total_llb = len(lab_chunk_plans)
                     for _i, _plan in enumerate(lab_chunk_plans):
+                        # Every chunk (see the LOCAL post-pass in
+                        # search_composition_logic for why no modulo). Before the
+                        # None-skip so a run of weak chunks still yields checkpoints.
+                        if progress_callback:
+                            try:
+                                progress_callback(_i, _total_llb)
+                            except (InterruptedError, KeyboardInterrupt):
+                                raise
+                            except Exception:
+                                pass  # progress is advisory; cancellation is not
                         if _plan is None:
                             continue  # pre-pass marked this chunk as weak/too-short
                         _token_start_idx = _plan.token_start_idx
@@ -1285,6 +1339,10 @@ class LabEngine:
                                     "lab_composition_search: skipped LOCAL-LAB chunk-hit dedup entry: %r",
                                     _dedup_llb_exc,
                                 )
+            except InterruptedError:
+                # Precedes the broad handler and sets the flag, so the returned
+                # payload's 'partial' key stays truthful on a cancelled run.
+                was_interrupted = True
             except Exception as _local_lab_exc:
                 logging.getLogger(__name__).warning(
                     "lab_composition_search: LOCAL LAB scan failed: %r", _local_lab_exc,

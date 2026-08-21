@@ -146,6 +146,17 @@
         <li><b>Column Filtering:</b> Click on column headers (Shelfmark, Title, Snippet) to filter results by text. Check "Exclude" to hide matching results instead of showing them.</li>
     </ul>
 
+    <h3>Stopping and Pausing a Search</h3>
+    <p>While a search is running the <b>Search</b> button becomes <b>Stop</b>, and a pause button (<b>&#9208;</b>) appears beside it. The two together take up exactly the space the Search button used, so nothing shifts under the mouse when a search starts.</p>
+    <ul>
+        <li><b>Stop</b> ends the search and keeps every result it had already found. The results header marks the list as "Partial results" so you can see it was not a complete run.</li>
+        <li><b>&#9208; Pause</b> suspends the search at its next checkpoint. Because it waits for a checkpoint rather than stopping instantly, the button shows <b>&#8987;</b> for a moment first; once the search has actually paused it becomes <b>&#9654;</b>. Hover over the button for a description of whichever state it is in.</li>
+        <li><b>&#9654; Resume</b> continues from exactly where the search stopped &mdash; nothing already scanned is scanned again. Time spent paused is not counted in the elapsed time, and in Composition Search it is excluded from the estimated time remaining.</li>
+        <li>A paused search releases the setting that keeps the computer awake, so a machine left paused can sleep normally.</li>
+        <li><b>A paused search is held in memory only.</b> Closing the program ends it &mdash; there is nothing to resume when you next start up.</li>
+    </ul>
+    <p>Pause is available for regular searches, Lab Mode searches and Composition Search. It is not offered during the grouping step at the end of a composition scan, which cannot currently be interrupted cleanly.</p>
+
     <h3>Search Settings (&#9881;)</h3>
     <p>Click the gear icon to open advanced search settings:</p>
     <ul>
