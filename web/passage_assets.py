@@ -39,9 +39,12 @@ import logging
 import os
 import threading
 from dataclasses import dataclass
-from typing import Optional, Protocol
+from typing import Optional, TYPE_CHECKING
 
 from web.feature_flags import PASSAGE_PARALLELS_ENABLED
+
+if TYPE_CHECKING:
+    from shared.passage_parallels import PageTextFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -121,12 +124,7 @@ def passage_available() -> bool:
     return bool(PASSAGE_PARALLELS_ENABLED and _state.ready)
 
 
-class _PageTextFetcher(Protocol):
-    def get_full_text_by_header(self, full_header: str) -> Optional[str]:
-        ...
-
-
-def get_passage_searcher(text_fetcher: "_PageTextFetcher"):
+def get_passage_searcher(text_fetcher: "PageTextFetcher"):
     """A fresh ``PassageSearcher``, or ``None`` when unavailable.
 
     Reads the flag and the loaded-index snapshot together, so there is no
