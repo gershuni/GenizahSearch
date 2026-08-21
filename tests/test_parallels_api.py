@@ -971,6 +971,39 @@ def test_parallels_method_passage_scope_unsupported_returns_400(client, mock_sea
     assert r.json()['error']['code'] == 'passage_scope_unsupported'
 
 
+@pytest.mark.parametrize('bad_boundary_mode', ['boundary', 'combined'])
+def test_parallels_method_passage_boundary_mode_unsupported_returns_400(
+    client, mock_searcher, clean_env, monkeypatch, bad_boundary_mode,
+):
+    """Adversarial review finding #2: method='passage' + boundary_mode !=
+    'full' is a structural rejection (400 'passage_option_unsupported'),
+    never a silent degradation to 'full'. Rejected at request-validation
+    time (step 4b) BEFORE any concurrency slot is acquired -- the mock
+    searcher's search_composition_logic must never even be called."""
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    r = client.post('/api/parallels', json={
+        'text': 'hello world', 'method': 'passage',
+        'boundary_mode': bad_boundary_mode,
+    })
+    assert r.status_code == 400, r.text
+    assert r.json()['error']['code'] == 'passage_option_unsupported'
+    mock_searcher.search_composition_logic.assert_not_called()
+
+
+def test_parallels_method_passage_boundary_mode_full_is_not_rejected(
+    client, mock_searcher, clean_env, monkeypatch,
+):
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    monkeypatch.setattr(
+        'web.passage_assets.get_passage_searcher',
+        lambda text_fetcher: mock_searcher,
+    )
+    r = client.post('/api/parallels', json={
+        'text': 'hello world', 'method': 'passage', 'boundary_mode': 'full',
+    })
+    assert r.status_code == 200, r.text
+
+
 def test_parallels_method_passage_scope_exclude_local_is_not_rejected(
     client, mock_searcher, clean_env, monkeypatch,
 ):
