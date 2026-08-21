@@ -537,3 +537,43 @@ honest for that run (width 0.0924 → 0.0929 under a per-work correction).
   held at `he` because its Arabic vocabulary happens to carry almost no
   definite articles. Both are the expected error modes at the measured rates,
   not new phenomena.
+
+
+---
+
+## The tradeoff sweep (2026-08-21): one live knob, two inert ones
+
+Owner request: an internal recall/precision map, and whether parameters can
+trade one for the other. `scripts/sweep_passage_tradeoff.py`, tune split,
+full n=300 samples on both instruments; precision measured on the 100
+already-graded deck pairs (they are labels, in both directions -- the 58
+incumbent-only pairs included) plus the count of NEW unlabeled returns.
+
+| density_scale | FGP recall@50 | witness recall@50 | strict on labeled | result size p50 / p90 |
+|---|---|---|---|---|
+| 1.00 (`standard-40`) | 0.703 | 0.800 | 0.98 | 2 / 47 |
+| 1.15 | 0.757 | 0.857 | 1.00 | 2 / 90 |
+| **1.30 (`wide-40`)** | **0.793** | **0.893** | **1.00** | **4 / 139** |
+| 1.45 | 0.830 | 0.893 | 0.97 | 8 / 235 |
+
+Latency flat (~0.36 s) across the axis -- the caps hold. Findings:
+
+- **`density_scale` is the knob.** 1.30 sits at the knee: +9.0/+9.3
+  recall@50 points over the shipping default with no measured precision cost
+  on labeled pairs. 1.45 saturates the witness instrument, doubles the
+  reader burden again, and shows the first strict dip.
+- **`min_span` 25/40/60/80 is inert on these instruments** (broad grid,
+  n=60 per cell, every row identical): the queries are long and accepted
+  spans are almost never short (short-span share ~1%). Its effect lives in
+  short-quote queries, which still have no instrument.
+- **`min_anchors` 3 is inert** -- true matches carry tens of anchors.
+- **The two-sided regime is a shifted duplicate of the density axis** and
+  earns no preset.
+- **Tightening below 1.00 only loses:** precision is already at ceiling, so
+  a tighter boundary drops real finds (42 -> 31 labeled pairs returned).
+
+The unmeasured remainder: the wide point returns NEW rows the graded deck
+never labeled. `deck_delta_v1` (46 cards, manuscript grain, blinded,
+`--delta-only`) contains exactly those -- everything `wide-40` adds over
+`standard-40` on the 60 tune deck queries and nothing else. Its grading
+decides whether wide becomes the default or an option.
