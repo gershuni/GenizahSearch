@@ -114,6 +114,20 @@ rather than guessed away quietly -- see the task report for the same list):
       overall cards yet zero graded non-source cards, and reporting a
       fabricated 0.000 for that column would be exactly the failure mode
       the rule exists to prevent.
+  D8. `is_source` is NOT always a bool, despite the input contract's
+      "is_source": bool -- `scripts/build_display_deck.py`'s own
+      `compute_is_source()` (imported from build_grading_deck.py) returns
+      None when a query row lacks `meta.sys_id`, "so a query file without
+      that field degrades honestly instead of crashing or silently
+      reporting False" (that function's own docstring). This module's
+      `non_source_only` filters treat both `False` and `None` as
+      "include in the non-source column" (`if non_source_only and
+      card.get('is_source'):` only excludes an AFFIRMATIVE `True`) --
+      i.e. a card of genuinely unknown source-status is folded into
+      "non-source" by default rather than excluded outright. This was
+      found by reading the companion builder after this module's
+      contract (which promised a plain bool) was already written; flagged
+      here rather than silently relied upon.
 
 Usage:
   python scripts/score_display_deck.py --deck-dir DIR --verdicts V.json \
