@@ -1,0 +1,318 @@
+# -*- coding: utf-8 -*-
+"""On-disk format and reader for the passage index.
+
+Contract: docs/specs/passage-matching-algorithm.md sections 4, 5 and 10.
+
+Arrangement C from the spec: the index is persisted over the CORPUS and the
+query is streamed through it. That is what makes interactive retrieval
+possible; the two research arrangements are O(corpus) per pass.
+
+Files in an index directory
+---------------------------
+manifest.json      provenance, layout, counts, and every build parameter
+gram_offsets.bin   uint64[GRAM_CODE_SPACE + 1]  -- CSR row starts
+postings.bin       5 bytes per posting: page(24) | pos(16), little-endian
+streams.bin        uint8 per letter, value = ord(letter) - 0x05D0, so 0..26
+records.bin        RECORD_DTYPE per corpus record
+record_ids.bin     concatenated utf-8 record ids, sliced by records.bin
+
+Why 24/16 and not 25/15. Measured bounds are 948,549 records (20 bits) and a
+longest record of 11,809 letters (14 bits). 24/16 leaves 16.7M records (17x)
+and 65,535 positions (5.5x); 25/15 would leave 33.5M records but only 32,767
+positions, which is 2.8x and would be at risk if a record grain ever
+concatenated pages. Same 5-byte payload either way. The research code assumes
+20-bit pages, so nothing shipped constrains this choice -- but the bit budget
+HAS overflowed once before in this project's history, which is why both bounds
+are asserted at build time and recorded in the manifest.
+
+Why streams.bin exists at all. Verification needs each candidate record's
+normalized stream, and re-normalizing 948K records per query is not an option.
+Display is different: project_span needs ORIGINAL text plus an offset map,
+neither of which is stored here, so rendering re-normalizes just the records
+actually shown. See the spec's display-span contract.
+
+Fail-closed. `open_index` returns None rather than raising on anything it does
+not fully recognise, and it checks declared counts against real file sizes --
+a truncated artifact is the failure mode most likely to produce plausible
+wrong answers rather than an error.
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+from dataclasses import dataclass
+from typing import Optional
+
+import numpy as np
+
+from shared.passage_normalize import (
+    GRAM_CODE_SPACE, HEB_MIN, K, NORMALIZER_VERSION,
+)
+
+# Bump when the on-disk layout changes in any way a reader would misread.
+LAYOUT_VERSION = 1
+SCHEMA_VERSION = 1
+
+PAGE_BITS = 24
+POS_BITS = 16
+POSTING_BYTES = 5                      # ceil((PAGE_BITS + POS_BITS) / 8)
+MAX_RECORDS = 1 << PAGE_BITS           # 16,777,216
+MAX_RECORD_LETTERS = 1 << POS_BITS     # 65,536
+
+MANIFEST_NAME = 'manifest.json'
+GRAM_OFFSETS_NAME = 'gram_offsets.bin'
+POSTINGS_NAME = 'postings.bin'
+STREAMS_NAME = 'streams.bin'
+RECORDS_NAME = 'records.bin'
+RECORD_IDS_NAME = 'record_ids.bin'
+
+RECORD_DTYPE = np.dtype([
+    ('stream_off', '<u8'),
+    ('n_letters', '<u4'),
+    ('id_off', '<u8'),
+    ('id_len', '<u2'),
+    ('_pad', 'V2'),
+])
+assert RECORD_DTYPE.itemsize == 24, RECORD_DTYPE.itemsize
+
+
+class IndexFormatError(Exception):
+    """Raised by build-side helpers; the reader never propagates it."""
+
+
+def require_little_endian() -> None:
+    """The packed layouts are little-endian by definition, not by accident."""
+    if sys.byteorder != 'little':
+        raise IndexFormatError(
+            'passage index layout is little-endian; this machine is '
+            f'{sys.byteorder}-endian')
+
+
+def pack_postings(pages: np.ndarray, positions: np.ndarray) -> np.ndarray:
+    """(pages, positions) -> uint8 array of POSTING_BYTES per posting.
+
+    Bounds are checked here rather than trusted, because an out-of-range page
+    silently aliases onto a different record instead of failing.
+    """
+    require_little_endian()
+    pages = np.asarray(pages, dtype=np.uint64)
+    positions = np.asarray(positions, dtype=np.uint64)
+    if pages.shape != positions.shape:
+        raise IndexFormatError('pages and positions differ in length')
+    if pages.size:
+        if int(pages.max()) >= MAX_RECORDS:
+            raise IndexFormatError(
+                f'record index {int(pages.max()):,} exceeds the {PAGE_BITS}-bit '
+                f'budget ({MAX_RECORDS:,}); the layout must widen')
+        if int(positions.max()) >= MAX_RECORD_LETTERS:
+            raise IndexFormatError(
+                f'position {int(positions.max()):,} exceeds the {POS_BITS}-bit '
+                f'budget ({MAX_RECORD_LETTERS:,}); the layout must widen')
+    packed = (pages << np.uint64(POS_BITS)) | positions
+    return packed.view(np.uint8).reshape(-1, 8)[:, :POSTING_BYTES].copy()
+
+
+def unpack_postings(raw: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """uint8 POSTING_BYTES-per-posting array -> (pages, positions)."""
+    require_little_endian()
+    raw = np.ascontiguousarray(raw, dtype=np.uint8)
+    if raw.size % POSTING_BYTES:
+        raise IndexFormatError(
+            f'posting blob of {raw.size} bytes is not a multiple of '
+            f'{POSTING_BYTES}')
+    n = raw.size // POSTING_BYTES
+    wide = np.zeros((n, 8), dtype=np.uint8)
+    wide[:, :POSTING_BYTES] = raw.reshape(n, POSTING_BYTES)
+    packed = wide.reshape(-1).view(np.uint64)
+    pages = (packed >> np.uint64(POS_BITS)).astype(np.uint32)
+    positions = (packed & np.uint64(MAX_RECORD_LETTERS - 1)).astype(np.uint32)
+    return pages, positions
+
+
+def encode_stream(stream: str) -> np.ndarray:
+    """Normalized letter stream -> uint8 letter indices (0..26)."""
+    if not stream:
+        return np.empty(0, dtype=np.uint8)
+    a = (np.frombuffer(stream.encode('utf-16-le'), dtype=np.uint16)
+         .astype(np.int32) - HEB_MIN)
+    if a.size and (a.min() < 0 or a.max() > 26):
+        raise IndexFormatError(
+            'stream holds a character outside alef..tav; it was not produced '
+            'by shared.passage_normalize')
+    return a.astype(np.uint8)
+
+
+def decode_stream(codes: np.ndarray) -> str:
+    """uint8 letter indices -> normalized letter stream."""
+    a = (np.asarray(codes, dtype=np.uint16) + np.uint16(HEB_MIN))
+    return a.astype('<u2').tobytes().decode('utf-16-le')
+
+
+# ---------------------------------------------------------------------------
+# Manifest
+# ---------------------------------------------------------------------------
+
+def layout_fingerprint() -> dict:
+    """The layout facts a reader must agree with before touching a byte."""
+    return {
+        'schema_version': SCHEMA_VERSION,
+        'layout_version': LAYOUT_VERSION,
+        'normalizer_version': NORMALIZER_VERSION,
+        'page_bits': PAGE_BITS,
+        'pos_bits': POS_BITS,
+        'posting_bytes': POSTING_BYTES,
+        'gram_k': K,
+        'gram_code_space': GRAM_CODE_SPACE,
+        'byteorder': 'little',
+    }
+
+
+def write_manifest(index_dir: str, payload: dict) -> str:
+    """Write manifest.json last, after every data file is closed and sized."""
+    manifest = dict(payload)
+    manifest['layout'] = layout_fingerprint()
+    path = os.path.join(index_dir, MANIFEST_NAME)
+    tmp = path + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as fh:
+        json.dump(manifest, fh, ensure_ascii=False, indent=1, sort_keys=True)
+    os.replace(tmp, path)
+    return path
+
+
+def _expected_sizes(counts: dict) -> dict:
+    return {
+        GRAM_OFFSETS_NAME: (GRAM_CODE_SPACE + 1) * 8,
+        POSTINGS_NAME: int(counts['n_postings']) * POSTING_BYTES,
+        STREAMS_NAME: int(counts['n_letters']),
+        RECORDS_NAME: int(counts['n_records']) * RECORD_DTYPE.itemsize,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Reader
+# ---------------------------------------------------------------------------
+
+@dataclass
+class PassageIndex:
+    """Memory-mapped reader. Construct via `open_index`, never directly."""
+    index_dir: str
+    manifest: dict
+    gram_offsets: np.ndarray
+    postings: np.ndarray          # uint8, POSTING_BYTES per posting
+    streams: np.ndarray           # uint8 letter indices
+    records: np.ndarray           # RECORD_DTYPE
+    record_ids: np.ndarray        # uint8 utf-8 blob
+
+    @property
+    def n_records(self) -> int:
+        return int(self.records.shape[0])
+
+    @property
+    def n_postings(self) -> int:
+        return int(self.postings.shape[0]) // POSTING_BYTES
+
+    def df(self, code: int) -> int:
+        """Postings for one gram code. Not distinct records -- postings."""
+        if not 0 <= code < GRAM_CODE_SPACE:
+            return 0
+        return int(self.gram_offsets[code + 1] - self.gram_offsets[code])
+
+    def dfs(self, codes: np.ndarray) -> np.ndarray:
+        """Vectorised `df` -- the query budget needs all of them at once."""
+        codes = np.asarray(codes, dtype=np.int64)
+        ok = (codes >= 0) & (codes < GRAM_CODE_SPACE)
+        out = np.zeros(codes.shape, dtype=np.int64)
+        safe = codes[ok]
+        out[ok] = (self.gram_offsets[safe + 1].astype(np.int64)
+                   - self.gram_offsets[safe].astype(np.int64))
+        return out
+
+    def postings_for(self, code: int) -> tuple[np.ndarray, np.ndarray]:
+        lo = int(self.gram_offsets[code])
+        hi = int(self.gram_offsets[code + 1])
+        if hi <= lo:
+            return (np.empty(0, dtype=np.uint32),
+                    np.empty(0, dtype=np.uint32))
+        blob = self.postings[lo * POSTING_BYTES:hi * POSTING_BYTES]
+        return unpack_postings(blob)
+
+    def stream(self, record: int) -> str:
+        r = self.records[record]
+        off = int(r['stream_off'])
+        return decode_stream(self.streams[off:off + int(r['n_letters'])])
+
+    def record_id(self, record: int) -> str:
+        r = self.records[record]
+        off = int(r['id_off'])
+        return bytes(self.record_ids[off:off + int(r['id_len'])]).decode('utf-8')
+
+
+def open_index(index_dir: str) -> Optional[PassageIndex]:
+    """Open an index, or return None. Never raises on a bad artifact.
+
+    Fail-closed on: missing files, unparseable or absent manifest, any layout
+    mismatch (schema, layout, normalizer, bit budgets, gram width, code space,
+    byte order), and any declared count that disagrees with a real file size.
+    A truncated artifact is the failure mode most likely to yield plausible
+    wrong answers instead of an error, so sizes are checked rather than
+    assumed.
+    """
+    try:
+        if sys.byteorder != 'little':
+            return None
+        mpath = os.path.join(index_dir, MANIFEST_NAME)
+        if not os.path.isfile(mpath):
+            return None
+        with open(mpath, encoding='utf-8') as fh:
+            manifest = json.load(fh)
+        if manifest.get('layout') != layout_fingerprint():
+            return None
+        counts = manifest.get('counts') or {}
+        for key in ('n_records', 'n_letters', 'n_postings'):
+            if not isinstance(counts.get(key), int) or counts[key] < 0:
+                return None
+        if counts['n_records'] > MAX_RECORDS:
+            return None
+        for name, expected in _expected_sizes(counts).items():
+            path = os.path.join(index_dir, name)
+            if not os.path.isfile(path) or os.path.getsize(path) != expected:
+                return None
+        ids_path = os.path.join(index_dir, RECORD_IDS_NAME)
+        if not os.path.isfile(ids_path):
+            return None
+
+        def _map(name, dtype, shape=None):
+            return np.memmap(os.path.join(index_dir, name), dtype=dtype,
+                             mode='r', shape=shape)
+
+        gram_offsets = _map(GRAM_OFFSETS_NAME, '<u8',
+                            (GRAM_CODE_SPACE + 1,))
+        # CSR sanity: monotone, starts at 0, ends at the declared total. A
+        # non-monotone offsets array would slice postings from other grams.
+        if int(gram_offsets[0]) != 0:
+            return None
+        if int(gram_offsets[-1]) != counts['n_postings']:
+            return None
+        postings = _map(POSTINGS_NAME, np.uint8,
+                        (counts['n_postings'] * POSTING_BYTES,))
+        streams = _map(STREAMS_NAME, np.uint8, (counts['n_letters'],))
+        records = _map(RECORDS_NAME, RECORD_DTYPE, (counts['n_records'],))
+        ids_size = os.path.getsize(ids_path)
+        record_ids = (_map(RECORD_IDS_NAME, np.uint8, (ids_size,))
+                      if ids_size else np.empty(0, dtype=np.uint8))
+        return PassageIndex(index_dir=index_dir, manifest=manifest,
+                            gram_offsets=gram_offsets, postings=postings,
+                            streams=streams, records=records,
+                            record_ids=record_ids)
+    except Exception:
+        return None
+
+
+def verify_csr_monotone(gram_offsets: np.ndarray) -> None:
+    """Full monotonicity check. O(code space); build/verify side only."""
+    d = np.diff(gram_offsets.astype(np.int64))
+    if int(d.min(initial=0)) < 0:
+        bad = int(np.argmin(d))
+        raise IndexFormatError(
+            f'gram_offsets is not monotone at code {bad}')
