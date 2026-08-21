@@ -269,6 +269,26 @@ _DEFAULT_MAX_CONCURRENT_QUERIES = 4
 #: only a budget when a slot guarantees a worker, so each class's semaphore
 #: capacity IS its executor's `max_workers` (code review round 13, finding 2).
 _DEFAULT_MAX_CONCURRENT_BROWSE_QUERIES = 24
+#: The EXPORT-path bound (EXPORT-03, phase 136.2), the third and smallest
+#: budget. An export is uncapped in ROWS by owner decision, so it is bounded in
+#: CONCURRENCY instead: one request walks the whole filtered set, and two of
+#: them at once must not be able to occupy the workers the browse path needs.
+#: Deliberately NOT folded into the heavy budget -- an export holds its slot for
+#: the length of a whole workbook build, and sharing the heavy cap of 4 would
+#: let two exports halve the budget every corpus-wide query draws on.
+_DEFAULT_MAX_CONCURRENT_EXPORT_QUERIES = 2
+#: Seconds. A whole-set export legitimately takes far longer than any
+#: interactive read, and its honest failure is a timeout, never a short file.
+_DEFAULT_EXPORT_TIMEOUT = 300.0
+#: Identifiers per `IN (...)` batch in the export's excerpt read. SQLite's
+#: default host-parameter ceiling is 999; 500 keeps a wide margin and still
+#: turns tens of thousands of per-row reads into tens of queries.
+#: CLAMPED at `_EXPORT_EXCERPT_CHUNK_MAX`, because the knob is an env var and a
+#: configured 1,000 would build a statement with 1,000 bind variables against a
+#: 999 limit -- a misconfiguration that turns the whole export into an error
+#: rather than a slower query (Codex review, finding C).
+_DEFAULT_EXPORT_EXCERPT_CHUNK = 500
+_EXPORT_EXCERPT_CHUNK_MAX = 900
 _DEFAULT_BROWSE_LRU_MAX_ENTRIES = 5000
 _DEFAULT_PAGE_SIZE_DEFAULT = 50
 _DEFAULT_PAGE_SIZE_MAX = 200
@@ -992,6 +1012,33 @@ _FINDINGS_UNIT_SELECT: Dict[str, str] = {
         NULL                           AS shelfmark_display
     """,
 }
+
+#: unit -> (the LEAF column that carries this group's key, the FILTER AXIS an
+#: expansion pins it on). `None` for the leaf grain, which groups nothing.
+#:
+#: DEFINED HERE, not in `web/components/findings_rows.py`, which is where it
+#: used to live and which now imports it. Two consumers need the same table and
+#: they are on opposite sides of the layering guard: the page opens a grouped
+#: row onto its children with it, and the EXPORT flattens the same grouping
+#: with it (owner report, 2026-08-21). A copy in `shared/` beside a copy in
+#: `web/` is the shape that drifts, and the drift would be silent -- an export
+#: grouping on a column the page no longer expands on still produces a
+#: plausible file.
+#:
+#: `findings_rows` keeps its own import-time check that every axis named here
+#: exists in `_build_findings_filter`'s signature; that check is about the
+#: PREDICATE, and it belongs next to the caller that passes the keyword.
+EXPANSION_KEY_BY_UNIT: Dict[str, Optional[Tuple[str, str]]] = {
+    FINDINGS_UNIT_IDENTIFICATION: None,
+    FINDINGS_UNIT_MANUSCRIPT: ("sys_id", "sys_id"),
+    FINDINGS_UNIT_WORK: ("display_work_id", "work_id"),
+}
+
+#: The units whose rows are a GROUP rather than a finding. Derived, never
+#: listed: a unit that gains an expansion gains a flattened export with it.
+EXPORT_GROUPED_UNITS: frozenset = frozenset(
+    unit for unit, pair in EXPANSION_KEY_BY_UNIT.items() if pair is not None)
+
 
 _FINDINGS_UNIT_GROUP_BY: Dict[str, Optional[str]] = {
     FINDINGS_UNIT_IDENTIFICATION: None,
@@ -2199,6 +2246,19 @@ def _present_expansion_row(
     }
 
 
+def _export_page_guard(total: Optional[int], page_size: int) -> int:
+    """How many pages an export walk may fetch before it is treated as runaway.
+
+    Generous by construction: the reported total's own page count plus slack,
+    or a flat ceiling when there is no total. This is a LIVENESS bound on a
+    single-worker box, never a completeness signal -- tripping it marks the
+    result INCOMPLETE, which is why it can afford to be loose.
+    """
+    if total is None or int(total) <= 0:
+        return 5000
+    return (int(total) + page_size - 1) // page_size + 8
+
+
 class DiscoveryService:
     """The one async read-only chokepoint over ``discovery.db``.
 
@@ -2271,6 +2331,14 @@ class DiscoveryService:
         )
         self._browse_sem = asyncio.Semaphore(browse_capacity)
         self._browse_capacity = browse_capacity
+
+        # The EXPORT-path bound (phase 136.2). Third budget class, same shape.
+        export_capacity = _get_positive_int_env(
+            "DISCOVERY_MAX_CONCURRENT_EXPORT_QUERIES",
+            _DEFAULT_MAX_CONCURRENT_EXPORT_QUERIES,
+        )
+        self._export_sem = asyncio.Semaphore(export_capacity)
+        self._export_capacity = export_capacity
 
         # One executor PER BUDGET CLASS, sized to that class's capacity.
         #
@@ -3378,6 +3446,308 @@ class DiscoveryService:
             "locus_to": locus_to if locus_filter_enabled else None,
         })
 
+    def _export_artifact_identity(self) -> Tuple[Any, Any]:
+        """`(resolved path, sidecar_version)` -- the identity the export pins
+        itself to across its two trips to the sidecar.
+
+        THE VERSION ALONE IS NOT AN IDENTITY, and this module says so about its
+        own caches: `sidecar_version` "can stay identical across a resolved-path
+        swap (the pre-rebuild asset, the private rebuild and the public
+        projection all three report `discovery-v1-real` locally)". An export
+        that compared only the version would therefore accept exactly the swap
+        it was written to detect (Codex review round 3, finding 5) -- so it
+        compares the PAIR, which is the same key `_band_measurements` and
+        `_launch_stats_cache` already use for the same reason.
+        """
+        try:
+            path = self._path_provider() if self._path_provider is not None else None
+        except Exception:  # pragma: no cover - the provider's own failure path
+            path = None
+        return (path, self.get_version())
+
+    def _export_timeout(self) -> float:
+        return _get_positive_float_env(
+            "DISCOVERY_EXPORT_TIMEOUT", _DEFAULT_EXPORT_TIMEOUT)
+
+    def _export_walk(self, **query) -> Tuple[
+            Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[int],
+            Dict[str, Any], bool, bool]:
+        """Every page of ONE `get_findings_enveloped` query, as a flat list.
+
+        Returns `(error_envelope_or_None, items, reported_total, first_page_meta,
+        approximate_total, guard_tripped)`. Extracted from
+        `collect_findings_for_export` because a GROUPED export runs it twice --
+        once on the group grain for its order, once on the leaf grain for its
+        rows -- and two hand-written copies of a paging loop whose whole point
+        is not to end early is two chances to end early differently.
+        """
+        page_size = self._clamp_page_size(_ABSOLUTE_PAGE_SIZE_CEILING)
+        approximate_total = False
+        guard_tripped = False
+        items: List[Dict[str, Any]] = []
+        first_meta: Dict[str, Any] = {}
+        total: Optional[int] = None
+        page = 1
+
+        while True:
+            envelope = self.get_findings_enveloped(page=page,
+                                                   page_size=page_size, **query)
+            if envelope.get("status") != STATUS_OK:
+                return envelope, [], None, {}, False, False
+            if page == 1:
+                first_meta = dict(envelope.get("meta") or {})
+                total = envelope.get("total")
+                # `DISCOVERY_FINDINGS_COUNT_MAX` turns `total` into a CAP and
+                # flags it. Using a capped total as the walk's upper bound would
+                # stop the export at the cap and then compare the rows it
+                # collected against that same cap and call the file complete --
+                # a short workbook certifying itself. When the count is
+                # approximate the bound is DROPPED and the walk ends the honest
+                # way, on a short page.
+                approximate_total = bool(first_meta.get("approximate_total"))
+            batch = list(envelope.get("items") or ())
+            items.extend(batch)
+            # THE ONLY HONEST END OF THE WALK: a page shorter than the page
+            # size. The reported total is deliberately NOT used as a stopping
+            # condition.
+            #
+            # It was, and that was a false-complete generator (Codex review,
+            # finding B): an under-reported total whose value happened to land
+            # on a full-page boundary stopped the loop early AND then satisfied
+            # `len(items) == total`, so the workbook declared itself complete
+            # having never asked whether more rows existed. Stopping on EOF
+            # costs one extra query when the set divides exactly by the page
+            # size, and cannot produce that lie.
+            if len(batch) < page_size:
+                break
+            page += 1
+            # RUNAWAY GUARD ONLY -- generous, and never a completeness signal.
+            # An artifact whose window total disagrees wildly with what the
+            # predicate returns must not spin forever on a single-worker box.
+            # Tripping it marks the walk INCOMPLETE rather than ending it
+            # quietly.
+            if page > _export_page_guard(total, page_size):
+                guard_tripped = True
+                logger.error(
+                    "DiscoveryService export walk exceeded its page guard "
+                    "(pages=%s, reported_total=%s) -- returning an INCOMPLETE "
+                    "result set", page, total)
+                break
+        return None, items, total, first_meta, approximate_total, guard_tripped
+
+    def collect_findings_for_export(
+        self, unit: str = FINDINGS_UNIT_IDENTIFICATION,
+        bucket: str = BUCKET_MAIN,
+        novelty: Optional[Iterable[str]] = None,
+        divergence: str = DIVERGENCE_SHOWN,
+        domain: Optional[str] = None,
+        author: Optional[str] = None,
+        work_id: Optional[str] = None,
+        locus_from: Optional[int] = None,
+        locus_to: Optional[int] = None,
+        sort: str = FINDINGS_SORT_BAND_RANK,
+        suppressed: Optional[Iterable[str]] = None,
+        sys_id: Optional[str] = None,
+        with_excerpts: bool = True,
+    ) -> Dict[str, Any]:
+        """EVERY row matching the filters, plus its excerpt, in ONE envelope.
+
+        EXPORT-01's "one data path, not two": this walks `get_findings_enveloped`
+        page by page rather than issuing its own SQL. The export therefore cannot
+        return a row the page would not, cannot order them differently, and
+        cannot acquire a column the surface projection withholds -- because it
+        is reading through the same method, the same projection and the same
+        predicate the reader is looking at.
+
+        UNCAPPED IN ROWS by owner decision (2026-08-20), and bounded everywhere
+        else instead: one export slot for the whole walk (see `_SLOT_EXPORT`),
+        one timeout for the whole build, and a chunked excerpt read rather than
+        one query per row.
+
+        Paging a live result set is normally a correctness hazard -- rows shift
+        between pages as the data changes underneath. It is safe HERE, and only
+        here, because the sidecar is a READ-ONLY artifact pinned to one
+        `sidecar_version` for the life of the process: there is no writer, so
+        the ordering cannot move mid-walk. `meta['sidecar_version']` is carried
+        out so the caller can state which artifact the file describes.
+
+        FAILS WHOLE, NEVER SHORT. Any page that comes back with a status other
+        than `ok` aborts the walk and returns THAT status. A partial workbook
+        presented as a complete one is the export-shaped version of the defect
+        the envelope exists to prevent -- a reader cannot tell a short file from
+        a small result set, and this one is downloaded and kept.
+        """
+        # THE ARTIFACT IS PINNED ACROSS THE WALK. Paging is only safe because
+        # the sidecar is read-only for the life of a version -- but the loader
+        # supports re-pointing and the service reconnects whenever the path or
+        # version changes, so a deploy landing mid-export could hand the second
+        # half of the walk a different artifact from the first. Recorded before
+        # the walk and re-checked after (Codex review, finding A).
+        identity_before = self._export_artifact_identity()
+        filters = dict(
+            bucket=bucket, novelty=novelty, divergence=divergence,
+            domain=domain, author=author, work_id=work_id,
+            locus_from=locus_from, locus_to=locus_to, sort=sort,
+            suppressed=suppressed, sys_id=sys_id)
+
+        # ---- the grouped units are FLATTENED, not exported as they render ---
+        #
+        # `unit=work` and `unit=manuscript` are GROUP BY grains, and their
+        # SELECT lists write NULL into the columns the other grain carries: a
+        # work row has no `sys_id`, no shelfmark and no `identification_id` (so
+        # no excerpt either), and a manuscript row has no work, author or
+        # relation. On the PAGE that is complete, because the row carries an
+        # EXPANDER. A spreadsheet has none, so the file was a title and two
+        # counts -- "useless xlsx, no expandable id ... so no ms id and not
+        # text" (owner report, 2026-08-21).
+        #
+        # The expander's own contract is that "the children come from the same
+        # read at the leaf grain with this key pinned". So the export walks the
+        # GROUP grain for its order and the LEAF grain for its rows, and emits
+        # the leaves in the groups' order. Every leaf already carries both
+        # identities (`sys_id` + `shelfmark_display` AND `display_work_id` +
+        # `neutral_title`), so the grouping survives as columns a reader can
+        # sort and pivot on -- which is what a spreadsheet has instead of a
+        # disclosure triangle.
+        group_pair = EXPANSION_KEY_BY_UNIT.get(unit)
+        group_order: Dict[str, int] = {}
+        group_total: Optional[int] = None
+        group_order_complete = True
+        if group_pair is not None:
+            group_field = group_pair[0]
+            err, group_items, group_total, _gmeta, g_approx, g_guard = (
+                self._export_walk(unit=unit, **filters))
+            if err is not None:
+                return err
+            for index, row in enumerate(group_items):
+                key = str(row.get(group_field) or "")
+                if key and key not in group_order:
+                    group_order[key] = index
+            # A short GROUP walk costs ORDER, not rows: the leaves it could not
+            # place sort to the end. Stated separately rather than folded into
+            # `walk_complete`, which is about the ROWS and must not be reddened
+            # by a presentation degradation.
+            group_order_complete = not (g_approx or g_guard)
+
+        leaf_unit = (FINDINGS_UNIT_IDENTIFICATION if group_pair is not None
+                     else unit)
+        err, items, total, first_meta, approximate_total, guard_tripped = (
+            self._export_walk(unit=leaf_unit, **filters))
+        if err is not None:
+            return err
+
+        if group_pair is not None:
+            group_field = group_pair[0]
+            unplaced = sum(1 for row in items
+                           if str(row.get(group_field) or "") not in group_order)
+            if unplaced:
+                # The two walks share one predicate, so this should be zero.
+                # Counted and carried out rather than assumed: a silent
+                # disagreement between the group list and the leaves under it is
+                # the one thing this two-walk design could get wrong.
+                logger.warning(
+                    "DiscoveryService export: %s leaf row(s) matched no group "
+                    "from the %s walk", unplaced, unit)
+                group_order_complete = False
+            # STABLE, so the page's own ordering survives inside each group.
+            items.sort(key=lambda row: group_order.get(
+                str(row.get(group_field) or ""), len(group_order)))
+
+        if self._export_artifact_identity() != identity_before:
+            # A different artifact answered part of this walk. The rows cannot
+            # be reconciled after the fact, so the export fails rather than
+            # shipping a file that mixes two builds.
+            logger.error(
+                "DiscoveryService export walk saw the sidecar version change "
+                "mid-walk -- refusing to build a mixed-artifact export")
+            return unavailable_envelope(meta={"reason": "artifact_changed_mid_export"})
+
+        excerpts: Dict[str, Dict[str, Any]] = {}
+        if with_excerpts and items:
+            try:
+                excerpts = self._query_excerpts_for_identifications(
+                    [row.get("identification_id") for row in items])
+            except Exception as e:
+                # Type name only -- this module reads an artifact that may carry
+                # restricted content and a driver message can quote its input.
+                logger.error(
+                    "DiscoveryService export excerpt read failed (%s)",
+                    type(e).__name__)
+                return unavailable_envelope(meta={"reason": "excerpt_read_failed"})
+
+        # AND AGAIN AFTER THE EXCERPTS. The excerpt read is a second trip to the
+        # sidecar and `is_available()` will happily reconnect to a newly loaded
+        # artifact, so checking only before it left a window where old finding
+        # rows could be married to new excerpt text and stamped with the new
+        # version (Codex review round 2, finding 5).
+        if self._export_artifact_identity() != identity_before:
+            logger.error(
+                "DiscoveryService export walk saw the sidecar artifact change "
+                "during the excerpt read -- refusing a mixed-artifact export")
+            return unavailable_envelope(meta={"reason": "artifact_changed_mid_export"})
+
+        meta = dict(first_meta)
+        meta.update({
+            "export": True,
+            #: THE UNIT THE READER ASKED FOR, against the grain the file is
+            #: actually on. They differ for a grouped unit, and the About sheet
+            #: has to say so: a file with 40,000 rows headed "one row per work"
+            #: is a puzzle unless it explains itself.
+            "export_unit_requested": unit,
+            "export_grain": leaf_unit,
+            "export_group_count": group_total,
+            "export_group_order_complete": group_order_complete,
+            "row_count": len(items),
+            "excerpt_count": len(excerpts),
+            #: The count the FIRST page reported against what the walk actually
+            #: collected. Equal on every healthy read; carried out rather than
+            #: asserted so the workbook can state it, because a silent
+            #: disagreement here is precisely the "short file that looks
+            #: complete" failure.
+            "reported_total": total,
+            #: `None` -- not `True` -- when the reported total was a cap: the
+            #: walk cannot be checked against a number that was never a count,
+            #: and claiming completeness there would be the assertion this key
+            #: exists to avoid making.
+            #: ORDER MATTERS, and it was wrong first time round (Codex
+            #: review round 2, finding 3). A tripped guard means the walk was
+            #: KNOWINGLY cut short, which is a harder fact than "the total was
+            #: a cap so completeness is unverifiable" -- so `False` outranks
+            #: `None`. With the cap branch first, a guard-tripped export
+            #: reported itself merely "unverified" while shipping a file it
+            #: knew was truncated.
+            "walk_complete": (
+                False if guard_tripped
+                else None if approximate_total
+                else (total is None or len(items) == int(total))),
+            #: The version recorded BEFORE the walk, not the one loaded now.
+            #: Both are equal by the time this runs (the two checks above
+            #: guarantee it), and stamping the snapshot rather than re-reading
+            #: keeps that a property of the code instead of a coincidence.
+            "sidecar_version": identity_before[1],
+            "with_excerpts": bool(with_excerpts),
+        })
+        # ATTACHED BEFORE VALIDATION, ON PURPOSE. `make_envelope`'s walker
+        # (`_walk_nodes`) is RECURSIVE, so a nested mapping IS inspected against
+        # `FORBIDDEN_SURFACE_FIELDS` -- an earlier draft attached the excerpt
+        # afterwards on the stated belief that it could not be, which was simply
+        # false (Codex review, finding D). Attaching first costs nothing and
+        # buys the nested rows the same check every flat row gets, on top of the
+        # `surface_safe_excerpt` projection they already carry.
+        #
+        # Consumed by `web/discovery_export_service.py` and by nothing else. A
+        # rendering surface must keep using `get_excerpt_enveloped`, which can
+        # tell an outage apart from an absent excerpt; here the whole walk has
+        # already succeeded or already returned somebody else's status.
+        if excerpts:
+            for row in items:
+                found = excerpts.get(str(row.get("identification_id") or ""))
+                if found is not None:
+                    row["excerpt"] = found
+
+        return make_envelope(
+            STATUS_OK, items, total if total is not None else len(items), meta=meta)
+
     def get_findings_facets_enveloped(
         self, level: str, bucket: str = BUCKET_MAIN,
         novelty: Optional[Iterable[str]] = None,
@@ -3874,6 +4244,113 @@ class DiscoveryService:
                     item[key] = None
         return [surface_safe_excerpt(item)]
 
+    @staticmethod
+    def _decode_excerpt_row(item: Dict[str, Any]) -> Dict[str, Any]:
+        """Decode the stored JSON highlight intervals, IN PLACE, and return the
+        row. Factored out of `_query_excerpt_for_identification` so the single
+        and batched readers cannot drift on how a malformed value degrades:
+        `None` is the renderer's whole-span fallback, never an exception that
+        takes the excerpt down with it.
+        """
+        for key in ("frag_hl", "work_hl"):
+            value = item.get(key)
+            if isinstance(value, str):
+                try:
+                    item[key] = json.loads(value)
+                except (ValueError, TypeError):
+                    item[key] = None
+        return item
+
+    def _query_excerpts_for_identifications(
+        self, identification_ids: Sequence[str],
+    ) -> Dict[str, Dict[str, Any]]:
+        """`{identification_id: projected excerpt row}` for a SET of ids, read
+        in chunked `IN (...)` batches -- the export's counterpart to
+        `_query_excerpt_for_identification`, which reads exactly one.
+
+        BATCHED for the reason `_first_match_pages` documents, only sharper:
+        the findings export is uncapped in rows by owner decision, so over the
+        main pool a per-row read is 9,523 serialized SQLite round trips inside
+        ONE request on a server with a SINGLE uvicorn worker. This is the same
+        shape the citation-range P1 fix landed on -- a correlated `EXISTS`
+        rewritten as an uncorrelated `IN (SELECT ...)`, 10,478 ms -> 97 ms
+        measured on production (`4f6e31f4`).
+
+        Ids missing from `discovery_excerpt` are simply ABSENT from the result
+        rather than mapped to a placeholder. The caller distinguishes "no
+        excerpt row" from "a row whose work side is empty", and collapsing the
+        two here would hand the export a `None` it could not tell apart from
+        the honest masked-work state.
+
+        RAISES on query failure -- including `sqlite3.OperationalError` when
+        `discovery_excerpt` does not exist on a pre-`excerpt-v1` asset. Same
+        contract as the single-row helper, deliberately: the caller classifies
+        the failure, and `excerpts_available()` stays what a surface gates on.
+        """
+        out: Dict[str, Dict[str, Any]] = {}
+        if not identification_ids:
+            return out
+        # RAISES rather than returning `{}` when the sidecar has gone away
+        # mid-walk. An empty mapping here is indistinguishable from "none of
+        # these identifications has an excerpt", and the caller would build a
+        # workbook whose text columns are silently empty for every row -- a
+        # short file in the one dimension the About sheet does not count
+        # (Codex review, finding C). The `{}`-on-everything contract lives in
+        # `get_excerpts_for_identifications`, which is not what the export uses.
+        if not self.is_available():
+            raise DiscoveryUnavailable("sidecar not serving")
+        conn = self._get_conn()
+        if conn is None:
+            raise DiscoveryUnavailable("sidecar not serving")
+
+        chunk_size = min(
+            _get_positive_int_env("DISCOVERY_EXPORT_EXCERPT_CHUNK",
+                                  _DEFAULT_EXPORT_EXCERPT_CHUNK),
+            _EXPORT_EXCERPT_CHUNK_MAX)
+        # De-duplicated but ORDER-PRESERVING: the caller zips the result back
+        # onto its own row order, and a set() here would make the query order
+        # (and so the query plan) vary run to run for identical input.
+        seen: Dict[str, None] = {}
+        for raw in identification_ids:
+            key = str(raw or "")
+            if key:
+                seen.setdefault(key, None)
+        ids = list(seen)
+
+        for start in range(0, len(ids), chunk_size):
+            batch = ids[start:start + chunk_size]
+            placeholders = ",".join("?" * len(batch))
+            cur = conn.execute(
+                "SELECT * FROM discovery_excerpt "
+                "WHERE identification_id IN ({})".format(placeholders),
+                batch,
+            )
+            for row in cur.fetchall():
+                item = self._decode_excerpt_row(dict(row))
+                projected = surface_safe_excerpt(item)
+                ident = str(projected.get("identification_id") or "")
+                if ident:
+                    out[ident] = projected
+        return out
+
+    def get_excerpts_for_identifications(
+        self, identification_ids: Sequence[str],
+    ) -> Dict[str, Dict[str, Any]]:
+        """`{}`-on-failure wrapper, mirroring `get_excerpt_for_identification`'s
+        legacy list contract. NOT surface-facing: the export path uses the
+        enveloped async form so a failure is a named state rather than an empty
+        mapping indistinguishable from "this set has no excerpts".
+        """
+        try:
+            return self._query_excerpts_for_identifications(identification_ids)
+        except Exception as e:
+            # Type name only -- this module reads an artifact that may carry
+            # restricted content and a driver message can quote its input.
+            logger.error(
+                "DiscoveryService.get_excerpts_for_identifications failed (%s)",
+                type(e).__name__)
+            return {}
+
     def get_excerpt_for_identification(
         self, identification_id: str
     ) -> List[Dict[str, Any]]:
@@ -4182,6 +4659,7 @@ class DiscoveryService:
 
     _SLOT_HEAVY = "heavy"
     _SLOT_BROWSE = "browse"
+    _SLOT_EXPORT = "export"
 
     _SLOT_SPECS = {
         _SLOT_HEAVY: ("_heavy_sem", "_heavy_capacity",
@@ -4190,6 +4668,9 @@ class DiscoveryService:
         _SLOT_BROWSE: ("_browse_sem", "_browse_capacity",
                        "DISCOVERY_MAX_CONCURRENT_BROWSE_QUERIES",
                        _DEFAULT_MAX_CONCURRENT_BROWSE_QUERIES),
+        _SLOT_EXPORT: ("_export_sem", "_export_capacity",
+                       "DISCOVERY_MAX_CONCURRENT_EXPORT_QUERIES",
+                       _DEFAULT_MAX_CONCURRENT_EXPORT_QUERIES),
     }
 
     async def _acquire_slot(self, kind: str) -> Callable[[], None]:
@@ -4251,7 +4732,8 @@ class DiscoveryService:
     # rationale at lines 1129-1140.)
     # ------------------------------------------------------------------
 
-    async def _run_off_loop(self, sync_fn: Callable, *args, timeout: float, heavy: bool = False):
+    async def _run_off_loop(self, sync_fn: Callable, *args, timeout: float,
+                            heavy: bool = False, slot: Optional[str] = None):
         # get_RUNNING_loop, never get_event_loop.
         #
         # `get_event_loop()` returns whatever loop is SET for the thread, which
@@ -4272,7 +4754,14 @@ class DiscoveryService:
         # There is no third branch and no `bounded=False` escape, deliberately:
         # an opt-in bound is a bound whose next caller forgets it, which is
         # exactly how the browse path came to have none (round 12, finding 4).
-        kind = self._SLOT_HEAVY if heavy else self._SLOT_BROWSE
+        # `slot` NAMES a budget explicitly; `heavy` keeps its original
+        # two-way meaning for every existing caller. Still no unbounded
+        # branch and still no `bounded=False` escape -- a third CLASS is not
+        # a third option to skip the bound, and an unknown name raises here
+        # rather than silently falling through to the browse budget.
+        if slot is not None and slot not in self._SLOT_SPECS:
+            raise ValueError("_run_off_loop: unknown slot {!r}".format(slot))
+        kind = slot or (self._SLOT_HEAVY if heavy else self._SLOT_BROWSE)
         _release: Optional[Callable[[], None]] = await self._acquire_slot(kind)
         try:
             # This class's OWN executor, never the shared default one. Two
@@ -4428,6 +4917,7 @@ class DiscoveryService:
     async def _enveloped_off_loop(
         self, sync_fn: Callable, args: tuple, *, timeout: float,
         heavy: bool = False, cache_name: Optional[str] = None,
+        slot: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Run an enveloped SYNC callable off the loop and classify its failure
         modes into the closed status vocabulary.
@@ -4462,7 +4952,8 @@ class DiscoveryService:
                     "items": list(cached.get("items") or []),
                     "meta": dict(cached.get("meta") or {}),
                 }
-            return await self._run_off_loop(sync_fn, *args, timeout=timeout, heavy=heavy)
+            return await self._run_off_loop(
+                sync_fn, *args, timeout=timeout, heavy=heavy, slot=slot)
         except DiscoveryOverload:
             return busy_envelope(meta={"reason": "bounded_concurrency"})
         except DiscoveryUnavailable:
@@ -4602,6 +5093,41 @@ class DiscoveryService:
              divergence, domain, author, unit,
              tuple(suppressed or ()) or None),
             timeout=self._findings_timeout(), heavy=True,
+        )
+
+    async def collect_findings_for_export_async(
+        self, unit: str = FINDINGS_UNIT_IDENTIFICATION,
+        bucket: str = BUCKET_MAIN,
+        novelty: Optional[Iterable[str]] = None,
+        divergence: str = DIVERGENCE_SHOWN,
+        domain: Optional[str] = None,
+        author: Optional[str] = None,
+        work_id: Optional[str] = None,
+        locus_from: Optional[int] = None,
+        locus_to: Optional[int] = None,
+        sort: str = FINDINGS_SORT_BAND_RANK,
+        suppressed: Optional[Iterable[str]] = None,
+        sys_id: Optional[str] = None,
+        with_excerpts: bool = True,
+    ) -> Dict[str, Any]:
+        """The export collector, off the loop, on the EXPORT budget.
+
+        Its own slot class rather than `heavy=True`: an export holds its slot
+        for the length of a whole-corpus walk, and sharing the heavy cap of 4
+        would let two concurrent exports take half the budget every
+        corpus-wide interactive query draws on.
+
+        POSITIONAL DISPATCH -- the tuple order must match the sync signature
+        exactly; see `get_findings_facets_enveloped_async` for the same note
+        and the reason it is written next to the call.
+        """
+        return await self._enveloped_off_loop(
+            self.collect_findings_for_export,
+            (unit, bucket, tuple(novelty or ()) or None, divergence,
+             domain, author, work_id, locus_from, locus_to, sort,
+             tuple(suppressed or ()) or None, sys_id, with_excerpts),
+            timeout=self._export_timeout(),
+            slot=self._SLOT_EXPORT,
         )
 
     async def run_off_loop(

@@ -63,6 +63,7 @@ v9.0.0 by owner decision as the **desktop release's headline**, v9.0.0 having sh
 - [x] **Phase 134: Discovery Data Spine** - Masked, versioned `discovery.db` sidecar + async DiscoveryService + frozen-frame & budget artifacts; proves masking, event-loop safety, and fail-open. **CLOSED 2026-07-23** on spine success criteria SC1–SC3 (all met by the v1 build); the owner-review data-quality re-distill (discovery-v2) is re-bracketed as Phase 135's leadoff task, gated on the twin census.
 - [x] **Phase 135: Precision Certificate & Confidence Bands** — CLOSED 2026-07-28 (9/9). ✅ **CERT-01 MEASURED = PASS**: owner graded all 280 cards catalogue-blind, validator 12/12; pre-registered weighted precision **0.9382, 95% CI [0.9084, 0.9644]** vs the 0.85 Strict floor (`135-09-CERT01-MEASUREMENT.md`). Public-scope (Sefaria-only) subgroup 0.9580 CI [0.9240, 0.9847] — descriptive, not pre-registered. ⚠ Still open, now homed in **Phase 139a**: `band_precision` has NOT been re-baked (`tier_a` carries no number yet — needs `--precision-spec` + deploy), the CERT-02 outcome copy is unapplied, and the per-stratum spread (1.000 ja → 0.471 msource:medium) must reach the BAND-05 methods page. CERT-01 stays `Pending` until those land. Liturgical-containment FP class (one work = 45% of error; D-17 structurally can't catch it) → **discovery-v3** candidate (renamed from "v2.1" 2026-08-05, `docs/specs/discovery-v3-naming.md`). Data-driven four-band display contract + bilingual methods page + pre-registered tier-A precision measurement (grades in parallel). **Leadoff task = the discovery-v2 data re-distill** (canonical merge + w001239 drop + `work_relations` + Lever-1 coverage routing + (B) band-enum rename; plan `docs/specs/discovery-v2-bake-plan.md`; gated on the SEED-029 census) — the band/precision/display contract binds against v2, not v1.
 - [x] **Phase 136: Read Surfaces — Connections Panel & Work→Witnesses** - Browse "computed identifications" panel (banded, masked evidence) + `/work/{id}` witness-map page grouped by codicological unit + computed identifications on `/catalog-browse` + a corpus-wide findings page. **SCOPE EXPANDED 2026-07-30** (owner): the novelty axis (NOVEL-01/02) moves IN from post-136, VIS-01 is homed here, and ONE authorized rebuild + flag-OFF redeploy is the first gate. **CLOSED 2026-08-08** — 22/22 on the code. The checkbox was left unticked when the Progress table was reconciled on 2026-08-16, so this file said Complete and In Progress about the same phase; `init.manager` read the checkbox and reported `roadmap_complete: false`. Ticked 2026-08-20.
+- [x] **Phase 136.2: Findings Export (xlsx)** - An Excel export of `/computed-identifications` over the reader's current filters, carrying the same rows, labels and excerpt text the page itself renders. **NEW 2026-08-20 (owner).** Scope decisions taken at request time: findings page only (not the connections panel), the WHOLE filtered set uncapped (not the current page), and reference text INCLUDED. Trips the masking sweep's copy/export absence assertion by design — closing that is the phase's main gate, not a side task.
 - [ ] **Phase 137: Community Judgments — Hardening** - **RETITLED 2026-08-16 (owner: "ratify reality").** A beta reviews feature shipped 2026-08-13 outside any plan and is live: it meets JUDGE-03 and JUDGE-05, partially meets JUDGE-02. This phase's job is no longer to build from zero but to close the two it **structurally fails** — JUDGE-01 (votes overwrite instead of appending a superseding event; no band captured at judgment time) and JUDGE-04 (one row per review instead of an aggregate; moderation mutates status columns instead of writing separate append-only events) — plus a live role-matrix test for JUDGE-02. Carries a live-data migration question: vote history for judgments already cast under overwrite semantics is not recoverable.
 - [ ] **Phase 138: Leads Queue** - `/leads` high-recall R-B screening lane, explicitly uncertified, canon-lane caveated, same voting. **Unchanged — the one later phase where nothing was pulled forward** (`web/pages/findings.py` still renders the mode strip's leads tab as "Coming soon"; no `/leads` route exists).
 - [ ] **Phase 139a: Release Hardening & REL-01 Gate Closure** - **SPLIT OUT 2026-08-16.** Close the five REL-01 gate items still open at the 2026-08-08 flag flip, re-run the cross-surface masking sweep over the three surfaces that shipped after the last attestation (2026-08-05), and apply or explicitly defer the CERT-02 tier-A copy. Cheap relative to 139b and unblocks the "beta → released" transition.
@@ -329,6 +330,374 @@ page-side `span_start`/`span_end` offsets that already ship.
 extension), 136-25 (`/work/{id}` page), 136-26 (titles + `/catalog-browse`). Replan against them rather
 than from scratch — they passed the plan-checker on 2026-08-02, but 136-23 must now be replanned
 *against the shipped excerpt bake* rather than against a blank page.
+**UI hint**: yes
+
+### Phase 136.2: Findings Export (xlsx)
+
+**⚠ NEW 2026-08-20**, at owner request, entered before implementation rather than after.
+
+**Goal**: A reader looking at `/computed-identifications` can download the result set they are
+looking at as a bilingual Excel workbook — the same rows, the same labels, the same excerpt text
+the page renders, and the same honest states where text is unavailable.
+
+**Depends on**: Phase 136 (the shipped findings page, its filter/sort state, and the
+`discovery_excerpt` table). Independent of Phase 136.1 — it needs nothing 136.1 delivers, and
+136.1 needs nothing from here.
+
+**Requirements**: EXPORT-01, EXPORT-02, EXPORT-03
+
+**Scope decisions taken by the owner at request time (2026-08-20), each after the trade-off was
+stated:**
+
+| Decision | Choice | What it costs |
+|---|---|---|
+| Surface | Findings page only | The connections panel keeps its verified no-egress status. |
+| Row scope | **Whole filtered set, UNCAPPED** | The main pool alone is 9,523 rows over 6,755 manuscripts, on a box with one uvicorn worker. Bounded concurrency and a batched excerpt read carry the load instead of a row cap. |
+| Text | **Reference text INCLUDED** | Same content the live page already shows, so no new class of exposure — but the export inherits the `reuse_ok` enforcement gap recorded against Phase 136.1 SC2. |
+
+**THE GOVERNING RULE — one data path, not two.** The export is a *projection of what the surface
+renders*. Where the sidecar carries no work-side pieces for an identification, the cell carries the
+same honest "not available for display" string the page shows. The export therefore cannot contain
+text the surface itself would not show, and the new masking class scans a subset of already-swept
+content. Any column that would require reaching past `shared/discovery_surface_projection.py` for
+data the page does not have is out of scope by construction — that allowlist exists because a
+renderer-level assertion was already proven to act too late.
+
+**Why the masked-corpus question does NOT reopen here**: `scripts/bake_discovery_excerpts.py`
+already resolves it at bake time. ~70% of identifications matched a reference edition whose text
+must never ship; for the Tanakh subset (~93% of that mass) the span is re-projected into the
+public-domain Sefaria text, with the masked stream used only as an in-memory alignment query and
+"never written to the output DB, a log line, an exception message, or a temp file". Non-Tanakh
+masked works get no work-side pieces at all.
+
+**Success Criteria** (what must be TRUE):
+
+  1. A download on `/computed-identifications` returns an .xlsx over the reader's CURRENT filter and
+     sort state, covering the whole filtered set rather than the rendered page, with bilingual
+     headers and conditional RTL matching the house export convention.
+
+  2. **The masking sweep gains a fifth egress class rather than losing its fourth.** The copy/export
+     class today records a *verified absence* (`_COPY_EXPORT_APIS` asserted at zero across the four
+     surface modules); this phase converts that to a scoped inventory in which the findings page's
+     `ui.download` is the one expected hit. Two things must hold or the class is theatre:
+     **`web/discovery_export_service.py` is added to the scanned surface list** — omitting it repeats
+     the reviews-surface defect exactly, where the asserted absence was true of the scanned set and
+     false of the product — and the capture **opens the workbook and reads CELL VALUES**, because a
+     byte scan of deflated XML sees nothing. Mutation-proven at both data and code level, each
+     mutation watched red by name.
+
+  3. **No precision figure reaches a cell**, and every band/relation label comes from
+     `discovery_band_labels.py` / `discovery_display_strings.py` rather than a literal. Those helpers
+     raise on a missing vocabulary entry while callers swallow, which drops the element silently —
+     so the export asserts on the presence of the label, not merely on the absence of a crash.
+
+  4. **The excerpt read is batched.** `_query_excerpt_for_identification` is one query per
+     identification; uncapped over the main pool that is 9,523 separate SQLite queries. A chunked
+     `IN (...)` read projected through `surface_safe_excerpt` replaces it — the same fix shape as the
+     citation-range P1 (`4f6e31f4`, 10,478 ms → 97 ms).
+
+  5. **The export has its OWN concurrency budget and its OWN `ThreadPoolExecutor` sized to it.**
+     Two semaphores over one unconfigured pool are two names for one budget, which already cost a fix
+     in `shared/discovery_service.py`; see `docs/specs/discovery-budgets.md` §2/§3. An export must not
+     be able to starve the browse path.
+
+  6. The route hides cleanly when the flag is off or the sidecar is absent, degrades honestly on
+     timeout or overload rather than returning a short file that looks complete, and reports any
+     limit that fires. A truncated export presented as a whole one is a correctness defect, not a
+     tuning choice.
+
+  7. `web/pages/findings.py` still does not contain the substring `_service` — a comment naming the
+     shared module's path has reddened that layering gate before.
+
+**BUILT 2026-08-20** (inline, at owner request), then hardened across three adversarial
+Codex rounds. What shipped:
+
+| | |
+|---|---|
+| Surface | A download control on the `/computed-identifications` result bar |
+| Route | `GET /api/export/computed-identifications` — **stateless**, every filter a query parameter |
+| Measured | **28,635 rows in 52.9 s** on the default view against the real artifact (144 pages at the 200-row ceiling + 58 chunked excerpt batches, dev box) |
+| Budget | `DISCOVERY_MAX_CONCURRENT_EXPORT_QUERIES=2`, own executor. Verified live that ONLY the `export` executor was built — neither the heavy nor the browse budget was touched |
+| Sheets | Identifications · About this export (two, after the rework below) |
+
+**Two columns were removed and one added, all three after reading the renderer rather
+than the spec:** no BAND column (the grain exposes `best_band_rank` and no band label,
+and `_render_row_meta` refuses to derive one — "a second band vocabulary"); no
+comparison-source column (`novelty_source_label` is not in `SURFACE_FINDING_FIELDS`, so
+it would have been blank in every row of every export); and a **Catalogued as** column,
+injected from the same `csv_bank` the row renderer reads, because omitting the
+library's own title made the file quietly less informative than the screen.
+
+### Reworked the same day, on the owner's reading of a real export
+
+The file was built, downloaded and read, and four things were wrong with it. None
+was caught by any gate, because every one of them is a question about what a
+reader does with the file rather than about what the file contains.
+
+| Owner instruction | What was wrong | What changed |
+|---|---|---|
+| "add credit to Stoekl et al." | The workbook carried thousands of lines of MiDRASH automatic transcription and named nobody. | A **Credits** block on the About sheet, from `shared.export_utils.MIDRASH_CREDIT_LINES`. |
+| "remove ↳ in מיקום בחיבור" | `locus_subline` prefixes a row-layout cue that says "this line belongs to the title above it" — a relationship a column header states already, and a glyph that breaks sorting and copy-paste. | `locus_subline(..., cue=False)`. One helper still owns the address. |
+| "add highlight of the parallel texts, like in the parallel search export" | The passages were flat text, so the matched words — the whole reason the row is in the file — were invisible. | Red-and-bold rich text via `shared.export_utils.build_rich_snippet_cell`, the SAME helper the search and parallels exports use. |
+| "add the texts on the same rows with the findings and perhaps shorten them" | The passages sat on a second sheet: judging a match meant joining two sheets on a shelfmark that repeats across rows. | The text sheet is **retired**; five evidence columns ride on the finding's own row, with context abbreviated to 160 characters a side. |
+
+**THE MATCHED SPAN IS NEVER ABBREVIATED**, only the context around it, and every
+cut is marked with an ellipsis. A clipped claim in a downloaded file is
+indistinguishable from a short match, which is the defect this whole surface is
+written against; an unmarked cut is a claim about the page that the file is not
+entitled to make.
+
+Three things the rework had to get right that were not in the instruction:
+
+* **The alignment offsets are indices, so the flattening had to be
+  length-preserving.** `frag_hl` / `work_hl` are char offsets INTO the span
+  piece. `clean_text_single_line` — the obvious helper — collapses a CR-LF pair
+  to one space and runs of spaces to one, which would slide every later offset
+  left and highlight the wrong words, silently, and only on rows that happen to
+  contain a line break. `_flatten` maps one character to one character.
+* **The marker is a character that occurs in source text.** An odd number of
+  literal `*` in an excerpt would have inverted the highlight of everything
+  after it; every chunk is scrubbed before ours go in, and a test plants one.
+* **A mirror drifts.** The pane emits HTML and a cell cannot, so `_marked_span`
+  mirrors `findings_rows._compose_excerpt_piece` rather than calling it. Both
+  are now driven over the same inputs — malformed intervals included — and the
+  highlighted TEXT compared, so there cannot quietly become two highlight
+  vocabularies.
+
+Two defects were found by reading the renderer while doing the merge, neither of
+them in the instruction: the automated-transcription qualifier was stamped on
+**every** row (asserting machine reading over the FGP and PGP transcriptions
+that are human work — `_render_panes` appends it for `text_layer == 'htr'`
+only), and the retired text sheet had retyped the two passage headers and
+already drifted on the Hebrew ("קטע מכתב היד" against the pane's "קטע כתב היד").
+Both headers now come from `ds.excerpt_strings`.
+
+The citation itself was **deduplicated rather than copied a fourth time**: it
+was written out verbatim in `web/export_service.CREDITS_TEXT`,
+`shared/export_dossier._CREDITS_LINES_*` and `genizah_app.py`, each declaring
+one of the others canonical. The two WEB copies now compose from one constant
+in `shared/export_utils.py`, and the change was proved byte-identical against a
+snapshot of every credits variant (en/he, local-only, desktop app name) before
+and after. **`genizah_app.py` still carries its own literal copy** — the desktop
+app is a separate release line and was not touched in a web change; that is a
+follow-up, and this record says so rather than claiming a dedup that did not
+happen (Codex round 4 caught the overclaim). A stale citation credits the wrong
+record, which is worse than none.
+
+### Round 4 — the rework went back to Codex, and six more things were wrong
+
+Two of the six were only findable by measuring the artifact, which is why they
+survived the suite:
+
+* **A quarter of the passages were ALREADY abbreviated, and nothing said so.**
+  `bake_discovery_excerpts.pieces()` caps a span at 600 stream letters, joins
+  its head and tail with a visible `⋯` and flags the row — **10,968 of 48,270
+  fragment spans (22.7%) and 12,212 work spans (25.3%)**. Neither the page nor
+  the export mentioned it, so the mark sat inside a quoted passage meaning
+  nothing, and the About sheet's claim that "the matched passage is never
+  shortened" was false for one row in four. The flags are now read and named
+  (`clipped_note`, a new entry in the shared vocabulary), and the About wording
+  is corrected.
+* **The credit spoke for transcriptions MiDRASH did not make.** 2,759 excerpts
+  are FGP and 87 are PGP — human work by other projects, 5.9% of the artifact.
+  The blanket "these are MiDRASH transcriptions" would have misattributed all
+  of them. The credit is now conditional on the mark the transcription-note
+  column already carries.
+
+The other four: the work side was treated as present if ANY of its three pieces
+was truthy, where `_render_panes` keys the whole pane on `work_span` (an export
+that would have shown context as an edition passage where the page says the
+edition is unavailable — the retired text sheet had the same bug, and no row in
+the live artifact is in that state, which is why nothing caught it); a matched
+run consisting of literal marker characters lost its highlight to the escaping
+rule; the context clip returned 162 characters from a function documented as
+bounded by 160; and nothing bounded a passage before `sanitize_text_for_excel`'s
+blind 32,700-character truncation, which could have cut between a marker pair
+and inverted the highlight for the rest of the cell.
+
+**Answering "perhaps shorten them" honestly.** The measurement says the context
+is *already* short — the bake caps it at 90 characters a side, so the 160-char
+clip added here never fires on this artifact and stands only as a display bound
+against a future wider bake. What makes a cell long is the MATCH itself:
+average 480 characters, longest 1,756, and a quarter of those are already
+`⋯`-abbreviated upstream. Cutting further means cutting matched text, which has
+a research cost, so it is left as an owner decision rather than taken here.
+
+**Cost, measured** (Codex round 4 asked and nothing in the repo answered it):
+at 28,635 rows with real lengths, the build takes **66.3 s** and produces a
+**5.8 MB** workbook; the same rows without rich text take 14.0 s. The highlight
+therefore costs about **+23 s**, linear in rows (verified at 4,000 and 28,635),
+and peak traced allocation is single-digit MB because `write_only` streams. The
+whole request still fits inside `DISCOVERY_EXPORT_TIMEOUT=300`, but the margin
+narrowed from roughly 5.7× to 3×, and that is worth knowing before the corpus
+grows. (An earlier reading of 374 s was **tracemalloc's own overhead**, not the
+builder — recorded here because it nearly produced a false alarm.)
+
+> **Not fixed, and recorded rather than hidden:** `sanitize_text_for_excel`
+> drops every character above U+FFFD, so an astral-plane character is lost from
+> any cell. That is pre-existing behaviour of the shared sanitizer that every
+> export in this repository has, the live artifact contains none, and changing
+> it would touch the search and dossier exports too.
+
+**Rework verification:** **149 tests** in the export suite (with a gate for each
+of the ten rework properties and each of the six round-4 findings) · the masking
+sweep re-run over the new cell layout · **21/21 mutations watched red by name**
+(the original five, ten for the rework, six for the round-4 fixes), one of which — M13 — caught this
+suite's own vacuity first: the credit test compared `MIDRASH_CREDIT_LINES`
+against cells built FROM `MIDRASH_CREDIT_LINES`, so mutating the constant left
+it green. It now pins published literals, which is the "a gate must change with
+the artifact, not with the fixture" rule this project has paid for before.
+
+### 2026-08-21 — three more from reading a real download
+
+| Owner report | What was actually wrong | What changed |
+|---|---|---|
+| "One row per work / per manuscript gives a useless xlsx — no expandable id, so no ms id and no text" | Those units are **GROUP BY grains**. `_FINDINGS_UNIT_SELECT` writes NULL into `identification_id`, `sys_id` and `shelfmark_display` on the work grain, and into the work, author and relation columns on the manuscript grain. On the page that is complete because the row carries an **expander**; the export had no equivalent, so it wrote a title and two counts — and with a NULL `identification_id` there was no excerpt to attach either. | The export now walks the **group grain for its ORDER** and the **leaf grain for its ROWS**, which is the expander's own contract ("the children come from the same read at the leaf grain with this key pinned"). The grouping survives as columns instead of a disclosure triangle. |
+| "The 'Preparing your file' card stays after the download ended" | A `ui.download` is a browser navigation. Nothing reports back to the server *or to the page*, and `type='ongoing'` is Quasar's `timeout: 0` — so the card had **no event that could ever dismiss it**. | A one-shot cookie handshake: the page mints a token, the route stamps it on **every** response (200, 400, 503, 504), the page polls for it and clears the card. A spinner that only stops on success is a spinner that hangs on failure. |
+| "Users should be warned before a very large download starts" | Nothing said how big the file was or how long it would take. | A confirmation above 2,000 rows, with the row count in it — and a **different sentence for the grouped units**, because "{rows} rows" is false there: the file is one row per identification, so a view of 3,000 works is tens of thousands of rows. |
+
+**The grouping table stopped being two tables.** `EXPANSION_KEY_BY_UNIT` lived in
+`web/components/findings_rows.py`, and the export needed the same mapping from
+the other side of the layering guard. Rather than copy it, it moved to
+`shared/discovery_service.py` and the page imports it — one object with two
+readers, asserted by identity (`fr.EXPANSION_KEY_BY_UNIT is
+EXPANSION_KEY_BY_UNIT`), because an export grouping on a column the page no
+longer expands on still produces a perfectly plausible file.
+
+**Two defects the new tests found on their own, neither of them in the report:**
+
+* `start_export` wrapped **the download itself** in the `except` that makes the
+  handshake best-effort, so a download that never started dismissed its own
+  card and reported nothing — a reader would watch the spinner tidy itself away
+  and get no file. Only the WAIT is best-effort now.
+* The findings page's awaited-call gate (no nested offload, no direct service
+  call) refused `await ui.run_javascript`. It was right to: the rule is that
+  every awaited call resolves to a declared wrapper. The exception admitted is
+  **structural** — the receiver must be the name `ui` — so it cannot widen into
+  "anything with a familiar-looking attribute".
+
+**A short GROUP walk costs the ORDER, not the rows**, and that distinction is
+carried out in the meta rather than folded into `walk_complete`: the leaves it
+could not place sort to the end and the About sheet says so. Marking a complete
+file incomplete is a smaller error than the reverse, but it is still a false
+statement, and this surface's whole discipline is that the file does not make
+statements nobody measured.
+
+### A pre-existing concurrency-slot leak, found on the way past
+
+Running the masking sweep before any other discovery test in the same process
+made `test_page_id_accessor_runs_off_the_event_loop` fail with `busy` — from a
+budget it never used. Measured after the rendered capture: the service's
+semaphores read **0/24 (browse) and 0/4 (heavy)**. 28 slots acquired and never
+returned, all from `get_related_pages_enveloped_async` (24) and
+`get_work_expansion_enveloped_async` (4).
+
+**The mechanism.** `_run_off_loop` hands ownership of the slot's release to
+`fut.add_done_callback`, deliberately: a `run_in_executor` thread cannot be
+cancelled, so a timed-out read has to keep its slot until the thread ACTUALLY
+finishes rather than until the awaiter gives up. That callback is scheduled on
+the loop that created the future — and the capture drives each render through
+its own `asyncio.run()`, which closes its loop the moment the coroutine returns.
+A read that timed out leaves a thread whose completion callback has nowhere to
+run, and the slot is gone for the life of the process.
+
+**Production is not affected.** The web app has ONE long-lived loop, so the
+callback always fires and the slot always comes back. Only a harness that
+creates and destroys loops can lose them. This does, however, look like the
+explanation for the note already sitting in `_run_off_loop` about an off-loop
+dispatch assertion that "measures ZERO dispatches under a multi-file run and
+passes alone… It is not the explanation for that failure, which is still open."
+
+**The first attribution run was WRONG, and the reason is worth keeping.** It ran
+the pre-136.2 commit in a git worktree, which passed cleanly — so the leak was
+briefly recorded as newly introduced. A worktree has none of this repository's
+gitignored data: with no `discovery_data/`, the sweep there issued **0** slot
+acquisitions instead of 51 and could not have leaked anything. Given the live
+sidecar via `GENIZAH_DISCOVERY_DATA_DIR`, the same commit leaks the same 28
+slots from the same two call sites. A code comparison that is silently a data
+comparison is worse than no comparison, because it produces a confident answer.
+
+**What was done, and what was not.** The sweep now hands the budgets back on
+module teardown, with the measurement written next to it: a test file that
+silently consumes a global resource makes every later failure a mystery. The
+concurrency primitive was NOT changed. Making a slot survive its loop means
+replacing the budget's `asyncio.Semaphore` with a loop-independent one, in code
+that took three adversarial review rounds to get right, and that is not a change
+to make inside an export-UX task. It is scoped work if the owner wants it.
+
+### The three review rounds, and what they were worth
+
+**Round 1 — CHANGES-REQUIRED, defects in 7 of 8 areas.** The two that mattered most were
+invisible from inside the change:
+
+* **The workbook build ran on the event loop.** The collector was correctly off-loop; the
+  builder was then called inline in the async route. openpyxl writing ~28,600 rows is
+  seconds of CPU on a server with ONE uvicorn worker, outside the export slot and outside
+  the timeout.
+* **Raw query values were reflected into cells.** A crafted URL could put arbitrary text
+  — an unqualified percentage, a restricted name — into a downloaded file that carries our
+  provenance sheet. A reflected value is worse in an artifact than on a page, because the
+  file outlives the request and travels without its URL.
+
+Also round 1: the walk used the reported total as a stopping condition, which
+generated false completeness; the excerpt chunk size had no ceiling against SQLite's
+999-parameter limit; a mid-walk sidecar loss silently produced a file with every text
+column empty; and the justification for attaching excerpts after validation was simply
+false — `_walk_nodes` IS recursive, so they are now attached BEFORE it and get checked.
+
+**Round 2 — CHANGES-REQUIRED, 5 more.** The fix for the event-loop block had created a
+second reservation: walk and build each took their own slot, so a request whose walk had
+finished could be refused at build re-entry, and one request could hold two full
+timeouts. Both halves now run in ONE executor crossing. Also: `novelty` was
+membership-checked but not cardinality-bounded; a tripped page guard reported
+"unverifiable" instead of "incomplete"; the version snapshot was taken before the excerpt
+read but never after; the egress inventory still missed the route itself; and
+`request.base_url` — the client-controlled **Host header** — was being baked into every
+link in the workbook.
+
+**Round 3 — CHANGES-REQUIRED, 2 left, both fixed.** The artifact snapshot compared only
+`sidecar_version`, which this module's own cache comments say is NOT unique across a
+resolved-path swap; it now compares `(path, version)`. And the presence half of the
+egress inventory had fallen back to a source scan for the media-type token, which was
+vacuous twice over — it matched prose, and `web/api.py` serves other spreadsheet routes,
+so deleting THIS route's media type would still have satisfied it. It is now pinned to
+the route's function definition via AST.
+
+> **The round-3 fixes were not themselves put through a fourth review round.** They are
+> small and covered by the suite, but the record should not imply an approval that was
+> never given: the final Codex verdict on file is CHANGES-REQUIRED against the code as it
+> stood BEFORE those two fixes.
+
+### What the project's own gates caught, independently of Codex
+
+* **The masking sweep's copy/export class went red the moment the button landed** — which
+  is what it was for. It recorded a verified ABSENCE of any copy/export egress; that is
+  now a scoped inventory naming each one, plus a FIFTH capture class that opens the
+  workbook and reads CELL VALUES (a byte scan of deflated XML sees nothing, and a test
+  plants a needle to prove exactly that).
+* **The mutation battery found the new check's own vacuity.** Deleting the export's
+  `ui.download` call left the gate GREEN, because the words survived in the docstring of
+  the function that had stopped calling it — the mirror image of the comment that once
+  reddened this page's layering gate. The presence half is now AST-based. **5/5 mutations
+  red by name** on the final code.
+* **The VIS-01 audience proof refused to be bypassed.** It enumerates every public
+  coroutine in `web/discovery.py` and failed because the export was an unregistered read
+  path. It is now registered with a builder stub that RAISES, so if the audience gate ever
+  let a private artifact through, the proof fails loudly instead of passing on an empty
+  workbook. That test also drove the return contract: an envelope with a `content` key
+  rather than a tuple, so this read is not the one the proof cannot judge.
+
+**Verification:** 363 passed across the masking sweep (36), the export suite (20), the
+audience proof (47) and the findings render smoke (260) · `ruff` clean · `check_docs.py`
+exit 0 · one PRE-EXISTING unrelated failure elsewhere in the tree
+(`test_cert01_grading_validator.py`, a stale `seftja_dates_sha256` pin against a
+gitignored research file — the same stale-pin class as Phase 148 OPS-01) · the full
+non-GUI suite still segfaults at ~68% on this machine, which predates this work.
+
+**Success-criteria status:** SC1–SC7 met. **The retro-plan is still owed** — built inline
+rather than through `/gsd-plan-phase`, so there is no PLAN/SUMMARY pair; Phase 140 SC1.
+
+**Plans**: built inline 2026-08-20 at owner request (not through `/gsd-plan-phase`); retro-plan owed.
 **UI hint**: yes
 
 ### Phase 137: Community Judgments — Hardening
@@ -835,6 +1204,7 @@ work when this re-map ran. **Read the lane, not the integer.**
 | 135. Precision Certificate & Confidence Bands | 9/9 | Complete   | 2026-07-28 |
 | 136. Read Surfaces — Connections Panel & Work→Witnesses | 22/22 | Complete   | 2026-08-08 |
 | 136.1 Evidence View, Work Pages & Catalogue Integration | 1/6 SC | In Progress|  |
+| 136.2 Findings Export (xlsx) | 7/7 SC | Complete   | 2026-08-20 |
 | 137. Community Judgments — Hardening | 2/5 JUDGE | In Progress|  |
 | 138. Leads Queue | 0/TBD | Not started | - |
 | 139a. Release Hardening & REL-01 Gate Closure | 0/TBD | Not started | - |

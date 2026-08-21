@@ -375,6 +375,14 @@
 - [ ] **OBS-02**: Operational metrics cover query timeouts, result truncation, sidecar unavailable/incompatible events, atlas payload sizes, and judgment rate-limit/moderation activity
 - [ ] **REL-01**: Release order is gated: claim semantics + masked schema → validated title map + sidecar + frozen-frame artifact → certificate card draw → read surfaces (panel/work) → Supabase migration + security smoke → judgment UI → leads → bounded atlas → public promotion; the feature flag, sitemap/SEO discovery, and homepage band stay OFF until: the CERT-01 measurement is graded to completion, the BAND-05 immutable methods report is published, the CERT-02 outcome-specific copy is applied (tier-A goes public WITH its measured number), and the masking (DATA-05), RTL (I18N-02), accessibility (A11Y-01/02), performance (PERF-01), and deployment (DATA-08) checks pass. ATLAS-PREVIEW EXCEPTION (owner, 2026-07-20): the static atlas overview (ATLAS-01) may deploy EARLY as a standalone beta page, before the certificate and the claim surfaces, PROVIDED it displays no claim-level statements (no work–witness identifications, no bands, no precision numbers — cluster/shelfmark-level visualization only), region/cluster labels come only from our own catalogue titles (libraries.csv — masking-safe catalogue metadata, distinct from the DATA-04 reviewed neutral WORK titles), reviewed neutral titles, or are omitted, an asset-level masking scan passes, its PERF/i18n basics hold, and it sits behind a DEDICATED atlas-preview feature flag distinct from the main discovery flag (the main discovery flag, the full homepage discovery band, and sitemap/SEO discovery stay OFF until the full gate). The exception EXTENDS (Phase 133 discuss, owner 2026-07-20) to a claim-free homepage TEASER card linking to the /atlas beta: same claim-free + masking + i18n/RTL conditions, CLS-safe, gated by the atlas-preview flag, and noindex until the full REL-01 gate; the full homepage discovery band (promoting claims) still waits for Phase 139.
 
+### Findings Export (phase 136.2)
+
+*Added 2026-08-20 at owner request, before implementation.*
+
+- [ ] **EXPORT-01**: `/computed-identifications` offers an .xlsx download over the reader's CURRENT filter and sort state, covering the whole filtered set rather than the rendered page, with bilingual headers and conditional RTL. The workbook is a PROJECTION OF WHAT THE SURFACE RENDERS — same rows, same labels, same excerpt text, and the same honest "not available for display" state where the sidecar carries no work-side pieces. No column may require reaching past `shared/discovery_surface_projection.py`'s allowlist
+- [ ] **EXPORT-02**: The masking sweep's copy/export class converts from an asserted ABSENCE to a scoped inventory naming the one expected egress, with the export builder module added to the scanned surface set, and the capture opening the workbook to read CELL VALUES rather than scanning bytes — a deflated-XML byte scan sees nothing. No precision figure reaches a cell; every band and relation label comes from the frozen vocabulary helpers and is asserted present, not merely non-crashing
+- [ ] **EXPORT-03**: The export is bounded without being capped: excerpts are read in chunked batches rather than one query per identification, the path takes its OWN concurrency budget backed by its OWN `ThreadPoolExecutor` sized to that budget, and it degrades honestly on timeout or overload rather than returning a short file that looks complete
+
 ### Passage Matching (phases 141-147)
 
 *Added 2026-08-20. A second selectable parallels method — the discovery pipeline's character-level
@@ -461,6 +469,9 @@ Every v9.0.0 requirement maps to exactly one phase. Phases continue from the pre
 | PANEL-03 | Phase 136.1 (moved out of 136, owner 2026-08-02) | Pending |
 | WORK-01 | Phase 136.1 (moved out of 136, owner 2026-08-02) | Pending |
 | WORK-02 | Phase 136.1 (moved out of 136, owner 2026-08-02) | Pending |
+| EXPORT-01 | Phase 136.2 | Complete (2026-08-20; retro-plan owed) |
+| EXPORT-02 | Phase 136.2 | Complete (2026-08-20; retro-plan owed) |
+| EXPORT-03 | Phase 136.2 | Complete (2026-08-20; retro-plan owed) |
 | JUDGE-01 | Phase 137 | Pending |
 | JUDGE-02 | Phase 137 | Pending |
 | JUDGE-03 | Phase 137 | Pending |
@@ -491,7 +502,7 @@ Every v9.0.0 requirement maps to exactly one phase. Phases continue from the pre
 | OPS-02 | Phase 148 | Pending — 103-identification loss accepted by ruling; the gate is not built |
 | OPS-03 | Phase 149 | In progress — P1 closed 2026-08-20; ~1.1-3.0 s still unattributed |
 
-**Coverage:** 56 / 56 v9.0.0 requirements mapped ✓ (no orphans, no duplicates). Note: the requirement set skips DATA-09 by design — the Claim Model & Data Spine block runs DATA-01..08 then DATA-10.
+**Coverage:** 59 / 59 v9.0.0 requirements mapped ✓ (no orphans, no duplicates). Note: the requirement set skips DATA-09 by design — the Claim Model & Data Spine block runs DATA-01..08 then DATA-10.
 
 **Cross-cutting note:** I18N-01/02, A11Y-01/02, SEO-01, OBS-01/02, and REL-01 are homed in Phase 139 (the release-hardening capstone) because their completion criterion is a comprehensive cross-surface gate and several explicitly reference graph/atlas labels. Translations, RTL, and accessibility are nonetheless BUILT INTO every UI surface (Phases 133, 136–139) from line one per house convention — Phase 133's atlas-preview page carries its own PERF/i18n basics per the REL-01 atlas-preview exception; Phase 139 owns their final verification. Likewise PERF-01, DATA-05, and DATA-08 are delivered in Phase 134 but re-verified at the REL-01 gate.
 
