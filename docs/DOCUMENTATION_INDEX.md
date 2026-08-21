@@ -125,6 +125,7 @@ Detailed specifications for complex features:
 | [passage-matching-algorithm.md](specs/passage-matching-algorithm.md) | **The character-level passage matcher** — normalization, 5-gram indexing, diagonal two-hit seeding, the two acceptance boundaries, Stage-0 hygiene, and the interactive posting budget. Tracked authority for the algorithm |
 | [passage-index-build-measurements.md](specs/passage-index-build-measurements.md) | Measured build cost, artifact size, construction comparison and RAM behaviour for the passage index (Phase 142) |
 | [parallels-method-comparison.md](specs/parallels-method-comparison.md) | Head-to-head recall/precision of passage matching vs the incumbent chunk search (INTERIM, tuning split) |
+| [parallels-holdout-prereg.md](specs/parallels-holdout-prereg.md) | Pre-registration for the one-shot parallels holdout run — endpoints, sampling, frozen inputs (DRAFT until its freeze block is filled) |
 
 ---
 
