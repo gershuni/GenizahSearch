@@ -194,12 +194,21 @@ queries, **top 3 per method**, pooled and deduplicated to 240 cards, method
 label and rank stripped, order a deterministic shuffle by card id. Owner graded
 100 on the eight-term relation vocabulary.
 
-The graded subset is spread across the whole deck rather than its head: 41 of
-the first 100 deck positions were graded, against 41.7 expected under a uniform
-draw. Treated as approximately representative of the 240; the residual risk is
-that a deliberately skipped card is not a random omission.
+**CORRECTED (2026-08-21 re-examination).** The graded 100 are the FIRST 100
+cards of the presented deck, an unbroken prefix — the grader worked one pass
+and stopped. The earlier claim of a "spread" (41 of the first 100 positions)
+was computed against the key file's bookkeeping order, not the shuffled
+presentation order, and was wrong. Mitigation, verified: presentation order is
+a deterministic shuffle by card id (a hash), uncorrelated with query, method,
+and grade, so a prefix of it approximates a random draw of 100-of-240; the
+prefix itself contains all three buckets at near-population rates.
 
-| | n | strict (`same_text`) | useful (any real relation) |
+**"strict" includes `paraphrase`.** The scorer defines
+`REAL_STRICT = {same_text, paraphrase}`; the label below previously read
+"strict (`same_text`)" and misdescribed it. With `same_text` alone: passage
+40/42 = 0.952, chunk 40/77 = 0.519 — the non-overlap is unchanged.
+
+| | n | strict (`same_text`+`paraphrase`) | useful (any real relation) |
 |---|---|---|---|
 | passage `standard-40` | 42 | **0.976** [0.877, 0.996] | 1.000 [0.916, 1.000] |
 | chunk `c3-exact-f100` | 77 | **0.532** [0.422, 0.640] | 0.974 [0.910, 0.993] |
@@ -225,20 +234,39 @@ Read the `same_text` column. Each method found **21 same-text pairs the other
 missed**, on identical queries at identical depth. The union holds 61 distinct
 same-text pairs and each method recovers 40 of them — **65.6% each**.
 
-That is the finding, and it is not the one the precision headline suggests:
+### Depth probe: the symmetry above is a top-3 artifact, and it breaks in passage's favour
 
-- **The methods are complementary, not ranked.** A default flip to passage-only
-  would lose 21 of 61 same-text pairs (34%) in this sample — a recall
-  regression on precisely the class the plan names as most costly and hardest
-  to detect. Symmetrically, staying on the incumbent forgoes the other 21.
+"The other method missed it" in the table means "not in its top 3", because
+`per_method_k = 3`. The 2026-08-21 re-examination ran every exclusive
+same-text card's query through the OTHER method's **full, uncapped** ranked
+list (retrievers rebuilt exactly as the harness builds them):
+
+| exclusive same-text cards | truly ABSENT from the other's full list | present, past top-3 |
+|---|---|---|
+| passage-only (n=21), probed in chunk | **15 (71%)** — zero score anywhere | 6 (5 at ranks 4–7, 1 at 126) |
+| chunk-only (n=21), probed in passage | **8 (38%)** | 13 (mostly ranks 3–13) |
+
+At the looser manuscript grain the asymmetry holds (10/21 vs. fewer absent).
+One formulaic query (`fgp:13345`) dominates the chunk-only-present cases.
+
+So the corrected reading:
+
+- **The incumbent's misses are mostly structural** — it assigns zero score to
+  71% of passage's exclusive finds; no deeper k recovers them.
+- **Passage's misses are mostly demotions** — 62% of the incumbent's exclusive
+  finds ARE in passage's list, just past an arbitrary cutoff. A flip to
+  passage-only with a deeper displayed list loses ~8 of 61 same-text pairs
+  (13%), not 21 of 61 (34%) as the top-3 table alone implies; staying on the
+  incumbent forgoes ~15 of 61 (25%) that it cannot retrieve at all.
 - **Their exclusive yields differ completely in composition.** Passage's 23
   exclusive cards are 91% same-text. The incumbent's 58 exclusive cards are 36%
   same-text and 59% liturgical formula or scriptural quotation — real matches,
   correctly found, but not what a parallels search is for.
 
-This argues for a **union or side-by-side presentation** over a flip, and it
-was not visible in any recall instrument: pooled recall is 100% for the union
-by construction, so only the *split* of the union is measurable — which is
+This still argues for a **union or side-by-side presentation** — but the flip
+is *less* costly than the top-3 cross-tab suggested, not more. None of this
+was visible to any recall instrument: pooled recall is 100% for the union by
+construction, so only the *split* of the union is measurable — which is
 exactly what the deck measures.
 
 ### The depth asymmetry favours passage and must be stated
@@ -291,10 +319,21 @@ truth from a scholarly witness list built by neither method.
 `scripts/build_witness_query_set.py`. The oracle holds 15,072 (work,
 manuscript) attestations; 12,713 at `confidence = high`, covering 3,323 works.
 Restricting to works with at least 4 attested manuscripts that the passage
-index actually holds leaves **614 works → 2,258 queries** of ~900 readable
-characters each, sampled at deterministic positions spread across each work's
-body. Every exclusion is counted and the writer fails on count divergence
-(2,456 expected = 2,258 written + 198 below the 400-letter floor).
+index actually holds leaves **614 funnel-passing works → 2,258 queries** of
+~900 readable characters each, sampled at deterministic positions spread
+across each work's body. Every exclusion is counted and the writer fails on
+count divergence (2,456 expected = 2,258 written + 198 below the 400-letter
+floor).
+
+**Population corrections (2026-08-21 re-examination).** The 198-slice drop
+took ALL four slices from 41 works, so the file holds queries for **573
+distinct works**, not 614 — the "573" in the channel analysis below is that
+number. Separately, **94 of the 2,258 queries (4.2%) are byte-identical
+duplicates** of a same-work sibling: the slicer's short-body fallback can land
+several of a work's windows on one start position. Same-work only, zero
+cross-work collisions; it mildly inflates the effective n and the builder now
+drops duplicates (counted as `duplicate_slice`). The v1 file with duplicates is
+what the recorded tune runs used.
 
 Two deliberate design points:
 
@@ -431,3 +470,57 @@ The Judeo-Arabic protected class is therefore available on the FGP instrument
 at ample n, and unavailable on the witness instrument. Both methods must be
 re-run with `language` in the stratum set before the flip decision; every run
 recorded above predates the label.
+
+
+---
+
+## Re-examination (2026-08-21): what was independently verified, and what changed
+
+Seven independent verifiers re-derived every reported number from raw
+artifacts (deck key + verdicts, the oracle, the index, the labelled corpora)
+without reading this document's claims. Confirmed exactly: the precision
+table, the cross-tab, the confound test, zero leakage in all 2,258 witness
+texts (in fact zero non-Hebrew characters at all), the accounting funnel, the
+harness's equal-eligibility semantics (filter applied before any cap, ranks
+recomputed; verified against 6 live queries), that the harness calls the real
+shipping `search_composition_logic`, the ledger's write-once enforcement
+(mutation-killed), and the language-classifier counts (all 21,348 labelled
+rows re-derived from text, zero mismatches).
+
+Corrections from the same pass are folded in above: the graded-prefix fact,
+the `strict` definition, the 573/614 population split, the duplicate slices,
+and the depth-probe asymmetry.
+
+### Holdout split repaired before first use
+
+The tune/holdout split hashed the bare query id, so the witness instrument's
+four sibling slices per work — identical positive sets — straddled the
+boundary for **510 of 573 works**. The holdout had never been scored, so
+nothing is contaminated; the split is now group-aware (query id up to the
+first `#`), pinned by `tests/test_retrieval_eval_split.py`, including the
+property that made the fix safe: ids without `#` (the whole FGP set) keep
+byte-identical assignments, so recorded FGP results remain valid. Witness
+tune/holdout membership changes; the recorded witness tune numbers refer to
+the old membership and remain exploratory either way.
+
+Also measured: per-work clustering in the reported 300-query witness sample is
+negligible in practice — the evenly-spaced sampler landed on 298 distinct
+works (mean 1.007 queries/work), so the Wilson intervals are effectively
+honest for that run (width 0.0924 → 0.0929 under a per-work correction).
+
+### Language-classifier caveats sharpened
+
+- **The seed-stability check validates only the FPR.** `--validate` never
+  samples the Judeo-Arabic side, so recall is structurally seed-invariant; the
+  stability re-run at a different seed confirms the false-positive rate, not
+  recall.
+- **The stoplist's cost is concentrated**: about a third of the measured
+  recall shortfall traces to אלא and אלי alone, which are also genuine
+  Judeo-Arabic function words. The measured operating point (0.868 / 0.0076)
+  already absorbs this; do not "improve" the stoplist without re-measuring.
+- **Two live label errors found at the known blind spots**: a purely Hebrew
+  litany labelled `ja` because אלהיכם is missing from the stoplist and the
+  text sits just above the 30-word floor; and a genuine Judeo-Arabic passage
+  held at `he` because its Arabic vocabulary happens to carry almost no
+  definite articles. Both are the expected error modes at the measured rates,
+  not new phenomena.

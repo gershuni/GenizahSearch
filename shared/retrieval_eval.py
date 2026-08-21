@@ -55,8 +55,21 @@ class EvalQuery:
     strata: dict = field(default_factory=dict)
 
     def split(self, salt: str = 'v1') -> str:
-        """Stable tune/holdout assignment from the query id alone."""
-        h = hashlib.sha256(f'{salt}|{self.query_id}'.encode()).hexdigest()
+        """Stable tune/holdout assignment, GROUP-aware.
+
+        Hashing the bare query_id put sibling queries of one work on both
+        sides of the boundary: the witness instrument draws 4 slices per work
+        (`wit:<work>#0..3`) with IDENTICAL positive sets, and 510 of its 573
+        works straddled tune/holdout -- tuning would have seen the very
+        works/positives the holdout is meant to decide on. The group key is
+        the query_id up to the first '#', which keeps a work's slices
+        together. Ids without '#' (the FGP set) are their own group, so their
+        assignment is byte-identical to the old rule and every FGP result
+        recorded before this change remains valid. Found and fixed before any
+        holdout was ever scored.
+        """
+        group = self.query_id.split('#', 1)[0]
+        h = hashlib.sha256(f'{salt}|{group}'.encode()).hexdigest()
         return SPLIT_TUNE if int(h[:8], 16) % 100 < 50 else SPLIT_HOLDOUT
 
 

@@ -118,6 +118,12 @@ def main() -> int:
     ap.add_argument('--baseline', default=None,
                     help='config_id to treat as incumbent for non-inferiority')
     ap.add_argument('--force', action='store_true')
+    ap.add_argument('--dump-outcomes',
+                    help='jsonl of per-query outcomes. Required for a '
+                         'PAIRED comparison: independent Wilson intervals '
+                         'on the same queries understate the power '
+                         'available, and only the per-query table shows '
+                         'how much of each method is exclusive.')
     ap.add_argument('--all-docs', action='store_true',
                     help='do NOT restrict the incumbent to the '
                          'shared document set (compares products, '
@@ -140,6 +146,8 @@ def main() -> int:
     print(f'strata: {", ".join(stratum_names)}')
 
     ledger = EvalLedger(args.ledger) if args.ledger else None
+    dump = (open(args.dump_outcomes, 'w', encoding='utf-8')
+            if args.dump_outcomes else None)
     results = {}
     for r in build_retrievers(args.configs, args.index,
                               equal_eligibility=not args.all_docs):
@@ -149,6 +157,14 @@ def main() -> int:
         s = summarize(outs, k_values=K_VALUES)
         strata = {name: summarize_by_stratum(outs, name, k_values=K_VALUES)
                   for name in stratum_names}
+        if dump:
+            for o in outs:
+                dump.write(json.dumps({
+                    'config_id': cid, 'query_id': o.query_id,
+                    'rank': o.rank, 'n_returned': o.n_returned,
+                    'seconds': round(o.seconds, 4),
+                    'strata': o.strata}, ensure_ascii=False) + '\n')
+            dump.flush()
         results[cid] = s
         print(f'\n=== {cid} ===  ({time.time() - t0:.0f}s)', flush=True)
         print(f'  n={s["n"]}  found={s["found_any"]}  mrr={s["mrr"]}', flush=True)
@@ -166,6 +182,10 @@ def main() -> int:
                           split=args.split, query_set=os.path.basename(
                               args.queries), summary=s, strata=strata,
                           force=args.force)
+
+    if dump:
+        dump.close()
+        print(f'wrote per-query outcomes to {args.dump_outcomes}')
 
     if args.baseline and args.baseline in results:
         base = results[args.baseline]

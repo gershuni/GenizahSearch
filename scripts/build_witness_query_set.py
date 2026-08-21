@@ -220,8 +220,18 @@ def main() -> int:
         for work_id, present, path in chosen:
             body = read_body(path)
             positives = sorted(r for s in sorted(present) for r in s2r[s])
+            seen_texts = set()
             for k, text in enumerate(slices(body, work_id, args.per_work,
                                             args.target_chars)):
+                # The short-body fallback in slices() can land 2-4 of a work's
+                # windows on the same start position, yielding byte-identical
+                # "independent" queries (measured: 94 of 2,258, 4.2%, in v1 of
+                # this file). Identical siblings inflate n without adding
+                # information; drop them, counted.
+                if text in seen_texts:
+                    qdrop['duplicate_slice'] += 1
+                    continue
+                seen_texts.add(text)
                 stream, _ = norm_stream(text)
                 if len(stream) < MIN_QUERY_LETTERS:
                     qdrop['below_min_letters'] += 1
