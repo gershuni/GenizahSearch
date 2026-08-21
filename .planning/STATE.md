@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
-stopped_at: "Roadmap RE-MAPPED 2026-08-20: 10 phases -> 19. Phase Details had never been updated to match the 2026-08-16 checkbox list, so GSD read a retired Phase 139 and reported 136 incomplete and 139 complete - exactly inverted. Added the passage-matching lane (141-147, owner-planned outside GSD, built on an unmerged branch) and the discovery data lane (148-149) for ~85 post-ratification commits that had no phase. Discovery beta still LIVE in production (DISCOVERY_ENABLED=1 since 2026-08-08). Phases 133-136 CLOSED, now with retrospective VERIFICATION.md attestations. The REL-01 masking re-sweep that was the one un-waived gate item is CLOSED (2026-08-19)."
-last_updated: "2026-08-20T00:00:00.000Z"
-last_activity: 2026-08-20
+stopped_at: "Phase 136.2 (Findings Export, xlsx) CLOSED 2026-08-21 — merged as PR #323 (f1d0f94d) and deployed by the owner the same day, then verified against PRODUCTION rather than inferred from the merge (route live, the completion cookie stamped on a failure path, the %0A token ignored). 38 mutations red by name; the battery is now crash-safe after an interrupted run left a mutation in the working tree. Still owed: the 136.2 retro-plan (Phase 140 SC1). Left unfixed by decision: the harness-only concurrency-slot leak, and a PRE-EXISTING cross-file test failure (measured at 6 failed on the base vs 5 with the work). Next: Phase 136.1, and the discovery-data lane (148-149)."
+last_updated: "2026-08-21T09:15:00.000Z"
+last_activity: 2026-08-21
 progress:
   total_phases: 19
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 45
   completed_plans: 43
-  percent: 21
+  percent: 26
 ---
 
 # Project State
@@ -21,7 +21,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-20)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** three parallel lanes — passage matching (Phase 144, evaluation, in progress on an unmerged branch), discovery data (Phases 148-149), discovery surfaces (Phase 136.1 next). See `.planning/ROADMAP.md` § Progress for the lane table.
+**Current focus:** three parallel lanes — passage matching (Phase 144, evaluation, in progress on an unmerged branch), discovery data (Phases 148-149), discovery surfaces (136.2 CLOSED and live 2026-08-21; Phase 136.1 next). See `.planning/ROADMAP.md` § Progress for the lane table.
 
 ## Current Position
 

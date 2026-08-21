@@ -740,8 +740,14 @@ exit 0 · one PRE-EXISTING unrelated failure elsewhere in the tree
 gitignored research file — the same stale-pin class as Phase 148 OPS-01) · the full
 non-GUI suite still segfaults at ~68% on this machine, which predates this work.
 
-**Success-criteria status:** SC1–SC7 met. **The retro-plan is still owed** — built inline
-rather than through `/gsd-plan-phase`, so there is no PLAN/SUMMARY pair; Phase 140 SC1.
+**Success-criteria status:** SC1–SC7 met. **CLOSED 2026-08-21** — merged as PR #323
+(`f1d0f94d`) and deployed by the owner the same day. Verified IN PRODUCTION rather than
+inferred from the merge: a bad-bucket request returns 400 (the route is live, not 404),
+that 400 carries the `gs_dl_` completion cookie (the handshake fires on the failure path,
+which is the point of it), and a `%0A`-suffixed token is ignored rather than stamped (the
+`fullmatch` fix is live). Attestation: `136.2-VERIFICATION.md`. **The retro-plan is still
+owed** — built inline rather than through `/gsd-plan-phase`, so there is no PLAN/SUMMARY
+pair; Phase 140 SC1.
 
 **Plans**: built inline 2026-08-20 at owner request (not through `/gsd-plan-phase`); retro-plan owed.
 **UI hint**: yes
