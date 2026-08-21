@@ -796,6 +796,12 @@ def create_parallels_page(initial_text: str = None):
                             # incumbent-vs-Lab choice already is.
                             if passage_mode.value:
                                 passage_mode.value = False
+                                # NiceGUI does not fire 'update:model-value' for
+                                # a programmatic .value assignment (only for a
+                                # real user click), so on_passage_mode_change's
+                                # boundary_mode re-enable would otherwise never
+                                # run -- call it explicitly.
+                                on_passage_mode_change()
                         else:
                             deep_scan.style('display: none;')
                             freq_threshold_row.style('display: block;')
@@ -810,6 +816,19 @@ def create_parallels_page(initial_text: str = None):
                         if passage_mode.value and lab_mode.value:
                             lab_mode.value = False
                             on_lab_mode_change()
+                        if passage_mode.value:
+                            # Finding #2 (adversarial review): passage-matching
+                            # has no cross-paragraph/token-boundary concept --
+                            # PassageSearcher raises ValueError for anything but
+                            # 'full', and web/search_api.py rejects it with 400
+                            # 'passage_option_unsupported'. Forcing + disabling
+                            # here means the UI can never even SEND the
+                            # unsupported value, rather than relying only on
+                            # that rejection.
+                            boundary_mode.value = 'full'
+                            boundary_mode.disable()
+                        else:
+                            boundary_mode.enable()
 
                     passage_mode.on('update:model-value', on_passage_mode_change)
 
@@ -2626,6 +2645,12 @@ def create_parallels_page(initial_text: str = None):
         # build time) -- a request in flight when the passage index becomes
         # unavailable must degrade to "not selected", never crash run_search().
         captured_passage_mode = bool(passage_mode.value) and passage_available() and not captured_lab_mode
+        # Phase 145 finding #10 (adversarial review): computed ONCE here
+        # rather than the 'lab'/'passage'/'chunk' ternary being written twice
+        # (PostHog capture + composition-history params) below.
+        captured_engine = 'lab' if captured_lab_mode else (
+            'passage' if captured_passage_mode else 'chunk'
+        )
         captured_freq_threshold = int(freq_threshold.value) if freq_threshold.value else 50
         captured_deep_scan = deep_scan.value if captured_lab_mode else False
         captured_chunk_size = int(chunk_size.value) if chunk_size.value else 5
@@ -2811,9 +2836,7 @@ def create_parallels_page(initial_text: str = None):
                     'mode': captured_mode,
                     # Phase 145: which backend actually served this search --
                     # 'lab' / 'passage' / 'chunk' (the pre-existing default).
-                    'engine': 'lab' if captured_lab_mode else (
-                        'passage' if captured_passage_mode else 'chunk'
-                    ),
+                    'engine': captured_engine,
                 })
 
                 try:
@@ -2896,9 +2919,7 @@ def create_parallels_page(initial_text: str = None):
                             # re-select any engine toggle today -- lab_mode
                             # included -- so this is observability, not a
                             # restore contract).
-                            'engine': 'lab' if captured_lab_mode else (
-                                'passage' if captured_passage_mode else 'chunk'
-                            ),
+                            'engine': captured_engine,
                             'filters': {
                                 'domains': p_state.filter_domains,
                                 'authors': p_state.filter_authors,
