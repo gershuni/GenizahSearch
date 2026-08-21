@@ -499,15 +499,25 @@ the two apart from the envelope shape alone.
   (`library_filter_mode="exclude"`) is a no-op for passage and is NOT rejected.
 - **Span-shaped `matches[]`.** Each accepted contiguous span of matched text on a manuscript
   page is one `matches[]` entry (`chunk_count` = number of spans, unlike the incumbent's
-  Tantivy-hit-derived count). `score` is the span's matched-letter count — directly
-  comparable to the `chunk` engine's merged-span character score, not a Tantivy relevance
-  score. `manuscript_snippet` / `source_chunk_text` are still `*term*`-marked highlight text
-  (same markup the `chunk` engine emits), built via a bounded re-normalization of only the
-  top-ranked rendered rows.
+  Tantivy-hit-derived count; `chunk_index` is the ordinal of the span's position within the
+  submitted `text`, comparable across different matched manuscripts the same way the
+  `chunk` engine's sliding-window index is). `score` is the span's matched-letter count —
+  directly comparable to the `chunk` engine's merged-span character score, not a Tantivy
+  relevance score. `manuscript_snippet` / `source_chunk_text` are still `*term*`-marked
+  highlight text (same markup the `chunk` engine emits, including sanitizing a literal `*`
+  in the source manuscript text so it is never mistaken for that markup), built via a
+  bounded re-normalization. The row set this engine renders and the row set it returns are
+  always identical — grouped and capped at 200 manuscripts by the same rule `/api/parallels`
+  applies to every method, applied internally rather than left to the caller.
 - **Filtering.** `filters` (domains/authors/works/materials/dates/other libraries) applies
-  as a plain sys_id restriction, same as `chunk`. `mode` (exact/variants/fuzzy), `max_freq`,
-  and the cross-paragraph `boundary_mode`/`boundary_*` knobs have no passage-matching
-  equivalent and are accepted but ignored; `filtered[]` is always `[]` for this method.
+  as a plain sys_id restriction, same as `chunk`. `mode` (exact/variants/fuzzy) and
+  `max_freq` have no passage-matching equivalent and are accepted but ignored;
+  `filtered[]` is always `[]` for this method (via the public API — this endpoint never
+  submits a "known source text" to filter against; see below). `boundary_mode` is NOT
+  silently ignored: only `"full"` (the default) is supported, since passage-matching has no
+  cross-paragraph/token-boundary concept over a letter stream. `boundary_mode: "boundary"` or
+  `"combined"` together with `method='passage'` returns 400 `passage_option_unsupported`
+  rather than quietly behaving as `"full"`.
 - **Timeout.** Its own ceiling, `SEARCH_API_PASSAGE_TIMEOUT` (default 30s; see Environment
   Variables below) — separate from `SEARCH_API_PARALLELS_TIMEOUT`, since the two engines'
   cost models are unrelated. Exceeding it returns 504 `core_timeout`.
@@ -695,6 +705,7 @@ public API surface — renaming any is a breaking change).
 | `composition_too_long` | 400 | `len(text.strip()) > 20000` |
 | `passage_unavailable` | 503 | Phase 145: `method='passage'` requested but `PASSAGE_PARALLELS_ENABLED` is off, or the passage index did not load |
 | `passage_scope_unsupported` | 400 | Phase 145: `method='passage'` + `filters.library` includes `"LOCAL"` in include mode — the passage index holds no Local-corpus records |
+| `passage_option_unsupported` | 400 | Phase 145: `method='passage'` + `boundary_mode` other than `"full"` — passage-matching has no cross-paragraph/token-boundary concept over a letter stream |
 | `passage_search_busy` | 503 + `Retry-After` | Phase 145: passage-matching concurrency budget (`SEARCH_API_PASSAGE_CONCURRENCY`, default 4) exhausted; fail-fast; retry shortly |
 
 See [shared/api_errors.py](../shared/api_errors.py) for the authoritative frozenset.
