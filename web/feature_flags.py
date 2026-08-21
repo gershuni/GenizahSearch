@@ -42,6 +42,18 @@ DISCOVERY_ENABLED = _env_enabled("DISCOVERY_ENABLED", False)
 # noindex is a bounded pre-release window, never a forever de-index.
 DISCOVERY_PUBLIC_RELEASED = _env_enabled("DISCOVERY_PUBLIC_RELEASED", False)
 
+# Phase 145 (passage-matching parallels search, web surface). Default OFF:
+# the flag gates the not-yet-released `method='passage'` option on
+# POST /api/parallels and the method selector on web/pages/parallels.py.
+# Enable with PASSAGE_PARALLELS_ENABLED=1. NOTE: this flag is necessary but
+# NOT sufficient -- the single authoritative predicate
+# web/passage_assets.py::passage_available() ANDs it with the passage
+# index's startup-loaded readiness state (shared/passage_index.py::open_index
+# is itself fail-closed: manifest, layout version, normalizer version, bit
+# budgets, byte order, CSR sanity, declared-vs-actual file sizes), so a
+# flag-ON/index-missing-or-corrupt window still hides cleanly.
+PASSAGE_PARALLELS_ENABLED = _env_enabled("PASSAGE_PARALLELS_ENABLED", False)
+
 
 def web_fgp_enabled() -> bool:
     """Whether FGP transcriptions surface in the WEB version chooser.
