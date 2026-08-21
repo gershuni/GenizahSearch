@@ -619,13 +619,23 @@ standard's top-3 finds through wide's **full** ranked list:
 | wide rank 51+ | 1 |
 | **absent from wide entirely** | **0** |
 
-Nothing is lost — widening only re-ranks, and the displaced finds land mostly
-at ranks 4–10. **The apparent tradeoff is an artefact of a 3-deep display, not
-a property of the retrieval.** Consequences:
+Nothing is *absent* — widening only re-ranks. But the follow-on claim I drew
+from this was **wrong, and an external review (Codex, 2026-08-21) caught it**:
+I wrote that "with a display list of ~10 or deeper, `wide-40` dominates
+`standard-40` outright". The trace refutes that on its own numbers — **9 of
+standard's top-3 finds land at wide rank 11 or worse** (8 at 11–50, 1 at 51+),
+so a 10-deep display does NOT show them. What the trace supports is the
+narrower statement: *not absent from wide's full list*. Consequences, corrected:
 
-- With a display list of ~10 or deeper, `wide-40` dominates `standard-40`
-  outright: every standard find is still there, plus 46 more per 60 queries,
-  half of them same-text.
+- Widening re-ranks rather than discards, and most displaced finds (14 of 23)
+  land at ranks 4–10 where a deeper list recovers them. Nine do not.
+- A 10-deep display is mostly hypothetical anyway: measured on the same 300
+  tune queries, **242 of 300 standard queries (81%) and 203 of 300 wide
+  queries (68%) return fewer than 10 distinct manuscripts**, with medians of
+  1 and 3. "Precision@10" is therefore not the right quantity — most slots do
+  not exist. The product-relevant measure is per-query YIELD (how many
+  same-text manuscripts a reader is actually shown), which is what the next
+  instrument measures.
 - Per-result precision does fall, because the additions are 46%
   quotation/formula: blended top-3 strict ≈ **0.82** for wide against ≈ 0.98
   for standard (the standard figure is carried over from the tune deck, a
@@ -633,11 +643,24 @@ a property of the retrieval.** Consequences:
 - Result-set size at top-3 grows 109 → 130 cells (+19%); at depth the
   medians are 4 against 2.
 
-### Bearing on the default
+### Bearing on the default, and why F1 is not the summary to use
 
-Recall improves at depth (+9.0/+9.3 points recall@50) and nothing is lost, so
-the case for `wide-40` as the default rests on one product question: **how deep
-is the list the reader actually sees.** Deep list → widen. Three-deep list →
-the gain is invisible and the extra quotations are the only visible change.
-This is a UI decision informed by measurement, and it is recorded here rather
-than settled unilaterally.
+Recall improves at depth (+9.0/+9.3 points recall@50) and nothing drops out of
+the full list, so `wide-40` is the stronger retriever. What is NOT yet
+measurable is what a reader sees: precision beyond rank 3 is ungraded for
+every method.
+
+**F1 is the wrong summary here and will not be reported.** Our recall
+denominator is "does the query's own source manuscript surface" (an oracle
+over one target per query); our precision denominator is "what relation does
+each shown manuscript bear to the query" (graded cards). Those are different
+gold universes and their harmonic mean has no product interpretation. On
+external review the recommended single number is **expected non-source strict
+manuscript yield in the actual display**: distinct `same_text`/`paraphrase`
+manuscripts shown per query, counting empty slots as zero — reported beside
+sys-grain known-manuscript recall@10 and the formula/canonical burden.
+
+Also flagged for correction: the union and 5+5 recall rows computed on
+2026-08-21 are **record-grain** calculations, while the product and the next
+deck are manuscript-grain. They must be recomputed at sys grain before being
+used for any decision.
