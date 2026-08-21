@@ -31,20 +31,20 @@ THE INPUT CONTRACT (a deck directory holds three files):
                       views -- each entry names {"view", "rank",
                       "rank_band", "span_band", "stratum", "N_h", "n_h",
                       "pi_h"} for that one (view, stratum) draw. A card
-                      graded once therefore contributes ONCE PER SELECTION,
-                      each at that selection's own `pi_h`.
+                      graded once therefore contributes ONCE PER SELECTION.
   deck_manifest.json  {"cards_hash", "key_hash", "n_cards", "n_queries",
                       "views": {view: {"N_display", "strata": {stratum:
-                      {"N_h", "n_h"}}, "display_counts_by_query":
-                      {query_id: int}}}}. `N_display` is the TRUE
+                      {"N_h", "n_h"}}}}}. `N_display` is the TRUE
                       denominator: the total number of displayed (query,
                       sys_id) cards in that view across the whole panel,
-                      known by design, not estimated from the sample.
-                      `display_counts_by_query` (added 2026-08-21 after the
-                      integration smoke described below) is the per-QUERY
-                      breakdown of that same total: how many displayed
-                      cards THIS view shows for each query_id, summing
-                      exactly to `N_display`.
+                      known by design, not estimated from the sample. As of
+                      the stratified-bootstrap rewrite below, `N_h`/`n_h`
+                      per stratum are the ONLY per-stratum numbers this
+                      module reads from the manifest (a selection's own
+                      carried `n_h`/`N_h`/`pi_h` are still validated for
+                      basic sanity, but the manifest's declared values are
+                      the canonical weight source -- see "KEEP THE WEIGHTS
+                      FIXED" below).
   prereg.json         metadata; must carry a positive "panel_n_queries"
                       (the yield endpoint's denominator has no meaning
                       without it).
@@ -66,77 +66,111 @@ same_text/paraphrase), and its own weighted rate is reported as a separate
 number precisely so a reader of the report is not left guessing how much
 of the "non-strict" mass is corpus artefact versus a genuine miss.
 
-THE 2026-08-21 INTEGRATION-SMOKE FIX -- precision/duplicate_photo_rate
-intervals escaping [0, 1]. The first version of this module's bootstrap
-resampled QUERIES in the numerator only, while dividing every replicate by
-the FIXED, unresampled `N_display` -- correct for the POINT estimate (a
-known population total never needs resampling), wrong for the interval: a
-replicate that happens to draw display-heavy, high-weight queries inflates
-the numerator against a denominator that cannot move with it, so the upper
-bound can exceed 1 -- impossible for a share of display slots. Confirmed on
-a real integration run: `[0.544, 1.486]`, `[0.651, 1.377]`, `[0.581,
-1.502]` on three views whose points were all exactly 1.000.
+TWO INTEGRATION SMOKES, TWO FIXES -- the full, honest history, because the
+first fix was itself found wrong by measuring real output, not just by
+reasoning about it:
 
-The fix (`weighted_ratio_cluster_bootstrap`, used by precision and
-duplicate_photo_rate, both genuine shares of `N_display`): treat it as a
-proper RATIO estimator. Every bootstrap replicate resamples query ids and
-recomputes BOTH the numerator (weighted strict/duplicate contribution) AND
-the matching per-query denominator (that query's own display count, from
-the new `display_counts_by_query`) from the SAME drawn queries, then takes
-their ratio. A query's weight can never be counted on one side of the
-ratio without its own share of the other. The POINT estimate is UNCHANGED
-(`sum(y_i/pi_i) / N_display`, per the instruction that fixing the interval
-must not move the number the point already reports correctly).
+  SMOKE 1 (2026-08-21, real builder output, synthetic all-same_text
+  verdicts): the ORIGINAL bootstrap resampled QUERIES in the numerator
+  only, dividing every replicate by `N_display` held FIXED -- correct for
+  the point estimate, wrong for the interval: a replicate drawing display-
+  heavy queries inflates the numerator against a denominator that cannot
+  move with it. Observed: ci95 upper bounds of 1.486, 1.377, 1.502 on
+  views whose points were all exactly 1.000. FIX 1: a RATIO bootstrap that
+  resampled queries and recomputed a per-query denominator (a new manifest
+  field, `display_counts_by_query`) alongside the numerator.
 
-Because a share of display slots can never legitimately fall outside
-[0, 1], `weighted_ratio_cluster_bootstrap` treats an escaped bound as an
-INTERNAL BUG and refuses (fatal) rather than clip it away -- clipping would
-hide a real defect in the estimator or its inputs behind a plausible-looking
-number. Yield has NO such bound (more than one strict manuscript per query
-is normal and desirable), so it is never clamped or bound-checked; see
-`weighted_cluster_bootstrap`'s own docstring for how its point-vs-bootstrap
-denominator asymmetry works instead.
+  SMOKE 2 (same day, run against REAL smoke-deck data instead of an
+  all-same_text synthetic): FIX 1's own unit-interval guard fired for
+  real, "ci95 upper bound of 1.5247 escaped [0, 1]" -- refusing to clip it
+  away was correct, but the cause was not fixable inside a per-query ratio
+  bootstrap at all. The sampling design is stratified by (view, rank_band,
+  span_band) -- strata that cut ACROSS queries -- while FIX 1's variance
+  estimator clustered by QUERY. Those two do not compose: a card drawn
+  from a thin stratum (measured: pi_h = 4/74, weight 18.5) can belong to a
+  query that itself displays only a handful of cards, so that ONE query's
+  own naive numerator can exceed its own naive local denominator even
+  though the estimator is behaving exactly as designed. Measured on the
+  real smoke deck: 6 of 10 graded S queries, 8 of 14 W queries, and 7 of
+  12 C5 queries had a weighted numerator exceeding their own display
+  count -- this is the NORMAL case for 6-8 of every ~12 graded queries,
+  not a rare edge case. `display_counts_by_query` is consequently GONE
+  from this module: nothing here reads it any more.
+
+  FIX 2 (current): resample the way the deck was actually DRAWN --
+  per STRATUM, not per query. See "KEEP THE WEIGHTS FIXED" below.
+
+KEEP THE WEIGHTS FIXED AT N_h/n_h -- the stratified bootstrap. For each
+view, group every GRADED selection by its stratum. A replicate draws `n_h`
+cards WITH REPLACEMENT from that stratum's graded cards (not from the whole
+design population -- only the graded subset has a known outcome), and every
+draw is weighted at the stratum's OWN `N_h/n_h`, the SAME number for every
+card in that stratum, taken from the manifest, not from any individual
+selection's own carried `pi_h` (which the design intends to equal N_h/n_h
+anyway, but the bound below needs one canonical source, not N separately
+agreeing copies). This bounds the replicate total by construction:
+
+    max replicate numerator = sum over h of  n_h * (N_h / n_h) * 1
+                             = sum over h of N_h
+                             = N_display
+
+-- so precision (and duplicate_photo_rate, the other share-of-slots metric)
+can NEVER exceed 1 no matter what a replicate happens to draw. The
+`unit_interval` guard on `stratified_bootstrap` becomes a true internal-bug
+detector again, rather than a tripwire on the design itself. This equality
+(`sum of stratum N_h == N_display`) is a real invariant of how
+`build_display_deck.py` computes `N_display` -- and `validate_structure`
+now verifies it on the read side (never trust, verify) rather than assuming
+the builder's own bookkeeping is correct on the specific file it produced.
+
+Yield's denominator handling simplifies under this rewrite: since there is
+no more QUERY resampling at all, both the point estimate AND every
+bootstrap replicate divide by the SAME fixed `panel_n_queries` -- the
+point/bootstrap-denominator asymmetry FIX 1 needed for yield (documented as
+D1 below, superseded) is gone; `stratified_bootstrap` takes one `denom`,
+used for both.
+
+RESIDUAL LIMITATION, stated with numbers rather than a bare promise: a
+stratified bootstrap treats cards as independent WITHIN a stratum. That is
+a good approximation here -- measured on the real smoke deck, cards per
+(query, stratum) was {1: 14} for view S and {1: 16, 2: 1} for both W and
+C5, i.e. almost no query contributes TWO cards to the same stratum, so the
+within-stratum-independence assumption costs almost nothing. What the
+stratified bootstrap does NOT model is a query contributing cards to
+DIFFERENT strata: those draws are resampled independently even though they
+describe the same query, so any real correlation between them is missed,
+making the reported interval a (typically modest) UNDERSTATEMENT of the
+true uncertainty. `score()` computes and reports the exposure directly, per
+view, as `multi_stratum_queries` in the JSON output -- "how many queries
+have selections in 2+ distinct strata" -- so a reader can judge the size of
+the understatement on THIS deck rather than take a promise about deck
+design in general.
 
 DESIGN DECISIONS MADE WHERE THE CONTRACT ABOVE WAS SILENT (flagged here
 rather than guessed away quietly -- see the task report for the same list):
 
-  D1. YIELD's bootstrap denominator is FIXED PER REPLICATE but DIFFERENT
-      FROM its point estimate's denominator -- see `weighted_cluster_
-      bootstrap`'s docstring for the full reasoning. This is now the only
-      surviving "fixed denominator" scheme in this module: PRECISION and
-      duplicate_photo_rate no longer use it (see the integration-smoke fix
-      above) precisely because a share-of-slots ratio cannot tolerate a
-      denominator that does not move with a resampled numerator, while a
-      per-query RATE (yield) has no such constraint.
-  D2. The query-resampling universe for a given (view, column) is now the
-      FULL set of queries that view's `display_counts_by_query` names --
-      resolved by the 2026-08-21 fix for any query the view displays
-      something for (a query with zero GRADED cards in that view still
-      resamples correctly, contributing 0 to the numerator and its real
-      display count to the denominator, per the coordinator's
-      "conservative reading"). What remains genuinely unresolvable from
-      the given files: a panel query with LITERALLY ZERO candidates in
-      EVERY view (absent from every view's `display_counts_by_query`,
-      since neither deck_key.json nor prereg.json enumerates the full
-      panel query_id list, only `panel_n_queries`, a count). Such a
-      query's contribution is deterministically zero regardless of being
-      "drawn", so the point estimate is unaffected; the bootstrap variance
-      is very slightly narrower than a hypothetical full-population
-      resample would give.
+  D1. SUPERSEDED by FIX 2 above. Previously: yield's bootstrap denominator
+      was fixed-but-different-from-its-point-estimate's-denominator (a
+      per-query-resampling artefact). There is no query resampling left,
+      so there is nothing left to document here beyond FIX 2's own
+      simplification note.
+  D2. SUPERSEDED by FIX 2 above. Previously described the query-resampling
+      universe for FIX 1's per-query ratio bootstrap; moot now that
+      resampling is per-stratum, not per-query.
   D3. "Restricted to non-source cards" (item 3 of the spec) filters the
-      NUMERATOR only; the denominator -- both the point estimate's fixed
-      `N_display` / `panel_n_queries` AND the ratio bootstrap's per-query
-      `display_counts_by_query` -- is shared, unfiltered, identical between
-      the "overall" and "non_source" columns. A non-source-only
+      NUMERATOR only; the denominator (`N_display` / `panel_n_queries`)
+      is shared, unfiltered, identical between the "overall" and
+      "non_source" columns -- unchanged in spirit from before, now
+      implemented by filtering which GRADED cards enter a stratum's pool
+      rather than which query's contribution counts. A non-source-only
       denominator (i.e. "accuracy among just the non-source slots") is NOT
-      computed, because neither `N_display` nor `display_counts_by_query`
-      is broken out by `is_source` in the given schema, so a true
-      non-source population size is not derivable without fabricating an
-      estimated sub-population (a Hajek-type ratio), which would mix
-      estimator types within one report. The chosen reading is honest and
-      simple to hand-verify: "what share of ALL displayed slots is a
-      genuine non-source strict match" rather than "accuracy specifically
-      among non-source slots".
+      computed, because `N_display` is not broken out by `is_source` in
+      the given schema, so a true non-source population size is not
+      derivable without fabricating an estimated sub-population (a
+      Hajek-type ratio), which would mix estimator types within one
+      report. The chosen reading is honest and simple to hand-verify:
+      "what share of ALL displayed slots is a genuine non-source strict
+      match" rather than "accuracy specifically among non-source slots".
   D4. prereg.json's grade-vocabulary override key name is not given in the
       spec (only "panel_n_queries" is shown in the example). This module
       accepts `prereg["grade_vocabulary"]`, falling back to
@@ -152,7 +186,10 @@ rather than guessed away quietly -- see the task report for the same list):
       "--min-graded N (fatal if fewer graded)" does not say per-view.
   D6. The relation mix by rank band is computed over all graded selections
       in a view (source and non-source combined), not split further by
-      `is_source` -- the spec asks for one such breakdown, not two.
+      `is_source` -- the spec asks for one such breakdown, not two. It now
+      weights by the manifest's canonical `N_h/n_h` (see "KEEP THE WEIGHTS
+      FIXED"), not by each selection's own carried `pi_h`, for the same
+      single-source-of-truth reason.
   D7. The "zero graded cards -> INSUFFICIENT" rule (spec's validation
       section) is applied independently to EACH (view, column) pair, not
       only at the whole-view grain: a view can have plenty of graded
@@ -162,9 +199,7 @@ rather than guessed away quietly -- see the task report for the same list):
   D8. `is_source` is NOT always a bool, despite the input contract's
       "is_source": bool -- `scripts/build_display_deck.py`'s own
       `compute_is_source()` (imported from build_grading_deck.py) returns
-      None when a query row lacks `meta.sys_id`, "so a query file without
-      that field degrades honestly instead of crashing or silently
-      reporting False" (that function's own docstring). This module's
+      None when a query row lacks `meta.sys_id`. This module's
       `non_source_only` filters treat both `False` and `None` as
       "include in the non-source column" (`if non_source_only and
       card.get('is_source'):` only excludes an AFFIRMATIVE `True`) --
@@ -210,7 +245,8 @@ INSUFFICIENT = 'INSUFFICIENT'
 
 # Float slack for the [0, 1] share-of-slots bound check -- large enough to
 # absorb ordinary floating-point division noise, far too small to mask a
-# real escape (the bug this guards against overshot by tenths, not 1e-9).
+# real escape (both smokes this module survived overshot by tenths, not
+# 1e-9).
 UNIT_INTERVAL_EPS = 1e-9
 
 
@@ -240,15 +276,19 @@ def validate_structure(key_list: list, manifest: dict) -> None:
       - every card carries at least one selection;
       - every selection has 0 < pi_h <= 1;
       - every selection has n_h <= N_h (the selection's OWN carried
-        n_h/N_h fields);
+        n_h/N_h fields -- a basic sanity/tamper-evidence check, even
+        though the stratified bootstrap weights by the MANIFEST's
+        declared N_h/n_h, not by these per-selection copies);
       - for every (view, stratum) pair, the number of selections actually
         present in deck_key.json does not exceed that (view, stratum)'s
         n_h as declared in deck_manifest.json (a pair absent from the
         manifest is treated as declaring n_h=0, so any selection against
-        an undeclared view/stratum is refused too).
-
-    See `validate_display_counts` for the SEPARATE, newer set of checks
-    over `display_counts_by_query`.
+        an undeclared view/stratum is refused too);
+      - for every view, the declared strata's N_h values sum EXACTLY to
+        that view's N_display -- the invariant the stratified bootstrap's
+        max-numerator-equals-N_display bound depends on, and a real
+        property of how build_display_deck.py computes N_display, verified
+        here rather than assumed.
     """
     empty_selection_ids = []
     range_violations = []
@@ -278,12 +318,21 @@ def validate_structure(key_list: list, manifest: dict) -> None:
         if actual > n_h_declared:
             cap_violations.append((view, stratum, actual, n_h_declared))
 
+    n_display_mismatches = []
+    for view, view_manifest in sorted(views_manifest.items()):
+        strata_manifest = view_manifest.get('strata') or {}
+        total_N_h = sum(s.get('N_h', 0) for s in strata_manifest.values())
+        n_display = view_manifest.get('N_display')
+        if total_N_h != n_display:
+            n_display_mismatches.append((view, total_N_h, n_display))
+
     if not (empty_selection_ids or range_violations or nh_violations
-            or cap_violations):
+            or cap_violations or n_display_mismatches):
         return
 
     total = (len(empty_selection_ids) + len(range_violations)
-             + len(nh_violations) + len(cap_violations))
+             + len(nh_violations) + len(cap_violations)
+             + len(n_display_mismatches))
     lines = [f'REFUSING to score: {total} structural defect(s) in '
             f'deck_key.json / deck_manifest.json']
     if empty_selection_ids:
@@ -299,83 +348,9 @@ def validate_structure(key_list: list, manifest: dict) -> None:
         lines.append(f'  {len(cap_violations)} (view, stratum) '
                     f'combination(s) exceeding manifest n_h totals: '
                     f'{cap_violations[:5]}')
-    raise SystemExit('\n'.join(lines))
-
-
-def validate_display_counts(key_list: list, manifest: dict) -> None:
-    """Fatal (SystemExit), never a silent skip, on any defect in
-    deck_manifest.json's `display_counts_by_query` (per view: the number of
-    displayed (query, sys_id) cards that view shows for each query -- the
-    per-query denominator the ratio bootstrap needs, added 2026-08-21 after
-    an integration smoke exposed a fixed-denominator bootstrap escaping
-    [0, 1]). Every defect kind is counted across the WHOLE manifest before
-    raising, same fail-closed style as `validate_structure`.
-
-    `scripts/build_display_deck.py` asserts these invariants itself at
-    write time; this is "never trust, verify" on the read side -- this
-    module must not silently assume a producer's own internal assertion
-    always ran, or ran correctly, on the specific file it was handed.
-
-    Checks, per view declared in deck_manifest.json:
-      - `display_counts_by_query` is present and is a mapping;
-      - every value in it is a positive number;
-      - its values sum EXACTLY to that view's `N_display`;
-      - every query_id referenced by ANY selection for that view in
-        deck_key.json is a key in that view's display_counts_by_query (a
-        graded card's query cannot be a mystery to the very denominator
-        its own view's ratio bootstrap needs).
-    """
-    views_manifest = manifest.get('views') or {}
-
-    missing_field = []
-    non_positive = []
-    sum_mismatches = []
-    orphan_queries = []
-
-    selection_queries_by_view: dict = collections.defaultdict(set)
-    for card in key_list:
-        qid = card.get('query_id')
-        for sel in card.get('selections') or []:
-            selection_queries_by_view[sel.get('view')].add(qid)
-
-    for view, view_manifest in sorted(views_manifest.items()):
-        dcbq = view_manifest.get('display_counts_by_query')
-        if not isinstance(dcbq, dict) or not dcbq:
-            missing_field.append(view)
-            continue
-        for qid, count in dcbq.items():
-            if not isinstance(count, (int, float)) or count <= 0:
-                non_positive.append((view, qid, count))
-        total = sum(v for v in dcbq.values() if isinstance(v, (int, float)))
-        n_display = view_manifest.get('N_display')
-        if total != n_display:
-            sum_mismatches.append((view, total, n_display))
-        for qid in selection_queries_by_view.get(view, ()):
-            if qid not in dcbq:
-                orphan_queries.append((view, qid))
-
-    if not (missing_field or non_positive or sum_mismatches
-            or orphan_queries):
-        return
-
-    total_defects = (len(missing_field) + len(non_positive)
-                    + len(sum_mismatches) + len(orphan_queries))
-    lines = [f'REFUSING to score: {total_defects} display_counts_by_query '
-            f'defect(s) in deck_manifest.json']
-    if missing_field:
-        lines.append(f'  {len(missing_field)} view(s) missing or empty '
-                    f'display_counts_by_query: {missing_field}')
-    if non_positive:
-        lines.append(f'  {len(non_positive)} non-positive '
-                    f'display_counts_by_query value(s): {non_positive[:5]}')
-    if sum_mismatches:
-        lines.append(f'  {len(sum_mismatches)} view(s) whose '
-                    f'display_counts_by_query does not sum to N_display: '
-                    f'{sum_mismatches[:5]}')
-    if orphan_queries:
-        lines.append(f'  {len(orphan_queries)} (view, query_id) pair(s) '
-                    f'with a selection but absent from '
-                    f'display_counts_by_query: {orphan_queries[:5]}')
+    if n_display_mismatches:
+        lines.append(f'  {len(n_display_mismatches)} view(s) whose strata '
+                    f"N_h do not sum to N_display: {n_display_mismatches[:5]}")
     raise SystemExit('\n'.join(lines))
 
 
@@ -422,153 +397,107 @@ def graded_selection_count(key: dict, graded: dict, view: str,
     return n
 
 
-def dense_numerator_by_query(key: dict, graded: dict, view: str, predicate,
-                             query_universe, non_source_only: bool = False) -> dict:
-    """{query_id: weighted_sum} for EVERY query_id in `query_universe` --
-    DENSE, never sparse: a query with no matching graded selection gets an
-    explicit 0.0 rather than being omitted, so a cluster bootstrap over the
-    view's FULL set of displaying queries (`query_universe`, from
-    `display_counts_by_query`) can resample it and correctly contribute
-    nothing to the numerator while a ratio bootstrap elsewhere still
-    charges it its real display count in the denominator (D2/D4: the
-    2026-08-21 fix's "conservative reading").
-
-    `query_universe` is trusted to already contain every query any
-    matching selection could reference -- `validate_display_counts`
-    enforces that upstream, so this function does not re-check it on the
-    hot path.
+def count_multi_stratum_queries(key: dict, view: str) -> int:
+    """How many DISTINCT queries have selections in 2+ distinct strata
+    within `view` -- the residual within-query correlation the stratified
+    bootstrap does not model (see the module docstring's "RESIDUAL
+    LIMITATION"). Counted over ALL cards in the key, not just graded ones,
+    because this is a property of the DECK'S DESIGN (which cards were
+    drawn for which query), not of grading progress.
     """
-    out = {q: 0.0 for q in query_universe}
+    strata_by_query: dict = collections.defaultdict(set)
+    for card in key.values():
+        for sel in card.get('selections') or []:
+            if sel.get('view') != view:
+                continue
+            strata_by_query[card['query_id']].add(sel.get('stratum'))
+    return sum(1 for strata in strata_by_query.values() if len(strata) >= 2)
+
+
+def stratum_pools(key: dict, graded: dict, view: str, predicate,
+                  view_manifest: dict, non_source_only: bool = False) -> dict:
+    """{stratum: {'weight': N_h/n_h, 'n_h': n_h, 'graded': [0/1, ...]}} --
+    the per-stratum pool `stratified_bootstrap` draws from. `weight` and
+    `n_h` come from the MANIFEST's declared per-stratum values (the
+    canonical source -- see "KEEP THE WEIGHTS FIXED" in the module
+    docstring), not from any individual selection's own carried `pi_h`.
+    `graded` holds one 0/1 entry per GRADED selection in this (view,
+    stratum) matching `predicate(grade)` (and, if `non_source_only`,
+    excluding source cards) -- its length can be LESS than `n_h` when
+    grading is incomplete; a stratum with nothing graded yet is simply an
+    empty list, which `stratified_bootstrap` treats as a deterministic 0
+    contribution.
+    """
+    strata_manifest = view_manifest.get('strata') or {}
+    out = {}
+    for st, m in strata_manifest.items():
+        n_h = m.get('n_h') or 0
+        N_h = m.get('N_h') or 0
+        out[st] = {'weight': (N_h / n_h) if n_h else 0.0, 'n_h': n_h,
+                  'graded': []}
     for cid, card in key.items():
         if cid not in graded:
             continue
         if non_source_only and card.get('is_source'):
             continue
         grade = graded[cid]
-        if not predicate(grade):
-            continue
+        y = 1 if predicate(grade) else 0
         for sel in card.get('selections') or []:
             if sel.get('view') != view:
                 continue
-            out[card['query_id']] += 1.0 / sel['pi_h']
+            st = sel.get('stratum')
+            if st in out:
+                out[st]['graded'].append(y)
     return out
 
 
-def weighted_cluster_bootstrap(numer_by_query: dict, point_denom: float,
-                               bootstrap_denom: float, resamples: int,
-                               seed: int) -> dict:
-    """Point estimate = sum(numer)/point_denom; CI resamples query ids
-    (query-clustered, mirroring scripts/analyze_paired_outcomes.py's
-    seeded random.Random(seed) + rng.randrange(len(keys)) idiom) and
-    divides each replicate's resampled numerator sum by `bootstrap_denom`
-    -- FIXED per replicate, because every replicate draws the SAME NUMBER
-    of query ids (len(keys)). This is the right shape for YIELD, the only
-    caller left after the 2026-08-21 fix moved precision and
-    duplicate_photo_rate to `weighted_ratio_cluster_bootstrap` instead
-    (see the module docstring's integration-smoke section): yield's
-    natural bootstrap denominator IS that draw count, a per-query RATE,
-    not a resampled display-slot total.
+def stratified_bootstrap(strata: dict, denom: float, resamples: int,
+                         seed: int, *, unit_interval: bool = False) -> dict:
+    """The FIX 2 estimator: point = sum over strata of weight*sum(graded),
+    divided by the FIXED `denom` (N_display for precision/
+    duplicate_photo_rate, panel_n_queries for yield -- see the module
+    docstring's "Yield's denominator handling simplifies"). Each bootstrap
+    replicate independently resamples EVERY stratum: for stratum h with a
+    non-empty graded pool, draw `n_h` items WITH REPLACEMENT from that
+    pool, contributing `weight * (sum of the n_h draws)`; a stratum with
+    nothing graded contributes a deterministic 0. The replicate total is
+    divided by the SAME fixed `denom` used for the point -- there is no
+    query resampling left anywhere in this module, so nothing about the
+    denominator varies between the point estimate and any replicate,
+    unlike FIX 1's yield asymmetry (superseded, see D1).
 
-    `point_denom` and `bootstrap_denom` are DELIBERATELY not always equal
-    (D1): yield's point divides by the pre-registered `panel_n_queries`
-    (the full panel size, a stable cross-deck constant used so the
-    headline number is comparable across decks and views regardless of
-    how many queries any one view happened to display something for),
-    while its bootstrap CI divides by `len(keys)` (the number of queries
-    THIS VIEW actually displays anything for, which can be smaller than
-    `panel_n_queries` if some panel queries have zero candidates in this
-    view). The CI therefore characterises sampling variability in the
-    rate among DISPLAYING queries, on a potentially different scale than
-    the panel-wide point estimate -- both are correct for what they
-    separately claim to measure. Yield has no upper bound (more than one
-    strict manuscript per query is normal), so unlike the ratio bootstrap,
-    nothing here is ever asserted into [0, 1].
+    This construction bounds the replicate total by n_h*weight=N_h per
+    stratum (at most, when every draw happens to be a 1), so the total can
+    never exceed sum(N_h)=N_display -- `validate_structure` verifies that
+    equality on the read side. `unit_interval=True` still asserts (fatal,
+    never silently clipped) that the point AND both CI bounds fall in
+    [0, 1] past a tiny float epsilon, but it is now a genuine internal-bug
+    detector: on a correctly-validated deck, this bound is a mathematical
+    certainty, not a design tripwire (see the module docstring's two
+    integration-smoke fixes for why FIX 1's version of this same guard was
+    NOT a tripwire-free certainty, and fired for real).
     """
-    keys = sorted(numer_by_query)
-    point = sum(numer_by_query.values()) / point_denom if point_denom else 0.0
+    contributing = [(s['weight'], s['n_h'], s['graded'])
+                   for s in strata.values() if s['graded']]
+    point_total = sum(weight * sum(graded_list)
+                      for weight, _n_h, graded_list in contributing)
+    point = point_total / denom if denom else 0.0
 
     rng = random.Random(seed)
     stats = []
     for _ in range(resamples):
-        s = 0.0
-        for _ in range(len(keys)):
-            g = keys[rng.randrange(len(keys))]
-            s += numer_by_query[g]
-        stats.append(s / bootstrap_denom if bootstrap_denom else 0.0)
+        total = 0.0
+        for weight, n_h, graded_list in contributing:
+            m = len(graded_list)
+            for _ in range(n_h):
+                total += weight * graded_list[rng.randrange(m)]
+        stats.append(total / denom if denom else 0.0)
     stats.sort()
 
     def q_(p: float) -> float:
         return stats[min(len(stats) - 1, int(p * len(stats)))]
 
-    return {
-        'point': round(point, 4),
-        'ci95': [round(q_(0.025), 4), round(q_(0.975), 4)],
-        'n_groups': len(keys),
-    }
-
-
-def weighted_ratio_cluster_bootstrap(numer_by_query: dict, denom_by_query: dict,
-                                     point_denom: float, resamples: int,
-                                     seed: int, *, unit_interval: bool = False) -> dict:
-    """A RATIO bootstrap for share-of-display-slots estimators (precision,
-    duplicate_photo_rate): each replicate resamples query ids with
-    replacement and recomputes BOTH the numerator and the matching
-    denominator from the SAME drawn queries, then takes their ratio --
-    unlike `weighted_cluster_bootstrap`, whose bootstrap denominator is a
-    single FIXED number shared by every replicate.
-
-    Why this exists (the 2026-08-21 integration-smoke bug this function
-    fixes -- see the module docstring for the full account): holding
-    `N_display` fixed while only resampling the numerator lets a replicate
-    that happens to draw display-heavy, high-weight queries inflate the
-    numerator against an unchanged denominator, producing a CI bound
-    ABOVE 1 -- impossible for a share of display slots. Resampling the
-    matching per-query denominator alongside the numerator keeps both
-    sides of the ratio drawn from the SAME queries, so a query's weight is
-    never counted on one side without its own share of the other.
-
-    `numer_by_query` and `denom_by_query` MUST share the same key set --
-    the FULL, dense set of queries this view displays anything for
-    (`deck_manifest.json`'s `display_counts_by_query`), not just the
-    subset with a graded card: a displaying-but-ungraded query still
-    consumes real denominator mass and must be resampleable, contributing
-    0 to the numerator and its true display count to the denominator (D2,
-    the coordinator's "conservative reading").
-
-    `point_denom` is the FIXED, external population constant (`N_display`)
-    the POINT estimate divides by -- UNCHANGED by this fix; only the CI
-    changed.
-
-    unit_interval: a share-of-slots point AND its CI bounds can never
-    legitimately fall outside [0, 1]. If they do (checked against the
-    UNROUNDED bootstrap quantiles, past a tiny float epsilon), that is an
-    INTERNAL BUG in the estimator or its inputs -- refuse loudly rather
-    than clip the number away, so a real defect is never hidden behind a
-    plausible-looking, silently-truncated one.
-    """
-    keys = sorted(numer_by_query)
-    if sorted(denom_by_query) != keys:
-        raise SystemExit(
-            'INTERNAL BUG: numerator and denominator query universes '
-            'differ in a ratio bootstrap -- refusing to resample a '
-            'mismatched pair')
-    point = sum(numer_by_query.values()) / point_denom if point_denom else 0.0
-
-    rng = random.Random(seed)
-    stats = []
-    for _ in range(resamples):
-        num = den = 0.0
-        for _ in range(len(keys)):
-            g = keys[rng.randrange(len(keys))]
-            num += numer_by_query[g]
-            den += denom_by_query[g]
-        stats.append(num / den if den else 0.0)
-    stats.sort()
-
-    def q_(p: float) -> float:
-        return stats[min(len(stats) - 1, int(p * len(stats)))]
-
-    lo_raw, hi_raw = q_(0.025), q_(0.975)
+    lo_raw, hi_raw = (q_(0.025), q_(0.975)) if stats else (0.0, 0.0)
 
     if unit_interval:
         for label, val in (('point', point), ('ci95 lower bound', lo_raw),
@@ -583,16 +512,25 @@ def weighted_ratio_cluster_bootstrap(numer_by_query: dict, denom_by_query: dict,
     return {
         'point': round(point, 4),
         'ci95': [round(lo_raw, 4), round(hi_raw, 4)],
-        'n_groups': len(keys),
+        'n_groups': len(contributing),
     }
 
 
-def relation_mix_by_rank_band(key: dict, graded: dict, view: str) -> dict:
+def relation_mix_by_rank_band(key: dict, graded: dict, view: str,
+                              view_manifest: dict) -> dict:
     """{rank_band: {"n": int, "mix": {grade: weighted_fraction}}} for every
-    GRADED selection in `view`, weighted by 1/pi_h and normalised to sum to
-    1 within each band (D6: source and non-source combined). A band with
-    zero graded selections is simply absent -- never a fabricated entry.
+    GRADED selection in `view`, weighted by the manifest's canonical
+    N_h/n_h per stratum (D6) and normalised to sum to 1 within each band
+    (source and non-source combined). A band with zero graded selections
+    is simply absent -- never a fabricated entry.
     """
+    strata_manifest = view_manifest.get('strata') or {}
+
+    def weight_of(stratum):
+        m = strata_manifest.get(stratum) or {}
+        n_h = m.get('n_h') or 0
+        return (m.get('N_h', 0) / n_h) if n_h else 0.0
+
     weights: dict = collections.defaultdict(lambda: collections.defaultdict(float))
     counts: collections.Counter = collections.Counter()
     for cid, card in key.items():
@@ -602,7 +540,7 @@ def relation_mix_by_rank_band(key: dict, graded: dict, view: str) -> dict:
         for sel in card.get('selections') or []:
             if sel.get('view') != view:
                 continue
-            weights[sel.get('rank_band')][grade] += 1.0 / sel['pi_h']
+            weights[sel.get('rank_band')][grade] += weight_of(sel.get('stratum'))
             counts[sel.get('rank_band')] += 1
     out = {}
     for band, grade_weights in weights.items():
@@ -651,7 +589,6 @@ def score(deck_dir: str, verdicts_path: str, *, min_graded: int = 0,
             f'was edited or regenerated without re-baking the manifest.')
 
     validate_structure(key_list, manifest)
-    validate_display_counts(key_list, manifest)
 
     key = {c['id']: c for c in key_list}
 
@@ -694,11 +631,10 @@ def score(deck_dir: str, verdicts_path: str, *, min_graded: int = 0,
     views_out = {}
     for view, view_manifest in sorted((manifest.get('views') or {}).items()):
         N_display = view_manifest.get('N_display')
-        display_counts = view_manifest.get('display_counts_by_query') or {}
-        query_universe = set(display_counts)
         entry = {
             'n_display': N_display,
             'n_graded_selections': graded_selection_count(key, graded, view),
+            'multi_stratum_queries': count_multi_stratum_queries(key, view),
             'precision': {},
             'yield': {},
             'duplicate_photo_rate': {},
@@ -711,23 +647,23 @@ def score(deck_dir: str, verdicts_path: str, *, min_graded: int = 0,
                 entry['yield'][column] = INSUFFICIENT
                 entry['duplicate_photo_rate'][column] = INSUFFICIENT
                 continue
-            strict_numer = dense_numerator_by_query(
-                key, graded, view, lambda g: g in STRICT, query_universe,
+            strict_strata = stratum_pools(
+                key, graded, view, lambda g: g in STRICT, view_manifest,
                 non_source_only=non_source_only)
-            dup_numer = dense_numerator_by_query(
+            dup_strata = stratum_pools(
                 key, graded, view, lambda g: g == DUPLICATE_PHOTO,
-                query_universe, non_source_only=non_source_only)
-            entry['precision'][column] = weighted_ratio_cluster_bootstrap(
-                strict_numer, display_counts, N_display,
-                cluster_resamples, cluster_seed, unit_interval=True)
-            entry['yield'][column] = weighted_cluster_bootstrap(
-                strict_numer, panel_n_queries, len(query_universe),
-                cluster_resamples, cluster_seed)
-            entry['duplicate_photo_rate'][column] = weighted_ratio_cluster_bootstrap(
-                dup_numer, display_counts, N_display,
-                cluster_resamples, cluster_seed, unit_interval=True)
+                view_manifest, non_source_only=non_source_only)
+            entry['precision'][column] = stratified_bootstrap(
+                strict_strata, N_display, cluster_resamples, cluster_seed,
+                unit_interval=True)
+            entry['yield'][column] = stratified_bootstrap(
+                strict_strata, panel_n_queries, cluster_resamples,
+                cluster_seed)
+            entry['duplicate_photo_rate'][column] = stratified_bootstrap(
+                dup_strata, N_display, cluster_resamples, cluster_seed,
+                unit_interval=True)
         entry['relation_mix_by_rank_band'] = relation_mix_by_rank_band(
-            key, graded, view)
+            key, graded, view, view_manifest)
         views_out[view] = entry
 
     return {
@@ -768,9 +704,8 @@ def render_report(res: dict) -> list:
     lines.append(f'{"view":<{w}} {"N_display":>9} {"precision(overall)":>26} '
                 f'{"precision(non-src)":>26} {"yield(overall)":>20} '
                 f'{"yield(non-src)":>20}')
-    lines.append(f'  (weighted, query-clustered bootstrap, seed '
-                f'{res["cluster_seed"]}, {res["cluster_resamples"]} '
-                f'resamples)')
+    lines.append(f'  (stratified bootstrap, seed {res["cluster_seed"]}, '
+                f'{res["cluster_resamples"]} resamples)')
     lines.append('-' * (w + 106))
     for v in views:
         e = res['views'][v]
@@ -785,7 +720,8 @@ def render_report(res: dict) -> list:
         lines.append(f'{v}  duplicate_photo_rate: '
                      f'overall={fmt(e["duplicate_photo_rate"]["overall"])}  '
                      f'non_source={fmt(e["duplicate_photo_rate"]["non_source"])}'
-                     f'  n_graded_selections={e["n_graded_selections"]}')
+                     f'  n_graded_selections={e["n_graded_selections"]}'
+                     f'  multi_stratum_queries={e["multi_stratum_queries"]}')
         for band, m in sorted((e.get('relation_mix_by_rank_band') or {}).items(),
                               key=lambda kv: str(kv[0])):
             mix = '  '.join(f'{g}:{frac:.2f}' for g, frac in
