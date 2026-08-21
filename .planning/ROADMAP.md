@@ -46,19 +46,56 @@ Fold the SEED-029 corpus-wide same-work text-reuse map (275,894 tier-A page-leve
 - **BAND-04** — per-surface recall-honesty disclaimer wording (fixed at application time per surface).
 - Also settled here: final band-selection / distilled row counts, the neutral work-title curation/review workflow, and atlas scope (static starfield vs bounded interactivity).
 
+**SCOPE ADDED 2026-08-20 (second re-map).** The milestone now carries three lanes, not one. The
+discovery surface lane (136.1 → 139b) is unchanged. Two more were entered because work was happening
+in them with no phase to belong to: a **discovery data lane** (148, 149) for the V4.1/V4.2
+reference-expansion track and the serving-performance work that landed after the 2026-08-16
+ratification, and a **passage-matching lane** (141-147) — a second selectable parallels method,
+owner-planned outside GSD and already substantially built on an unmerged branch, placed inside
+v9.0.0 by owner decision as the **desktop release's headline**, v9.0.0 having shipped web-only on
+2026-08-16. If the desktop release must go first, 141-147 re-cut cleanly into v9.1.0.
+
 ## Phases
 
 **Phase Numbering:** integer phases are planned milestone work; decimal phases (e.g., 133.1) are urgent insertions marked INSERTED, appearing between their surrounding integers.
 
 - [x] **Phase 133: Visual Atlas Preview (early quick win)** - Offline layout bake → static, canon-masked corpus-overview asset on a standalone `/atlas` beta page, deployed early under the REL-01 atlas-preview exception. **CLOSED 2026-07-21** — live in production (`ATLAS_PREVIEW_ENABLED=1`), re-confirmed 2026-07-29.
 - [x] **Phase 134: Discovery Data Spine** - Masked, versioned `discovery.db` sidecar + async DiscoveryService + frozen-frame & budget artifacts; proves masking, event-loop safety, and fail-open. **CLOSED 2026-07-23** on spine success criteria SC1–SC3 (all met by the v1 build); the owner-review data-quality re-distill (discovery-v2) is re-bracketed as Phase 135's leadoff task, gated on the twin census.
-- [x] **Phase 135: Precision Certificate & Confidence Bands** — CLOSED 2026-07-28 (9/9). ✅ **CERT-01 MEASURED = PASS**: owner graded all 280 cards catalogue-blind, validator 12/12; pre-registered weighted precision **0.9382, 95% CI [0.9084, 0.9644]** vs the 0.85 Strict floor (`135-09-CERT01-MEASUREMENT.md`). Public-scope (Sefaria-only) subgroup 0.9580 CI [0.9240, 0.9847] — descriptive, not pre-registered. ⚠ Still open for Phase 139: `band_precision` has NOT been re-baked (`tier_a` carries no number yet — needs `--precision-spec` + deploy), the CERT-02 outcome copy is unapplied, and the per-stratum spread (1.000 ja → 0.471 msource:medium) must reach the BAND-05 methods page. CERT-01 stays `Pending` until those land. Liturgical-containment FP class (one work = 45% of error; D-17 structurally can't catch it) → **discovery-v3** candidate (renamed from "v2.1" 2026-08-05, `docs/specs/discovery-v3-naming.md`). Data-driven four-band display contract + bilingual methods page + pre-registered tier-A precision measurement (grades in parallel). **Leadoff task = the discovery-v2 data re-distill** (canonical merge + w001239 drop + `work_relations` + Lever-1 coverage routing + (B) band-enum rename; plan `docs/specs/discovery-v2-bake-plan.md`; gated on the SEED-029 census) — the band/precision/display contract binds against v2, not v1.
-- [ ] **Phase 136: Read Surfaces — Connections Panel & Work→Witnesses** - Browse "computed identifications" panel (banded, masked evidence) + `/work/{id}` witness-map page grouped by codicological unit + computed identifications on `/catalog-browse` + a corpus-wide findings page. **SCOPE EXPANDED 2026-07-30** (owner): the novelty axis (NOVEL-01/02) moves IN from post-136, VIS-01 is homed here, and ONE authorized rebuild + flag-OFF redeploy is the first gate.
+- [x] **Phase 135: Precision Certificate & Confidence Bands** — CLOSED 2026-07-28 (9/9). ✅ **CERT-01 MEASURED = PASS**: owner graded all 280 cards catalogue-blind, validator 12/12; pre-registered weighted precision **0.9382, 95% CI [0.9084, 0.9644]** vs the 0.85 Strict floor (`135-09-CERT01-MEASUREMENT.md`). Public-scope (Sefaria-only) subgroup 0.9580 CI [0.9240, 0.9847] — descriptive, not pre-registered. ⚠ Still open, now homed in **Phase 139a**: `band_precision` has NOT been re-baked (`tier_a` carries no number yet — needs `--precision-spec` + deploy), the CERT-02 outcome copy is unapplied, and the per-stratum spread (1.000 ja → 0.471 msource:medium) must reach the BAND-05 methods page. CERT-01 stays `Pending` until those land. Liturgical-containment FP class (one work = 45% of error; D-17 structurally can't catch it) → **discovery-v3** candidate (renamed from "v2.1" 2026-08-05, `docs/specs/discovery-v3-naming.md`). Data-driven four-band display contract + bilingual methods page + pre-registered tier-A precision measurement (grades in parallel). **Leadoff task = the discovery-v2 data re-distill** (canonical merge + w001239 drop + `work_relations` + Lever-1 coverage routing + (B) band-enum rename; plan `docs/specs/discovery-v2-bake-plan.md`; gated on the SEED-029 census) — the band/precision/display contract binds against v2, not v1.
+- [x] **Phase 136: Read Surfaces — Connections Panel & Work→Witnesses** - Browse "computed identifications" panel (banded, masked evidence) + `/work/{id}` witness-map page grouped by codicological unit + computed identifications on `/catalog-browse` + a corpus-wide findings page. **SCOPE EXPANDED 2026-07-30** (owner): the novelty axis (NOVEL-01/02) moves IN from post-136, VIS-01 is homed here, and ONE authorized rebuild + flag-OFF redeploy is the first gate. **CLOSED 2026-08-08** — 22/22 on the code. The checkbox was left unticked when the Progress table was reconciled on 2026-08-16, so this file said Complete and In Progress about the same phase; `init.manager` read the checkbox and reported `roadmap_complete: false`. Ticked 2026-08-20.
+- [x] **Phase 136.2: Findings Export (xlsx)** - An Excel export of `/computed-identifications` over the reader's current filters, carrying the same rows, labels and excerpt text the page itself renders. **NEW 2026-08-20 (owner).** Scope decisions taken at request time: findings page only (not the connections panel), the WHOLE filtered set uncapped (not the current page), and reference text INCLUDED. Trips the masking sweep's copy/export absence assertion by design — closing that is the phase's main gate, not a side task.
 - [ ] **Phase 137: Community Judgments — Hardening** - **RETITLED 2026-08-16 (owner: "ratify reality").** A beta reviews feature shipped 2026-08-13 outside any plan and is live: it meets JUDGE-03 and JUDGE-05, partially meets JUDGE-02. This phase's job is no longer to build from zero but to close the two it **structurally fails** — JUDGE-01 (votes overwrite instead of appending a superseding event; no band captured at judgment time) and JUDGE-04 (one row per review instead of an aggregate; moderation mutates status columns instead of writing separate append-only events) — plus a live role-matrix test for JUDGE-02. Carries a live-data migration question: vote history for judgments already cast under overwrite semantics is not recoverable.
 - [ ] **Phase 138: Leads Queue** - `/leads` high-recall R-B screening lane, explicitly uncertified, canon-lane caveated, same voting. **Unchanged — the one later phase where nothing was pulled forward** (`web/pages/findings.py` still renders the mode strip's leads tab as "Coming soon"; no `/leads` route exists).
 - [ ] **Phase 139a: Release Hardening & REL-01 Gate Closure** - **SPLIT OUT 2026-08-16.** Close the five REL-01 gate items still open at the 2026-08-08 flag flip, re-run the cross-surface masking sweep over the three surfaces that shipped after the last attestation (2026-08-05), and apply or explicitly defer the CERT-02 tier-A copy. Cheap relative to 139b and unblocks the "beta → released" transition.
 - [ ] **Phase 139b: Atlas Drill-down & Homepage Capstone** - Server-bounded drill-down explorer (absorbing/upgrading the preview page) + SEO/i18n/RTL/a11y/observability. **SC2 (the CLS-safe homepage band) shipped early on 2026-08-12/13** (`c413d5e9`, `fcb1eb8e`) and is retro-credited: it was correctly gated in code on `discovery_available()`/`atlas_preview_available()` rather than on a bare flag. The still-unbuilt explorer is the highest-risk surface in the milestone and remains the first candidate to cut to fast-follow.
 - [ ] **Phase 140: Milestone Bookkeeping & Debt Closure** - **NEW 2026-08-16.** Retro-plan the two production-affecting features that have no plan trace (the relation matrix, the excerpt bake), reconcile the `STATE.md`↔ROADMAP novelty-run contradiction, and decide the phase home for the reference-expansion track (discovery-v3 / V4 / V4.1) and the locus track. Mostly documentation plus one owner-decision checkpoint; sequenced FIRST because every other phase plans against numbers this phase makes true.
+
+### Passage-matching parallels search (phases 141-147, desktop lane)
+
+**ADDED 2026-08-20.** A second selectable parallels method: the discovery pipeline's
+character-level seed-and-extend matcher brought to composition search, proven or disproven against
+the shipped token-window method before any default changes. Owner-planned outside GSD and already
+substantially built on branch `claude/computed-id-parallels-search-a7c8fd` (20 commits, unmerged).
+Placed **inside v9.0.0** by owner decision as the desktop release's headline, v9.0.0 having shipped
+web-only. Full plan: `docs/plans/passage-matching-parallels-search.md`.
+
+- [x] **Phase 141: Passage Matching — Algorithm Specification** - One tracked, self-contained spec for the character-level matcher: normalization, gram coding, index orientation, diagonal-keyed candidate generation, the two verification boundaries, one minimum-span contract, mandatory Stage-0 hygiene, the DF/budget policy, a parameter table with provenance, and an explicit "not established" section. **BUILT on branch** — `docs/specs/passage-matching-algorithm.md` v1, 13 sections (`ce7c8beb`); the 25/30/40 minimum-span conflict is settled and classified as query policy, not an artifact input.
+- [x] **Phase 142: Passage Matching — Spike, Closed-Subset Comparator & GO/NO-GO** - Build over a corpus slice, measure the artifact, benchmark the two constructions, choose DF cap / stride / budget policy, and compare both methods validly at small scale before any multi-GB artifact exists. **BUILT on branch** — `docs/specs/passage-index-build-measurements.md`, 7 sections. Findings that overturned the plan: `spool` beat mass-partitioned `scatter` and needs no scratch; batching by records cost 3 GB of RAM; the query caps were "pure waste"; the author's own rarity proposal was refuted by his own measurement (`f2e19e1a`).
+- [x] **Phase 143: Passage Matching — Shared Engine, Builder & Full Index** - The ported normalizer, the corpus-resident CSR index, the query path, the release verifier, and the full-corpus build. **BUILT on branch** — full-corpus index built, a cap that truncated by catalog position removed, 5 s queries down to 0.6 s (`b9d5c594`); normalizer ported byte-exact against 737k letters of real corpus (`bf17eb67`); the release verifier's own sampled order check was caught letting a corrupted artifact pass (`318a0336`).
+- [ ] **Phase 144: Passage Matching — Full-Scale Evaluation & Default Decision** - Four instruments, both methods, page-scoped comparator, frozen eligible-page manifest, per-method rank strata, and the pre-declared non-inferiority endpoints. **IN PROGRESS on branch, tuning split only — the holdout has never been touched.** Interim FGP self-retrieval at n=120: passage recall@50 **0.750** [0.666, 0.819] against the incumbent's **0.708** [0.622, 0.782] at `chunk_size=3` — **intervals overlap heavily, so there is no demonstrated recall difference**; sweeping the incumbent's chunk size overturned the author's own conclusion (`7cc50fe7`), and a corpus inequality worth 26% was found and fixed (`926bb1c9`). Passage separates on RANKING and speed, not retrieval: recall@1 0.592 vs 0.467, MRR 0.639 vs 0.533, 391 ms vs 14,565 ms (37x).
+- [ ] **Phase 145: Passage Matching — Web Surface** - `method: 'chunk' | 'passage'` on the parallels API with scope rejection, a fail-closed asset loader mirroring `web/discovery_assets.py`, its OWN `ThreadPoolExecutor` sized to its semaphore, a safe highlight contract with an RTL+LTR DOM matrix, an i18n inventory, and declared cold-cache SLOs before deploy.
+- [ ] **Phase 146: Passage Matching — Desktop Surface & Release** - Method selector with the enforced `local`/`all` scope restriction, a background build worker (never `__init__`, never the UI thread) with progress/checkpoint/free-space preflight, stale-index detection from the input manifest, then flip-or-don't-flip per Phase 144 and the v9.0.0 desktop release.
+- [ ] **Phase 147: Passage Mode on Regular Search (optional)** - A fourth `search_mode`, gated on its OWN comparison against `execute_search(..., mode="fuzzy")`. Instruments 1-4 compare composition methods and cannot license a regular-search change.
+
+### Discovery data lane (phases 148-149, parallel)
+
+**ADDED 2026-08-20.** Homes the reference-expansion and operability work that landed after the
+2026-08-16 ratification with no phase to belong to. Numbered after 147 only because 141-147 were
+already claimed by in-flight work — these are **not** sequenced behind the passage track and 148
+carries a live operational risk.
+
+- [ ] **Phase 148: Reference Expansion & Bake Reproducibility** - Records V4.1 + V4.2 as shipped and closes what they left open: the checked-in V4.2 recipe **cannot rebuild the artifact production serves** (two stale hash pins fail closed, so rollback-by-rebuild does not currently exist), the Track-1 matcher non-monotonicity behind the owner-accepted 103-identification loss, and the scoping of discovery-v3 — which Phase 136.1's reference-side display waits on.
+- [ ] **Phase 149: Discovery Performance & Operability** - The findings page costs ~2 s with 1.1-3.0 s unaccounted for; a second index candidate on `discovery_identification` (P3); and two fixes made 2026-08-19 that are **written but not deployed** (perf-watch misattributing every slow request, `/admin` blocking the event loop on every page build). Source: `docs/specs/discovery-performance-situation-2026-08-20.md`.
 
 ## Phase Details
 
@@ -74,7 +111,7 @@ Fold the SEED-029 corpus-wide same-work text-reuse map (275,894 tier-A page-leve
   3. An asset-level masking scan passes over the shipped atlas asset and the page's rendered output (no reference-corpus text, sigla, or provenance; the restricted source appears in committed material only as "M-source") — the forerunner of the permanent DATA-05 guard.
   4. The page meets its performance basics — static payload within the PERF-01 atlas byte cap, no request-time computation, CLS-safe render — and EN/HE + RTL basics for this page only (page chrome + labels).
   5. The beta page is live in production ahead of every claim surface, clearly labeled as a beta/preview, per the owner's first-deployable-artifact priority.
-  6. A small claim-free homepage teaser card links to `/atlas` under the widened ATLAS-PREVIEW exception — CLS-safe, no claim-level statements, gated by the dedicated atlas-preview flag, masking-scan-clean, EN/HE + RTL, and `noindex` until the REL-01 gate (the full homepage discovery band remains Phase 139).
+  6. A small claim-free homepage teaser card links to `/atlas` under the widened ATLAS-PREVIEW exception — CLS-safe, no claim-level statements, gated by the dedicated atlas-preview flag, masking-scan-clean, EN/HE + RTL, and `noindex` until the REL-01 gate (the full homepage discovery band was Phase 139's, now **139b SC2** — and it shipped early on 2026-08-12/13, retro-credited).
 
 **Plans**: 6 plans (5 waves)
 
@@ -131,7 +168,7 @@ Plans:
 ### Phase 135: Precision Certificate & Confidence Bands
 
 **Goal**: The four-band confidence model is displayable everywhere with data-driven labels and honest status copy, a bilingual methods page documents each band, and a pre-registered tier-A precision measurement is drawn against the frozen frame and enters grading — so no claim can ever appear without its band and status.
-**Depends on**: Phase 134 (frozen-frame artifact + sidecar band metadata). CERT-01's frame freezes AFTER Phase 134 distillation stabilizes; its grading runs as a research track IN PARALLEL with Phases 136–138 and its completed certificate gates public promotion in Phase 139 (REL-01).
+**Depends on**: Phase 134 (frozen-frame artifact + sidecar band metadata). CERT-01's frame freezes AFTER Phase 134 distillation stabilizes; its grading runs as a research track IN PARALLEL with Phases 136–138 and its completed certificate gates public promotion in **Phase 139a** (REL-01) — though the flag was in fact flipped ahead of that gate on 2026-08-08; see the REL-01 section below.
 **Requirements**: BAND-01, BAND-02, BAND-03, BAND-04, BAND-05, CERT-01, CERT-02
 **Success Criteria** (what must be TRUE):
 
@@ -173,7 +210,7 @@ Plans:
 
 ### Phase 136: Read Surfaces — Connections Panel & Work→Witnesses
 
-**Goal**: A researcher browsing a manuscript sees its computed same-work identifications and related manuscripts — banded, masked, with our-text-only evidence, and honestly framed as text matches rather than asserted identifications — can navigate to a per-work witness-map page grouped by codicological unit, and can sweep the whole corpus for findings that no finding aid already records. Everything ships behind the flag; nothing goes public until Phase 139.
+**Goal**: A researcher browsing a manuscript sees its computed same-work identifications and related manuscripts — banded, masked, with our-text-only evidence, and honestly framed as text matches rather than asserted identifications — can navigate to a per-work witness-map page grouped by codicological unit, and can sweep the whole corpus for findings that no finding aid already records. Everything ships behind the flag; nothing goes public until Phase 139. *(Historical — written before the flag flip. `DISCOVERY_ENABLED=1` in production since 2026-08-08 and these surfaces are public; the sentence is kept as the phase's own record, not as current policy.)*
 
 **⚠ SCOPE EXPANDED 2026-07-30** (owner, `136-CONTEXT.md`; discuss-phase ran both the real-data mockup gate and the Codex adversarial gate before planning). Four decisions reshape this entry:
 
@@ -182,7 +219,7 @@ Plans:
 - **Two NEW surfaces** beyond the panel and the work page: computed identifications on `/catalog-browse`, and a corpus-wide **findings page** with its own nav entry (owner: *"a big new amazing feature… maximum ability to see new findings"*).
 - **ONE rebuild + ONE production redeploy** (flag-OFF) is the first execution gate — the surfaces need stored fields the frozen v2 asset does not carry, and the owner authorized exactly one, not a series.
 
-**Depends on**: Phase 135 (band-display contract + methods page + certificate framework; CERT-01 measured PASS — weighted 0.9382 CI [0.9084, 0.9644]). Builds on the LIVE v2 asset, NOT on the gen-2 evidence refresh — that becomes **discovery-v3** in its own later phase (D-01). ⚠ **Renamed 2026-08-05:** this line read "discovery-v2.1" until Phase 136's own additive rebuild took that name on 2026-08-03 (`docs/specs/discovery-frames-v2.1.md` — built, deployed, currently serving), at which point the sentence read as waiting on something already shipped. Rationale and the full list of affected records: `docs/specs/discovery-v3-naming.md`. Translations, RTL, and accessibility are built into these surfaces from line one per house convention; comprehensive cross-surface i18n/RTL/a11y verification is gated in Phase 139.
+**Depends on**: Phase 135 (band-display contract + methods page + certificate framework; CERT-01 measured PASS — weighted 0.9382 CI [0.9084, 0.9644]). Builds on the LIVE v2 asset, NOT on the gen-2 evidence refresh — that becomes **discovery-v3** in its own later phase (D-01). ⚠ **Renamed 2026-08-05:** this line read "discovery-v2.1" until Phase 136's own additive rebuild took that name on 2026-08-03 (`docs/specs/discovery-frames-v2.1.md` — built, deployed, currently serving), at which point the sentence read as waiting on something already shipped. Rationale and the full list of affected records: `docs/specs/discovery-v3-naming.md`. Translations, RTL, and accessibility are built into these surfaces from line one per house convention; comprehensive cross-surface i18n/RTL/a11y verification is now **Phase 139b SC3** — and since the surfaces are already public it is a live quality obligation, not a pre-launch gate.
 **Requirements**: PANEL-01, PANEL-02, VIS-01, NOVEL-01, NOVEL-02 — and this phase AMENDS BAND-03 + BAND-05 (no precision percentages anywhere; qualitative methods page) plus `discovery-band-labels-v1.md` §2/§3 and `discovery-budgets.md`. **PANEL-03, WORK-01 and WORK-02 moved to Phase 136.1** (owner, 2026-08-02).
 **Success Criteria** (what must be TRUE):
 
@@ -240,15 +277,22 @@ until this phase lands, then become links — no dead ends at either stage.
 live inside a one-to-two week window. Nothing here was cut for being unwanted; it was cut for being
 off the shortest path to a live surface.
 
+**STATUS 2026-08-20 — 1 of 6 criteria, and the one that moved was met by a different mechanism.**
+The excerpt / "View text match" view shipped 2026-08-13 (`74702fa8` + follow-ups) outside any plan.
+It satisfies the *user-visible* half of SC1 but not the specified one: excerpts are **baked at build
+time**, not offset-validated at render time, so the version-drift fail-closed behaviour SC1 exists to
+guarantee is not the mechanism in production. SC2's per-work `reuse_ok` licence gate is **not
+visibly enforced** in `scripts/bake_discovery_excerpts.py`. SC3, SC4 and SC5 are unbuilt — no route
+exists for `/work/{id}` or for the `/catalog-browse` integration, so work titles are still dead text.
+
 **Depends on**: Phase 136 (the trimmed rebuild, the deployed asset, and both launch surfaces must
 exist before there is anywhere to link from). **PANEL-03's reference-side display additionally waits on
-discovery-v3** — the gen-2 evidence bake, **not** `docs/specs/discovery-frames-v2.1.md`, which is already
-built and deployed; this line said "discovery-v2.1" until 2026-08-05 and therefore read as blocked on a
-shipped artifact (see `docs/specs/discovery-v3-naming.md`). `w_start`/`w_end` and the Sefaria versemap resolution were trimmed out of Phase 136's
-rebuild (owner, 2026-08-02) because they serve only the reference locus and the side-by-side view, and
-they carried the build's hardest work (the `body` ↔ `norm_stream` coordinate mapping). **The our-text-only
-evidence highlight does NOT wait** — it uses the page-side `span_start`/`span_end` offsets that already
-ship, so the evidence view can land in two stages if that is faster.
+discovery-v3**, whose scoping is now homed in **Phase 148** — it is not `docs/specs/discovery-frames-v2.1.md`,
+which is built and deployed (see `docs/specs/discovery-v3-naming.md`). `w_start`/`w_end` and the Sefaria
+versemap resolution were trimmed out of Phase 136's rebuild (owner, 2026-08-02) because they serve only
+the reference locus and the side-by-side view, and they carried the build's hardest work (the `body` ↔
+`norm_stream` coordinate mapping). **The our-text-only evidence highlight does NOT wait** — it uses the
+page-side `span_start`/`span_end` offsets that already ship.
 
 **Requirements**: PANEL-03, WORK-01, WORK-02
 
@@ -258,43 +302,495 @@ ship, so the evidence view can land in two stages if that is faster.
      highlighting only where offsets exist, failing closed on HTR-version drift. The stored offsets index
      the NORMALIZED letter stream (652 chars off on the sampled case if sliced raw), the result must be
      clipped per line (72 of 148 rows vs 1, silently), one renderer must emit both discovery spans and
-     search-term highlights, and the highlight drops on version change.
+     search-term highlights, and the highlight drops on version change. **Partially met by the shipped
+     build-time excerpt bake; the render-time validation and the drift fail-close are what remain.**
 
   2. Reference text renders only where the acquisition manifest's per-work `reuse_ok` is `yes` (277 works),
      carrying `attribution_text` where the licence requires it; `unclear` (46), `noncommercial_only` (1) and
      **absent** (21 — every JA work) all fail closed, asserted on the absence of the flag too. M-source
-     never renders.
+     never renders. **Not met — the gate is not visibly enforced in the shipped bake script.**
 
   3. A `/work/{id}` page lists all identified carriers grouped by codicological witness unit (joined
      fragments appear as ONE witness), AND-composed filters, server-side pagination with the real total,
-     deterministic sort, and counts that count units rather than claim rows. No tier filter.
+     deterministic sort, and counts that count units rather than claim rows. No tier filter. **Not met.**
 
   4. `/catalog-browse` carries computed identifications alongside catalogued ones, visibly separated and
-     separately worded.
+     separately worded. **Not met.**
 
-  5. Work titles on the Phase 136 surfaces become links to `/work/{id}`.
+  5. Work titles on the Phase 136 surfaces become links to `/work/{id}`. **Not met.**
+
   6. Every surface hides cleanly with the flag off or the sidecar absent, stays inside the PERF-01
      budgets, and passes the masking scan on rendered output, JSON payloads, copy/export and error paths.
+     **The excerpt view is already covered by the masking sweep** (`test_discovery_masking_sweep.py::_excerpt_loader`,
+     six states, dated 2026-08-13); the unbuilt surfaces are not.
 
 **Plans**: TBD — **seed from the six already-written, checker-verified plans** archived at
 `.planning/phases/136-read-surfaces-connections-panel-work-witnesses/superseded-2026-08-02/`:
 136-17 (offset renderer), 136-22 (gate-3 decisions), 136-23 (evidence view), 136-24 (work service
 extension), 136-25 (`/work/{id}` page), 136-26 (titles + `/catalog-browse`). Replan against them rather
-than from scratch — they passed the plan-checker on 2026-08-02.
+than from scratch — they passed the plan-checker on 2026-08-02, but 136-23 must now be replanned
+*against the shipped excerpt bake* rather than against a blank page.
 **UI hint**: yes
 
-### Phase 137: Community Judgments
+### Phase 136.2: Findings Export (xlsx)
 
-**Goal**: Logged-in users can confirm / reject / annotate any stored work-witness or MS–MS relation claim, captured append-only in Supabase as a structurally separate display layer that never touches band assignment, precision, or ranking.
-**Depends on**: Phase 136 (there is nothing to judge until claims render on the panel + work pages) + Supabase auth. REL-01 sequences this phase internally: Supabase migration + security smoke FIRST, then the judgment UI goes live.
-**Requirements**: JUDGE-01, JUDGE-02, JUDGE-03, JUDGE-04, JUDGE-05
+**⚠ NEW 2026-08-20**, at owner request, entered before implementation rather than after.
+
+**Goal**: A reader looking at `/computed-identifications` can download the result set they are
+looking at as a bilingual Excel workbook — the same rows, the same labels, the same excerpt text
+the page renders, and the same honest states where text is unavailable.
+
+**Depends on**: Phase 136 (the shipped findings page, its filter/sort state, and the
+`discovery_excerpt` table). Independent of Phase 136.1 — it needs nothing 136.1 delivers, and
+136.1 needs nothing from here.
+
+**Requirements**: EXPORT-01, EXPORT-02, EXPORT-03
+
+**Scope decisions taken by the owner at request time (2026-08-20), each after the trade-off was
+stated:**
+
+| Decision | Choice | What it costs |
+|---|---|---|
+| Surface | Findings page only | The connections panel keeps its verified no-egress status. |
+| Row scope | **Whole filtered set, UNCAPPED** | The main pool alone is 9,523 rows over 6,755 manuscripts, on a box with one uvicorn worker. Bounded concurrency and a batched excerpt read carry the load instead of a row cap. |
+| Text | **Reference text INCLUDED** | Same content the live page already shows, so no new class of exposure — but the export inherits the `reuse_ok` enforcement gap recorded against Phase 136.1 SC2. |
+
+**THE GOVERNING RULE — one data path, not two.** The export is a *projection of what the surface
+renders*. Where the sidecar carries no work-side pieces for an identification, the cell carries the
+same honest "not available for display" string the page shows. The export therefore cannot contain
+text the surface itself would not show, and the new masking class scans a subset of already-swept
+content. Any column that would require reaching past `shared/discovery_surface_projection.py` for
+data the page does not have is out of scope by construction — that allowlist exists because a
+renderer-level assertion was already proven to act too late.
+
+**Why the masked-corpus question does NOT reopen here**: `scripts/bake_discovery_excerpts.py`
+already resolves it at bake time. ~70% of identifications matched a reference edition whose text
+must never ship; for the Tanakh subset (~93% of that mass) the span is re-projected into the
+public-domain Sefaria text, with the masked stream used only as an in-memory alignment query and
+"never written to the output DB, a log line, an exception message, or a temp file". Non-Tanakh
+masked works get no work-side pieces at all.
+
 **Success Criteria** (what must be TRUE):
 
-  1. A logged-in user casts ONE editable judgment per claim (✓ / ? / ✗ + optional note + optional typed refinement) on the panel and work pages; changing a vote inserts a superseding DB-enforced append-only event, and each judgment persists claim id, claim type, sidecar version, and the band shown at judgment time.
-  2. The `work_witness_judgments` Supabase schema ships with RLS + explicit GRANTs (2026-05-30 rule) + role-matrix tests; note free-text is private by default (owner + moderators) via the simplest safe RLS posture.
-  3. Community judgments never affect band assignment, precision copy, ranking, or certified styling — verified as a structurally separate layer.
-  4. Aggregate judgment signals (including explicit disagreement counts) are visible on claims; free-text annotations are captured but NEVER publicly rendered in v9; admin hide/spam are append-only moderation events in a separate table and hidden/spam judgments are excluded from aggregates.
-  5. Judgment writes are abuse-resistant — per-user rate limits, annotation length limits, input escaping/sanitization — and a Supabase security smoke passes before the voting UI goes live.
+  1. A download on `/computed-identifications` returns an .xlsx over the reader's CURRENT filter and
+     sort state, covering the whole filtered set rather than the rendered page, with bilingual
+     headers and conditional RTL matching the house export convention.
+
+  2. **The masking sweep gains a fifth egress class rather than losing its fourth.** The copy/export
+     class today records a *verified absence* (`_COPY_EXPORT_APIS` asserted at zero across the four
+     surface modules); this phase converts that to a scoped inventory in which the findings page's
+     `ui.download` is the one expected hit. Two things must hold or the class is theatre:
+     **`web/discovery_export_service.py` is added to the scanned surface list** — omitting it repeats
+     the reviews-surface defect exactly, where the asserted absence was true of the scanned set and
+     false of the product — and the capture **opens the workbook and reads CELL VALUES**, because a
+     byte scan of deflated XML sees nothing. Mutation-proven at both data and code level, each
+     mutation watched red by name.
+
+  3. **No precision figure reaches a cell**, and every band/relation label comes from
+     `discovery_band_labels.py` / `discovery_display_strings.py` rather than a literal. Those helpers
+     raise on a missing vocabulary entry while callers swallow, which drops the element silently —
+     so the export asserts on the presence of the label, not merely on the absence of a crash.
+
+  4. **The excerpt read is batched.** `_query_excerpt_for_identification` is one query per
+     identification; uncapped over the main pool that is 9,523 separate SQLite queries. A chunked
+     `IN (...)` read projected through `surface_safe_excerpt` replaces it — the same fix shape as the
+     citation-range P1 (`4f6e31f4`, 10,478 ms → 97 ms).
+
+  5. **The export has its OWN concurrency budget and its OWN `ThreadPoolExecutor` sized to it.**
+     Two semaphores over one unconfigured pool are two names for one budget, which already cost a fix
+     in `shared/discovery_service.py`; see `docs/specs/discovery-budgets.md` §2/§3. An export must not
+     be able to starve the browse path.
+
+  6. The route hides cleanly when the flag is off or the sidecar is absent, degrades honestly on
+     timeout or overload rather than returning a short file that looks complete, and reports any
+     limit that fires. A truncated export presented as a whole one is a correctness defect, not a
+     tuning choice.
+
+  7. `web/pages/findings.py` still does not contain the substring `_service` — a comment naming the
+     shared module's path has reddened that layering gate before.
+
+**BUILT 2026-08-20** (inline, at owner request), then hardened across three adversarial
+Codex rounds. What shipped:
+
+| | |
+|---|---|
+| Surface | A download control on the `/computed-identifications` result bar |
+| Route | `GET /api/export/computed-identifications` — **stateless**, every filter a query parameter |
+| Measured | **28,635 rows in 52.9 s** on the default view against the real artifact (144 pages at the 200-row ceiling + 58 chunked excerpt batches, dev box) |
+| Budget | `DISCOVERY_MAX_CONCURRENT_EXPORT_QUERIES=2`, own executor. Verified live that ONLY the `export` executor was built — neither the heavy nor the browse budget was touched |
+| Sheets | Identifications · About this export (two, after the rework below) |
+
+**Two columns were removed and one added, all three after reading the renderer rather
+than the spec:** no BAND column (the grain exposes `best_band_rank` and no band label,
+and `_render_row_meta` refuses to derive one — "a second band vocabulary"); no
+comparison-source column (`novelty_source_label` is not in `SURFACE_FINDING_FIELDS`, so
+it would have been blank in every row of every export); and a **Catalogued as** column,
+injected from the same `csv_bank` the row renderer reads, because omitting the
+library's own title made the file quietly less informative than the screen.
+
+### Reworked the same day, on the owner's reading of a real export
+
+The file was built, downloaded and read, and four things were wrong with it. None
+was caught by any gate, because every one of them is a question about what a
+reader does with the file rather than about what the file contains.
+
+| Owner instruction | What was wrong | What changed |
+|---|---|---|
+| "add credit to Stoekl et al." | The workbook carried thousands of lines of MiDRASH automatic transcription and named nobody. | A **Credits** block on the About sheet, from `shared.export_utils.MIDRASH_CREDIT_LINES`. |
+| "remove ↳ in מיקום בחיבור" | `locus_subline` prefixes a row-layout cue that says "this line belongs to the title above it" — a relationship a column header states already, and a glyph that breaks sorting and copy-paste. | `locus_subline(..., cue=False)`. One helper still owns the address. |
+| "add highlight of the parallel texts, like in the parallel search export" | The passages were flat text, so the matched words — the whole reason the row is in the file — were invisible. | Red-and-bold rich text via `shared.export_utils.build_rich_snippet_cell`, the SAME helper the search and parallels exports use. |
+| "add the texts on the same rows with the findings and perhaps shorten them" | The passages sat on a second sheet: judging a match meant joining two sheets on a shelfmark that repeats across rows. | The text sheet is **retired**; five evidence columns ride on the finding's own row, with context abbreviated to 160 characters a side. |
+
+**THE MATCHED SPAN IS NEVER ABBREVIATED**, only the context around it, and every
+cut is marked with an ellipsis. A clipped claim in a downloaded file is
+indistinguishable from a short match, which is the defect this whole surface is
+written against; an unmarked cut is a claim about the page that the file is not
+entitled to make.
+
+Three things the rework had to get right that were not in the instruction:
+
+* **The alignment offsets are indices, so the flattening had to be
+  length-preserving.** `frag_hl` / `work_hl` are char offsets INTO the span
+  piece. `clean_text_single_line` — the obvious helper — collapses a CR-LF pair
+  to one space and runs of spaces to one, which would slide every later offset
+  left and highlight the wrong words, silently, and only on rows that happen to
+  contain a line break. `_flatten` maps one character to one character.
+* **The marker is a character that occurs in source text.** An odd number of
+  literal `*` in an excerpt would have inverted the highlight of everything
+  after it; every chunk is scrubbed before ours go in, and a test plants one.
+* **A mirror drifts.** The pane emits HTML and a cell cannot, so `_marked_span`
+  mirrors `findings_rows._compose_excerpt_piece` rather than calling it. Both
+  are now driven over the same inputs — malformed intervals included — and the
+  highlighted TEXT compared, so there cannot quietly become two highlight
+  vocabularies.
+
+Two defects were found by reading the renderer while doing the merge, neither of
+them in the instruction: the automated-transcription qualifier was stamped on
+**every** row (asserting machine reading over the FGP and PGP transcriptions
+that are human work — `_render_panes` appends it for `text_layer == 'htr'`
+only), and the retired text sheet had retyped the two passage headers and
+already drifted on the Hebrew ("קטע מכתב היד" against the pane's "קטע כתב היד").
+Both headers now come from `ds.excerpt_strings`.
+
+The citation itself was **deduplicated rather than copied a fourth time**: it
+was written out verbatim in `web/export_service.CREDITS_TEXT`,
+`shared/export_dossier._CREDITS_LINES_*` and `genizah_app.py`, each declaring
+one of the others canonical. The two WEB copies now compose from one constant
+in `shared/export_utils.py`, and the change was proved byte-identical against a
+snapshot of every credits variant (en/he, local-only, desktop app name) before
+and after. **`genizah_app.py` still carries its own literal copy** — the desktop
+app is a separate release line and was not touched in a web change; that is a
+follow-up, and this record says so rather than claiming a dedup that did not
+happen (Codex round 4 caught the overclaim). A stale citation credits the wrong
+record, which is worse than none.
+
+### Round 4 — the rework went back to Codex, and six more things were wrong
+
+Two of the six were only findable by measuring the artifact, which is why they
+survived the suite:
+
+* **A quarter of the passages were ALREADY abbreviated, and nothing said so.**
+  `bake_discovery_excerpts.pieces()` caps a span at 600 stream letters, joins
+  its head and tail with a visible `⋯` and flags the row — **10,968 of 48,270
+  fragment spans (22.7%) and 12,212 work spans (25.3%)**. Neither the page nor
+  the export mentioned it, so the mark sat inside a quoted passage meaning
+  nothing, and the About sheet's claim that "the matched passage is never
+  shortened" was false for one row in four. The flags are now read and named
+  (`clipped_note`, a new entry in the shared vocabulary), and the About wording
+  is corrected.
+* **The credit spoke for transcriptions MiDRASH did not make.** 2,759 excerpts
+  are FGP and 87 are PGP — human work by other projects, 5.9% of the artifact.
+  The blanket "these are MiDRASH transcriptions" would have misattributed all
+  of them. The credit is now conditional on the mark the transcription-note
+  column already carries.
+
+The other four: the work side was treated as present if ANY of its three pieces
+was truthy, where `_render_panes` keys the whole pane on `work_span` (an export
+that would have shown context as an edition passage where the page says the
+edition is unavailable — the retired text sheet had the same bug, and no row in
+the live artifact is in that state, which is why nothing caught it); a matched
+run consisting of literal marker characters lost its highlight to the escaping
+rule; the context clip returned 162 characters from a function documented as
+bounded by 160; and nothing bounded a passage before `sanitize_text_for_excel`'s
+blind 32,700-character truncation, which could have cut between a marker pair
+and inverted the highlight for the rest of the cell.
+
+**Answering "perhaps shorten them" honestly.** The measurement says the context
+is *already* short — the bake caps it at 90 characters a side, so the 160-char
+clip added here never fires on this artifact and stands only as a display bound
+against a future wider bake. What makes a cell long is the MATCH itself:
+average 480 characters, longest 1,756, and a quarter of those are already
+`⋯`-abbreviated upstream. Cutting further means cutting matched text, which has
+a research cost, so it is left as an owner decision rather than taken here.
+
+**Cost, measured** (Codex round 4 asked and nothing in the repo answered it):
+at 28,635 rows with real lengths, the build takes **66.3 s** and produces a
+**5.8 MB** workbook; the same rows without rich text take 14.0 s. The highlight
+therefore costs about **+23 s**, linear in rows (verified at 4,000 and 28,635),
+and peak traced allocation is single-digit MB because `write_only` streams. The
+whole request still fits inside `DISCOVERY_EXPORT_TIMEOUT=300`, but the margin
+narrowed from roughly 5.7× to 3×, and that is worth knowing before the corpus
+grows. (An earlier reading of 374 s was **tracemalloc's own overhead**, not the
+builder — recorded here because it nearly produced a false alarm.)
+
+> **Not fixed, and recorded rather than hidden:** `sanitize_text_for_excel`
+> drops every character above U+FFFD, so an astral-plane character is lost from
+> any cell. That is pre-existing behaviour of the shared sanitizer that every
+> export in this repository has, the live artifact contains none, and changing
+> it would touch the search and dossier exports too.
+
+**Rework verification:** **149 tests** in the export suite (with a gate for each
+of the ten rework properties and each of the six round-4 findings) · the masking
+sweep re-run over the new cell layout · **21/21 mutations watched red by name**
+(the original five, ten for the rework, six for the round-4 fixes), one of which — M13 — caught this
+suite's own vacuity first: the credit test compared `MIDRASH_CREDIT_LINES`
+against cells built FROM `MIDRASH_CREDIT_LINES`, so mutating the constant left
+it green. It now pins published literals, which is the "a gate must change with
+the artifact, not with the fixture" rule this project has paid for before.
+
+### 2026-08-21 — three more from reading a real download
+
+| Owner report | What was actually wrong | What changed |
+|---|---|---|
+| "One row per work / per manuscript gives a useless xlsx — no expandable id, so no ms id and no text" | Those units are **GROUP BY grains**. `_FINDINGS_UNIT_SELECT` writes NULL into `identification_id`, `sys_id` and `shelfmark_display` on the work grain, and into the work, author and relation columns on the manuscript grain. On the page that is complete because the row carries an **expander**; the export had no equivalent, so it wrote a title and two counts — and with a NULL `identification_id` there was no excerpt to attach either. | The export now walks the **group grain for its ORDER** and the **leaf grain for its ROWS**, which is the expander's own contract ("the children come from the same read at the leaf grain with this key pinned"). The grouping survives as columns instead of a disclosure triangle. |
+| "The 'Preparing your file' card stays after the download ended" | A `ui.download` is a browser navigation. Nothing reports back to the server *or to the page*, and `type='ongoing'` is Quasar's `timeout: 0` — so the card had **no event that could ever dismiss it**. | A one-shot cookie handshake: the page mints a token, the route stamps it on **every** response (200, 400, 503, 504), the page polls for it and clears the card. A spinner that only stops on success is a spinner that hangs on failure. |
+| "Users should be warned before a very large download starts" | Nothing said how big the file was or how long it would take. | A confirmation above 2,000 rows, with the row count in it — and a **different sentence for the grouped units**, because "{rows} rows" is false there: the file is one row per identification, so a view of 3,000 works is tens of thousands of rows. |
+
+**The grouping table stopped being two tables.** `EXPANSION_KEY_BY_UNIT` lived in
+`web/components/findings_rows.py`, and the export needed the same mapping from
+the other side of the layering guard. Rather than copy it, it moved to
+`shared/discovery_service.py` and the page imports it — one object with two
+readers, asserted by identity (`fr.EXPANSION_KEY_BY_UNIT is
+EXPANSION_KEY_BY_UNIT`), because an export grouping on a column the page no
+longer expands on still produces a perfectly plausible file.
+
+**Two defects the new tests found on their own, neither of them in the report:**
+
+* `start_export` wrapped **the download itself** in the `except` that makes the
+  handshake best-effort, so a download that never started dismissed its own
+  card and reported nothing — a reader would watch the spinner tidy itself away
+  and get no file. Only the WAIT is best-effort now.
+* The findings page's awaited-call gate (no nested offload, no direct service
+  call) refused `await ui.run_javascript`. It was right to: the rule is that
+  every awaited call resolves to a declared wrapper. The exception admitted is
+  **structural** — the receiver must be the name `ui` — so it cannot widen into
+  "anything with a familiar-looking attribute".
+
+**A short GROUP walk costs the ORDER, not the rows**, and that distinction is
+carried out in the meta rather than folded into `walk_complete`: the leaves it
+could not place sort to the end and the About sheet says so. Marking a complete
+file incomplete is a smaller error than the reverse, but it is still a false
+statement, and this surface's whole discipline is that the file does not make
+statements nobody measured.
+
+### Finishing the mutation battery — and the false sentence it was hiding
+
+The nine mutations added for the 2026-08-21 fixes were anchor-verified but never
+run: a session teardown killed the battery mid-cycle, and it left **M22 applied
+in the working tree** — `leaf_unit = unit  # MUTANT`, which is precisely the
+defect the owner had just reported. A residue scan caught it before staging.
+That is luck, not a process, so the harness changed first: a byte-exact backup
+plus a journal naming it, written BEFORE the mutation lands and cleared only
+after the restore verifies, with `atexit`, `SIGINT` and `SIGTERM` all running
+the same repair and the next run repairing before it does anything else. Proven
+by driving the harness's own `_arm` and `_repair` through an `os._exit(9)` —
+which skips atexit and every handler — against `shared/discovery_service.py`
+itself: the killed process left the mutation in the file, and a fresh process
+restored it byte-exact.
+
+**M24 came back GREEN, and it was not merely an unwatched line.**
+`export_group_order_complete` has THREE causes — leaves that matched no group, a
+group walk that tripped its page guard, and a group count that came back
+approximate — and the About sheet asserted ONE of them for all three: *"Some
+rows could not be placed in their group and appear at the end."* In the
+approximate case every row IS placed, because an approximate count does not
+shorten the walk; the bound is dropped and it still ends on a short page. So the
+file told the reader to look for something that was not there. And
+`_grain_sentence` prints `export_group_count` as a flat number, so a capped
+count arrived in the sheet **stated as a count** — the thing CLAUDE.md calls "a
+correctness defect, not a tuning choice" for `DISCOVERY_FINDINGS_COUNT_MAX`,
+landing in the one artifact a reader cannot check against the page.
+
+The umbrella flag stays conservative and still goes False for all three; what
+changed is that the service now carries WHICH cause fired
+(`export_group_unplaced`, `export_group_count_approximate`) and the workbook
+says only what is true — the rows-moved sentence when rows really moved, the
+count named as a ceiling when it is one, and nothing when nothing is wrong.
+
+The green was possible because the only test on that flag truncates the group
+walk's ITEMS, which lands on the `unplaced` branch and never reaches the line
+M24 mutates. The mutation was sound and the watch was pointed elsewhere — the
+same shape as M13, one layer further out.
+
+**33/33 mutations watched red by name**, in one run, with a residue scan the
+run cannot skip. Two new tests cover the causes nothing was watching (an
+approximate group count, and a group walk stopped by its page guard), and three
+new mutations watch the fix: the rows-moved sentence printed off the umbrella
+again (M31), the ceiling disclosure dropped (M32), and the unplaced count never
+reaching the workbook (M33).
+
+### A pre-existing concurrency-slot leak, found on the way past
+
+Running the masking sweep before any other discovery test in the same process
+made `test_page_id_accessor_runs_off_the_event_loop` fail with `busy` — from a
+budget it never used. Measured after the rendered capture: the service's
+semaphores read **0/24 (browse) and 0/4 (heavy)**. 28 slots acquired and never
+returned, all from `get_related_pages_enveloped_async` (24) and
+`get_work_expansion_enveloped_async` (4).
+
+**The mechanism.** `_run_off_loop` hands ownership of the slot's release to
+`fut.add_done_callback`, deliberately: a `run_in_executor` thread cannot be
+cancelled, so a timed-out read has to keep its slot until the thread ACTUALLY
+finishes rather than until the awaiter gives up. That callback is scheduled on
+the loop that created the future — and the capture drives each render through
+its own `asyncio.run()`, which closes its loop the moment the coroutine returns.
+A read that timed out leaves a thread whose completion callback has nowhere to
+run, and the slot is gone for the life of the process.
+
+**Production is not affected.** The web app has ONE long-lived loop, so the
+callback always fires and the slot always comes back. Only a harness that
+creates and destroys loops can lose them. This does, however, look like the
+explanation for the note already sitting in `_run_off_loop` about an off-loop
+dispatch assertion that "measures ZERO dispatches under a multi-file run and
+passes alone… It is not the explanation for that failure, which is still open."
+
+**The first attribution run was WRONG, and the reason is worth keeping.** It ran
+the pre-136.2 commit in a git worktree, which passed cleanly — so the leak was
+briefly recorded as newly introduced. A worktree has none of this repository's
+gitignored data: with no `discovery_data/`, the sweep there issued **0** slot
+acquisitions instead of 51 and could not have leaked anything. Given the live
+sidecar via `GENIZAH_DISCOVERY_DATA_DIR`, the same commit leaks the same 28
+slots from the same two call sites. A code comparison that is silently a data
+comparison is worse than no comparison, because it produces a confident answer.
+
+**What was done, and what was not.** The sweep now hands the budgets back on
+module teardown, with the measurement written next to it: a test file that
+silently consumes a global resource makes every later failure a mystery. The
+concurrency primitive was NOT changed. Making a slot survive its loop means
+replacing the budget's `asyncio.Semaphore` with a loop-independent one, in code
+that took three adversarial review rounds to get right, and that is not a change
+to make inside an export-UX task. It is scoped work if the owner wants it.
+
+### The three review rounds, and what they were worth
+
+**Round 1 — CHANGES-REQUIRED, defects in 7 of 8 areas.** The two that mattered most were
+invisible from inside the change:
+
+* **The workbook build ran on the event loop.** The collector was correctly off-loop; the
+  builder was then called inline in the async route. openpyxl writing ~28,600 rows is
+  seconds of CPU on a server with ONE uvicorn worker, outside the export slot and outside
+  the timeout.
+* **Raw query values were reflected into cells.** A crafted URL could put arbitrary text
+  — an unqualified percentage, a restricted name — into a downloaded file that carries our
+  provenance sheet. A reflected value is worse in an artifact than on a page, because the
+  file outlives the request and travels without its URL.
+
+Also round 1: the walk used the reported total as a stopping condition, which
+generated false completeness; the excerpt chunk size had no ceiling against SQLite's
+999-parameter limit; a mid-walk sidecar loss silently produced a file with every text
+column empty; and the justification for attaching excerpts after validation was simply
+false — `_walk_nodes` IS recursive, so they are now attached BEFORE it and get checked.
+
+**Round 2 — CHANGES-REQUIRED, 5 more.** The fix for the event-loop block had created a
+second reservation: walk and build each took their own slot, so a request whose walk had
+finished could be refused at build re-entry, and one request could hold two full
+timeouts. Both halves now run in ONE executor crossing. Also: `novelty` was
+membership-checked but not cardinality-bounded; a tripped page guard reported
+"unverifiable" instead of "incomplete"; the version snapshot was taken before the excerpt
+read but never after; the egress inventory still missed the route itself; and
+`request.base_url` — the client-controlled **Host header** — was being baked into every
+link in the workbook.
+
+**Round 3 — CHANGES-REQUIRED, 2 left, both fixed.** The artifact snapshot compared only
+`sidecar_version`, which this module's own cache comments say is NOT unique across a
+resolved-path swap; it now compares `(path, version)`. And the presence half of the
+egress inventory had fallen back to a source scan for the media-type token, which was
+vacuous twice over — it matched prose, and `web/api.py` serves other spreadsheet routes,
+so deleting THIS route's media type would still have satisfied it. It is now pinned to
+the route's function definition via AST.
+
+> **The round-3 fixes were not themselves put through a fourth review round.** They are
+> small and covered by the suite, but the record should not imply an approval that was
+> never given: the final Codex verdict on file is CHANGES-REQUIRED against the code as it
+> stood BEFORE those two fixes.
+
+### What the project's own gates caught, independently of Codex
+
+* **The masking sweep's copy/export class went red the moment the button landed** — which
+  is what it was for. It recorded a verified ABSENCE of any copy/export egress; that is
+  now a scoped inventory naming each one, plus a FIFTH capture class that opens the
+  workbook and reads CELL VALUES (a byte scan of deflated XML sees nothing, and a test
+  plants a needle to prove exactly that).
+* **The mutation battery found the new check's own vacuity.** Deleting the export's
+  `ui.download` call left the gate GREEN, because the words survived in the docstring of
+  the function that had stopped calling it — the mirror image of the comment that once
+  reddened this page's layering gate. The presence half is now AST-based. **5/5 mutations
+  red by name** on the final code.
+* **The VIS-01 audience proof refused to be bypassed.** It enumerates every public
+  coroutine in `web/discovery.py` and failed because the export was an unregistered read
+  path. It is now registered with a builder stub that RAISES, so if the audience gate ever
+  let a private artifact through, the proof fails loudly instead of passing on an empty
+  workbook. That test also drove the return contract: an envelope with a `content` key
+  rather than a tuple, so this read is not the one the proof cannot judge.
+
+**Verification:** 363 passed across the masking sweep (36), the export suite (20), the
+audience proof (47) and the findings render smoke (260) · `ruff` clean · `check_docs.py`
+exit 0 · one PRE-EXISTING unrelated failure elsewhere in the tree
+(`test_cert01_grading_validator.py`, a stale `seftja_dates_sha256` pin against a
+gitignored research file — the same stale-pin class as Phase 148 OPS-01) · the full
+non-GUI suite still segfaults at ~68% on this machine, which predates this work.
+
+**Success-criteria status:** SC1–SC7 met. **CLOSED 2026-08-21** — merged as PR #323
+(`f1d0f94d`) and deployed by the owner the same day. Verified IN PRODUCTION rather than
+inferred from the merge: a bad-bucket request returns 400 (the route is live, not 404),
+that 400 carries the `gs_dl_` completion cookie (the handshake fires on the failure path,
+which is the point of it), and a `%0A`-suffixed token is ignored rather than stamped (the
+`fullmatch` fix is live). Attestation: `136.2-VERIFICATION.md`. **The retro-plan is still
+owed** — built inline rather than through `/gsd-plan-phase`, so there is no PLAN/SUMMARY
+pair; Phase 140 SC1.
+
+**Plans**: built inline 2026-08-20 at owner request (not through `/gsd-plan-phase`); retro-plan owed.
+**UI hint**: yes
+
+### Phase 137: Community Judgments — Hardening
+
+**⚠ RETITLED AND RE-SCOPED 2026-08-16** (owner: "ratify reality"), detail block rewritten 2026-08-20.
+A beta identification-reviews feature shipped 2026-08-13 (`7268a7eb`, `b7618f5a`) outside any plan and
+is live and default-ON (`IDENTIFICATION_REVIEWS_ENABLED=true`). This phase's job is no longer to build
+from zero.
+
+**Goal**: The shipped reviews feature acquires the two properties it structurally lacks — append-only
+judgment history with the band captured at judgment time, and aggregate signals kept separate from
+moderation state — without regressing what already works.
+
+**Depends on**: the shipped beta feature (`web/identification_reviews.py`, Supabase SECURITY DEFINER
+RPCs) + Supabase auth. No longer depends on Phase 136 in any blocking sense — the claims it judges
+have been rendering in production since 2026-08-08.
+
+**Requirements**: JUDGE-01, JUDGE-02, JUDGE-03, JUDGE-04, JUDGE-05
+
+**Credit already earned** (recorded 2026-08-16): **JUDGE-03 and JUDGE-05 in full; JUDGE-02 partially**
+— RLS, explicit GRANTs and SECURITY DEFINER RPCs exist, but the only test is a substring assertion
+against the SQL file's text. **2 of 5.**
+
+**Success Criteria** (what must be TRUE):
+
+  1. **JUDGE-01 — append-only.** Changing a vote inserts a superseding DB-enforced event rather than
+     overwriting the row, and every judgment persists claim id, claim type, sidecar version, **and the
+     band shown at judgment time**. Carries a live-data decision the phase must answer explicitly:
+     **vote history for judgments already cast under overwrite semantics is not recoverable** — the
+     migration either back-fills a synthetic genesis event per existing row or declares the pre-migration
+     history lost, in writing.
+  2. **JUDGE-02 — proven, not asserted.** A live role-matrix test exercises anonymous / authenticated /
+     owner / moderator against every RPC and table, replacing the substring assertion.
+  3. **JUDGE-04 — aggregates and moderation are separate append-only events.** One aggregate per claim
+     rather than one row per review; admin hide/spam are events in a separate table, not mutations of a
+     status column; hidden and spam judgments are excluded from aggregates.
+  4. Community judgments still never affect band assignment, precision copy, ranking, or certified
+     styling — re-verified as a structurally separate layer after the schema change.
+  5. The masking sweep over the reviews surface (`tests/render_smoke/test_discovery_masking_sweep_reviews_home.py`,
+     21 tests, added 2026-08-19) stays green through the migration, including the mailto link target and
+     the outbound Supabase write.
 
 **Plans**: TBD
 **UI hint**: yes
@@ -302,36 +798,448 @@ than from scratch — they passed the plan-checker on 2026-08-02.
 ### Phase 138: Leads Queue
 
 **Goal**: The high-recall R-B / R-CANON screening lane becomes a reviewable, explicitly-uncertified queue where users triage leads with the same voting used everywhere else.
-**Depends on**: Phase 137 (lead review reuses the JUDGE-01 voting + typed refinement). No new table — the data already lives in the sidecar claims banded `screening_rb` / `screening_canon`. **Relationship to Phase 136's findings page (owner, 2026-07-30):** they are the same machinery pointed at different lanes and `/leads` should be built as a MODE of it, not a second implementation — 136 ships the corpus-wide sweep over the *default-shown* lanes (tier + novelty + coverage filters, server-paginated), 138 adds the screening lanes plus triage. If 136's page cannot host that as a filter state, say so and justify a separate page at planning; the shared query, sort keys and indexes are Phase 136's deliverable either way.
+
+**Depends on**: Phase 137's hardened voting (lead review reuses JUDGE-01 voting + typed refinement). No new table — the data already lives in the sidecar claims banded `screening_rb` / `screening_canon`.
+
+**STATUS 2026-08-20 — unchanged, and the one later phase where nothing was pulled forward.**
+`web/pages/findings.py` renders the mode strip's leads tab as "Coming soon"; no `/leads` route exists.
+The 2026-07-30 owner ruling — that `/leads` is a MODE of the findings page, not a second
+implementation — is now testable rather than hypothetical: the findings page shipped with a mode
+strip, so the phase either fills that tab or justifies a separate page against a surface that exists.
+
 **Requirements**: LEADS-01, LEADS-02
+
 **Success Criteria** (what must be TRUE):
 
-  1. A `/leads` page presents the R-B lane as the lead queue with the BAND-03 "possible identification" framing, pagination, deterministic sort, and band/library filters.
+  1. The R-B lane is presented as the lead queue with the BAND-03 "possible identification" framing,
+     pagination, deterministic sort, and band/library filters — **as the findings page's leads mode**,
+     or with a written justification for a separate route measured against the shipped mode strip.
   2. The canon lane is separately caveated (including the known Targum-confusion class), not merely ranked lower.
   3. Reviewing a lead uses the same JUDGE-01 voting (main verdict ✓ / ? / ✗ + note) plus an OPTIONAL advanced typed refinement drawn from the fixed vocabulary (A cites B / B cites A / common source / compilation / another language or edition / …).
+  4. The leads lanes carry the same masking discipline as the default lanes, swept as rendered output rather than inferred from the default-lane sweep.
 
 **Plans**: TBD
 **UI hint**: yes
 
-### Phase 139: Atlas Drill-down, Homepage & Release Hardening
+### Phase 139a: Release Hardening & REL-01 Gate Closure
 
-**Goal**: The connection atlas becomes the flagship — the Phase 133 preview page upgraded/absorbed into a server-bounded drill-down explorer — promoted on a CLS-safe homepage, and the whole discovery module passes its cross-cutting release gates before the feature flag, SEO/sitemap, and homepage band turn ON.
-**Depends on**: Phase 138 (REL-01 orders bounded atlas → public promotion last) and the Phase 135 CERT-01 certificate being graded to completion. This is the capstone; the drill-down explorer is the highest-risk surface and the first candidate to cut to fast-follow under schedule pressure (the Phase 133 static preview already exists as the fallback flagship).
-**Requirements**: ATLAS-02, ATLAS-03, SEO-01, I18N-01, I18N-02, A11Y-01, A11Y-02, OBS-01, OBS-02, REL-01
+**⚠ SPLIT OUT of Phase 139 on 2026-08-16**; detail block written 2026-08-20.
+
+**Goal**: The discovery module stops being a beta with open gate items — the five REL-01 items still
+open at the 2026-08-08 flag flip are closed or formally retired, so "beta → released" becomes a
+decision the record can support.
+
+**Depends on**: nothing blocking. The flag is already on; this phase closes the gap between what
+shipped and what the gate asked for.
+
+**Requirements**: REL-01, VIS-02, CERT-02, D-06b
+
+**Already closed — do not re-do**: the cross-surface masking sweep, which was the one item NOT waived.
+Its artifact half was re-run 2026-08-16 against the real deployed build (the sweep had been attesting
+an artifact production stopped serving on 2026-08-15) and its surface half on 2026-08-19
+(`ef373de2`, 21 tests, mutation-proven at both data and code level). One of the three named surfaces
+— the excerpt view — turned out to be already swept; the entry was stale in saying otherwise.
+
 **Success Criteria** (what must be TRUE):
 
-  1. A server-bounded drill-down explorer — upgrading/absorbing the Phase 133 static preview page — serves capped neighborhoods (PERF-01 node/edge/byte caps, single-hop server-side expansion) without the client ever loading the full edge set; the ATLAS-01 static overview remains the offline-precomputed entry view.
-  2. A CLS-safe static homepage band promotes the atlas + discovery (no live suggestions/graph in v9), enabled ONLY via the REL-01 gates.
-  3. All discovery surfaces are fully translated EN/HE with passing HE-mode render-smoke tests and RTL/bidi correctness including graph/atlas labels; confidence is never signaled by color alone, the graph has a textual/table equivalent, contrast passes on all new text/controls/badges/marks, keyboard + screen-reader labels work, and animations honor reduced-motion.
-  4. SEO outputs pass inside the DATA-05 masking gate — `/work/{id}` + atlas get canonical URLs, EN/HE hreflang, titles/descriptions, sitemap inclusion, neutral-only JSON-LD; `/leads` + uncertified-toggle states are `noindex` — and privacy-allowlisted PostHog product events (panel impressions, lead-toggle, evidence opens, work/atlas nav, judgment completion) + operational metrics (timeouts, truncation, sidecar unavailable/incompatible, atlas payload sizes, judgment rate-limit/moderation) are wired with the denylist enforced (never titles, text, shelfmarks, raw research IDs, or free text).
-  5. The REL-01 release gate flips the feature flag, sitemap/SEO discovery, and homepage band ON only after CERT-01 is graded to completion, the BAND-05 immutable methods report is published, CERT-02 outcome-specific copy is applied (tier-A goes public WITH its measured number), and the masking (DATA-05), RTL (I18N-02), accessibility (A11Y-01/02), performance (PERF-01), and deployment (DATA-08) checks pass — the ATLAS-PREVIEW exception having applied only to the Phase 133 beta page and its claim-free homepage teaser.
+  1. **D-06b** is either applied to the live surfaces or formally retired with the reason recorded —
+     not left open indefinitely as "disclosure detail".
+  2. A **correction / retraction policy** exists and is reachable from the surfaces that make claims.
+     It lost its carrying requirement when the curated-surface exception was declined on 2026-07-28,
+     and is genuinely owed.
+  3. **VIS-02 reconciliation** is completed or explicitly folded into VIS-01's build-time enforcement,
+     with the difference between them stated.
+  4. The **browser-check attestation** is recorded. The CI `findings-browser-check` job exists and runs;
+     what is missing is the written record, not the check.
+  5. The **CERT-02 tier-A copy** is either applied or explicitly deferred with its trigger named. It is
+     moot only while the no-percentages ruling stands, and `band_precision` remains un-re-baked — so
+     "deferred until the ruling changes" is an acceptable outcome, but it must be written down.
+  6. The **per-stratum precision spread** (1.000 ja → 0.471 `msource:medium`, one work causing 45% of
+     all measured error) reaches the BAND-05 methods page. A weighted headline without the spread
+     misleads anyone in the weak stratum — the CERT-01 measurement document says so itself.
+
+**Plans**: TBD
+**UI hint**: no
+
+### Phase 139b: Atlas Drill-down & Homepage Capstone
+
+**⚠ SPLIT OUT of Phase 139 on 2026-08-16**; detail block written 2026-08-20.
+
+**Goal**: The connection atlas becomes the flagship — the Phase 133 static preview upgraded or absorbed
+into a server-bounded drill-down explorer — with the cross-cutting i18n / RTL / a11y / SEO / observability
+work that the whole discovery module owes.
+
+**Depends on**: Phase 139a for the release-gate half. The drill-down explorer is the highest-risk surface
+in the milestone and remains the first candidate to cut to fast-follow — the Phase 133 static preview
+already exists as the fallback flagship.
+
+**Requirements**: ATLAS-02, ATLAS-03, SEO-01, I18N-01, I18N-02, A11Y-01, A11Y-02, OBS-01, OBS-02
+
+**Credit already earned**: **SC2 shipped early on 2026-08-12/13** (`c413d5e9`, `fcb1eb8e`) and is
+retro-credited in full. Every route and teaser is gated on `atlas_preview_available()` /
+`discovery_available()` — the availability predicate, never a bare flag — so the clean-hide discipline
+this phase exists to enforce was respected by the code that jumped the queue.
+
+**Success Criteria** (what must be TRUE):
+
+  1. A server-bounded drill-down explorer — upgrading or absorbing the Phase 133 static preview page —
+     serves capped neighborhoods (PERF-01 node/edge/byte caps, single-hop server-side expansion) without
+     the client ever loading the full edge set; the ATLAS-01 static overview remains the offline-precomputed
+     entry view.
+  2. ~~A CLS-safe static homepage band promotes the atlas + discovery~~ — **MET 2026-08-12/13, retro-credited.**
+  3. All discovery surfaces are fully translated EN/HE with passing HE-mode render-smoke tests and RTL/bidi
+     correctness including graph/atlas labels; confidence is never signaled by color alone, the graph has a
+     textual/table equivalent, contrast passes on all new text/controls/badges/marks, keyboard + screen-reader
+     labels work, and animations honor reduced-motion. **This now covers surfaces that are already public** —
+     it is a live quality obligation, not a pre-launch gate.
+  4. SEO outputs pass inside the DATA-05 masking gate — `/work/{id}` + atlas get canonical URLs, EN/HE
+     hreflang, titles/descriptions, sitemap inclusion, neutral-only JSON-LD; `/leads` + uncertified-toggle
+     states are `noindex` — and privacy-allowlisted PostHog product events + operational metrics are wired
+     with the denylist enforced (never titles, text, shelfmarks, raw research IDs, or free text).
+  5. The **"beta → released"** transition, not the flag flip. The flag flip happened on 2026-08-08 and is
+     recorded below; what remains is removing the beta label once 139a's gate items and this phase's
+     cross-cutting checks pass.
 
 **Plans**: TBD
 **UI hint**: yes
+
+### Phase 140: Milestone Bookkeeping & Debt Closure
+
+**⚠ NEW 2026-08-16**, re-scoped 2026-08-20 (one of its three jobs was done by this re-map).
+
+**Goal**: Every production-affecting feature in the discovery module has a plan trace, and the planning
+record stops contradicting itself.
+
+**Depends on**: nothing. Sequenced early because other phases plan against numbers this phase makes true.
+
+**Requirements**: none directly — this phase serves REL-01's auditability.
+
+**Success Criteria** (what must be TRUE):
+
+  1. Retro-plans exist for the two production-affecting features that have no plan file at all: the
+     **relation precedence matrix** (`shared/discovery_relation_matrix.py`, 2026-08-12/13 — production code
+     governing what a claim is allowed to assert) and the **excerpt bake**.
+  2. The `STATE.md` ↔ ROADMAP contradiction about the production LLM novelty run is reconciled against
+     what actually ran (the gate was re-run on gemini-3.7-flash on 2026-08-18: 69,732 verdicts, $9.43,
+     81.7% label agreement with 3.6).
+  3. The two plans left without a SUMMARY — `134-07` and `136-13` — are either summarised from the shipped
+     code or explicitly marked withdrawn.
+  4. ~~Decide the phase home for the reference-expansion track~~ — **DONE 2026-08-20 by this re-map:
+     Phases 148 and 149.**
+
+**Plans**: TBD
+**UI hint**: no
+
+### Phase 141: Passage Matching — Algorithm Specification
+
+**Goal**: One tracked, self-contained document lays out the character-level passage matcher, so it is
+implementable without access to the gitignored research tree.
+
+**Depends on**: nothing. The algorithm exists and is in production inside the discovery pipeline; what
+did not exist was a narration of it — the closest document (`same_work_spike/probe/METHOD.md`, 606 lines)
+is gitignored and covers Track 2, while the Track-1 direction parallels search needs was design-level only.
+
+**Requirements**: PASS-01
+
+**STATUS: BUILT on branch `claude/computed-id-parallels-search-a7c8fd`, unmerged** —
+`docs/specs/passage-matching-algorithm.md` v1, 13 sections (`ce7c8beb`).
+
+**Success Criteria** (what must be TRUE):
+
+  1. Normalization is specified and **versioned** (`normalizer_version`), as a hard artifact-identity input.
+  2. Gram coding, index orientation, diagonal-keyed candidate generation and verification are each
+     specified with their real constants and a provenance column.
+  3. **Both** verification boundaries are stated with the reason there are two — two-sided (both noisy,
+     survival ∝ (1−CER)⁴) and one-sided (clean query, ∝ (1−CER)²) — with calibration provenance.
+  4. **One** minimum-span number in normalized letters, ending the probe's 25/30/40 conflict, and
+     classified as **query policy, not an artifact input** — changing it must not invalidate a built index.
+  5. Stage-0 hygiene is documented as mandatory with its measured precision/recall.
+  6. An explicit **"what is not established"** section: corpus-wide precision never measured, confusion-weighted
+     alignment costs unimplemented, matres-light normalization unvalidated, Judeo-Arabic without an evaluation stratum.
+  7. `scripts/check_atlas_masking.py` passes **with `MASKING_SCAN_PATTERNS_FILE` configured** — reference
+     corpora appear only under masked codenames. A green run with the variable unset is meaningless.
+
+**Plans**: retro-plan owed (built outside GSD)
+**UI hint**: no
+
+### Phase 142: Passage Matching — Spike, Closed-Subset Comparator & GO/NO-GO
+
+**Goal**: A genuine go/no-go before any multi-GB artifact exists — the artifact measured, the
+construction chosen on evidence, and both methods compared validly at small scale.
+
+**Depends on**: Phase 141.
+
+**Requirements**: PASS-02, PASS-03, PASS-04
+
+**STATUS: BUILT on branch, unmerged** — `docs/specs/passage-index-build-measurements.md`, 7 sections.
+Three findings overturned the plan rather than confirming it: **`spool` beat mass-partitioned `scatter`**
+and needs no scratch space; batching by records cost 3 GB of RAM and the removed sort was faster
+(`d80c357c`); the query caps were **pure waste**; and the author's own rarity proposal was refuted by his
+own measurement (`f2e19e1a`). The build benchmark caught two bugs in itself on first run (`ffe0595d`).
+
+**Success Criteria** (what must be TRUE):
+
+  1. Artifact size, postings/page, bytes/page and DF distribution are measured, not projected.
+  2. The two constructions are **benchmarked against each other** on wall-clock and peak RSS, and the
+     winner ships — declaring a winner in advance is what broke the first design.
+  3. A full latency acceptance table with **declared thresholds**: warm **and cold** cache p50/p95/p99 at a
+     stated concurrency, postings consumed, candidates, verifications, page faults, peak RSS, queue time.
+  4. DF cap, stride and budget policy chosen by measurement — no-cap vs band-allocated vs rarest-first
+     under identical budgets.
+  5. A **closed corpus subset** with all positives wholly inside it, so both methods compare validly at
+     small scale, with the incumbent page-scoped and the eligible-page manifest applied.
+
+**Plans**: retro-plan owed (built outside GSD)
+**UI hint**: no
+
+### Phase 143: Passage Matching — Shared Engine, Builder & Full Index
+
+**Goal**: The engine, the builder and the full-corpus artifact exist behind two gates — builder/integrity
+and query determinism — with integrity meaning reconstruction, not cursor accounting.
+
+**Depends on**: Phase 142's GO.
+
+**Requirements**: PASS-02, PASS-03
+
+**STATUS: BUILT on branch, unmerged** — full-corpus index built; a cap that truncated by catalog position
+removed; 5 s queries down to 0.6 s (`b9d5c594`). The normalizer was ported **byte-exact** and proved so
+against 737k letters of real corpus (`bf17eb67`). The release verifier's own sampled order check was
+caught letting a corrupted artifact pass (`318a0336`) — found by the gate, not by review.
+
+**Success Criteria** (what must be TRUE):
+
+  1. Modules land in `shared/` framework-agnostic: normalize, builder, index reader, search, hygiene,
+     plus build/verify/bench scripts.
+  2. **Integrity is not cursor equality.** Artifact hash, per-page stream hashes, page-boundary assertions
+     so grams never cross a page, byte-for-byte parity against an in-memory reference builder, and a
+     reconstruction check that re-derives sampled postings from `streams.bin` to their CSR location.
+  3. The layout version is in the manifest and load **refuses on mismatch**; overflow fails the build loudly.
+  4. Budget determinism with a **pass/fail acceptance rule** for query-prefix monotonicity — a bounded
+     regression tolerance on held-out positives, or the monotonicity claim is dropped. A test that merely
+     detects the problem changes nothing.
+  5. Every cap that fires is reported in the envelope; nothing truncates silently.
+  6. The display-span path (bounded re-normalization of only the rendered pages) is inside the latency budget.
+
+**Plans**: retro-plan owed (built outside GSD)
+**UI hint**: no
+
+### Phase 144: Passage Matching — Full-Scale Evaluation & Default Decision
+
+**Goal**: Whether passage matching beats the incumbent is settled by measurement against pre-declared
+endpoints, on data that was not used to tune it.
+
+**Depends on**: Phase 143's artifact.
+
+**Requirements**: PASS-04, PASS-05
+
+**STATUS: IN PROGRESS on branch — TUNING SPLIT ONLY. The holdout has never been touched.**
+Interim FGP self-retrieval, n = 120, ground truth deliberately retreated to **manuscript grain, not
+folio grain** (only 18,362 of 45,034 FGP rows carry a folio label, and using the CER script's fuzzy
+content matching would let a fuzzy matcher decide what a passage matcher is supposed to find):
+
+| method | recall@1 | recall@10 | recall@50 | MRR | p50 | p95 |
+|---|---|---|---|---|---|---|
+| passage `standard-40` | 0.592 | 0.708 | **0.750** [0.666, 0.819] | 0.639 | 391 ms | 508 ms |
+| chunk `c3-exact-f100` | 0.467 | 0.658 | **0.708** [0.622, 0.782] | 0.533 | 14,565 ms | — |
+| chunk `c5-exact-f100` | 0.383 | 0.542 | **0.575** [0.486, 0.660] | 0.440 | 22,262 ms | 195,143 ms |
+
+**The hypothesis is under real pressure and the record should say so.** Sweeping the incumbent's chunk
+size **overturned the author's own conclusion** (`7cc50fe7`): at `chunk_size=5` the intervals do not
+overlap, at `chunk_size=3` they overlap heavily and passage's lower bound (0.666) sits below the
+incumbent's point estimate. **On recall@50 there is no demonstrated difference at n=120.** Where passage
+separates is **ranking and speed**, not retrieval: recall@1 0.592 vs 0.467, MRR 0.639 vs 0.533, 391 ms vs
+14,565 ms (37×). A further inequality worth 26% — the two methods searching different corpora — was found
+and fixed (`926bb1c9`).
+
+**Success Criteria** (what must be TRUE):
+
+  1. **The comparison is equal on all three axes it was unequal on**: a page-scoped incumbent comparator
+     (composition search passes no scope filter, so it also matches `sys:`/`part:` pseudo-documents), one
+     frozen eligible-page manifest applied to both methods, and stratification by per-method rank quantile
+     — never by pooled raw score, which is not numerically comparable across methods.
+  2. Four instruments run: FGP self-retrieval (with its same-folio-recognition limit stated), witness-index
+     recall over **at least three** compositions in different genres (one formulaic composition cannot
+     establish default behaviour), the catalogue yardstick **as recall only, never acceptance evidence**,
+     and a pooled blinded precision deck in CERT-01 shape with method label and rank stripped and evidence
+     rendered method-neutrally.
+  3. The incumbent is swept across chunk sizes 2/3/5+ × exact/variants/fuzzy — the sweep the Context
+     hypothesis owes, and the one that has already changed the answer once.
+  4. **The default flip is decided against pre-declared endpoints**: recall@50 primary, precision@k
+     secondary, a one-sided 95% CI lower bound **no worse than 3 points** versus the incumbent in **every**
+     named protected class (query-length band, genre, language, page-CER band), multiplicity handled, sample
+     sizes declared before drawing. A class whose sample cannot support that precision **blocks by
+     insufficiency** — which is an honest outcome, not a failure.
+  5. Tuning and evaluation splits stay separate — DF cap, budget, stride and boundary are chosen by
+     measurement and must not be fitted on the deciding data.
+  6. **Not earning the flip is an acceptable result.** Shipping as a selectable method is cheap to be wrong
+     about; flipping the default is asymmetric and mostly invisible, because in a research tool a recall
+     regression is indistinguishable from an absence of evidence.
+
+**Plans**: TBD
+**UI hint**: no
+
+### Phase 145: Passage Matching — Web Surface
+
+**Goal**: `/parallels` offers both methods with the passage path fail-closed, scope-restricted, and
+inside declared capacity limits.
+
+**Depends on**: Phase 144 (a surface for a method whose evaluation is unfinished ships as an option, not
+a default).
+
+**Requirements**: PASS-06, PASS-07
+
+**Success Criteria** (what must be TRUE):
+
+  1. `method: 'chunk' | 'passage'` on `ParallelsRequest` with `SEARCH_API_PASSAGE_TIMEOUT`; **`passage`
+     with a non-Genizah scope is rejected by the API**, not merely hidden in the widget.
+  2. `web/passage_assets.py` mirrors `web/discovery_assets.py`: flag **AND** manifest **AND** input-hash
+     **AND** layout-version, else `ready=False` and a clean hide.
+  3. Its **own `ThreadPoolExecutor` with `max_workers` equal to its semaphore capacity**. Two semaphores
+     over one unconfigured default pool are two names for one budget — that already cost a fix in
+     `shared/discovery_service.py`.
+  4. A safe highlight markup contract with a DOM test matrix in **both RTL and LTR**. NiceGUI's
+     client-side sanitizer strips `class` from `ui.html` on this very page.
+  5. Declared cold-cache SLOs met before deploy: cold p95, concurrency target, RSS/page-cache residency
+     budget, executor saturation limit, loop-lag ceiling. One Uvicorn worker, and a 7.8 GB index has been
+     evicted on this host by a 1.4 GB read/write before.
+  6. i18n inventory through both translation paths, with tests — only raw Hebrew literals leak.
+  7. `docs/SEARCH_API.md` documents the new field, the span-shaped `matches[]`, and the scope restriction.
+
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 146: Passage Matching — Desktop Surface & Release
+
+**Goal**: The desktop app builds the index locally and offers the method, and v9.0.0 ships on the desktop
+line with this as its headline.
+
+**Depends on**: Phases 144 and 145.
+
+**Requirements**: PASS-06, PASS-08
+
+**Success Criteria** (what must be TRUE):
+
+  1. `build_index.py` gains a third target; the build runs in a **background worker — never `__init__`,
+     never the UI thread** — with progress, a resumable checkpoint and a free-space preflight. Building
+     inline on the UI thread has already frozen launch here once.
+  2. A stale-index rebuild prompt fires from the artifact's input manifest, and **changing the
+     minimum-span number does NOT trigger a rebuild** — it is query policy.
+  3. The method selector is **disabled with a translated explanation whenever scope is `local` or `all`**,
+     enforced in API validation and in session/history restore, not only in the widget. My Library passage
+     search is deferred, and the UI says so.
+  4. A clean "index not built yet" state, and the whole flow never blocks the UI.
+  5. Release plumbing untouched: no installer data change, no hosted asset, no 2 GB split.
+  6. Flip or don't flip per Phase 144 — **routing is explicitly out of scope**; an eligibility rule ships,
+     a router does not.
+
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 147: Passage Mode on Regular Search (optional)
+
+**Goal**: A fourth `search_mode` on regular search, if and only if it earns it on its own evidence.
+
+**Depends on**: Phase 146.
+
+**Requirements**: PASS-09
+
+**Success Criteria** (what must be TRUE):
+
+  1. Gated on its **own** comparison against `execute_search(..., mode="fuzzy")`. Instruments 1-4 compare
+     composition methods and cannot license a regular-search change.
+  2. The eligibility floor is expressed as a **minimum span in normalized letters**, not a word count —
+     two distinct 5-grams need only six letters, so "5-7 words" is the wrong unit.
+
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 148: Reference Expansion & Bake Reproducibility
+
+**⚠ NEW 2026-08-20.** Homes the V4.1/V4.2 reference-expansion track, which shipped between 2026-08-16 and
+2026-08-19 with no phase to belong to. Numbered after 147 only because 141-147 were already claimed by
+in-flight work — this is **not** sequenced behind the passage track.
+
+**Goal**: The reference corpus can be rebuilt from what is checked in, and the matcher behaviour that
+silently deleted live identifications is either fixed or bounded by a gate.
+
+**Depends on**: nothing blocking. Phase 136.1's reference-side display waits on this phase's discovery-v3
+scoping.
+
+**Requirements**: OPS-01, OPS-02, DATA-08
+
+**Already shipped, recorded here rather than re-planned**: public-first identities minting standalone
+canonicals from an owner-approved artifact, container sources at book grain, per-daf Wikisource acquisition
+taking locus identity from each page's own title, the cohort registry and contract v2, identification
+eligibility (a reference can match without identifying), liturgy as a masking authority, and the locus
+label fix (a citation no longer repeats the title the surface already shows).
+
+**Success Criteria** (what must be TRUE):
+
+  1. **The checked-in recipe rebuilds what production serves.** `_tmp/build_v42lit_sidecar.ps1` currently
+     fails two of its own hash pins against disk and the loaders fail closed, so it **aborts before
+     distillation — rollback-by-rebuild does not exist right now.** Rollback by atomic manifest repoint is
+     unaffected and remains the primary path. Both hashes must be **derived at run time from the files**,
+     never hand-copied; the recipe's own comment names the anti-pattern it fell into.
+  2. Byte-identity is **not** the target and the record says why: `build_date = _now_iso()` is written into
+     `meta` before the file hash is computed, which is what `frame_content_hash` exists to route around.
+  3. **The Track-1 non-monotonicity is fixed or gated.** `REF_DF_CAP` is a raw **posting** cap that drops
+     *all* postings of an over-cap code, which is how the V4.2 append deleted 103 live identifications. The
+     loss is accepted by owner ruling (2026-08-19); what is not accepted is the next append repeating it
+     blind — **every append diffs against live before ship**, and the diff is a gate, not a report.
+  4. discovery-v3 is scoped to a decision: what the gen-2 evidence refresh must contain for Phase 136.1's
+     reference-side display, and whether the liturgical-containment FP class (one work = 45% of CERT-01's
+     measured error, which D-17 structurally cannot catch) is in or out.
+
+**Plans**: TBD
+**UI hint**: no
+
+### Phase 149: Discovery Performance & Operability
+
+**⚠ NEW 2026-08-20.** Source: `docs/specs/discovery-performance-situation-2026-08-20.md`.
+
+**Goal**: The discovery surfaces' latency is accounted for rather than inferred, and the two fixes already
+written for it are actually in production.
+
+**Depends on**: nothing.
+
+**Requirements**: OPS-03, PERF-01
+
+**Already closed — do not re-do**: the citation-range P1 (a correlated `EXISTS` became an uncorrelated
+`IN (SELECT ...)`, 10,478 ms → 97 ms measured on production, plus a second bug found by review where the
+row expansion dropped the range — `4f6e31f4`), and `bench_discovery.py` off the deploy path after it hung
+a deploy (`449e4039`).
+
+**Success Criteria** (what must be TRUE):
+
+  1. The findings page's ~2 s is **attributed**: ~0.9 s is accounted for and 1.1-3.0 s is not. The two
+     Supabase calls and a browser trace are measured **first**, then a fix is chosen. Do not naively
+     `asyncio.gather` the facets — the spec names that trap.
+  2. The two fixes made 2026-08-19 are **deployed**: perf-watch was misattributing every slow request, and
+     `/admin` blocked the event loop on every page build. Written but not shipped is not fixed.
+  3. The second index candidate on `discovery_identification` (P3) is evaluated and either bundled into the
+     next canonical rebuild or dropped with the reason recorded.
+  4. Every budget or cap that fires is reported, and no page reports a capped total as an exact one.
+
+**Plans**: TBD
+**UI hint**: no
+
 
 ## Progress
 
-**Execution Order:** Phases execute in numeric order: 133 → 134 → 135 → 136 → 137 → 138 → 139. Phase 133 (Visual Atlas Preview) is the early quick win and deploys under the REL-01 ATLAS-PREVIEW exception; the Phase 135 CERT-01 grading runs as a parallel research track spanning 136–138 and must complete before the Phase 139 REL-01 gate.
+**Execution Order — lanes, not a single numeric line.** *Rewritten 2026-08-20; the old line
+("133 → 134 → 135 → 136 → 137 → 138 → 139") stopped describing this milestone some time ago —
+139b's SC2 shipped before 138 exists, CERT-01 always ran as a parallel research track, and the
+data work never queued behind the surfaces it feeds.*
+
+| Lane | Phases | Sequencing |
+|---|---|---|
+| **Discovery surfaces** | 136.1 → 137 → 138 → 139a → 139b | In order. 139a before 139b for the release-gate half. |
+| **Discovery data** | 148, 149 | Parallel, not queued behind 141-147. 148 gates Phase 136.1's reference-side display and carries a live operational risk (no rollback-by-rebuild today). |
+| **Passage matching (desktop)** | 141 → 142 → 143 → 144 → 145 → 146 → (147) | In order, with 144's GO/NO-GO deciding whether 146 flips the default. Parallel to both discovery lanes. |
+| **Bookkeeping** | 140 | Early — other phases plan against numbers it makes true. |
+
+Numbers 148-149 sort after the passage track only because 141-147 were already claimed by in-flight
+work when this re-map ran. **Read the lane, not the integer.**
 
 > **RECONCILED 2026-08-16 (owner ruling: "ratify reality").** This table had drifted from the
 > phase checkboxes above it and from `STATE.md`, three ways at once: it read 134 as `6/8, In
@@ -348,11 +1256,21 @@ than from scratch — they passed the plan-checker on 2026-08-02.
 | 135. Precision Certificate & Confidence Bands | 9/9 | Complete   | 2026-07-28 |
 | 136. Read Surfaces — Connections Panel & Work→Witnesses | 22/22 | Complete   | 2026-08-08 |
 | 136.1 Evidence View, Work Pages & Catalogue Integration | 1/6 SC | In Progress|  |
+| 136.2 Findings Export (xlsx) | 7/7 SC | Complete   | 2026-08-20 |
 | 137. Community Judgments — Hardening | 2/5 JUDGE | In Progress|  |
 | 138. Leads Queue | 0/TBD | Not started | - |
 | 139a. Release Hardening & REL-01 Gate Closure | 0/TBD | Not started | - |
 | 139b. Atlas Drill-down & Homepage Capstone | SC2 shipped early | In Progress|  |
 | 140. Milestone Bookkeeping & Debt Closure | 0/TBD | Not started | - |
+| 141. Passage Matching — Algorithm Specification | 1/1 spec | Built, unmerged | 2026-08-19 |
+| 142. Passage Matching — Spike & GO/NO-GO | measured | Built, unmerged | 2026-08-20 |
+| 143. Passage Matching — Engine, Builder & Full Index | built | Built, unmerged | 2026-08-20 |
+| 144. Passage Matching — Evaluation & Default Decision | tuning split only | In Progress| |
+| 145. Passage Matching — Web Surface | 0/TBD | Not started | - |
+| 146. Passage Matching — Desktop Surface & Release | 0/TBD | Not started | - |
+| 147. Passage Mode on Regular Search (optional) | 0/TBD | Not started | - |
+| 148. Reference Expansion & Bake Reproducibility | shipped + 4 SC open | In Progress| |
+| 149. Discovery Performance & Operability | 2 of 5 problems closed | In Progress| |
 
 **Why 133 is Complete and not 5/6:** `133-06`'s outstanding Tasks 3-4 were the human production
 deploy. That deploy happened — `ATLAS_PREVIEW_ENABLED=1` on genizahsearch.com from 2026-07-21
@@ -382,6 +1300,32 @@ the criterion, and withheld where it does not — partial credit is recorded as 
 | **137** | Beta community identification reviews (`7268a7eb`, `b7618f5a`, 2026-08-13), default-ON | **JUDGE-03 and JUDGE-05 in full; JUDGE-02 partially** (RLS + explicit GRANTs + SECURITY DEFINER RPCs exist, but the only test is a substring assertion against the SQL file text, not a live role-matrix test). **JUDGE-01 and JUDGE-04 structurally not met** — see the Phase 137 entry. **2 of 5.** |
 | **139b** | `/start` guided launchpad + homepage discovery entry points (`c413d5e9`, `fcb1eb8e`, 2026-08-12/13) | **SC2 in full, retro-credited.** Every route and teaser is gated on `atlas_preview_available()` / `discovery_available()` — the availability predicate, never a bare flag — so the clean-hide discipline the phase exists to enforce was respected by the code that jumped the queue. |
 | **136** | The relation precedence matrix (`shared/discovery_relation_matrix.py`, 2026-08-12/13) and the launch-statistics reader (`a4ce0b31`) | Production code that governs what a claim is allowed to assert, with **no plan file at all**. Retro-plans owed — Phase 140. |
+
+## Scope that shipped after the 2026-08-16 ratification
+
+*Recorded 2026-08-20 by a second re-map. The 2026-08-16 ratification was thorough about everything
+up to 2026-08-16 — and then roughly 85 commits landed in four days with no phase to belong to. The
+ratification's own Phase 140 anticipated part of this ("decide the phase home for the
+reference-expansion track"), which this table and Phases 148-149 now answer. As before, credit is
+recorded where the built thing satisfies something, and withheld where it does not.*
+
+| Track | What shipped | Home | Credit |
+|---|---|---|---|
+| **Reference expansion V4.1 + V4.2** | Public-first identities minting standalone canonicals from an owner-approved artifact (`4647c73a`), container sources at book grain (`94da69eb`), per-daf Wikisource acquisition taking locus identity from each page's own title (`88f31191`), the shared contract v2 + run identity + cohort registry (`c0cf1eb2`, `e3c9f6fb`), identification eligibility — a reference can match without identifying (`d843a1c8`), liturgy as a masking authority (`8f765bf7`) | **Phase 148** | Shipped. Four criteria remain open, the first of which is that **the checked-in recipe can no longer rebuild what production serves**. |
+| **Track-1 matcher non-monotonicity** | The V4.2 append deleted 103 live identifications; `REF_DF_CAP` is a raw posting cap that drops *all* postings of an over-cap code (`8aa92453`) | **Phase 148** | Loss accepted by owner ruling 2026-08-19. The Codex counter-design is deferred; the gate that stops a blind repeat is not built. |
+| **A provider name written into a masked-code column** | The build discarded 14 approved works without saying so (`32e2a8d7`, `990688ee`) | **Phase 148** | Fixed. Recorded because the silent-discard shape is the milestone's characteristic defect, now in its eighth instance. |
+| **Locus / display strings** | A citation stops repeating the title the surface already shows (`7cde7b07`, `16b3ca7c`) | **Phase 148** | Fixed and live. |
+| **Novelty gate on gemini-3.7-flash** | 69,732 verdicts, $9.43, 81.7% label agreement with 3.6, movement conservative (`b5ac780d`); bounded concurrency (`2c6cbb2c`) | **Phase 140** | Done — and it settles the `STATE.md` ↔ ROADMAP contradiction about whether a production novelty run ever happened. |
+| **Citation-range outage** | A correlated `EXISTS` became an uncorrelated `IN (SELECT ...)`: 10,478 ms → 97 ms on production, plus a second bug found by review where the row expansion dropped the range (`4f6e31f4`) | **Phase 149** | **P1 CLOSED 2026-08-20**, deployed, owner-confirmed in a browser. |
+| **Deploy readiness** | `bench_discovery.py` off the deploy path after it hung a deploy — real smoke, bounded statements, ssh keepalive (`449e4039`) | **Phase 149** | Closed. |
+| **Masking sweep, surface half** | The two genuinely unswept REL-01 surfaces covered, gate proven able to fail (`ef373de2`, 21 tests) | **Phase 139a** | Closed — this was the one REL-01 item that was never waived. |
+| **Passage-matching parallels search** | 20 commits on `claude/computed-id-parallels-search-a7c8fd`: the tracked algorithm spec, the build measurements, the full-corpus index, the release verifier, the evaluation core, and the first head-to-head numbers | **Phases 141-147** | Planned by the owner outside GSD and entered into the roadmap on 2026-08-20 rather than retro-credited, because it is live work rather than finished work. **Unmerged.** |
+
+**One honest note about this table.** It exists because the same thing happened twice in two weeks:
+work shipped, the record did not move, and the gap was found by a tool disagreeing with a document
+rather than by anyone noticing. The 2026-08-16 entry called that out and it recurred anyway. Phase
+140 is the standing answer; whether it works is measurable the next time this section needs writing.
+
 
 ## REL-01: the 2026-08-08 flag flip, recorded after the fact
 

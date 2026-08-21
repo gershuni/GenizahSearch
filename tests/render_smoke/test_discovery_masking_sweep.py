@@ -92,11 +92,13 @@ import check_atlas_masking as cam  # noqa: E402
 import shared.discovery_display_strings as ds  # noqa: E402
 import web.components.discovery_panel as dp  # noqa: E402
 import web.components.findings_rows as fr  # noqa: E402
+import web.discovery_export_service as des  # noqa: E402
 import web.pages.findings as fp  # noqa: E402
 from shared.discovery_errors import DiscoveryOverload  # noqa: E402
 from shared.discovery_surface_projection import (  # noqa: E402
     STATUS_OK,
     make_envelope,
+    surface_safe_excerpt,
 )
 from tests.render_smoke import test_findings_render_smoke as tf  # noqa: E402
 from tests.render_smoke import test_panel_render_smoke as tp  # noqa: E402
@@ -114,13 +116,21 @@ CLASS_RENDERED = "rendered"
 CLASS_PAYLOADS = "json-payloads"
 CLASS_COPY_EXPORT = "copy-export"
 CLASS_ERROR_PATHS = "error-paths"
-PATH_CLASSES = (CLASS_RENDERED, CLASS_PAYLOADS, CLASS_COPY_EXPORT, CLASS_ERROR_PATHS)
+#: FIFTH CLASS, added with the findings xlsx export (EXPORT-02, phase 136.2).
+#: Until then class 3 recorded a verified ABSENCE of any copy/export egress.
+#: The export makes that absence false, so the class it was standing in for now
+#: has to exist: a file a reader downloads and keeps is the furthest any
+#: artifact text travels, and it is the one egress that survives the session.
+CLASS_EXPORT_WORKBOOK = "export-workbook"
+PATH_CLASSES = (CLASS_RENDERED, CLASS_PAYLOADS, CLASS_COPY_EXPORT,
+                CLASS_ERROR_PATHS, CLASS_EXPORT_WORKBOOK)
 
 CLASS_FILES = {
     CLASS_RENDERED: "class-1-rendered.txt",
     CLASS_PAYLOADS: "class-2-json-payloads.txt",
     CLASS_COPY_EXPORT: "class-3-copy-export.txt",
     CLASS_ERROR_PATHS: "class-4-error-paths.txt",
+    CLASS_EXPORT_WORKBOOK: "class-5-export-workbook.txt",
 }
 
 #: The surface modules whose UI-emitting lines the rendered capture must reach.
@@ -145,7 +155,43 @@ _COPY_EXPORT_APIS = (
     "to_csv",
     "to_excel",
     "writerow",
+    # Added with the export (phase 136.2): the module that BUILDS a workbook is
+    # an egress even though it calls none of the transport APIs above, so the
+    # inventory has to be able to see it.
+    "Workbook(",
+    #: THE HTTP EGRESS ITSELF. Adding `web/api.py` to the scanned set was not
+    #: enough: the export route returns a plain `Response`, which the inventory
+    #: did not recognise, so the one route that actually hands a reader the
+    #: workbook stayed untracked (Codex review round 2, finding 6). Tracking
+    #: `Response(` would fire on dozens of unrelated routes and mean nothing;
+    #: the spreadsheet MEDIA TYPE appears in exactly one place and is therefore
+    #: the precise token for "this module serves a workbook".
+    "spreadsheetml",
 )
+
+#: The egress this surface is ALLOWED to have, `api -> the modules that may use
+#: it`. Everything else is still asserted at zero.
+#:
+#: WHY THIS REPLACED A FLAT ZERO. Until 2026-08-20 the copy/export class
+#: recorded a verified absence: no clipboard call, no download route, no export
+#: handler. The findings xlsx export makes that false, and the honest move is to
+#: name the one egress rather than to delete the check -- a deleted check is how
+#: a surface acquires a second egress that nobody notices.
+#:
+#: The test asserts this mapping EXACTLY, in both directions. An unexpected hit
+#: fails, and so does a MISSING one: if the export is removed or renamed, this
+#: table is wrong too, and a stale allowance is precisely the thing that would
+#: let a future egress in under an old name.
+_EXPECTED_COPY_EXPORT_EGRESS = {
+    "ui.download": ("web/pages/findings.py",),
+    "Workbook(": ("web/discovery_export_service.py",),
+    #: PRE-EXISTING and non-discovery: `web/api.py` serves several unrelated
+    #: file routes. Declared so the module can be scanned for NEW egress
+    #: without its existing routes reading as a regression.
+    "FileResponse": ("web/api.py",),
+    #: The discovery export route's own response.
+    "spreadsheetml": ("web/api.py",),
+}
 
 
 # ===========================================================================
@@ -497,14 +543,112 @@ def _discovery_reads_consumed() -> Dict[str, List[str]]:
     return reads
 
 
+def _unexpected_copy_export_hits() -> Dict[str, List[str]]:
+    """`_copy_export_api_hits()` minus what `_EXPECTED_COPY_EXPORT_EGRESS`
+    allows -- i.e. every egress this surface has acquired without the sweep
+    being told about it."""
+    unexpected: Dict[str, List[str]] = {}
+    for api, modules in _copy_export_api_hits().items():
+        allowed = set(_EXPECTED_COPY_EXPORT_EGRESS.get(api, ()))
+        surprising = [m for m in modules if m not in allowed]
+        if surprising:
+            unexpected[api] = surprising
+    return unexpected
+
+
+#: How to recognise each expected egress in an AST -- `api -> (owner, attr)`,
+#: where `attr` is `None` for a bare call like `Workbook(...)`.
+_EGRESS_CALL_SHAPE = {
+    "ui.download": ("ui", "download"),
+    "Workbook(": (None, "Workbook"),
+    "FileResponse": (None, "FileResponse"),
+    #: A media-type STRING has no call shape, so the presence half is pinned to
+    #: the ROUTE FUNCTION instead -- `("def", name)` means "a function of this
+    #: name must be DEFINED in the module".
+    #:
+    #: A source scan for "spreadsheetml" was the first attempt and was vacuous
+    #: twice over (Codex review round 3, finding 6): it matched prose, and
+    #: `web/api.py` serves OTHER spreadsheet routes, so deleting this export's
+    #: media type would still have satisfied it. A function definition is code,
+    #: cannot be written in a comment, and is specific to this route.
+    "spreadsheetml": ("def", "export_computed_identifications"),
+}
+
+
+def _module_really_calls(rel: str, api: str) -> bool:
+    """Does `rel` actually CALL `api`, as opposed to merely mentioning it?
+
+    AST, NOT SUBSTRING, AND THE REASON IS MEASURED. The first version of
+    `_missing_copy_export_hits` compared source text, and the mutation battery
+    caught it being vacuous: deleting the real `ui.download(...)` call from the
+    findings page left the check GREEN, because the words "ui.download" still
+    appeared in the docstring of the function that had just stopped calling it.
+
+    That is the same defect this repository already carries a scar from in the
+    opposite direction -- a COMMENT citing a module path reddened the findings
+    page's layering gate. A source-text scan cannot tell code from prose, so
+    the direction that must not be satisfiable by prose is parsed instead.
+
+    The UNEXPECTED direction stays text-based on purpose: there, a mention is a
+    perfectly good reason to look, and over-sensitivity costs nothing.
+    """
+    owner, attr = _EGRESS_CALL_SHAPE[api]
+    tree = ast.parse(_read(rel))
+    if owner == "def":
+        # "This ROUTE still exists", for an egress identified by a media type
+        # rather than by a call. Structural: a function definition cannot be
+        # satisfied by a docstring, and it names THIS route rather than any
+        # spreadsheet response in a large shared module.
+        return any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                   and n.name == attr
+                   for n in ast.walk(tree))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if owner is None:
+            if isinstance(func, ast.Name) and func.id == attr:
+                return True
+            continue
+        if (isinstance(func, ast.Attribute) and func.attr == attr
+                and isinstance(func.value, ast.Name) and func.value.id == owner):
+            return True
+    return False
+
+
+def _missing_copy_export_hits() -> Dict[str, List[str]]:
+    """The other direction: egress the table PROMISES that the code no longer
+    has. A stale allowance is a hole, so it fails too."""
+    missing: Dict[str, List[str]] = {}
+    for api, modules in _EXPECTED_COPY_EXPORT_EGRESS.items():
+        gone = [m for m in modules if not _module_really_calls(m, api)]
+        if gone:
+            missing[api] = gone
+    return missing
+
+
 def _copy_export_api_hits() -> Dict[str, List[str]]:
-    """`{api: [modules using it]}` over the surface modules -- the derived proof
-    behind the copy/export class's asserted ABSENCE."""
+    """`{api: [modules using it]}` over the surface modules -- the derived
+    inventory behind the copy/export class."""
     hits: Dict[str, List[str]] = {}
     surfaces = ["web/components/discovery_panel.py",
                 "web/components/findings_rows.py",
                 "web/pages/findings.py",
-                "web/pages/browse_enrichment.py"]
+                "web/pages/browse_enrichment.py",
+                # The export builder. Listing it is the whole lesson of the
+                # reviews-surface sweep: the four-class inventory asserted an
+                # absence over four modules, the product had a fifth, and the
+                # absence was therefore true of the SCANNED SET and false of
+                # the product. A module that exists to emit an egress must be
+                # in the set that gets inventoried.
+                "web/discovery_export_service.py",
+                # The module that actually RETURNS the workbook over HTTP. The
+                # builder alone is not the egress -- the route is (Codex review,
+                # finding F). api.py is a shared module with many non-discovery
+                # routes, so its pre-existing egress is declared rather than
+                # assumed away; what this buys is that a NEW export API
+                # appearing there has to be looked at.
+                "web/api.py"]
     for rel in surfaces:
         source = _read(rel)
         for api in _COPY_EXPORT_APIS:
@@ -1360,6 +1504,12 @@ def payload_map(seed: Optional[str] = None) -> Dict[str, List[Tuple[str, Any]]]:
         "get_related_page_count_enveloped": [("related_count", panel["related_count"])],
         "get_related_pages_enveloped": [("related_rows", panel["related_rows"])],
         "get_work_expansion_enveloped": [("expansion", panel["expansion"])],
+        # The EXPORT envelope (phase 136.2). It is an enveloped read consumed by
+        # a surface, so class 2 has to scan it for the same reason it scans the
+        # others -- the workbook class scans the FILE, which is a different
+        # egress from the envelope that produced it. Both, not either.
+        "collect_and_build_export": [
+            ("export_envelope", tf.findings_envelope(_seeded_finding_rows(seed)))],
         "get_findings_enveloped": (
             [(n, e) for n, e in findings_envelopes if n.startswith("findings/")]
             + [("findings/seeded", seeded_findings)]),
@@ -1447,6 +1597,143 @@ def capture_copy_export(hrefs: List[str], seed: Optional[str] = None) -> str:
             lines.extend(_client_hrefs(client))
         finally:
             client.delete()
+    return "\n".join(lines)
+
+
+#: The excerpt states the export has to carry, one row each. The THIRD is the
+#: one that matters: the bake writes four `None` work pieces for a masked
+#: non-Bible work, and the export has to render the honest "not available"
+#: sentence there rather than an empty cell -- so the capture must contain a
+#: row that reaches it.
+_EXPORT_EXCERPT_STATES = ("both_sides", "no_work_side", "no_excerpt")
+
+
+def _export_excerpt(state: str, seed: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """A PROJECTED excerpt row for one state, or `None` for "no excerpt".
+
+    Built through `surface_safe_excerpt`, not by hand, for the same reason the
+    findings rows are built through `finding_row`: the capture must drive the
+    shape the service actually hands the builder, or it scans a fiction.
+    """
+    if state == "no_excerpt":
+        return None
+    text = seed or "sample passage"
+    row = {
+        "identification_id": "synthetic-1",
+        "evidence_id": 1,
+        "a_page_id": "synthetic-page",
+        "frag_before": text, "frag_span": text, "frag_after": text,
+        "frag_clipped": 0,
+        "work_before": None, "work_span": None, "work_after": None,
+        "work_clipped": None, "work_source": None,
+        "attribution": None,
+        "n_spans": 2,
+        "text_layer": "htr",
+        "frag_hl": None, "work_hl": None, "work_markup": None,
+    }
+    if state == "both_sides":
+        row.update({
+            "work_before": text, "work_span": text, "work_after": text,
+            "work_clipped": 0, "work_source": "reprojected",
+            "attribution": text,
+        })
+    return surface_safe_excerpt(row)
+
+
+def _export_items(seed: Optional[str] = None) -> List[Dict[str, Any]]:
+    """The rows the export capture is built from: the sweep's own corpus rows,
+    each carrying one of the excerpt states, plus a seeded copy when a needle
+    is being planted.
+
+    The findings rows come from `tf.finding_row` -- the SAME factory the
+    rendered class drives -- so a field the surface projection gains later
+    reaches this capture without anyone remembering to add it here.
+    """
+    base = [row for name, row in tf.corpus_rows()
+            if name == "SURFACE_FINDING_FIELDS"]
+    items: List[Dict[str, Any]] = []
+    for index, state in enumerate(_EXPORT_EXCERPT_STATES):
+        row = dict(base[index % len(base)])
+        excerpt = _export_excerpt(state, seed=seed)
+        if excerpt is not None:
+            row["excerpt"] = excerpt
+        items.append(row)
+    if seed:
+        # THE NEEDLE THROUGH EVERY TEXT-BEARING COLUMN, not only the excerpt:
+        # a scan that only ever caught seeded excerpt text would prove nothing
+        # about the shelfmark, the title or the author columns.
+        seeded = dict(base[0])
+        seeded.update({
+            "shelfmark_display": seed,
+            "neutral_title": seed,
+            "author": seed,
+            "library_code": seed,
+            "locus_label": seed,
+            "sys_id": seed,
+        })
+        seeded["excerpt"] = _export_excerpt("both_sides", seed=seed)
+        items.append(seeded)
+    return items
+
+
+def _workbook_bytes(seed: Optional[str] = None, lang: str = "en") -> bytes:
+    """The real .xlsx the route would return, built by the shipped builder."""
+    items = _export_items(seed)
+    envelope = make_envelope(STATUS_OK, items, len(items), meta={
+        "unit": "identification", "bucket": "main", "sort": "band_rank",
+        "row_count": len(items), "reported_total": len(items),
+        "walk_complete": True, "sidecar_version": "synthetic-sweep",
+    })
+    # The excerpt rides OUTSIDE the envelope's validated item shape, exactly as
+    # the service attaches it -- see `collect_findings_for_export`.
+    for built, source in zip(envelope["items"], items):
+        if "excerpt" in source:
+            built["excerpt"] = source["excerpt"]
+    return des.build_findings_workbook(
+        envelope, lang=lang,
+        filters={"unit": "identification", "bucket": "main"},
+        generated_at="2026-01-01T00:00:00Z",
+        page_url="https://example.invalid/computed-identifications",
+        base_url="https://example.invalid")
+
+
+def workbook_cell_text(data: bytes) -> str:
+    """Every CELL VALUE in the workbook, plus every sheet name.
+
+    READ AS CELLS, NEVER AS BYTES, and that is the whole design of this class.
+    An .xlsx is a ZIP of deflated XML: a byte scan of the file sees compressed
+    output and reports nothing, whatever the cells say. This repository has
+    already paid for the cell-vs-byte distinction once -- `--scan-asset` alone
+    was proved INSUFFICIENT by construction against a sqlite artifact, where the
+    byte scan reported 0 at three offsets the cell scan reported 1 -- and a
+    compressed container makes the same mistake worse, not better.
+    `test_the_workbook_needle_is_invisible_to_a_byte_scan` pins it.
+    """
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    lines: List[str] = []
+    for name in wb.sheetnames:
+        lines.append(f"# SHEET: {name}")
+        for row in wb[name].iter_rows(values_only=True):
+            for value in row:
+                if value is None:
+                    continue
+                lines.append(str(value))
+    wb.close()
+    return "\n".join(lines)
+
+
+def capture_export_workbook(seed: Optional[str] = None) -> str:
+    """Path class 5 -- the downloadable workbook, in both languages.
+
+    BOTH LANGUAGES, because the sheet titles, the column headers, the honest
+    "not available" sentence and the About sheet's prose are all bilingual, and
+    a Hebrew-only string can only be caught by rendering Hebrew.
+    """
+    lines = ["# CLASS 5 -- THE EXPORTED WORKBOOK (cell values, never bytes)"]
+    for lang in LANGS:
+        lines.append(f"# --- lang={lang}")
+        lines.append(workbook_cell_text(_workbook_bytes(seed=seed, lang=lang)))
     return "\n".join(lines)
 
 
@@ -1588,6 +1875,57 @@ def _write_class_files(directory: pathlib.Path,
     return paths
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _return_the_discovery_budgets():
+    """Hand back the concurrency slots this module's captures consume.
+
+    MEASURED: after the rendered capture runs against a real sidecar the
+    service's semaphores read 0/24 (browse) and 0/4 (heavy) -- 28 slots taken
+    and never returned, all from `get_related_pages_enveloped_async` (24) and
+    `get_work_expansion_enveloped_async` (4).
+
+    WHY. `_run_off_loop` transfers ownership of the release to
+    `fut.add_done_callback`, deliberately: a `run_in_executor` thread cannot be
+    cancelled, so a timed-out read has to hold its slot until the thread
+    actually finishes rather than until the awaiter gives up. That callback is
+    scheduled on the loop that created the future, and this capture drives each
+    render through its own `asyncio.run()` -- which closes its loop the moment
+    the coroutine returns. A read that timed out therefore leaves a thread whose
+    completion callback has nowhere to run, and the slot is gone for the life of
+    the process.
+
+    NOT A LIVE DEFECT, and this is not papering over one. The web app has ONE
+    long-lived loop, so the callback always fires and the slot always comes
+    back; only a harness that creates and destroys loops can lose them. It is
+    also PRE-EXISTING -- the same 28 slots leak from the same two call sites on
+    the pre-136.2 commit once that checkout is given a real sidecar.
+
+    Nothing in THIS file fails without the restore. The damage lands on whatever
+    discovery test runs next in the same process and gets `busy` from a budget
+    it never touched (`test_page_id_accessor_runs_off_the_event_loop` is the one
+    that surfaced it). A test file that silently consumes a global resource is a
+    test file that makes every later failure a mystery.
+    """
+    yield
+    import asyncio as _asyncio
+
+    import web.discovery as _wd
+
+    service = getattr(_wd, "_service", None)
+    if service is None:  # pragma: no cover - the module always has one
+        return
+    for sem_attr, cap_attr in (("_browse_sem", "_browse_capacity"),
+                               ("_heavy_sem", "_heavy_capacity"),
+                               ("_export_sem", "_export_capacity")):
+        capacity = getattr(service, cap_attr, None)
+        if capacity:
+            # A FRESH semaphore, not `release()` calls: a worker thread that
+            # outlives this teardown still holds a reference to the old object
+            # and will release THAT one, which is exactly where its release
+            # should land.
+            setattr(service, sem_attr, _asyncio.Semaphore(int(capacity)))
+
+
 @pytest.fixture(scope="module")
 def clean_capture(tmp_path_factory):
     """The full, unseeded capture of all four classes."""
@@ -1599,6 +1937,7 @@ def clean_capture(tmp_path_factory):
         CLASS_PAYLOADS: capture_payloads(),
         CLASS_COPY_EXPORT: capture_copy_export(hrefs),
         CLASS_ERROR_PATHS: capture_error_paths(),
+        CLASS_EXPORT_WORKBOOK: capture_export_workbook(),
     }
     directory_files = directory / "capture"
     directory_files.mkdir()
@@ -1627,6 +1966,7 @@ def seeded_capture(tmp_path_factory):
         CLASS_PAYLOADS: capture_payloads(needle),
         CLASS_COPY_EXPORT: capture_copy_export(hrefs, seed=needle),
         CLASS_ERROR_PATHS: capture_error_paths(needle),
+        CLASS_EXPORT_WORKBOOK: capture_export_workbook(needle),
     }
     return {"needle": needle, "texts": texts, "dir": directory}
 
@@ -1673,13 +2013,16 @@ def _configured_pattern_file() -> pathlib.Path:
 # A. THE CAPTURE IS REAL AND COVERS WHAT IT CLAIMS.
 # ===========================================================================
 
-def test_all_four_path_classes_are_captured_and_none_is_a_stub(clean_capture):
+def test_all_five_path_classes_are_captured_and_none_is_a_stub(clean_capture):
     """The purest false green available here is a clean scan over an empty
     capture -- every other test in this file would report exactly that. Sizes
     are asserted per class, by name, so a class that silently stopped producing
     output is caught as itself rather than as a byte total."""
+    # 4,646 chars measured on the clean capture; the floor is set well under it
+    # so ordinary copy edits do not trip it, and well over a stub.
     minimums = {CLASS_RENDERED: 200_000, CLASS_PAYLOADS: 20_000,
-                CLASS_COPY_EXPORT: 200, CLASS_ERROR_PATHS: 5_000}
+                CLASS_COPY_EXPORT: 200, CLASS_ERROR_PATHS: 5_000,
+                CLASS_EXPORT_WORKBOOK: 2_000}
     for path_class in PATH_CLASSES:
         text = clean_capture["texts"][path_class]
         assert len(text) >= minimums[path_class], (
@@ -1902,20 +2245,28 @@ def test_the_json_class_holds_a_real_payload_for_every_read_it_claims(clean_capt
                 f"{read}/{where} is not an envelope")
 
 
-def test_the_copy_export_class_records_an_absence_it_actually_verified(clean_capture):
-    """Criterion: *if* a copy or export path does not exist, that is asserted and
-    recorded rather than assumed.
+def test_the_copy_export_class_records_the_egress_it_actually_verified(clean_capture):
+    """Criterion: every copy or export path is NAMED, and no other exists.
 
-    It does not exist -- no clipboard call, no download route, no export handler
-    on either surface -- and the ONE thing a reader can copy is a link target,
-    so those are captured and scanned. Both halves are checked: the absence is
-    derived from the source, and the presence of the link targets is asserted on
-    the rendered output.
+    THIS TEST USED TO ASSERT A FLAT ZERO. Until the findings xlsx export landed
+    (phase 136.2) there was no clipboard call, no download route and no export
+    handler on any of these surfaces, and the class recorded that verified
+    absence. The export makes the absence false, so the check became a scoped
+    inventory instead of being deleted -- deleting it is how a surface acquires
+    a SECOND egress that nobody notices.
+
+    Checked in BOTH directions. An unexpected hit fails, and so does a missing
+    one: an allowance left behind for an export that was renamed or removed is a
+    hole the next egress walks through under the old name.
     """
-    hits = _copy_export_api_hits()
-    assert not hits, (
+    unexpected = _unexpected_copy_export_hits()
+    assert not unexpected, (
         "a surface gained a copy/export egress this sweep does not capture: "
-        + repr(hits))
+        + repr(unexpected))
+    missing = _missing_copy_export_hits()
+    assert not missing, (
+        "_EXPECTED_COPY_EXPORT_EGRESS still allows an egress the code no "
+        "longer has -- update the table: " + repr(missing))
     hrefs = clean_capture["hrefs"]
     assert hrefs, (
         "no link target was captured at all -- either the shelfmark link was "
@@ -1925,9 +2276,84 @@ def test_the_copy_export_class_records_an_absence_it_actually_verified(clean_cap
         "the findings row's manuscript link is missing from the copy/export "
         f"capture; captured targets were {sorted(set(hrefs))[:10]}")
     text = clean_capture["texts"][CLASS_COPY_EXPORT]
+    hits = _copy_export_api_hits()
     for api in _COPY_EXPORT_APIS:
-        assert f"#   {api}: ABSENT" in text, (
+        expected = ", ".join(hits.get(api, [])) or "ABSENT"
+        assert f"#   {api}: {expected}" in text, (
             f"the recorded inventory does not state the disposition of {api}")
+
+
+def test_the_workbook_class_captures_real_cell_values(clean_capture):
+    """Criterion: the fifth class scans what a reader downloads.
+
+    NON-VACUITY FIRST. A capture that produced an empty string, or that quietly
+    built a workbook with no rows, would pass every masking scan ever run
+    against it -- which is this project's characteristic defect in its purest
+    form. So the assertions are on CONTENT the builder is known to emit: both
+    sheet titles, a column header, the manuscript-side passage, and the honest
+    sentence the export puts where a masked work has no edition text.
+    """
+    text = clean_capture["texts"][CLASS_EXPORT_WORKBOOK]
+    assert text.strip(), "the workbook capture is empty"
+
+    for lang in LANGS:
+        assert f"# --- lang={lang}" in text
+        titles = des._SHEET_TITLES
+        for key in des.SHEET_KEYS:
+            assert f"# SHEET: {des._pick(titles[key], lang)}" in text, (
+                f"the {key} sheet is missing from the {lang} capture")
+        strings = ds.excerpt_strings(lang)
+        assert strings["work_unavailable"] in text, (
+            "the capture never reaches the state where a masked work has no "
+            f"edition text ({lang}) -- so the sentence that state renders is "
+            "unscanned")
+        assert ds.recall_disclaimer(lang) in text, (
+            "the About sheet's recall disclaimer is missing -- the file would "
+            f"leave the building without it ({lang})")
+
+    assert "sample passage" in text, (
+        "no excerpt text reached a cell; the capture is scanning an empty "
+        "workbook")
+
+
+def test_the_workbook_needle_is_invisible_to_a_byte_scan(seeded_capture):
+    """Criterion: the cell scan is not merely a different way of reading the
+    same bytes -- it is the ONLY way that works.
+
+    THE PROOF, by construction. The needle is planted in real cells, the
+    workbook is built by the shipped builder, and then the SAME needle is looked
+    for twice: in the raw .xlsx bytes, where deflate hides it, and in the cell
+    capture, where it is found. If a future change made the archive store its
+    XML uncompressed this test would fail loudly -- which is the right outcome,
+    because the reason for the cell scan would have changed and the record
+    should say so rather than quietly still passing.
+
+    This is the direct analogue of the sqlite lesson already recorded in this
+    repository, where `--scan-asset` alone reported 0 at offsets the cell scan
+    reported 1.
+    """
+    needle = seeded_capture["needle"]
+    raw = _workbook_bytes(seed=needle)
+    # EVERY membership test is reduced to a BOOL BEFORE the assert. This file's
+    # own AST guard rejected the first draft of this test, which read
+    # `assert needle in workbook_cell_text(raw)` -- pytest rewrites that and
+    # prints both operands, so the failure output would carry the restricted
+    # pattern. That is the M4 defect this sweep found in itself, and the guard
+    # caught it recurring here.
+    visible_in_bytes = needle.encode("utf-8") in raw
+    visible_in_cells = _contains(workbook_cell_text(raw), needle)
+    visible_in_capture = _contains(
+        seeded_capture["texts"][CLASS_EXPORT_WORKBOOK], needle)
+    assert not visible_in_bytes, (
+        "the needle was findable in the RAW workbook bytes -- the archive is "
+        "apparently storing its XML uncompressed, so this test's premise no "
+        "longer holds and the class's rationale needs rewriting")
+    assert visible_in_cells, (
+        "the needle is in neither the bytes nor the cells: the capture is not "
+        "reading the workbook it was handed")
+    assert visible_in_capture, (
+        "the seeded workbook capture does not contain the needle, so a leak "
+        "into a downloaded file would not be caught")
 
 
 def test_the_error_class_drives_at_least_six_failure_modes_on_each_surface(

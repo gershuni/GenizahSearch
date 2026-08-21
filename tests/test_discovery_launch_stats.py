@@ -1617,9 +1617,10 @@ def test_the_read_runs_under_the_findings_timeout_not_the_browse_timeout(
     seen = []
     original = service._run_off_loop
 
-    async def spy(sync_fn, *args, timeout, heavy=False):
+    async def spy(sync_fn, *args, timeout, heavy=False, slot=None):
         seen.append(timeout)
-        return await original(sync_fn, *args, timeout=timeout, heavy=heavy)
+        return await original(sync_fn, *args, timeout=timeout, heavy=heavy,
+                              slot=slot)
 
     monkeypatch.setattr(service, "_run_off_loop", spy)
     asyncio.run(service.get_launch_stats_enveloped_async())

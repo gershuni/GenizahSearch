@@ -673,6 +673,37 @@ def test_the_browse_budget_is_larger_than_the_heavy_one_by_construction():
     assert _DEFAULT_MAX_CONCURRENT_BROWSE_QUERIES % concurrent_reads_per_cold_panel_load == 0
 
 
+
+def test_the_off_loop_signature_is_pinned_because_test_doubles_mirror_it():
+    """`_run_off_loop` is stood in for by hand-written doubles in other files.
+
+    Three of them re-declare its signature rather than taking `**kwargs`, which
+    is deliberate -- a double that swallows any call cannot detect a wrong one.
+    The cost is that ADDING a parameter here breaks them, and it breaks them
+    somewhere unhelpful: `_dispatch_enveloped` forwards every keyword on every
+    crossing, so the `TypeError` lands inside whatever surface the double is
+    serving and is reported as "temporarily unavailable". That is exactly how
+    the `slot` parameter reached CI green locally and red there, having broken
+    the browse panel's expansion tests, which the change never touched.
+
+    So the keyword set is PINNED. If this fails, the signature grew -- update
+    these three doubles in the same commit:
+
+      * `tests/test_discovery_panel_render.py::_Spy.__call__`
+      * `tests/test_discovery_panel_browse_wiring.py::_Spy.__call__`
+      * `tests/test_discovery_launch_stats.py`, the local `spy` inside
+        `test_the_read_runs_under_the_findings_timeout_not_the_browse_timeout`
+    """
+    import inspect
+    from shared.discovery_service import DiscoveryService as _DS
+    params = inspect.signature(_DS._run_off_loop).parameters
+    keyword_only = {name for name, p in params.items()
+                    if p.kind is inspect.Parameter.KEYWORD_ONLY}
+    assert keyword_only == {"timeout", "heavy", "slot"}, (
+        f"`_run_off_loop` keyword-only parameters are now {sorted(keyword_only)}"
+        " -- update the three test doubles named in this test's docstring")
+
+
 def test_no_executor_crossing_can_opt_out_of_a_slot():
     """A source guard, because the defect was an OPT-IN bound whose next caller
     forgot it. `_run_off_loop` is the ONE place a crossing happens; it must take

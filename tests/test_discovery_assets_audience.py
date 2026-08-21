@@ -611,6 +611,13 @@ def _golden_claim_id(page_id: str) -> str:
     return row[0]
 
 
+def _must_not_be_reached(*_args, **_kwargs):
+    """Injected where a private artifact must never reach the renderer."""
+    raise AssertionError(
+        "a private-audience artifact reached the export's workbook builder -- "
+        "the audience gate let rows past before rendering")
+
+
 _READ_PATH_ARGS = {
     "page_id": "p012",
     "claim_id": _golden_claim_id("p012"),
@@ -628,6 +635,13 @@ _READ_PATH_ARGS = {
     "level": "domain",
     # excerpt-v1: the text-vs-text read is keyed by the identification.
     "identification_id": "i-nonexistent",
+    # phase 136.2: the findings export takes the workbook builder as an
+    # INJECTION. The stub RAISES rather than returning a harmless value, and
+    # that is the registration doing real work: on a private-audience artifact
+    # the walk must fail before anything is rendered, so if the audience gate
+    # ever let it through, the builder would be reached and this proof would
+    # fail loudly instead of passing on an empty workbook.
+    "build_fn": _must_not_be_reached,
 }
 
 # The unavailable envelope each wrapper shape returns. Anything else is data.
