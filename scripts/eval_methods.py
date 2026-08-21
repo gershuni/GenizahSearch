@@ -124,6 +124,17 @@ def main() -> int:
                          'on the same queries understate the power '
                          'available, and only the per-query table shows '
                          'how much of each method is exclusive.')
+    ap.add_argument('--stratify-by', default=None,
+                    help='stratum key for EQUAL-ALLOCATION sampling: --limit '
+                         'is split evenly across the values named in '
+                         '--strata-values, evenly spaced WITHIN each value. '
+                         'Exists because proportional sampling leaves a '
+                         'minority protected class (Judeo-Arabic, ~37%% of '
+                         'FGP) underpowered for the non-inferiority margin.')
+    ap.add_argument('--strata-values', default=None,
+                    help='comma-separated stratum values to allocate equally '
+                         '(required with --stratify-by; values absent from '
+                         'the split are a fatal error, never a silent skip)')
     ap.add_argument('--all-docs', action='store_true',
                     help='do NOT restrict the incumbent to the '
                          'shared document set (compares products, '
@@ -132,9 +143,31 @@ def main() -> int:
 
     queries = load_queries(args.queries)
     chosen = split_queries(queries)[args.split]
-    # Deterministic subsample: evenly spaced, so a --limit run is a spread of
-    # the population rather than its head.
-    if args.limit and len(chosen) > args.limit:
+    # Deterministic subsample. Plain mode: evenly spaced over the whole
+    # split, so a --limit run is a spread of the population rather than its
+    # head. Stratified mode: --limit divided EQUALLY across the declared
+    # stratum values, evenly spaced within each -- the pre-registered
+    # allocation for protected classes.
+    if args.stratify_by:
+        if not args.strata_values:
+            raise SystemExit('--stratify-by requires --strata-values')
+        values = [v.strip() for v in args.strata_values.split(',') if v.strip()]
+        per = (args.limit or len(chosen)) // len(values)
+        picked = []
+        for val in values:
+            pool = [q for q in chosen
+                    if q.strata.get(args.stratify_by) == val]
+            if len(pool) < per:
+                raise SystemExit(
+                    f'stratum {args.stratify_by}={val!r} has only '
+                    f'{len(pool)} queries in the {args.split} split; '
+                    f'{per} requested -- refusing to under-fill silently')
+            step = len(pool) / per
+            picked.extend(pool[int(i * step)] for i in range(per))
+        chosen = picked
+        print(f'stratified sample: {per} per value of '
+              f'{args.stratify_by} ({", ".join(values)})')
+    elif args.limit and len(chosen) > args.limit:
         step = len(chosen) / args.limit
         chosen = [chosen[int(i * step)] for i in range(args.limit)]
     print(f'{len(queries):,} queries loaded; split={args.split}; '
