@@ -3613,6 +3613,13 @@ class DiscoveryService:
         group_order: Dict[str, int] = {}
         group_total: Optional[int] = None
         group_order_complete = True
+        # WHICH cause fired, not just that one did. The flag above is the
+        # umbrella and stays conservative; these two are what the About
+        # sheet is allowed to make a sentence out of. Reporting "some rows
+        # appear at the end" for a cause that placed every row is a false
+        # statement in a file that travels without its page.
+        group_unplaced = 0
+        group_count_approximate = False
         if group_pair is not None:
             group_field = group_pair[0]
             err, group_items, group_total, _gmeta, g_approx, g_guard = (
@@ -3628,6 +3635,11 @@ class DiscoveryService:
             # `walk_complete`, which is about the ROWS and must not be reddened
             # by a presentation degradation.
             group_order_complete = not (g_approx or g_guard)
+            # An approximate count does NOT shorten the walk -- the bound
+            # is dropped and it still ends on a short page -- so the order
+            # survives. What does not survive is `group_total`, which is a
+            # CAP the About sheet would otherwise print as a count.
+            group_count_approximate = bool(g_approx)
 
         leaf_unit = (FINDINGS_UNIT_IDENTIFICATION if group_pair is not None
                      else unit)
@@ -3638,16 +3650,17 @@ class DiscoveryService:
 
         if group_pair is not None:
             group_field = group_pair[0]
-            unplaced = sum(1 for row in items
-                           if str(row.get(group_field) or "") not in group_order)
-            if unplaced:
+            group_unplaced = sum(
+                1 for row in items
+                if str(row.get(group_field) or "") not in group_order)
+            if group_unplaced:
                 # The two walks share one predicate, so this should be zero.
                 # Counted and carried out rather than assumed: a silent
                 # disagreement between the group list and the leaves under it is
                 # the one thing this two-walk design could get wrong.
                 logger.warning(
                     "DiscoveryService export: %s leaf row(s) matched no group "
-                    "from the %s walk", unplaced, unit)
+                    "from the %s walk", group_unplaced, unit)
                 group_order_complete = False
             # STABLE, so the page's own ordering survives inside each group.
             items.sort(key=lambda row: group_order.get(
@@ -3697,6 +3710,18 @@ class DiscoveryService:
             "export_grain": leaf_unit,
             "export_group_count": group_total,
             "export_group_order_complete": group_order_complete,
+            #: The ONE cause that changes what a reader sees in the rows:
+            #: leaves that matched no group sort to the end. Carried as a
+            #: COUNT rather than a flag so the workbook can tell "nothing
+            #: moved" from "something did" instead of inferring it from
+            #: the umbrella above, which also goes False for causes that
+            #: placed every row.
+            "export_group_unplaced": group_unplaced,
+            #: `export_group_count` is a CAP, not a count. Stating a cap as
+            #: a count is the defect `DISCOVERY_FINDINGS_COUNT_MAX` is
+            #: documented against, and a downloaded file is where it is
+            #: least checkable.
+            "export_group_count_approximate": group_count_approximate,
             "row_count": len(items),
             "excerpt_count": len(excerpts),
             #: The count the FIRST page reported against what the walk actually

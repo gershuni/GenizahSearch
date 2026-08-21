@@ -716,6 +716,98 @@ def test_a_short_group_walk_costs_the_order_and_says_so_without_lying_about_rows
     assert "appear at the end" in body
 
 
+
+@pytest.mark.parametrize("lang", ("en", "he"))
+def test_an_approximate_group_count_is_named_as_a_ceiling_not_a_count(
+        monkeypatch, lang):
+    """A capped group count must not be printed as a count -- and must not drag
+    the rows-moved sentence along with it.
+
+    `DISCOVERY_FINDINGS_COUNT_MAX` turns a total into a CEILING and flags it.
+    The About sheet prints `export_group_count` inside a flat sentence ("one row
+    per work, of N works"), so a capped number arrives there stated as fact --
+    the defect CLAUDE.md calls "a correctness defect, not a tuning choice", in
+    the one place a reader cannot check it against the page.
+
+    An approximate count does NOT shorten the walk: the bound is dropped and it
+    still ends on a short page. So every row IS placed, and the sentence about
+    rows appearing at the end -- which the umbrella flag used to trigger -- was
+    telling the reader to look for something that was not there.
+    """
+    svc, _seen = _grouped_service(monkeypatch)
+    real = svc.get_findings_enveloped
+
+    def _capped(unit="identification", **kw):
+        env = real(unit=unit, **kw)
+        if unit == "work":
+            env["meta"] = dict(env["meta"], approximate_total=True)
+        return env
+
+    monkeypatch.setattr(svc, "get_findings_enveloped", _capped)
+    env = svc.collect_findings_for_export(unit="work")
+    meta = env["meta"]
+
+    # The umbrella flag stays conservative. This is the only assertion in the
+    # suite that reaches `not (g_approx or g_guard)`.
+    assert meta["export_group_order_complete"] is False
+    assert meta["export_group_count_approximate"] is True
+    # ... and yet nothing moved: every leaf found its group.
+    assert meta["export_group_unplaced"] == 0
+    assert [r["identification_id"] for r in env["items"]] == ["i-2", "i-1", "i-3"]
+    assert meta["walk_complete"] is True, "the ROWS are complete and must say so"
+
+    body = " ".join(_cells(des.build_findings_workbook(env, lang=lang)))
+    ceiling = {"en": "ceiling, not a count", "he": "תקרה ולא ספירה"}[lang]
+    at_end = {"en": "appear at the end", "he": "מופיעות בסוף"}[lang]
+    assert ceiling in body, "a capped group count is stated as if it were one"
+    assert at_end not in body, (
+        "the file tells the reader some rows appear at the end when every row "
+        "was placed in its group")
+
+
+def test_a_group_walk_that_trips_its_page_guard_leaves_the_order_uncertified(
+        monkeypatch):
+    """The runaway guard is the OTHER way a grouping stops being certifiable.
+
+    Groups past the guard were never seen, so leaves in them could not be
+    placed. Here they all happen to be placed anyway, which is the point: the
+    flag must come from the walk having been cut short, not from noticing
+    afterwards that something failed to sort.
+    """
+    svc, seen = _grouped_service(monkeypatch)
+    real = svc.get_findings_enveloped
+
+    def _runaway(unit="identification", page=1, page_size=200, **kw):
+        env = real(unit=unit, page=page, page_size=page_size, **kw)
+        if unit == "work":
+            # A FULL page every time, so the walk can only ever end on the
+            # guard. The two real groups lead page 1, so every leaf still
+            # places and the guard is the sole cause under test.
+            filler = [{"display_work_id": "w-%d-%d" % (page, i),
+                       "neutral_title": "Filler", "sys_id": None,
+                       "shelfmark_display": None, "identification_id": None}
+                      for i in range(page_size - 2)]
+            env["items"] = [dict(r) for r in env["items"]] + filler
+            env["total"] = 1          # guard = 1 page of slack + 8
+        return env
+
+    monkeypatch.setattr(svc, "get_findings_enveloped", _runaway)
+    env = svc.collect_findings_for_export(unit="work")
+    meta = env["meta"]
+
+    assert seen.count("work") == 9, (
+        f"the guard did not stop the group walk (pages={seen.count('work')})")
+    assert meta["export_group_order_complete"] is False
+    assert meta["export_group_unplaced"] == 0
+    assert meta["export_group_count_approximate"] is False
+    # THE ROWS ARE UNTOUCHED: a group-side degradation must never be reported
+    # as a short file.
+    assert meta["walk_complete"] is True
+    assert [r["identification_id"] for r in env["items"]] == ["i-2", "i-1", "i-3"]
+    body = " ".join(_cells(des.build_findings_workbook(env, lang="en")))
+    assert "appear at the end" not in body
+
+
 def test_the_page_and_the_export_group_on_one_table():
     """The page opens a grouped row onto its children with
     `EXPANSION_KEY_BY_UNIT`; the export flattens the same grouping with it.

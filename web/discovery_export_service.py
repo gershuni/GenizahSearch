@@ -772,8 +772,13 @@ def build_findings_workbook(
         _about(_pick({"en": "One row is", "he": "כל שורה היא"}, lang),
                _grain_sentence(meta.get("export_group_count"), requested, lang))
         # A short GROUP walk costs the ORDER, not the rows. Said out loud
-        # rather than left to look like the reader's own sort choice.
-        if meta.get("export_group_order_complete") is False:
+        # rather than left to look like the reader's own sort choice --
+        # but said ONLY about the cause that actually fired. The umbrella
+        # flag `export_group_order_complete` goes False for three different
+        # reasons and two of them place every row, so printing the
+        # rows-at-the-end sentence off the umbrella told the reader to look
+        # for something that was not there.
+        if int(meta.get("export_group_unplaced") or 0) > 0:
             _about(_pick({"en": "Grouping", "he": "הקיבוץ"}, lang),
                    _pick({
                        "en": "Some rows could not be placed in their group and "
@@ -781,6 +786,19 @@ def build_findings_workbook(
                              "only the ordering is affected.",
                        "he": "חלק מהשורות לא שובצו בקבוצתן ומופיעות בסוף. כל "
                              "השורות התואמות נמצאות בקובץ; רק הסדר הושפע.",
+                   }, lang))
+        # The count in the sentence above is a CAP once the artifact stopped
+        # counting. A number presented as a count when it is a ceiling is
+        # the one thing `DISCOVERY_FINDINGS_COUNT_MAX` is documented never
+        # to be allowed to do, and this file is read away from the page.
+        if meta.get("export_group_count_approximate"):
+            _about(_pick({"en": "Group count", "he": "מספר הקבוצות"}, lang),
+                   _pick({
+                       "en": "The number above is a ceiling, not a count -- "
+                             "counting stopped there. Every matching row is "
+                             "still in this file.",
+                       "he": "המספר שלמעלה הוא תקרה ולא ספירה — הספירה נעצרה "
+                             "בו. כל השורות התואמות נמצאות בקובץ.",
                    }, lang))
     _about(_pick({"en": "Rows in this file", "he": "שורות בקובץ"}, lang),
            meta.get("row_count", len(items)))

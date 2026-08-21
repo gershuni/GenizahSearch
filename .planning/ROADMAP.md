@@ -583,6 +583,52 @@ file incomplete is a smaller error than the reverse, but it is still a false
 statement, and this surface's whole discipline is that the file does not make
 statements nobody measured.
 
+### Finishing the mutation battery — and the false sentence it was hiding
+
+The nine mutations added for the 2026-08-21 fixes were anchor-verified but never
+run: a session teardown killed the battery mid-cycle, and it left **M22 applied
+in the working tree** — `leaf_unit = unit  # MUTANT`, which is precisely the
+defect the owner had just reported. A residue scan caught it before staging.
+That is luck, not a process, so the harness changed first: a byte-exact backup
+plus a journal naming it, written BEFORE the mutation lands and cleared only
+after the restore verifies, with `atexit`, `SIGINT` and `SIGTERM` all running
+the same repair and the next run repairing before it does anything else. Proven
+by driving the harness's own `_arm` and `_repair` through an `os._exit(9)` —
+which skips atexit and every handler — against `shared/discovery_service.py`
+itself: the killed process left the mutation in the file, and a fresh process
+restored it byte-exact.
+
+**M24 came back GREEN, and it was not merely an unwatched line.**
+`export_group_order_complete` has THREE causes — leaves that matched no group, a
+group walk that tripped its page guard, and a group count that came back
+approximate — and the About sheet asserted ONE of them for all three: *"Some
+rows could not be placed in their group and appear at the end."* In the
+approximate case every row IS placed, because an approximate count does not
+shorten the walk; the bound is dropped and it still ends on a short page. So the
+file told the reader to look for something that was not there. And
+`_grain_sentence` prints `export_group_count` as a flat number, so a capped
+count arrived in the sheet **stated as a count** — the thing CLAUDE.md calls "a
+correctness defect, not a tuning choice" for `DISCOVERY_FINDINGS_COUNT_MAX`,
+landing in the one artifact a reader cannot check against the page.
+
+The umbrella flag stays conservative and still goes False for all three; what
+changed is that the service now carries WHICH cause fired
+(`export_group_unplaced`, `export_group_count_approximate`) and the workbook
+says only what is true — the rows-moved sentence when rows really moved, the
+count named as a ceiling when it is one, and nothing when nothing is wrong.
+
+The green was possible because the only test on that flag truncates the group
+walk's ITEMS, which lands on the `unplaced` branch and never reaches the line
+M24 mutates. The mutation was sound and the watch was pointed elsewhere — the
+same shape as M13, one layer further out.
+
+**33/33 mutations watched red by name**, in one run, with a residue scan the
+run cannot skip. Two new tests cover the causes nothing was watching (an
+approximate group count, and a group walk stopped by its page guard), and three
+new mutations watch the fix: the rows-moved sentence printed off the umbrella
+again (M31), the ceiling disclosure dropped (M32), and the unplaced count never
+reaching the workbook (M33).
+
 ### A pre-existing concurrency-slot leak, found on the way past
 
 Running the masking sweep before any other discovery test in the same process
