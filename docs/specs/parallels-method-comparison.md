@@ -792,3 +792,67 @@ Caveats carried: tune split, exploratory, n=120 cards standing in for ~4,700
 displayed ones (interval widths +/-0.08 to +/-0.16); FGP queries only; and
 none of this covers short-quotation queries, where `min_span` matters and no
 instrument exists.
+
+
+---
+
+## Owner correction (2026-08-22): list length is not a cost
+
+The owner's constraint, stated directly: *"a researcher has no problem
+receiving 50 or even a hundred, two hundred, three hundred fragments if in the
+end there is something that fits. It is like search results."*
+
+That invalidates the premise under two earlier conclusions, and both have to
+be reopened rather than defended.
+
+### 1. "The combined view is dominated" was conditional on slot scarcity
+
+`C5` lost because it gave the passage engine 5 slots instead of 10 and
+discarded its ranks 6-10. With no slot budget the displacement does not
+happen, and the right combined design is **append, not interleave**: the
+passage engine's full list, then whatever the incumbent found that it did
+not, below. Nothing is displaced, so the incumbent's low precision sits in
+the tail rather than the head.
+
+| | passage wide alone | wide, then incumbent appended | gain |
+|---|---|---|---|
+| FGP recall@50 | 0.793 | **0.863** | +7.0 pts (21 queries) |
+| FGP recall@200 | 0.820 | **0.870** | +5.0 pts (15 queries) |
+| witness recall@50 | 0.893 | **0.920** | +2.7 pts |
+| witness recall@200 | 0.897 | **0.937** | +4.0 pts |
+
+The remaining cost is latency, and it is real: the passage engine answers in
+~0.3 s, the incumbent in 13-20 s. A page that waits for both forfeits the
+speed advantage entirely. Progressive loading (passage results immediately,
+incumbent extras appended when they arrive) is the design that keeps both.
+
+### 2. `wide-40` at density_scale 1.3 was chosen at a knee that no longer binds
+
+1.3 was picked because burden doubled at 1.45. Re-measured upward on the same
+300 FGP tune queries, with burden no longer a cost:
+
+| density_scale | recall@50 | recall@200 | median manuscripts | p90 | p50 latency |
+|---|---|---|---|---|---|
+| 1.30 (`wide-40`) | 0.793 | 0.820 | 3 | 123 | 363 ms |
+| 1.45 | 0.830 | 0.863 | 6 | 209 | 350 ms |
+| **1.60** | **0.843** | **0.893** | 8 | 301 | 509 ms |
+| 1.80 | 0.857 | 0.903 | 22 | 458 | 570 ms |
+| 2.00 | 0.853 | 0.910 | **102** | 691 | 575 ms |
+
+Two things worth reading carefully:
+
+- **recall@50 peaks at 1.80 and FALLS at 2.00** (0.857 -> 0.853). Even when
+  the display is unbounded, ranking still binds: at 2.00 the median query
+  returns 102 manuscripts and the true target gets pushed past rank 50 by
+  its own noise. "Length is free" does not make ordering free.
+- **Returns diminish sharply.** 1.60 -> 1.80 buys +1.0 point of recall@200
+  and nearly triples the median list (8 -> 22); 1.80 -> 2.00 buys +0.7 and
+  quintuples it (22 -> 102).
+
+Latency stays sub-second throughout, so it is not the binding constraint.
+
+**What is NOT measured:** precision above 1.30. Every graded card in
+`deck_display_v1` comes from the 1.30 setting. The owner's tolerance is for
+long lists *that end in something useful* — so whether 1.60's additions are
+real finds or formulas is exactly the open question, and a ~40-card delta
+deck (what 1.60 adds over 1.30) would settle it at low cost.
