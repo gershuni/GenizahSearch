@@ -910,3 +910,55 @@ was doing work.
 
 This deck supersedes `deck_delta_wider_v1` (FGP-based, built the same day,
 ungraded) for the `wide-40` vs `wider-40` decision.
+
+
+## `deck_ref_wider_v1` graded (44 of 44): widening to 1.60 buys quotations
+
+Strict (same text or paraphrase) on what `wider-40` adds over `wide-40`:
+**0.318 [0.159, 0.500]** query-clustered. Useful 1.000 — zero `unrelated`,
+zero `junk`, so nothing it adds is garbage.
+
+| grade | n |
+|---|---|
+| `canonical` (scriptural / rabbinic quotation) | **28** |
+| `same_text` | 12 |
+| `paraphrase` | 2 |
+| `shared_formula` | 2 |
+
+Per query: 1.52 added manuscripts, of which **0.48 genuine and 0.97
+canonical**. Compared with the earlier step (1.00 → 1.30, graded 0.543 strict
+with 30% canonical), returns diminish sharply and the canonical share roughly
+doubles to 64%.
+
+### The canonical flood is a property of the QUERY, not the threshold
+
+Splitting the same deck by which reference corpus the query came from:
+
+| query corpus | strict | canonical | share genuine |
+|---|---|---|---|
+| commentary/code-heavy corpus | 5 | 21 | **18.5%** (5 of 27) |
+| document/composition corpus | 9 | 7 | **53%** (9 of 17) |
+
+Paste a passage of a commentary and it *contains* the verse it comments on, so
+widening finds Genizah fragments of that verse — correctly, and uselessly for
+this feature. Paste an original composition and more than half the additions
+are real textual parallels. Cell sizes are 17 and 27, so this is a strong
+signal at weak resolution, not a calibrated rate.
+
+### Decision
+
+**`wide-40` (1.30) stays the default.** At 1.60 two thirds of what you gain is
+scripture you did not ask for, and the gain concentrates in exactly the query
+type — commentaries — where it is least wanted.
+
+Two things follow rather than close:
+
+1. **`wider-40` is worth keeping as a user-selectable "widen search"**, since
+   nothing it returns is junk and for composition-type queries the additions
+   are 53% genuine.
+2. **A canonical-overlap demotion would unlock 1.60 and beyond.** The
+   discovery pipeline already has the precedent — a row whose best span is
+   covered by the union of Bible-match spans on the same page is demoted — and
+   the reference corpora contain the canonical works needed to detect it. That
+   is a feature, not a parameter, and it is the single change that would make
+   the wider settings obviously correct rather than a trade.
