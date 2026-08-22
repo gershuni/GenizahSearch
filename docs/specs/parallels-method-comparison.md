@@ -726,3 +726,69 @@ unit tests on fixtures:
    re-inflating the numerator to the unfiltered maximum (0.868 with a
    [1.000, 1.000] interval). Replaced with domain estimation — membership in
    the indicator, every unit kept in the pool.
+
+
+## Display-deck result (all 120 cards graded, 2026-08-22)
+
+Grades: 74 `same_text`, 24 `canonical`, 17 `shared_formula`, 4 `unrelated`,
+1 `paraphrase`. Scored with the stratified IPW estimator; intervals are
+95% stratified-bootstrap, seed 20260821.
+
+**Headline endpoint — non-source strict manuscript yield per query** (how
+many genuinely same-text manuscripts, other than the query's own source, a
+reader is actually shown; empty slots count zero):
+
+| view | yield, non-source | precision, non-source | precision, overall |
+|---|---|---|---|
+| `S` standard, top 10 | 2.051 [1.437, 2.669] | 0.631 [0.442, 0.821] | 0.852 [0.700, 0.972] |
+| **`W` wide, top 10** | **3.106 [2.365, 3.778]** | **0.640 [0.487, 0.778]** | 0.748 [0.641, 0.844] |
+| `C5` wide + incumbent, 5+5 | 2.805 [1.923, 3.687] | 0.364 [0.249, 0.478] | 0.441 [0.346, 0.540] |
+
+### Widening is free at the display level
+
+`W` and `S` have the SAME non-source precision — 0.640 against 0.631, well
+inside each other's intervals — while `W` yields 51% more same-text
+manuscripts per query. The earlier top-3 delta deck suggested widening cost
+precision (its additions graded 0.543 strict); across a 10-deep display that
+cost disappears, because the weaker additions sit below the good ones rather
+than replacing them. `W` dominates `S`: same precision, more yield.
+
+### The combined view is dominated on both axes, and this reverses the recall reading
+
+`C5` was the candidate the union recall numbers favoured (union recall@10
+0.797 against 0.733 for wide alone). Graded, it is the worst option:
+
+- **precision 0.364 non-source, against 0.640 for `W`** — intervals do not
+  overlap, so this is a real difference, not noise;
+- **yield 2.805, BELOW `W`'s 3.106** — it does not even buy the extra finds
+  it costs precision for.
+
+The mechanism is visible in the rank-band mix. `C5` gives the passage engine
+only 5 slots instead of 10, so it discards wide's ranks 6–10 — which grade
+59% `same_text` — and fills those slots from the incumbent, whose
+contributions grade 33% `canonical` + 38% `shared_formula` + 4% `unrelated`
+at ranks 4–10, i.e. 75% non-target.
+
+**All four `unrelated` cards in the whole deck are in `C5`, three of them in
+its top 3. Neither passage-only view produced a single one.** Traced to
+their source: every one is ABSENT from wide's list entirely and sits at
+incumbent rank 2, 3, 2 and 5 — they are incumbent contributions, and the
+interleave promotes them into the most visible slots.
+
+Why this contradicts the recall reading: recall@10 asks "did the query's own
+manuscript surface", and pooling two methods can only help that. Yield asks
+"how many genuinely same-text manuscripts is the reader shown", and pooling
+spends half the display budget on a weaker ranker. The two questions have
+different answers, and the second is the product question.
+
+### Recommendation
+
+**`wide-40` alone, displayed 10 deep.** Same precision as the tighter
+setting, half again the yield, no `unrelated` results at all, and ~40x
+faster than any view containing the incumbent. The combined view is not
+worth building: it is less precise and yields less than wide alone.
+
+Caveats carried: tune split, exploratory, n=120 cards standing in for ~4,700
+displayed ones (interval widths +/-0.08 to +/-0.16); FGP queries only; and
+none of this covers short-quotation queries, where `min_span` matters and no
+instrument exists.
