@@ -962,3 +962,73 @@ Two things follow rather than close:
    the reference corpora contain the canonical works needed to detect it. That
    is a feature, not a parameter, and it is the single change that would make
    the wider settings obviously correct rather than a trade.
+
+
+---
+
+## Canonical filtering: the existing feature does not solve this, and text overlap is the wrong signal
+
+Owner, 2026-08-23: canonical-citation filtering already exists in the regular
+search as an option — the user supplies canonical text or imports it from an
+external library. Confirmed present: `filter_text_dialog.py` +
+`sefaria_utils.py` fetch and cache canonical texts, and
+`SearchEngine.search_composition_logic` routes a chunk to `filtered` when the
+chunk's regex matches anywhere inside `filter_text`
+(`shared/search_engine.py:3037`). `shared/passage_parallels.py` honours the
+same parameter (per-record, on the query-side span). So the wiring exists on
+both paths.
+
+**It does not work for this problem.** Tested against the 44 graded cards,
+with the full canonical strata of the reference corpora as `filter_text`
+(15,163,534 letters from 307 works):
+
+| | result |
+|---|---|
+| canonical cards filtered out | **0 of 28** |
+| genuine finds wrongly filtered | 1 of 12 |
+
+Exact-substring matching of a ~62-letter span against a clean canonical corpus
+essentially never fires: the composition's own citation differs from the
+canonical text by spelling, abbreviation, or partial quotation. The mechanism
+works for the incumbent because its needles are 3-5 word chunks with a
+mark-tolerant regex, not 60-letter spans.
+
+**Loosening it makes things worse, not better.** Two weaker variants, both
+measured on the same graded cards:
+
+- *Any short sub-window present in the canon*: catches 22 of 28 canonical —
+  but also 7 of 12 genuine. Real parallels quote scripture too.
+- *Coverage of the span by canonical windows* (the discovery pipeline's guard
+  shape): the distributions do not separate at all — median coverage 0.49 for
+  `canonical` against 0.53 for `same_text`. At every threshold the genuine
+  loss tracks the canonical gain.
+
+### What the signal actually is
+
+Reading the catalogue titles of the returned manuscripts makes it obvious.
+The cards graded `canonical` are overwhelmingly manuscripts that ARE canonical
+works — Talmud Bavli, Mishnah, Torah, Bible, Halakhot Gedolot, Rif, Mishneh
+Torah. The cards graded `same_text` are liturgy, piyyut, Haggadah, Arukh,
+derashot — the kind of thing the query itself is.
+
+**"Canonical" is a property of the returned MANUSCRIPT, not of the text
+overlap.** The query quoted a canonical work and the engine correctly found a
+copy of it.
+
+A title-based rule on data already shipped (`libraries.csv`, resolved for
+42/42 of these sys_ids):
+
+| | result |
+|---|---|
+| canonical demoted | **18 of 26 (69%)** |
+| genuine lost | **2 of 14 (14%)** |
+
+The two genuine losses are a Prophets manuscript and a Talmud manuscript that
+really did carry the searched text — irreducible for a title rule, which is
+why this must DEMOTE rather than delete, and be user-optional. The eight
+canonical it misses are untitled or idiosyncratically titled fragments
+(`<empty>`, `קובץ`, a Judeo-Arabic legal work).
+
+This is a far better discriminator than any text-overlap test, it needs no
+canonical corpus at query time, and it costs a title lookup. It is also NOT
+what the existing feature does, so it is new work rather than wiring.
