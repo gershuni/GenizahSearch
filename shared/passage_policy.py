@@ -157,8 +157,20 @@ FLAT_25_NOISY = PassagePolicy(name='flat-25-noisy', min_span=25,
 # noise) is measured by the delta grading deck, not assumed.
 WIDE_40 = PassagePolicy(name='wide-40', density_scale=1.3)
 
+# wider-40: density_scale 1.6, the operating point the owner's 2026-08-22
+# ruling opened up ("a researcher has no problem receiving 50 or even three
+# hundred fragments if in the end there is something that fits"). 1.3 had been
+# chosen at a knee defined by BURDEN doubling -- a cost that ruling removes.
+# Re-measured on 300 FGP tune queries: recall@200 0.820 -> 0.893, median
+# manuscripts 3 -> 8, latency still sub-second. Not pushed further because
+# recall@50 PEAKS at 1.8 and falls at 2.0 -- past that the target is buried by
+# its own noise, so an unbounded display does not make ordering free.
+# Its added results are NOT yet graded; that is what deck_delta_wider_v1 asks.
+WIDER_40 = PassagePolicy(name='wider-40', density_scale=1.6)
+
 PRESETS = {p.name: p for p in
-           (STANDARD_40, STANDARD_40_NOISY, FLAT_25, FLAT_25_NOISY, WIDE_40)}
+           (STANDARD_40, STANDARD_40_NOISY, FLAT_25, FLAT_25_NOISY,
+            WIDE_40, WIDER_40)}
 DEFAULT_POLICY = STANDARD_40
 
 
