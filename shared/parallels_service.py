@@ -50,6 +50,8 @@ import logging
 from dataclasses import dataclass
 from typing import Optional, Protocol
 
+from shared.canonical_works import partition_rows
+
 logger = logging.getLogger(__name__)
 
 
@@ -125,6 +127,11 @@ class ParallelsResultBundle:
     filtered_results: list[dict]
     boundary_options: dict
     truncated_to_200: bool = False
+    # How many rows the canonical-works option moved out of main_results and
+    # into filtered_results. 0 when the option is off. Surfaced so a surface
+    # can say "N canonical works hidden" rather than silently showing less --
+    # this project's no-silent-truncation rule.
+    canonical_hidden: int = 0
     dropped_text_lookup_failures: int = 0
 
 
@@ -217,6 +224,7 @@ async def fetch_parallels_results(
     boundary_mode: str = 'full',
     restrict_sys_ids: Optional[set] = None,
     executor=None,
+    hide_canonical: bool = False,
 ) -> ParallelsResultBundle:
     """Run search_composition_logic via run_in_executor + apply group cap.
 
@@ -320,6 +328,26 @@ async def fetch_parallels_results(
     dropped_text_lookup_failures = int(
         (result or {}).get('dropped_text_lookup_failures') or 0)
 
+    # Optional: hide manuscripts the catalogue identifies as canonical works
+    # ("hide canonical works by the catalogue"). Applied HERE, after the
+    # searcher and before the cap, so it is method-agnostic -- both the chunk
+    # and passage paths get identical behaviour from one implementation, and
+    # neither searcher needs to know the option exists.
+    #
+    # Order matters: demoting BEFORE the group cap means the cap is spent on
+    # rows the user will actually see, rather than on canonical rows that are
+    # about to be moved out of the main list.
+    #
+    # Demoted rows go to filtered_results, never to /dev/null -- the rule
+    # loses 2 of 14 genuine finds on the graded evidence (a Prophets and a
+    # Bavli manuscript that really did carry the searched text), so the user
+    # must be able to reach them. See shared/canonical_works.py.
+    canonical_hidden = 0
+    if hide_canonical:
+        main_results, demoted = partition_rows(main_results, meta_mgr)
+        canonical_hidden = len(demoted)
+        filtered_results = list(filtered_results) + demoted
+
     # D-07 cap on main groups only.
     capped_main, truncated = _cap_main_results_by_group(main_results, meta_mgr)
 
@@ -340,4 +368,5 @@ async def fetch_parallels_results(
         boundary_options=boundary_options,
         truncated_to_200=truncated,
         dropped_text_lookup_failures=dropped_text_lookup_failures,
+        canonical_hidden=canonical_hidden,
     )
