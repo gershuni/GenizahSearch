@@ -856,3 +856,57 @@ Latency stays sub-second throughout, so it is not the binding constraint.
 long lists *that end in something useful* — so whether 1.60's additions are
 real finds or formulas is exactly the open question, and a ~40-card delta
 deck (what 1.60 adds over 1.30) would settle it at low cost.
+
+
+---
+
+## The FGP validity problem, measured — and the instrument that replaces it
+
+Owner, 2026-08-22: FGP transcriptions are frequently partial, and carry
+transcriber summaries and skips. They are not the real search case, which is
+a continuous passage of a composition pasted in.
+
+Quantified against each transcription's own HTR page (4,000 rows, normalized
+letters):
+
+| transcription / page length | share |
+|---|---|
+| under 0.5 (materially truncated) | 2.1% |
+| 0.5 – 0.8 | 6.5% |
+| 0.8 – 1.25 (comparable) | 57.6% |
+| **over 1.25 (longer than the page)** | **33.7%** |
+
+The dominant deviation is not truncation but ADDITION — a third of
+transcriptions carry more text than the page holds, which is what editorial
+notes and apparatus look like. (The ratio alone cannot separate "transcriber
+added material" from "HTR missed material"; both inflate it.) About 42%
+deviate materially in one direction or the other.
+
+**What this does and does not touch.** Recall was measured on TWO instruments
+and they agree (wide > standard > incumbent, every depth, both): the witness
+instrument draws continuous ~900-character slices from complete works, so it
+is already the ecologically valid one. But **every graded deck to date —
+`deck_v5`, `deck_delta_v1`, `deck_display_v1`, `deck_delta_wider_v1` — used
+FGP queries.** All precision evidence therefore rests on the unrepresentative
+distribution.
+
+### `scripts/build_reference_query_set.py`
+
+Queries drawn as contiguous readable slices from COMPLETE works in the two
+reference corpora, no witness-oracle restriction (a precision deck needs no
+oracle — it shows query text beside a returned manuscript and asks the
+relation, so the draw can span the whole corpus rather than its attested
+corner). 896 queries from 1,454 works long enough to contain a passage; the
+`##` metadata blocks are stripped before slicing, since they name the source
+manuscript. `positives` is emitted EMPTY on purpose, so misuse as a recall
+instrument fails loudly instead of scoring zero.
+
+`deck_ref_wider_v1`: 44 cards, 29 queries, every card exclusive to
+`wider-40`, drawn from both corpora (27 / 17). Median shared span 62 letters
+and 45.5% short, against 56% short in the FGP-based version of the same
+question — the reference-source queries produce a somewhat cleaner delta
+before any grading, which is itself a small sign that the query distribution
+was doing work.
+
+This deck supersedes `deck_delta_wider_v1` (FGP-based, built the same day,
+ungraded) for the `wide-40` vs `wider-40` decision.
