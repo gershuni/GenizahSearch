@@ -449,8 +449,15 @@ def create_parallels_page(initial_text: str = None):
                 _active_snapshot, p_state.results, p_state.filtered_results)
             if _restored_total > _restored_shown:
                 ui.notify(
+                    # Round 7 (Codex P2): the controls sit at build-time
+                    # defaults after a reload, so an UNCONDITIONAL "run
+                    # the search again" would run a DIFFERENT search.
+                    # State the condition instead of promising. Whether a
+                    # reload should restore the configuration itself is
+                    # the owner decision filed in docs/OPEN_ISSUES.md.
                     tr('Restored {shown} of {total} results from the last '
-                       'search — run the search again for the full list.'
+                       'search — to see the full list, run the search '
+                       'again with its original settings.'
                        ).format(shown=_restored_shown,
                                 total=_restored_total),
                     type='info',

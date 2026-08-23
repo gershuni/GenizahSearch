@@ -5001,8 +5001,11 @@ TRANSLATIONS.update({
         "החיפוש ברמת האות נכשל.",
     "Letter-level search checked the {n} best-evidenced candidates of {m}.":
         "החיפוש ברמת האות בדק את {n} המועמדים המבוססים ביותר מתוך {m}.",
-    "Restored {shown} of {total} results from the last search — run the search again for the full list.":
-        "שוחזרו {shown} מתוך {total} תוצאות מהחיפוש האחרון — הריצו את החיפוש שוב לרשימה המלאה.",
+    # Round 7 (Codex P2): the promise is conditional on the ORIGINAL
+    # settings -- after a reload the controls are at defaults, and an
+    # unconditional "run it again" would run a different search.
+    "Restored {shown} of {total} results from the last search — to see the full list, run the search again with its original settings.":
+        "שוחזרו {shown} מתוך {total} תוצאות מהחיפוש האחרון — לרשימה המלאה יש להריץ את החיפוש שוב עם ההגדרות המקוריות.",
     "Letter-level search matched more than {cap} manuscripts — showing the strongest {cap}.":
         "החיפוש ברמת האות מצא יותר מ־{cap} כתבי יד — מוצגים ה־{cap} החזקים ביותר.",
 })

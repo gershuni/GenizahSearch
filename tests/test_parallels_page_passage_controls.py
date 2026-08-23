@@ -603,3 +603,17 @@ def test_the_clear_path_clears_the_stamp_with_the_rows():
     flat = ' '.join(src.split())
     assert ("safe_user_set('parallels_results', []) "
             "safe_user_set('parallels_results_fingerprint', '')") in flat
+
+
+# =========================================================================
+# Round 7 (Codex P2): after a reload the controls sit at build-time
+# defaults, so the restore notice must not promise that a bare re-run
+# recovers the full list -- it states the original-settings condition.
+# =========================================================================
+
+def test_the_restore_notice_states_its_condition():
+    src = _read_source()
+    assert 'run the search again for the full list' not in src, (
+        'the unconditional restore promise is back -- a reload does not'
+        ' restore the controls, so a bare re-run is a DIFFERENT search')
+    assert 'with its original settings' in src
