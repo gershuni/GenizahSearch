@@ -181,7 +181,11 @@ def test_row_contract_keys_and_types(searcher, synthetic_corpus):
     # 'dropped_text_lookup_failures' (finding #16(b)) is ADDITIVE -- existing
     # consumers that only read 'main'/'filtered' (shared/parallels_service.py
     # via .get()) are unaffected by its presence.
-    assert set(result.keys()) == {'main', 'filtered', 'dropped_text_lookup_failures'}
+    assert set(result.keys()) == {
+        'main', 'filtered', 'dropped_text_lookup_failures',
+        # PR #324 round 3, both additive for the same reason:
+        'duplicate_photography_demoted', 'query_report',
+    }
     assert result['filtered'] == []
     assert result['dropped_text_lookup_failures'] == 0
     assert result['main'], 'the motif carrier was not found'
@@ -765,3 +769,95 @@ def test_load_passage_state_flag_off_never_touches_the_filesystem(tmp_path, monk
     assert ready is False
     assert passage_assets.passage_available() is False
     assert passage_assets.get_passage_searcher(text_fetcher=None) is None
+
+
+# ---------------------------------------------------------------------------
+# PR #324 round 3, P1 pair: the discarded QueryReport, and the never-invoked
+# duplicate-photography hygiene.
+# ---------------------------------------------------------------------------
+
+def test_query_report_is_returned_not_discarded(searcher, synthetic_corpus):
+    """QueryReport's own contract says it 'ships in the result envelope -- a
+    truncated search that does not say so is a correctness defect'. The
+    searcher bound it to `_report` and threw it away."""
+    _idx, originals, motif = synthetic_corpus
+    result = searcher.search_composition_logic(full_text=motif)
+    rep = result.get('query_report')
+    assert rep, 'query_report missing from the searcher return dict'
+    assert rep['policy_id'] == searcher.policy.policy_id
+    assert rep['query_letters'] > 0
+    assert 'verify_truncated' in rep and 'candidates_truncated' in rep
+
+
+def test_a_truncated_search_says_so(grouped_corpus):
+    """With verify_cap=1 the verifier MUST truncate on a multi-candidate
+    query, and the report must carry that fact out. Uses grouped_corpus (12
+    records all carrying the motif -> 12 candidates against a cap of 1);
+    synthetic_corpus has ONE carrier, so nothing there can ever truncate."""
+    from shared.passage_policy import PassagePolicy
+
+    idx, originals, motif = grouped_corpus
+    tight = PassageSearcher(
+        index=idx, text_fetcher=_FakeTextFetcher(originals),
+        policy=PassagePolicy(name='tight-rt', verify_cap=1))
+    result = tight.search_composition_logic(full_text=motif)
+    assert result['query_report']['verify_truncated'] is True, (
+        'the verify cap fired but the report does not say so'
+    )
+
+
+def _lines(n_lines: int, salt: int, width: int = 20) -> list:
+    return [_aperiodic(width, salt=salt * 100 + i) for i in range(n_lines)]
+
+
+@pytest.fixture(scope='module')
+def dup_corpus(tmp_path_factory):
+    """Three multi-LINE records (line breaks are what the detector reads):
+
+      dupA, dupB -- byte-identical 6-line text: the same physical page
+                    photographed under two catalogue records.
+      ctrl       -- shares 3 of its 8 lines with the query (a genuine
+                    parallel quoting the same passage), everything else
+                    different: line agreement 3/8 = 0.375 < 0.60, must KEEP.
+    """
+    d = str(tmp_path_factory.mktemp('ppar_dup'))
+    page_lines = _lines(6, salt=41)
+    shared = page_lines[:3]                    # 60 letters -- the query
+    ctrl_lines = shared + _lines(5, salt=97)   # 3 shared of 8
+
+    ids = {'a': f"99{1:08d}_IE{77_000_001}_P{1:07d}_FL1",
+           'b': f"99{2:08d}_IE{77_000_002}_P{1:07d}_FL1",
+           'c': f"99{3:08d}_IE{77_000_003}_P{1:07d}_FL1"}
+    originals = {ids['a']: '\n'.join(page_lines),
+                 ids['b']: '\n'.join(page_lines),
+                 ids['c']: '\n'.join(ctrl_lines)}
+    build_index(sorted(originals.items()), d, partitions=2,
+                apply_hygiene=False)
+    idx = open_index(d)
+    assert idx is not None
+    return idx, originals, '\n'.join(shared), ids
+
+
+def test_duplicate_photography_is_demoted_not_deleted(dup_corpus):
+    idx, originals, query, ids = dup_corpus
+    s = PassageSearcher(index=idx, text_fetcher=_FakeTextFetcher(originals))
+    result = s.search_composition_logic(full_text=query)
+
+    main_ids = {r['raw_header'] for r in result['main']}
+    filt = [r for r in result['filtered']
+            if r.get('filter_reason') == 'duplicate_photography']
+
+    # Exactly one of the two photographs survives in main...
+    assert len({ids['a'], ids['b']} & main_ids) == 1, (
+        f'expected exactly one photograph of the page in main, got '
+        f'{sorted(main_ids)}'
+    )
+    # ...the other is DEMOTED (reachable, rendered) -- never deleted.
+    assert len(filt) == 1 and result['duplicate_photography_demoted'] == 1
+    assert filt[0]['text'], 'the demoted row must stay rendered'
+    # The genuine parallel that merely QUOTES the same passage is kept:
+    # its line agreement is 3/8, far under the 0.60 threshold.
+    assert ids['c'] in main_ids, (
+        'a genuine parallel sharing only the quoted lines was wrongly '
+        'demoted as duplicate photography'
+    )

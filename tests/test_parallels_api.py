@@ -1372,3 +1372,73 @@ def test_run_through_passage_budget_times_out(monkeypatch):
         assert not _PassageSemaphoreState.sem.locked()
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# PR #324 round 3: the QueryReport and hygiene counts must reach the envelope.
+# ---------------------------------------------------------------------------
+
+def test_passage_truncation_and_dup_counts_reach_the_envelope(
+    client, mock_searcher, clean_env, monkeypatch,
+):
+    """A capped passage search, and one that demoted duplicate photography,
+    must SAY so in warnings -- and the full report must ride the request echo
+    for evaluation consumers. Until round 3 the searcher discarded the report
+    entirely, so a truncated search looked complete."""
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    monkeypatch.setattr(
+        'web.passage_assets.get_passage_searcher',
+        lambda text_fetcher: mock_searcher,
+    )
+    mock_searcher.search_composition_logic.return_value = {
+        'main': [_make_main_row()],
+        'filtered': [],
+        'dropped_text_lookup_failures': 0,
+        'duplicate_photography_demoted': 2,
+        'query_report': {
+            'policy_id': 'p-test', 'candidates_truncated': False,
+            'verify_truncated': True, 'postings_excluded': 5,
+        },
+    }
+    r = client.post('/api/parallels',
+                    json={'text': 'hello world', 'method': 'passage'})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    codes = [w.get('code') if isinstance(w, dict) else w
+             for w in body.get('warnings', [])]
+    assert 'passage_results_truncated' in codes, codes
+    assert 'duplicate_photography_demoted' in codes, codes
+    dup = next(w for w in body['warnings']
+               if isinstance(w, dict)
+               and w.get('code') == 'duplicate_photography_demoted')
+    assert dup['count'] == 2
+    assert body['request']['passage_report']['verify_truncated'] is True
+
+
+def test_an_untruncated_passage_search_warns_nothing_extra(
+    client, mock_searcher, clean_env, monkeypatch,
+):
+    """postings_excluded alone is ROUTINE budget behaviour on long queries --
+    it must NOT produce the truncation warning (it lives in the echo's full
+    report instead), or the warning fires on nearly every request and stops
+    meaning anything."""
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    monkeypatch.setattr(
+        'web.passage_assets.get_passage_searcher',
+        lambda text_fetcher: mock_searcher,
+    )
+    mock_searcher.search_composition_logic.return_value = {
+        'main': [_make_main_row()],
+        'filtered': [],
+        'query_report': {
+            'policy_id': 'p-test', 'candidates_truncated': False,
+            'verify_truncated': False, 'postings_excluded': 12345,
+        },
+    }
+    r = client.post('/api/parallels',
+                    json={'text': 'hello world', 'method': 'passage'})
+    assert r.status_code == 200, r.text
+    codes = [w.get('code') if isinstance(w, dict) else w
+             for w in r.json().get('warnings', [])]
+    assert 'passage_results_truncated' not in codes, codes
+    assert 'duplicate_photography_demoted' not in codes, codes

@@ -133,6 +133,14 @@ class ParallelsResultBundle:
     # this project's no-silent-truncation rule.
     canonical_hidden: int = 0
     dropped_text_lookup_failures: int = 0
+    # PR #324 round 3. The passage engine's QueryReport (as a dict) -- its own
+    # contract says a truncated search that does not say so is a correctness
+    # defect, and until round 3 the searcher discarded it. None for the chunk
+    # path, which has no equivalent report.
+    passage_report: Optional[dict] = None
+    # Rows the passage engine's post-verify Stage-0 demoted to filtered as
+    # duplicate photography of a better-scored row. 0 for the chunk path.
+    duplicate_photography_demoted: int = 0
 
 
 async def _run_sync(func, *args, _executor=None, **kwargs):
@@ -327,6 +335,9 @@ async def fetch_parallels_results(
     # nothing here needs to know which searcher produced `result`.
     dropped_text_lookup_failures = int(
         (result or {}).get('dropped_text_lookup_failures') or 0)
+    passage_report = (result or {}).get('query_report') or None
+    duplicate_photography_demoted = int(
+        (result or {}).get('duplicate_photography_demoted') or 0)
 
     # Optional: hide manuscripts the catalogue identifies as canonical works
     # ("hide canonical works by the catalogue"). Applied HERE, after the
@@ -369,4 +380,6 @@ async def fetch_parallels_results(
         truncated_to_200=truncated,
         dropped_text_lookup_failures=dropped_text_lookup_failures,
         canonical_hidden=canonical_hidden,
+        passage_report=passage_report,
+        duplicate_photography_demoted=duplicate_photography_demoted,
     )

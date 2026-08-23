@@ -164,10 +164,19 @@ from dataclasses import dataclass
 from typing import Optional, Protocol
 
 from shared.parallels_service import PARALLELS_GROUP_CAP, _cap_main_results_by_group
+from shared.passage_hygiene import is_duplicate_photography
 from shared.passage_index import PassageIndex
 from shared.passage_normalize import nfc, norm_stream, norm_stream_fast, project_span
 from shared.passage_policy import PassagePolicy, get_preset
 from shared.passage_search import search_passage
+
+# How many score-adjacent SURVIVORS each rendered row is compared against in
+# the duplicate-photography pass. Duplicate photographs of one page score
+# near-identically (same text matched), so they land adjacent in score order
+# -- a small window catches the class the measurement found (36/36 join
+# anomalies were adjacent duplicates) while keeping the pass O(window x rows)
+# instead of the O(rows^2) the plan's "Bounded Stage-0" section forbids.
+DUP_SCAN_WINDOW = 3
 
 logger = logging.getLogger(__name__)
 
@@ -334,7 +343,7 @@ class PassageSearcher:
             )
 
         text = full_text or ''
-        hits, _report = search_passage(self.index, text, self.policy)
+        hits, report = search_passage(self.index, text, self.policy)
 
         if min_boundary_matches:
             hits = [h for h in hits if h.n_spans >= min_boundary_matches]
@@ -402,11 +411,17 @@ class PassageSearcher:
         # Finding #16(b): a row whose text lookup fails is DROPPED and
         # COUNTED, never returned half-blank.
         dropped = 0
+        # Raw page text captured during rendering, for the duplicate-
+        # photography pass below -- the render already fetched it, so the
+        # hygiene pass costs no extra Tantivy lookups.
+        raw_text_by_header: dict = {}
 
         main_results = []
         for row in capped_main_candidates:
             hit = hit_by_header[row['raw_header']]
-            if self._render_highlights(row, hit, q_nfc, q_offsets, span_index_of_q0):
+            if self._render_highlights(row, hit, q_nfc, q_offsets,
+                                       span_index_of_q0,
+                                       raw_text_out=raw_text_by_header):
                 main_results.append(row)
             else:
                 dropped += 1
@@ -414,15 +429,58 @@ class PassageSearcher:
         filtered_results = []
         for row in capped_filtered_candidates:
             hit = hit_by_header[row['raw_header']]
-            if self._render_highlights(row, hit, q_nfc, q_offsets, span_index_of_q0):
+            if self._render_highlights(row, hit, q_nfc, q_offsets,
+                                       span_index_of_q0,
+                                       raw_text_out=raw_text_by_header):
                 filtered_results.append(row)
             else:
                 dropped += 1
+
+        # Post-verify Stage-0: duplicate-photography suppression (PR #324
+        # round 3 -- the algorithm spec section 9 marks this MANDATORY, and
+        # until this pass the helper existed only at its definition). The
+        # false-positive class it removes is the one that looks most like a
+        # discovery: the same physical page photographed under two catalogue
+        # records, measured 36 of 36 among "join anomaly" pairs. Bounded
+        # exactly as the plan's "Bounded Stage-0" section requires: each row
+        # is compared only against the last DUP_SCAN_WINDOW SURVIVORS in
+        # score order (a cluster of N photographs of one page collapses to
+        # its best-scored copy with N-1 window-1 comparisons, not N^2), and
+        # the demoted count ships in the return dict -- never a silent
+        # removal. Demote, not delete: the row moves to `filtered`, already
+        # rendered, so a skeptical user can still inspect it.
+        dup_demoted = 0
+        if len(main_results) > 1:
+            survivors: list = []
+            for row in main_results:
+                dup_of = None
+                tb = raw_text_by_header.get(row['raw_header'])
+                if tb:
+                    for prev in survivors[-DUP_SCAN_WINDOW:]:
+                        ta = raw_text_by_header.get(prev['raw_header'])
+                        if ta and is_duplicate_photography(ta, tb):
+                            dup_of = prev
+                            break
+                if dup_of is not None:
+                    row['filter_reason'] = 'duplicate_photography'
+                    filtered_results.append(row)
+                    dup_demoted += 1
+                else:
+                    survivors.append(row)
+            main_results = survivors
 
         return {
             'main': main_results,
             'filtered': filtered_results,
             'dropped_text_lookup_failures': dropped,
+            'duplicate_photography_demoted': dup_demoted,
+            # The budget/truncation report. QueryReport's own contract says
+            # it "ships in the result envelope -- a truncated search that
+            # does not say so is a correctness defect"; until PR #324 round 3
+            # this method bound it to `_report` and threw it away, so a
+            # capped search looked complete to users AND to the evaluation
+            # instruments.
+            'query_report': report.as_dict(),
         }
 
     # -- filter_text parity (finding #3) -------------------------------------
@@ -449,7 +507,8 @@ class PassageSearcher:
     # -- bounded re-normalization (display path only) -----------------------
 
     def _render_highlights(self, row: dict, hit, q_nfc: str, q_offsets,
-                            span_index_of_q0: dict) -> bool:
+                            span_index_of_q0: dict,
+                            raw_text_out: Optional[dict] = None) -> bool:
         """Fill in `text` / `source_ctx` / `chunk_hits` for ONE row (either a
         surviving `main` row or a surviving `filtered` row -- both are
         group-capped identically, finding #16(a)).
@@ -483,6 +542,12 @@ class PassageSearcher:
                 '(counted, not returned as a blank row)', hit.record_id,
             )
             return False
+
+        if raw_text_out is not None:
+            # For the duplicate-photography pass: line_agreement needs the
+            # ORIGINAL text with its line breaks (line breaks are a property
+            # of the physical page), and this is the one place it is fetched.
+            raw_text_out[hit.record_id] = orig_text
 
         r_nfc = nfc(orig_text)  # redundant with norm_stream's internal nfc() -- accepted cost
         _r_stream, r_offsets = norm_stream(orig_text)

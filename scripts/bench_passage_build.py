@@ -87,11 +87,21 @@ def run_one(records_factory, out_dir, args, construction) -> dict:
     if os.path.isdir(out_dir):
         shutil.rmtree(out_dir)
     t0 = time.time()
+    # Fingerprint the corpus into the manifest (PR #324 round 3). This bench
+    # is also the shipped way to BUILD a real artifact (--keep on the full
+    # corpus is exactly how the production index was made), and without
+    # `source_manifest` it wrote `corpus.sources: []` -- an artifact that
+    # cannot be tied to the bytes it indexed, so a stale index could be
+    # paired with newer Tantivy display text and project spans onto changed
+    # content. One extra sha256 pass over the corpus file, paid once per
+    # build.
+    from shared.passage_corpus import source_manifest
     stats = build_index(
         records_factory(), out_dir, construction=construction,
         partitions=args.partitions, stride=args.stride,
         df_cap=args.df_cap, batch_grams=args.batch_grams,
         apply_hygiene=not args.no_hygiene,
+        source_manifest=source_manifest([args.corpus]),
         corpus_label=f'bench:{args.records}',
         progress=(lambda *a: None) if args.quiet else _progress)
     wall = time.time() - t0

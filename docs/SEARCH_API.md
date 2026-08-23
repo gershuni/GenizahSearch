@@ -501,9 +501,14 @@ the two apart from the envelope shape alone.
   page is one `matches[]` entry (`chunk_count` = number of spans, unlike the incumbent's
   Tantivy-hit-derived count; `chunk_index` is the ordinal of the span's position within the
   submitted `text`, comparable across different matched manuscripts the same way the
-  `chunk` engine's sliding-window index is). `score` is the span's matched-letter count —
-  directly comparable to the `chunk` engine's merged-span character score, not a Tantivy
-  relevance score. `manuscript_snippet` / `source_chunk_text` are still `*term*`-marked
+  `chunk` engine's sliding-window index is). `score` is the span's matched-letter count,
+  not a Tantivy relevance score — and it is **NOT comparable to the `chunk` engine's
+  score**: passage counts normalized letters on the *query* side of the match (whitespace,
+  marks, punctuation and digits removed), while `chunk` counts raw characters of the
+  *manuscript* side's merged spans. The two are measured on opposite sides of the match in
+  different units, so no conversion factor exists. A client combining the two methods must
+  rank *within* each method (by rank or per-method quantile) and never pool or sort a mixed
+  list by raw `score`. `manuscript_snippet` / `source_chunk_text` are still `*term*`-marked
   highlight text (same markup the `chunk` engine emits, including sanitizing a literal `*`
   in the source manuscript text so it is never mistaken for that markup), built via a
   bounded re-normalization. The row set this engine renders and the row set it returns are

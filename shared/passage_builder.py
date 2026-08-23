@@ -545,14 +545,18 @@ def build_index(records: Iterable, index_dir: str, *,
         raise IndexFormatError(f'unknown construction {construction!r}')
     require_little_endian()
     os.makedirs(index_dir, exist_ok=True)
-    # Invalidate before touching data. Best-effort by design: if the manifest
-    # cannot be removed the build must not proceed to overwrite data files
-    # under a manifest that still describes the old ones.
+    # Preflight FIRST, invalidate second (PR #324 round 3). The first version
+    # of this ordering removed the manifest and then ran the free-space check,
+    # so a failed preflight -- which touches nothing -- still left a perfectly
+    # good existing index unopenable. A refusal to start must leave the world
+    # exactly as it found it.
+    if free_space_bytes:
+        check_free_space(index_dir, free_space_bytes)
+    # Invalidate before touching data: a rebuild in place must not overwrite
+    # data files under a manifest that still describes the old ones.
     _stale_manifest = os.path.join(index_dir, MANIFEST_NAME)
     if os.path.exists(_stale_manifest):
         os.remove(_stale_manifest)
-    if free_space_bytes:
-        check_free_space(index_dir, free_space_bytes)
     progress = progress or _noop
     t_start = time.time()
 

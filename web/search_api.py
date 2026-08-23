@@ -2082,6 +2082,24 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 'code': 'passage_text_lookup_failed',
                 'count': bundle.dropped_text_lookup_failures,
             })
+        # PR #324 round 3: a capped passage search must SAY so. Only the two
+        # states that actually truncate the RESULT SET warn -- postings
+        # exclusion is routine budget behaviour on any long query and lives
+        # in the report echo below, not in a warning that would fire on
+        # nearly every request.
+        _rep = bundle.passage_report
+        if _rep and (_rep.get('candidates_truncated')
+                     or _rep.get('verify_truncated')):
+            warnings_list.append({
+                'code': 'passage_results_truncated',
+                'candidates_truncated': bool(_rep.get('candidates_truncated')),
+                'verify_truncated': bool(_rep.get('verify_truncated')),
+            })
+        if bundle.duplicate_photography_demoted:
+            warnings_list.append({
+                'code': 'duplicate_photography_demoted',
+                'count': bundle.duplicate_photography_demoted,
+            })
 
         # 81A D-07 — request echo for /api/parallels. Field name `mode` is
         # PRESERVED here (NOT renamed to search_mode); the rename is deferred
@@ -2118,6 +2136,10 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
         }
         if _is_passage:
             parallels_echo['passage_policy'] = passage_policy_echo
+            # The full budget/truncation report (QueryReport.as_dict()), for
+            # evaluation consumers who need postings/candidates/verify
+            # accounting rather than just the truncated-or-not warning.
+            parallels_echo['passage_report'] = bundle.passage_report
 
         # 8. Serialize — Phase 77 D-14 SOLE producer of envelope shape.
         envelope = serialize_parallels_payload(

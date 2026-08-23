@@ -458,3 +458,22 @@ def test_a_rebuild_in_place_invalidates_the_old_manifest_first(tmp_path):
         'an interrupted rebuild must fail closed, not open under the manifest '
         'that described the PREVIOUS contents'
     )
+
+
+def test_a_failed_space_preflight_leaves_the_old_index_openable(tmp_path):
+    """PR #324 round 3: the round-2 fix deleted the manifest and THEN ran the
+    free-space check, so a refused rebuild -- which touches no data at all --
+    still left a perfectly good existing index unopenable. A refusal to start
+    must leave the world exactly as it found it."""
+    d = str(tmp_path / 'preflight')
+    build_index(synthetic_records(6), d, apply_hygiene=False)
+    assert open_index(d) is not None
+
+    with pytest.raises(IndexFormatError):
+        build_index(synthetic_records(6), d, apply_hygiene=False,
+                    free_space_bytes=10 ** 18)  # a petabyte: always refused
+
+    assert open_index(d) is not None, (
+        'the refused rebuild destroyed the manifest of the index it never '
+        'touched'
+    )
