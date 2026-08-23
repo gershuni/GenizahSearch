@@ -899,10 +899,6 @@ def create_parallels_page(initial_text: str = None):
 
                     # Initialize help text
                     update_boundary_help()
-                    # Apply the default-selected method's control state on load:
-                    # letter-level is pre-selected when available, so the chunk
-                    # controls must START disabled, not wait for a first toggle.
-                    on_passage_mode_change()
 
                 # Right: Options Panel
                 with ui.column().classes('w-80 gap-4'):
@@ -1010,6 +1006,19 @@ def create_parallels_page(initial_text: str = None):
                             format='%d'
                         ).classes('w-24').props('outlined dense')
                         ui.label(tr('Minimum matching chunks per manuscript')).classes('text-xs').style('color: var(--text-muted);')
+
+                    # Apply the default-selected method's control state on
+                    # load: letter-level is pre-selected when available, so
+                    # the chunk controls must START disabled rather than wait
+                    # for a first toggle. This call sits HERE -- after
+                    # mode_select (defined above), chunk_size and
+                    # freq_threshold (the sliders above) -- because the
+                    # handler closes over all three and an earlier call site
+                    # crashed the whole page with NameError at build time
+                    # (owner-reported, 2026-08-23): the widgets are created
+                    # BELOW the selector block, and only a real render
+                    # executes this path -- a source-text pin cannot.
+                    on_passage_mode_change()
 
                     ui.separator().classes('my-2')
 

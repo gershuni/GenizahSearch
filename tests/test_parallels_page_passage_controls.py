@@ -19,6 +19,8 @@ side effects unsuited to a unit import).
 from __future__ import annotations
 
 import ast
+
+import pytest
 import os
 import re
 
@@ -279,12 +281,79 @@ def test_letter_level_is_the_default_method():
 def test_the_default_selection_state_is_applied_on_load():
     """Letter-level is pre-selected, so the chunk controls must START
     disabled -- the handler has to run once at build time, not wait for the
-    first user toggle."""
+    first user toggle.
+
+    And the call must sit AFTER every widget the handler closes over: the
+    first version invoked it right after the handler definition, and the
+    whole page died with NameError at build time (owner-reported,
+    2026-08-23) because mode_select/chunk_size/freq_threshold are created
+    BELOW the selector block. Source-order is exactly what this pins.
+    """
     src = _read_source()
-    # rindex: the FIRST occurrence is the function's own definition;
-    # the init call sits at the last one.
-    tail = src[src.rindex('update_boundary_help()'):]
-    assert 'on_passage_mode_change()' in tail[:600], (
-        'no load-time invocation: chunk controls start enabled under a '
-        'selected letter-level method'
-    )
+    init_at = src.rindex('on_passage_mode_change()')
+    for widget in ("mode_select = ui.select",
+                   "chunk_size = ui.slider",
+                   "freq_threshold = ui.slider"):
+        assert widget in src, f'anchor {widget!r} vanished -- rewrite this pin'
+        assert src.index(widget) < init_at, (
+            f'the build-time on_passage_mode_change() call precedes '
+            f'{widget!r}; the handler will NameError during page build'
+        )
+
+
+# ---------------------------------------------------------------------------
+# The page must actually BUILD. Source-text pins cannot execute closures; the
+# NameError that took the whole /parallels page down (owner-reported,
+# 2026-08-23: on_passage_mode_change() invoked at build time before
+# chunk_size existed) sailed through every source-level gate in this file.
+# This is the render-executed test that catches that class.
+# ---------------------------------------------------------------------------
+
+_SIM_READY = False
+
+
+def _ensure_sim():
+    global _SIM_READY
+    if not _SIM_READY:
+        from nicegui.testing.general import prepare_simulation
+
+        prepare_simulation()
+        _SIM_READY = True
+
+
+@pytest.mark.parametrize('available', [True, False])
+def test_the_page_builds_without_raising(available, monkeypatch):
+    """Build /parallels with the passage index present and absent. Any
+    NameError/AttributeError in a build-time code path -- including handler
+    invocations like the load-time on_passage_mode_change() -- fails here
+    the way it failed for the owner, instead of in production."""
+    import asyncio
+
+    import web.pages.parallels as pp
+    from web.translations import set_language
+
+    _ensure_sim()
+    from nicegui import core, ui
+    from nicegui.client import Client
+
+    monkeypatch.setattr(pp, 'passage_available', lambda: available)
+    set_language('he')
+    try:
+        async def _run():
+            core.loop = asyncio.get_running_loop()
+            with Client(ui.page('/_parallels_probe')) as client:
+                with client:
+                    pp.create_parallels_page()
+            return client
+
+        client = asyncio.run(_run())
+    finally:
+        set_language('he')
+    # The method radio must exist exactly when the index is available.
+    radios = [el for el in client.elements.values()
+              if type(el).__name__ == 'Radio']
+    assert len(radios) >= (1 if available else 0)
+    if available:
+        assert any(getattr(r, 'value', None) == 'passage' for r in radios), (
+            'letter-level must be the pre-selected method'
+        )
