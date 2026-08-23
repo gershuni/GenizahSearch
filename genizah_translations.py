@@ -4968,18 +4968,37 @@ TRANSLATIONS.update({
 # The Phase-145 strings were never translated (an i18n leak found while
 # wiring the GUI truncation notice); Hebrew users saw English notifies.
 TRANSLATIONS.update({
-    "Passage matching (beta)":
-        "התאמת קטעים (בטא)",
-    "Character-level matching, tolerant of OCR noise and reflowed line breaks. Genizah corpus only.":
-        "התאמה ברמת האות, סובלנית לשגיאות פענוח ולשבירות שורה. קורפוס הגניזה בלבד.",
-    "Passage matching is busy right now — please try again in a moment.":
-        "התאמת הקטעים עמוסה כרגע — נסו שוב בעוד רגע.",
-    "Passage matching search timed out — try a shorter text.":
-        "חיפוש התאמת הקטעים חרג מהזמן המוקצב — נסו טקסט קצר יותר.",
-    "Passage matching search failed.":
-        "חיפוש התאמת הקטעים נכשל.",
-    "Passage search matched more than {cap} manuscripts — showing the strongest {cap}.":
-        "חיפוש הקטעים מצא יותר מ־{cap} כתבי יד — מוצגים ה־{cap} החזקים ביותר.",
-    "Passage search checked the {n} best-evidenced candidates of {m}.":
-        "חיפוש הקטעים בדק את {n} המועמדים המבוססים ביותר מתוך {m}.",
+})
+
+
+# === Web parallels — letter-level search rename + controls (owner, 2026-08-23) ===
+TRANSLATIONS.update({
+    "New! Letter-level search":
+        "חדש! חיפוש ברמת האות",
+    "Chunk search (slower)":
+        "חיפוש מקטעים (איטי יותר)",
+    "Letter-level search: fast, yields fewer irrelevant results, and tolerates transcription errors, nikkud and line breaks. Genizah corpus only.":
+        "חיפוש ברמת האות: מהיר, מחזיר פחות תוצאות לא רלוונטיות, ועמיד לשיבושי פענוח, לניקוד ולשבירות שורה. קורפוס הגניזה בלבד.",
+    "Match width":
+        "רוחב התאמה",
+    "Narrow (near-exact)":
+        "צר (כמעט מדויק)",
+    "Medium width":
+        "בינוני",
+    "Wide width":
+        "רחב",
+    "Widest (default)":
+        "רחב מאוד (ברירת מחדל)",
+    "How far a manuscript may drift from your text and still match. Wider finds more noisy witnesses; the strongest matches always rank first.":
+        "עד כמה כתב היד יכול לסטות מהטקסט שלך ועדיין להיחשב התאמה. רחב יותר מוצא יותר עדים משובשים; ההתאמות החזקות תמיד מדורגות ראשונות.",
+    "Letter-level search is busy right now — please try again in a moment.":
+        "החיפוש ברמת האות עמוס כרגע — נסו שוב בעוד רגע.",
+    "Letter-level search timed out — try a shorter text.":
+        "החיפוש ברמת האות חרג מהזמן המוקצב — נסו טקסט קצר יותר.",
+    "Letter-level search failed.":
+        "החיפוש ברמת האות נכשל.",
+    "Letter-level search checked the {n} best-evidenced candidates of {m}.":
+        "החיפוש ברמת האות בדק את {n} המועמדים המבוססים ביותר מתוך {m}.",
+    "Letter-level search matched more than {cap} manuscripts — showing the strongest {cap}.":
+        "החיפוש ברמת האות מצא יותר מ־{cap} כתבי יד — מוצגים ה־{cap} החזקים ביותר.",
 })

@@ -981,3 +981,20 @@ def test_service_ORs_the_searcher_truncation_flag():
         "the searcher's truncation flag was dropped between the return dict "
         'and the bundle'
     )
+
+
+def test_the_web_width_control_reaches_the_policy(synthetic_corpus, monkeypatch):
+    """Owner ruling 2026-08-23 (letter-level controls): the page's Match-width
+    select passes a preset name into get_passage_searcher; an unknown name
+    must raise, never silently fall back to a different width."""
+    import web.passage_assets as pa
+
+    idx, originals, _motif = synthetic_corpus
+    monkeypatch.setattr(pa, 'PASSAGE_PARALLELS_ENABLED', True)
+    monkeypatch.setattr(pa, '_state', pa._PassageState(ready=True, index=idx))
+
+    s = pa.get_passage_searcher(_FakeTextFetcher(originals), preset='wide-40')
+    assert s.policy.name == 'wide-40' and s.policy.density_scale == 1.3
+
+    with pytest.raises(Exception):
+        pa.get_passage_searcher(_FakeTextFetcher(originals), preset='slider-17')

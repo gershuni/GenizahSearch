@@ -151,7 +151,8 @@ def passage_available() -> bool:
     return bool(PASSAGE_PARALLELS_ENABLED and _state.ready)
 
 
-def get_passage_searcher(text_fetcher: "PageTextFetcher"):
+def get_passage_searcher(text_fetcher: "PageTextFetcher",
+                         preset: str = 'widest-40'):
     """A fresh ``PassageSearcher``, or ``None`` when unavailable.
 
     Reads the flag and the loaded-index snapshot together, so there is no
@@ -182,5 +183,9 @@ def get_passage_searcher(text_fetcher: "PageTextFetcher"):
     # web surface opts in HERE, deliberately: DEFAULT_POLICY stays
     # standard-40 so evaluation tooling keeps choosing its policy
     # explicitly. A user-facing control for this knob is planned (146A).
+    # `preset` is the page's Match-width control (owner ruling 2026-08-23:
+    # letter-level search gets its own controls); widest-40 stays the default
+    # per the same day's earlier ruling. An unknown name raises in get_preset
+    # -- fail loudly, never silently fall back to a different width.
     return PassageSearcher(index=idx, text_fetcher=text_fetcher,
-                           policy=get_preset('widest-40'))
+                           policy=get_preset(preset))

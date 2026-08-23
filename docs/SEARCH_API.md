@@ -497,6 +497,7 @@ the two apart from the envelope shape alone.
   `library_filter_mode="include"` returns 400 `passage_scope_unsupported` rather than a
   silently-empty result that would look identical to "no matches found". Excluding `"LOCAL"`
   (`library_filter_mode="exclude"`) is a no-op for passage and is NOT rejected.
+- **Display name.** The web GUI presents this method as “Letter-level search” (owner naming, 2026-08-23) and selects it by default when the index is available; `method='passage'` remains the stable wire value — API clients should never parse display names.
 - **Span-shaped `matches[]`.** Each accepted contiguous span of matched text on a manuscript
   page is one `matches[]` entry (`chunk_count` = number of spans, unlike the incumbent's
   Tantivy-hit-derived count; `chunk_index` is the ordinal of the span's position within the

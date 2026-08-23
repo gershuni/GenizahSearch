@@ -113,10 +113,10 @@ def test_disable_calls_are_inside_the_passage_mode_true_branch():
     src = _on_passage_mode_change_source()
     lines = src.splitlines()
     if_true_idx = next(
-        i for i, ln in enumerate(lines) if re.search(r'if passage_mode\.value\s*:', ln)
+        i for i, ln in enumerate(lines) if re.search(r'if _letter_level_selected\(\)\s*:', ln)
     )
     else_idx = next(i for i, ln in enumerate(lines) if ln.strip() == 'else:')
-    assert if_true_idx < else_idx, 'expected an if passage_mode.value: ... else: shape'
+    assert if_true_idx < else_idx, 'expected an if _letter_level_selected(): ... else: shape'
     true_branch = '\n'.join(lines[if_true_idx:else_idx])
     false_branch = '\n'.join(lines[else_idx:])
     for widget in ('chunk_size', 'mode_select', 'freq_threshold', 'boundary_mode'):
@@ -234,7 +234,7 @@ def test_every_passage_ui_string_has_a_hebrew_translation():
     passage_strings = set()
     for parts in calls:
         joined = ''.join(_re.findall(r"'([^']*)'", parts))
-        if 'assage' in joined:  # Passage/passage
+        if 'assage' in joined or 'etter-level' in joined:  # passage / Letter-level
             passage_strings.add(joined)
     assert passage_strings, 'the extractor matched nothing -- vacuous gate'
     missing = sorted(s for s in passage_strings if s not in TRANSLATIONS)
@@ -250,9 +250,41 @@ def test_the_truncation_string_used_matches_its_translation_key():
     Hebrew users to English. Pin the exact joined string."""
     from genizah_translations import TRANSLATIONS
 
-    key = ('Passage search checked the {n} best-evidenced '
+    key = ('Letter-level search checked the {n} best-evidenced '
            'candidates of {m}.')
     assert key in TRANSLATIONS, 'the exact notify string must be a key'
     # And the Hebrew side must keep both placeholders, or .format() on the
     # translated string drops the numbers for Hebrew users only.
     assert '{n}' in TRANSLATIONS[key] and '{m}' in TRANSLATIONS[key]
+
+
+# ---------------------------------------------------------------------------
+# Owner ruling 2026-08-23: letter-level search is the DEFAULT method.
+# ---------------------------------------------------------------------------
+
+def test_letter_level_is_the_default_method():
+    """The radio must default to 'passage' (letter-level), with chunk as the
+    explicit alternative -- and fall back to 'chunk' only when the index is
+    unavailable. Source-text pins, same style as the rest of this file."""
+    src = _read_source()
+    assert 'method_radio = ui.radio(' in src
+    idx = src.index('method_radio = ui.radio(')
+    creation = src[idx:idx + 400]
+    assert "value='passage'" in creation, 'letter-level must be pre-selected'
+    assert "method_radio.value = 'chunk'" in src, (
+        'the unavailable-index fallback must pin the value to chunk'
+    )
+
+
+def test_the_default_selection_state_is_applied_on_load():
+    """Letter-level is pre-selected, so the chunk controls must START
+    disabled -- the handler has to run once at build time, not wait for the
+    first user toggle."""
+    src = _read_source()
+    # rindex: the FIRST occurrence is the function's own definition;
+    # the init call sits at the last one.
+    tail = src[src.rindex('update_boundary_help()'):]
+    assert 'on_passage_mode_change()' in tail[:600], (
+        'no load-time invocation: chunk controls start enabled under a '
+        'selected letter-level method'
+    )
