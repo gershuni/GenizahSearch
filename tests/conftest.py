@@ -524,3 +524,64 @@ def crash_telemetry_state(monkeypatch):
 
     _tel._reset_for_tests()
     _ph._reset_for_tests()
+
+
+# ---------------------------------------------------------------------------
+# Qt deferred-deletion hygiene between gui tests (PR #324 CI, exit 139).
+# ---------------------------------------------------------------------------
+#
+# `deleteLater()` does not delete anything. It POSTS a DeferredDelete event
+# that only fires when an event loop runs. The desktop tests close their
+# widgets with `tab.deleteLater()` in a `finally:` and then return, so nothing
+# ever processes that event -- the queue grows for the whole session.
+#
+# The bill arrives when some later test runs an event loop. Two do it for
+# ordinary reasons: `desktop/my_library_tab.py::_perform_reset` calls
+# `QApplication.processEvents()`, and the pause/resume integration tests
+# dispatch real events. At that moment Qt destroys the C++ side of EVERY
+# widget queued by EVERY earlier test, while their Python wrappers are still
+# referenced -- access violation, exit 139.
+#
+# That is why the crash point moves (it lands on whichever test first drains a
+# big enough backlog: `test_pause_integration_qt.py` on CI's Linux runner,
+# `test_my_library_tab_prior_status_cache.py` locally on Windows) and why
+# every one of those files passes when run alone (one pending deletion, and no
+# live reference left to trip over).
+#
+# Draining at each test's own boundary keeps a test's deletions inside that
+# test, where its references are already going out of scope.
+@pytest.fixture(autouse=True)
+def _drain_qt_deferred_deletions(request):
+    yield
+    if "gui" not in request.keywords:
+        return
+    try:
+        from PyQt6.QtCore import QEvent
+        from PyQt6.QtWidgets import QApplication
+    except Exception:
+        return
+    app = QApplication.instance()
+    if app is None:
+        return
+    try:
+        from PyQt6.QtCore import QThread, QTimer
+        # Quiesce FIRST. A running QTimer or a live worker QThread can post a
+        # queued call into a widget this test already closed; draining the
+        # queue with those still alive is what fires it.
+        for obj in app.findChildren(QTimer):
+            try:
+                obj.stop()
+            except Exception:
+                pass
+        for th in app.findChildren(QThread):
+            try:
+                if th.isRunning():
+                    th.quit()
+                    th.wait(2000)
+            except Exception:
+                pass
+        app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
+    except Exception:
+        # Never let hygiene turn a passing test red.
+        pass

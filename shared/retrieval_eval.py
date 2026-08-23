@@ -230,7 +230,8 @@ class EvalLedger:
                                 sort_keys=True) + '\n')
         return entry
 
-    def reserve_all(self, *, configs, split: str, query_set: str) -> list:
+    def reserve_all(self, *, configs, split: str, query_set: str,
+                    force: bool = False) -> list:
         """Reserve several configs ALL-OR-NOTHING (PR #324 review).
 
         `configs` is an iterable of (method, policy_id).
@@ -265,7 +266,15 @@ class EvalLedger:
                     f'one reservation batch -- refusing before any query '
                     f'runs, and before anything is written.')
             seen.add(key)
-            if key in taken:
+            if key in taken and not force:
+                # `force` mirrors `record(force=True)`: the operator is
+                # explicitly re-opening a spent holdout and the ledger will
+                # mark the scoring `forced`. Refusing here made --force
+                # unreachable through the runner (PR #324 review) -- the
+                # reservation rejected the key before `record` ever saw the
+                # flag. The WITHIN-batch duplicate check above still applies:
+                # asking for the same config twice in one command is a
+                # mistake under any flag.
                 raise HoldoutReuse(
                     f'{method} / {policy_id} / {query_set} is already '
                     f'reserved or scored on the holdout split -- refusing '

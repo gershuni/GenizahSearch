@@ -206,7 +206,7 @@ def main() -> int:
         ledger.reserve_all(
             configs=[(r.config_id.split('-')[0], r.config_id)
                      for r in retrievers],
-            split=args.split, query_set=qs_name)
+            split=args.split, query_set=qs_name, force=args.force)
         print(f'holdout reservations recorded for '
               f'{len(retrievers)} config(s)')
 

@@ -61,7 +61,8 @@ import numpy as np
 
 from shared.passage_hygiene import DROP_REASONS, page_filter
 from shared.passage_index import (
-    GRAM_OFFSETS_NAME, MAX_RECORDS, MAX_RECORD_LETTERS, POSTINGS_NAME,
+    GRAM_OFFSETS_NAME, MANIFEST_NAME, MAX_RECORDS, MAX_RECORD_LETTERS,
+    POSTINGS_NAME,
     POSTING_BYTES, RECORDS_NAME, RECORD_DTYPE, RECORD_IDS_NAME, STREAMS_NAME,
     IndexFormatError, encode_stream, pack_postings, require_little_endian,
     verify_csr_monotone, write_manifest,
@@ -522,12 +523,34 @@ def build_index(records: Iterable, index_dir: str, *,
     """Build a passage index into `index_dir`. Returns measured BuildStats.
 
     manifest.json is written LAST, so an interrupted build leaves a directory
-    that `open_index` refuses rather than one it half-reads.
+    that `open_index` refuses rather than one it half-reads -- and any
+    PRE-EXISTING manifest is deleted FIRST, before a byte of data is touched.
+
+    That second half matters only for a rebuild in place, which is exactly the
+    case the "written last" rule does not cover (PR #324 review). Overwriting
+    a populated directory leaves the OLD manifest valid-looking while the data
+    files beneath it are replaced: the scatter builder truncates postings.bin
+    straight to its final size and fills it incrementally, so a same-sized
+    rebuild that is interrupted -- or merely opened concurrently -- passes
+    every check `open_index` makes and serves zeroed or half-rewritten
+    postings as plausible matches. Deleting the manifest first converts that
+    window into a clean refusal.
+
+    This is a floor, not the full answer: it makes an interrupted rebuild fail
+    closed, but the index is still UNAVAILABLE until the rebuild finishes. A
+    staging directory plus an atomic swap is the real fix and belongs with the
+    desktop build worker, which is where a rebuild-in-place actually happens.
     """
     if construction not in ('scatter', 'spool'):
         raise IndexFormatError(f'unknown construction {construction!r}')
     require_little_endian()
     os.makedirs(index_dir, exist_ok=True)
+    # Invalidate before touching data. Best-effort by design: if the manifest
+    # cannot be removed the build must not proceed to overwrite data files
+    # under a manifest that still describes the old ones.
+    _stale_manifest = os.path.join(index_dir, MANIFEST_NAME)
+    if os.path.exists(_stale_manifest):
+        os.remove(_stale_manifest)
     if free_space_bytes:
         check_free_space(index_dir, free_space_bytes)
     progress = progress or _noop

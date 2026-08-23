@@ -269,9 +269,18 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libegl1
       - run: pip install -r requirements-lock.txt
       - run: pip install pytest
-      # Fresh process, only the gui-marked tests. -m gui selects the event-
-      # dispatching PyQt6 dialog tests auto-marked in tests/conftest.py.
-      - run: pytest tests/ -m gui
+      # ONE PROCESS PER FILE. Qt state is process-global and these desktop
+      # tests leak it across test boundaries (a widget closed with
+      # deleteLater() is only QUEUED for destruction; a worker QThread or
+      # QTimer can post a queued call into a widget an earlier test already
+      # closed). Nothing fires until something runs an event loop, and then it
+      # all fires at once on objects whose Python wrappers are still live --
+      # SIGSEGV, at a position that moves with the run. Per-file processes
+      # bound a leak to its own file. This is the same isolation the `tests`,
+      # `gui-tests`, `render-smoke-tests` and `atlas-bake-tests` split already
+      # buys at coarser grain, one level finer; the underlying widget/worker
+      # lifetime bug is desktop work tracked separately.
+      - run: python scripts/run_gui_tests.py
 
   slow-tests:
     timeout-minutes: 30

@@ -175,3 +175,34 @@ def test_reserve_all_is_a_no_op_off_the_holdout_split(tmp_path):
     assert led.reserve_all(configs=[('passage', 'p-1'), ('passage', 'p-1')],
                            split=SPLIT_TUNE, query_set='qs.jsonl') == []
     assert not os.path.exists(path) or os.path.getsize(path) == 0
+
+
+def test_force_can_reopen_a_spent_holdout_through_the_batch_path(tmp_path):
+    """--force was unreachable: `reserve_all` rejected the key before
+    `record(force=True)` ever ran, so the advertised override could not be
+    used through the runner at all (PR #324 review)."""
+    from shared.retrieval_eval import EvalLedger, HoldoutReuse, SPLIT_HOLDOUT
+
+    path = str(tmp_path / 'force.jsonl')
+    led = EvalLedger(path)
+    led.reserve(method='passage', policy_id='p-1', split=SPLIT_HOLDOUT,
+                query_set='qs.jsonl')
+
+    again = EvalLedger(path)
+    with pytest.raises(HoldoutReuse):
+        again.reserve_all(configs=[('passage', 'p-1')],
+                          split=SPLIT_HOLDOUT, query_set='qs.jsonl')
+    assert again.reserve_all(configs=[('passage', 'p-1')],
+                             split=SPLIT_HOLDOUT, query_set='qs.jsonl',
+                             force=True), '--force must reach the ledger'
+
+
+def test_force_does_NOT_excuse_a_duplicate_within_one_batch(tmp_path):
+    """Re-opening a spent holdout is a deliberate operator act; asking for the
+    same config twice in one command is a mistake under any flag."""
+    from shared.retrieval_eval import EvalLedger, HoldoutReuse, SPLIT_HOLDOUT
+
+    led = EvalLedger(str(tmp_path / 'dup2.jsonl'))
+    with pytest.raises(HoldoutReuse):
+        led.reserve_all(configs=[('passage', 'p-1'), ('passage', 'p-1')],
+                        split=SPLIT_HOLDOUT, query_set='qs.jsonl', force=True)

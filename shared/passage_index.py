@@ -303,19 +303,11 @@ def open_index(index_dir: str) -> Optional[PassageIndex]:
         # matches rather than the clean fail-closed hide every other check
         # here delivers -- the worst outcome for a research tool.
         #
-        # Chunked so the temporary stays ~1 MB instead of materialising a
-        # 14.3M-element boolean beside a 114 MB memmap read. That read is a
-        # real one-off open() cost, accepted: it is startup-only, sequential,
-        # and the alternative is serving wrong spans from a corrupt artifact.
-        _CHUNK = 1 << 20
-        _prev = np.uint64(0)
-        for _start in range(0, gram_offsets.size, _CHUNK):
-            block = np.asarray(gram_offsets[_start:_start + _CHUNK])
-            if block.size == 0:
-                continue
-            if block[0] < _prev or (block[1:] < block[:-1]).any():
-                return None
-            _prev = block[-1]
+        # `csr_is_monotone` is chunked (~1 MB transient), so the 114 MB
+        # sequential read is the only real cost -- one-off, at open(), and the
+        # alternative is serving wrong spans from a corrupt artifact.
+        if not csr_is_monotone(gram_offsets):
+            return None
         postings = _map(POSTINGS_NAME, np.uint8,
                         (counts['n_postings'] * POSTING_BYTES,))
         streams = _map(STREAMS_NAME, np.uint8, (counts['n_letters'],))
@@ -331,10 +323,37 @@ def open_index(index_dir: str) -> Optional[PassageIndex]:
         return None
 
 
+CSR_SCAN_CHUNK = 1 << 20
+
+
+def csr_is_monotone(gram_offsets) -> bool:
+    """True when `gram_offsets` is non-decreasing. Chunked, ~1 MB transient.
+
+    ONE implementation, used by both the build/verify side and `open_index`
+    (PR #324 review). The open path added an inline copy of this loop first;
+    two versions of one invariant drift, and the whole point of the check is
+    that it cannot be quietly weaker in the place that matters most.
+
+    Chunked rather than `np.diff(offsets.astype(np.int64))`: the code space is
+    27**5 + 1 entries, so the vectorised form allocates a 114 MB cast plus a
+    114 MB difference. That cost is why the original was documented
+    "build/verify side only" -- and why the open path could not simply call
+    it. Chunking removes the reason for the split.
+    """
+    prev = None
+    for start in range(0, len(gram_offsets), CSR_SCAN_CHUNK):
+        block = np.asarray(gram_offsets[start:start + CSR_SCAN_CHUNK])
+        if block.size == 0:
+            continue
+        if prev is not None and block[0] < prev:
+            return False
+        if block.size > 1 and bool((block[1:] < block[:-1]).any()):
+            return False
+        prev = block[-1]
+    return True
+
+
 def verify_csr_monotone(gram_offsets: np.ndarray) -> None:
-    """Full monotonicity check. O(code space); build/verify side only."""
-    d = np.diff(gram_offsets.astype(np.int64))
-    if int(d.min(initial=0)) < 0:
-        bad = int(np.argmin(d))
-        raise IndexFormatError(
-            f'gram_offsets is not monotone at code {bad}')
+    """Raising form, for the build/verify side."""
+    if not csr_is_monotone(gram_offsets):
+        raise IndexFormatError('gram_offsets is not monotone')

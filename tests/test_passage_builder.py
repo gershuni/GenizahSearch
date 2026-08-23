@@ -421,3 +421,40 @@ def test_non_monotone_csr_offsets_are_refused(tmp_path):
         'non-monotone CSR offsets must fail closed -- endpoints and file '
         'sizes are still valid, so this is the only check that can catch it'
     )
+
+
+def test_a_rebuild_in_place_invalidates_the_old_manifest_first(tmp_path):
+    """PR #324 review: "manifest written LAST" only protects a FRESH build.
+
+    Rebuilding over a populated directory left the OLD manifest valid while
+    the data files under it were replaced. The scatter builder truncates
+    postings.bin straight to its final size and fills it incrementally, so a
+    same-sized rebuild that is interrupted -- or merely opened concurrently --
+    passed every check `open_index` makes and served zeroed or half-rewritten
+    postings as plausible matches.
+    """
+    from shared.passage_index import MANIFEST_NAME
+
+    d = str(tmp_path / 'rebuild')
+    build_index(synthetic_records(8), d, apply_hygiene=False)
+    assert open_index(d) is not None, 'fixture must open before the rebuild'
+
+    class _Boom(RuntimeError):
+        pass
+
+    def _records_that_die_midway():
+        for i, rec in enumerate(synthetic_records(8)):
+            if i == 4:
+                raise _Boom('interrupted mid-rebuild')
+            yield rec
+
+    with pytest.raises(_Boom):
+        build_index(_records_that_die_midway(), d, apply_hygiene=False)
+
+    assert not os.path.exists(os.path.join(d, MANIFEST_NAME)), (
+        'the stale manifest survived an interrupted rebuild'
+    )
+    assert open_index(d) is None, (
+        'an interrupted rebuild must fail closed, not open under the manifest '
+        'that described the PREVIOUS contents'
+    )
