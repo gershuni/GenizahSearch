@@ -527,61 +527,60 @@ def crash_telemetry_state(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Qt deferred-deletion hygiene between gui tests (PR #324 CI, exit 139).
-# ---------------------------------------------------------------------------
+# NOTE (PR #324): a `_drain_qt_deferred_deletions` teardown fixture lived here
+# briefly -- it quiesced QTimers/QThreads and drained the posted-event queue
+# after each gui test. Removed on measurement: with the QApplication keeper
+# below plus one-process-per-file isolation (scripts/run_gui_tests.py), the
+# full per-file matrix ran 29 files with ZERO crashes without it -- while its
+# own processEvents() call was the thing dispatching stale queued signal
+# emissions into deleted widgets (measured: it CAUSED the
+# test_local_ceiling_enforcement.py crash it was meant to prevent). Do not
+# reintroduce event-queue draining in teardown; fix widget/worker lifetimes
+# in the desktop code instead.
+# The QApplication KEEPER (PR #324 per-file gui isolation, root cause).
 #
-# `deleteLater()` does not delete anything. It POSTS a DeferredDelete event
-# that only fires when an event loop runs. The desktop tests close their
-# widgets with `tab.deleteLater()` in a `finally:` and then return, so nothing
-# ever processes that event -- the queue grows for the whole session.
+# At least eight desktop test files carry this fixture shape:
 #
-# The bill arrives when some later test runs an event loop. Two do it for
-# ordinary reasons: `desktop/my_library_tab.py::_perform_reset` calls
-# `QApplication.processEvents()`, and the pause/resume integration tests
-# dispatch real events. At that moment Qt destroys the C++ side of EVERY
-# widget queued by EVERY earlier test, while their Python wrappers are still
-# referenced -- access violation, exit 139.
+#     @pytest.fixture(autouse=True)
+#     def _ensure_app():
+#         if QApplication.instance() is None:
+#             QApplication(sys.argv)          # <-- no reference kept
 #
-# That is why the crash point moves (it lands on whichever test first drains a
-# big enough backlog: `test_pause_integration_qt.py` on CI's Linux runner,
-# `test_my_library_tab_prior_status_cache.py` locally on Windows) and why
-# every one of those files passes when run alone (one pending deletion, and no
-# live reference left to trip over).
+# The QApplication is a local temporary: the moment the fixture returns,
+# CPython's refcount hits zero, PyQt6 destroys the C++ application, and
+# `QApplication.instance()` is None again BY THE TIME THE TEST BODY RUNS.
+# The first QPixmap/QWidget after that hits Qt's fatal "must construct a
+# QGuiApplication" -- abort(), exit -6 on Linux and 0xC0000409 on Windows,
+# with no Python traceback at all.
 #
-# Draining at each test's own boundary keeps a test's deletions inside that
-# test, where its references are already going out of scope.
+# The bug was latent for as long as these files ran inside one big mixed
+# process: some EARLIER file always held a module-global app, so
+# `instance() is None` was False and the broken branch never executed.
+# Per-file gui processes removed the donor app and exposed it -- measured:
+# test_join_workbench_rotate.py and test_local_ceiling_enforcement.py abort
+# when run alone, on both platforms, at the first pixmap.
+#
+# Fix at the class level, not per file: before any gui-marked test, create
+# the application ourselves and KEEP the reference for the life of the
+# process. Every file fixture then finds a live instance and its unreferenced
+# branch becomes unreachable. Ordering does not matter: if this runs first,
+# the file fixture is a no-op; if the file fixture somehow ran first, its app
+# is already dead by now, instance() is None, and we create a kept one.
+_QT_APP_KEEPER: list = []
+
+
 @pytest.fixture(autouse=True)
-def _drain_qt_deferred_deletions(request):
+def _gui_app_keeper(request):
+    if "gui" in request.keywords:
+        try:
+            from PyQt6.QtWidgets import QApplication
+        except Exception:
+            pass
+        else:
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication(sys.argv or ["pytest"])
+            if app not in _QT_APP_KEEPER:
+                _QT_APP_KEEPER.append(app)
     yield
-    if "gui" not in request.keywords:
-        return
-    try:
-        from PyQt6.QtCore import QEvent
-        from PyQt6.QtWidgets import QApplication
-    except Exception:
-        return
-    app = QApplication.instance()
-    if app is None:
-        return
-    try:
-        from PyQt6.QtCore import QThread, QTimer
-        # Quiesce FIRST. A running QTimer or a live worker QThread can post a
-        # queued call into a widget this test already closed; draining the
-        # queue with those still alive is what fires it.
-        for obj in app.findChildren(QTimer):
-            try:
-                obj.stop()
-            except Exception:
-                pass
-        for th in app.findChildren(QThread):
-            try:
-                if th.isRunning():
-                    th.quit()
-                    th.wait(2000)
-            except Exception:
-                pass
-        app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-        app.processEvents()
-    except Exception:
-        # Never let hygiene turn a passing test red.
-        pass
+

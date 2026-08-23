@@ -35,6 +35,11 @@ jobs:
       # test docstrings and CLAUDE.md (GITHUB_ACTIONS is auto-set by the runner).
       QT_QPA_PLATFORM: offscreen
     strategy:
+      # fail-fast canceled the sibling OS the moment one failed, so a
+      # cross-platform failure reported HALF its data (PR #324: the gui
+      # Windows log ended at "The operation was canceled" and the real
+      # Windows behaviour stayed unknown). Report each OS independently.
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
@@ -252,6 +257,11 @@ jobs:
       # process-global Qt state, which avoids the full-suite accumulation segfault.
       QT_QPA_PLATFORM: offscreen
     strategy:
+      # fail-fast canceled the sibling OS the moment one failed, so a
+      # cross-platform failure reported HALF its data (PR #324: the gui
+      # Windows log ended at "The operation was canceled" and the real
+      # Windows behaviour stayed unknown). Report each OS independently.
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
