@@ -409,6 +409,58 @@ RRF_K = 60
 PHASE_LOCAL_SEARCH = 'local_search'
 
 
+#: Padding (characters) kept either side of a matched span in composition
+#: snippets.
+COMPOSITION_SNIPPET_PAD = 60
+
+
+def build_marked_composition_fragment(content, span_start, span_end,
+                                      pad=COMPOSITION_SNIPPET_PAD):
+    """Return one composition snippet with the matched span in ``*`` markers.
+
+    Extracted from ``search_composition_logic`` so the marker contract can be
+    tested without a Tantivy index (PR #325 workflow review: the fix below
+    shipped unproven because nothing could reach these two lines cheaply).
+
+    A literal ``*`` already present in the manuscript text is replaced with a
+    space FIRST: every consumer treats ``*`` as a highlight delimiter -- the
+    parallels xlsx export splits on it to build red+bold runs, and one stray
+    marker restyles the remainder of the cell. ``highlight`` and
+    ``_highlight_by_span`` in this module already apply the same rule; the
+    composition builder did not, and the xlsx highlighting work made the gap
+    visible.
+    """
+    if not content:
+        return ''
+    start = max(0, span_start - pad)
+    end = min(len(content), span_end + pad)
+    return (content[start:span_start].replace('*', ' ')
+            + '*' + content[span_start:span_end].replace('*', ' ')
+            + '*' + content[span_end:end].replace('*', ' '))
+
+
+def mark_word_highlights(snippet, highlights):
+    """Wrap each (start, end) character span of ``snippet`` in ``*`` markers.
+
+    Extracted for the same reason as ``build_marked_composition_fragment``
+    above: the marker contract must be testable without a Tantivy index.
+
+    Codex round 6 (PR #325): the source-context builder inserted markers into
+    the user's PASTED text verbatim, so a literal ``*`` already in it (a
+    copied footnote marker, say) toggled the xlsx rich-text state and styled
+    the rest of the cell as matched. Neutralize literal asterisks FIRST --
+    ``.replace`` is length-preserving, which is what keeps the span offsets
+    (measured on the raw snippet) valid -- then insert in reverse order so
+    earlier offsets survive the splices. Same rule as ``highlight``,
+    ``_highlight_by_span`` and the composition-fragment builder above.
+    """
+    result = snippet.replace('*', ' ')
+    for word_start, word_end in reversed(highlights):
+        result = (result[:word_start] + '*' + result[word_start:word_end]
+                  + '*' + result[word_end:])
+    return result
+
+
 class SearchEngine:
     """Run searches, build queries, and provide browsing utilities."""
     def __init__(self, meta_mgr, variants_mgr):
@@ -3345,12 +3397,8 @@ class SearchEngine:
                                 word_char_end = token_positions[k][1] - char_start
                                 highlights.append((word_char_start, word_char_end))
 
-                        # Apply highlights in reverse order to preserve positions
-                        result = original_snippet
-                        for word_start, word_end in reversed(highlights):
-                            result = result[:word_start] + '*' + result[word_start:word_end] + '*' + result[word_end:]
-
-                        src_snippets.append(result)
+                        src_snippets.append(
+                            mark_word_highlights(original_snippet, highlights))
 
                 spans = sorted(data['matches'], key=lambda x: x[0])
                 merged = []
@@ -3384,11 +3432,8 @@ class SearchEngine:
 
                 ms_snips = []
                 for s, e in merged:
-                    start = max(0, s - 60); end = min(len(data['content']), e + 60)
-                    fragment = data['content'][start:s] + \
-                               f"*{data['content'][s:e]}*" + \
-                               data['content'][e:end]
-                    ms_snips.append(fragment)
+                    ms_snips.append(build_marked_composition_fragment(
+                        data['content'], s, e))
 
                 combined_pattern = "|".join(list(data['patterns'])) if data.get('patterns') else ""
 

@@ -232,7 +232,7 @@ def create_parallels_page(initial_text: str = None):
     # DMF-09: dual-mode post-fetch filter for parallels results (Phase 131-05).
     # Used for Hide mode (Show-only is scoped pre-query via restrict_sys_ids).
     # Apply BEFORE the export+storage writes so exports + stored payloads are scoped (Codex MED #6).
-    def _apply_parallels_library_filter(results_list):
+    def _apply_parallels_library_filter(results_list, mode, codes):
         """Dual-mode filter parallels results by selected library codes.
 
         Mirrors web/pages/search.py::_apply_library_filter (3830-3853).
@@ -243,9 +243,17 @@ def create_parallels_page(initial_text: str = None):
         Library code resolution: tries row['library_code'] first, then
         row['display']['library_code'], then meta_mgr lookup via raw_header sys_id.
         (Show-only is scoped pre-query so this is mainly used for Hide.)
+
+        Round 6 (Codex P2): `mode` and `codes` are explicit parameters, not
+        p_state reads. The post-search caller passes its dispatch-time
+        captures so rows are filtered by the same values they are
+        fingerprinted with; the re-render caller passes the live selection
+        the user just applied. An internal p_state read let a selection
+        change DURING a search filter rows with values the fingerprint never
+        described. The pure mirror in tests/test_parallels_library_filter.py
+        has carried this exact signature all along.
         """
-        mode = getattr(p_state, 'library_mode', 'hide')
-        codes = set(p_state.library_filter)
+        codes = set(codes or ())
         if not codes:
             return results_list  # empty codes = show all in either mode (D-05/D-08)
 
@@ -312,9 +320,19 @@ def create_parallels_page(initial_text: str = None):
                 'version': _PARALLELS_ACTIVE_TAB_VERSION,
                 'results': _compact_result_rows(p_state.results[:500]),
                 'filtered_results': _compact_result_rows((p_state.filtered_results or [])[:500]),
+                # True pre-truncation sizes (PR #325 review): the [:500] cap
+                # above is deliberate (the 778 MB search_history.json lesson),
+                # so a restore that trims the tail must be able to SAY so
+                # instead of silently presenting 500 as everything.
+                'results_total': len(p_state.results),
+                'filtered_total': len(p_state.filtered_results or []),
+                'search_fingerprint': getattr(p_state, 'search_fingerprint', '') or '',
                 'domain_exclusions': sorted(p_state.domain_exclusions),
                 'excluded_manuscript_ids': sorted(p_state.excluded_manuscript_ids),
-                'source_text': text_input.value if 'text_input' in locals() else decoded_text,
+                'source_text': (getattr(p_state, 'searched_source_text', '')
+                                or (text_input.value
+                                    if 'text_input' in locals()
+                                    else decoded_text)),
             }
         except Exception:
             pass
@@ -387,13 +405,63 @@ def create_parallels_page(initial_text: str = None):
             # Per D-13 (Refinement 3 audit): thread snapshot's source_text into meta so export
             # handlers can echo it in the envelope without falling back to a legacy storage key.
             _snapshot_source_text = _active_snapshot.get('source_text', '') or ''
+            p_state.searched_source_text = _snapshot_source_text
             _snapshot_meta = {'source_text': _snapshot_source_text}
-            from web.export_state import set_parallels_export
-            set_parallels_export(
+            _snapshot_fp = _active_snapshot.get('search_fingerprint') or ''
+            if _snapshot_fp:
+                _snapshot_meta['search_fingerprint'] = _snapshot_fp
+                p_state.search_fingerprint = _snapshot_fp
+            # Display recovery (PR #325 round 2, adopting the reviewer's
+            # suggestion on its merits): the export payload persists up to
+            # 5,000 rows of the SAME search and its rows ARE the display
+            # shape (the page stores exactly these compacted rows as its
+            # own state after every fresh search) -- so a reload recovers
+            # the pager's tail from it instead of apologising for the
+            # snapshot's deliberate 500-row cap.
+            from web.export_state import recover_richer_parallels_rows
+            p_state.results, p_state.filtered_results, _recovered = (
+                recover_richer_parallels_rows(
+                    p_state.results, p_state.filtered_results,
+                    meta=_snapshot_meta))
+            # PR #325 review (Codex P2): the display snapshot is 500 rows by
+            # design, but the FULL export payload (up to 5,000 rows) survives
+            # the reload in app.storage.user. Overwriting it with the display
+            # fallback silently capped every post-refresh export at 500 --
+            # preserve_or_set keeps the richer same-search payload and writes
+            # only when nothing would be lost.
+            from web.export_state import preserve_or_set_parallels_export
+            preserve_or_set_parallels_export(
                 results=p_state.results,
                 filtered=p_state.filtered_results,
                 meta=_snapshot_meta,
             )
+            # And the DISPLAY truncation stops being silent: the snapshot
+            # records the true totals, so a trimmed restore says what it
+            # trimmed and how to get it back (a passage re-run is <1s).
+            # Filtered-aware (PR #325 round 2, Codex P2): a search whose
+            # FILTERED bucket lost its tail was announced as complete when
+            # only results_total was compared. Both buckets count, and the
+            # arithmetic lives in a unit-tested helper -- the first version
+            # sat inline in this closure, its "mutation proof" matched zero
+            # tests, and pytest's exit-5 masqueraded as red in the harness.
+            from web.export_state import parallels_restore_shortfall
+            _restored_shown, _restored_total = parallels_restore_shortfall(
+                _active_snapshot, p_state.results, p_state.filtered_results)
+            if _restored_total > _restored_shown:
+                ui.notify(
+                    # Round 7 (Codex P2): the controls sit at build-time
+                    # defaults after a reload, so an UNCONDITIONAL "run
+                    # the search again" would run a DIFFERENT search.
+                    # State the condition instead of promising. Whether a
+                    # reload should restore the configuration itself is
+                    # the owner decision filed in docs/OPEN_ISSUES.md.
+                    tr('Restored {shown} of {total} results from the last '
+                       'search — to see the full list, run the search '
+                       'again with its original settings.'
+                       ).format(shown=_restored_shown,
+                                total=_restored_total),
+                    type='info',
+                )
         except Exception:
             pass  # Snapshot restore failed; page falls back to empty
     else:
@@ -411,12 +479,40 @@ def create_parallels_page(initial_text: str = None):
                 # carries a known shape — bucket (b) positive export with empty source_text.
                 _legacy_source_text = _safe_get('parallels_source_text', '') or ''
                 _bootstrap_meta = {'source_text': _legacy_source_text}
-                from web.export_state import set_parallels_export
-                set_parallels_export(
+                # Round 6: fallback rows written by stamped code carry their
+                # search identity in a sibling key -- fold it in so
+                # _same_parallels_search can VERIFY same-search. Rows from
+                # before the stamp leave meta bare, and the mixed-pair rule
+                # fails closed rather than trusting source_text.
+                _legacy_fingerprint = _safe_get(
+                    'parallels_results_fingerprint', '') or ''
+                if _legacy_fingerprint:
+                    _bootstrap_meta['search_fingerprint'] = _legacy_fingerprint
+                p_state.searched_source_text = _legacy_source_text
+                # Workflow review (P1): this branch runs whenever the TAB has
+                # no snapshot -- opening the page in a second tab is enough.
+                # It used to call set_parallels_export() directly, overwriting
+                # the per-USER export payload (up to 5,000 rows) with the
+                # 250-row `parallels_results` fallback it just read. Harmless
+                # while results were capped near 200; with the uncapped fetch
+                # this PR introduces, a 3,000-row search silently exported 250
+                # rows after opening a second tab. Use the same preserve-and-
+                # recover pair the snapshot branch above uses -- one restore
+                # semantics, not two.
+                from web.export_state import (
+                    preserve_or_set_parallels_export,
+                    recover_richer_parallels_rows,
+                )
+                p_state.results, _legacy_filtered, _bootstrap_recovered = (
+                    recover_richer_parallels_rows(
+                        p_state.results, _legacy_filtered,
+                        meta=_bootstrap_meta))
+                preserve_or_set_parallels_export(
                     results=p_state.results,
                     filtered=_legacy_filtered,
                     meta=_bootstrap_meta,
                 )
+                p_state.filtered_results = _legacy_filtered
             except Exception:
                 pass  # Browser storage operation failed; preference not persisted
 
@@ -663,7 +759,7 @@ def create_parallels_page(initial_text: str = None):
                         method_radio.tooltip(tr(
                             'Letter-level search: fast, yields fewer irrelevant '
                             'results, and tolerates transcription errors, nikkud '
-                            'and line breaks. Genizah corpus only.'
+                            'and line breaks.'
                         ))
 
                         def _letter_level_selected() -> bool:
@@ -679,7 +775,7 @@ def create_parallels_page(initial_text: str = None):
                                 'standard-40': tr('Narrow (near-exact)'),
                                 'wide-40': tr('Medium width'),
                                 'wider-40': tr('Wide width'),
-                                'widest-40': tr('Widest (default)'),
+                                'widest-40': tr('Very wide (default)'),
                                 'max-40': tr('Maximal (may add noise)'),
                             },
                             value='widest-40',
@@ -872,6 +968,15 @@ def create_parallels_page(initial_text: str = None):
                             # unsupported value, rather than relying only on
                             # that rejection.
                             boundary_mode.value = 'full'
+                            # NiceGUI fires no event for a programmatic
+                            # .value write, so boundary_mode's own handler
+                            # (registered below as update_boundary_ui) never
+                            # ran -- the help text, stats line and Advanced
+                            # button kept describing the boundary mode the
+                            # user had selected before switching to
+                            # letter-level. Same explicit-call rule already
+                            # applied to mode_select just below.
+                            update_boundary_ui()
                             boundary_mode.disable()
                             # Codex review finding #13(c): chunk_size/mode/
                             # max_freq are likewise inert for passage (no
@@ -889,12 +994,23 @@ def create_parallels_page(initial_text: str = None):
                             mode_select.disable()
                             freq_threshold.value = 50
                             freq_threshold.disable()
+                            # Owner ruling 2026-08-23: "Min. chunk matches"
+                            # counts CHUNKS, which letter-level search does
+                            # not have. Its nearest analogue (n_spans) counts
+                            # merged match spans, where one long continuous
+                            # match is a SINGLE span -- so any min>1 would
+                            # silently drop exactly the strongest witnesses.
+                            # Force the no-op value and disable, like the
+                            # knobs above.
+                            min_chunks_input.value = 1
+                            min_chunks_input.disable()
                         else:
                             passage_width.style('display: none;')
                             boundary_mode.enable()
                             chunk_size.enable()
                             mode_select.enable()
                             freq_threshold.enable()
+                            min_chunks_input.enable()
 
                     method_radio.on('update:model-value', on_passage_mode_change)
 
@@ -1012,9 +1128,10 @@ def create_parallels_page(initial_text: str = None):
                     # load: letter-level is pre-selected when available, so
                     # the chunk controls must START disabled rather than wait
                     # for a first toggle. This call sits HERE -- after
-                    # mode_select (defined above), chunk_size and
-                    # freq_threshold (the sliders above) -- because the
-                    # handler closes over all three and an earlier call site
+                    # mode_select (defined above), chunk_size, freq_threshold
+                    # (the sliders above) and min_chunks_input (just above)
+                    # -- because the handler closes over all four and an
+                    # earlier call site
                     # crashed the whole page with NameError at build time
                     # (owner-reported, 2026-08-23): the widgets are created
                     # BELOW the selector block, and only a real render
@@ -1883,9 +2000,12 @@ def create_parallels_page(initial_text: str = None):
             filtered_results = _filter_parallels_by_domain(filtered_results) if filtered_results else filtered_results
         # Apply library Hide filter (Show-only is pre-query so not needed here on re-render)
         if p_state.library_mode == 'hide' and p_state.library_filter:
-            main_results = _apply_parallels_library_filter(main_results)
+            main_results = _apply_parallels_library_filter(
+                main_results, p_state.library_mode, p_state.library_filter)
             if filtered_results:
-                filtered_results = _apply_parallels_library_filter(filtered_results)
+                filtered_results = _apply_parallels_library_filter(
+                    filtered_results, p_state.library_mode,
+                    p_state.library_filter)
         render_results(main_results, filtered_results)
 
     # If session restored a library filter, sync button state now (after functions are defined)
@@ -2560,7 +2680,30 @@ def create_parallels_page(initial_text: str = None):
                 'boundary_options': None,
                 'warnings': ['restored-from-history'],
             }
-            from web.export_state import set_parallels_export
+            # Workflow review (P1): this handler wrote the payload but never
+            # touched p_state.search_fingerprint, so the NEXT snapshot persist
+            # stamped these history-restored rows with the identity of
+            # whatever search ran before them -- and a later reload could
+            # recover that unrelated search's payload into this view. Stamp
+            # the restored search's own identity, through the one helper that
+            # defines identity (history knows only a subset of the inputs;
+            # the rest default to None, which is honest -- a restored entry
+            # is not the same identity as a fresh run with those knobs set).
+            from web.export_state import (
+                compute_parallels_search_fingerprint,
+                set_parallels_export,
+            )
+            _restored_fingerprint = compute_parallels_search_fingerprint(
+                text=_parallels_search_meta['source_text'],
+                engine='history',
+                chunk_size=params.get('chunk_size'),
+                mode=params.get('mode'),
+                filters=params.get('filters'),
+                excluded=p_state.excluded_manuscript_ids,
+            )
+            _parallels_search_meta['search_fingerprint'] = _restored_fingerprint
+            p_state.search_fingerprint = _restored_fingerprint
+            p_state.searched_source_text = _parallels_search_meta['source_text']
             set_parallels_export(
                 results=p_state.results,
                 filtered=p_state.filtered_results,
@@ -2616,6 +2759,7 @@ def create_parallels_page(initial_text: str = None):
         safe_user_set('parallels_library_filter', {'mode': 'hide', 'codes': []})
         # Reset persistent storage to clean defaults
         safe_user_set('parallels_results', [])
+        safe_user_set('parallels_results_fingerprint', '')
         safe_user_set('parallels_filtered', [])
         safe_user_set('parallels_source_text', '')
         safe_user_set('parallels_domain_exclusions', [])
@@ -2648,13 +2792,25 @@ def create_parallels_page(initial_text: str = None):
             run_btn.enable()
             return
 
-        # Update variant level and max changes from UI before search
+        # Update variant level and max changes from UI before search.
+        # Round 5 (Codex P2): capture BOTH values here, at dispatch -- the
+        # variant controls stay enabled during the await, and a fingerprint
+        # reading the live widgets afterwards could describe an edited
+        # configuration the engine never used, colliding with a tab that
+        # really searched it. The captures below are, by construction, the
+        # exact values that initialized the engine.
+        captured_variant_level = None
+        captured_variant_max_changes = None
         if mode_select.value == 'variants' and state.var_mgr:
             # Get pairs count from preset or slider
-            pairs_count = int(variant_slider.value) if variant_slider else current_preset['value']
-            state.var_mgr.set_variant_level(pairs_count)
+            captured_variant_level = (int(variant_slider.value)
+                                      if variant_slider
+                                      else current_preset['value'])
+            state.var_mgr.set_variant_level(captured_variant_level)
             if state.lab_engine and state.lab_engine.settings:
-                state.lab_engine.settings.variant_max_changes = int(max_changes_select.value)
+                captured_variant_max_changes = int(max_changes_select.value)
+                state.lab_engine.settings.variant_max_changes = (
+                    captured_variant_max_changes)
 
         # Reset state
         p_state.is_running = True
@@ -2811,6 +2967,14 @@ def create_parallels_page(initial_text: str = None):
 
         # Capture restrict_sys_ids for the background thread
         captured_restrict_sys_ids = restrict_sys_ids
+        # Workflow review: the library scope and the per-manuscript
+        # exclusions were the last inputs still read LIVE from p_state after
+        # the await. Capture them here with everything else -- the search
+        # that ran used these values, and the post-search 'hide' pass must
+        # filter by the same ones it is fingerprinted with.
+        captured_library_mode = p_state.library_mode
+        captured_library_filter = list(p_state.library_filter or [])
+        captured_excluded_ids = set(p_state.excluded_manuscript_ids or ())
 
         def run_search():
             try:
@@ -2870,8 +3034,14 @@ def create_parallels_page(initial_text: str = None):
             APIError (busy/timeout -> a translated notification) from any
             other failure.
             """
+            # render_cap=0 -> UNCAPPED (owner ruling 2026-08-23): the page's
+            # own "Load more" batching (50 groups per click, strongest first)
+            # is the pager, and set_parallels_export's 5,000-row bound is the
+            # export ceiling -- so the engine's 200-group cap was hiding found
+            # manuscripts from both surfaces (measured: 198 shown of 497
+            # found on Birkat Hamazon).
             passage_searcher = get_passage_searcher(
-                state.searcher, preset=captured_passage_width)
+                state.searcher, preset=captured_passage_width, render_cap=0)
             if passage_searcher is None:
                 return None
             return passage_searcher.search_composition_logic(
@@ -3026,8 +3196,49 @@ def create_parallels_page(initial_text: str = None):
                         'text_any': list(getattr(p_state, 'filter_text_any', None) or []),
                         'text_not': list(getattr(p_state, 'filter_text_not', None) or []),
                     } if _has_active_filters() else None
+                    # Search identity: ONE definition, in export_state --
+                    # executable by tests, canonicalizing its own set-like
+                    # inputs (PR #325 rounds 2-5, plus the workflow review
+                    # that found the same rule being rebuilt, differently, by
+                    # the history-restore path). Every value passed here is a
+                    # DISPATCH-TIME capture: a live read describes a
+                    # configuration the search may not have used.
+                    from web.export_state import (
+                        compute_parallels_search_fingerprint,
+                    )
+                    _search_fingerprint = compute_parallels_search_fingerprint(
+                        text=text,
+                        engine=captured_engine,
+                        width=captured_passage_width,
+                        chunk_size=captured_chunk_size,
+                        mode=captured_mode,
+                        max_freq=captured_freq_threshold,
+                        filter_text=captured_filter_text or '',
+                        deep_scan=captured_deep_scan,
+                        boundary_mode=captured_boundary_mode,
+                        boundary_delimiter=captured_boundary_delimiter,
+                        boundary_boost=captured_boundary_boost,
+                        min_boundary_matches=captured_min_boundary_matches,
+                        min_delimiter_distance=captured_min_delimiter_distance,
+                        variant_level=captured_variant_level,
+                        variant_max_changes=captured_variant_max_changes,
+                        # The library 'hide' pass below reads these same
+                        # captures, so the identity and the filtering that
+                        # shaped the rows cannot disagree.
+                        library_mode=captured_library_mode,
+                        library_filter=captured_library_filter,
+                        # Pre-query scope: advanced filters + show_only
+                        # libraries + per-manuscript exclusions, merged into
+                        # one set at dispatch.
+                        restrict=captured_restrict_sys_ids,
+                        excluded=captured_excluded_ids,
+                        filters=_parallels_filters,
+                    )
+                    p_state.search_fingerprint = _search_fingerprint
+                    p_state.searched_source_text = text
                     _parallels_search_meta = {
-                        'source_text': text_input.value or '',
+                        'source_text': text,
+                        'search_fingerprint': _search_fingerprint,
                         'chunk_size': captured_chunk_size,
                         'mode': captured_mode,
                         'max_freq': float(captured_freq_threshold) if captured_freq_threshold is not None else None,
@@ -3039,10 +3250,14 @@ def create_parallels_page(initial_text: str = None):
                     # Applied BEFORE set_parallels_export / safe_user_set so exports + stored
                     # payloads are scoped.  Show-only is already scoped pre-query (restrict_sys_ids)
                     # so no post-fetch pass needed for Show-only.
-                    if p_state.library_mode == 'hide' and p_state.library_filter:
-                        main_results = _apply_parallels_library_filter(main_results)
+                    if captured_library_mode == 'hide' and captured_library_filter:
+                        main_results = _apply_parallels_library_filter(
+                            main_results, captured_library_mode,
+                            captured_library_filter)
                         if filtered_results:
-                            filtered_results = _apply_parallels_library_filter(filtered_results)
+                            filtered_results = _apply_parallels_library_filter(
+                                filtered_results, captured_library_mode,
+                                captured_library_filter)
                     from web.export_state import (
                         compact_parallels_result_rows,
                         set_parallels_export,
@@ -3060,6 +3275,12 @@ def create_parallels_page(initial_text: str = None):
                     safe_user_set('parallels_results', _compact_result_rows(
                         main_results[:_PARALLELS_ACTIVE_USER_FALLBACK_LIMIT]
                     ))
+                    # Round 6: stamp the fallback's identity beside it. The
+                    # legacy bootstrap folds it into its meta, so the
+                    # mixed-pair rule in _same_parallels_search can VERIFY
+                    # same-search instead of trusting source_text.
+                    safe_user_set('parallels_results_fingerprint',
+                                  _search_fingerprint)
                     safe_user_set('parallels_filtered', _compact_result_rows(
                         (filtered_results or [])[:_PARALLELS_ACTIVE_USER_FALLBACK_LIMIT]
                     ))

@@ -98,6 +98,23 @@ def test_passage_mode_forces_and_disables_freq_threshold():
         'freq_threshold must be re-enabled when passage mode is deselected')
 
 
+def test_passage_mode_forces_and_disables_min_chunks():
+    """Owner ruling 2026-08-23 (round 3): 'Min. chunk matches' counts
+    CHUNKS, which letter-level search does not have -- and the value DOES
+    reach the passage searcher (as an n_spans floor, where one long
+    continuous match is a single span), so any min>1 would silently drop
+    exactly the strongest witnesses. Force the no-op value and disable."""
+    src = _on_passage_mode_change_source()
+    assert re.search(r"min_chunks_input\.value\s*=\s*1\b", src), (
+        "on_passage_mode_change must force min_chunks to 1 -- the passage "
+        "searcher applies it as an n_spans floor, and one long continuous "
+        "match is a SINGLE span")
+    assert 'min_chunks_input.disable()' in src, (
+        'min_chunks_input must be disabled while letter-level is selected')
+    assert 'min_chunks_input.enable()' in src, (
+        'min_chunks_input must be re-enabled when chunk search is selected')
+
+
 def test_passage_mode_still_forces_and_disables_boundary_mode():
     """Regression guard for the PRE-EXISTING fix (adversarial review finding
     #2) that finding #13(c) sits alongside -- must not have been lost in the
@@ -121,7 +138,8 @@ def test_disable_calls_are_inside_the_passage_mode_true_branch():
     assert if_true_idx < else_idx, 'expected an if _letter_level_selected(): ... else: shape'
     true_branch = '\n'.join(lines[if_true_idx:else_idx])
     false_branch = '\n'.join(lines[else_idx:])
-    for widget in ('chunk_size', 'mode_select', 'freq_threshold', 'boundary_mode'):
+    for widget in ('chunk_size', 'mode_select', 'freq_threshold',
+                   'boundary_mode', 'min_chunks_input'):
         assert f'{widget}.disable()' in true_branch, (
             f'{widget}.disable() must be inside the passage_mode.value branch')
         assert f'{widget}.enable()' in false_branch, (
@@ -293,7 +311,8 @@ def test_the_default_selection_state_is_applied_on_load():
     init_at = src.rindex('on_passage_mode_change()')
     for widget in ("mode_select = ui.select",
                    "chunk_size = ui.slider",
-                   "freq_threshold = ui.slider"):
+                   "freq_threshold = ui.slider",
+                   "min_chunks_input = ui.number"):
         assert widget in src, f'anchor {widget!r} vanished -- rewrite this pin'
         assert src.index(widget) < init_at, (
             f'the build-time on_passage_mode_change() call precedes '
@@ -302,6 +321,191 @@ def test_the_default_selection_state_is_applied_on_load():
 
 
 # ---------------------------------------------------------------------------
+# Owner rulings 2026-08-23 (round 3): width-ladder terminology and tooltip
+# scope. The 'assage'/'etter-level' i18n gate above cannot see the width
+# labels (none contain either substring), so they get their own pins.
+# ---------------------------------------------------------------------------
+
+def _passage_width_creation_slice() -> str:
+    src = _read_source()
+    idx = src.index('passage_width = ui.select(')
+    end = src.index('if not passage_available():', idx)
+    return src[idx:end]
+
+
+def test_width_ladder_has_no_rung_above_widest():
+    """Owner ruling: 'widest and then maximal means this is not the
+    widest'. The 1.8 preset's label must not claim to be the extreme while
+    the 2.0 option sits above it."""
+    slice_ = _passage_width_creation_slice()
+    assert "tr('Very wide (default)')" in slice_, (
+        'the widest-40 preset label must be Very wide (default)')
+    assert 'Widest' not in slice_, (
+        "a 'Widest' label with a 'Maximal' rung above it is a contradiction")
+    assert "tr('Maximal (may add noise)')" in slice_
+
+
+def test_every_width_control_string_has_a_hebrew_translation():
+    from genizah_translations import TRANSLATIONS
+
+    slice_ = _passage_width_creation_slice()
+    calls = re.findall(r"tr\(\s*((?:'[^']*'\s*)+)\)", slice_)
+    strings = []
+    for parts in calls:
+        strings.append(''.join(re.findall(r"'([^']*)'", parts)))
+    # 5 ladder labels + the select's own label + the width tooltip.
+    assert len(strings) >= 7, f'extractor matched too little: {strings}'
+    missing = sorted(s for s in strings if s not in TRANSLATIONS)
+    assert not missing, (
+        'width-control strings with no Hebrew translation: ' + repr(missing))
+
+
+def test_the_tooltip_does_not_scope_to_the_genizah_corpus():
+    """Owner ruling: the website is Genizah-only everywhere, so the scope
+    note is noise. (Desktop, which really has local/all corpus scopes, gets
+    its own scoped wording with the 146B method selector.)"""
+    assert 'Genizah corpus only' not in _read_source()
+
+
+# ---------------------------------------------------------------------------
+# PR #325 round 3 (Codex P2): the search fingerprint IS the identity the
+# export preserve/recover logic trusts across reloads and tabs. Every input
+# that changes the returned buckets must be hashed, canonicalized -- one
+# omitted input means two tabs differing only in it share a fingerprint,
+# and a reload can restore the other tab's rows.
+# ---------------------------------------------------------------------------
+
+def _fingerprint_call_slice() -> str:
+    """The fresh-search call to the identity helper, arguments included."""
+    src = _read_source()
+    idx = src.index('_search_fingerprint = compute_parallels_search_fingerprint(')
+    end = src.index('\n                    )', idx)
+    return src[idx:end]
+
+
+def test_fingerprint_call_passes_every_result_affecting_input():
+    """The page must hand the helper every input that changes the returned
+    buckets. (What the helper DOES with them is proven by execution in
+    tests/test_parallels_fingerprint.py -- this pin only guards the wiring.)"""
+    slice_ = _fingerprint_call_slice()
+    required = [
+        'text', 'engine', 'width', 'chunk_size', 'mode', 'max_freq',
+        'filter_text', 'deep_scan',
+        'boundary_mode', 'boundary_delimiter', 'boundary_boost',
+        'min_boundary_matches', 'min_delimiter_distance',
+        'variant_level', 'variant_max_changes',
+        'library_mode', 'library_filter', 'restrict', 'excluded',
+        'filters',
+    ]
+    missing = [k for k in required if f'{k}=' not in slice_]
+    assert not missing, (
+        'the fingerprint call omits result-affecting input(s) -- two tabs '
+        'differing only in these would swap rows across a reload: '
+        + repr(missing))
+
+
+def test_fingerprint_call_reads_no_live_widget():
+    """Round 5 (Codex P2) generalized: only the Run button is disabled during
+    the await, so ANY `.value` read at this call site describes post-edit
+    state the engine never used. Everything must be a dispatch capture."""
+    slice_ = _fingerprint_call_slice()
+    offenders = [ln.strip() for ln in slice_.splitlines() if '.value' in ln]
+    assert not offenders, (
+        'live widget read(s) at the fingerprint call site: ' + repr(offenders))
+
+
+def test_fingerprint_call_reads_no_live_page_state():
+    """Workflow review: library_mode / library_filter / excluded_manuscript_ids
+    were read live from p_state AFTER the await. p_state is mutated by chip
+    clicks, so those reads could describe a scope the search never used --
+    and the post-search 'hide' pass must filter by the same captures it is
+    fingerprinted with."""
+    slice_ = _fingerprint_call_slice()
+    offenders = [ln.strip() for ln in slice_.splitlines() if 'p_state.' in ln]
+    assert not offenders, (
+        'live p_state read(s) at the fingerprint call site: ' + repr(offenders))
+
+
+def test_the_library_hide_pass_uses_the_same_captures_it_is_hashed_with():
+    """If the filter reads live p_state while the identity hashes captures,
+    the fingerprint describes rows the filter did not produce."""
+    src = _read_source()
+    assert ("if captured_library_mode == 'hide' and captured_library_filter:"
+            in src), (
+        'the post-search library filter must use the dispatch captures')
+
+
+def test_fingerprint_and_meta_use_the_dispatched_text():
+    """Round 4 (Codex P2): the textarea stays editable during the await, so
+    reading text_input.value after it fingerprints text that was never
+    searched -- colliding with a tab that really searched the edited text."""
+    slice_ = _fingerprint_call_slice()
+    assert 'text=text,' in slice_, (
+        'the fingerprint must hash the dispatched text')
+
+    # Two sites build _parallels_search_meta; the history-restore one
+    # correctly echoes its stored snapshot. Pin the FRESH-SEARCH one.
+    src = _read_source()
+    fp_at = src.index('_search_fingerprint = compute_parallels_search_fingerprint(')
+    meta_at = src.index('_parallels_search_meta = {', fp_at)
+    meta_slice = src[meta_at:meta_at + 200]
+    assert "'source_text': text," in meta_slice, (
+        'export meta must echo the dispatched text, not the live textarea')
+
+
+def test_history_restore_stamps_its_own_identity():
+    """Workflow review (P1): the composition-history restore wrote the export
+    payload but never set p_state.search_fingerprint, so the next snapshot
+    persist stamped the restored rows with the PREVIOUS search's identity --
+    and a later reload could recover that unrelated search's payload."""
+    src = _read_source()
+    handler_at = src.index("'warnings': ['restored-from-history'],")
+    after = src[handler_at:handler_at + 1800]
+    assert 'compute_parallels_search_fingerprint(' in after, (
+        'history restore must compute an identity through the shared helper')
+    assert 'p_state.search_fingerprint = ' in after, (
+        'history restore must stamp p_state, or the stale fingerprint from '
+        'the previous search survives into the snapshot')
+
+
+def test_the_legacy_bootstrap_preserves_the_richer_payload():
+    """Workflow review (P1): the no-snapshot branch (a second browser tab is
+    enough to reach it) called set_parallels_export directly, overwriting the
+    up-to-5,000-row payload with the 250-row user fallback. Harmless while
+    results were capped near 200; this PR's uncapped fetch made it lossy."""
+    src = _read_source()
+    boot_at = src.index("_bootstrap_meta = {'source_text': _legacy_source_text}")
+    after = src[boot_at:boot_at + 2600]  # window covers the round-6 identity-carry block too
+    assert 'preserve_or_set_parallels_export(' in after, (
+        'the bootstrap branch must not clobber a richer same-search payload')
+    assert 'recover_richer_parallels_rows(' in after, (
+        'the bootstrap branch should recover the payload tail, like the '
+        'snapshot branch above it')
+    # Scan CODE only: this block's own comment names the old writer to
+    # explain why it is gone, and a substring check over comments is
+    # how a gate goes vacuous (or, here, falsely red).
+    code = [ln for ln in after.splitlines()
+            if not ln.lstrip().startswith('#')]
+    bare_writer = [ln for ln in code
+                   if 'set_parallels_export(' in ln
+                   and 'preserve_or_set_parallels_export(' not in ln]
+    assert not bare_writer, (
+        'the unconditional writer is still reachable in this branch: '
+        + repr(bare_writer))
+
+
+def test_programmatic_boundary_write_calls_its_handler():
+    """NiceGUI fires no event for a programmatic .value write, so the
+    boundary help/stats/Advanced-button state stayed as the user last left
+    it while letter-level forced 'full'."""
+    src = _on_passage_mode_change_source()
+    idx = src.index("boundary_mode.value = 'full'")
+    after = src[idx:idx + 700]
+    assert 'update_boundary_ui()' in after, (
+        'forcing boundary_mode without calling its handler leaves the help '
+        'text, stats line and Advanced button describing the old mode')
+
+
 # The page must actually BUILD. Source-text pins cannot execute closures; the
 # NameError that took the whole /parallels page down (owner-reported,
 # 2026-08-23: on_passage_mode_change() invoked at build time before
@@ -352,8 +556,64 @@ def test_the_page_builds_without_raising(available, monkeypatch):
     # The method radio must exist exactly when the index is available.
     radios = [el for el in client.elements.values()
               if type(el).__name__ == 'Radio']
-    assert len(radios) >= (1 if available else 0)
+    # `>= 0` would have been vacuous for the unavailable arm (workflow
+    # review): assert what each arm actually claims.
     if available:
+        assert len(radios) >= 1, 'the method radio must exist'
         assert any(getattr(r, 'value', None) == 'passage' for r in radios), (
             'letter-level must be the pre-selected method'
         )
+    else:
+        assert all(getattr(r, 'value', None) != 'passage' for r in radios), (
+            'with no passage index, no radio may sit on the letter-level '
+            'value -- the page would send a method the backend rejects'
+        )
+
+
+# =========================================================================
+# Round 6 (Codex P2): the legacy fallback carries its identity, so the
+# mixed-pair rule in _same_parallels_search can verify instead of trusting
+# source_text.
+# =========================================================================
+
+def test_the_fallback_write_stamps_its_identity_beside_it():
+    src = _read_source()
+    flat = ' '.join(src.split())
+    assert ("safe_user_set('parallels_results_fingerprint', "
+            '_search_fingerprint)') in flat, (
+        'the fresh-search fallback write must stamp '
+        "parallels_results_fingerprint with the same _search_fingerprint "
+        'it just used for the export payload'
+    )
+
+
+def test_the_bootstrap_folds_the_stamp_into_its_meta():
+    src = _read_source()
+    flat = ' '.join(src.split())
+    assert ("_legacy_fingerprint = _safe_get( "
+            "'parallels_results_fingerprint', '') or ''") in flat
+    assert ("_bootstrap_meta['search_fingerprint'] = _legacy_fingerprint"
+            ) in flat
+
+
+def test_the_clear_path_clears_the_stamp_with_the_rows():
+    """A cleared results list with a surviving stamp would label the NEXT
+    legacy bootstrap's empty rows with a dead search's identity."""
+    src = _read_source()
+    flat = ' '.join(src.split())
+    assert ("safe_user_set('parallels_results', []) "
+            "safe_user_set('parallels_results_fingerprint', '')") in flat
+
+
+# =========================================================================
+# Round 7 (Codex P2): after a reload the controls sit at build-time
+# defaults, so the restore notice must not promise that a bare re-run
+# recovers the full list -- it states the original-settings condition.
+# =========================================================================
+
+def test_the_restore_notice_states_its_condition():
+    src = _read_source()
+    assert 'run the search again for the full list' not in src, (
+        'the unconditional restore promise is back -- a reload does not'
+        ' restore the controls, so a bare re-run is a DIFFERENT search')
+    assert 'with its original settings' in src

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v9.0.0
 milestone_name: Discovery — Same-Work Identification & Connection Atlas
 status: executing
-stopped_at: "Phase 136.2 (Findings Export, xlsx) CLOSED 2026-08-21 — merged as PR #323 (f1d0f94d) and deployed by the owner the same day, then verified against PRODUCTION rather than inferred from the merge (route live, the completion cookie stamped on a failure path, the %0A token ignored). 38 mutations red by name; the battery is now crash-safe after an interrupted run left a mutation in the working tree. Still owed: the 136.2 retro-plan (Phase 140 SC1). Left unfixed by decision: the harness-only concurrency-slot leak, and a PRE-EXISTING cross-file test failure (measured at 6 failed on the base vs 5 with the work). Next: Phase 136.1, and the discovery-data lane (148-149)."
-last_updated: "2026-08-21T09:15:00.000Z"
+stopped_at: "Phase 136.2 (Findings Export, xlsx) CLOSED 2026-08-21 — merged as PR #323 (f1d0f94d) and deployed by the owner the same day, then verified against PRODUCTION rather than inferred from the merge (route live, the completion cookie stamped on a failure path, the %0A token ignored). 38 mutations red by name; the battery is now crash-safe after an interrupted run left a mutation in the working tree. Still owed: the 136.2 retro-plan (Phase 140 SC1). Left unfixed by decision: the harness-only concurrency-slot leak, and a PRE-EXISTING cross-file test failure (measured at 6 failed on the base vs 5 with the work). Next: Phase 136.1, and the discovery-data lane (148-149). BOOKKEEPING 2026-08-21: 136.2 had no phase directory, so `init.manager` (disk-strict since ADR-3180 §7.4 — a ticked ROADMAP box carries no machine authority) read it as never discussed and kept recommending it; its retrospective attestation moved to `.planning/phases/136.2-findings-export-xlsx/` and the phase now reads complete (4/20 -> 5/20). Also: 136.1 had a Phase Details block and a Progress-table row but NO checkbox (19 boxes against 20 phases) — added. 141/142/143 UNTICKED by owner ruling the same day: they read `[x]` while the Progress table called them 'Built, unmerged' on `claude/computed-id-parallels-search-a7c8fd`. Re-tick on merge + verification, not on build. Checkbox list and disk state now agree exactly: 5 ticked, 5 complete."
+last_updated: "2026-08-21T12:00:00.000Z"
 last_activity: 2026-08-21
 progress:
-  total_phases: 19
+  total_phases: 20
   completed_phases: 5
   total_plans: 45
   completed_plans: 43
-  percent: 26
+  percent: 25
 ---
 
 # Project State

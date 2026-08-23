@@ -295,6 +295,15 @@ def _compact_parallels_result_row(row: Any) -> Tuple[Any, bool]:
         if isinstance(value, str):
             truncated = value[:_PARALLELS_TEXT_STORAGE_CHARS]
             if truncated != value:
+                # A blind slice can cut between a highlight span's
+                # opening and closing `*`, leaving an odd marker
+                # count -- and every marker consumer (the xlsx
+                # rich-text renderer, the page's HTML highlighter)
+                # splits on `*` and would style the entire tail
+                # after the orphan as highlighted. Close the cut
+                # span: the highlighted run genuinely was truncated.
+                if truncated.count('*') % 2 == 1:
+                    truncated += '*'
                 kept[key] = truncated
                 changed = True
 
@@ -749,6 +758,221 @@ def get_parallels_export() -> Optional[Dict[str, Any]]:
     if changed:
         safe_user_set(_PARALLELS_KEY, compacted)
     return compacted
+
+
+def _same_parallels_search(existing_meta: Dict[str, Any],
+                           offered_meta: Dict[str, Any]) -> bool:
+    """One identity rule for "is this payload from the SAME search?".
+
+    PR #325 review round 2 (Codex P2): source_text alone is too weak -- two
+    tabs of one user can search identical text with different widths, modes
+    or filters, and app.storage.user holds whichever tab wrote last, so a
+    source_text-only match let one tab's restore preserve (or recover) the
+    OTHER tab's rows. Fresh searches now stamp a `search_fingerprint` (a
+    stable hash over text + engine + width + chunk/mode/freq + filters);
+    when BOTH sides carry one, the fingerprints decide. The source_text
+    fallback survives only when BOTH sides predate the fingerprint; a pair
+    with exactly one fails closed (round 6 -- see the inline comment).
+    """
+    a = (existing_meta or {}).get('search_fingerprint')
+    b = (offered_meta or {}).get('search_fingerprint')
+    if a and b:
+        return a == b
+    if a or b:
+        # Mixed pair (round 6, Codex P2): every post-fingerprint writer
+        # stamps one -- fresh searches, the history restore, and the legacy
+        # bootstrap (which folds in the sibling
+        # `parallels_results_fingerprint` key when its fallback rows were
+        # written by stamped code). One-sided therefore means the two
+        # payloads straddle the fingerprint deploy and CANNOT be verified as
+        # the same search; source_text alone would let a same-text search
+        # with different width/mode/filters adopt the other tab's rows.
+        return False
+    return ((existing_meta or {}).get('source_text')
+            == (offered_meta or {}).get('source_text'))
+
+
+#: Inputs whose ORDER is meaningless to the search. Hashing them raw splits
+#: one search into many identities, so recovery silently never fires.
+_PARALLELS_FINGERPRINT_SET_INPUTS = ('library_filter', 'restrict', 'excluded')
+
+
+def _canonical_parallels_filters(filters):
+    """Sort every list inside the advanced-filter dict (order-insensitive)."""
+    if not isinstance(filters, dict):
+        return None
+    return {k: (sorted(v) if isinstance(v, list) else v)
+            for k, v in filters.items()}
+
+
+def compute_parallels_search_fingerprint(
+    *,
+    text,
+    engine,
+    width=None,
+    chunk_size=None,
+    mode=None,
+    max_freq=None,
+    filter_text='',
+    deep_scan=False,
+    boundary_mode=None,
+    boundary_delimiter=None,
+    boundary_boost=None,
+    min_boundary_matches=None,
+    min_delimiter_distance=None,
+    variant_level=None,
+    variant_max_changes=None,
+    library_mode=None,
+    library_filter=None,
+    restrict=None,
+    excluded=None,
+    filters=None,
+) -> str:
+    """Return the 16-hex identity of ONE parallels search.
+
+    THE one definition of "same search" for the preserve/recover logic. It
+    lives here, not in a page closure, for three reasons the PR #325 review
+    surfaced:
+
+    * it must be EXECUTABLE by tests -- a source-text pin over a closure
+      cannot prove that changing an input changes the hash;
+    * canonicalization must be structural, not remembered at each call site
+      (set-like inputs are sorted HERE, so no caller can forget);
+    * two call sites build it (a fresh search and a composition-history
+      restore), and an identity rule defined twice is an identity rule that
+      drifts.
+
+    Every parameter is keyword-only, so a positional call cannot shift values
+    between inputs. Callers must pass values CAPTURED AT DISPATCH: a live
+    widget read describes a configuration the search may not have used
+    (PR #325 review rounds 4-5).
+    """
+    import hashlib
+    import json
+
+    payload = {
+        'text': text or '',
+        'engine': engine,
+        'width': width,
+        'chunk_size': chunk_size,
+        'mode': mode,
+        'max_freq': max_freq,
+        'filter_text': filter_text or '',
+        'deep_scan': bool(deep_scan),
+        'boundary_mode': boundary_mode,
+        'boundary_delimiter': boundary_delimiter,
+        'boundary_boost': boundary_boost,
+        'min_boundary_matches': min_boundary_matches,
+        'min_delimiter_distance': min_delimiter_distance,
+        'variant_level': variant_level,
+        'variant_max_changes': variant_max_changes,
+        'library_mode': library_mode,
+        'library_filter': library_filter,
+        'restrict': restrict,
+        'excluded': excluded,
+        'filters': _canonical_parallels_filters(filters),
+    }
+    for key in _PARALLELS_FINGERPRINT_SET_INPUTS:
+        value = payload.get(key)
+        if value is not None:
+            payload[key] = sorted(value)
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True,
+                   default=str).encode('utf-8')
+    ).hexdigest()[:16]
+
+
+def recover_richer_parallels_rows(
+    results: List[Dict[str, Any]],
+    filtered: List[Dict[str, Any]],
+    meta: Optional[Dict[str, Any]] = None,
+) -> tuple:
+    """-> (results, filtered, recovered). Display recovery after a reload.
+
+    The display snapshot is 500 rows by design; the export payload persists
+    up to 5,000 rows of the SAME search and survives the reload. Payload rows
+    are display-safe by construction: after every fresh search the page
+    stores exactly these compacted rows as its own display state
+    (web/pages/parallels.py, compact_parallels_result_rows). So when the
+    payload is the same search and holds more, the page should show IT, not
+    the trimmed snapshot -- recovering the pager's tail instead of merely
+    apologising for losing it.
+
+    Never mixes searches (_same_parallels_search) and never downgrades: on
+    any mismatch or a smaller payload, the offered rows come back unchanged.
+    """
+    existing = get_parallels_export()
+    if isinstance(existing, dict) and _same_parallels_search(
+            existing.get('meta') or {}, meta or {}):
+        # Round 4 (Codex P2): compare BOTH buckets. Main-only missed the
+        # 400-main/800-filtered case -- equal mains, so recovery skipped
+        # the 300 filtered rows the payload already held. Same-search
+        # lists are prefixes of the same full lists, so a combined sum
+        # never downgrades one bucket to grow the other.
+        existing_rows = existing.get('results') or []
+        existing_filtered = existing.get('filtered') or []
+        if (len(existing_rows) + len(existing_filtered)
+                > len(results or []) + len(filtered or [])):
+            return existing_rows, existing_filtered, True
+    return (results or [], filtered or [], False)
+
+
+def parallels_restore_shortfall(
+    snapshot: Dict[str, Any],
+    results: List[Dict[str, Any]],
+    filtered: List[Dict[str, Any]],
+) -> tuple:
+    """-> (shown, recorded_total) across BOTH buckets.
+
+    PR #325 round 2 (Codex P2): the restore notice compared only
+    results_total, so a search whose FILTERED bucket lost its tail to the
+    snapshot cap was announced as complete. One helper owns the arithmetic
+    so the both-buckets rule is unit-testable instead of living inline in a
+    page closure no test executes.
+    """
+    total = (int((snapshot or {}).get('results_total') or 0)
+             + int((snapshot or {}).get('filtered_total') or 0))
+    shown = len(results or []) + len(filtered or [])
+    return shown, total
+
+
+def preserve_or_set_parallels_export(
+    results: List[Dict[str, Any]],
+    filtered: List[Dict[str, Any]],
+    meta: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """RESTORE-path writer: keep an existing richer payload for the SAME search.
+
+    PR #325 review (Codex P2). The page's display snapshot is capped at 500
+    rows by design (the 778 MB search_history.json lesson), but the export
+    payload persists up to 5,000 rows in app.storage.user and SURVIVES a
+    reload intact. The restore path used to call set_parallels_export() with
+    the 500-row display fallback, overwriting the intact full payload -- so a
+    594-row Birkat Hamazon search silently exported 500 rows after a refresh.
+
+    This writer overwrites ONLY when it would not lose information: it skips
+    the write when a payload already exists for the same search (matched by
+    _same_parallels_search: fingerprint, source_text fallback for legacy
+    payloads) holding at least as many rows -- BOTH buckets counted -- as
+    the restore is offering.
+    Fresh searches must keep calling set_parallels_export() directly -- a new
+    search legitimately REPLACES the payload, whatever the sizes.
+
+    Returns True when it wrote, False when it preserved the existing payload.
+    """
+    existing = get_parallels_export()
+    if isinstance(existing, dict):
+        # Round 4 (Codex P2): richness is BOTH buckets here too, mirroring
+        # recover_richer_parallels_rows -- a payload with equal mains but a
+        # longer filtered tail must be preserved, not overwritten.
+        existing_total = (len(existing.get('results') or [])
+                          + len(existing.get('filtered') or []))
+        offered_total = len(results or []) + len(filtered or [])
+        if (_same_parallels_search(existing.get('meta') or {}, meta or {})
+                and existing_total >= offered_total):
+            return False
+    set_parallels_export(results=results, filtered=filtered, meta=meta)
+    return True
 
 
 def update_parallels_export_filtered(filtered: List[Dict[str, Any]]) -> None:

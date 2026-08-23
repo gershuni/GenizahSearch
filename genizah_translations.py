@@ -4977,8 +4977,8 @@ TRANSLATIONS.update({
         "חדש! חיפוש ברמת האות",
     "Chunk search (slower)":
         "חיפוש מקטעים (איטי יותר)",
-    "Letter-level search: fast, yields fewer irrelevant results, and tolerates transcription errors, nikkud and line breaks. Genizah corpus only.":
-        "חיפוש ברמת האות: מהיר, מחזיר פחות תוצאות לא רלוונטיות, ועמיד לשיבושי פענוח, לניקוד ולשבירות שורה. קורפוס הגניזה בלבד.",
+    "Letter-level search: fast, yields fewer irrelevant results, and tolerates transcription errors, nikkud and line breaks.":
+        "חיפוש ברמת האות: מהיר, מחזיר פחות תוצאות לא רלוונטיות, ועמיד לשיבושי פענוח, לניקוד ולשבירות שורה.",
     "Match width":
         "רוחב התאמה",
     "Narrow (near-exact)":
@@ -4989,7 +4989,7 @@ TRANSLATIONS.update({
         "רחב",
     "Maximal (may add noise)":
         "מרבי (עלול להוסיף רעש)",
-    "Widest (default)":
+    "Very wide (default)":
         "רחב מאוד (ברירת מחדל)",
     "How far a manuscript may drift from your text and still match. Wider finds more noisy witnesses; the strongest matches always rank first.":
         "עד כמה כתב היד יכול לסטות מהטקסט שלך ועדיין להיחשב התאמה. רחב יותר מוצא יותר עדים משובשים; ההתאמות החזקות תמיד מדורגות ראשונות.",
@@ -5001,6 +5001,11 @@ TRANSLATIONS.update({
         "החיפוש ברמת האות נכשל.",
     "Letter-level search checked the {n} best-evidenced candidates of {m}.":
         "החיפוש ברמת האות בדק את {n} המועמדים המבוססים ביותר מתוך {m}.",
+    # Round 7 (Codex P2): the promise is conditional on the ORIGINAL
+    # settings -- after a reload the controls are at defaults, and an
+    # unconditional "run it again" would run a different search.
+    "Restored {shown} of {total} results from the last search — to see the full list, run the search again with its original settings.":
+        "שוחזרו {shown} מתוך {total} תוצאות מהחיפוש האחרון — לרשימה המלאה יש להריץ את החיפוש שוב עם ההגדרות המקוריות.",
     "Letter-level search matched more than {cap} manuscripts — showing the strongest {cap}.":
         "החיפוש ברמת האות מצא יותר מ־{cap} כתבי יד — מוצגים ה־{cap} החזקים ביותר.",
 })

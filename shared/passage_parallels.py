@@ -283,6 +283,15 @@ class PassageSearcher:
     index: PassageIndex
     text_fetcher: PageTextFetcher
     policy: Optional[PassagePolicy] = None
+    # <= 0 means UNCAPPED (owner ruling 2026-08-23, the Birkat Hamazon
+    # session): return every group, fully rendered. The page passes 0 -- its
+    # display layer already batches 50 groups per "Load more" click, and the
+    # export layer caps at 5,000 rows, so the 200-group cap here was hiding
+    # 299 of 497 found manuscripts from BOTH surfaces for no benefit. The
+    # API path keeps the default: its envelope contract is 200 groups, and
+    # rendering rows the service would immediately discard is pure waste.
+    # Cost bound when uncapped: verify_cap (3,000 records) bounds the render
+    # at ~4s worst case, inside every timeout that guards this path.
     render_cap: int = PARALLELS_GROUP_CAP
 
     def __post_init__(self) -> None:
@@ -411,10 +420,17 @@ class PassageSearcher:
         # `filtered` is capped too (unlike the incumbent's own filtered
         # bucket, which is documented as "typically small" on an assumption
         # passage's filter_text mechanism does not share).
-        capped_main_candidates, main_truncated = _cap_main_results_by_group(
-            eligible_rows, _RegexSysIdParser(), cap=self.render_cap)
-        capped_filtered_candidates, _truncated_f = _cap_main_results_by_group(
-            filtered_candidate_rows, _RegexSysIdParser(), cap=self.render_cap)
+        if self.render_cap and self.render_cap > 0:
+            capped_main_candidates, main_truncated = _cap_main_results_by_group(
+                eligible_rows, _RegexSysIdParser(), cap=self.render_cap)
+            capped_filtered_candidates, _truncated_f = _cap_main_results_by_group(
+                filtered_candidate_rows, _RegexSysIdParser(), cap=self.render_cap)
+        else:
+            # Uncapped: every group survives, so nothing is truncated by
+            # definition and "rendered == kept" holds over the full set.
+            capped_main_candidates = eligible_rows
+            capped_filtered_candidates = filtered_candidate_rows
+            main_truncated = False
 
         # Finding #16(b): a row whose text lookup fails is DROPPED and
         # COUNTED, never returned half-blank.

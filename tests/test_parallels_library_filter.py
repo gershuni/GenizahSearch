@@ -496,3 +496,59 @@ def test_ast_parallels_filter_before_export():
         f"set_parallels_export( (pos {export_pos}) so exports are scoped. "
         "Finding #6 contract. RED until Plan 05."
     )
+
+
+# ---------------------------------------------------------------------------
+# (17) Round 6 (Codex P2): the closure takes mode/codes explicitly.
+# The pure mirror at the top of this file has carried this signature all
+# along -- the drift (the closure reading p_state live) is exactly what a
+# mirror cannot catch, so these pins watch the real source.
+# ---------------------------------------------------------------------------
+
+def _real_filter_source() -> str:
+    source = PARALLELS_PY.read_text(encoding='utf-8')
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.FunctionDef)
+                and node.name == '_apply_parallels_library_filter'):
+            return ast.get_source_segment(source, node) or ''
+    raise AssertionError('_apply_parallels_library_filter not found')
+
+
+def test_ast_filter_signature_matches_the_mirror():
+    src = _real_filter_source()
+    first_line = src.splitlines()[0]
+    assert first_line == (
+        'def _apply_parallels_library_filter(results_list, mode, codes):'
+    ), first_line
+
+
+def test_ast_filter_body_never_reads_the_live_selection():
+    """A p_state read inside the filter lets a selection change DURING a
+    search filter rows with values the fingerprint never described."""
+    offenders = [
+        line for line in _real_filter_source().splitlines()
+        if 'p_state.library' in line.split('#')[0]
+    ]
+    assert not offenders, offenders
+
+
+def test_ast_post_search_call_passes_the_captures():
+    """The post-await caller must hand the helper the same dispatch-time
+    captures its own guard and the fingerprint already use."""
+    source = PARALLELS_PY.read_text(encoding='utf-8')
+    flat = ' '.join(source.split())
+    assert ('_apply_parallels_library_filter( main_results, '
+            'captured_library_mode, captured_library_filter)') in flat
+    assert ('_apply_parallels_library_filter( filtered_results, '
+            'captured_library_mode, captured_library_filter)') in flat
+
+
+def test_ast_rerender_call_passes_the_live_selection():
+    """The re-render caller is the OTHER contract: the user just applied a
+    new selection and asked for a re-render of stored rows, so live values
+    are the correct ones there."""
+    source = PARALLELS_PY.read_text(encoding='utf-8')
+    flat = ' '.join(source.split())
+    assert ('_apply_parallels_library_filter( main_results, '
+            'p_state.library_mode, p_state.library_filter)') in flat

@@ -15,6 +15,21 @@ import types
 
 import genizah_app as app
 from genizah_app import _PauseCtx
+
+import pytest
+
+import genizah_core
+
+
+@pytest.fixture(autouse=True)
+def _pin_english_labels(monkeypatch):
+    """tr() reads genizah_core.CURRENT_LANG, filled from the DEVELOPER'S
+    persisted app config at import -- the 'Searching My Library...' format
+    assertion below would test the machine owner's language setting, not
+    the code (red on a Hebrew-configured machine, green on CI's English
+    default). Same pin as test_pause_resume_ui.py."""
+    monkeypatch.setattr(genizah_core, 'CURRENT_LANG', 'en')
+
 from shared.search_engine import PHASE_LOCAL_SEARCH
 
 

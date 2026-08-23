@@ -1145,3 +1145,29 @@ A "Maximal" width step (max-40, density_scale 2.0 -- the validation ceiling)
 was added anyway at the owner's request, with the measured caveats in its
 preset docstring: 2.0 is past the recall@50 peak, and its value arrives in
 full only once paging exists.
+
+### Paging + uncapped exports (2026-08-23): the cap had no job left
+
+Implementing the owner's two 146A pulls (paging; export everything) collapsed
+into ONE change once the seams were read: the parallels page ALREADY ships a
+working pager (`load_more_main`, 50 groups per "Load more" click, strongest
+first -- the chunk path has used it all along), and the export layer already
+bounds itself at 5,000 rows independently. The engine's 200-group cap on the
+page path was therefore hiding found manuscripts from BOTH surfaces while
+protecting neither. The page now requests `render_cap=0` (uncapped); the API
+path keeps the searcher default, because its envelope contract is 200 groups
+and rendering rows the service would discard is pure waste.
+
+Verified on the owner's own Birkat Hamazon query through the exact page path:
+**594 rows / 443 manuscripts + 68 duplicate-photography demotions, zero blank
+rows, truncated=False, 0.83s.** "Rendered == kept" holds over the full set --
+the uncapped test asserts every returned row carries its highlight text,
+because a blank row past the old cap boundary would be finding #1
+reintroduced at scale. Worst-case bound: verify_cap (3,000 records) keeps an
+uncapped render under ~4s, inside every timeout guarding the path.
+
+One vacuous-pin catch worth recording: the page-side gate originally asserted
+`'render_cap=0' in src` -- and stayed GREEN under mutation because an
+explanatory COMMENT contains the same substring. The pin now extracts the
+actual `get_passage_searcher(...)` call and asserts on that; the repo has
+seen the comment-vs-gate failure in both directions now.

@@ -998,3 +998,67 @@ def test_the_web_width_control_reaches_the_policy(synthetic_corpus, monkeypatch)
 
     with pytest.raises(Exception):
         pa.get_passage_searcher(_FakeTextFetcher(originals), preset='slider-17')
+
+
+# ---------------------------------------------------------------------------
+# Owner ruling 2026-08-23 (Birkat Hamazon session): the page path is UNCAPPED.
+# Display batching pages it; the export layer bounds it. The engine's group
+# cap hid 299 of 497 found manuscripts from both surfaces.
+# ---------------------------------------------------------------------------
+
+def test_render_cap_zero_returns_every_group_fully_rendered(grouped_corpus):
+    idx, originals, motif = grouped_corpus   # 4 sys_id groups, all matching
+    capped = PassageSearcher(index=idx,
+                             text_fetcher=_FakeTextFetcher(originals),
+                             render_cap=2).search_composition_logic(
+        full_text=motif)
+    uncapped = PassageSearcher(index=idx,
+                               text_fetcher=_FakeTextFetcher(originals),
+                               render_cap=0).search_composition_logic(
+        full_text=motif)
+
+    def groups(res):
+        return {r['raw_header'].split('_', 1)[0] for r in res['main']}
+
+    assert len(groups(capped)) == 2 and capped['truncated_to_200'] is True
+    assert len(groups(uncapped)) == 4, 'uncapped must return every group'
+    assert uncapped['truncated_to_200'] is False, (
+        'nothing is truncated by definition when the cap is off'
+    )
+    # rendered == kept must hold over the FULL set, not just the first 200:
+    # a blank row past the old cap boundary would be the silent-blank defect
+    # (finding #1) reintroduced at scale.
+    assert all(r['text'] for r in uncapped['main']), (
+        'an uncapped row was returned unrendered'
+    )
+
+
+def test_page_requests_the_uncapped_searcher(synthetic_corpus, monkeypatch):
+    """The page passes render_cap=0; the API path keeps the searcher default
+    (200-group envelope contract). Both pinned, because a future refactor
+    that drops the page's kwarg silently reinstates the hidden-manuscripts
+    behaviour the owner measured and ruled out."""
+    import web.passage_assets as pa
+
+    idx, originals, _motif = synthetic_corpus
+    monkeypatch.setattr(pa, 'PASSAGE_PARALLELS_ENABLED', True)
+    monkeypatch.setattr(pa, '_state', pa._PassageState(ready=True, index=idx))
+
+    api_default = pa.get_passage_searcher(_FakeTextFetcher(originals))
+    from shared.parallels_service import PARALLELS_GROUP_CAP
+    assert api_default.render_cap == PARALLELS_GROUP_CAP
+
+    page_style = pa.get_passage_searcher(_FakeTextFetcher(originals),
+                                         render_cap=0)
+    assert page_style.render_cap == 0
+
+    src = open('web/pages/parallels.py', encoding='utf-8').read()
+    # Pin the CALL, not the file: an explanatory comment also contains the
+    # substring 'render_cap=0', so a bare `in src` stayed green when the
+    # actual kwarg was removed (mutation-caught in this session).
+    call_at = src.index('passage_searcher = get_passage_searcher(')
+    call = src[call_at:src.index(')', call_at) + 1]
+    assert 'render_cap=0' in call, (
+        "the page's get_passage_searcher CALL no longer passes render_cap=0 "
+        "-- found manuscripts are hidden from display AND export again"
+    )

@@ -251,6 +251,31 @@ def test_compact_parallels_result_rows_for_live_state():
     assert 'content' not in compacted[0]
 
 
+def test_truncation_never_leaves_an_orphaned_highlight_marker():
+    """The 4000-char storage slice can cut between a highlight span's
+    opening and closing `*`. Every marker consumer (the xlsx rich-text
+    renderer, the page's HTML highlighter) splits on `*`, so an odd count
+    styles the entire post-cut tail as highlighted. The compactor must
+    close the cut span."""
+    from web import export_state
+
+    cap = export_state._PARALLELS_TEXT_STORAGE_CHARS
+    # An opening marker just before the cap, the closing one beyond it.
+    straddling = 'x' * (cap - 3) + '*abcdef*'
+    row = _result(1)
+    row.update({'source_ctx': straddling, 'text': straddling})
+
+    compacted = export_state.compact_parallels_result_rows([row])[0]
+
+    for key in ('source_ctx', 'text'):
+        value = compacted[key]
+        assert value.count('*') % 2 == 0, (
+            f'{key} kept an orphaned marker: ...{value[-12:]!r}')
+        # The re-balance closes the cut span; it must not grow the field
+        # by more than that one closing marker.
+        assert len(value) <= cap + 1
+
+
 def test_compact_parallels_preserves_live_ui_metadata():
     """SEED-002 fixup round 2 (Codex catch): compact_parallels_result_rows()
     is used at web/pages/parallels.py:2338-2339 to overwrite the LIVE
@@ -857,3 +882,234 @@ def test_compact_no_display_no_synth_passes_through(monkeypatch):
     stored = storage['export_search_payload']['results'][0]
     assert stored['img'] == '3r'
     assert stored['source'] == 'pgp'
+
+
+# ---------------------------------------------------------------------------
+# PR #325 review (Codex P2): the restore path must not clobber a richer
+# same-search export payload with the 500-row display fallback.
+# ---------------------------------------------------------------------------
+
+def _install_stub(monkeypatch, storage: dict):
+    import web.safe_storage as ss
+    monkeypatch.setattr(ss, 'app', _make_stub(storage))
+
+
+def test_restore_preserves_a_richer_same_search_payload(monkeypatch):
+    storage = {}
+    _install_stub(monkeypatch, storage)
+    from web.export_state import (
+        get_parallels_export, preserve_or_set_parallels_export,
+        set_parallels_export,
+    )
+
+    full = [_result(i) for i in range(594)]
+    set_parallels_export(results=full, filtered=[],
+                         meta={'source_text': 'birkat'})
+    wrote = preserve_or_set_parallels_export(
+        results=full[:500], filtered=[], meta={'source_text': 'birkat'})
+    assert wrote is False, 'the 500-row display fallback clobbered the payload'
+    assert len(get_parallels_export()['results']) == 594
+
+
+def test_restore_still_writes_when_nothing_would_be_lost(monkeypatch):
+    storage = {}
+    _install_stub(monkeypatch, storage)
+    from web.export_state import (
+        get_parallels_export, preserve_or_set_parallels_export,
+        set_parallels_export,
+    )
+
+    # (a) no payload at all -- legacy session: must write.
+    assert preserve_or_set_parallels_export(
+        results=[_result(i) for i in range(3)], filtered=[],
+        meta={'source_text': 'a'}) is True
+    assert len(get_parallels_export()['results']) == 3
+
+    # (b) payload from a DIFFERENT search: must write (never preserve a
+    # stale payload across a change of query).
+    set_parallels_export(results=[_result(i) for i in range(50)],
+                         filtered=[], meta={'source_text': 'other'})
+    assert preserve_or_set_parallels_export(
+        results=[_result(i) for i in range(10)], filtered=[],
+        meta={'source_text': 'a'}) is True
+    payload = get_parallels_export()
+    assert len(payload['results']) == 10
+    assert payload['meta']['source_text'] == 'a'
+
+    # (c) same search but the restore OFFERS MORE than stored (payload was
+    # written by an older, smaller-capped session): must write.
+    assert preserve_or_set_parallels_export(
+        results=[_result(i) for i in range(20)], filtered=[],
+        meta={'source_text': 'a'}) is True
+    assert len(get_parallels_export()['results']) == 20
+
+
+# ---------------------------------------------------------------------------
+# PR #325 round 2 (Codex P2): search identity is the fingerprint, not the
+# text -- and the display recovers the payload's tail on reload.
+# ---------------------------------------------------------------------------
+
+def test_same_text_different_search_is_never_preserved(monkeypatch):
+    """Two tabs, identical text, different width: whichever wrote last owns
+    app.storage.user, and the other tab's restore must NOT preserve (or
+    recover) it. This is the exact cross-tab poisoning the round-2 review
+    named."""
+    storage = {}
+    _install_stub(monkeypatch, storage)
+    from web.export_state import (
+        get_parallels_export, preserve_or_set_parallels_export,
+        recover_richer_parallels_rows, set_parallels_export,
+    )
+
+    # Tab A wrote last: same text, width 1.8, 300 rows.
+    set_parallels_export(
+        results=[_result(i) for i in range(300)], filtered=[],
+        meta={'source_text': 'same', 'search_fingerprint': 'fp-tab-A'})
+
+    # Tab B reloads: same text, width 1.0, offering its 50-row snapshot.
+    meta_b = {'source_text': 'same', 'search_fingerprint': 'fp-tab-B'}
+    r, f, recovered = recover_richer_parallels_rows(
+        [_result(i) for i in range(50)], [], meta=meta_b)
+    assert recovered is False and len(r) == 50, (
+        "tab B recovered tab A's rows -- different searches were mixed"
+    )
+    assert preserve_or_set_parallels_export(
+        results=r, filtered=f, meta=meta_b) is True, (
+        "tab B preserved tab A's payload instead of writing its own"
+    )
+    assert get_parallels_export()['meta']['search_fingerprint'] == 'fp-tab-B'
+
+
+def test_reload_recovers_the_pager_tail_from_the_payload(monkeypatch):
+    """Same search (fingerprints match): the 500-row snapshot recovers the
+    full 594-row payload for DISPLAY, and the preserve guard then keeps the
+    payload untouched."""
+    storage = {}
+    _install_stub(monkeypatch, storage)
+    from web.export_state import (
+        preserve_or_set_parallels_export, recover_richer_parallels_rows,
+        set_parallels_export,
+    )
+
+    meta = {'source_text': 'birkat', 'search_fingerprint': 'fp-1'}
+    set_parallels_export(results=[_result(i) for i in range(594)],
+                         filtered=[_result(1000 + i) for i in range(68)],
+                         meta=meta)
+    r, f, recovered = recover_richer_parallels_rows(
+        [_result(i) for i in range(500)], [], meta=meta)
+    assert recovered is True and len(r) == 594 and len(f) == 68
+    assert preserve_or_set_parallels_export(results=r, filtered=f,
+                                            meta=meta) is False
+
+
+def test_recovery_counts_the_filtered_bucket_too(monkeypatch):
+    """Round 4 (Codex P2): equal mains, richer filtered. Main-only richness
+    skipped recovery here, so the pager lost 300 filtered rows the payload
+    already held -- and the notice then asked the user to re-run a search
+    whose rows were sitting in storage."""
+    storage = {}
+    _install_stub(monkeypatch, storage)
+    from web.export_state import (
+        preserve_or_set_parallels_export, recover_richer_parallels_rows,
+        set_parallels_export,
+    )
+
+    meta = {'source_text': 'birkat', 'search_fingerprint': 'fp-1'}
+    set_parallels_export(results=[_result(i) for i in range(40)],
+                         filtered=[_result(1000 + i) for i in range(80)],
+                         meta=meta)
+    # Snapshot offers the SAME 40 mains but only 50 of the filtered rows.
+    r, f, recovered = recover_richer_parallels_rows(
+        [_result(i) for i in range(40)],
+        [_result(1000 + i) for i in range(50)],
+        meta=meta)
+    assert recovered is True and len(r) == 40 and len(f) == 80
+
+    # And the preserve guard applies the same both-buckets rule: offering
+    # the poorer snapshot back must NOT overwrite the richer payload.
+    assert preserve_or_set_parallels_export(
+        results=[_result(i) for i in range(40)],
+        filtered=[_result(1000 + i) for i in range(50)],
+        meta=meta) is False
+
+
+def test_recovery_never_downgrades_on_a_poorer_payload(monkeypatch):
+    """The inverse direction: when the OFFERED rows are the richer set
+    (fresh restore beats a stale small payload), recovery declines and
+    preserve overwrites."""
+    storage = {}
+    _install_stub(monkeypatch, storage)
+    from web.export_state import (
+        get_parallels_export, preserve_or_set_parallels_export,
+        recover_richer_parallels_rows, set_parallels_export,
+    )
+
+    meta = {'source_text': 'birkat', 'search_fingerprint': 'fp-1'}
+    set_parallels_export(results=[_result(i) for i in range(40)],
+                         filtered=[], meta=meta)
+    offered_r = [_result(i) for i in range(40)]
+    offered_f = [_result(1000 + i) for i in range(20)]
+    r, f, recovered = recover_richer_parallels_rows(
+        offered_r, offered_f, meta=meta)
+    assert recovered is False and len(r) == 40 and len(f) == 20
+    assert preserve_or_set_parallels_export(
+        results=offered_r, filtered=offered_f, meta=meta) is True
+    payload = get_parallels_export()
+    assert len(payload['filtered']) == 20
+
+
+def test_legacy_pairs_match_on_text_but_a_mixed_pair_fails_closed(monkeypatch):
+    """Round 6 refinement of the round-3 contract. A pre-upgrade session's
+    first reload offers UNSTAMPED meta (the restore paths only stamp when
+    the stored identity exists), so legacy-vs-legacy still preserves on
+    source_text and no pre-upgrade session is clobbered by restoring. But a
+    STAMPED offer -- a fresh post-upgrade search -- against a legacy payload
+    is a mixed pair: it cannot be VERIFIED as the same search, and the same
+    text searched with a different width, mode or filter set must not adopt
+    the old rows. The fresh search takes the slot."""
+    storage = {}
+    _install_stub(monkeypatch, storage)
+    from web.export_state import (
+        get_parallels_export, preserve_or_set_parallels_export,
+        set_parallels_export,
+    )
+
+    # Legacy payload + legacy offer (a pre-upgrade reload): preserved.
+    set_parallels_export(results=[_result(i) for i in range(300)],
+                         filtered=[], meta={'source_text': 'legacy'})
+    assert preserve_or_set_parallels_export(
+        results=[_result(i) for i in range(200)], filtered=[],
+        meta={'source_text': 'legacy'}) is False, (
+        'a pre-upgrade reload clobbered its own richer payload'
+    )
+    assert len(get_parallels_export()['results']) == 300
+
+    # Legacy payload + stamped offer (a fresh search): replaced.
+    assert preserve_or_set_parallels_export(
+        results=[_result(i) for i in range(200)], filtered=[],
+        meta={'source_text': 'legacy',
+              'search_fingerprint': 'fp-new'}) is True, (
+        'a fresh stamped search must own the slot -- a same-text legacy '
+        'payload cannot be verified as the same search'
+    )
+    assert len(get_parallels_export()['results']) == 200
+
+
+def test_restore_shortfall_counts_the_filtered_bucket_too(monkeypatch):
+    """A search with 400 main rows (fully restored) and 800 filtered rows
+    (trimmed to 500) lost 300 rows -- and the first notice condition, which
+    read only results_total, called that complete."""
+    from web.export_state import parallels_restore_shortfall
+
+    snapshot = {'results_total': 400, 'filtered_total': 800}
+    shown, total = parallels_restore_shortfall(
+        snapshot, [_result(i) for i in range(400)],
+        [_result(i) for i in range(500)])
+    assert (shown, total) == (900, 1200)
+    assert total > shown, 'the filtered-bucket shortfall was invisible'
+
+    # And no false alarm when everything came back.
+    shown2, total2 = parallels_restore_shortfall(
+        {'results_total': 10, 'filtered_total': 5},
+        [_result(i) for i in range(10)], [_result(i) for i in range(5)])
+    assert total2 == shown2

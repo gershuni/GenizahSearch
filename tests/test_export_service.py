@@ -604,6 +604,71 @@ class TestExportService:
         with pytest.raises(ValueError, match="No parallels results"):
             export_service.export_parallels_excel([], [])
 
+    def test_export_parallels_excel_marked_spans_are_rich_text(
+            self, export_service, sample_parallels_results):
+        """Owner ruling 2026-08-23: the `*` markers must become red+bold
+        runs (build_rich_snippet_cell, the D-14 helper), not be stripped --
+        stripped, Source Context and Manuscript Match are near-identical
+        plain text for short source texts."""
+        from io import BytesIO
+
+        import openpyxl
+        from openpyxl.cell.rich_text import CellRichText, TextBlock
+
+        content, _ = export_service.export_parallels_excel(
+            sample_parallels_results, []
+        )
+        wb = openpyxl.load_workbook(BytesIO(content), rich_text=True)
+        ws = wb.active
+
+        # Fixture source_ctx is 'Source *context* text' -> col 6 rich.
+        src_cell = ws.cell(2, 6).value
+        assert isinstance(src_cell, CellRichText), (
+            f'Source Context cell was {type(src_cell).__name__}')
+        flat = str(src_cell)
+        assert '*' not in flat and 'context' in flat
+        # The claim is red AND bold: a regression to bold-but-black would
+        # otherwise pass this test unchanged (workflow review).
+        marked = [
+            b for b in src_cell
+            if isinstance(b, TextBlock) and b.font is not None and b.font.b
+        ]
+        assert [b.text for b in marked] == ['context'], (
+            f'expected exactly the marked span bold, got {marked}')
+        # openpyxl returns a Color object whose rgb is the 8-digit
+        # ARGB form ('00FF0000'), not the 6-digit string passed in.
+        _rgb = getattr(marked[0].font.color, 'rgb', None)
+        assert _rgb and str(_rgb).endswith('FF0000'), (
+            f'the highlighted run must be red, got {_rgb!r}')
+
+        # Fixture text has no markers -> col 7 stays a plain string.
+        ms_cell = ws.cell(2, 7).value
+        assert isinstance(ms_cell, str)
+        assert 'Manuscript match text' in ms_cell
+
+    def test_export_parallels_excel_manuscript_match_column_is_rich_too(
+            self, export_service):
+        """Both text columns carry markers (chunk snippets and passage
+        _highlight_span alike) -- col 7 must render them, not just col 6."""
+        from io import BytesIO
+
+        import openpyxl
+        from openpyxl.cell.rich_text import CellRichText
+
+        rows = [{
+            'raw_header': 'header_9912345678901234_page1',
+            'score': 85,
+            'source_ctx': 'plain source',
+            'text': 'match *inside* the manuscript',
+        }]
+        content, _ = export_service.export_parallels_excel(rows, [])
+        wb = openpyxl.load_workbook(BytesIO(content), rich_text=True)
+        ws = wb.active
+        ms_cell = ws.cell(2, 7).value
+        assert isinstance(ms_cell, CellRichText), (
+            f'Manuscript Match cell was {type(ms_cell).__name__}')
+        assert '*' not in str(ms_cell)
+
     def test_export_parallels_word(self, export_service, sample_parallels_results):
         """Should export parallels to valid Word file."""
         content, filename = export_service.export_parallels_word(
