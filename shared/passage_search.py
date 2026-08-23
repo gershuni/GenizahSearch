@@ -110,7 +110,15 @@ def _admit_grams(idx: PassageIndex, codes: np.ndarray, first_pos: np.ndarray,
         report.grams_admitted = len(codes)
         report.postings_admitted = int(dfs.sum())
         order = np.lexsort((first_pos, codes, dfs))
-        return base[order]
+        # Map back through `held`, exactly as the capped branches do below.
+        # Returning `base[order]` here was a real defect (PR #324 review):
+        # `base` is built AFTER `codes = codes[held]`, so its indices address
+        # the FILTERED array, while `_candidates` applies whatever we return
+        # to the caller's ORIGINAL `codes`/`qpos`. Whenever any query gram was
+        # absent from the index -- routine on noisy HTR text -- no-cap
+        # expanded the wrong grams and stamped them with the wrong query
+        # positions. Silently: every index was in range, so nothing raised.
+        return np.flatnonzero(held)[order]
 
     edges = np.asarray(idx.manifest.get('query', {}).get('df_band_edges')
                        or [], dtype=np.int64)

@@ -115,3 +115,63 @@ def test_holdout_key_includes_query_set(tmp_path):
     with pytest.raises(HoldoutReuse):
         led.reserve(method='passage', policy_id='p1', split=SPLIT_HOLDOUT,
                     query_set='fgp.jsonl')
+
+
+# ---------------------------------------------------------------------------
+# PR #324 review, P1: a partially-written holdout reservation batch.
+# ---------------------------------------------------------------------------
+
+def test_a_refused_batch_reserves_NOTHING(tmp_path):
+    """The write-once holdout must not be spent by an error message.
+
+    Looping `reserve()` over N configs wrote each as it went, so a duplicate
+    at position N left 1..N-1 on disk as consumed -- before a single query
+    ran. The operator's natural response (drop the duplicate, re-run) was
+    then refused for the earlier configs too.
+    """
+    from shared.retrieval_eval import EvalLedger, HoldoutReuse, SPLIT_HOLDOUT
+
+    path = str(tmp_path / 'ledger.jsonl')
+    led = EvalLedger(path)
+    led.reserve(method='passage', policy_id='passage-wide',
+                split=SPLIT_HOLDOUT, query_set='qs.jsonl')
+
+    fresh = EvalLedger(path)
+    with pytest.raises(HoldoutReuse):
+        fresh.reserve_all(
+            configs=[('chunk', 'chunk-5'),            # new
+                     ('passage', 'passage-wide')],    # already reserved
+            split=SPLIT_HOLDOUT, query_set='qs.jsonl')
+
+    after = EvalLedger(path)
+    assert after.reserve(method='chunk', policy_id='chunk-5',
+                         split=SPLIT_HOLDOUT, query_set='qs.jsonl'), (
+        'chunk-5 was consumed by a batch that was refused -- the holdout is '
+        'write-once, so a rejected batch must leave it untouched'
+    )
+
+
+def test_a_batch_that_repeats_a_key_within_itself_is_refused(tmp_path):
+    """The per-call form could not see this at all: the first write landed
+    and made the second look like a pre-existing reservation."""
+    from shared.retrieval_eval import EvalLedger, HoldoutReuse, SPLIT_HOLDOUT
+
+    path = str(tmp_path / 'dup.jsonl')
+    led = EvalLedger(path)
+    with pytest.raises(HoldoutReuse):
+        led.reserve_all(configs=[('passage', 'p-1'), ('passage', 'p-1')],
+                        split=SPLIT_HOLDOUT, query_set='qs.jsonl')
+
+    assert EvalLedger(path).reserve(
+        method='passage', policy_id='p-1', split=SPLIT_HOLDOUT,
+        query_set='qs.jsonl'), 'the refused batch still wrote an entry'
+
+
+def test_reserve_all_is_a_no_op_off_the_holdout_split(tmp_path):
+    from shared.retrieval_eval import EvalLedger, SPLIT_TUNE
+
+    path = str(tmp_path / 'tune.jsonl')
+    led = EvalLedger(path)
+    assert led.reserve_all(configs=[('passage', 'p-1'), ('passage', 'p-1')],
+                           split=SPLIT_TUNE, query_set='qs.jsonl') == []
+    assert not os.path.exists(path) or os.path.getsize(path) == 0

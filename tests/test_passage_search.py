@@ -213,3 +213,112 @@ def test_verbatim_passage_query_scores_near_zero_density(small_index):
     for h in hits:
         assert h.best_density <= 0.02, \
             f'record {h.record}: density {h.best_density} on a verbatim match'
+
+
+# ---------------------------------------------------------------------------
+# PR #324 review, P1: the no-cap branch returned indices in the WRONG space.
+# ---------------------------------------------------------------------------
+
+# Grams absent from the fixture corpus whose CODES SORT LOW. Both properties
+# are required and the second is easy to get wrong: `np.unique` sorts `codes`
+# by code value, so if every absent gram sorts to the TAIL then
+# `np.flatnonzero(held)` == `np.arange(k)` == `base` and the two index spaces
+# coincide -- the buggy and fixed returns become byte-identical and any test
+# built on such a query passes either way.
+#
+# The first attempt at this fixture used resh/shin/tav, the HIGHEST letter
+# codes, and was exactly that silent no-op (measured: 13 absent grams, all at
+# the tail, mutation stayed green). Runs of alef with low-letter punctuation
+# put absent grams underneath present ones instead.
+_ABSENT_LOW_PREFIX = 'אאאאבאאאגאאאדאאאהאאאו' * 3
+
+
+def _absent_gram_query(motif: str) -> str:
+    return _ABSENT_LOW_PREFIX + motif
+
+
+def _query_arrays(idx, motif):
+    import numpy as np
+
+    from shared.passage_normalize import gram_codes, norm_stream
+
+    qstream, _ = norm_stream(_absent_gram_query(motif))
+    codes, first_idx = np.unique(gram_codes(qstream), return_index=True)
+    return codes, first_idx.astype(np.int64), idx.dfs(codes) > 0
+
+
+def _assert_spaces_really_differ(held):
+    """The precondition, asserted rather than assumed.
+
+    Unless some absent gram sorts BELOW some present one, the filtered and
+    original index spaces are the same array and this bug is unobservable.
+    """
+    import numpy as np
+
+    present = np.flatnonzero(held)
+    assert present.size < held.size, 'no absent grams at all'
+    assert (present != np.arange(present.size)).any(), (
+        'every absent gram sorts to the tail, so the filtered and original '
+        'index spaces coincide and this fixture cannot observe the defect'
+    )
+
+
+def test_no_cap_admits_exactly_the_grams_that_are_IN_the_index(small_index):
+    """The invariant the no-cap branch broke, asserted directly.
+
+    `_admit_grams` drops df == 0 grams (`held`) and then works in the FILTERED
+    index space. Every capped branch converts back on the way out with
+    `np.flatnonzero(held)[chosen]`; BUDGET_NO_CAP returned `base[order]`,
+    whose values address the filtered array -- while `_candidates` applies
+    whatever it gets to the caller's ORIGINAL `codes`/`qpos`.
+
+    Note what the damage is NOT. Each admitted index still pairs a code with
+    its own `qpos`, so diagonals stay coherent and a strong motif is still
+    retrieved; a retrieval-level assertion does not catch this. What actually
+    happens is that the selection becomes "the len(held) lowest-valued codes",
+    a set that includes absent grams (expanding to nothing) and omits present
+    ones -- lost anchors, and DFs measured for grams other than those
+    expanded. Hence an index-space assertion, not a recall one.
+    """
+    import numpy as np
+
+    from shared.passage_search import QueryReport, _admit_grams
+
+    idx, motif = small_index
+    codes, qpos, held = _query_arrays(idx, motif)
+    _assert_spaces_really_differ(held)
+
+    nocap = PassagePolicy(name='nocap-probe', budget_policy='no_cap')
+    admitted = _admit_grams(idx, codes, qpos, nocap, QueryReport())
+
+    assert int(admitted.max()) < codes.size, "index outside the caller's range"
+    assert (idx.dfs(codes[admitted]) > 0).all(), (
+        'no-cap admitted a gram absent from the index -- the returned indices '
+        "address the filtered array, not the caller's"
+    )
+    assert sorted(admitted.tolist()) == np.flatnonzero(held).tolist(), (
+        'under no_cap the contract is total: exactly the grams the index '
+        'holds, and nothing else'
+    )
+
+
+def test_no_cap_admits_the_same_grams_as_an_effectively_unlimited_cap(
+        small_index):
+    """Differential form. A budget large enough to admit everything must
+    select the same grams as no-cap; only the capped path mapped back."""
+    from shared.passage_search import QueryReport, _admit_grams
+
+    idx, motif = small_index
+    codes, qpos, held = _query_arrays(idx, motif)
+    _assert_spaces_really_differ(held)
+
+    nocap = PassagePolicy(name='nocap-cmp', budget_policy='no_cap')
+    roomy = PassagePolicy(name='roomy-cmp', budget_policy='rarest_first',
+                          posting_budget=10 ** 9)
+
+    a = sorted(_admit_grams(idx, codes, qpos, nocap, QueryReport()).tolist())
+    b = sorted(_admit_grams(idx, codes, qpos, roomy, QueryReport()).tolist())
+    assert a == b, (
+        'no-cap and an unlimited cap admit the same grams by definition; they '
+        'disagreed, so one of them is in the wrong index space'
+    )

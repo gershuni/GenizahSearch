@@ -294,6 +294,28 @@ def open_index(index_dir: str) -> Optional[PassageIndex]:
             return None
         if int(gram_offsets[-1]) != counts['n_postings']:
             return None
+        # Monotonicity is the part this comment used to promise and the code
+        # did not do (PR #324 review). Endpoints and file sizes stay valid
+        # under middle-of-array corruption, and `postings_for` slices
+        # `postings[start:end]` unguarded: a reversed pair reads as an empty
+        # posting list, and an inflated one reads a neighbouring gram's
+        # postings as if they were this gram's. Both produce plausible wrong
+        # matches rather than the clean fail-closed hide every other check
+        # here delivers -- the worst outcome for a research tool.
+        #
+        # Chunked so the temporary stays ~1 MB instead of materialising a
+        # 14.3M-element boolean beside a 114 MB memmap read. That read is a
+        # real one-off open() cost, accepted: it is startup-only, sequential,
+        # and the alternative is serving wrong spans from a corrupt artifact.
+        _CHUNK = 1 << 20
+        _prev = np.uint64(0)
+        for _start in range(0, gram_offsets.size, _CHUNK):
+            block = np.asarray(gram_offsets[_start:_start + _CHUNK])
+            if block.size == 0:
+                continue
+            if block[0] < _prev or (block[1:] < block[:-1]).any():
+                return None
+            _prev = block[-1]
         postings = _map(POSTINGS_NAME, np.uint8,
                         (counts['n_postings'] * POSTING_BYTES,))
         streams = _map(STREAMS_NAME, np.uint8, (counts['n_letters'],))

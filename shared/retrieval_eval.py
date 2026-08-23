@@ -230,6 +230,60 @@ class EvalLedger:
                                 sort_keys=True) + '\n')
         return entry
 
+    def reserve_all(self, *, configs, split: str, query_set: str) -> list:
+        """Reserve several configs ALL-OR-NOTHING (PR #324 review).
+
+        `configs` is an iterable of (method, policy_id).
+
+        The defect this closes is one level down from the one `reserve`
+        closes. A caller looping `reserve()` over N configs writes each
+        reservation as it goes, so if config 3 is a duplicate the ledger
+        raises *after* configs 1 and 2 are already on disk. No query has run,
+        yet those two are now permanently marked as having consumed the
+        write-once holdout, and the obvious operator response -- fix the
+        duplicate, re-run -- is refused. The holdout is spent by an error
+        message.
+
+        This also rejects a batch that repeats a key WITHIN itself, which the
+        per-call form could not see at all: the first write would land and
+        make the second look like a pre-existing reservation.
+
+        Validate everything, then write once.
+        """
+        if split != SPLIT_HOLDOUT:
+            return []
+
+        pairs = [(str(m), str(p)) for m, p in configs]
+        taken = self._holdout_keys('reservation') | self._holdout_keys('record')
+
+        seen = set()
+        for method, policy_id in pairs:
+            key = (method, policy_id, query_set)
+            if key in seen:
+                raise HoldoutReuse(
+                    f'{method} / {policy_id} / {query_set} appears twice in '
+                    f'one reservation batch -- refusing before any query '
+                    f'runs, and before anything is written.')
+            seen.add(key)
+            if key in taken:
+                raise HoldoutReuse(
+                    f'{method} / {policy_id} / {query_set} is already '
+                    f'reserved or scored on the holdout split -- refusing '
+                    f'before any query runs, and before any config in this '
+                    f'batch is written.')
+
+        entries = [{'type': 'reservation', 'method': m, 'policy_id': p,
+                    'split': split, 'query_set': query_set}
+                   for m, p in pairs]
+        # One write, after every key has passed. Not a transaction, but it
+        # removes the window where a refusal leaves earlier configs consumed.
+        with open(self.path, 'a', encoding='utf-8') as fh:
+            fh.write(''.join(
+                json.dumps(e, ensure_ascii=False, sort_keys=True) + '\n'
+                for e in entries))
+        self.entries.extend(entries)
+        return entries
+
     def record(self, *, method: str, policy_id: str, split: str,
                query_set: str, summary: dict, strata: Optional[dict] = None,
                force: bool = False) -> dict:

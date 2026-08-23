@@ -382,3 +382,42 @@ def test_real_corpus_record_ids_and_streams_round_trip(tmp_path):
     for i, (rid, txt) in enumerate(kept):
         assert idx.record_id(i) == rid
         assert idx.stream(i) == norm_stream_fast(txt)
+
+
+def test_non_monotone_csr_offsets_are_refused(tmp_path):
+    """PR #324 review, P2: the comment promised monotonicity; the code checked
+    only the first and last entry.
+
+    A middle-of-array corruption leaves both endpoints valid and every file
+    size unchanged, so nothing else in `open_index` notices. `postings_for`
+    then slices `postings[start:end]` unguarded, so a reversed pair reads as
+    an empty posting list and an inflated one reads a NEIGHBOURING gram's
+    postings as this gram's -- plausible wrong matches instead of the clean
+    fail-closed hide every other check here delivers.
+    """
+    import numpy as np
+
+    from shared.passage_index import GRAM_OFFSETS_NAME
+
+    d = str(tmp_path / 'csr')
+    build_index(synthetic_records(8), d, apply_hygiene=False)
+    assert open_index(d) is not None, 'fixture must open before corruption'
+
+    path = os.path.join(d, GRAM_OFFSETS_NAME)
+    offsets = np.fromfile(path, dtype='<u8')
+
+    # Find a strictly increasing step somewhere in the MIDDLE and reverse it,
+    # leaving offsets[0] and offsets[-1] untouched.
+    steps = np.flatnonzero(np.diff(offsets[1:-1]) > 0)
+    assert steps.size, 'fixture has no interior step to corrupt'
+    i = int(steps[steps.size // 2]) + 1
+    original = offsets[i]
+    offsets[i] = offsets[i + 1] + np.uint64(1)      # break monotonicity
+    assert offsets[i] != original
+    assert int(offsets[0]) == 0, 'first entry must stay valid'
+    offsets.tofile(path)
+
+    assert open_index(d) is None, (
+        'non-monotone CSR offsets must fail closed -- endpoints and file '
+        'sizes are still valid, so this is the only check that can catch it'
+    )

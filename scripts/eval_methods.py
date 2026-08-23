@@ -199,10 +199,14 @@ def main() -> int:
             raise SystemExit(f'refusing to overwrite existing outcome dump '
                              f'{args.dump_outcomes} on a holdout run')
         qs_name = os.path.basename(args.queries)
-        for r in retrievers:
-            ledger.reserve(method=r.config_id.split('-')[0],
-                           policy_id=r.config_id, split=args.split,
-                           query_set=qs_name)
+        # All-or-nothing (PR #324 review). Looping `reserve()` wrote each
+        # config as it went, so a duplicate at position N left 1..N-1
+        # permanently marked as having consumed the write-once holdout --
+        # before a single query had run, and with a retry then refused.
+        ledger.reserve_all(
+            configs=[(r.config_id.split('-')[0], r.config_id)
+                     for r in retrievers],
+            split=args.split, query_set=qs_name)
         print(f'holdout reservations recorded for '
               f'{len(retrievers)} config(s)')
 
