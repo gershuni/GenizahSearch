@@ -1032,3 +1032,70 @@ canonical it misses are untitled or idiosyncratically titled fragments
 This is a far better discriminator than any text-overlap test, it needs no
 canonical corpus at query time, and it costs a title lookup. It is also NOT
 what the existing feature does, so it is new work rather than wiring.
+
+---
+
+## Two live GUI case studies (2026-08-23): the web default moves to 1.8
+
+First real-user sessions on the deployed-locally GUI, both graded row by row
+by the owner. Both scored at PRODUCTION caps (verify_cap 3,000).
+
+### Case 1 — Dror Yikra (2 stanzas, 111 normalized letters)
+
+The GUI (standard-40) returned 2 results plus the truncation notice. Verified
+offline: removing the verify cap entirely (all 26,164 candidates verified)
+still yields exactly 2 — **the notice was a false alarm**; the strongest-first
+verify order had already kept everything real. The incumbent (12.4s vs 0.27s)
+returned the same two manuscripts plus one low-scored third — and that third
+is precisely what passage finds at density_scale 1.6+ (density 0.405). Corpus
+truth: 3 recognizable pages, two clean, one garbled. The famous-piyyut prior
+("should have many witnesses") measures the Genizah, not this HTR corpus:
+tiny liturgical fragments fall under Stage-0's 80-letter floor or arrive
+HTR-mangled.
+
+### Case 2 — Yom Shabbaton, three-method comparison with owner grading
+
+The owner ran chunk-4, cross-paragraph, and passage on the same vocalized
+query and graded every row (V/X). Nikkud confirmed harmless: the fully
+vocalized query matched unvocalized HTR 13-for-13. Manuscript-level, against
+the union of his V marks (28 manuscripts):
+
+| method | recall | precision |
+|---|---|---|
+| chunk-4 | 27/28 | 27/55 (49%) |
+| cross-paragraph | 20/28 | 20/20 (100%) |
+| passage @ 1.0 (GUI default) | 13/28 | 13/13 (100%) |
+| passage @ 1.3 | 18/28 | — |
+| passage @ 1.6 | 24/28 | — |
+| **passage @ 1.8** | **26/28** | ≥26/35 (74%+) |
+| passage @ 2.0 | 26/28 | 26/265 — **the cliff, seen live** |
+
+At 1.8 passage sits one manuscript behind the incumbent's recall at ~74%
+precision against its 49%, in 0.6s against minutes — and returned 9
+same-series candidates (T-S NS 165.172, T-S NS 27.346, EVR II A 53/934/...)
+the incumbent never surfaced, i.e. candidate NOVEL finds pending the owner's
+eyes. Still missed at 1.8: MS heb. e.54/44 and Ms. EVR II A 24.
+
+The 2.0 row is the corpus-wide sweep's recall@50 peak-then-fall reproduced on
+a single live query: 265 manuscripts returned, in-pool count unchanged.
+
+### Also observed live in the same session
+
+- **The incumbent's duplicate rows are the V0.7+V0.8 double-indexing.**
+  Ms. EVR II A 200/1 appeared twice at score 75 with transcription-variant
+  text of the same page; the Tantivy index ingests both versions, the
+  passage corpus reads V0.8 only (13 distinct manuscripts in 14 rows).
+  Pre-existing, incumbent-side; filed separately from this track.
+- **The duplicate-photography demotion fired correctly in production**: NLI
+  Box K.15/K.16, identical text and score — one physical page in two boxes,
+  demoted to Filtered, reachable.
+
+### Decision (owner, 2026-08-23)
+
+The web surface searches at **widest-40 (density_scale 1.8)** — wired in
+`web/passage_assets.py::get_passage_searcher`, while `DEFAULT_POLICY` stays
+standard-40 so evaluation tooling keeps choosing explicitly. A user-facing
+control for the knob is planned (Phase 146A). Open wording question, not yet
+decided: the truncation notice fires honestly but over-warns (Case 1 shows a
+firing with zero results lost); candidate rewording is neutral-informative
+("checked the N best-evidenced candidates of M") rather than alarm-shaped.

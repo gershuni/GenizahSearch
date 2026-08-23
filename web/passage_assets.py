@@ -171,4 +171,16 @@ def get_passage_searcher(text_fetcher: "PageTextFetcher"):
     if idx is None:
         return None
     from shared.passage_parallels import PassageSearcher  # local: shared/ stays import-light for web/
-    return PassageSearcher(index=idx, text_fetcher=text_fetcher)
+    from shared.passage_policy import get_preset
+    # widest-40 (density_scale 1.8) by owner ruling 2026-08-23, decided on two
+    # live GUI case studies graded row-by-row by the owner: at the old default
+    # (standard-40, 1.0) the Yom Shabbaton query surfaced 13 of his 28
+    # verified manuscripts; at 1.8, 26 of 28 -- one behind the incumbent's
+    # recall at ~74% precision vs its 49%, in 0.6s vs minutes. 2.0 is the
+    # measured cliff (265 manuscripts returned, still 26/28). The preset's
+    # docstring in shared/passage_policy.py carries the full numbers. The
+    # web surface opts in HERE, deliberately: DEFAULT_POLICY stays
+    # standard-40 so evaluation tooling keeps choosing its policy
+    # explicitly. A user-facing control for this knob is planned (146A).
+    return PassageSearcher(index=idx, text_fetcher=text_fetcher,
+                           policy=get_preset('widest-40'))

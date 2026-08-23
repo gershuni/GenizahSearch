@@ -168,9 +168,29 @@ WIDE_40 = PassagePolicy(name='wide-40', density_scale=1.3)
 # Its added results are NOT yet graded; that is what deck_delta_wider_v1 asks.
 WIDER_40 = PassagePolicy(name='wider-40', density_scale=1.6)
 
+# widest-40: density_scale 1.8, the web GUI's operating point (owner ruling,
+# 2026-08-23). Chosen on two live GUI case studies scored against the owner's
+# OWN row-by-row grading, both at PRODUCTION caps (verify_cap 3,000):
+#
+#   Yom Shabbaton (28 owner-verified manuscripts, union of two incumbent
+#   modes):  1.0 -> 13/28,  1.3 -> 18/28,  1.6 -> 24/28,  1.8 -> 26/28
+#   (one behind chunk-4's 27/28, at ~74% worst-case precision vs its 49%,
+#   in 0.6s vs minutes), plus 9 same-series candidates the incumbent never
+#   surfaced.  2.0 -> 265 manuscripts returned, STILL 26/28: the cliff.
+#   Dror Yikra: 2 -> 5 records, including the one noisy witness (density
+#   0.405) that only the incumbent had found.
+#
+# 1.8 is also where the corpus-wide tune sweep put the recall@50 PEAK
+# (0.857, falling to 0.853 at 2.0) -- the last point before the target is
+# buried by its own noise. Not the library default: DEFAULT_POLICY stays
+# standard-40 so eval tooling keeps choosing explicitly; the web surface
+# opts in at web/passage_assets.py::get_passage_searcher. A user-facing
+# control for this knob is planned (Phase 146A).
+WIDEST_40 = PassagePolicy(name='widest-40', density_scale=1.8)
+
 PRESETS = {p.name: p for p in
            (STANDARD_40, STANDARD_40_NOISY, FLAT_25, FLAT_25_NOISY,
-            WIDE_40, WIDER_40)}
+            WIDE_40, WIDER_40, WIDEST_40)}
 DEFAULT_POLICY = STANDARD_40
 
 

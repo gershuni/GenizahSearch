@@ -861,3 +861,31 @@ def test_duplicate_photography_is_demoted_not_deleted(dup_corpus):
         'a genuine parallel sharing only the quoted lines was wrongly '
         'demoted as duplicate photography'
     )
+
+
+# ---------------------------------------------------------------------------
+# Owner ruling 2026-08-23: the web GUI searches at widest-40 (ds=1.8).
+# ---------------------------------------------------------------------------
+
+def test_the_web_surface_searches_at_widest_40(synthetic_corpus, monkeypatch):
+    """Decided on two live GUI case studies graded row-by-row by the owner:
+    the default (standard-40) surfaced 13 of his 28 verified manuscripts on
+    the Yom Shabbaton query; widest-40 (density_scale 1.8) surfaced 26 -- and
+    2.0 is the measured cliff. The web surface must opt in EXPLICITLY while
+    DEFAULT_POLICY stays standard-40 for evaluation tooling, so this pins the
+    wiring in web/passage_assets.py::get_passage_searcher, not the library
+    default."""
+    import web.passage_assets as pa
+
+    idx, originals, _motif = synthetic_corpus
+    monkeypatch.setattr(pa, 'PASSAGE_PARALLELS_ENABLED', True)
+    monkeypatch.setattr(pa, '_state', pa._PassageState(ready=True, index=idx))
+
+    s = pa.get_passage_searcher(_FakeTextFetcher(originals))
+    assert s is not None
+    assert s.policy.name == 'widest-40'
+    assert s.policy.density_scale == 1.8
+
+    # And the library default did NOT silently move with it.
+    from shared.passage_policy import DEFAULT_POLICY
+    assert DEFAULT_POLICY.name == 'standard-40'
