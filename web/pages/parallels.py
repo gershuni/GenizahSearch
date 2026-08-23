@@ -333,6 +333,8 @@ def create_parallels_page(initial_text: str = None):
                                 or (text_input.value
                                     if 'text_input' in locals()
                                     else decoded_text)),
+                'search_config': dict(
+                    getattr(p_state, 'searched_config', None) or {}),
             }
         except Exception:
             pass
@@ -394,11 +396,14 @@ def create_parallels_page(initial_text: str = None):
         p_state.library_filter = []
 
     # Restore previous results
+    _restored_search_config = {}
     _active_snapshot = _get_active_snapshot()
     if _active_snapshot:
         try:
             p_state.results = _active_snapshot.get('results', []) or []
             p_state.filtered_results = _active_snapshot.get('filtered_results', []) or []
+            _restored_search_config = dict(
+                _active_snapshot.get('search_config') or {})
             p_state.domain_exclusions = set(_active_snapshot.get('domain_exclusions', []))
             p_state.excluded_manuscript_ids = set(_active_snapshot.get('excluded_manuscript_ids', []))
             # Phase 88: per-session export payload is the sole writer path (singleton mirror removed).
@@ -1124,19 +1129,107 @@ def create_parallels_page(initial_text: str = None):
                         ).classes('w-24').props('outlined dense')
                         ui.label(tr('Minimum matching chunks per manuscript')).classes('text-xs').style('color: var(--text-muted);')
 
-                    # Apply the default-selected method's control state on
-                    # load: letter-level is pre-selected when available, so
-                    # the chunk controls must START disabled rather than wait
-                    # for a first toggle. This call sits HERE -- after
-                    # mode_select (defined above), chunk_size, freq_threshold
-                    # (the sliders above) and min_chunks_input (just above)
-                    # -- because the handler closes over all four and an
-                    # earlier call site
-                    # crashed the whole page with NameError at build time
-                    # (owner-reported, 2026-08-23): the widgets are created
-                    # BELOW the selector block, and only a real render
-                    # executes this path -- a source-text pin cannot.
-                    on_passage_mode_change()
+                    def _apply_restored_search_config():
+                        """Re-apply the snapshot's search configuration to
+                        the controls, then run the method's enable/disable
+                        pass.
+
+                        Rules this encodes (each has bitten this page):
+                        * NiceGUI fires no event for a programmatic .value
+                          write, so every handler is called EXPLICITLY after
+                          its widget is set.
+                        * Every select/radio value is validated against the
+                          widget's own .options before it is applied -- a
+                          stale snapshot from an older build must degrade to
+                          the default, never crash the page or smuggle in a
+                          value the UI cannot express.
+                        * Passage-inert knobs (chunk/mode/freq/min-chunks/
+                          boundary) are skipped for engine='passage': the
+                          final on_passage_mode_change() forces and disables
+                          them, exactly as a fresh selection would.
+                        * Any failure falls back to the plain build-time
+                          init -- a broken snapshot costs the restore, not
+                          the page.
+                        """
+                        cfg = _restored_search_config
+                        engine = cfg.get('engine') if isinstance(cfg, dict) else None
+                        if engine not in ('chunk', 'passage', 'lab'):
+                            on_passage_mode_change()
+                            return
+                        try:
+                            if engine == 'lab':
+                                if not lab_mode.value:
+                                    lab_mode.value = True
+                                    on_lab_mode_change()
+                            elif engine == 'passage' and passage_available():
+                                method_radio.value = 'passage'
+                                if cfg.get('width') in passage_width.options:
+                                    passage_width.value = cfg['width']
+                            else:
+                                # 'chunk', or 'passage' degrading because the
+                                # index is unavailable (same rule as dispatch).
+                                method_radio.value = 'chunk'
+                            if engine != 'passage':
+                                cs = cfg.get('chunk_size')
+                                if isinstance(cs, (int, float)) and 2 <= cs <= 12:
+                                    chunk_size.value = int(cs)
+                                if cfg.get('mode') in ('exact', 'variants', 'fuzzy'):
+                                    mode_select.value = cfg['mode']
+                                    on_mode_change()
+                                mf = cfg.get('max_freq')
+                                if isinstance(mf, (int, float)) and 10 <= mf <= 100:
+                                    freq_threshold.value = int(mf)
+                                if cfg.get('boundary_mode') == 'full':
+                                    # In 'full' mode the identity's
+                                    # min_boundary_matches IS the "Min.
+                                    # chunk matches" widget (the dispatch
+                                    # derives one from the other); in
+                                    # boundary modes the widget is inert,
+                                    # so nothing is lost by not storing
+                                    # it separately -- the config carries
+                                    # EXACTLY the identity inputs.
+                                    mc = cfg.get('min_boundary_matches')
+                                    if isinstance(mc, (int, float)) and 1 <= mc <= 20:
+                                        min_chunks_input.value = int(mc)
+                                if engine == 'lab':
+                                    deep_scan.value = bool(cfg.get('deep_scan', False))
+                                if cfg.get('boundary_mode') in boundary_mode.options:
+                                    boundary_mode.value = cfg['boundary_mode']
+                                if cfg.get('boundary_delimiter') in boundary_delimiter.options:
+                                    boundary_delimiter.value = cfg['boundary_delimiter']
+                                bb = cfg.get('boundary_boost')
+                                if isinstance(bb, (int, float)) and 1.0 <= bb <= 3.0:
+                                    boundary_boost.value = float(bb)
+                                if cfg.get('min_boundary_matches') in min_boundary_matches.options:
+                                    min_boundary_matches.value = cfg['min_boundary_matches']
+                                if cfg.get('min_delimiter_distance') in min_delimiter_distance.options:
+                                    min_delimiter_distance.value = cfg['min_delimiter_distance']
+                                update_boundary_ui()
+                                vl = cfg.get('variant_level')
+                                if isinstance(vl, (int, float)):
+                                    if (variant_level_select is not None
+                                            and int(vl) in variant_level_select.options):
+                                        variant_level_select.value = int(vl)
+                                        on_level_change()
+                                    elif variant_slider is not None and 10 <= vl <= 300:
+                                        variant_slider.value = int(vl)
+                                        on_slider_change()
+                                vmc = cfg.get('variant_max_changes')
+                                if (isinstance(vmc, (int, float))
+                                        and int(vmc) in max_changes_select.options):
+                                    max_changes_select.value = int(vmc)
+                        except Exception:
+                            pass  # Stale/foreign snapshot: keep defaults, page must build
+                        on_passage_mode_change()
+
+                    # Apply the restored (or default) method's control state
+                    # on load. This call sits HERE -- after mode_select,
+                    # chunk_size, freq_threshold and min_chunks_input -- an
+                    # earlier call site crashed the whole page with NameError
+                    # at build time (owner-reported, 2026-08-23): the widgets
+                    # are created BELOW the selector block, and only a real
+                    # render executes this path -- a source-text pin cannot.
+                    _apply_restored_search_config()
 
                     ui.separator().classes('my-2')
 
@@ -3236,6 +3329,30 @@ def create_parallels_page(initial_text: str = None):
                     )
                     p_state.search_fingerprint = _search_fingerprint
                     p_state.searched_source_text = text
+                    # The CONFIGURATION that produced these rows, from the
+                    # SAME dispatch-time captures the fingerprint hashes --
+                    # one list of "what defines a search", so the restored
+                    # controls and the stored identity cannot disagree.
+                    # Persisted by _persist_active_snapshot and re-applied to
+                    # the widgets by _apply_restored_search_config on reload
+                    # (docs/OPEN_ISSUES.md: reload restored the rows but left
+                    # the controls at build-time defaults, so the restore
+                    # notice pointed at a DIFFERENT search).
+                    p_state.searched_config = {
+                        'engine': captured_engine,
+                        'width': captured_passage_width,
+                        'chunk_size': captured_chunk_size,
+                        'mode': captured_mode,
+                        'max_freq': captured_freq_threshold,
+                        'deep_scan': captured_deep_scan,
+                        'boundary_mode': captured_boundary_mode,
+                        'boundary_delimiter': captured_boundary_delimiter,
+                        'boundary_boost': captured_boundary_boost,
+                        'min_boundary_matches': captured_min_boundary_matches,
+                        'min_delimiter_distance': captured_min_delimiter_distance,
+                        'variant_level': captured_variant_level,
+                        'variant_max_changes': captured_variant_max_changes,
+                    }
                     _parallels_search_meta = {
                         'source_text': text,
                         'search_fingerprint': _search_fingerprint,

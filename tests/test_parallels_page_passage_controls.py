@@ -617,3 +617,103 @@ def test_the_restore_notice_states_its_condition():
         'the unconditional restore promise is back -- a reload does not'
         ' restore the controls, so a bare re-run is a DIFFERENT search')
     assert 'with its original settings' in src
+
+
+# =========================================================================
+# Configuration restore (closes the OPEN_ISSUES row the PR #325 review
+# filed): the snapshot persists the search CONFIGURATION from the same
+# dispatch captures the fingerprint hashes, and a reload re-applies it to
+# the controls -- so "run the search again" reproduces the search.
+# =========================================================================
+
+_CONFIG_KEYS = (
+    'engine', 'width', 'chunk_size', 'mode', 'max_freq', 'deep_scan',
+    'boundary_mode', 'boundary_delimiter', 'boundary_boost',
+    'min_boundary_matches', 'min_delimiter_distance',
+    'variant_level', 'variant_max_changes',
+)
+
+
+def _searched_config_slice() -> str:
+    src = _read_source()
+    idx = src.index('p_state.searched_config = {')
+    end = src.index('}', idx)
+    return src[idx:end]
+
+
+def _apply_config_source() -> str:
+    tree = ast.parse(_read_source())
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.FunctionDef)
+                and node.name == '_apply_restored_search_config'):
+            return ast.get_source_segment(_read_source(), node) or ''
+    raise AssertionError('_apply_restored_search_config not found')
+
+
+def test_the_dispatch_stashes_the_config_from_the_same_captures():
+    """Every stashed value must be a captured_* name that the fingerprint
+    call also passes -- one list of "what defines a search". A live widget
+    read here could describe a configuration the search never used, and a
+    name absent from the fingerprint would restore a knob the identity
+    does not cover."""
+    slice_ = _searched_config_slice()
+    fp = _fingerprint_call_slice()
+    # Account for EVERY entry: a lenient value regex once skipped a
+    # dotted live read (passage_width.value) instead of failing it,
+    # and the mutation proof caught the gate green. Count first.
+    entries = re.findall(r"'(\w+)':\s*([^,]+),", slice_)
+    assert len(entries) == len(_CONFIG_KEYS), (
+        [k for k, _ in entries], 'entry count drifted from _CONFIG_KEYS')
+    for key, expr in entries:
+        expr = expr.strip()
+        assert key in _CONFIG_KEYS, ('unexpected config key', key)
+        assert re.fullmatch(r'captured_\w+', expr), (
+            key, expr, 'must be a bare dispatch capture, never a live read')
+        assert expr in fp, (expr, 'is not part of the search identity')
+
+
+def test_the_snapshot_persists_the_search_config():
+    src = _read_source()
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.FunctionDef)
+                and node.name == '_persist_active_snapshot'):
+            seg = ast.get_source_segment(src, node) or ''
+            assert "'search_config':" in seg
+            assert 'searched_config' in seg
+            return
+    raise AssertionError('_persist_active_snapshot not found')
+
+
+def test_the_restore_block_reads_the_search_config():
+    src = _read_source()
+    flat = ' '.join(src.split())
+    assert ("_restored_search_config = dict( "
+            "_active_snapshot.get('search_config') or {})") in flat
+
+
+def test_the_apply_covers_every_key_and_calls_the_handlers():
+    """NiceGUI fires no event for a programmatic .value write, so every
+    handler must be called explicitly; and every select/radio value must be
+    validated against the widget's own .options so a stale snapshot
+    degrades instead of crashing."""
+    seg = _apply_config_source()
+    for key in _CONFIG_KEYS:
+        assert "'%s'" % key in seg, ('apply misses config key', key)
+    for handler in ('on_lab_mode_change()', 'on_mode_change()',
+                    'update_boundary_ui()', 'on_passage_mode_change()',
+                    'on_level_change()', 'on_slider_change()'):
+        assert handler in seg, ('handler not called explicitly', handler)
+    assert seg.count('.options') >= 5, 'options-validation idiom missing'
+    assert 'except Exception' in seg, (
+        'a broken snapshot must cost the restore, not the page')
+
+
+def test_the_apply_runs_at_build_time():
+    """The function must actually be CALLED where the old bare init call
+    ran -- defining it changes nothing on its own."""
+    src = _read_source()
+    # (?<!def ) -- the def line itself contains the same substring,
+    # so a bare count would pass with the function never invoked.
+    calls = re.findall(r'(?<!def )_apply_restored_search_config\(\)', src)
+    assert calls, 'the apply function is never invoked'
