@@ -4978,6 +4978,6 @@ TRANSLATIONS.update({
         "חיפוש התאמת הקטעים חרג מהזמן המוקצב — נסו טקסט קצר יותר.",
     "Passage matching search failed.":
         "חיפוש התאמת הקטעים נכשל.",
-    "Some passage results were cut off by a search cap — the list may be incomplete.":
-        "חלק מתוצאות התאמת הקטעים נחתכו בשל מגבלת חיפוש — הרשימה עשויה להיות חלקית.",
+    "Passage search checked the {n} best-evidenced candidates of {m}.":
+        "חיפוש הקטעים בדק את {n} המועמדים המבוססים ביותר מתוך {m}.",
 })

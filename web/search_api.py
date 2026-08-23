@@ -2094,6 +2094,14 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 'code': 'passage_results_truncated',
                 'candidates_truncated': bool(_rep.get('candidates_truncated')),
                 'verify_truncated': bool(_rep.get('verify_truncated')),
+                # Self-describing (owner ruling 2026-08-23, the over-warning
+                # fix): candidates are verified strongest-evidence-first, so
+                # "checked N of M" is what happened -- measured on Dror
+                # Yikra, a firing where uncapped verification of all 26,164
+                # candidates changed nothing. Consumers should present this
+                # as information, not alarm; the GUI does.
+                'verified': int(_rep.get('verified') or 0),
+                'candidates': int(_rep.get('candidates') or 0),
             })
         if bundle.duplicate_photography_demoted:
             warnings_list.append({

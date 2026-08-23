@@ -1095,10 +1095,13 @@ a single live query: 265 manuscripts returned, in-pool count unchanged.
 The web surface searches at **widest-40 (density_scale 1.8)** — wired in
 `web/passage_assets.py::get_passage_searcher`, while `DEFAULT_POLICY` stays
 standard-40 so evaluation tooling keeps choosing explicitly. A user-facing
-control for the knob is planned (Phase 146A). Open wording question, not yet
-decided: the truncation notice fires honestly but over-warns (Case 1 shows a
-firing with zero results lost); candidate rewording is neutral-informative
-("checked the N best-evidenced candidates of M") rather than alarm-shaped.
+control for the knob is planned (Phase 146A). The truncation-notice wording
+question was decided the same day (owner, 2026-08-23): the notice fired
+honestly but over-warned -- Case 1 shows a firing with zero results lost --
+so it is now neutral-informative and self-describing ("Passage search checked
+the N best-evidenced candidates of M", info-level, real numbers from the
+QueryReport), and the API's `passage_results_truncated` warning carries the
+same `verified`/`candidates` counts.
 
 ### The 1.8 run graded (2026-08-23, 48 rows): 7 novel witnesses, precision 94%
 

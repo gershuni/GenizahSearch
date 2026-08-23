@@ -2898,10 +2898,22 @@ def create_parallels_page(initial_text: str = None):
             # no notify: they are visible in the filtered section itself.)
             _qrep = result_data.get('query_report') or {}
             if _qrep.get('candidates_truncated') or _qrep.get('verify_truncated'):
+                # Info, not warning, and it says what actually happened
+                # (owner ruling 2026-08-23). The first wording -- "results
+                # may be incomplete" -- fired on virtually every common-
+                # phrase query, and the Dror Yikra measurement showed a
+                # firing where uncapped verification of all 26,164
+                # candidates changed NOTHING: candidates are verified
+                # strongest-evidence-first, so what the cap skips is the
+                # weakest tail. An alarm that cries wolf on famous piyyutim
+                # teaches users to distrust the engine (the first real user
+                # hit exactly this and reported it as a bug).
                 ui.notify(
-                    tr('Some passage results were cut off by a search cap '
-                       '— the list may be incomplete.'),
-                    type='warning',
+                    tr('Passage search checked the {n} best-evidenced '
+                       'candidates of {m}.').format(
+                        n=f"{_qrep.get('verified', 0):,}",
+                        m=f"{_qrep.get('candidates', 0):,}"),
+                    type='info',
                 )
 
             if main_results or filtered_results:

@@ -210,7 +210,9 @@ def test_page_notifies_on_a_truncated_passage_search():
         'GUI users while the API path warns'
     )
     idx = src.index("result_data.get('query_report')")
-    after = src[idx:idx + 700]
+    # 1,600 chars: the block carries a long WHY comment (the Dror
+    # Yikra false-alarm measurement) between the read and the notify.
+    after = src[idx:idx + 1600]
     assert "candidates_truncated" in after and "verify_truncated" in after
     assert 'ui.notify(' in after, 'reading the report without telling anyone'
 
@@ -248,6 +250,9 @@ def test_the_truncation_string_used_matches_its_translation_key():
     Hebrew users to English. Pin the exact joined string."""
     from genizah_translations import TRANSLATIONS
 
-    key = ('Some passage results were cut off by a search cap '
-           '— the list may be incomplete.')
+    key = ('Passage search checked the {n} best-evidenced '
+           'candidates of {m}.')
     assert key in TRANSLATIONS, 'the exact notify string must be a key'
+    # And the Hebrew side must keep both placeholders, or .format() on the
+    # translated string drops the numbers for Hebrew users only.
+    assert '{n}' in TRANSLATIONS[key] and '{m}' in TRANSLATIONS[key]
