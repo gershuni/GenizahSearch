@@ -4978,6 +4978,8 @@ TRANSLATIONS.update({
         "חיפוש התאמת הקטעים חרג מהזמן המוקצב — נסו טקסט קצר יותר.",
     "Passage matching search failed.":
         "חיפוש התאמת הקטעים נכשל.",
+    "Passage search matched more than {cap} manuscripts — showing the strongest {cap}.":
+        "חיפוש הקטעים מצא יותר מ־{cap} כתבי יד — מוצגים ה־{cap} החזקים ביותר.",
     "Passage search checked the {n} best-evidenced candidates of {m}.":
         "חיפוש הקטעים בדק את {n} המועמדים המבוססים ביותר מתוך {m}.",
 })

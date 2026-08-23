@@ -2915,6 +2915,17 @@ def create_parallels_page(initial_text: str = None):
                         m=f"{_qrep.get('candidates', 0):,}"),
                     type='info',
                 )
+            # PR #324 round 5: the searcher's group-cap flag used to be
+            # discarded entirely, so a >200-manuscript passage query looked
+            # complete. Same info-not-alarm register as above.
+            if result_data.get('truncated_to_200'):
+                from shared.parallels_service import PARALLELS_GROUP_CAP
+                ui.notify(
+                    tr('Passage search matched more than {cap} manuscripts '
+                       '— showing the strongest {cap}.').format(
+                        cap=PARALLELS_GROUP_CAP),
+                    type='info',
+                )
 
             if main_results or filtered_results:
                 p_state.results = main_results

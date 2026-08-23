@@ -185,6 +185,8 @@ def test_row_contract_keys_and_types(searcher, synthetic_corpus):
         'main', 'filtered', 'dropped_text_lookup_failures',
         # PR #324 round 3, both additive for the same reason:
         'duplicate_photography_demoted', 'query_report',
+        # PR #324 round 5: the group-cap flag, previously discarded.
+        'truncated_to_200',
     }
     assert result['filtered'] == []
     assert result['dropped_text_lookup_failures'] == 0
@@ -889,3 +891,93 @@ def test_the_web_surface_searches_at_widest_40(synthetic_corpus, monkeypatch):
     # And the library default did NOT silently move with it.
     from shared.passage_policy import DEFAULT_POLICY
     assert DEFAULT_POLICY.name == 'standard-40'
+
+
+# ---------------------------------------------------------------------------
+# PR #324 round 5, P1 pair: restriction must precede the caps, and the
+# group-cap truncation flag must survive to the caller.
+# ---------------------------------------------------------------------------
+
+def test_restriction_is_applied_before_the_caps(grouped_corpus):
+    """restrict_sys_ids used to filter HITS, after candidate_cap and
+    verify_cap were spent globally -- so on a common text, out-of-set
+    candidates consumed the caps and in-set witnesses came back as false
+    negatives that look exactly like absence of evidence.
+
+    grouped_corpus: 4 sys_id groups x 3 pages, every page carrying the same
+    motif. With verify_cap=1 only ONE candidate is ever verified; unless the
+    restriction reaches the engine, that one slot goes to the globally
+    strongest candidate, which is almost surely not in the restricted set.
+    """
+    from shared.passage_policy import PassagePolicy
+
+    idx, originals, motif = grouped_corpus
+    tight = PassageSearcher(
+        index=idx, text_fetcher=_FakeTextFetcher(originals),
+        policy=PassagePolicy(name='tight-restrict', verify_cap=1))
+
+    # The set the caller restricts to: group 3 only.
+    want_sys = _grouped_record_id(3, 0).split('_', 1)[0]
+
+    unrestricted = tight.search_composition_logic(full_text=motif)
+    took_slot = unrestricted['main'][0]['raw_header'].split('_', 1)[0]
+    assert took_slot != want_sys, (
+        'fixture cannot observe the defect: the globally strongest candidate '
+        'is already in the restricted set'
+    )
+
+    res = tight.search_composition_logic(full_text=motif,
+                                         restrict_sys_ids={want_sys})
+    got = {r['raw_header'].split('_', 1)[0] for r in res['main']}
+    assert got == {want_sys}, (
+        f'restricted search returned {sorted(got) or "nothing"} -- the caps '
+        f'were spent on records the caller excluded'
+    )
+    assert res['query_report']['candidates_restricted'] > 0, (
+        'the engine did not count the restriction -- it is still filtering '
+        'hits after the caps'
+    )
+
+
+def test_group_cap_truncation_reaches_the_return_dict(grouped_corpus):
+    """The flag was computed and DISCARDED: the API path re-applied the same
+    cap to an already-capped list, saw no truncation, and a >render_cap query
+    silently looked complete."""
+    idx, originals, motif = grouped_corpus
+    s = PassageSearcher(index=idx, text_fetcher=_FakeTextFetcher(originals),
+                        render_cap=2)   # 4 groups match -> truncation
+    res = s.search_composition_logic(full_text=motif)
+    assert res['truncated_to_200'] is True
+    untr = PassageSearcher(index=idx,
+                           text_fetcher=_FakeTextFetcher(originals),
+                           render_cap=200).search_composition_logic(
+        full_text=motif)
+    assert untr['truncated_to_200'] is False
+
+
+def test_service_ORs_the_searcher_truncation_flag():
+    """fetch_parallels_results re-caps an already-capped list, so its own
+    flag is False; the searcher's flag must carry through the bundle."""
+    import asyncio
+
+    from shared import parallels_service as ps
+
+    class _Searcher:
+        def search_composition_logic(self, *a, **k):
+            return {'main': [{'uid': 'a', 'raw_header': '111_IE1_P000001_FL1',
+                              'src_lbl': '', 'source_ctx': '', 'text': 't',
+                              'score': 9, 'final_score': 9, 'chunk_count': 1,
+                              'chunk_hits': []}],
+                    'filtered': [], 'truncated_to_200': True}
+
+    class _MM:
+        def parse_full_id_components(self, uid):
+            return None
+
+    bundle = asyncio.run(ps.fetch_parallels_results(
+        searcher=_Searcher(), meta_mgr=_MM(), text='t',
+        chunk_size=3, mode='exact'))
+    assert bundle.truncated_to_200 is True, (
+        "the searcher's truncation flag was dropped between the return dict "
+        'and the bundle'
+    )

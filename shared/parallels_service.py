@@ -359,8 +359,14 @@ async def fetch_parallels_results(
         canonical_hidden = len(demoted)
         filtered_results = list(filtered_results) + demoted
 
-    # D-07 cap on main groups only.
+    # D-07 cap on main groups only. OR-ed with the searcher's OWN flag
+    # (PR #324 round 5): PassageSearcher caps internally, so by the time this
+    # function re-applies the same rule the list is already <= cap groups and
+    # the local flag is False -- the searcher's flag is the only witness that
+    # a >render_cap query was truncated at all. Absent for the chunk path.
+    searcher_truncated = bool((result or {}).get('truncated_to_200'))
     capped_main, truncated = _cap_main_results_by_group(main_results, meta_mgr)
+    truncated = truncated or searcher_truncated
 
     # Boundary options for envelope echo (D-06 inherited from Phase 77).
     boundary_options = {

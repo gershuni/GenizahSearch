@@ -68,6 +68,7 @@ class QueryReport:
     postings_excluded: int = 0
     candidates: int = 0
     candidates_truncated: bool = False
+    candidates_restricted: int = 0
     verified: int = 0
     verify_truncated: bool = False
     accepted_spans: int = 0
@@ -165,7 +166,7 @@ def _admit_grams(idx: PassageIndex, codes: np.ndarray, first_pos: np.ndarray,
 
 def _candidates(idx: PassageIndex, codes: np.ndarray, qpos: np.ndarray,
                 admitted: np.ndarray, policy: PassagePolicy,
-                report: QueryReport):
+                report: QueryReport, record_allowed=None):
     """Diagonal two-hit with DISTINCT gram codes (spec section 6.1).
 
     Returns (rec, min_q, max_q, min_r, max_r) arrays for clusters that carry
@@ -213,6 +214,29 @@ def _candidates(idx: PassageIndex, codes: np.ndarray, qpos: np.ndarray,
     distinct = np.bincount(grp2[fc], minlength=starts.size)
 
     keep = distinct >= policy.min_anchors
+
+    # Record restriction BEFORE either cap is spent (PR #324 round 5). The
+    # searcher used to filter restrict_sys_ids on the HITS, after
+    # candidate_cap and verify_cap had already been consumed globally -- so
+    # a library/work/date-filtered search on a common text could lose its
+    # in-set witnesses to stronger candidates from manuscripts the caller
+    # had explicitly excluded: false negatives that look like absence of
+    # evidence. Applied here, the caps are spent only on records the caller
+    # can actually receive. The predicate sees the record-id STRING; decode
+    # once per unique candidate record (tens of thousands at most), never
+    # per posting.
+    if record_allowed is not None and keep.any():
+        g_rec_all = rec[starts]
+        cand_recs = np.unique(g_rec_all[keep])
+        allowed_set = {int(r) for r in cand_recs.tolist()
+                       if record_allowed(idx.record_id(int(r)))}
+        allowed_mask = np.fromiter((int(r) in allowed_set
+                                    for r in g_rec_all.tolist()),
+                                   dtype=bool, count=g_rec_all.size)
+        before = int(keep.sum())
+        keep &= allowed_mask
+        report.candidates_restricted = before - int(keep.sum())
+
     report.candidates = int(keep.sum())
     kept_groups = np.flatnonzero(keep)
     # Order candidates by EVIDENCE STRENGTH (distinct anchors, descending),
@@ -309,6 +333,7 @@ def _verify_and_merge(idx: PassageIndex, qstream: str, cand, policy:
 
 def search_passage(idx: PassageIndex, query_text: str,
                    policy: PassagePolicy = DEFAULT_POLICY,
+                   record_allowed=None,
                    ) -> tuple[list, QueryReport]:
     """The full arrangement-C query. Returns (hits, report).
 
@@ -336,7 +361,8 @@ def search_passage(idx: PassageIndex, query_text: str,
         report.seconds = round(time.time() - t0, 4)
         return [], report
 
-    cand = _candidates(idx, codes, qpos, admitted, policy, report)
+    cand = _candidates(idx, codes, qpos, admitted, policy, report,
+                       record_allowed=record_allowed)
     merged = _verify_and_merge(idx, qstream, cand, policy, report)
 
     hits = []

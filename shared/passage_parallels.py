@@ -343,7 +343,15 @@ class PassageSearcher:
             )
 
         text = full_text or ''
-        hits, report = search_passage(self.index, text, self.policy)
+        # PR #324 round 5: the restriction goes INTO the engine so the
+        # candidate/verify caps are spent only on records the caller can
+        # receive. Filtering hits afterwards (the old shape, kept below as
+        # belt-and-braces) let out-of-set candidates consume the caps and
+        # produced false negatives on filtered searches over common texts.
+        _allowed = (None if restrict_sys_ids is None else
+                    (lambda rid: _extract_sys_id(rid) in restrict_sys_ids))
+        hits, report = search_passage(self.index, text, self.policy,
+                                      record_allowed=_allowed)
 
         if min_boundary_matches:
             hits = [h for h in hits if h.n_spans >= min_boundary_matches]
@@ -403,7 +411,7 @@ class PassageSearcher:
         # `filtered` is capped too (unlike the incumbent's own filtered
         # bucket, which is documented as "typically small" on an assumption
         # passage's filter_text mechanism does not share).
-        capped_main_candidates, _truncated = _cap_main_results_by_group(
+        capped_main_candidates, main_truncated = _cap_main_results_by_group(
             eligible_rows, _RegexSysIdParser(), cap=self.render_cap)
         capped_filtered_candidates, _truncated_f = _cap_main_results_by_group(
             filtered_candidate_rows, _RegexSysIdParser(), cap=self.render_cap)
@@ -472,6 +480,12 @@ class PassageSearcher:
         return {
             'main': main_results,
             'filtered': filtered_results,
+            # PR #324 round 5: this flag used to be computed and DISCARDED.
+            # The API path then re-applied the same cap downstream to an
+            # already-capped list, concluded nothing was truncated, and
+            # omitted truncated_to_200 -- queries with over render_cap
+            # manuscript groups silently looked complete.
+            'truncated_to_200': bool(main_truncated),
             'dropped_text_lookup_failures': dropped,
             'duplicate_photography_demoted': dup_demoted,
             # The budget/truncation report. QueryReport's own contract says
