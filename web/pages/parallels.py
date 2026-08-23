@@ -232,7 +232,7 @@ def create_parallels_page(initial_text: str = None):
     # DMF-09: dual-mode post-fetch filter for parallels results (Phase 131-05).
     # Used for Hide mode (Show-only is scoped pre-query via restrict_sys_ids).
     # Apply BEFORE the export+storage writes so exports + stored payloads are scoped (Codex MED #6).
-    def _apply_parallels_library_filter(results_list):
+    def _apply_parallels_library_filter(results_list, mode, codes):
         """Dual-mode filter parallels results by selected library codes.
 
         Mirrors web/pages/search.py::_apply_library_filter (3830-3853).
@@ -243,9 +243,17 @@ def create_parallels_page(initial_text: str = None):
         Library code resolution: tries row['library_code'] first, then
         row['display']['library_code'], then meta_mgr lookup via raw_header sys_id.
         (Show-only is scoped pre-query so this is mainly used for Hide.)
+
+        Round 6 (Codex P2): `mode` and `codes` are explicit parameters, not
+        p_state reads. The post-search caller passes its dispatch-time
+        captures so rows are filtered by the same values they are
+        fingerprinted with; the re-render caller passes the live selection
+        the user just applied. An internal p_state read let a selection
+        change DURING a search filter rows with values the fingerprint never
+        described. The pure mirror in tests/test_parallels_library_filter.py
+        has carried this exact signature all along.
         """
-        mode = getattr(p_state, 'library_mode', 'hide')
-        codes = set(p_state.library_filter)
+        codes = set(codes or ())
         if not codes:
             return results_list  # empty codes = show all in either mode (D-05/D-08)
 
@@ -464,6 +472,15 @@ def create_parallels_page(initial_text: str = None):
                 # carries a known shape — bucket (b) positive export with empty source_text.
                 _legacy_source_text = _safe_get('parallels_source_text', '') or ''
                 _bootstrap_meta = {'source_text': _legacy_source_text}
+                # Round 6: fallback rows written by stamped code carry their
+                # search identity in a sibling key -- fold it in so
+                # _same_parallels_search can VERIFY same-search. Rows from
+                # before the stamp leave meta bare, and the mixed-pair rule
+                # fails closed rather than trusting source_text.
+                _legacy_fingerprint = _safe_get(
+                    'parallels_results_fingerprint', '') or ''
+                if _legacy_fingerprint:
+                    _bootstrap_meta['search_fingerprint'] = _legacy_fingerprint
                 p_state.searched_source_text = _legacy_source_text
                 # Workflow review (P1): this branch runs whenever the TAB has
                 # no snapshot -- opening the page in a second tab is enough.
@@ -1976,9 +1993,12 @@ def create_parallels_page(initial_text: str = None):
             filtered_results = _filter_parallels_by_domain(filtered_results) if filtered_results else filtered_results
         # Apply library Hide filter (Show-only is pre-query so not needed here on re-render)
         if p_state.library_mode == 'hide' and p_state.library_filter:
-            main_results = _apply_parallels_library_filter(main_results)
+            main_results = _apply_parallels_library_filter(
+                main_results, p_state.library_mode, p_state.library_filter)
             if filtered_results:
-                filtered_results = _apply_parallels_library_filter(filtered_results)
+                filtered_results = _apply_parallels_library_filter(
+                    filtered_results, p_state.library_mode,
+                    p_state.library_filter)
         render_results(main_results, filtered_results)
 
     # If session restored a library filter, sync button state now (after functions are defined)
@@ -2732,6 +2752,7 @@ def create_parallels_page(initial_text: str = None):
         safe_user_set('parallels_library_filter', {'mode': 'hide', 'codes': []})
         # Reset persistent storage to clean defaults
         safe_user_set('parallels_results', [])
+        safe_user_set('parallels_results_fingerprint', '')
         safe_user_set('parallels_filtered', [])
         safe_user_set('parallels_source_text', '')
         safe_user_set('parallels_domain_exclusions', [])
@@ -3223,9 +3244,13 @@ def create_parallels_page(initial_text: str = None):
                     # payloads are scoped.  Show-only is already scoped pre-query (restrict_sys_ids)
                     # so no post-fetch pass needed for Show-only.
                     if captured_library_mode == 'hide' and captured_library_filter:
-                        main_results = _apply_parallels_library_filter(main_results)
+                        main_results = _apply_parallels_library_filter(
+                            main_results, captured_library_mode,
+                            captured_library_filter)
                         if filtered_results:
-                            filtered_results = _apply_parallels_library_filter(filtered_results)
+                            filtered_results = _apply_parallels_library_filter(
+                                filtered_results, captured_library_mode,
+                                captured_library_filter)
                     from web.export_state import (
                         compact_parallels_result_rows,
                         set_parallels_export,
@@ -3243,6 +3268,12 @@ def create_parallels_page(initial_text: str = None):
                     safe_user_set('parallels_results', _compact_result_rows(
                         main_results[:_PARALLELS_ACTIVE_USER_FALLBACK_LIMIT]
                     ))
+                    # Round 6: stamp the fallback's identity beside it. The
+                    # legacy bootstrap folds it into its meta, so the
+                    # mixed-pair rule in _same_parallels_search can VERIFY
+                    # same-search instead of trusting source_text.
+                    safe_user_set('parallels_results_fingerprint',
+                                  _search_fingerprint)
                     safe_user_set('parallels_filtered', _compact_result_rows(
                         (filtered_results or [])[:_PARALLELS_ACTIVE_USER_FALLBACK_LIMIT]
                     ))

@@ -475,7 +475,7 @@ def test_the_legacy_bootstrap_preserves_the_richer_payload():
     results were capped near 200; this PR's uncapped fetch made it lossy."""
     src = _read_source()
     boot_at = src.index("_bootstrap_meta = {'source_text': _legacy_source_text}")
-    after = src[boot_at:boot_at + 1400]
+    after = src[boot_at:boot_at + 2600]  # window covers the round-6 identity-carry block too
     assert 'preserve_or_set_parallels_export(' in after, (
         'the bootstrap branch must not clobber a richer same-search payload')
     assert 'recover_richer_parallels_rows(' in after, (
@@ -568,3 +568,38 @@ def test_the_page_builds_without_raising(available, monkeypatch):
             'with no passage index, no radio may sit on the letter-level '
             'value -- the page would send a method the backend rejects'
         )
+
+
+# =========================================================================
+# Round 6 (Codex P2): the legacy fallback carries its identity, so the
+# mixed-pair rule in _same_parallels_search can verify instead of trusting
+# source_text.
+# =========================================================================
+
+def test_the_fallback_write_stamps_its_identity_beside_it():
+    src = _read_source()
+    flat = ' '.join(src.split())
+    assert ("safe_user_set('parallels_results_fingerprint', "
+            '_search_fingerprint)') in flat, (
+        'the fresh-search fallback write must stamp '
+        "parallels_results_fingerprint with the same _search_fingerprint "
+        'it just used for the export payload'
+    )
+
+
+def test_the_bootstrap_folds_the_stamp_into_its_meta():
+    src = _read_source()
+    flat = ' '.join(src.split())
+    assert ("_legacy_fingerprint = _safe_get( "
+            "'parallels_results_fingerprint', '') or ''") in flat
+    assert ("_bootstrap_meta['search_fingerprint'] = _legacy_fingerprint"
+            ) in flat
+
+
+def test_the_clear_path_clears_the_stamp_with_the_rows():
+    """A cleared results list with a surviving stamp would label the NEXT
+    legacy bootstrap's empty rows with a dead search's identity."""
+    src = _read_source()
+    flat = ' '.join(src.split())
+    assert ("safe_user_set('parallels_results', []) "
+            "safe_user_set('parallels_results_fingerprint', '')") in flat

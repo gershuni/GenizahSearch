@@ -134,3 +134,35 @@ def test_the_defaults_cover_a_partial_caller():
     value = fp(text='abc', engine='history', chunk_size=5, mode='exact')
     assert len(value) == 16
     assert value != fp(text='abc', engine='history', chunk_size=6, mode='exact')
+
+
+# =========================================================================
+# _same_parallels_search: the identity DECISION the fingerprint feeds
+# (round 6 -- Codex P2: a mixed fingerprint/legacy pair must fail closed).
+# =========================================================================
+from web.export_state import _same_parallels_search
+
+
+def test_both_fingerprints_present_the_fingerprints_decide():
+    stamped_x = {'search_fingerprint': 'aaaa', 'source_text': 'x'}
+    assert _same_parallels_search(
+        stamped_x, {'search_fingerprint': 'aaaa', 'source_text': 'y'})
+    assert not _same_parallels_search(
+        stamped_x, {'search_fingerprint': 'bbbb', 'source_text': 'x'})
+
+
+def test_a_mixed_pair_fails_closed_in_both_directions():
+    """One side stamped, one not: the payloads straddle the fingerprint
+    deploy and cannot be verified as the same search. Same source_text must
+    NOT recover the rows -- the other tab may have searched the same text
+    with a different width, mode or filter set."""
+    legacy = {'source_text': 'x'}
+    stamped = {'search_fingerprint': 'aaaa', 'source_text': 'x'}
+    assert not _same_parallels_search(legacy, stamped)
+    assert not _same_parallels_search(stamped, legacy)
+
+
+def test_a_legacy_pair_still_falls_back_to_source_text():
+    assert _same_parallels_search({'source_text': 'x'}, {'source_text': 'x'})
+    assert not _same_parallels_search({'source_text': 'x'},
+                                      {'source_text': 'y'})

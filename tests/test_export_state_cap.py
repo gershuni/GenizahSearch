@@ -1058,10 +1058,15 @@ def test_recovery_never_downgrades_on_a_poorer_payload(monkeypatch):
     assert len(payload['filtered']) == 20
 
 
-def test_legacy_payload_without_fingerprint_still_matches_on_text(monkeypatch):
-    """Payloads written before the fingerprint existed carry only
-    source_text; the fallback must keep preserving them rather than
-    clobbering every pre-upgrade session on its first reload."""
+def test_legacy_pairs_match_on_text_but_a_mixed_pair_fails_closed(monkeypatch):
+    """Round 6 refinement of the round-3 contract. A pre-upgrade session's
+    first reload offers UNSTAMPED meta (the restore paths only stamp when
+    the stored identity exists), so legacy-vs-legacy still preserves on
+    source_text and no pre-upgrade session is clobbered by restoring. But a
+    STAMPED offer -- a fresh post-upgrade search -- against a legacy payload
+    is a mixed pair: it cannot be VERIFIED as the same search, and the same
+    text searched with a different width, mode or filter set must not adopt
+    the old rows. The fresh search takes the slot."""
     storage = {}
     _install_stub(monkeypatch, storage)
     from web.export_state import (
@@ -1069,15 +1074,25 @@ def test_legacy_payload_without_fingerprint_still_matches_on_text(monkeypatch):
         set_parallels_export,
     )
 
+    # Legacy payload + legacy offer (a pre-upgrade reload): preserved.
     set_parallels_export(results=[_result(i) for i in range(300)],
                          filtered=[], meta={'source_text': 'legacy'})
     assert preserve_or_set_parallels_export(
         results=[_result(i) for i in range(200)], filtered=[],
-        meta={'source_text': 'legacy',
-              'search_fingerprint': 'fp-new'}) is False, (
-        'a legacy same-text payload was clobbered by the fingerprint rule'
+        meta={'source_text': 'legacy'}) is False, (
+        'a pre-upgrade reload clobbered its own richer payload'
     )
     assert len(get_parallels_export()['results']) == 300
+
+    # Legacy payload + stamped offer (a fresh search): replaced.
+    assert preserve_or_set_parallels_export(
+        results=[_result(i) for i in range(200)], filtered=[],
+        meta={'source_text': 'legacy',
+              'search_fingerprint': 'fp-new'}) is True, (
+        'a fresh stamped search must own the slot -- a same-text legacy '
+        'payload cannot be verified as the same search'
+    )
+    assert len(get_parallels_export()['results']) == 200
 
 
 def test_restore_shortfall_counts_the_filtered_bucket_too(monkeypatch):

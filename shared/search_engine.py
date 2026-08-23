@@ -439,6 +439,28 @@ def build_marked_composition_fragment(content, span_start, span_end,
             + '*' + content[span_end:end].replace('*', ' '))
 
 
+def mark_word_highlights(snippet, highlights):
+    """Wrap each (start, end) character span of ``snippet`` in ``*`` markers.
+
+    Extracted for the same reason as ``build_marked_composition_fragment``
+    above: the marker contract must be testable without a Tantivy index.
+
+    Codex round 6 (PR #325): the source-context builder inserted markers into
+    the user's PASTED text verbatim, so a literal ``*`` already in it (a
+    copied footnote marker, say) toggled the xlsx rich-text state and styled
+    the rest of the cell as matched. Neutralize literal asterisks FIRST --
+    ``.replace`` is length-preserving, which is what keeps the span offsets
+    (measured on the raw snippet) valid -- then insert in reverse order so
+    earlier offsets survive the splices. Same rule as ``highlight``,
+    ``_highlight_by_span`` and the composition-fragment builder above.
+    """
+    result = snippet.replace('*', ' ')
+    for word_start, word_end in reversed(highlights):
+        result = (result[:word_start] + '*' + result[word_start:word_end]
+                  + '*' + result[word_end:])
+    return result
+
+
 class SearchEngine:
     """Run searches, build queries, and provide browsing utilities."""
     def __init__(self, meta_mgr, variants_mgr):
@@ -3375,12 +3397,8 @@ class SearchEngine:
                                 word_char_end = token_positions[k][1] - char_start
                                 highlights.append((word_char_start, word_char_end))
 
-                        # Apply highlights in reverse order to preserve positions
-                        result = original_snippet
-                        for word_start, word_end in reversed(highlights):
-                            result = result[:word_start] + '*' + result[word_start:word_end] + '*' + result[word_end:]
-
-                        src_snippets.append(result)
+                        src_snippets.append(
+                            mark_word_highlights(original_snippet, highlights))
 
                 spans = sorted(data['matches'], key=lambda x: x[0])
                 merged = []

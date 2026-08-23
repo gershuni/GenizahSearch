@@ -48,3 +48,50 @@ def test_padding_is_bounded_and_clamped_at_both_ends():
 def test_empty_content_yields_empty_string():
     assert build('', 0, 0) == ''
     assert build(None, 0, 0) == ''
+
+
+# =========================================================================
+# mark_word_highlights: the chunk-path SOURCE-context builder (round 6).
+# Same extraction rationale as the fragment builder above: the only caller
+# runs inside a full Tantivy composition search.
+# =========================================================================
+from shared.search_engine import mark_word_highlights
+
+
+def test_word_spans_are_wrapped_in_markers():
+    assert mark_word_highlights('abc def gh', [(4, 7)]) == 'abc *def* gh'
+
+
+def test_multiple_spans_keep_their_own_words():
+    assert mark_word_highlights('aa bb cc', [(0, 2), (6, 8)]) == '*aa* bb *cc*'
+
+
+def test_a_literal_asterisk_in_the_pasted_source_is_neutralized():
+    """The user's pasted text can carry a footnote '*'; left in place it
+    toggles the xlsx rich-text state and styles the rest of the cell."""
+    out = mark_word_highlights('x* hit y', [(3, 6)])
+    assert out.count('*') == 2
+    assert '*hit*' in out
+
+
+def test_neutralization_preserves_the_span_offsets():
+    """.replace('*', ' ') is 1:1 by design -- a literal '*' BEFORE the span
+    must not shift which word gets highlighted. A 'fix' that deletes the
+    asterisk instead of spacing it would highlight the wrong letters."""
+    out = mark_word_highlights('** hit y', [(3, 6)])
+    assert '*hit*' in out
+    assert out == '   *hit* y'
+
+
+def test_no_spans_still_neutralizes_literals():
+    assert mark_word_highlights('a*b', []) == 'a b'
+
+
+def test_the_source_context_builder_routes_through_the_helper():
+    """No executed test reaches the composition loop without a Tantivy
+    index, so pin the call site: the source-context builder must route
+    through the tested helper, not a re-inlined marker loop."""
+    from pathlib import Path
+    engine = (Path(__file__).parent.parent / 'shared' /
+              'search_engine.py').read_text(encoding='utf-8')
+    assert 'mark_word_highlights(original_snippet, highlights)' in engine

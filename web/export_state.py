@@ -771,13 +771,23 @@ def _same_parallels_search(existing_meta: Dict[str, Any],
     OTHER tab's rows. Fresh searches now stamp a `search_fingerprint` (a
     stable hash over text + engine + width + chunk/mode/freq + filters);
     when BOTH sides carry one, the fingerprints decide. The source_text
-    fallback survives only for payloads written before the fingerprint
-    existed -- weaker, but strictly no weaker than the behaviour it replaces.
+    fallback survives only when BOTH sides predate the fingerprint; a pair
+    with exactly one fails closed (round 6 -- see the inline comment).
     """
     a = (existing_meta or {}).get('search_fingerprint')
     b = (offered_meta or {}).get('search_fingerprint')
     if a and b:
         return a == b
+    if a or b:
+        # Mixed pair (round 6, Codex P2): every post-fingerprint writer
+        # stamps one -- fresh searches, the history restore, and the legacy
+        # bootstrap (which folds in the sibling
+        # `parallels_results_fingerprint` key when its fallback rows were
+        # written by stamped code). One-sided therefore means the two
+        # payloads straddle the fingerprint deploy and CANNOT be verified as
+        # the same search; source_text alone would let a same-text search
+        # with different width/mode/filters adopt the other tab's rows.
+        return False
     return ((existing_meta or {}).get('source_text')
             == (offered_meta or {}).get('source_text'))
 
