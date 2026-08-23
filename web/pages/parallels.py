@@ -321,7 +321,10 @@ def create_parallels_page(initial_text: str = None):
                 'search_fingerprint': getattr(p_state, 'search_fingerprint', '') or '',
                 'domain_exclusions': sorted(p_state.domain_exclusions),
                 'excluded_manuscript_ids': sorted(p_state.excluded_manuscript_ids),
-                'source_text': text_input.value if 'text_input' in locals() else decoded_text,
+                'source_text': (getattr(p_state, 'searched_source_text', '')
+                                or (text_input.value
+                                    if 'text_input' in locals()
+                                    else decoded_text)),
             }
         except Exception:
             pass
@@ -394,6 +397,7 @@ def create_parallels_page(initial_text: str = None):
             # Per D-13 (Refinement 3 audit): thread snapshot's source_text into meta so export
             # handlers can echo it in the envelope without falling back to a legacy storage key.
             _snapshot_source_text = _active_snapshot.get('source_text', '') or ''
+            p_state.searched_source_text = _snapshot_source_text
             _snapshot_meta = {'source_text': _snapshot_source_text}
             _snapshot_fp = _active_snapshot.get('search_fingerprint') or ''
             if _snapshot_fp:
@@ -3105,8 +3109,24 @@ def create_parallels_page(initial_text: str = None):
                     # restore the other tab's rows.
                     import hashlib as _hashlib
                     import json as _json
+                    # Round 4 (Codex P2): multi-select filter lists are
+                    # order-insensitive to the search, so hash a sorted COPY
+                    # -- two tabs picking the same filters in different
+                    # orders are the same search, and a spurious identity
+                    # split makes recovery silently never fire. The meta/
+                    # history dict keeps the user's order (it rebuilds UI
+                    # selections).
+                    _canon_filters = ({
+                        k: (sorted(v) if isinstance(v, list) else v)
+                        for k, v in _parallels_filters.items()
+                    } if _parallels_filters else None)
+                    # Round 4 (Codex P2): hash the text the engine actually
+                    # SEARCHED (`text`, captured at dispatch) -- the textarea
+                    # stays editable during the await, and a fingerprint of
+                    # the edited value would collide with a tab that really
+                    # searched it, letting recovery swap in these rows.
                     _search_fingerprint = _hashlib.sha256(_json.dumps({
-                        'text': text_input.value or '',
+                        'text': text,
                         'engine': captured_engine,
                         'width': captured_passage_width,
                         'chunk_size': captured_chunk_size,
@@ -3141,12 +3161,13 @@ def create_parallels_page(initial_text: str = None):
                         'excluded': sorted(
                             getattr(p_state, 'excluded_manuscript_ids', None)
                             or []),
-                        'filters': _parallels_filters,
+                        'filters': _canon_filters,
                     }, ensure_ascii=False, sort_keys=True,
                         default=str).encode('utf-8')).hexdigest()[:16]
                     p_state.search_fingerprint = _search_fingerprint
+                    p_state.searched_source_text = text
                     _parallels_search_meta = {
-                        'source_text': text_input.value or '',
+                        'source_text': text,
                         'search_fingerprint': _search_fingerprint,
                         'chunk_size': captured_chunk_size,
                         'mode': captured_mode,

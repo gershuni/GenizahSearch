@@ -802,11 +802,18 @@ def recover_richer_parallels_rows(
     any mismatch or a smaller payload, the offered rows come back unchanged.
     """
     existing = get_parallels_export()
-    if (isinstance(existing, dict)
-            and _same_parallels_search(existing.get('meta') or {}, meta or {})
-            and len(existing.get('results') or []) > len(results or [])):
-        return (existing.get('results') or [],
-                existing.get('filtered') or [], True)
+    if isinstance(existing, dict) and _same_parallels_search(
+            existing.get('meta') or {}, meta or {}):
+        # Round 4 (Codex P2): compare BOTH buckets. Main-only missed the
+        # 400-main/800-filtered case -- equal mains, so recovery skipped
+        # the 300 filtered rows the payload already held. Same-search
+        # lists are prefixes of the same full lists, so a combined sum
+        # never downgrades one bucket to grow the other.
+        existing_rows = existing.get('results') or []
+        existing_filtered = existing.get('filtered') or []
+        if (len(existing_rows) + len(existing_filtered)
+                > len(results or []) + len(filtered or [])):
+            return existing_rows, existing_filtered, True
     return (results or [], filtered or [], False)
 
 
@@ -844,8 +851,10 @@ def preserve_or_set_parallels_export(
     594-row Birkat Hamazon search silently exported 500 rows after a refresh.
 
     This writer overwrites ONLY when it would not lose information: it skips
-    the write when a payload already exists for the same search (matched on
-    meta.source_text) with at least as many rows as the restore is offering.
+    the write when a payload already exists for the same search (matched by
+    _same_parallels_search: fingerprint, source_text fallback for legacy
+    payloads) holding at least as many rows -- BOTH buckets counted -- as
+    the restore is offering.
     Fresh searches must keep calling set_parallels_export() directly -- a new
     search legitimately REPLACES the payload, whatever the sizes.
 
@@ -853,9 +862,14 @@ def preserve_or_set_parallels_export(
     """
     existing = get_parallels_export()
     if isinstance(existing, dict):
-        existing_rows = existing.get('results') or []
+        # Round 4 (Codex P2): richness is BOTH buckets here too, mirroring
+        # recover_richer_parallels_rows -- a payload with equal mains but a
+        # longer filtered tail must be preserved, not overwritten.
+        existing_total = (len(existing.get('results') or [])
+                          + len(existing.get('filtered') or []))
+        offered_total = len(results or []) + len(filtered or [])
         if (_same_parallels_search(existing.get('meta') or {}, meta or {})
-                and len(existing_rows) >= len(results or [])):
+                and existing_total >= offered_total):
             return False
     set_parallels_export(results=results, filtered=filtered, meta=meta)
     return True

@@ -412,6 +412,37 @@ def test_fingerprint_canonicalizes_every_set_like_input():
     excluded_at = slice_.index("'excluded':")
     assert 'sorted(' in slice_[excluded_at:excluded_at + 80], (
         'excluded_manuscript_ids must be sorted before hashing')
+    # Round 4 (Codex P2): the advanced-filter dict must be hashed via its
+    # canonicalized copy -- the raw dict keeps the user's multi-select
+    # order, which the search ignores, so hashing it splits one search
+    # into many identities and recovery silently never fires.
+    assert "'filters': _canon_filters," in slice_, (
+        'the fingerprint must hash the canonicalized filters copy')
+    assert '_parallels_filters,' not in slice_, (
+        'the raw (selection-ordered) filters dict leaked into the hash')
+
+
+def test_fingerprint_and_meta_use_the_dispatched_text():
+    """Round 4 (Codex P2): the textarea stays editable during the await, so
+    reading text_input.value after it fingerprints text that was never
+    searched -- colliding with a tab that really searched the edited text
+    and letting recovery swap in unrelated rows. Both the hash and the
+    export meta must use `text`, captured at dispatch."""
+    slice_ = _fingerprint_dict_slice()
+    assert "'text': text," in slice_, (
+        'the fingerprint must hash the dispatched text')
+    assert 'text_input.value' not in slice_, (
+        'the fingerprint reads the live textarea, not the searched text')
+
+    # Two sites build _parallels_search_meta; the history-restore one
+    # correctly echoes its stored snapshot. Pin the FRESH-SEARCH one, which
+    # sits after the fingerprint block.
+    src = _read_source()
+    fp_at = src.index('_search_fingerprint = _hashlib.sha256(')
+    meta_at = src.index('_parallels_search_meta = {', fp_at)
+    meta_slice = src[meta_at:meta_at + 200]
+    assert "'source_text': text," in meta_slice, (
+        'export meta must echo the dispatched text, not the live textarea')
 
 
 # ---------------------------------------------------------------------------

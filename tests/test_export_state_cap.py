@@ -1002,6 +1002,62 @@ def test_reload_recovers_the_pager_tail_from_the_payload(monkeypatch):
                                             meta=meta) is False
 
 
+def test_recovery_counts_the_filtered_bucket_too(monkeypatch):
+    """Round 4 (Codex P2): equal mains, richer filtered. Main-only richness
+    skipped recovery here, so the pager lost 300 filtered rows the payload
+    already held -- and the notice then asked the user to re-run a search
+    whose rows were sitting in storage."""
+    storage = {}
+    _install_stub(monkeypatch, storage)
+    from web.export_state import (
+        preserve_or_set_parallels_export, recover_richer_parallels_rows,
+        set_parallels_export,
+    )
+
+    meta = {'source_text': 'birkat', 'search_fingerprint': 'fp-1'}
+    set_parallels_export(results=[_result(i) for i in range(40)],
+                         filtered=[_result(1000 + i) for i in range(80)],
+                         meta=meta)
+    # Snapshot offers the SAME 40 mains but only 50 of the filtered rows.
+    r, f, recovered = recover_richer_parallels_rows(
+        [_result(i) for i in range(40)],
+        [_result(1000 + i) for i in range(50)],
+        meta=meta)
+    assert recovered is True and len(r) == 40 and len(f) == 80
+
+    # And the preserve guard applies the same both-buckets rule: offering
+    # the poorer snapshot back must NOT overwrite the richer payload.
+    assert preserve_or_set_parallels_export(
+        results=[_result(i) for i in range(40)],
+        filtered=[_result(1000 + i) for i in range(50)],
+        meta=meta) is False
+
+
+def test_recovery_never_downgrades_on_a_poorer_payload(monkeypatch):
+    """The inverse direction: when the OFFERED rows are the richer set
+    (fresh restore beats a stale small payload), recovery declines and
+    preserve overwrites."""
+    storage = {}
+    _install_stub(monkeypatch, storage)
+    from web.export_state import (
+        get_parallels_export, preserve_or_set_parallels_export,
+        recover_richer_parallels_rows, set_parallels_export,
+    )
+
+    meta = {'source_text': 'birkat', 'search_fingerprint': 'fp-1'}
+    set_parallels_export(results=[_result(i) for i in range(40)],
+                         filtered=[], meta=meta)
+    offered_r = [_result(i) for i in range(40)]
+    offered_f = [_result(1000 + i) for i in range(20)]
+    r, f, recovered = recover_richer_parallels_rows(
+        offered_r, offered_f, meta=meta)
+    assert recovered is False and len(r) == 40 and len(f) == 20
+    assert preserve_or_set_parallels_export(
+        results=offered_r, filtered=offered_f, meta=meta) is True
+    payload = get_parallels_export()
+    assert len(payload['filtered']) == 20
+
+
 def test_legacy_payload_without_fingerprint_still_matches_on_text(monkeypatch):
     """Payloads written before the fingerprint existed carry only
     source_text; the fallback must keep preserving them rather than
