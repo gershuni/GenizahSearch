@@ -409,6 +409,36 @@ RRF_K = 60
 PHASE_LOCAL_SEARCH = 'local_search'
 
 
+#: Padding (characters) kept either side of a matched span in composition
+#: snippets.
+COMPOSITION_SNIPPET_PAD = 60
+
+
+def build_marked_composition_fragment(content, span_start, span_end,
+                                      pad=COMPOSITION_SNIPPET_PAD):
+    """Return one composition snippet with the matched span in ``*`` markers.
+
+    Extracted from ``search_composition_logic`` so the marker contract can be
+    tested without a Tantivy index (PR #325 workflow review: the fix below
+    shipped unproven because nothing could reach these two lines cheaply).
+
+    A literal ``*`` already present in the manuscript text is replaced with a
+    space FIRST: every consumer treats ``*`` as a highlight delimiter -- the
+    parallels xlsx export splits on it to build red+bold runs, and one stray
+    marker restyles the remainder of the cell. ``highlight`` and
+    ``_highlight_by_span`` in this module already apply the same rule; the
+    composition builder did not, and the xlsx highlighting work made the gap
+    visible.
+    """
+    if not content:
+        return ''
+    start = max(0, span_start - pad)
+    end = min(len(content), span_end + pad)
+    return (content[start:span_start].replace('*', ' ')
+            + '*' + content[span_start:span_end].replace('*', ' ')
+            + '*' + content[span_end:end].replace('*', ' '))
+
+
 class SearchEngine:
     """Run searches, build queries, and provide browsing utilities."""
     def __init__(self, meta_mgr, variants_mgr):
@@ -3384,11 +3414,8 @@ class SearchEngine:
 
                 ms_snips = []
                 for s, e in merged:
-                    start = max(0, s - 60); end = min(len(data['content']), e + 60)
-                    fragment = data['content'][start:s] + \
-                               f"*{data['content'][s:e]}*" + \
-                               data['content'][e:end]
-                    ms_snips.append(fragment)
+                    ms_snips.append(build_marked_composition_fragment(
+                        data['content'], s, e))
 
                 combined_pattern = "|".join(list(data['patterns'])) if data.get('patterns') else ""
 

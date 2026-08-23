@@ -782,6 +782,96 @@ def _same_parallels_search(existing_meta: Dict[str, Any],
             == (offered_meta or {}).get('source_text'))
 
 
+#: Inputs whose ORDER is meaningless to the search. Hashing them raw splits
+#: one search into many identities, so recovery silently never fires.
+_PARALLELS_FINGERPRINT_SET_INPUTS = ('library_filter', 'restrict', 'excluded')
+
+
+def _canonical_parallels_filters(filters):
+    """Sort every list inside the advanced-filter dict (order-insensitive)."""
+    if not isinstance(filters, dict):
+        return None
+    return {k: (sorted(v) if isinstance(v, list) else v)
+            for k, v in filters.items()}
+
+
+def compute_parallels_search_fingerprint(
+    *,
+    text,
+    engine,
+    width=None,
+    chunk_size=None,
+    mode=None,
+    max_freq=None,
+    filter_text='',
+    deep_scan=False,
+    boundary_mode=None,
+    boundary_delimiter=None,
+    boundary_boost=None,
+    min_boundary_matches=None,
+    min_delimiter_distance=None,
+    variant_level=None,
+    variant_max_changes=None,
+    library_mode=None,
+    library_filter=None,
+    restrict=None,
+    excluded=None,
+    filters=None,
+) -> str:
+    """Return the 16-hex identity of ONE parallels search.
+
+    THE one definition of "same search" for the preserve/recover logic. It
+    lives here, not in a page closure, for three reasons the PR #325 review
+    surfaced:
+
+    * it must be EXECUTABLE by tests -- a source-text pin over a closure
+      cannot prove that changing an input changes the hash;
+    * canonicalization must be structural, not remembered at each call site
+      (set-like inputs are sorted HERE, so no caller can forget);
+    * two call sites build it (a fresh search and a composition-history
+      restore), and an identity rule defined twice is an identity rule that
+      drifts.
+
+    Every parameter is keyword-only, so a positional call cannot shift values
+    between inputs. Callers must pass values CAPTURED AT DISPATCH: a live
+    widget read describes a configuration the search may not have used
+    (PR #325 review rounds 4-5).
+    """
+    import hashlib
+    import json
+
+    payload = {
+        'text': text or '',
+        'engine': engine,
+        'width': width,
+        'chunk_size': chunk_size,
+        'mode': mode,
+        'max_freq': max_freq,
+        'filter_text': filter_text or '',
+        'deep_scan': bool(deep_scan),
+        'boundary_mode': boundary_mode,
+        'boundary_delimiter': boundary_delimiter,
+        'boundary_boost': boundary_boost,
+        'min_boundary_matches': min_boundary_matches,
+        'min_delimiter_distance': min_delimiter_distance,
+        'variant_level': variant_level,
+        'variant_max_changes': variant_max_changes,
+        'library_mode': library_mode,
+        'library_filter': library_filter,
+        'restrict': restrict,
+        'excluded': excluded,
+        'filters': _canonical_parallels_filters(filters),
+    }
+    for key in _PARALLELS_FINGERPRINT_SET_INPUTS:
+        value = payload.get(key)
+        if value is not None:
+            payload[key] = sorted(value)
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True,
+                   default=str).encode('utf-8')
+    ).hexdigest()[:16]
+
+
 def recover_richer_parallels_rows(
     results: List[Dict[str, Any]],
     filtered: List[Dict[str, Any]],

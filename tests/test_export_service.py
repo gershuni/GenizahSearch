@@ -627,12 +627,19 @@ class TestExportService:
             f'Source Context cell was {type(src_cell).__name__}')
         flat = str(src_cell)
         assert '*' not in flat and 'context' in flat
-        bold_runs = [
-            b.text for b in src_cell
+        # The claim is red AND bold: a regression to bold-but-black would
+        # otherwise pass this test unchanged (workflow review).
+        marked = [
+            b for b in src_cell
             if isinstance(b, TextBlock) and b.font is not None and b.font.b
         ]
-        assert bold_runs == ['context'], (
-            f'expected exactly the marked span bold, got {bold_runs}')
+        assert [b.text for b in marked] == ['context'], (
+            f'expected exactly the marked span bold, got {marked}')
+        # openpyxl returns a Color object whose rgb is the 8-digit
+        # ARGB form ('00FF0000'), not the 6-digit string passed in.
+        _rgb = getattr(marked[0].font.color, 'rgb', None)
+        assert _rgb and str(_rgb).endswith('FF0000'), (
+            f'the highlighted run must be red, got {_rgb!r}')
 
         # Fixture text has no markers -> col 7 stays a plain string.
         ms_cell = ws.cell(2, 7).value

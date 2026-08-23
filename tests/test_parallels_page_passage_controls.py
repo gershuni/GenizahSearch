@@ -375,15 +375,19 @@ def test_the_tooltip_does_not_scope_to_the_genizah_corpus():
 # and a reload can restore the other tab's rows.
 # ---------------------------------------------------------------------------
 
-def _fingerprint_dict_slice() -> str:
+def _fingerprint_call_slice() -> str:
+    """The fresh-search call to the identity helper, arguments included."""
     src = _read_source()
-    idx = src.index('_search_fingerprint = _hashlib.sha256(')
-    end = src.index('.hexdigest()[:16]', idx)
+    idx = src.index('_search_fingerprint = compute_parallels_search_fingerprint(')
+    end = src.index('\n                    )', idx)
     return src[idx:end]
 
 
-def test_fingerprint_hashes_every_result_affecting_input():
-    slice_ = _fingerprint_dict_slice()
+def test_fingerprint_call_passes_every_result_affecting_input():
+    """The page must hand the helper every input that changes the returned
+    buckets. (What the helper DOES with them is proven by execution in
+    tests/test_parallels_fingerprint.py -- this pin only guards the wiring.)"""
+    slice_ = _fingerprint_call_slice()
     required = [
         'text', 'engine', 'width', 'chunk_size', 'mode', 'max_freq',
         'filter_text', 'deep_scan',
@@ -393,72 +397,115 @@ def test_fingerprint_hashes_every_result_affecting_input():
         'library_mode', 'library_filter', 'restrict', 'excluded',
         'filters',
     ]
-    missing = [k for k in required if f"'{k}':" not in slice_]
+    missing = [k for k in required if f'{k}=' not in slice_]
     assert not missing, (
-        'fingerprint omits result-affecting input(s) -- two tabs differing '
-        'only in these would swap rows across a reload: ' + repr(missing))
+        'the fingerprint call omits result-affecting input(s) -- two tabs '
+        'differing only in these would swap rows across a reload: '
+        + repr(missing))
 
 
-def test_fingerprint_canonicalizes_every_set_like_input():
-    """A raw set through json's default=str serializes in arbitrary order,
-    splitting ONE search into many identities (recovery never fires). Every
-    set-like input must go through sorted()."""
-    slice_ = _fingerprint_dict_slice()
-    for expr in ('sorted(p_state.library_filter or [])',
-                 'sorted(captured_restrict_sys_ids)'):
-        assert expr in slice_, f'missing canonicalization: {expr}'
-    # excluded_manuscript_ids is a set too -- its sorted() spans lines, so
-    # pin the call rather than the whole expression.
-    excluded_at = slice_.index("'excluded':")
-    assert 'sorted(' in slice_[excluded_at:excluded_at + 80], (
-        'excluded_manuscript_ids must be sorted before hashing')
-    # Round 4 (Codex P2): the advanced-filter dict must be hashed via its
-    # canonicalized copy -- the raw dict keeps the user's multi-select
-    # order, which the search ignores, so hashing it splits one search
-    # into many identities and recovery silently never fires.
-    assert "'filters': _canon_filters," in slice_, (
-        'the fingerprint must hash the canonicalized filters copy')
-    assert '_parallels_filters,' not in slice_, (
-        'the raw (selection-ordered) filters dict leaked into the hash')
-
-
-def test_fingerprint_reads_no_live_widget():
-    """Round 5 (Codex P2): only the Run button is disabled during the
-    await -- the variant controls (and any other widget) stay editable, so
-    ANY `.value` read inside the fingerprint dict describes post-edit state
-    the engine never used. Everything must come from dispatch-time
-    captures. (`current_preset['value']` is a dict key, not a widget read,
-    and would not match this pin anyway.)"""
-    slice_ = _fingerprint_dict_slice()
+def test_fingerprint_call_reads_no_live_widget():
+    """Round 5 (Codex P2) generalized: only the Run button is disabled during
+    the await, so ANY `.value` read at this call site describes post-edit
+    state the engine never used. Everything must be a dispatch capture."""
+    slice_ = _fingerprint_call_slice()
     offenders = [ln.strip() for ln in slice_.splitlines() if '.value' in ln]
     assert not offenders, (
-        'live widget read(s) inside the fingerprint dict: ' + repr(offenders))
+        'live widget read(s) at the fingerprint call site: ' + repr(offenders))
+
+
+def test_fingerprint_call_reads_no_live_page_state():
+    """Workflow review: library_mode / library_filter / excluded_manuscript_ids
+    were read live from p_state AFTER the await. p_state is mutated by chip
+    clicks, so those reads could describe a scope the search never used --
+    and the post-search 'hide' pass must filter by the same captures it is
+    fingerprinted with."""
+    slice_ = _fingerprint_call_slice()
+    offenders = [ln.strip() for ln in slice_.splitlines() if 'p_state.' in ln]
+    assert not offenders, (
+        'live p_state read(s) at the fingerprint call site: ' + repr(offenders))
+
+
+def test_the_library_hide_pass_uses_the_same_captures_it_is_hashed_with():
+    """If the filter reads live p_state while the identity hashes captures,
+    the fingerprint describes rows the filter did not produce."""
+    src = _read_source()
+    assert ("if captured_library_mode == 'hide' and captured_library_filter:"
+            in src), (
+        'the post-search library filter must use the dispatch captures')
 
 
 def test_fingerprint_and_meta_use_the_dispatched_text():
     """Round 4 (Codex P2): the textarea stays editable during the await, so
     reading text_input.value after it fingerprints text that was never
-    searched -- colliding with a tab that really searched the edited text
-    and letting recovery swap in unrelated rows. Both the hash and the
-    export meta must use `text`, captured at dispatch."""
-    slice_ = _fingerprint_dict_slice()
-    assert "'text': text," in slice_, (
+    searched -- colliding with a tab that really searched the edited text."""
+    slice_ = _fingerprint_call_slice()
+    assert 'text=text,' in slice_, (
         'the fingerprint must hash the dispatched text')
-    assert 'text_input.value' not in slice_, (
-        'the fingerprint reads the live textarea, not the searched text')
 
     # Two sites build _parallels_search_meta; the history-restore one
-    # correctly echoes its stored snapshot. Pin the FRESH-SEARCH one, which
-    # sits after the fingerprint block.
+    # correctly echoes its stored snapshot. Pin the FRESH-SEARCH one.
     src = _read_source()
-    fp_at = src.index('_search_fingerprint = _hashlib.sha256(')
+    fp_at = src.index('_search_fingerprint = compute_parallels_search_fingerprint(')
     meta_at = src.index('_parallels_search_meta = {', fp_at)
     meta_slice = src[meta_at:meta_at + 200]
     assert "'source_text': text," in meta_slice, (
         'export meta must echo the dispatched text, not the live textarea')
 
 
-# ---------------------------------------------------------------------------
+def test_history_restore_stamps_its_own_identity():
+    """Workflow review (P1): the composition-history restore wrote the export
+    payload but never set p_state.search_fingerprint, so the next snapshot
+    persist stamped the restored rows with the PREVIOUS search's identity --
+    and a later reload could recover that unrelated search's payload."""
+    src = _read_source()
+    handler_at = src.index("'warnings': ['restored-from-history'],")
+    after = src[handler_at:handler_at + 1800]
+    assert 'compute_parallels_search_fingerprint(' in after, (
+        'history restore must compute an identity through the shared helper')
+    assert 'p_state.search_fingerprint = ' in after, (
+        'history restore must stamp p_state, or the stale fingerprint from '
+        'the previous search survives into the snapshot')
+
+
+def test_the_legacy_bootstrap_preserves_the_richer_payload():
+    """Workflow review (P1): the no-snapshot branch (a second browser tab is
+    enough to reach it) called set_parallels_export directly, overwriting the
+    up-to-5,000-row payload with the 250-row user fallback. Harmless while
+    results were capped near 200; this PR's uncapped fetch made it lossy."""
+    src = _read_source()
+    boot_at = src.index("_bootstrap_meta = {'source_text': _legacy_source_text}")
+    after = src[boot_at:boot_at + 1400]
+    assert 'preserve_or_set_parallels_export(' in after, (
+        'the bootstrap branch must not clobber a richer same-search payload')
+    assert 'recover_richer_parallels_rows(' in after, (
+        'the bootstrap branch should recover the payload tail, like the '
+        'snapshot branch above it')
+    # Scan CODE only: this block's own comment names the old writer to
+    # explain why it is gone, and a substring check over comments is
+    # how a gate goes vacuous (or, here, falsely red).
+    code = [ln for ln in after.splitlines()
+            if not ln.lstrip().startswith('#')]
+    bare_writer = [ln for ln in code
+                   if 'set_parallels_export(' in ln
+                   and 'preserve_or_set_parallels_export(' not in ln]
+    assert not bare_writer, (
+        'the unconditional writer is still reachable in this branch: '
+        + repr(bare_writer))
+
+
+def test_programmatic_boundary_write_calls_its_handler():
+    """NiceGUI fires no event for a programmatic .value write, so the
+    boundary help/stats/Advanced-button state stayed as the user last left
+    it while letter-level forced 'full'."""
+    src = _on_passage_mode_change_source()
+    idx = src.index("boundary_mode.value = 'full'")
+    after = src[idx:idx + 700]
+    assert 'update_boundary_ui()' in after, (
+        'forcing boundary_mode without calling its handler leaves the help '
+        'text, stats line and Advanced button describing the old mode')
+
+
 # The page must actually BUILD. Source-text pins cannot execute closures; the
 # NameError that took the whole /parallels page down (owner-reported,
 # 2026-08-23: on_passage_mode_change() invoked at build time before
@@ -509,8 +556,15 @@ def test_the_page_builds_without_raising(available, monkeypatch):
     # The method radio must exist exactly when the index is available.
     radios = [el for el in client.elements.values()
               if type(el).__name__ == 'Radio']
-    assert len(radios) >= (1 if available else 0)
+    # `>= 0` would have been vacuous for the unavailable arm (workflow
+    # review): assert what each arm actually claims.
     if available:
+        assert len(radios) >= 1, 'the method radio must exist'
         assert any(getattr(r, 'value', None) == 'passage' for r in radios), (
             'letter-level must be the pre-selected method'
+        )
+    else:
+        assert all(getattr(r, 'value', None) != 'passage' for r in radios), (
+            'with no passage index, no radio may sit on the letter-level '
+            'value -- the page would send a method the backend rejects'
         )

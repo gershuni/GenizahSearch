@@ -192,8 +192,10 @@ def get_passage_searcher(text_fetcher: "PageTextFetcher",
     # 200-group envelope contract); the page passes 0 for UNCAPPED (owner
     # ruling 2026-08-23 -- its display layer batches, its export layer has
     # its own 5,000-row bound).
-    if render_cap is None:
-        return PassageSearcher(index=idx, text_fetcher=text_fetcher,
-                               policy=get_preset(preset))
+    # One constructor call, not two: a second kwarg added to
+    # PassageSearcher had to be remembered in both branches (workflow
+    # review). render_cap is simply omitted when the caller did not
+    # ask for one, so the searcher's own default still applies.
+    kwargs = {} if render_cap is None else {'render_cap': render_cap}
     return PassageSearcher(index=idx, text_fetcher=text_fetcher,
-                           policy=get_preset(preset), render_cap=render_cap)
+                           policy=get_preset(preset), **kwargs)
