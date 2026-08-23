@@ -19,10 +19,27 @@ site:
   Tantivy hits (search_engine.py::_count_unique_chunks). Passage spans are
   already merged and distinct by construction.
 * `score` / `final_score` are BOTH `PassageHit.score` (matched letters,
-  merged-span character count) -- directly comparable to the incumbent's
-  merged-span character score (`base_score` in search_engine.py), which is
-  why passage never computes a boundary-boosted `final_score`: there is no
-  boundary-crossing concept over a letter stream with no token boundaries.
+  merged-span length). Passage never computes a boundary-boosted
+  `final_score`: there is no boundary-crossing concept over a letter stream
+  with no token boundaries.
+
+  NOT COMPARABLE TO THE INCUMBENT'S SCORE, and an earlier version of this
+  docstring wrongly said it was "directly comparable" (adversarial review
+  round 2). The two numbers are measured on OPPOSITE SIDES of the match:
+  passage sums QUERY-stream spans (`sum(q1 - q0)`,
+  shared/passage_search.py::search), while the incumbent sums merged spans
+  in the CANDIDATE's raw `content` (shared/search_engine.py, `base_score`).
+  They are not the same quantity in different units, so no conversion
+  factor exists to reconcile them -- and three further gaps compound it:
+  the passage stream has whitespace, marks, punctuation and digits removed
+  by `norm_stream`; passage alignment is approximate and may merge spans
+  differently; and raw-character inflation varies with each manuscript's
+  orthography and pointing.
+
+  Consequence for any surface combining the two methods: rank WITHIN a
+  method and append, never pool the raw scores into one sorted list. This
+  matches the evaluation rule in docs/specs/parallels-method-comparison.md
+  ("stratify by per-method rank/quantile, never by pooled raw score").
   `boundary_mode` accordingly must be `'full'` -- anything else raises
   ValueError rather than silently degrading (adversarial review finding #2;
   web/search_api.py rejects 'boundary'/'combined' with a 400 BEFORE ever

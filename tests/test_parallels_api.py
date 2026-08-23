@@ -1242,16 +1242,106 @@ def test_run_through_passage_budget_busy_when_semaphore_exhausted(monkeypatch):
         release = await _PassageSemaphoreState.acquire()  # takes the only slot
         try:
             assert _PassageSemaphoreState._capacity == 1
-            never_done = asyncio.get_event_loop().create_future()
+            made = []
+
+            def _factory():
+                made.append(1)
+                return asyncio.get_event_loop().create_future()
+
             with pytest.raises(APIError) as exc_info:
-                await run_through_passage_budget(never_done)
+                await run_through_passage_budget(_factory)
             assert exc_info.value.code == 'passage_search_busy'
             assert exc_info.value.http_status == 503
+            # Adversarial review round 2: a rejected caller must not have
+            # created -- let alone dispatched -- any work. Before the factory
+            # signature, run_passage_search called run_in_executor BEFORE
+            # admission, so a 503'd request still occupied a pool worker and
+            # the rejection shed no load at all.
+            assert made == [], (
+                'the awaitable was constructed despite a 503 -- admission '
+                'control must run BEFORE the work exists'
+            )
         finally:
             release()
 
     asyncio.run(_run())
     _PassageSemaphoreState.reset(DEFAULT_PASSAGE_CONCURRENCY)
+
+
+def test_a_busy_rejection_never_reaches_the_worker(monkeypatch):
+    """THE regression test for the adversarial-review-round-2 defect.
+
+    `run_passage_search` used to call `loop.run_in_executor(...)` BEFORE
+    `run_through_passage_budget` acquired the semaphore. `run_in_executor`
+    submits immediately, so a caller answered `passage_search_busy` had
+    already handed its search to the pool: the 503 removed the waiting
+    client but not the load, and under a burst every surplus job stayed
+    queued on a 4-worker executor. Same shape as the discovery-service
+    backlog CLAUDE.md records.
+
+    Note WHERE this asserts. The two tests around it exercise
+    `run_through_passage_budget` directly, which never had the bug -- it
+    always acquired before `ensure_future`. The defect lived in the page's
+    entry point, so only a test that goes through `run_passage_search` can
+    fail on it. Mutation-checked: restoring the submit-then-acquire order in
+    web/search_api.py::run_passage_search turns this red and leaves every
+    other test in this file green.
+    """
+    import asyncio
+
+    from web.search_api import (
+        run_passage_search, _PassageSemaphoreState, DEFAULT_PASSAGE_CONCURRENCY,
+    )
+
+    monkeypatch.setenv('SEARCH_API_PASSAGE_CONCURRENCY', '1')
+
+    ran = []
+
+    def _worker():
+        ran.append(1)
+        return 'should never happen'
+
+    async def _run():
+        release = await _PassageSemaphoreState.acquire()  # the only slot
+        try:
+            with pytest.raises(APIError) as exc_info:
+                await run_passage_search(_worker)
+            assert exc_info.value.code == 'passage_search_busy'
+        finally:
+            release()
+        # Give any (wrongly) submitted job a chance to land on a pool thread
+        # before asserting -- a same-tick assertion could pass merely because
+        # the executor had not scheduled it yet, which is exactly the kind of
+        # vacuous green this project treats as a defect.
+        await asyncio.sleep(0.25)
+        assert ran == [], (
+            'the worker ran despite a 503 -- work was dispatched to the '
+            'executor before admission control'
+        )
+
+    asyncio.run(_run())
+    _PassageSemaphoreState.reset(DEFAULT_PASSAGE_CONCURRENCY)
+
+
+def test_budget_refuses_an_already_built_awaitable(monkeypatch):
+    """The factory contract is enforced, not merely documented: passing the
+    pre-round-2 shape (an awaitable) must fail loudly BEFORE a slot is
+    acquired, so it can never strand a permit or silently re-open the hole.
+    """
+    import asyncio
+
+    from web.search_api import run_through_passage_budget, _PassageSemaphoreState
+
+    async def _run():
+        coro = asyncio.sleep(0)
+        try:
+            with pytest.raises(TypeError):
+                await run_through_passage_budget(coro)
+        finally:
+            coro.close()  # never awaited; close it so pytest sees no warning
+        assert not _PassageSemaphoreState.sem.locked(), 'a permit was stranded'
+
+    asyncio.run(_run())
 
 
 def test_run_through_passage_budget_times_out(monkeypatch):
@@ -1271,7 +1361,7 @@ def test_run_through_passage_budget_times_out(monkeypatch):
             return 'too late'
 
         with pytest.raises(APIError) as exc_info:
-            await run_through_passage_budget(_slow())
+            await run_through_passage_budget(_slow)
         assert exc_info.value.code == 'core_timeout'
         assert exc_info.value.http_status == 504
         # The slot must be free again once the slow task's done-callback has

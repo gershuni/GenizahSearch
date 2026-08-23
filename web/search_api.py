@@ -568,21 +568,43 @@ def _passage_executor() -> 'ThreadPoolExecutor':
     return _PassageSemaphoreState.executor()
 
 
-async def run_through_passage_budget(awaitable):
-    """Acquire the passage-matching budget slot, await `awaitable` with the
-    passage timeout ceiling (SEARCH_API_PASSAGE_TIMEOUT), release the slot
-    via a done-callback. This is the ONE function that owns the
-    semaphore/timeout/release discipline for passage-matching -- both this
-    endpoint's own passage branch AND web/pages/parallels.py's direct call
-    path now go through it (Codex review finding #15: the page previously
-    bypassed the budget entirely via NiceGUI's generic run.io_bound, with no
-    semaphore, no dedicated executor and no timeout ceiling at all, so
-    concurrent GUI users could overwhelm the single-worker host's thread
-    pool and the passage index's mmap with no bound whatsoever).
+async def run_through_passage_budget(make_awaitable):
+    """Acquire the passage-matching budget slot, THEN create the work, await
+    it with the passage timeout ceiling (SEARCH_API_PASSAGE_TIMEOUT), and
+    release the slot via a done-callback. This is the ONE function that owns
+    the semaphore/timeout/release discipline for passage-matching -- both
+    this endpoint's own passage branch AND web/pages/parallels.py's direct
+    call path now go through it (Codex review finding #15: the page
+    previously bypassed the budget entirely via NiceGUI's generic
+    run.io_bound, with no semaphore, no dedicated executor and no timeout
+    ceiling at all, so concurrent GUI users could overwhelm the
+    single-worker host's thread pool and the passage index's mmap with no
+    bound whatsoever).
 
-    Deliberately agnostic to WHAT is being awaited (a coroutine, or a Future
-    from `loop.run_in_executor`) so each caller supplies whichever shape
-    fits its own work -- this endpoint already has an async coroutine
+    `make_awaitable` is a ZERO-ARGUMENT CALLABLE returning the awaitable to
+    run. It is a factory rather than an already-built awaitable on purpose,
+    and the reason is a real defect this signature replaces (adversarial
+    review round 2). The old signature took the awaitable itself, so every
+    caller had to construct the work BEFORE admission control could reject
+    it. For a coroutine that was merely wasteful -- a coroutine object does
+    not execute until `ensure_future`, though an un-awaited one does emit a
+    RuntimeWarning on the 503 path. For `loop.run_in_executor` it was a
+    genuine load-shedding hole: that call SUBMITS to the pool immediately
+    and returns an already-running Future, so a caller told
+    `passage_search_busy` had already queued its search. The rejection shed
+    no load at all -- it only removed the client that was waiting for the
+    answer. Under a burst the executor kept every surplus job, which is the
+    same shape as the discovery-service backlog CLAUDE.md records
+    ("run_in_executor threads are not cancellable, so a timed-out read keeps
+    its threadpool worker").
+
+    Building the work here, after the permit is in hand, makes that class of
+    bug structurally impossible for every present and future caller instead
+    of correcting one call site.
+
+    Still deliberately agnostic to WHAT the factory returns (a coroutine, or
+    a Future from `loop.run_in_executor`) so each caller supplies whichever
+    shape fits its own work -- this endpoint has an async coroutine
     (`fetch_parallels_results`, which does its OWN run_in_executor dispatch
     internally via its `executor` kwarg); the page has a plain sync
     callable and wraps it via `run_passage_search` below. Either way there
@@ -601,17 +623,29 @@ async def run_through_passage_budget(awaitable):
     Returns:
         The awaited value on success.
     Raises:
+        TypeError: `make_awaitable` is not callable. Raised BEFORE the slot
+            is acquired, so a caller that passes an already-built awaitable
+            (the pre-round-2 shape) fails loudly and strands no permit.
         APIError('passage_search_busy', ..., 503): no slot is free right now.
+            The factory is NOT invoked, so no work is created or dispatched.
         APIError('core_timeout', ..., 504): did not finish within the
             timeout ceiling (the slot/executor worker keep running the
             search to completion regardless -- run_in_executor cannot
             cancel a thread; the done-callback is the sole releaser).
-        Any other exception `awaitable` itself raises, unchanged.
+        Any other exception the factory or its awaitable raises, unchanged.
     """
+    if not callable(make_awaitable):
+        raise TypeError(
+            'run_through_passage_budget expects a zero-argument callable '
+            'returning an awaitable, not an already-built awaitable -- work '
+            'must be created AFTER the budget slot is acquired, never before '
+            f'(got {type(make_awaitable).__name__})'
+        )
     ceiling = _resolve_passage_timeout()
     release = await _acquire_passage_slot()
     try:
-        task = asyncio.ensure_future(awaitable)
+        # Only now, holding the permit, is the work allowed to exist.
+        task = asyncio.ensure_future(make_awaitable())
         task.add_done_callback(lambda _t, _r=release: _r())
         release = None  # ownership -> done-callback
         _done, pending = await asyncio.wait({task}, timeout=ceiling)
@@ -636,11 +670,18 @@ async def run_passage_search(sync_fn, *args, **kwargs):
     ThreadPoolExecutor and routes it through run_through_passage_budget, so
     the page gets the identical semaphore, executor and timeout this
     endpoint's own passage branch uses.
+
+    The executor dispatch happens inside the factory, so it runs only once a
+    budget slot is held. Submitting first (the pre-round-2 shape) meant a
+    caller rejected with `passage_search_busy` had already queued its search
+    on the pool -- see run_through_passage_budget's docstring.
     """
     from functools import partial
     loop = asyncio.get_event_loop()
-    fut = loop.run_in_executor(_passage_executor(), partial(sync_fn, *args, **kwargs))
-    return await run_through_passage_budget(fut)
+    call = partial(sync_fn, *args, **kwargs)
+    return await run_through_passage_budget(
+        lambda: loop.run_in_executor(_passage_executor(), call)
+    )
 
 
 # Phase 79 D-11 / R-08 -- transcription char cap.
@@ -1950,8 +1991,11 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             # produced the result, for anyone reproducing a query later.
             passage_policy_echo = _pg_searcher.policy.as_dict()
             try:
+                # A factory, not a coroutine: the work is built only after a
+                # budget slot is held. Passing the coroutine directly also
+                # left it un-awaited (RuntimeWarning) on the 503 path.
                 bundle = await run_through_passage_budget(
-                    fetch_parallels_results(
+                    lambda: fetch_parallels_results(
                         searcher=_pg_searcher,
                         meta_mgr=state.meta_mgr,
                         text=text,
