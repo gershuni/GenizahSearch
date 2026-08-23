@@ -17,6 +17,20 @@ import pytest
 import genizah_app as app
 from genizah_app import _PauseCtx
 
+import genizah_core
+
+
+@pytest.fixture(autouse=True)
+def _pin_english_labels(monkeypatch):
+    """tr() reads genizah_core.CURRENT_LANG, which load_language() fills from
+    the DEVELOPER'S persisted app config at import -- so the label assertions
+    below ('Pause', 'Paused', ...) would test the machine owner's language
+    setting, not the code, and go red on any Hebrew-configured machine while
+    CI stays green on its English default. Pin the language the assertions
+    are written in (precedent: test_libfilter_desktop.py:1217)."""
+    monkeypatch.setattr(genizah_core, 'CURRENT_LANG', 'en')
+
+
 
 class _FakeButton:
     def __init__(self):
