@@ -30,6 +30,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 
+pytestmark = pytest.mark.gui  # imports PyQt6: gui bucket only -- Qt in the mixed non-GUI run
+# segfaults after thousands of NiceGUI/asyncio tests share the process (2026-08-21).
+
 # PyQt6-aware fixture pattern mirroring tests/test_folder_walk_worker.py and
 # tests/test_my_library_tab_reset_guard.py (Phase 97.3-01 Task 1).
 try:

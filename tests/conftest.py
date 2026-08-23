@@ -524,3 +524,63 @@ def crash_telemetry_state(monkeypatch):
 
     _tel._reset_for_tests()
     _ph._reset_for_tests()
+
+
+# ---------------------------------------------------------------------------
+# NOTE (PR #324): a `_drain_qt_deferred_deletions` teardown fixture lived here
+# briefly -- it quiesced QTimers/QThreads and drained the posted-event queue
+# after each gui test. Removed on measurement: with the QApplication keeper
+# below plus one-process-per-file isolation (scripts/run_gui_tests.py), the
+# full per-file matrix ran 29 files with ZERO crashes without it -- while its
+# own processEvents() call was the thing dispatching stale queued signal
+# emissions into deleted widgets (measured: it CAUSED the
+# test_local_ceiling_enforcement.py crash it was meant to prevent). Do not
+# reintroduce event-queue draining in teardown; fix widget/worker lifetimes
+# in the desktop code instead.
+# The QApplication KEEPER (PR #324 per-file gui isolation, root cause).
+#
+# At least eight desktop test files carry this fixture shape:
+#
+#     @pytest.fixture(autouse=True)
+#     def _ensure_app():
+#         if QApplication.instance() is None:
+#             QApplication(sys.argv)          # <-- no reference kept
+#
+# The QApplication is a local temporary: the moment the fixture returns,
+# CPython's refcount hits zero, PyQt6 destroys the C++ application, and
+# `QApplication.instance()` is None again BY THE TIME THE TEST BODY RUNS.
+# The first QPixmap/QWidget after that hits Qt's fatal "must construct a
+# QGuiApplication" -- abort(), exit -6 on Linux and 0xC0000409 on Windows,
+# with no Python traceback at all.
+#
+# The bug was latent for as long as these files ran inside one big mixed
+# process: some EARLIER file always held a module-global app, so
+# `instance() is None` was False and the broken branch never executed.
+# Per-file gui processes removed the donor app and exposed it -- measured:
+# test_join_workbench_rotate.py and test_local_ceiling_enforcement.py abort
+# when run alone, on both platforms, at the first pixmap.
+#
+# Fix at the class level, not per file: before any gui-marked test, create
+# the application ourselves and KEEP the reference for the life of the
+# process. Every file fixture then finds a live instance and its unreferenced
+# branch becomes unreachable. Ordering does not matter: if this runs first,
+# the file fixture is a no-op; if the file fixture somehow ran first, its app
+# is already dead by now, instance() is None, and we create a kept one.
+_QT_APP_KEEPER: list = []
+
+
+@pytest.fixture(autouse=True)
+def _gui_app_keeper(request):
+    if "gui" in request.keywords:
+        try:
+            from PyQt6.QtWidgets import QApplication
+        except Exception:
+            pass
+        else:
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication(sys.argv or ["pytest"])
+            if app not in _QT_APP_KEEPER:
+                _QT_APP_KEEPER.append(app)
+    yield
+

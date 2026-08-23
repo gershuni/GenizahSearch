@@ -42,6 +42,9 @@ import time
 
 import pytest
 
+pytestmark = pytest.mark.gui  # imports PyQt6: gui bucket only -- Qt in the mixed non-GUI run
+# segfaults after thousands of NiceGUI/asyncio tests share the process (2026-08-21).
+
 # Path bootstrap so `desktop.my_library_tab` and `shared.*` are importable.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

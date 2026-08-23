@@ -44,6 +44,15 @@ from shared.browse_map_utils import (
     library_codes_with_manuscripts,
 )
 
+# Phase 145: passage-matching parallels search (fail-closed -- flag AND
+# a loaded index; see web/passage_assets.py).
+from web.passage_assets import passage_available, get_passage_searcher
+# Codex review finding #15: route the page's passage search through the
+# SAME bounded execution budget POST /api/parallels uses -- one semaphore,
+# one dedicated ThreadPoolExecutor, one timeout ceiling, for BOTH surfaces.
+from web.search_api import run_passage_search
+from shared.api_errors import APIError
+
 
 def get_source_display_name(ref: str) -> str:
     """Get a display name for a source reference."""
@@ -633,6 +642,59 @@ def create_parallels_page(initial_text: str = None):
                         deep_scan = ui.checkbox(tr('Deep Scan')).style('display: none;')
                         deep_scan.tooltip(tr('Exhaustive search - slower but finds more results'))
 
+                        # Method selector (owner ruling 2026-08-23): letter-level
+                        # search is the DEFAULT when available, chunk is the explicit
+                        # alternative -- a radio, no longer an opt-in checkbox. The flip
+                        # rests on the owner's own row-by-row grading of live GUI runs
+                        # (docs/specs/parallels-method-comparison.md, 2026-08-23
+                        # sections): precision 94%, recall parity with chunk-4 plus 7
+                        # novel verified witnesses, ~0.6s vs minutes. Visible ONLY when
+                        # passage_available() (flag AND a loaded index) -- a clean hide,
+                        # value pinned to 'chunk', when the index is not deployed.
+                        # Mutually exclusive with Lab Mode (both are "pick a different
+                        # backend" toggles; a request can only use one at a time).
+                        method_radio = ui.radio(
+                            options={
+                                'passage': tr('New! Letter-level search'),
+                                'chunk': tr('Chunk search (slower)'),
+                            },
+                            value='passage',
+                        ).props('inline dense')
+                        method_radio.tooltip(tr(
+                            'Letter-level search: fast, yields fewer irrelevant '
+                            'results, and tolerates transcription errors, nikkud '
+                            'and line breaks. Genizah corpus only.'
+                        ))
+
+                        def _letter_level_selected() -> bool:
+                            return method_radio.value == 'passage'
+
+                        # The letter-level controls row, mirroring how the chunk
+                        # controls sit beside their method. ONE control on purpose:
+                        # match width (density_scale) is the single knob measured to
+                        # matter -- min_span and min_anchors were swept and found
+                        # inert -- and a row of decorative dials would be dishonest.
+                        passage_width = ui.select(
+                            options={
+                                'standard-40': tr('Narrow (near-exact)'),
+                                'wide-40': tr('Medium width'),
+                                'wider-40': tr('Wide width'),
+                                'widest-40': tr('Widest (default)'),
+                                'max-40': tr('Maximal (may add noise)'),
+                            },
+                            value='widest-40',
+                            label=tr('Match width'),
+                        ).classes('w-44').props('outlined dense')
+                        passage_width.tooltip(tr(
+                            'How far a manuscript may drift from your text and '
+                            'still match. Wider finds more noisy witnesses; the '
+                            'strongest matches always rank first.'
+                        ))
+                        if not passage_available():
+                            method_radio.value = 'chunk'
+                            method_radio.style('display: none;')
+                            passage_width.style('display: none;')
+
                     # === Boundary Search Settings ===
                     with ui.row().classes('w-full items-center gap-4 flex-wrap mt-2'):
                         # Paragraph delimiter (always editable - affects display even in full mode)
@@ -774,6 +836,17 @@ def create_parallels_page(initial_text: str = None):
                             freq_threshold_row.style('display: none;')
                             # Higher default for composition/lab mode
                             min_chunks_input.value = 3
+                            # Phase 145: Lab Mode and passage matching are two
+                            # different backends -- mutually exclusive, like the
+                            # incumbent-vs-Lab choice already is.
+                            if _letter_level_selected():
+                                method_radio.value = 'chunk'
+                                # NiceGUI does not fire 'update:model-value' for
+                                # a programmatic .value assignment (only for a
+                                # real user click), so on_passage_mode_change's
+                                # boundary_mode re-enable would otherwise never
+                                # run -- call it explicitly.
+                                on_passage_mode_change()
                         else:
                             deep_scan.style('display: none;')
                             freq_threshold_row.style('display: block;')
@@ -781,6 +854,49 @@ def create_parallels_page(initial_text: str = None):
                             min_chunks_input.value = 1
 
                     lab_mode.on('update:model-value', on_lab_mode_change)
+
+                    # Phase 145: passage-matching toggle handler -- reciprocal
+                    # mutual exclusivity with Lab Mode.
+                    def on_passage_mode_change():
+                        if _letter_level_selected() and lab_mode.value:
+                            lab_mode.value = False
+                            on_lab_mode_change()
+                        if _letter_level_selected():
+                            passage_width.style('display: inline-flex;')
+                            # Finding #2 (adversarial review): passage-matching
+                            # has no cross-paragraph/token-boundary concept --
+                            # PassageSearcher raises ValueError for anything but
+                            # 'full', and web/search_api.py rejects it with 400
+                            # 'passage_option_unsupported'. Forcing + disabling
+                            # here means the UI can never even SEND the
+                            # unsupported value, rather than relying only on
+                            # that rejection.
+                            boundary_mode.value = 'full'
+                            boundary_mode.disable()
+                            # Codex review finding #13(c): chunk_size/mode/
+                            # max_freq are likewise inert for passage (no
+                            # sliding-window chunk, no morphological-variant
+                            # matching, no per-chunk frequency signal) --
+                            # web/search_api.py rejects a non-default value of
+                            # any of them with the same 400
+                            # 'passage_option_unsupported', so these must be
+                            # forced to their defaults and disabled too,
+                            # exactly like boundary_mode above.
+                            chunk_size.value = 5
+                            chunk_size.disable()
+                            mode_select.value = 'exact'
+                            on_mode_change()  # hide variant_controls_col if it was showing
+                            mode_select.disable()
+                            freq_threshold.value = 50
+                            freq_threshold.disable()
+                        else:
+                            passage_width.style('display: none;')
+                            boundary_mode.enable()
+                            chunk_size.enable()
+                            mode_select.enable()
+                            freq_threshold.enable()
+
+                    method_radio.on('update:model-value', on_passage_mode_change)
 
                     # Initialize help text
                     update_boundary_help()
@@ -891,6 +1007,19 @@ def create_parallels_page(initial_text: str = None):
                             format='%d'
                         ).classes('w-24').props('outlined dense')
                         ui.label(tr('Minimum matching chunks per manuscript')).classes('text-xs').style('color: var(--text-muted);')
+
+                    # Apply the default-selected method's control state on
+                    # load: letter-level is pre-selected when available, so
+                    # the chunk controls must START disabled rather than wait
+                    # for a first toggle. This call sits HERE -- after
+                    # mode_select (defined above), chunk_size and
+                    # freq_threshold (the sliders above) -- because the
+                    # handler closes over all three and an earlier call site
+                    # crashed the whole page with NameError at build time
+                    # (owner-reported, 2026-08-23): the widgets are created
+                    # BELOW the selector block, and only a real render
+                    # executes this path -- a source-text pin cannot.
+                    on_passage_mode_change()
 
                     ui.separator().classes('my-2')
 
@@ -2591,6 +2720,17 @@ def create_parallels_page(initial_text: str = None):
 
         # Capture search mode settings in main thread
         captured_lab_mode = lab_mode.value
+        # Phase 145: re-check passage_available() here too (not just at widget
+        # build time) -- a request in flight when the passage index becomes
+        # unavailable must degrade to "not selected", never crash run_search().
+        captured_passage_mode = _letter_level_selected() and passage_available() and not captured_lab_mode
+        captured_passage_width = passage_width.value or 'widest-40'
+        # Phase 145 finding #10 (adversarial review): computed ONCE here
+        # rather than the 'lab'/'passage'/'chunk' ternary being written twice
+        # (PostHog capture + composition-history params) below.
+        captured_engine = 'lab' if captured_lab_mode else (
+            'passage' if captured_passage_mode else 'chunk'
+        )
         captured_freq_threshold = int(freq_threshold.value) if freq_threshold.value else 50
         captured_deep_scan = deep_scan.value if captured_lab_mode else False
         captured_chunk_size = int(chunk_size.value) if chunk_size.value else 5
@@ -2714,7 +2854,74 @@ def create_parallels_page(initial_text: str = None):
                 logger.exception(f"Parallels Error: {e}")
                 return None
 
-        result_data = await run.io_bound(run_search)
+        def _run_passage_search_sync():
+            """PASSAGE MATCHING (Phase 145, beta): character-level engine,
+            tolerant of OCR noise / reflowed line breaks. Constructed fresh
+            here (cheap -- no I/O, the index is already open) and never when
+            the index is unavailable, per
+            web/passage_assets.py::get_passage_searcher's contract.
+
+            Deliberately NOT wrapped in its own try/except -- run_search()
+            above swallows InterruptedError/Exception itself because it
+            dispatches via run.io_bound with no other error channel; this
+            function instead lets exceptions propagate through
+            run_passage_search so the await site below (still on THIS
+            coroutine, not a background thread) can distinguish a budget
+            APIError (busy/timeout -> a translated notification) from any
+            other failure.
+            """
+            passage_searcher = get_passage_searcher(
+                state.searcher, preset=captured_passage_width)
+            if passage_searcher is None:
+                return None
+            return passage_searcher.search_composition_logic(
+                text,
+                chunk_size=captured_chunk_size,
+                max_freq=captured_freq_threshold,
+                mode=captured_mode,
+                filter_text=captured_filter_text or None,
+                progress_callback=progress_cb,
+                boundary_mode=captured_boundary_mode,
+                boundary_delimiter=captured_boundary_delimiter,
+                boundary_boost=captured_boundary_boost,
+                min_boundary_matches=captured_min_boundary_matches,
+                min_delimiter_distance=captured_min_delimiter_distance,
+                restrict_sys_ids=captured_restrict_sys_ids,
+            )
+
+        if captured_passage_mode:
+            # Codex review finding #15: route through the SAME bounded
+            # execution budget POST /api/parallels uses for method='passage'
+            # (semaphore capacity 4 + its own dedicated ThreadPoolExecutor +
+            # SEARCH_API_PASSAGE_TIMEOUT) -- never run.io_bound's generic,
+            # unbounded pool. run_passage_search is awaited directly from
+            # THIS coroutine (it manages its own off-loop dispatch via
+            # run_in_executor internally); all ui.*/safe_user_* interaction
+            # stays on THIS side of the await (repo memory: NiceGUI
+            # background execution loses context -- ui.* calls from a raw
+            # executor thread RAISE, and safe_user_* reads silently degrade
+            # to {} -- _run_passage_search_sync itself does neither).
+            try:
+                result_data = await run_passage_search(_run_passage_search_sync)
+            except APIError as exc:
+                if exc.code == 'passage_search_busy':
+                    ui.notify(
+                        tr('Letter-level search is busy right now — please try again in a moment.'),
+                        type='warning',
+                    )
+                elif exc.code == 'core_timeout':
+                    ui.notify(
+                        tr('Letter-level search timed out — try a shorter text.'),
+                        type='negative',
+                    )
+                else:
+                    ui.notify(tr('Letter-level search failed.'), type='negative')
+                result_data = None
+            except Exception as e:
+                logger.exception(f"Parallels Error (passage): {e}")
+                result_data = None
+        else:
+            result_data = await run.io_bound(run_search)
 
         p_state.is_running = False
         p_state.progress = 1.0
@@ -2737,6 +2944,46 @@ def create_parallels_page(initial_text: str = None):
             filtered_results = result_data.get('filtered', [])
             is_partial = result_data.get('partial', False)
 
+            # PR #324 round 4: a capped passage search must say so HERE too.
+            # The API path warns (`passage_results_truncated`), and this
+            # direct page path was the one product caller still discarding
+            # `query_report` -- so a GUI user could mistake capped results
+            # for exhaustive ones. Only the two states that truncate the
+            # RESULT SET notify; postings exclusion is routine budget
+            # behaviour on long queries and would make the notice fire on
+            # nearly every request. (duplicate_photography_demoted rows need
+            # no notify: they are visible in the filtered section itself.)
+            _qrep = result_data.get('query_report') or {}
+            if _qrep.get('candidates_truncated') or _qrep.get('verify_truncated'):
+                # Info, not warning, and it says what actually happened
+                # (owner ruling 2026-08-23). The first wording -- "results
+                # may be incomplete" -- fired on virtually every common-
+                # phrase query, and the Dror Yikra measurement showed a
+                # firing where uncapped verification of all 26,164
+                # candidates changed NOTHING: candidates are verified
+                # strongest-evidence-first, so what the cap skips is the
+                # weakest tail. An alarm that cries wolf on famous piyyutim
+                # teaches users to distrust the engine (the first real user
+                # hit exactly this and reported it as a bug).
+                ui.notify(
+                    tr('Letter-level search checked the {n} best-evidenced '
+                       'candidates of {m}.').format(
+                        n=f"{_qrep.get('verified', 0):,}",
+                        m=f"{_qrep.get('candidates', 0):,}"),
+                    type='info',
+                )
+            # PR #324 round 5: the searcher's group-cap flag used to be
+            # discarded entirely, so a >200-manuscript passage query looked
+            # complete. Same info-not-alarm register as above.
+            if result_data.get('truncated_to_200'):
+                from shared.parallels_service import PARALLELS_GROUP_CAP
+                ui.notify(
+                    tr('Letter-level search matched more than {cap} manuscripts '
+                       '— showing the strongest {cap}.').format(
+                        cap=PARALLELS_GROUP_CAP),
+                    type='info',
+                )
+
             if main_results or filtered_results:
                 p_state.results = main_results
                 p_state.filtered_results = filtered_results
@@ -2751,6 +2998,9 @@ def create_parallels_page(initial_text: str = None):
                     'duration_seconds': round(total_elapsed, 1),
                     'is_partial': is_partial,
                     'mode': captured_mode,
+                    # Phase 145: which backend actually served this search --
+                    # 'lab' / 'passage' / 'chunk' (the pre-existing default).
+                    'engine': captured_engine,
                 })
 
                 try:
@@ -2829,6 +3079,11 @@ def create_parallels_page(initial_text: str = None):
                         params={
                             'chunk_size': int(chunk_size.value) if chunk_size.value else 5,
                             'mode': mode_select.value or 'exact',
+                            # Phase 145: record-only (history restore does not
+                            # re-select any engine toggle today -- lab_mode
+                            # included -- so this is observability, not a
+                            # restore contract).
+                            'engine': captured_engine,
                             'filters': {
                                 'domains': p_state.filter_domains,
                                 'authors': p_state.filter_authors,
