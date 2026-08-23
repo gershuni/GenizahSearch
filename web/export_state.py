@@ -751,6 +751,75 @@ def get_parallels_export() -> Optional[Dict[str, Any]]:
     return compacted
 
 
+def _same_parallels_search(existing_meta: Dict[str, Any],
+                           offered_meta: Dict[str, Any]) -> bool:
+    """One identity rule for "is this payload from the SAME search?".
+
+    PR #325 review round 2 (Codex P2): source_text alone is too weak -- two
+    tabs of one user can search identical text with different widths, modes
+    or filters, and app.storage.user holds whichever tab wrote last, so a
+    source_text-only match let one tab's restore preserve (or recover) the
+    OTHER tab's rows. Fresh searches now stamp a `search_fingerprint` (a
+    stable hash over text + engine + width + chunk/mode/freq + filters);
+    when BOTH sides carry one, the fingerprints decide. The source_text
+    fallback survives only for payloads written before the fingerprint
+    existed -- weaker, but strictly no weaker than the behaviour it replaces.
+    """
+    a = (existing_meta or {}).get('search_fingerprint')
+    b = (offered_meta or {}).get('search_fingerprint')
+    if a and b:
+        return a == b
+    return ((existing_meta or {}).get('source_text')
+            == (offered_meta or {}).get('source_text'))
+
+
+def recover_richer_parallels_rows(
+    results: List[Dict[str, Any]],
+    filtered: List[Dict[str, Any]],
+    meta: Optional[Dict[str, Any]] = None,
+) -> tuple:
+    """-> (results, filtered, recovered). Display recovery after a reload.
+
+    The display snapshot is 500 rows by design; the export payload persists
+    up to 5,000 rows of the SAME search and survives the reload. Payload rows
+    are display-safe by construction: after every fresh search the page
+    stores exactly these compacted rows as its own display state
+    (web/pages/parallels.py, compact_parallels_result_rows). So when the
+    payload is the same search and holds more, the page should show IT, not
+    the trimmed snapshot -- recovering the pager's tail instead of merely
+    apologising for losing it.
+
+    Never mixes searches (_same_parallels_search) and never downgrades: on
+    any mismatch or a smaller payload, the offered rows come back unchanged.
+    """
+    existing = get_parallels_export()
+    if (isinstance(existing, dict)
+            and _same_parallels_search(existing.get('meta') or {}, meta or {})
+            and len(existing.get('results') or []) > len(results or [])):
+        return (existing.get('results') or [],
+                existing.get('filtered') or [], True)
+    return (results or [], filtered or [], False)
+
+
+def parallels_restore_shortfall(
+    snapshot: Dict[str, Any],
+    results: List[Dict[str, Any]],
+    filtered: List[Dict[str, Any]],
+) -> tuple:
+    """-> (shown, recorded_total) across BOTH buckets.
+
+    PR #325 round 2 (Codex P2): the restore notice compared only
+    results_total, so a search whose FILTERED bucket lost its tail to the
+    snapshot cap was announced as complete. One helper owns the arithmetic
+    so the both-buckets rule is unit-testable instead of living inline in a
+    page closure no test executes.
+    """
+    total = (int((snapshot or {}).get('results_total') or 0)
+             + int((snapshot or {}).get('filtered_total') or 0))
+    shown = len(results or []) + len(filtered or [])
+    return shown, total
+
+
 def preserve_or_set_parallels_export(
     results: List[Dict[str, Any]],
     filtered: List[Dict[str, Any]],
@@ -775,10 +844,8 @@ def preserve_or_set_parallels_export(
     """
     existing = get_parallels_export()
     if isinstance(existing, dict):
-        existing_src = (existing.get('meta') or {}).get('source_text')
-        offered_src = (meta or {}).get('source_text')
         existing_rows = existing.get('results') or []
-        if (existing_src == offered_src
+        if (_same_parallels_search(existing.get('meta') or {}, meta or {})
                 and len(existing_rows) >= len(results or [])):
             return False
     set_parallels_export(results=results, filtered=filtered, meta=meta)

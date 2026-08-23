@@ -917,3 +917,103 @@ def test_restore_still_writes_when_nothing_would_be_lost(monkeypatch):
         results=[_result(i) for i in range(20)], filtered=[],
         meta={'source_text': 'a'}) is True
     assert len(get_parallels_export()['results']) == 20
+
+
+# ---------------------------------------------------------------------------
+# PR #325 round 2 (Codex P2): search identity is the fingerprint, not the
+# text -- and the display recovers the payload's tail on reload.
+# ---------------------------------------------------------------------------
+
+def test_same_text_different_search_is_never_preserved(monkeypatch):
+    """Two tabs, identical text, different width: whichever wrote last owns
+    app.storage.user, and the other tab's restore must NOT preserve (or
+    recover) it. This is the exact cross-tab poisoning the round-2 review
+    named."""
+    storage = {}
+    _install_stub(monkeypatch, storage)
+    from web.export_state import (
+        get_parallels_export, preserve_or_set_parallels_export,
+        recover_richer_parallels_rows, set_parallels_export,
+    )
+
+    # Tab A wrote last: same text, width 1.8, 300 rows.
+    set_parallels_export(
+        results=[_result(i) for i in range(300)], filtered=[],
+        meta={'source_text': 'same', 'search_fingerprint': 'fp-tab-A'})
+
+    # Tab B reloads: same text, width 1.0, offering its 50-row snapshot.
+    meta_b = {'source_text': 'same', 'search_fingerprint': 'fp-tab-B'}
+    r, f, recovered = recover_richer_parallels_rows(
+        [_result(i) for i in range(50)], [], meta=meta_b)
+    assert recovered is False and len(r) == 50, (
+        "tab B recovered tab A's rows -- different searches were mixed"
+    )
+    assert preserve_or_set_parallels_export(
+        results=r, filtered=f, meta=meta_b) is True, (
+        "tab B preserved tab A's payload instead of writing its own"
+    )
+    assert get_parallels_export()['meta']['search_fingerprint'] == 'fp-tab-B'
+
+
+def test_reload_recovers_the_pager_tail_from_the_payload(monkeypatch):
+    """Same search (fingerprints match): the 500-row snapshot recovers the
+    full 594-row payload for DISPLAY, and the preserve guard then keeps the
+    payload untouched."""
+    storage = {}
+    _install_stub(monkeypatch, storage)
+    from web.export_state import (
+        preserve_or_set_parallels_export, recover_richer_parallels_rows,
+        set_parallels_export,
+    )
+
+    meta = {'source_text': 'birkat', 'search_fingerprint': 'fp-1'}
+    set_parallels_export(results=[_result(i) for i in range(594)],
+                         filtered=[_result(1000 + i) for i in range(68)],
+                         meta=meta)
+    r, f, recovered = recover_richer_parallels_rows(
+        [_result(i) for i in range(500)], [], meta=meta)
+    assert recovered is True and len(r) == 594 and len(f) == 68
+    assert preserve_or_set_parallels_export(results=r, filtered=f,
+                                            meta=meta) is False
+
+
+def test_legacy_payload_without_fingerprint_still_matches_on_text(monkeypatch):
+    """Payloads written before the fingerprint existed carry only
+    source_text; the fallback must keep preserving them rather than
+    clobbering every pre-upgrade session on its first reload."""
+    storage = {}
+    _install_stub(monkeypatch, storage)
+    from web.export_state import (
+        get_parallels_export, preserve_or_set_parallels_export,
+        set_parallels_export,
+    )
+
+    set_parallels_export(results=[_result(i) for i in range(300)],
+                         filtered=[], meta={'source_text': 'legacy'})
+    assert preserve_or_set_parallels_export(
+        results=[_result(i) for i in range(200)], filtered=[],
+        meta={'source_text': 'legacy',
+              'search_fingerprint': 'fp-new'}) is False, (
+        'a legacy same-text payload was clobbered by the fingerprint rule'
+    )
+    assert len(get_parallels_export()['results']) == 300
+
+
+def test_restore_shortfall_counts_the_filtered_bucket_too(monkeypatch):
+    """A search with 400 main rows (fully restored) and 800 filtered rows
+    (trimmed to 500) lost 300 rows -- and the first notice condition, which
+    read only results_total, called that complete."""
+    from web.export_state import parallels_restore_shortfall
+
+    snapshot = {'results_total': 400, 'filtered_total': 800}
+    shown, total = parallels_restore_shortfall(
+        snapshot, [_result(i) for i in range(400)],
+        [_result(i) for i in range(500)])
+    assert (shown, total) == (900, 1200)
+    assert total > shown, 'the filtered-bucket shortfall was invisible'
+
+    # And no false alarm when everything came back.
+    shown2, total2 = parallels_restore_shortfall(
+        {'results_total': 10, 'filtered_total': 5},
+        [_result(i) for i in range(10)], [_result(i) for i in range(5)])
+    assert total2 == shown2

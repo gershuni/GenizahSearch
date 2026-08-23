@@ -318,6 +318,7 @@ def create_parallels_page(initial_text: str = None):
                 # instead of silently presenting 500 as everything.
                 'results_total': len(p_state.results),
                 'filtered_total': len(p_state.filtered_results or []),
+                'search_fingerprint': getattr(p_state, 'search_fingerprint', '') or '',
                 'domain_exclusions': sorted(p_state.domain_exclusions),
                 'excluded_manuscript_ids': sorted(p_state.excluded_manuscript_ids),
                 'source_text': text_input.value if 'text_input' in locals() else decoded_text,
@@ -394,6 +395,22 @@ def create_parallels_page(initial_text: str = None):
             # handlers can echo it in the envelope without falling back to a legacy storage key.
             _snapshot_source_text = _active_snapshot.get('source_text', '') or ''
             _snapshot_meta = {'source_text': _snapshot_source_text}
+            _snapshot_fp = _active_snapshot.get('search_fingerprint') or ''
+            if _snapshot_fp:
+                _snapshot_meta['search_fingerprint'] = _snapshot_fp
+                p_state.search_fingerprint = _snapshot_fp
+            # Display recovery (PR #325 round 2, adopting the reviewer's
+            # suggestion on its merits): the export payload persists up to
+            # 5,000 rows of the SAME search and its rows ARE the display
+            # shape (the page stores exactly these compacted rows as its
+            # own state after every fresh search) -- so a reload recovers
+            # the pager's tail from it instead of apologising for the
+            # snapshot's deliberate 500-row cap.
+            from web.export_state import recover_richer_parallels_rows
+            p_state.results, p_state.filtered_results, _recovered = (
+                recover_richer_parallels_rows(
+                    p_state.results, p_state.filtered_results,
+                    meta=_snapshot_meta))
             # PR #325 review (Codex P2): the display snapshot is 500 rows by
             # design, but the FULL export payload (up to 5,000 rows) survives
             # the reload in app.storage.user. Overwriting it with the display
@@ -409,12 +426,20 @@ def create_parallels_page(initial_text: str = None):
             # And the DISPLAY truncation stops being silent: the snapshot
             # records the true totals, so a trimmed restore says what it
             # trimmed and how to get it back (a passage re-run is <1s).
-            _restored_total = int(_active_snapshot.get('results_total') or 0)
-            if _restored_total > len(p_state.results):
+            # Filtered-aware (PR #325 round 2, Codex P2): a search whose
+            # FILTERED bucket lost its tail was announced as complete when
+            # only results_total was compared. Both buckets count, and the
+            # arithmetic lives in a unit-tested helper -- the first version
+            # sat inline in this closure, its "mutation proof" matched zero
+            # tests, and pytest's exit-5 masqueraded as red in the harness.
+            from web.export_state import parallels_restore_shortfall
+            _restored_shown, _restored_total = parallels_restore_shortfall(
+                _active_snapshot, p_state.results, p_state.filtered_results)
+            if _restored_total > _restored_shown:
                 ui.notify(
                     tr('Restored {shown} of {total} results from the last '
                        'search — run the search again for the full list.'
-                       ).format(shown=len(p_state.results),
+                       ).format(shown=_restored_shown,
                                 total=_restored_total),
                     type='info',
                 )
@@ -3056,8 +3081,26 @@ def create_parallels_page(initial_text: str = None):
                         'text_any': list(getattr(p_state, 'filter_text_any', None) or []),
                         'text_not': list(getattr(p_state, 'filter_text_not', None) or []),
                     } if _has_active_filters() else None
+                    # Search identity fingerprint (PR #325 round 2, Codex P2):
+                    # source_text alone cannot tell two same-text searches
+                    # with different widths/modes/filters apart, and the
+                    # preserve/recover logic must never mix them across tabs.
+                    import hashlib as _hashlib
+                    import json as _json
+                    _search_fingerprint = _hashlib.sha256(_json.dumps({
+                        'text': text_input.value or '',
+                        'engine': captured_engine,
+                        'width': captured_passage_width,
+                        'chunk_size': captured_chunk_size,
+                        'mode': captured_mode,
+                        'max_freq': captured_freq_threshold,
+                        'filters': _parallels_filters,
+                    }, ensure_ascii=False, sort_keys=True,
+                        default=str).encode('utf-8')).hexdigest()[:16]
+                    p_state.search_fingerprint = _search_fingerprint
                     _parallels_search_meta = {
                         'source_text': text_input.value or '',
+                        'search_fingerprint': _search_fingerprint,
                         'chunk_size': captured_chunk_size,
                         'mode': captured_mode,
                         'max_freq': float(captured_freq_threshold) if captured_freq_threshold is not None else None,
