@@ -3681,6 +3681,49 @@ class SearchEngine:
             LOGGER.warning("Failed to retrieve full text for uid %s: %s", uid, e)
         return None
 
+    def get_full_text_by_header(self, full_header):
+        """Fetch a page's stored `content` by its exact `full_header` value.
+
+        Phase 145 (passage-matching parallels search): the passage index
+        identifies a record by the same corpus-record id the Tantivy
+        `full_header` field stores verbatim (`shared/passage_corpus.py`'s
+        ``==> {sys_id}_{IE..}_{P######}_{FL..} <==`` header, stripped of its
+        arrows -- byte-identical to `full_header` since both are produced
+        from the same source line by the same strip). This mirrors
+        `get_full_text_by_id` exactly, just keyed on `full_header` instead of
+        `unique_id` (a phrase query on the header field, verified elsewhere
+        in this module at lines querying `full_header:"{sid}"`); a defensive
+        exact-match check guards against a same-prefix collision within the
+        phrase-query hit set.
+
+        `full_header` is validated against a closed character set BEFORE it
+        is interpolated into the Tantivy query string (adversarial review
+        finding #6): every real header is `[A-Za-z0-9_]+` by construction
+        (sys_id/IE/P/FL digits and letters joined by underscores -- see
+        shared/passage_corpus.py's HEADER_RE), so a value outside that set
+        cannot be a real header, and rejecting it before it reaches
+        `parse_query` closes the query-injection surface a directly-crafted
+        `record_id` (e.g. from a malformed or adversarial artifact) would
+        otherwise open. The rejected value itself is never logged --
+        untrusted input in a log line is its own hazard.
+        """
+        if not full_header or not re.match(r'^[A-Za-z0-9_]+$', full_header):
+            LOGGER.warning(
+                "get_full_text_by_header: rejecting a header outside the "
+                "[A-Za-z0-9_]+ character set (value withheld)"
+            )
+            return None
+        try:
+            q = self.index.parse_query(f'full_header:"{full_header}"', ["full_header"])
+            res = self.searcher.search(q, 5)
+            for _score, doc_addr in res.hits:
+                doc = self.searcher.doc(doc_addr)
+                if doc['full_header'][0] == full_header:
+                    return doc['content'][0]
+        except Exception as e:
+            LOGGER.warning("Failed to retrieve full text for header %s: %s", full_header, e)
+        return None
+
     def get_full_manuscript(self, sys_id):
         """Fetch ALL pages for a system ID, sorted by page number."""
         browse_map = self._load_browse_map()

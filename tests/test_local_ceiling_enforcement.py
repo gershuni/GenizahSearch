@@ -22,9 +22,15 @@ try:
 except ImportError:
     QT_AVAILABLE = False
 
-pytestmark = pytest.mark.skipif(
+pytestmark = [
+    pytest.mark.skipif(
     not QT_AVAILABLE, reason="PyQt6 not available"
-)
+),
+    # imports PyQt6: gui bucket only -- Qt in the mixed non-GUI
+    # run segfaults after thousands of NiceGUI/asyncio tests
+    # share the process (2026-08-21).
+    pytest.mark.gui,
+]
 
 
 @pytest.fixture(autouse=True)

@@ -1962,3 +1962,35 @@ moved out of `genizah_core.py` (→ `shared/*`) and `genizah_app.py` (→ `deskt
     - Method `execute_update` (Line 352) — Run the installer in silent mode (Windows only).
     - Method `on_cancel` (Line 417) — Handle cancel button click.
     - Method `closeEvent` (Line 432) — Handle dialog close event.
+
+## Phase 145 — Passage-Matching Parallels Search (web beta)
+
+`shared/passage_parallels.py` and `web/passage_assets.py`, added for the
+`method='passage'` option on `POST /api/parallels` (see CLAUDE.md's Key
+Files list and docs/SEARCH_API.md for the feature). `web/pages/parallels.py`
+gained a method selector beside the pre-existing Lab Mode toggle
+(`passage_mode` checkbox, `on_passage_mode_change`) but is not separately
+indexed here (too large; grep it directly, per this file's existing
+convention for `web/pages/search.py` / `web/pages/browse.py`).
+
+## shared/passage_parallels.py
+
+- **Function** `_derive_uid` (Line 145)
+- **Function** `_extract_sys_id` (Line 150)
+- **Class** `_RegexSysIdParser` (Line 155) — Minimal `UidComponentParser` (shared/parallels_service.py's Protocol)
+    - Method `parse_full_id_components` (Line 166)
+- **Function** `_highlight_span` (Line 170) — Build a `*match*`-marked snippet around normalized-stream span
+- **Class** `PageTextFetcher` (Line 202) — Structural type for the injected text source (SEED-016 #3 style).
+    - Method `get_full_text_by_header` (Line 214)
+- **Class** `PassageSearcher` (Line 219) — A `CompositionSearcher` (shared/parallels_service.py) backed by the
+    - Method `__post_init__` (Line 235)
+    - Method `search_composition_logic` (Line 241) — Same parameter names/order as
+    - Method `_is_source_text_filtered` (Line 357) — True when the query-side text of ANY span matched on `hit` also
+    - Method `_render_highlights` (Line 378) — Fill in `text` / `source_ctx` / `chunk_hits` for ONE row (either a
+
+## web/passage_assets.py
+
+- **Class** `_PassageState` (Line 71)
+- **Function** `load_passage_state` (Line 80) — Open + validate the passage index ONCE at startup.
+- **Function** `passage_available` (Line 116) — The ONE predicate any future passage-matching surface must gate on.
+- **Function** `get_passage_searcher` (Line 127) — A fresh ``PassageSearcher``, or ``None`` when unavailable.

@@ -12,6 +12,9 @@ needs a real QApplication; run locally with `pytest tests/test_my_library_tab_op
 """
 import pytest
 
+pytestmark = pytest.mark.gui  # imports PyQt6: gui bucket only -- Qt in the mixed non-GUI run
+# segfaults after thousands of NiceGUI/asyncio tests share the process (2026-08-21).
+
 pytest.importorskip("PyQt6.QtWidgets")
 from PyQt6.QtCore import Qt  # noqa: E402
 from PyQt6.QtWidgets import QApplication, QTreeWidgetItem  # noqa: E402

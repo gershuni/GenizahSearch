@@ -16,6 +16,11 @@ _app = QApplication.instance() or QApplication([])
 
 from desktop.my_library_tab import MyLibraryTab, SchemaRebuildWorker  # noqa: E402
 
+import pytest
+
+pytestmark = pytest.mark.gui  # imports PyQt6: gui bucket only -- Qt in the mixed non-GUI run
+# segfaults after thousands of NiceGUI/asyncio tests share the process (2026-08-21).
+
 
 class _StubIndexer:
     def __init__(self, ready=True, boom=False):
