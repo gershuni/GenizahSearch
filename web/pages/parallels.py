@@ -2713,13 +2713,25 @@ def create_parallels_page(initial_text: str = None):
             run_btn.enable()
             return
 
-        # Update variant level and max changes from UI before search
+        # Update variant level and max changes from UI before search.
+        # Round 5 (Codex P2): capture BOTH values here, at dispatch -- the
+        # variant controls stay enabled during the await, and a fingerprint
+        # reading the live widgets afterwards could describe an edited
+        # configuration the engine never used, colliding with a tab that
+        # really searched it. The captures below are, by construction, the
+        # exact values that initialized the engine.
+        captured_variant_level = None
+        captured_variant_max_changes = None
         if mode_select.value == 'variants' and state.var_mgr:
             # Get pairs count from preset or slider
-            pairs_count = int(variant_slider.value) if variant_slider else current_preset['value']
-            state.var_mgr.set_variant_level(pairs_count)
+            captured_variant_level = (int(variant_slider.value)
+                                      if variant_slider
+                                      else current_preset['value'])
+            state.var_mgr.set_variant_level(captured_variant_level)
             if state.lab_engine and state.lab_engine.settings:
-                state.lab_engine.settings.variant_max_changes = int(max_changes_select.value)
+                captured_variant_max_changes = int(max_changes_select.value)
+                state.lab_engine.settings.variant_max_changes = (
+                    captured_variant_max_changes)
 
         # Reset state
         p_state.is_running = True
@@ -3139,15 +3151,12 @@ def create_parallels_page(initial_text: str = None):
                         'boundary_boost': captured_boundary_boost,
                         'min_boundary_matches': captured_min_boundary_matches,
                         'min_delimiter_distance': captured_min_delimiter_distance,
-                        # Effective only for mode='variants'; None otherwise so
-                        # a stale widget value cannot split identical searches.
-                        'variant_level': (
-                            (int(variant_slider.value) if variant_slider
-                             else current_preset['value'])
-                            if captured_mode == 'variants' else None),
-                        'variant_max_changes': (
-                            int(max_changes_select.value)
-                            if captured_mode == 'variants' else None),
+                        # Captured at dispatch alongside the engine
+                        # setup (round 5, Codex P2); None outside variants
+                        # mode so a stale widget value cannot split
+                        # identical searches.
+                        'variant_level': captured_variant_level,
+                        'variant_max_changes': captured_variant_max_changes,
                         # library 'hide' filters rows AFTER the search, right
                         # before export -- it is part of what the user sees.
                         'library_mode': p_state.library_mode,

@@ -422,6 +422,19 @@ def test_fingerprint_canonicalizes_every_set_like_input():
         'the raw (selection-ordered) filters dict leaked into the hash')
 
 
+def test_fingerprint_reads_no_live_widget():
+    """Round 5 (Codex P2): only the Run button is disabled during the
+    await -- the variant controls (and any other widget) stay editable, so
+    ANY `.value` read inside the fingerprint dict describes post-edit state
+    the engine never used. Everything must come from dispatch-time
+    captures. (`current_preset['value']` is a dict key, not a widget read,
+    and would not match this pin anyway.)"""
+    slice_ = _fingerprint_dict_slice()
+    offenders = [ln.strip() for ln in slice_.splitlines() if '.value' in ln]
+    assert not offenders, (
+        'live widget read(s) inside the fingerprint dict: ' + repr(offenders))
+
+
 def test_fingerprint_and_meta_use_the_dispatched_text():
     """Round 4 (Codex P2): the textarea stays editable during the await, so
     reading text_input.value after it fingerprints text that was never
