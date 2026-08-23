@@ -192,3 +192,62 @@ def test_passage_branch_handles_busy_and_timeout_with_translated_messages():
     assert all(call == 'tr(' for call in notify_calls), (
         f'every ui.notify message in the passage branch must go through '
         f'tr() -- found raw-string call(s): {notify_calls}')
+
+
+# ---------------------------------------------------------------------------
+# PR #324 round 4: the page must surface passage truncation, and every
+# passage-UI string must actually be translated.
+# ---------------------------------------------------------------------------
+
+def test_page_notifies_on_a_truncated_passage_search():
+    """The API path warns (`passage_results_truncated`); this direct page
+    path was the one product caller still discarding `query_report`, so a
+    GUI user could mistake capped results for exhaustive ones. Source-text
+    assertion, same style as the run_passage_search gate above."""
+    src = _read_source()
+    assert "result_data.get('query_report')" in src, (
+        'the page never reads query_report -- truncation is invisible to '
+        'GUI users while the API path warns'
+    )
+    idx = src.index("result_data.get('query_report')")
+    after = src[idx:idx + 700]
+    assert "candidates_truncated" in after and "verify_truncated" in after
+    assert 'ui.notify(' in after, 'reading the report without telling anyone'
+
+
+def test_every_passage_ui_string_has_a_hebrew_translation():
+    """Phase 145 shipped its passage strings untranslated -- Hebrew users got
+    English notifies (found in PR #324 round 4). Pin every passage tr()
+    string on the page to a real Hebrew entry so the leak class cannot
+    recur silently."""
+    import re as _re
+
+    from genizah_translations import TRANSLATIONS
+
+    src = _read_source()
+    # Every tr('...') literal mentioning passage, with implicit-concat parts
+    # joined the way Python joins them.
+    calls = _re.findall(
+        r"tr\(\s*((?:'[^']*'\s*)+)\)", src)
+    passage_strings = set()
+    for parts in calls:
+        joined = ''.join(_re.findall(r"'([^']*)'", parts))
+        if 'assage' in joined:  # Passage/passage
+            passage_strings.add(joined)
+    assert passage_strings, 'the extractor matched nothing -- vacuous gate'
+    missing = sorted(s for s in passage_strings if s not in TRANSLATIONS)
+    assert not missing, (
+        'passage UI strings with no Hebrew translation (Hebrew users get '
+        'English): ' + repr(missing)
+    )
+
+
+def test_the_truncation_string_used_matches_its_translation_key():
+    """The notify builds its string by implicit concatenation; a one-space
+    drift between the source and the translations key silently reverts
+    Hebrew users to English. Pin the exact joined string."""
+    from genizah_translations import TRANSLATIONS
+
+    key = ('Some passage results were cut off by a search cap '
+           '— the list may be incomplete.')
+    assert key in TRANSLATIONS, 'the exact notify string must be a key'

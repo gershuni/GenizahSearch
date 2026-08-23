@@ -2887,6 +2887,23 @@ def create_parallels_page(initial_text: str = None):
             filtered_results = result_data.get('filtered', [])
             is_partial = result_data.get('partial', False)
 
+            # PR #324 round 4: a capped passage search must say so HERE too.
+            # The API path warns (`passage_results_truncated`), and this
+            # direct page path was the one product caller still discarding
+            # `query_report` -- so a GUI user could mistake capped results
+            # for exhaustive ones. Only the two states that truncate the
+            # RESULT SET notify; postings exclusion is routine budget
+            # behaviour on long queries and would make the notice fire on
+            # nearly every request. (duplicate_photography_demoted rows need
+            # no notify: they are visible in the filtered section itself.)
+            _qrep = result_data.get('query_report') or {}
+            if _qrep.get('candidates_truncated') or _qrep.get('verify_truncated'):
+                ui.notify(
+                    tr('Some passage results were cut off by a search cap '
+                       '— the list may be incomplete.'),
+                    type='warning',
+                )
+
             if main_results or filtered_results:
                 p_state.results = main_results
                 p_state.filtered_results = filtered_results

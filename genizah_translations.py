@@ -4962,3 +4962,22 @@ TRANSLATIONS.update({
     "Stopping a search keeps what it already found. Title, Shelfmark and My Library searches used to discard every result when stopped, even though the results header said “Partial results”.":
         "עצירת חיפוש שומרת על מה שנמצא עד כה. חיפושי כותר, סימן מדף ו“הספרייה שלי” השמיטו את כל התוצאות בעצירה, גם כשכותרת התוצאות הכריזה “תוצאות חלקיות”.",
 })
+
+
+# === Web parallels — Phase 145 passage matching (PR #324 round 4) ===
+# The Phase-145 strings were never translated (an i18n leak found while
+# wiring the GUI truncation notice); Hebrew users saw English notifies.
+TRANSLATIONS.update({
+    "Passage matching (beta)":
+        "התאמת קטעים (בטא)",
+    "Character-level matching, tolerant of OCR noise and reflowed line breaks. Genizah corpus only.":
+        "התאמה ברמת האות, סובלנית לשגיאות פענוח ולשבירות שורה. קורפוס הגניזה בלבד.",
+    "Passage matching is busy right now — please try again in a moment.":
+        "התאמת הקטעים עמוסה כרגע — נסו שוב בעוד רגע.",
+    "Passage matching search timed out — try a shorter text.":
+        "חיפוש התאמת הקטעים חרג מהזמן המוקצב — נסו טקסט קצר יותר.",
+    "Passage matching search failed.":
+        "חיפוש התאמת הקטעים נכשל.",
+    "Some passage results were cut off by a search cap — the list may be incomplete.":
+        "חלק מתוצאות התאמת הקטעים נחתכו בשל מגבלת חיפוש — הרשימה עשויה להיות חלקית.",
+})

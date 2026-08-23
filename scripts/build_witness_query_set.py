@@ -111,9 +111,22 @@ def ref_files(ref_dir: str) -> dict:
     return out
 
 
+def _openable(path: str) -> str:
+    """Absolute path, with the Windows long-path prefix ONLY on Windows.
+
+    Some corpus filenames exceed Windows MAX_PATH, hence the \\\\?\\ prefix --
+    but that prefix is a Windows NT namespace escape, not a portability shim:
+    on POSIX it turns /data/work.txt into the literal RELATIVE filename
+    "\\\\?\\/data/work.txt" and the build dies with FileNotFoundError on its
+    first usable work (PR #324 round 4).
+    """
+    ap = os.path.abspath(path)
+    return ('\\\\?\\' + ap) if os.name == 'nt' else ap
+
+
 def read_body(path: str) -> str:
     # The \\?\ prefix: some of these filenames exceed Windows MAX_PATH.
-    with open('\\\\?\\' + os.path.abspath(path), encoding='utf-8',
+    with open(_openable(path), encoding='utf-8',
               errors='replace') as fh:
         raw = fh.read()
     return HEADER_RE.sub(' ', raw)
