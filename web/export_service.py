@@ -1039,6 +1039,13 @@ class ExportService:
         if not main_results and not filtered_results:
             raise ValueError("No parallels results to export")
 
+        # Owner ruling 2026-08-23: keep the `*` highlight markers and render
+        # them as red+bold runs -- the same D-14 helper the search export
+        # and desktop's composition dossier already use. Stripped plain,
+        # Source Context and Manuscript Match are near-identical for short
+        # source texts and the sheet carries no match signal.
+        from shared_export_utils import build_rich_snippet_cell
+
         wb, ws = create_excel_workbook("Parallels Results")
 
         headers = ["#", "Shelfmark", "Library", "Title", "Score", "Source Context", "Manuscript Match", "Filtered"]
@@ -1061,8 +1068,8 @@ class ExportService:
                     item, self.meta_mgr
                 )
 
-                source_ctx = clean_text_single_line(remove_highlight_markers(item.get('source_ctx', '')))
-                ms_text = clean_text_single_line(remove_highlight_markers(item.get('text', '')))
+                source_ctx = clean_text_single_line(item.get('source_ctx', ''))
+                ms_text = clean_text_single_line(item.get('text', ''))
 
                 row = [
                     idx,
@@ -1070,13 +1077,23 @@ class ExportService:
                     sanitize_text_for_excel(library_name),
                     sanitize_text_for_excel(title),
                     item.get('score', 0),
-                    sanitize_text_for_excel(source_ctx),
-                    sanitize_text_for_excel(ms_text),
+                    None,  # Source Context -- rich-text below.
+                    None,  # Manuscript Match -- rich-text below.
                     'Yes' if is_filtered else '',
                 ]
                 ws.append(row)
 
                 current_row = ws.max_row
+                ws.cell(
+                    row=current_row, column=6,
+                    value=build_rich_snippet_cell(
+                        source_ctx, sanitize_text_for_excel),
+                )
+                ws.cell(
+                    row=current_row, column=7,
+                    value=build_rich_snippet_cell(
+                        ms_text, sanitize_text_for_excel),
+                )
                 ws.cell(row=current_row, column=1).alignment = center_align  # #
                 ws.cell(row=current_row, column=2).alignment = rtl_align     # Shelfmark
                 ws.cell(row=current_row, column=3).alignment = ltr_align     # Library
