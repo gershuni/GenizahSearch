@@ -1099,3 +1099,29 @@ control for the knob is planned (Phase 146A). Open wording question, not yet
 decided: the truncation notice fires honestly but over-warns (Case 1 shows a
 firing with zero results lost); candidate rewording is neutral-informative
 ("checked the N best-evidenced candidates of M") rather than alarm-shaped.
+
+### The 1.8 run graded (2026-08-23, 48 rows): 7 novel witnesses, precision 94%
+
+The owner graded the widest-40 GUI run row by row: **34 of 36 manuscripts V**
+(X: T-S NS 165.172, T-S NS 25.271). Against the two-incumbent pool of 28:
+27/28 found -- equal to chunk-4's recall -- **plus 7 verified manuscripts
+neither incumbent mode ever surfaced**: Ms. EVR II A 53, 934, 1134, 1501,
+2377, 2402, and T-S AS 101.2. These are the method's first owner-verified
+NOVEL discoveries. Updated universe (35 verified witnesses): passage 34/35,
+chunk-4 27/35, cross-paragraph 20/35. Only MS heb. e.54/44 still escapes.
+
+**The four Filtered rows audited** (the owner asked why the last rows were
+filtered): all four are duplicate-photography demotions, all four CORRECT,
+and they caught two distinct duplication species in one query. EVR II A
+200/1's P9/P10 (agreement 0.96/0.93) are the same pages under TWO IE numbers
+-- NLI digitized the manuscript twice, each digitization with its own HTR.
+Box K.15/K.16 (agreement 1.00, byte-identical) are the same physical page
+under three NLI records; the best-ranked copy stayed in main, both others
+demoted. The owner's V marks on all four validate demote-not-delete: genuine
+content, redundant rows, still reachable and gradable. This NLI image-level
+duplication is a different species from the incumbent's V0.7/V0.8
+double-transcription duplicates; the passage corpus is exposed only to the
+former, and the hygiene pass suppressed 4 redundant rows of 48.
+
+Offline reproduction of the GUI run is exact: main=44 + filtered=4 = the
+export's 48 rows, same scores, same reasons.
