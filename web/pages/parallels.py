@@ -3093,10 +3093,16 @@ def create_parallels_page(initial_text: str = None):
                         'text_any': list(getattr(p_state, 'filter_text_any', None) or []),
                         'text_not': list(getattr(p_state, 'filter_text_not', None) or []),
                     } if _has_active_filters() else None
-                    # Search identity fingerprint (PR #325 round 2, Codex P2):
-                    # source_text alone cannot tell two same-text searches
-                    # with different widths/modes/filters apart, and the
-                    # preserve/recover logic must never mix them across tabs.
+                    # Search identity fingerprint (PR #325 round 2, Codex P2;
+                    # completed in round 3): source_text alone cannot tell two
+                    # same-text searches apart, and the preserve/recover logic
+                    # must never mix them across tabs. The rule: EVERY input
+                    # that changes the returned buckets goes in, canonicalized
+                    # (set-likes sorted -- default=str on a raw set would
+                    # serialize in arbitrary order and split one search into
+                    # many identities). Miss one and two tabs differing only
+                    # in that input share a fingerprint, so a reload can
+                    # restore the other tab's rows.
                     import hashlib as _hashlib
                     import json as _json
                     _search_fingerprint = _hashlib.sha256(_json.dumps({
@@ -3106,6 +3112,35 @@ def create_parallels_page(initial_text: str = None):
                         'chunk_size': captured_chunk_size,
                         'mode': captured_mode,
                         'max_freq': captured_freq_threshold,
+                        'filter_text': captured_filter_text or '',
+                        'deep_scan': bool(captured_deep_scan),
+                        'boundary_mode': captured_boundary_mode,
+                        'boundary_delimiter': captured_boundary_delimiter,
+                        'boundary_boost': captured_boundary_boost,
+                        'min_boundary_matches': captured_min_boundary_matches,
+                        'min_delimiter_distance': captured_min_delimiter_distance,
+                        # Effective only for mode='variants'; None otherwise so
+                        # a stale widget value cannot split identical searches.
+                        'variant_level': (
+                            (int(variant_slider.value) if variant_slider
+                             else current_preset['value'])
+                            if captured_mode == 'variants' else None),
+                        'variant_max_changes': (
+                            int(max_changes_select.value)
+                            if captured_mode == 'variants' else None),
+                        # library 'hide' filters rows AFTER the search, right
+                        # before export -- it is part of what the user sees.
+                        'library_mode': p_state.library_mode,
+                        'library_filter': sorted(p_state.library_filter or []),
+                        # Pre-query scope: advanced filters + show_only
+                        # libraries + per-manuscript exclusions, already
+                        # merged into one set at dispatch.
+                        'restrict': (sorted(captured_restrict_sys_ids)
+                                     if captured_restrict_sys_ids is not None
+                                     else None),
+                        'excluded': sorted(
+                            getattr(p_state, 'excluded_manuscript_ids', None)
+                            or []),
                         'filters': _parallels_filters,
                     }, ensure_ascii=False, sort_keys=True,
                         default=str).encode('utf-8')).hexdigest()[:16]

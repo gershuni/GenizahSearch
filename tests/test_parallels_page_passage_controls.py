@@ -368,6 +368,53 @@ def test_the_tooltip_does_not_scope_to_the_genizah_corpus():
 
 
 # ---------------------------------------------------------------------------
+# PR #325 round 3 (Codex P2): the search fingerprint IS the identity the
+# export preserve/recover logic trusts across reloads and tabs. Every input
+# that changes the returned buckets must be hashed, canonicalized -- one
+# omitted input means two tabs differing only in it share a fingerprint,
+# and a reload can restore the other tab's rows.
+# ---------------------------------------------------------------------------
+
+def _fingerprint_dict_slice() -> str:
+    src = _read_source()
+    idx = src.index('_search_fingerprint = _hashlib.sha256(')
+    end = src.index('.hexdigest()[:16]', idx)
+    return src[idx:end]
+
+
+def test_fingerprint_hashes_every_result_affecting_input():
+    slice_ = _fingerprint_dict_slice()
+    required = [
+        'text', 'engine', 'width', 'chunk_size', 'mode', 'max_freq',
+        'filter_text', 'deep_scan',
+        'boundary_mode', 'boundary_delimiter', 'boundary_boost',
+        'min_boundary_matches', 'min_delimiter_distance',
+        'variant_level', 'variant_max_changes',
+        'library_mode', 'library_filter', 'restrict', 'excluded',
+        'filters',
+    ]
+    missing = [k for k in required if f"'{k}':" not in slice_]
+    assert not missing, (
+        'fingerprint omits result-affecting input(s) -- two tabs differing '
+        'only in these would swap rows across a reload: ' + repr(missing))
+
+
+def test_fingerprint_canonicalizes_every_set_like_input():
+    """A raw set through json's default=str serializes in arbitrary order,
+    splitting ONE search into many identities (recovery never fires). Every
+    set-like input must go through sorted()."""
+    slice_ = _fingerprint_dict_slice()
+    for expr in ('sorted(p_state.library_filter or [])',
+                 'sorted(captured_restrict_sys_ids)'):
+        assert expr in slice_, f'missing canonicalization: {expr}'
+    # excluded_manuscript_ids is a set too -- its sorted() spans lines, so
+    # pin the call rather than the whole expression.
+    excluded_at = slice_.index("'excluded':")
+    assert 'sorted(' in slice_[excluded_at:excluded_at + 80], (
+        'excluded_manuscript_ids must be sorted before hashing')
+
+
+# ---------------------------------------------------------------------------
 # The page must actually BUILD. Source-text pins cannot execute closures; the
 # NameError that took the whole /parallels page down (owner-reported,
 # 2026-08-23: on_passage_mode_change() invoked at build time before
