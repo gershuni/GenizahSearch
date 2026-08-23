@@ -295,6 +295,15 @@ def _compact_parallels_result_row(row: Any) -> Tuple[Any, bool]:
         if isinstance(value, str):
             truncated = value[:_PARALLELS_TEXT_STORAGE_CHARS]
             if truncated != value:
+                # A blind slice can cut between a highlight span's
+                # opening and closing `*`, leaving an odd marker
+                # count -- and every marker consumer (the xlsx
+                # rich-text renderer, the page's HTML highlighter)
+                # splits on `*` and would style the entire tail
+                # after the orphan as highlighted. Close the cut
+                # span: the highlighted run genuinely was truncated.
+                if truncated.count('*') % 2 == 1:
+                    truncated += '*'
                 kept[key] = truncated
                 changed = True
 

@@ -251,6 +251,31 @@ def test_compact_parallels_result_rows_for_live_state():
     assert 'content' not in compacted[0]
 
 
+def test_truncation_never_leaves_an_orphaned_highlight_marker():
+    """The 4000-char storage slice can cut between a highlight span's
+    opening and closing `*`. Every marker consumer (the xlsx rich-text
+    renderer, the page's HTML highlighter) splits on `*`, so an odd count
+    styles the entire post-cut tail as highlighted. The compactor must
+    close the cut span."""
+    from web import export_state
+
+    cap = export_state._PARALLELS_TEXT_STORAGE_CHARS
+    # An opening marker just before the cap, the closing one beyond it.
+    straddling = 'x' * (cap - 3) + '*abcdef*'
+    row = _result(1)
+    row.update({'source_ctx': straddling, 'text': straddling})
+
+    compacted = export_state.compact_parallels_result_rows([row])[0]
+
+    for key in ('source_ctx', 'text'):
+        value = compacted[key]
+        assert value.count('*') % 2 == 0, (
+            f'{key} kept an orphaned marker: ...{value[-12:]!r}')
+        # The re-balance closes the cut span; it must not grow the field
+        # by more than that one closing marker.
+        assert len(value) <= cap + 1
+
+
 def test_compact_parallels_preserves_live_ui_metadata():
     """SEED-002 fixup round 2 (Codex catch): compact_parallels_result_rows()
     is used at web/pages/parallels.py:2338-2339 to overwrite the LIVE
