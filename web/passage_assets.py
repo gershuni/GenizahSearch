@@ -152,7 +152,8 @@ def passage_available() -> bool:
 
 
 def get_passage_searcher(text_fetcher: "PageTextFetcher",
-                         preset: str = 'widest-40'):
+                         preset: str = 'widest-40',
+                         render_cap: int | None = None):
     """A fresh ``PassageSearcher``, or ``None`` when unavailable.
 
     Reads the flag and the loaded-index snapshot together, so there is no
@@ -187,5 +188,12 @@ def get_passage_searcher(text_fetcher: "PageTextFetcher",
     # letter-level search gets its own controls); widest-40 stays the default
     # per the same day's earlier ruling. An unknown name raises in get_preset
     # -- fail loudly, never silently fall back to a different width.
+    # render_cap: None keeps the searcher's own default (the API's
+    # 200-group envelope contract); the page passes 0 for UNCAPPED (owner
+    # ruling 2026-08-23 -- its display layer batches, its export layer has
+    # its own 5,000-row bound).
+    if render_cap is None:
+        return PassageSearcher(index=idx, text_fetcher=text_fetcher,
+                               policy=get_preset(preset))
     return PassageSearcher(index=idx, text_fetcher=text_fetcher,
-                           policy=get_preset(preset))
+                           policy=get_preset(preset), render_cap=render_cap)

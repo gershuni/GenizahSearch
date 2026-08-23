@@ -2870,8 +2870,14 @@ def create_parallels_page(initial_text: str = None):
             APIError (busy/timeout -> a translated notification) from any
             other failure.
             """
+            # render_cap=0 -> UNCAPPED (owner ruling 2026-08-23): the page's
+            # own "Load more" batching (50 groups per click, strongest first)
+            # is the pager, and set_parallels_export's 5,000-row bound is the
+            # export ceiling -- so the engine's 200-group cap was hiding found
+            # manuscripts from both surfaces (measured: 198 shown of 497
+            # found on Birkat Hamazon).
             passage_searcher = get_passage_searcher(
-                state.searcher, preset=captured_passage_width)
+                state.searcher, preset=captured_passage_width, render_cap=0)
             if passage_searcher is None:
                 return None
             return passage_searcher.search_composition_logic(
