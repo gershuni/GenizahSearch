@@ -4987,6 +4987,8 @@ TRANSLATIONS.update({
         "בינוני",
     "Wide width":
         "רחב",
+    "Maximal (may add noise)":
+        "מרבי (עלול להוסיף רעש)",
     "Widest (default)":
         "רחב מאוד (ברירת מחדל)",
     "How far a manuscript may drift from your text and still match. Wider finds more noisy witnesses; the strongest matches always rank first.":

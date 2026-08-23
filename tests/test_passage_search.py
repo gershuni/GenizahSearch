@@ -98,6 +98,9 @@ def test_presets_are_registered_and_default_is_standard_40():
                             # (owner ruling 2026-08-23, two graded GUI case
                             # studies -- see shared/passage_policy.py)
                             'widest-40',
+                            # max-40: the GUI's "Maximal" step (owner,
+                            # 2026-08-23, Birkat Hamazon session)
+                            'max-40',
                             'flat-25', 'flat-25-noisy'}
     with pytest.raises(ValueError):
         get_preset('slider-17')

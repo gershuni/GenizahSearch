@@ -188,9 +188,22 @@ WIDER_40 = PassagePolicy(name='wider-40', density_scale=1.6)
 # control for this knob is planned (Phase 146A).
 WIDEST_40 = PassagePolicy(name='widest-40', density_scale=1.8)
 
+# max-40: density_scale 2.0, the validation ceiling -- offered in the GUI as
+# "Maximal" at the owner's request (2026-08-23, the Birkat Hamazon session),
+# with the measured caveats attached rather than hidden: 2.0 is PAST the
+# recall@50 peak (ordering starts burying the target in its own noise:
+# 0.857 -> 0.853 on the corpus sweep, 265 manuscripts returned for 26
+# useful on the Yom Shabbaton case), and on the very query that prompted
+# the request it changes nothing VISIBLE -- BH at 1.8 already found 497
+# manuscripts of which the 200-group display cap showed 198; 2.0 finds 586
+# and still shows 200. The real unlock for many-witness texts is paging
+# (Phase 146A). This step exists for narrow-ish queries where the tail
+# fits, and becomes fully useful the day paging lands.
+MAX_40 = PassagePolicy(name='max-40', density_scale=2.0)
+
 PRESETS = {p.name: p for p in
            (STANDARD_40, STANDARD_40_NOISY, FLAT_25, FLAT_25_NOISY,
-            WIDE_40, WIDER_40, WIDEST_40)}
+            WIDE_40, WIDER_40, WIDEST_40, MAX_40)}
 DEFAULT_POLICY = STANDARD_40
 
 

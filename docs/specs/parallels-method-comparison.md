@@ -1128,3 +1128,20 @@ former, and the hygiene pass suppressed 4 redundant rows of 48.
 
 Offline reproduction of the GUI run is exact: main=44 + filtered=4 = the
 export's 48 rows, same scores, same reasons.
+
+### The Birkat Hamazon case (2026-08-23): width was not the limit -- the cap was
+
+The owner pasted ~3,900 characters of Birkat Hamazon liturgy, got 198
+manuscripts ("highly relevant"), and asked for an option to widen further.
+Measured before building: at his existing setting (widest-40, 1.8) the engine
+had already found **497 manuscripts in 0.32s** -- the 200-group display cap
+hid 299 of them. At 2.0: 586 found, still <=200 shown. Widening changes what
+is FOUND, not what is SHOWN; for many-witness liturgical texts the binding
+constraint is the display cap, which makes **paging (Phase 146A) the
+highest-value item on that list**, promoted by measurement rather than
+preference.
+
+A "Maximal" width step (max-40, density_scale 2.0 -- the validation ceiling)
+was added anyway at the owner's request, with the measured caveats in its
+preset docstring: 2.0 is past the recall@50 peak, and its value arrives in
+full only once paging exists.

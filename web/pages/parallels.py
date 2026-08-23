@@ -680,6 +680,7 @@ def create_parallels_page(initial_text: str = None):
                                 'wide-40': tr('Medium width'),
                                 'wider-40': tr('Wide width'),
                                 'widest-40': tr('Widest (default)'),
+                                'max-40': tr('Maximal (may add noise)'),
                             },
                             value='widest-40',
                             label=tr('Match width'),
