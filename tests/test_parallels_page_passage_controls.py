@@ -475,7 +475,7 @@ def test_the_legacy_bootstrap_preserves_the_richer_payload():
     results were capped near 200; this PR's uncapped fetch made it lossy."""
     src = _read_source()
     boot_at = src.index("_bootstrap_meta = {'source_text': _legacy_source_text}")
-    after = src[boot_at:boot_at + 2600]  # window covers the round-6 identity-carry block too
+    after = src[boot_at:boot_at + 4200]  # window covers the identity-carry and W4 config-mirror blocks too
     assert 'preserve_or_set_parallels_export(' in after, (
         'the bootstrap branch must not clobber a richer same-search payload')
     assert 'recover_richer_parallels_rows(' in after, (
@@ -633,6 +633,19 @@ _CONFIG_KEYS = (
     'variant_level', 'variant_max_changes',
 )
 
+#: Identity inputs applied to p_state (not widgets) on restore -- the
+#: library scope, advanced filters and Sefaria selection (Codex P2 on
+#: PR #326). Their value expressions in the stash:
+#: _parallels_filters is itself passed to the fingerprint; the Sefaria
+#: refs are the restorable PROXY for the fingerprint's filter_text,
+#: captured at the same instant get_filter_text() is.
+_CONFIG_STATE_KEYS = {
+    'filters': '_parallels_filters',
+    'library_mode': 'captured_library_mode',
+    'library_filter': 'captured_library_filter',
+    'sefaria_enabled': 'captured_sefaria_enabled',
+}
+
 
 def _searched_config_slice() -> str:
     src = _read_source()
@@ -662,10 +675,19 @@ def test_the_dispatch_stashes_the_config_from_the_same_captures():
     # dotted live read (passage_width.value) instead of failing it,
     # and the mutation proof caught the gate green. Count first.
     entries = re.findall(r"'(\w+)':\s*([^,]+),", slice_)
-    assert len(entries) == len(_CONFIG_KEYS), (
-        [k for k, _ in entries], 'entry count drifted from _CONFIG_KEYS')
+    assert len(entries) == len(_CONFIG_KEYS) + len(_CONFIG_STATE_KEYS), (
+        [k for k, _ in entries], 'entry count drifted from the key tables')
     for key, expr in entries:
         expr = expr.strip()
+        if key in _CONFIG_STATE_KEYS:
+            assert expr == _CONFIG_STATE_KEYS[key], (
+                key, expr, 'state-key expression drifted from the table')
+            if key != 'sefaria_enabled':
+                # sefaria_enabled is the documented proxy for the
+                # fingerprint's filter_text; every other expression must
+                # itself appear in the identity call.
+                assert expr in fp, (expr, 'is not part of the search identity')
+            continue
         assert key in _CONFIG_KEYS, ('unexpected config key', key)
         assert re.fullmatch(r'captured_\w+', expr), (
             key, expr, 'must be a bare dispatch capture, never a live read')
@@ -685,11 +707,16 @@ def test_the_snapshot_persists_the_search_config():
     raise AssertionError('_persist_active_snapshot not found')
 
 
-def test_the_restore_block_reads_the_search_config():
+def test_the_restore_block_reads_the_search_config_type_guarded():
+    """W3: dict('chunk') raises, and the restore's single try/except would
+    then skip every LATER step -- exclusions, fingerprint, recovery, the
+    notice -- over one corrupt key. isinstance, not coercion."""
     src = _read_source()
     flat = ' '.join(src.split())
-    assert ("_restored_search_config = dict( "
-            "_active_snapshot.get('search_config') or {})") in flat
+    assert ("_raw_search_config = _active_snapshot.get('search_config')"
+            ) in flat
+    assert ("if isinstance(_raw_search_config, dict)") in flat
+    assert "dict( _active_snapshot.get('search_config') or {})" not in flat
 
 
 def test_the_apply_covers_every_key_and_calls_the_handlers():
@@ -729,3 +756,84 @@ def test_the_lab_restore_clears_the_method_radio_first():
     assert "method_radio.value = 'chunk'" in lab_branch
     assert lab_branch.index("method_radio.value = 'chunk'") < lab_branch.index(
         'lab_mode.value = True'), 'the radio must be cleared BEFORE lab turns on'
+
+
+# =========================================================================
+# PR #326 round 2: Codex P2 (identity inputs) + workflow findings W1-W4.
+# =========================================================================
+
+def test_delimiter_restore_is_engine_independent():
+    """W1: the paragraph separator and min-distance are live in EVERY mode
+    (never forced or disabled by on_passage_mode_change, and read
+    unconditionally by update_boundary_stats), so their restore must sit
+    BEFORE the engine != 'passage' gate, not inside it."""
+    seg = _apply_config_source()
+    gate = seg.index("if engine != 'passage':")
+    assert seg.index("cfg.get('boundary_delimiter')") < gate
+    assert seg.index("cfg.get('min_delimiter_distance')") < gate
+
+
+def test_full_mode_min_chunks_never_stomps_the_advanced_select():
+    """W2: in 'full' mode the stored min_boundary_matches IS the min-chunks
+    value (1-20); written into the Advanced cross-paragraph select it would
+    invent a filter the user never chose on the next boundary-mode switch."""
+    seg = _apply_config_source()
+    idx = seg.index('min_boundary_matches.value = ')
+    guard = seg.rindex("cfg.get('boundary_mode') != 'full'", 0, idx)
+    assert idx - guard < 600, 'the != full guard is not on this assignment'
+
+
+def test_the_config_mirror_is_written_read_and_cleared():
+    """W4: the config lived only in the TAB snapshot, so a second tab (or a
+    lost snapshot) restored rows with build-default controls -- the exact
+    defect the snapshot path fixed. The per-user mirror travels with the
+    fallback rows and the fingerprint mirror."""
+    src = _read_source()
+    flat = ' '.join(src.split())
+    assert ("safe_user_set('parallels_search_config', "
+            'dict(p_state.searched_config))') in flat
+    assert "_safe_get('parallels_search_config', None)" in flat
+    assert "safe_user_set('parallels_search_config', {})" in flat
+
+
+def _identity_state_source() -> str:
+    tree = ast.parse(_read_source())
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.FunctionDef)
+                and node.name == '_apply_restored_identity_state'):
+            return ast.get_source_segment(_read_source(), node) or ''
+    raise AssertionError('_apply_restored_identity_state not found')
+
+
+def test_identity_state_covers_library_and_every_filter_field():
+    """Codex P2 on #326: these p_state inputs are identity inputs whose
+    independent persistence keeps the user's LATEST edits, not what the
+    restored search used. The snapshot wins for them, as it already does
+    for exclusions."""
+    seg = _identity_state_source()
+    assert 'sanitize_library_codes' in seg
+    assert 'p_state.library_mode' in seg and 'p_state.library_filter' in seg
+    for field in ('filter_domains', 'filter_authors', 'filter_works',
+                  'filter_include_mode', 'filter_date_from', 'filter_date_to',
+                  'filter_material_exclude', 'filter_text_all',
+                  'filter_text_any', 'filter_text_not'):
+        assert 'p_state.%s' % field in seg, ('filter field missing', field)
+    assert '_filters_from_browse' in seg, 'browse handoff must keep priority'
+    assert 'except Exception' in seg
+
+
+def test_identity_state_runs_in_both_restore_branches():
+    """The snapshot branch AND the legacy bootstrap must both apply it --
+    fixing one restore path and not the other is how the 250-row clobber
+    shipped in PR #325."""
+    src = _read_source()
+    calls = re.findall(r'(?<!def )_apply_restored_identity_state\(\)', src)
+    assert len(calls) >= 2, len(calls)
+
+
+def test_the_deferred_sefaria_restore_honours_the_snapshot_selection():
+    src = _read_source()
+    flat = ' '.join(src.split())
+    assert ("_cfg_sefaria = (_restored_search_config.get('sefaria_enabled')"
+            ' if isinstance(_restored_search_config, dict) else None)') in flat
+    assert 'if isinstance(_cfg_sefaria, list): stored_enabled = set(_cfg_sefaria)' in flat

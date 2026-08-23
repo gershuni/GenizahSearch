@@ -397,13 +397,61 @@ def create_parallels_page(initial_text: str = None):
 
     # Restore previous results
     _restored_search_config = {}
+
+    def _apply_restored_identity_state():
+        """Re-apply the restored search's p_state-level identity inputs.
+
+        The library scope and advanced filters are persisted independently
+        the moment the user edits them -- so after run-search-A, edit a
+        filter, reload, the page showed A's rows beside the NEWER filter
+        state, and a re-run was a different search (Codex P2 on PR #326).
+        The snapshot already wins for exclusions (just below); this makes
+        it win for the remaining identity inputs. Browse-handoff filters
+        keep priority: they are fresher intent than any snapshot.
+        """
+        cfg = _restored_search_config
+        if not isinstance(cfg, dict) or not cfg:
+            return
+        try:
+            _cfg_mode = cfg.get('library_mode')
+            if _cfg_mode in ('show_only', 'hide'):
+                _cfg_codes = sanitize_library_codes(cfg.get('library_filter'))
+                if _cfg_mode == 'show_only' and not _cfg_codes:
+                    _cfg_mode = 'hide'
+                p_state.library_mode = _cfg_mode
+                p_state.library_filter = _cfg_codes
+            if not _filters_from_browse and 'filters' in cfg:
+                # None is meaningful: search A ran WITHOUT filters, so any
+                # later-edited filter state is cleared back to defaults.
+                _f = cfg.get('filters')
+                _f = _f if isinstance(_f, dict) else {}
+                p_state.filter_domains = list(_f.get('domains') or [])
+                p_state.filter_authors = list(_f.get('authors') or [])
+                p_state.filter_works = list(_f.get('works') or [])
+                p_state.filter_include_mode = bool(_f.get('include_mode', True))
+                p_state.filter_date_from = _f.get('date_from')
+                p_state.filter_date_to = _f.get('date_to')
+                p_state.filter_material_exclude = list(_f.get('material_exclude') or [])
+                p_state.filter_text_all = list(_f.get('text_all') or [])
+                p_state.filter_text_any = list(_f.get('text_any') or [])
+                p_state.filter_text_not = list(_f.get('text_not') or [])
+        except Exception:
+            pass  # A broken snapshot costs the restore, never the page
+
     _active_snapshot = _get_active_snapshot()
     if _active_snapshot:
         try:
             p_state.results = _active_snapshot.get('results', []) or []
             p_state.filtered_results = _active_snapshot.get('filtered_results', []) or []
-            _restored_search_config = dict(
-                _active_snapshot.get('search_config') or {})
+            # isinstance, not bare dict(): dict('chunk') raises and the
+            # single try/except would then skip EVERY later restore step --
+            # exclusions, fingerprint, richer-row recovery, the notice --
+            # over one corrupt key (workflow review W3).
+            _raw_search_config = _active_snapshot.get('search_config')
+            _restored_search_config = (dict(_raw_search_config)
+                                       if isinstance(_raw_search_config, dict)
+                                       else {})
+            _apply_restored_identity_state()
             p_state.domain_exclusions = set(_active_snapshot.get('domain_exclusions', []))
             p_state.excluded_manuscript_ids = set(_active_snapshot.get('excluded_manuscript_ids', []))
             # Phase 88: per-session export payload is the sole writer path (singleton mirror removed).
@@ -493,6 +541,16 @@ def create_parallels_page(initial_text: str = None):
                     'parallels_results_fingerprint', '') or ''
                 if _legacy_fingerprint:
                     _bootstrap_meta['search_fingerprint'] = _legacy_fingerprint
+                # Workflow review W4: the config lived only in the TAB
+                # snapshot, so this branch -- a second tab, or a tab whose
+                # snapshot was lost -- restored the rows with build-default
+                # controls, recreating the exact defect the snapshot path
+                # fixed. The per-user mirror is written beside the rows it
+                # describes, at the same dispatch moment.
+                _raw_user_config = _safe_get('parallels_search_config', None)
+                if isinstance(_raw_user_config, dict) and _raw_user_config:
+                    _restored_search_config = dict(_raw_user_config)
+                _apply_restored_identity_state()
                 p_state.searched_source_text = _legacy_source_text
                 # Workflow review (P1): this branch runs whenever the TAB has
                 # no snapshot -- opening the page in a second tab is enough.
@@ -1177,6 +1235,18 @@ def create_parallels_page(initial_text: str = None):
                                 # 'chunk', or 'passage' degrading because the
                                 # index is unavailable (same rule as dispatch).
                                 method_radio.value = 'chunk'
+                            # The paragraph separator and min-distance
+                            # are LIVE in every mode: on_passage_mode_change
+                            # never forces or disables them, and
+                            # update_boundary_stats reads them
+                            # unconditionally for the stats line -- so they
+                            # restore for the passage engine too (workflow
+                            # review W1; the final on_passage_mode_change()
+                            # below refreshes the stats from these values).
+                            if cfg.get('boundary_delimiter') in boundary_delimiter.options:
+                                boundary_delimiter.value = cfg['boundary_delimiter']
+                            if cfg.get('min_delimiter_distance') in min_delimiter_distance.options:
+                                min_delimiter_distance.value = cfg['min_delimiter_distance']
                             if engine != 'passage':
                                 cs = cfg.get('chunk_size')
                                 if isinstance(cs, (int, float)) and 2 <= cs <= 12:
@@ -1203,15 +1273,18 @@ def create_parallels_page(initial_text: str = None):
                                     deep_scan.value = bool(cfg.get('deep_scan', False))
                                 if cfg.get('boundary_mode') in boundary_mode.options:
                                     boundary_mode.value = cfg['boundary_mode']
-                                if cfg.get('boundary_delimiter') in boundary_delimiter.options:
-                                    boundary_delimiter.value = cfg['boundary_delimiter']
                                 bb = cfg.get('boundary_boost')
                                 if isinstance(bb, (int, float)) and 1.0 <= bb <= 3.0:
                                     boundary_boost.value = float(bb)
-                                if cfg.get('min_boundary_matches') in min_boundary_matches.options:
+                                if (cfg.get('boundary_mode') != 'full'
+                                        and cfg.get('min_boundary_matches')
+                                        in min_boundary_matches.options):
+                                    # In 'full' mode this cfg key holds the
+                                    # min-CHUNKS value (see above); writing
+                                    # it into the Advanced cross-paragraph
+                                    # select would invent a filter the user
+                                    # never chose (workflow review W2).
                                     min_boundary_matches.value = cfg['min_boundary_matches']
-                                if cfg.get('min_delimiter_distance') in min_delimiter_distance.options:
-                                    min_delimiter_distance.value = cfg['min_delimiter_distance']
                                 update_boundary_ui()
                                 vl = cfg.get('variant_level')
                                 if isinstance(vl, (int, float)):
@@ -2861,6 +2934,7 @@ def create_parallels_page(initial_text: str = None):
         # Reset persistent storage to clean defaults
         safe_user_set('parallels_results', [])
         safe_user_set('parallels_results_fingerprint', '')
+        safe_user_set('parallels_search_config', {})
         safe_user_set('parallels_filtered', [])
         safe_user_set('parallels_source_text', '')
         safe_user_set('parallels_domain_exclusions', [])
@@ -2955,6 +3029,10 @@ def create_parallels_page(initial_text: str = None):
 
         # Capture filter text in main thread to avoid closure issues in background thread
         captured_filter_text = get_filter_text()
+        # The restorable PROXY for filter_text: the identity hashes the
+        # combined TEXT, but what a reload can re-select is the enabled
+        # source refs -- captured at the same instant the text is.
+        captured_sefaria_enabled = sorted(filter_sources['enabled'])
 
         def progress_cb(arg1, arg2=None):
             # Dual-protocol callback, mirroring desktop gui_threads.LabCompositionThread.cb:
@@ -3360,6 +3438,10 @@ def create_parallels_page(initial_text: str = None):
                         'min_delimiter_distance': captured_min_delimiter_distance,
                         'variant_level': captured_variant_level,
                         'variant_max_changes': captured_variant_max_changes,
+                        'filters': _parallels_filters,
+                        'library_mode': captured_library_mode,
+                        'library_filter': captured_library_filter,
+                        'sefaria_enabled': captured_sefaria_enabled,
                     }
                     _parallels_search_meta = {
                         'source_text': text,
@@ -3406,6 +3488,11 @@ def create_parallels_page(initial_text: str = None):
                     # same-search instead of trusting source_text.
                     safe_user_set('parallels_results_fingerprint',
                                   _search_fingerprint)
+                    # Workflow review W4: mirror the config beside the rows
+                    # and identity, so the legacy bootstrap restores controls
+                    # too, not only in the tab that searched.
+                    safe_user_set('parallels_search_config',
+                                  dict(p_state.searched_config))
                     safe_user_set('parallels_filtered', _compact_result_rows(
                         (filtered_results or [])[:_PARALLELS_ACTIVE_USER_FALLBACK_LIMIT]
                     ))
@@ -4591,6 +4678,14 @@ def create_parallels_page(initial_text: str = None):
         # the asyncio event loop.
         stored_refs = safe_user_get('filter_sources_refs', [])
         stored_enabled = set(safe_user_get('filter_sources_enabled', []))
+        # Codex P2 (PR #326): the enabled set is an identity input (it
+        # produces filter_text). When the restored search carries its own
+        # selection, it wins over the per-user latest-edit -- the loaded
+        # TEXTS still come from user storage; only the checkmarks move.
+        _cfg_sefaria = (_restored_search_config.get('sefaria_enabled')
+                        if isinstance(_restored_search_config, dict) else None)
+        if isinstance(_cfg_sefaria, list):
+            stored_enabled = set(_cfg_sefaria)
         stored_custom = safe_user_get('filter_sources_custom', {})
         filter_sources['custom_count'] = safe_user_get('filter_sources_custom_count', 0)
 
