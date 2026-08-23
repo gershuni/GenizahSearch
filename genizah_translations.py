@@ -4977,8 +4977,8 @@ TRANSLATIONS.update({
         "חדש! חיפוש ברמת האות",
     "Chunk search (slower)":
         "חיפוש מקטעים (איטי יותר)",
-    "Letter-level search: fast, yields fewer irrelevant results, and tolerates transcription errors, nikkud and line breaks. Genizah corpus only.":
-        "חיפוש ברמת האות: מהיר, מחזיר פחות תוצאות לא רלוונטיות, ועמיד לשיבושי פענוח, לניקוד ולשבירות שורה. קורפוס הגניזה בלבד.",
+    "Letter-level search: fast, yields fewer irrelevant results, and tolerates transcription errors, nikkud and line breaks.":
+        "חיפוש ברמת האות: מהיר, מחזיר פחות תוצאות לא רלוונטיות, ועמיד לשיבושי פענוח, לניקוד ולשבירות שורה.",
     "Match width":
         "רוחב התאמה",
     "Narrow (near-exact)":
@@ -4989,7 +4989,7 @@ TRANSLATIONS.update({
         "רחב",
     "Maximal (may add noise)":
         "מרבי (עלול להוסיף רעש)",
-    "Widest (default)":
+    "Very wide (default)":
         "רחב מאוד (ברירת מחדל)",
     "How far a manuscript may drift from your text and still match. Wider finds more noisy witnesses; the strongest matches always rank first.":
         "עד כמה כתב היד יכול לסטות מהטקסט שלך ועדיין להיחשב התאמה. רחב יותר מוצא יותר עדים משובשים; ההתאמות החזקות תמיד מדורגות ראשונות.",

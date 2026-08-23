@@ -712,7 +712,7 @@ def create_parallels_page(initial_text: str = None):
                         method_radio.tooltip(tr(
                             'Letter-level search: fast, yields fewer irrelevant '
                             'results, and tolerates transcription errors, nikkud '
-                            'and line breaks. Genizah corpus only.'
+                            'and line breaks.'
                         ))
 
                         def _letter_level_selected() -> bool:
@@ -728,7 +728,7 @@ def create_parallels_page(initial_text: str = None):
                                 'standard-40': tr('Narrow (near-exact)'),
                                 'wide-40': tr('Medium width'),
                                 'wider-40': tr('Wide width'),
-                                'widest-40': tr('Widest (default)'),
+                                'widest-40': tr('Very wide (default)'),
                                 'max-40': tr('Maximal (may add noise)'),
                             },
                             value='widest-40',
@@ -938,12 +938,23 @@ def create_parallels_page(initial_text: str = None):
                             mode_select.disable()
                             freq_threshold.value = 50
                             freq_threshold.disable()
+                            # Owner ruling 2026-08-23: "Min. chunk matches"
+                            # counts CHUNKS, which letter-level search does
+                            # not have. Its nearest analogue (n_spans) counts
+                            # merged match spans, where one long continuous
+                            # match is a SINGLE span -- so any min>1 would
+                            # silently drop exactly the strongest witnesses.
+                            # Force the no-op value and disable, like the
+                            # knobs above.
+                            min_chunks_input.value = 1
+                            min_chunks_input.disable()
                         else:
                             passage_width.style('display: none;')
                             boundary_mode.enable()
                             chunk_size.enable()
                             mode_select.enable()
                             freq_threshold.enable()
+                            min_chunks_input.enable()
 
                     method_radio.on('update:model-value', on_passage_mode_change)
 
@@ -1061,9 +1072,10 @@ def create_parallels_page(initial_text: str = None):
                     # load: letter-level is pre-selected when available, so
                     # the chunk controls must START disabled rather than wait
                     # for a first toggle. This call sits HERE -- after
-                    # mode_select (defined above), chunk_size and
-                    # freq_threshold (the sliders above) -- because the
-                    # handler closes over all three and an earlier call site
+                    # mode_select (defined above), chunk_size, freq_threshold
+                    # (the sliders above) and min_chunks_input (just above)
+                    # -- because the handler closes over all four and an
+                    # earlier call site
                     # crashed the whole page with NameError at build time
                     # (owner-reported, 2026-08-23): the widgets are created
                     # BELOW the selector block, and only a real render

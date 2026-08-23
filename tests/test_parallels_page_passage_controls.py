@@ -98,6 +98,23 @@ def test_passage_mode_forces_and_disables_freq_threshold():
         'freq_threshold must be re-enabled when passage mode is deselected')
 
 
+def test_passage_mode_forces_and_disables_min_chunks():
+    """Owner ruling 2026-08-23 (round 3): 'Min. chunk matches' counts
+    CHUNKS, which letter-level search does not have -- and the value DOES
+    reach the passage searcher (as an n_spans floor, where one long
+    continuous match is a single span), so any min>1 would silently drop
+    exactly the strongest witnesses. Force the no-op value and disable."""
+    src = _on_passage_mode_change_source()
+    assert re.search(r"min_chunks_input\.value\s*=\s*1\b", src), (
+        "on_passage_mode_change must force min_chunks to 1 -- the passage "
+        "searcher applies it as an n_spans floor, and one long continuous "
+        "match is a SINGLE span")
+    assert 'min_chunks_input.disable()' in src, (
+        'min_chunks_input must be disabled while letter-level is selected')
+    assert 'min_chunks_input.enable()' in src, (
+        'min_chunks_input must be re-enabled when chunk search is selected')
+
+
 def test_passage_mode_still_forces_and_disables_boundary_mode():
     """Regression guard for the PRE-EXISTING fix (adversarial review finding
     #2) that finding #13(c) sits alongside -- must not have been lost in the
@@ -121,7 +138,8 @@ def test_disable_calls_are_inside_the_passage_mode_true_branch():
     assert if_true_idx < else_idx, 'expected an if _letter_level_selected(): ... else: shape'
     true_branch = '\n'.join(lines[if_true_idx:else_idx])
     false_branch = '\n'.join(lines[else_idx:])
-    for widget in ('chunk_size', 'mode_select', 'freq_threshold', 'boundary_mode'):
+    for widget in ('chunk_size', 'mode_select', 'freq_threshold',
+                   'boundary_mode', 'min_chunks_input'):
         assert f'{widget}.disable()' in true_branch, (
             f'{widget}.disable() must be inside the passage_mode.value branch')
         assert f'{widget}.enable()' in false_branch, (
@@ -293,12 +311,60 @@ def test_the_default_selection_state_is_applied_on_load():
     init_at = src.rindex('on_passage_mode_change()')
     for widget in ("mode_select = ui.select",
                    "chunk_size = ui.slider",
-                   "freq_threshold = ui.slider"):
+                   "freq_threshold = ui.slider",
+                   "min_chunks_input = ui.number"):
         assert widget in src, f'anchor {widget!r} vanished -- rewrite this pin'
         assert src.index(widget) < init_at, (
             f'the build-time on_passage_mode_change() call precedes '
             f'{widget!r}; the handler will NameError during page build'
         )
+
+
+# ---------------------------------------------------------------------------
+# Owner rulings 2026-08-23 (round 3): width-ladder terminology and tooltip
+# scope. The 'assage'/'etter-level' i18n gate above cannot see the width
+# labels (none contain either substring), so they get their own pins.
+# ---------------------------------------------------------------------------
+
+def _passage_width_creation_slice() -> str:
+    src = _read_source()
+    idx = src.index('passage_width = ui.select(')
+    end = src.index('if not passage_available():', idx)
+    return src[idx:end]
+
+
+def test_width_ladder_has_no_rung_above_widest():
+    """Owner ruling: 'widest and then maximal means this is not the
+    widest'. The 1.8 preset's label must not claim to be the extreme while
+    the 2.0 option sits above it."""
+    slice_ = _passage_width_creation_slice()
+    assert "tr('Very wide (default)')" in slice_, (
+        'the widest-40 preset label must be Very wide (default)')
+    assert 'Widest' not in slice_, (
+        "a 'Widest' label with a 'Maximal' rung above it is a contradiction")
+    assert "tr('Maximal (may add noise)')" in slice_
+
+
+def test_every_width_control_string_has_a_hebrew_translation():
+    from genizah_translations import TRANSLATIONS
+
+    slice_ = _passage_width_creation_slice()
+    calls = re.findall(r"tr\(\s*((?:'[^']*'\s*)+)\)", slice_)
+    strings = []
+    for parts in calls:
+        strings.append(''.join(re.findall(r"'([^']*)'", parts)))
+    # 5 ladder labels + the select's own label + the width tooltip.
+    assert len(strings) >= 7, f'extractor matched too little: {strings}'
+    missing = sorted(s for s in strings if s not in TRANSLATIONS)
+    assert not missing, (
+        'width-control strings with no Hebrew translation: ' + repr(missing))
+
+
+def test_the_tooltip_does_not_scope_to_the_genizah_corpus():
+    """Owner ruling: the website is Genizah-only everywhere, so the scope
+    note is noise. (Desktop, which really has local/all corpus scopes, gets
+    its own scoped wording with the 146B method selector.)"""
+    assert 'Genizah corpus only' not in _read_source()
 
 
 # ---------------------------------------------------------------------------
