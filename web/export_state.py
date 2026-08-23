@@ -751,6 +751,40 @@ def get_parallels_export() -> Optional[Dict[str, Any]]:
     return compacted
 
 
+def preserve_or_set_parallels_export(
+    results: List[Dict[str, Any]],
+    filtered: List[Dict[str, Any]],
+    meta: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """RESTORE-path writer: keep an existing richer payload for the SAME search.
+
+    PR #325 review (Codex P2). The page's display snapshot is capped at 500
+    rows by design (the 778 MB search_history.json lesson), but the export
+    payload persists up to 5,000 rows in app.storage.user and SURVIVES a
+    reload intact. The restore path used to call set_parallels_export() with
+    the 500-row display fallback, overwriting the intact full payload -- so a
+    594-row Birkat Hamazon search silently exported 500 rows after a refresh.
+
+    This writer overwrites ONLY when it would not lose information: it skips
+    the write when a payload already exists for the same search (matched on
+    meta.source_text) with at least as many rows as the restore is offering.
+    Fresh searches must keep calling set_parallels_export() directly -- a new
+    search legitimately REPLACES the payload, whatever the sizes.
+
+    Returns True when it wrote, False when it preserved the existing payload.
+    """
+    existing = get_parallels_export()
+    if isinstance(existing, dict):
+        existing_src = (existing.get('meta') or {}).get('source_text')
+        offered_src = (meta or {}).get('source_text')
+        existing_rows = existing.get('results') or []
+        if (existing_src == offered_src
+                and len(existing_rows) >= len(results or [])):
+            return False
+    set_parallels_export(results=results, filtered=filtered, meta=meta)
+    return True
+
+
 def update_parallels_export_filtered(filtered: List[Dict[str, Any]]) -> None:
     """Patch only the ``filtered`` field (post-filter sync).
 

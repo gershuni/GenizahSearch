@@ -312,6 +312,12 @@ def create_parallels_page(initial_text: str = None):
                 'version': _PARALLELS_ACTIVE_TAB_VERSION,
                 'results': _compact_result_rows(p_state.results[:500]),
                 'filtered_results': _compact_result_rows((p_state.filtered_results or [])[:500]),
+                # True pre-truncation sizes (PR #325 review): the [:500] cap
+                # above is deliberate (the 778 MB search_history.json lesson),
+                # so a restore that trims the tail must be able to SAY so
+                # instead of silently presenting 500 as everything.
+                'results_total': len(p_state.results),
+                'filtered_total': len(p_state.filtered_results or []),
                 'domain_exclusions': sorted(p_state.domain_exclusions),
                 'excluded_manuscript_ids': sorted(p_state.excluded_manuscript_ids),
                 'source_text': text_input.value if 'text_input' in locals() else decoded_text,
@@ -388,12 +394,30 @@ def create_parallels_page(initial_text: str = None):
             # handlers can echo it in the envelope without falling back to a legacy storage key.
             _snapshot_source_text = _active_snapshot.get('source_text', '') or ''
             _snapshot_meta = {'source_text': _snapshot_source_text}
-            from web.export_state import set_parallels_export
-            set_parallels_export(
+            # PR #325 review (Codex P2): the display snapshot is 500 rows by
+            # design, but the FULL export payload (up to 5,000 rows) survives
+            # the reload in app.storage.user. Overwriting it with the display
+            # fallback silently capped every post-refresh export at 500 --
+            # preserve_or_set keeps the richer same-search payload and writes
+            # only when nothing would be lost.
+            from web.export_state import preserve_or_set_parallels_export
+            preserve_or_set_parallels_export(
                 results=p_state.results,
                 filtered=p_state.filtered_results,
                 meta=_snapshot_meta,
             )
+            # And the DISPLAY truncation stops being silent: the snapshot
+            # records the true totals, so a trimmed restore says what it
+            # trimmed and how to get it back (a passage re-run is <1s).
+            _restored_total = int(_active_snapshot.get('results_total') or 0)
+            if _restored_total > len(p_state.results):
+                ui.notify(
+                    tr('Restored {shown} of {total} results from the last '
+                       'search — run the search again for the full list.'
+                       ).format(shown=len(p_state.results),
+                                total=_restored_total),
+                    type='info',
+                )
         except Exception:
             pass  # Snapshot restore failed; page falls back to empty
     else:

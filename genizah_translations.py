@@ -5001,6 +5001,8 @@ TRANSLATIONS.update({
         "החיפוש ברמת האות נכשל.",
     "Letter-level search checked the {n} best-evidenced candidates of {m}.":
         "החיפוש ברמת האות בדק את {n} המועמדים המבוססים ביותר מתוך {m}.",
+    "Restored {shown} of {total} results from the last search — run the search again for the full list.":
+        "שוחזרו {shown} מתוך {total} תוצאות מהחיפוש האחרון — הריצו את החיפוש שוב לרשימה המלאה.",
     "Letter-level search matched more than {cap} manuscripts — showing the strongest {cap}.":
         "החיפוש ברמת האות מצא יותר מ־{cap} כתבי יד — מוצגים ה־{cap} החזקים ביותר.",
 })

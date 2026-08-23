@@ -857,3 +857,63 @@ def test_compact_no_display_no_synth_passes_through(monkeypatch):
     stored = storage['export_search_payload']['results'][0]
     assert stored['img'] == '3r'
     assert stored['source'] == 'pgp'
+
+
+# ---------------------------------------------------------------------------
+# PR #325 review (Codex P2): the restore path must not clobber a richer
+# same-search export payload with the 500-row display fallback.
+# ---------------------------------------------------------------------------
+
+def _install_stub(monkeypatch, storage: dict):
+    import web.safe_storage as ss
+    monkeypatch.setattr(ss, 'app', _make_stub(storage))
+
+
+def test_restore_preserves_a_richer_same_search_payload(monkeypatch):
+    storage = {}
+    _install_stub(monkeypatch, storage)
+    from web.export_state import (
+        get_parallels_export, preserve_or_set_parallels_export,
+        set_parallels_export,
+    )
+
+    full = [_result(i) for i in range(594)]
+    set_parallels_export(results=full, filtered=[],
+                         meta={'source_text': 'birkat'})
+    wrote = preserve_or_set_parallels_export(
+        results=full[:500], filtered=[], meta={'source_text': 'birkat'})
+    assert wrote is False, 'the 500-row display fallback clobbered the payload'
+    assert len(get_parallels_export()['results']) == 594
+
+
+def test_restore_still_writes_when_nothing_would_be_lost(monkeypatch):
+    storage = {}
+    _install_stub(monkeypatch, storage)
+    from web.export_state import (
+        get_parallels_export, preserve_or_set_parallels_export,
+        set_parallels_export,
+    )
+
+    # (a) no payload at all -- legacy session: must write.
+    assert preserve_or_set_parallels_export(
+        results=[_result(i) for i in range(3)], filtered=[],
+        meta={'source_text': 'a'}) is True
+    assert len(get_parallels_export()['results']) == 3
+
+    # (b) payload from a DIFFERENT search: must write (never preserve a
+    # stale payload across a change of query).
+    set_parallels_export(results=[_result(i) for i in range(50)],
+                         filtered=[], meta={'source_text': 'other'})
+    assert preserve_or_set_parallels_export(
+        results=[_result(i) for i in range(10)], filtered=[],
+        meta={'source_text': 'a'}) is True
+    payload = get_parallels_export()
+    assert len(payload['results']) == 10
+    assert payload['meta']['source_text'] == 'a'
+
+    # (c) same search but the restore OFFERS MORE than stored (payload was
+    # written by an older, smaller-capped session): must write.
+    assert preserve_or_set_parallels_export(
+        results=[_result(i) for i in range(20)], filtered=[],
+        meta={'source_text': 'a'}) is True
+    assert len(get_parallels_export()['results']) == 20
