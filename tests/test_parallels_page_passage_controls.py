@@ -717,3 +717,15 @@ def test_the_apply_runs_at_build_time():
     # so a bare count would pass with the function never invoked.
     calls = re.findall(r'(?<!def )_apply_restored_search_config\(\)', src)
     assert calls, 'the apply function is never invoked'
+
+
+def test_the_lab_restore_clears_the_method_radio_first():
+    """The method radio defaults to letter-level when the index is
+    available, and on_passage_mode_change() resolves letter-level + lab
+    by turning LAB off. A lab restore that does not first point the
+    radio at chunk is therefore undone by its own final init call."""
+    seg = _apply_config_source()
+    lab_branch = seg[seg.index("if engine == 'lab':"):seg.index('elif engine')]
+    assert "method_radio.value = 'chunk'" in lab_branch
+    assert lab_branch.index("method_radio.value = 'chunk'") < lab_branch.index(
+        'lab_mode.value = True'), 'the radio must be cleared BEFORE lab turns on'

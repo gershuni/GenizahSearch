@@ -1158,6 +1158,14 @@ def create_parallels_page(initial_text: str = None):
                             return
                         try:
                             if engine == 'lab':
+                                # Point the method radio at 'chunk' FIRST:
+                                # its build default is 'passage' when the
+                                # index is available, and the final
+                                # on_passage_mode_change() below treats
+                                # letter-level + lab as the mutual-
+                                # exclusion conflict and would switch lab
+                                # back OFF -- undoing this very restore.
+                                method_radio.value = 'chunk'
                                 if not lab_mode.value:
                                     lab_mode.value = True
                                     on_lab_mode_change()
