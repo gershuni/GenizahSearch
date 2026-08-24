@@ -65,9 +65,18 @@ WITNESS_SYS_ID_RE = re.compile(r'((?:99|97)\d{8,})')
 def witness_sys_id(row) -> str:
     """The sys_id a result row belongs to.
 
-    Mirrors shared/passage_parallels.py::_SYS_ID_RE, 97 included. THE one
-    copy on this page: three separate 99-only patterns silently skipped every
-    97-prefixed manuscript, so auto-expand could never promote one.
+    Mirrors `shared/passage_parallels.py::_SYS_ID_RE` and the authoritative
+    `shared/metadata_manager.py`, both of which accept a 97 prefix as well as
+    99. THE one copy on this page.
+
+    That is WIDER than the nine `r'(99\d{8,})'` patterns elsewhere in this
+    file, and wider than the serializer, the export writers and
+    `web/export_state.py`. The divergence is real but currently unreachable:
+    the live index holds 759,224 records and not one of them is 97-prefixed,
+    so no manuscript is skipped by the narrow patterns today. Following the
+    authoritative parser here is the safe direction -- a witness resolved by
+    the engine cannot fail to resolve on the page. Reconciling all of them is
+    a corpus-wide change, not a witness-feature one.
     """
     m = WITNESS_SYS_ID_RE.search((row or {}).get('raw_header') or '')
     return m.group(1) if m else None
