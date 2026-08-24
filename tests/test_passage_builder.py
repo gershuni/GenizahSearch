@@ -20,6 +20,7 @@ exclusions, DF-cap losses, stride, and both bit budgets.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import sys
 
@@ -32,8 +33,9 @@ from shared.passage_builder import (  # noqa: E402
     build_index, codes_from_letter_indices,
 )
 from shared.passage_index import (  # noqa: E402
-    GRAM_OFFSETS_NAME, MAX_RECORD_LETTERS, POSTINGS_NAME, RECORDS_NAME,
-    STREAMS_NAME, IndexFormatError, encode_stream, open_index,
+    GRAM_OFFSETS_NAME, MANIFEST_NAME, MAX_RECORD_LETTERS, POSTINGS_NAME,
+    RECORDS_NAME, STREAMS_NAME, IndexFormatError, diagnose_index,
+    encode_stream, open_index,
 )
 from shared.passage_normalize import (  # noqa: E402
     gram_codes, norm_stream_fast,
@@ -477,3 +479,67 @@ def test_a_failed_space_preflight_leaves_the_old_index_openable(tmp_path):
         'the refused rebuild destroyed the manifest of the index it never '
         'touched'
     )
+
+
+# ---------------------------------------------------------------------------
+# diagnose_index: `open_index` is silent by design, so the explainer beside it
+# must stay TRUE to it. Every case here asserts both halves -- the artifact
+# really fails to open, AND the sentence names the actual cause. A diagnosis
+# that drifts from the loader is worse than none.
+# ---------------------------------------------------------------------------
+
+def _healthy_index(tmp_path, name='ok'):
+    d = str(tmp_path / name)
+    build_index(synthetic_records(), d, partitions=3, apply_hygiene=False)
+    assert open_index(d) is not None
+    return d
+
+
+def test_diagnose_says_opens_cleanly_for_a_healthy_index(tmp_path):
+    assert diagnose_index(_healthy_index(tmp_path)) == 'opens cleanly'
+
+
+def test_diagnose_names_a_missing_directory(tmp_path):
+    msg = diagnose_index(str(tmp_path / 'not-there'))
+    assert 'not a directory' in msg and 'not-there' in msg
+
+
+def test_diagnose_names_a_directory_without_a_manifest(tmp_path):
+    empty = tmp_path / 'empty'
+    empty.mkdir()
+    assert open_index(str(empty)) is None
+    assert f'no {MANIFEST_NAME}' in diagnose_index(str(empty))
+
+
+def test_diagnose_names_the_mismatched_layout_field(tmp_path):
+    d = _healthy_index(tmp_path, 'stale')
+    mpath = os.path.join(d, MANIFEST_NAME)
+    with open(mpath, encoding='utf-8') as fh:
+        manifest = json.load(fh)
+    manifest['layout']['normalizer_version'] = 999
+    with open(mpath, 'w', encoding='utf-8') as fh:
+        json.dump(manifest, fh)
+    assert open_index(d) is None
+    msg = diagnose_index(d)
+    assert 'layout mismatch' in msg
+    assert 'normalizer_version' in msg and '999' in msg
+
+
+def test_diagnose_names_the_truncated_file(tmp_path):
+    d = _healthy_index(tmp_path, 'cut')
+    victim = os.path.join(d, STREAMS_NAME)
+    with open(victim, 'r+b') as fh:
+        fh.truncate(os.path.getsize(victim) - 8)
+    assert open_index(d) is None
+    msg = diagnose_index(d)
+    assert STREAMS_NAME in msg and 'truncated' in msg
+
+
+def test_diagnose_never_raises_on_garbage(tmp_path):
+    d = _healthy_index(tmp_path, 'garbage')
+    with open(os.path.join(d, MANIFEST_NAME), 'w', encoding='utf-8') as fh:
+        fh.write('{ not json at all')
+    assert open_index(d) is None
+    assert 'unparseable' in diagnose_index(d)
+    # Non-paths must not blow up either -- this is a diagnostic, not a gate.
+    assert isinstance(diagnose_index(''), str)

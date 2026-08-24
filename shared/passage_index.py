@@ -323,6 +323,88 @@ def open_index(index_dir: str) -> Optional[PassageIndex]:
         return None
 
 
+def diagnose_index(index_dir: str) -> str:
+    """Why would `open_index(index_dir)` return None? One human sentence.
+
+    `open_index` is deliberately silent: it returns None at a dozen points
+    and logs nothing, because on the WEB path a bad artifact must hide
+    cleanly rather than announce its internals. That is the right production
+    behaviour and it is not changed here. But it leaves an operator running a
+    CLI tool with "index failed to open" and no next step, which is how this
+    function came to exist (2026-08-24).
+
+    Read-only and never raises: it re-walks the same checks in the same order
+    and describes the FIRST one that fails, so the answer always names an
+    actionable thing (wrong directory, stale layout, truncated file). Returns
+    'opens cleanly' when nothing fails -- callers should treat a passing
+    diagnosis with a failing open as a bug report, not a contradiction to
+    paper over.
+
+    Kept beside `open_index` on purpose: two copies of these checks in two
+    files would drift, and a diagnosis that describes checks the loader no
+    longer makes is worse than no diagnosis.
+    """
+    try:
+        if sys.byteorder != 'little':
+            return (f'this machine is {sys.byteorder}-endian; the artifact '
+                    f'format is little-endian only')
+        if not os.path.isdir(index_dir):
+            return f'not a directory: {os.path.abspath(index_dir)}'
+        mpath = os.path.join(index_dir, MANIFEST_NAME)
+        if not os.path.isfile(mpath):
+            present = sorted(os.listdir(index_dir))[:12]
+            return (f'no {MANIFEST_NAME} in {os.path.abspath(index_dir)} '
+                    f'(contains: {", ".join(present) or "nothing"})')
+        try:
+            with open(mpath, encoding='utf-8') as fh:
+                manifest = json.load(fh)
+        except Exception as exc:
+            return f'{MANIFEST_NAME} is unreadable/unparseable: {exc}'
+
+        want = layout_fingerprint()
+        got = manifest.get('layout')
+        if got != want:
+            if not isinstance(got, dict):
+                return f'{MANIFEST_NAME} has no layout fingerprint'
+            diffs = [f'{k}: artifact={got.get(k)!r} reader={v!r}'
+                     for k, v in want.items() if got.get(k) != v]
+            return ('layout mismatch -- the artifact was built by a different '
+                    'version and must be rebuilt: ' + '; '.join(diffs))
+
+        counts = manifest.get('counts') or {}
+        for key in ('n_records', 'n_letters', 'n_postings'):
+            if not isinstance(counts.get(key), int) or counts[key] < 0:
+                return f'{MANIFEST_NAME} counts.{key} is missing or invalid'
+        if counts['n_records'] > MAX_RECORDS:
+            return (f'manifest declares {counts["n_records"]:,} records, '
+                    f'above the format maximum {MAX_RECORDS:,}')
+        for name, expected in _expected_sizes(counts).items():
+            path = os.path.join(index_dir, name)
+            if not os.path.isfile(path):
+                return f'missing data file: {name}'
+            actual = os.path.getsize(path)
+            if actual != expected:
+                return (f'{name} is {actual:,} bytes but the manifest implies '
+                        f'{expected:,} -- truncated or mismatched artifact')
+        if not os.path.isfile(os.path.join(index_dir, RECORD_IDS_NAME)):
+            return f'missing data file: {RECORD_IDS_NAME}'
+
+        gram_offsets = np.memmap(os.path.join(index_dir, GRAM_OFFSETS_NAME),
+                                 dtype='<u8', mode='r',
+                                 shape=(GRAM_CODE_SPACE + 1,))
+        if int(gram_offsets[0]) != 0:
+            return f'{GRAM_OFFSETS_NAME} does not start at 0 (corrupt CSR)'
+        if int(gram_offsets[-1]) != counts['n_postings']:
+            return (f'{GRAM_OFFSETS_NAME} ends at {int(gram_offsets[-1]):,} '
+                    f'but the manifest declares {counts["n_postings"]:,} '
+                    f'postings (corrupt CSR)')
+        if not csr_is_monotone(gram_offsets):
+            return f'{GRAM_OFFSETS_NAME} is not monotone (corrupt CSR)'
+        return 'opens cleanly'
+    except Exception as exc:  # never raise from a diagnostic
+        return f'unexpected error while diagnosing: {exc!r}'
+
+
 CSR_SCAN_CHUNK = 1 << 20
 
 

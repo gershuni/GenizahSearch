@@ -35,9 +35,35 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from shared.passage_index import open_index  # noqa: E402
+from shared.passage_index import (  # noqa: E402
+    MANIFEST_NAME, diagnose_index, open_index,
+)
 from shared.passage_policy import PRESETS, get_preset  # noqa: E402
 from shared.passage_search import search_passage  # noqa: E402
+
+
+def _nearby_index_dirs(index_dir: str) -> list:
+    """Sibling directories that DO look like an index, as a next step.
+
+    The likeliest cause of a failed open is simply the wrong directory name
+    -- the index lives outside the repo, is gitignored, and different
+    machines have used `current/`, `full_v1/` and dated names. Pointing at
+    the real ones beats making the operator go hunting.
+    """
+    hints: list = []
+    try:
+        parent = os.path.dirname(os.path.abspath(index_dir)) or '.'
+        if not os.path.isdir(parent):
+            return hints
+        for name in sorted(os.listdir(parent)):
+            cand = os.path.join(parent, name)
+            if (os.path.abspath(cand) != os.path.abspath(index_dir)
+                    and os.path.isdir(cand)
+                    and os.path.isfile(os.path.join(cand, MANIFEST_NAME))):
+                hints.append(f'an index appears to be here: {cand}')
+    except Exception:
+        pass
+    return hints[:5]
 
 
 def load_shelfmarks(csv_path: str) -> dict:
@@ -137,8 +163,11 @@ def main() -> int:
 
     idx = open_index(args.index)
     if idx is None:
-        print(f'index failed to open (fail-closed): {args.index}',
-              file=sys.stderr)
+        print(f'index failed to open (fail-closed): '
+              f'{os.path.abspath(args.index)}', file=sys.stderr)
+        print(f'  reason: {diagnose_index(args.index)}', file=sys.stderr)
+        for hint in _nearby_index_dirs(args.index):
+            print(f'  hint: {hint}', file=sys.stderr)
         return 2
 
     csv_path = args.libraries_csv
