@@ -1563,6 +1563,10 @@ def _make_fused_row(uid, sys_id, score, fusion, witness_ids):
         'witness_ids': witness_ids,
         'witness_id': ids[0],
         'witness_label': 'Witness ' + ids[0],
+        # Deliberately HIGHER than `score`: the fused row renders one
+        # witness's evidence and reports that witness's matched letters, so
+        # the strongest match any witness made is a separate number.
+        'best_witness_score': score * 2,
     })
     return row
 
@@ -1962,3 +1966,41 @@ def test_the_service_leaves_the_chunk_cap_alone(client, mock_searcher,
     r = client.post('/api/parallels', json={'text': 'hello world'})
     assert r.status_code == 200, r.text
     assert seen.get('order_key') is None
+
+
+def test_the_best_witness_score_reaches_the_envelope(client, multi_witness,
+                                                     clean_env):
+    """The fused row keeps `score` on the witness it actually renders, so the
+    strongest single match any witness made would be lost unless the envelope
+    reports it. It goes in `witness_fusion`, beside the other facts about the
+    fusion, where it cannot be mistaken for the row's own score."""
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [W1, W2]})
+    assert r.status_code == 200, r.text
+    results = r.json()['results']
+
+    for item in results:
+        wf = item['witness_fusion']
+        assert 'best_witness_score' in wf, (
+            'the strongest match on this manuscript is not reported anywhere'
+        )
+        assert wf['best_witness_score'] == item['score'] * 2, (
+            'it must be the fusion figure, not a copy of the score'
+        )
+
+
+def test_a_single_witness_response_has_no_best_witness_score(
+    client, mock_searcher, clean_env, monkeypatch,
+):
+    """`witness_fusion` is emitted only for genuinely fused groups -- the
+    single-witness path short-circuits before fusing, and a bare key here
+    would break the shape shared with /api/search."""
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    monkeypatch.setattr(
+        'web.passage_assets.get_passage_searcher',
+        lambda text_fetcher: mock_searcher)
+    mock_searcher.policy.as_dict.return_value = _fake_passage_policy()
+    r = client.post('/api/parallels', json={
+        'text': 'hello world', 'method': 'passage'})
+    assert r.status_code == 200, r.text
+    assert 'witness_fusion' not in r.json()['results'][0]

@@ -194,17 +194,30 @@ def fuse(rows_by_witness: "Mapping[str, Sequence[dict]] | Iterable[tuple]",
 
     Fields written onto the fused row:
 
-    ==================  ====================================================
-    `score`             the BEST single witness's matched letters -- scale
-    `final_score`       unchanged, because `create_manuscript_group` renders
-                        Max:/Avg: badges straight off it and the exports
-                        carry it as a column. Overwriting it with the RRF
-                        sum would silently change ~214 into ~0.03.
-    `fusion_score`      sum of 1/(60 + rank) over every witness that matched
-    `witness_count`     how many witnesses matched this record
-    `witness_id`        the WINNING witness (as does `witness_label`)
-    `witness_ids`       every matching witness id, rank order, comma-joined
-    ==================  ====================================================
+    ==========================  ============================================
+    `score`                     the WINNING witness's matched letters --
+    `final_score`               scale unchanged, because
+                                `create_manuscript_group` renders Max:/Avg:
+                                badges straight off it and the exports carry
+                                it as a column. Overwriting it with the RRF
+                                sum would silently change ~214 into ~0.03.
+    `fusion_score`              sum of 1/(60 + rank) over every witness that
+                                matched
+    `witness_count`             how many witnesses matched this record
+    `witness_id`                the WINNING witness (as does `witness_label`)
+    `witness_ids`               every matching witness id, rank order,
+                                comma-joined
+    `best_witness_score`        the highest score any contributor scored --
+                                a fact about the FUSION, not about this row
+    ==========================  ============================================
+
+    `score` used to be `max()` across the contributors, which contradicted
+    the winner rule above: a record found at rank 1 by a 400-letter witness
+    and at rank 31 by a 900-letter one rendered the SHORT witness's label and
+    highlighted span beside the number 900. A reader would take those 900
+    letters to be the ones highlighted in front of them. The number and the
+    evidence now come from the same row; the maximum is still reported, under
+    a name that says what it is.
     """
     pairs = (list(rows_by_witness.items())
              if hasattr(rows_by_witness, 'items') else list(rows_by_witness))
@@ -231,7 +244,7 @@ def fuse(rows_by_witness: "Mapping[str, Sequence[dict]] | Iterable[tuple]",
         contributors = entry['contributors']
         # Winner: best (lowest) rank; ties to the higher score; then to the
         # earlier witness, so the result is order-deterministic.
-        order, _rank, _score, best_row = min(
+        _order, _rank, win_score, best_row = min(
             contributors, key=lambda c: (c[1], -c[2], c[0]))
         out = dict(best_row)
         out['fusion_score'] = entry['rrf']
@@ -242,8 +255,12 @@ def fuse(rows_by_witness: "Mapping[str, Sequence[dict]] | Iterable[tuple]",
         out['witness_ids'] = _ID_SEP.join(
             _wid_of(c[3]) for c in sorted(contributors, key=lambda c: (c[1], c[0]))
         )
-        out['score'] = max(c[2] for c in contributors)
-        out['final_score'] = out['score']
+        # From the WINNER, not `max()` across contributors: this row shows
+        # the winner's label and the winner's highlighted span, so a score
+        # from anyone else describes text that is not on the screen.
+        out['score'] = win_score
+        out['final_score'] = win_score
+        out['best_witness_score'] = max(c[2] for c in contributors)
         out['chunk_count'] = best_row.get('chunk_count')
         fused.append(out)
 
@@ -276,9 +293,14 @@ def group_stats(items: Sequence[dict]) -> dict:
     """
     seen: dict = {}
     total = 0.0
+    best = 0.0
     for it in items or []:
         try:
             total += float(it.get('fusion_score') or 0.0)
+        except (TypeError, ValueError):
+            pass
+        try:
+            best = max(best, float(it.get('best_witness_score') or 0.0))
         except (TypeError, ValueError):
             pass
         for wid in split_ids(it.get('witness_ids')):
@@ -290,6 +312,10 @@ def group_stats(items: Sequence[dict]) -> dict:
         'witness_count': len(seen),
         'fusion_score': total,
         'witness_ids': list(seen.keys()),
+        # The strongest single match found on this manuscript by ANY witness.
+        # Reported here rather than as a row's `score` because it may belong
+        # to a witness whose evidence no row in the group renders.
+        'best_witness_score': best,
     }
 
 

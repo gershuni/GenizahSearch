@@ -1085,6 +1085,12 @@ def _to_parallels_envelope_item(
                 'witness_count': stats['witness_count'],
                 'witness_ids': stats['witness_ids'],
                 'fusion_score': round(stats['fusion_score'], 6),
+                # The strongest single match any witness made on this
+                # manuscript. NOT the same as `score`, which sums the
+                # matched letters of the witness each row actually renders --
+                # a row shows one witness's highlighted span, so a score from
+                # another would describe text the reader cannot see.
+                'best_witness_score': round(stats['best_witness_score'], 2),
             }
     return item
 

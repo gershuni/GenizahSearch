@@ -526,12 +526,23 @@ for reasons unrelated to match quality; RRF ties sum-of-scores at similar witnes
 beats it decisively at mixed ones. Each group in `results[]` gains a `witness_fusion` object:
 
 ```json
-"witness_fusion": {"witness_count": 4, "witness_ids": ["w1", "w3", "w5", "w7"], "fusion_score": 0.0621}
+"witness_fusion": {
+  "witness_count": 4,
+  "witness_ids": ["w1", "w3", "w5", "w7"],
+  "fusion_score": 0.0621,
+  "best_witness_score": 880.0
+}
 ```
 
 `witness_count` is the **union** of witnesses across the group's rows — a manuscript found on
 three pages by one witness is one witness. Witness ids are assigned positionally (`w1`, `w2`,
 …) in request order.
+
+`best_witness_score` is the strongest single match **any** witness made on this manuscript. It
+is reported here, and not as a row's `score`, because it may belong to a witness whose evidence
+no returned row renders: each row carries the label, highlighted span and `score` of the one
+witness that ranked it best, and a score borrowed from another witness would describe text the
+response does not contain.
 
 **`score` and `sort_score` stay matched letters on a multi-witness response**, exactly as on
 every other method — one scale everywhere. The array is ordered by

@@ -594,12 +594,24 @@ surface offers it for letter-level search only.
 one request per witness, which is what makes an R-round expansion cost `1 + rounds × K`
 searches rather than re-running everything on every addition).
 
-**`score` stays matched letters.** The fused row reports the best single witness's score on the
-unchanged scale, with the RRF sum in a separate `fusion_score`. Overwriting `score` would make
-the group cap fusion-aware for free but would silently turn ~214 into ~0.03 in every badge and
-export column that reads it. Wherever groups are ranked by fusion, `aggregate_score` /
-`sort_score` follow the same key, so the order returned and the order those numbers imply never
-disagree.
+**`score` stays matched letters, from the witness the row renders.** The RRF sum lives in a
+separate `fusion_score`. Overwriting `score` would make the group cap fusion-aware for free but
+would silently turn ~214 into ~0.03 in every badge and export column that reads it.
+
+Two corrections to earlier drafts of this paragraph, both found by review:
+
+* It said the fused row reports *the best single witness's* score — `max()` across every
+  contributor. That contradicted the winner rule one paragraph above: the row shows the winning
+  witness's label and highlighted span, so a score from a louder witness described text nobody
+  could see. `score` now comes from the same row as the evidence, and the maximum is reported
+  as `witness_fusion.best_witness_score`, where its meaning is stated.
+* It said `aggregate_score` / `sort_score` follow the fusion key wherever groups are ranked by
+  fusion. They deliberately do **not**. Summing fusion into `aggregate_score` turned the public
+  `score` into ~0.03 on multi-witness responses — the exact defect the paragraph above warns
+  about, reintroduced at the serializer. Group ORDER follows the fusion key; `aggregate_score`,
+  `sort_score` and `score` are always matched letters. A consumer re-sorting a multi-witness
+  response by `score` therefore gets a different order than the array's, which is documented in
+  `docs/SEARCH_API.md` rather than papered over.
 
 **`chunk_index` is per witness.** It is the ordinal of a span's query-side start offset among
 all distinct start offsets for that query — a position in the pasted composition, comparable

@@ -114,8 +114,13 @@ def test_best_rank_beats_higher_score_across_witnesses():
     # its RRF sum beats every long-witness-only row despite far lower scores.
     assert fused[0]['raw_header'] == 'GOOD'
     assert fused[0]['witness_id'] == 'w1'
-    # ... and it still reports the BEST score seen on it, from the other one.
-    assert fused[0]['score'] == 900.0
+    # ... and its score is the WINNER'S, not the other witness's 900. This
+    # line used to assert 900.0, one line below `witness_id == 'w1'`: the row
+    # rendered w1's label and w1's highlighted span beside a number that
+    # belonged to w2's text. The ranking claim this test exists for is
+    # untouched; the contradiction beside it is gone.
+    assert fused[0]['score'] == 400.0
+    assert fused[0]['best_witness_score'] == 900.0
 
 
 def test_fuse_is_order_deterministic_for_equal_contributions():
@@ -217,3 +222,70 @@ def test_split_ids_round_trips_the_flat_scalar():
     assert pf.split_ids('') == []
     assert pf.split_ids(None) == []
     assert pf.split_ids(['w1', 'w2']) == ['w1', 'w2']
+
+
+def test_the_score_and_the_rendered_evidence_come_from_one_witness():
+    """A fused row shows ONE witness's label and ONE witness's highlighted
+    span -- a span offset is a position in that witness's text and means
+    nothing against another's. A score from a different contributor therefore
+    describes text the reader cannot see."""
+    # The rendered fields are given DIFFERENT values per witness, or the
+    # assertion below could not tell whose row survived.
+    winner = pf.tag_rows(
+        [_row('REC', 120, source_ctx='span-in-w1')], 'w1', 'Winner')
+    louder = pf.tag_rows(
+        [_row('OTHER', 999), _row('REC', 880, source_ctx='span-in-w2')],
+        'w2', 'Louder')
+
+    row = pf.fuse({'w1': winner, 'w2': louder})[0]
+
+    assert row['raw_header'] == 'REC'
+    assert row['witness_id'] == 'w1'
+    assert row['witness_label'] == 'Winner'
+    assert row['source_ctx'] == 'span-in-w1', (
+        'sanity: the rendered evidence really is the winner\'s'
+    )
+    assert row['score'] == 120.0, (
+        'the score must describe the span rendered beside it'
+    )
+    assert row['final_score'] == 120.0, 'both fields, or the exports disagree'
+
+
+def test_the_best_witness_score_is_still_reported():
+    """Fusing must not DISCARD the information, only stop mislabelling it."""
+    row = pf.fuse({
+        'w1': _witness('w1', 'A', [('REC', 120)]),
+        'w2': _witness('w2', 'B', [('X', 1), ('REC', 880)]),
+    })[0]
+    assert row['best_witness_score'] == 880.0
+
+
+def test_a_single_witness_row_scores_the_same_either_way():
+    """With one contributor the winner IS the maximum, so nothing about the
+    common case moves."""
+    row = pf.fuse({'w1': _witness('w1', 'A', [('REC', 214)])})[0]
+    assert row['score'] == 214.0
+    assert row['best_witness_score'] == 214.0
+
+
+def test_group_stats_carries_the_best_witness_score_up():
+    """The group badge needs a number no row explains to be reachable
+    SOMEWHERE, or fusing silently loses the strongest match on a manuscript."""
+    # The maximum comes FIRST on purpose. Listed ascending, "take the last"
+    # and "take the maximum" agree, and a mutation to the former stayed green.
+    items = [
+        {'witness_ids': 'w1', 'fusion_score': 0.01, 'best_witness_score': 880},
+        {'witness_ids': 'w2', 'fusion_score': 0.02, 'best_witness_score': 120},
+    ]
+    stats = pf.group_stats(items)
+    assert stats['best_witness_score'] == 880.0
+    assert stats['witness_count'] == 2, 'the union rule is untouched'
+
+
+def test_group_stats_survives_junk_in_the_best_score():
+    stats = pf.group_stats([
+        {'witness_ids': 'w1', 'fusion_score': 0.01, 'best_witness_score': None},
+        {'witness_ids': 'w2', 'fusion_score': 0.02, 'best_witness_score': 'x'},
+        {'witness_ids': 'w3', 'fusion_score': 0.03, 'best_witness_score': 7},
+    ])
+    assert stats['best_witness_score'] == 7.0
