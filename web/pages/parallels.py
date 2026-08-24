@@ -73,6 +73,80 @@ def witness_sys_id(row) -> str:
     return m.group(1) if m else None
 
 
+def restore_witness_entries(raw, default_label: str, cap: int = None) -> list:
+    """Normalise a tab snapshot's witness list back into witness dicts.
+
+    Pure, module level and dependency-injected (`default_label` is the only
+    thing it would otherwise need `tr()` for) so the RULES are testable.
+    A mutation sweep proved they were not: reverting the drop rule below to
+    the obvious `if not text.strip()` -- which deletes every restored
+    manuscript witness -- left the entire page suite green.
+
+    Three rules:
+
+    * **A manuscript witness with a `sys_id` survives without text.** The
+      snapshot drops its text deliberately (the corpus still has it) and
+      `witnesses_needing_text` / the rehydrator put it back before dispatch.
+      Dropping it here would quietly shrink a restored 17-witness search.
+    * **Anything else with no text is dropped**, because nothing in the world
+      can recover it and a witness that cannot be searched must not sit in
+      the list pretending otherwise.
+    * **Ids are renumbered `w1..wN` over the SURVIVORS.** Reusing the stored
+      ids would leave gaps that `_witness_new_id` could then re-issue, and
+      two witnesses sharing an id corrupt the per-witness row cache.
+
+    Every witness comes back `pending`: the snapshot holds the FUSED rows, so
+    per-witness ranks cannot be recovered, and a fusion rebuilt from partial
+    inputs would be quietly wrong rather than visibly absent.
+
+    Returns the list; the caller assigns it and resets the row caches.
+    """
+    if not isinstance(raw, list) or not raw:
+        return []
+    out = []
+    for entry in raw[:(cap if cap is not None else WITNESS_CAP)]:
+        if not isinstance(entry, dict):
+            continue
+        kind = 'manuscript' if entry.get('kind') == 'manuscript' else 'pasted'
+        text = str(entry.get('text') or '')
+        sys_id = entry.get('sys_id')
+        if not text.strip() and not (kind == 'manuscript' and sys_id):
+            continue
+        out.append({
+            'id': f'w{len(out) + 1}',
+            'label': str(entry.get('label') or '') or (sys_id or default_label),
+            'kind': kind,
+            'sys_id': sys_id,
+            'seed_digest': str(entry.get('seed_digest') or ''),
+            'text': text,
+            'status': 'pending',
+            'hits': 0,
+            'error': '',
+        })
+    return out
+
+
+def witnesses_needing_text(pending) -> list:
+    """Which pending witnesses have no text to search and can get one back.
+
+    `_persist_active_snapshot` stores a MANUSCRIPT witness without its text on
+    purpose -- the corpus still has it, and copying up to 25 x 20,000 chars of
+    corpus text into a tab snapshot buys nothing. Nothing re-fetched it on
+    restore, so after a reload those witnesses searched the empty string and
+    reported `searched, 0 matches`: a false negative indistinguishable from a
+    real one. (Found by review, not by any test here.)
+
+    Module level and pure so the RULE is tested rather than its plumbing. A
+    pasted witness is never included -- its text existed nowhere but the
+    snapshot, so there is nothing to re-fetch -- and neither is one with no
+    `sys_id` to fetch by. Both are refused at dispatch instead.
+    """
+    return [w for w in (pending or [])
+            if w.get('kind') == 'manuscript'
+            and w.get('sys_id')
+            and not (w.get('text') or '').strip()]
+
+
 def collect_witness_texts(sys_ids, rows, fetch_header,
                           fetch_manuscript=None):
     """Gather the text to search a promoted manuscript WITH.
@@ -599,35 +673,13 @@ def create_parallels_page(initial_text: str = None):
         panel says the witnesses need re-running, and pressing Find Parallels
         searches all of them again.
         """
-        raw = snapshot.get('witnesses')
-        if not isinstance(raw, list) or not raw:
-            return
-        restored, seq = [], 0
-        for entry in raw[:WITNESS_CAP]:
-            if not isinstance(entry, dict):
-                continue
-            kind = 'manuscript' if entry.get('kind') == 'manuscript' else 'pasted'
-            text = str(entry.get('text') or '')
-            sys_id = entry.get('sys_id')
-            if kind == 'pasted' and not text.strip():
-                # A pasted witness with no text cannot be searched and must
-                # not sit in the list pretending otherwise.
-                continue
-            seq += 1
-            restored.append({
-                'id': f'w{seq}',
-                'label': str(entry.get('label') or '') or (
-                    sys_id or tr('Pasted text')),
-                'kind': kind,
-                'sys_id': sys_id,
-                'seed_digest': str(entry.get('seed_digest') or ''),
-                'text': text,
-                'status': 'pending',
-                'hits': 0,
-                'error': '',
-            })
+        # The rules live in `restore_witness_entries` (module level, pure,
+        # directly tested) -- a mutation sweep proved that a copy of them
+        # inside this closure was covered by nothing.
+        restored = restore_witness_entries(
+            snapshot.get('witnesses'), tr('Pasted text'))
         p_state.witnesses = restored
-        p_state.witness_seq = seq
+        p_state.witness_seq = len(restored)
         p_state.witness_rows = {}
         p_state.witness_filtered = {}
 
@@ -1028,7 +1080,9 @@ def create_parallels_page(initial_text: str = None):
                                         'w-full items-center gap-2') as witness_run_row:
                                     witness_run_btn = ui.button(
                                         tr('Search now'), icon='play_arrow',
-                                        on_click=lambda: _search_pending_witnesses(),
+                                        on_click=lambda: (
+                                            _clear_stop(),
+                                            _search_pending_witnesses())[-1],
                                     ).props('outline dense no-caps size=sm')
                                     witness_progress_label = ui.label('').classes(
                                         'text-xs').style('color: var(--text-muted);')
@@ -2655,6 +2709,53 @@ def create_parallels_page(initial_text: str = None):
             entry['error'] = tr('Letter-level search failed.')
             return None
 
+    def _clear_stop() -> None:
+        """Fresh user intent clears a standing Stop.
+
+        Deliberately NOT inside `_search_pending_witnesses`: that runs from
+        the seed search and from each auto-expand round too, where clearing
+        would undo a Stop the user already pressed.
+        """
+        p_state.is_cancelled = False
+
+    async def _rehydrate_manuscript_witnesses(pending: list) -> None:
+        """Re-fetch the text of restored manuscript witnesses.
+
+        `_persist_active_snapshot` stores manuscript witnesses WITHOUT their
+        text on purpose -- the corpus still has it, and duplicating up to
+        25 x 20,000 characters of it into a tab snapshot buys nothing. But
+        nothing re-fetched it on restore, so after a reload those witnesses
+        searched the empty string and came back `searched, 0 matches`: a
+        false negative that looks exactly like a real one.
+
+        Fetched off the event loop, in ONE batch, through the same
+        `collect_witness_texts` the promotion path uses. Anything still
+        unresolved keeps its empty text and is failed at dispatch with a
+        reason.
+        """
+        stale = witnesses_needing_text(pending)
+        if not stale:
+            return
+        sys_ids = [w['sys_id'] for w in stale]
+        # Captured HERE, on the event loop: the fetch runs off-loop and must
+        # not read page state.
+        rows_snapshot = list(p_state.results or [])
+
+        def _fetch():
+            return collect_witness_texts(
+                sys_ids, rows_snapshot,
+                fetch_header=state.searcher.get_full_text_by_header,
+                fetch_manuscript=state.searcher.get_full_manuscript,
+            )
+
+        try:
+            texts, _failed = await run.io_bound(_fetch)
+        except Exception as exc:
+            logger.exception(f"Witness rehydrate failed: {exc}")
+            return
+        for w in stale:
+            w['text'] = texts.get(w['sys_id']) or ''
+
     async def _search_pending_witnesses(_e=None) -> int:
         """Search every `pending` witness and merge its rows into what is
         already on screen. Additive by construction: a witness is searched at
@@ -2665,15 +2766,23 @@ def create_parallels_page(initial_text: str = None):
         """
         if p_state.is_running:
             return 0
+        if p_state.is_cancelled:
+            # A standing Stop stops the witnesses too. This function used to
+            # clear the flag on entry -- but it is reached from the SEED search
+            # and from each auto-expand round, not only from a button, so a
+            # Stop the user had already pressed was silently undone and the
+            # run continued. Only the explicit entry points clear it now
+            # (`_clear_stop`).
+            return 0
         pending = [w for w in p_state.witnesses if w['status'] == 'pending']
         if not pending:
             return 0
+        await _rehydrate_manuscript_witnesses(pending)
         if not p_state.last_passage_ctx:
             ui.notify(tr('Run a letter-level search first.'), type='warning')
             return 0
 
         p_state.is_running = True
-        p_state.is_cancelled = False
         found = 0
         try:
             for i, entry in enumerate(pending, start=1):
@@ -2684,6 +2793,15 @@ def create_parallels_page(initial_text: str = None):
                 # witness always runs to completion.
                 if p_state.is_cancelled:
                     break
+                if not (entry.get('text') or '').strip():
+                    # Never dispatch an empty query. The engine answers it
+                    # with nothing, and the panel would then report a
+                    # perfectly honest-looking "0 matches" for a search that
+                    # never ran -- a false negative no user could detect.
+                    entry['status'] = 'failed'
+                    entry['error'] = tr(
+                        'Could not load text for this manuscript.')
+                    continue
                 entry['status'] = 'running'
                 p_state.witness_progress = tr(
                     'Witness {i}/{k}: {label}').format(
@@ -2720,6 +2838,7 @@ def create_parallels_page(initial_text: str = None):
         return found
 
     async def _retry_witness(wid: str) -> None:
+        _clear_stop()   # pressing Retry is fresh intent
         for w in p_state.witnesses:
             if w['id'] == wid:
                 w['status'] = 'pending'
@@ -2827,7 +2946,7 @@ def create_parallels_page(initial_text: str = None):
         rounds = int(auto_rounds.value or 3)
         top_k = int(auto_top_k.value or 5)
         p_state.auto_expanding = True
-        p_state.is_cancelled = False
+        _clear_stop()   # pressing Run auto-expand is fresh intent
         try:
             for rnd in range(1, rounds + 1):
                 if p_state.is_cancelled:
@@ -2964,7 +3083,7 @@ def create_parallels_page(initial_text: str = None):
                 ui.space()
                 ui.button(
                     tr('Search with these too'), icon='playlist_add',
-                    on_click=lambda: _promote_checked(),
+                    on_click=lambda: (_clear_stop(), _promote_checked())[-1],
                 ).props('dense no-caps size=sm')
                 ui.button(
                     tr('Clear selection'),

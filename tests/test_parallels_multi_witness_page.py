@@ -553,10 +553,15 @@ def test_the_restore_has_an_actual_consumer():
 def test_restored_witnesses_come_back_pending_with_no_stale_rows():
     """The snapshot holds the FUSED rows, from which per-witness ranks
     cannot be recovered. A fusion rebuilt from incomplete inputs would be
-    quietly wrong rather than visibly absent."""
+    quietly wrong rather than visibly absent.
+
+    The `pending` half is checked by CALLING the normaliser (see
+    `test_every_restored_witness_comes_back_pending`); what is left here is
+    the closure's own job -- dropping the row caches it cannot rebuild.
+    """
     src = _func_source('_restore_witnesses_from_snapshot')
-    assert "'status': 'pending'" in src
     assert 'p_state.witness_rows = {}' in src
+    assert 'p_state.witness_filtered = {}' in src
 
 
 def test_witnesses_are_not_part_of_searched_config():
@@ -631,8 +636,13 @@ def test_the_stale_stamp_survives_a_reload():
     to be in the box after the reload."""
     assert "'seed_digest': w.get('seed_digest') or ''" in _func_source(
         '_persist_active_snapshot')
-    assert "'seed_digest': str(entry.get('seed_digest') or '')" in _func_source(
-        '_restore_witnesses_from_snapshot')
+    # The read half is checked by calling the normaliser, which a substring
+    # match cannot do -- see `test_the_seed_stamp_survives_the_round_trip`.
+    from web.pages.parallels import restore_witness_entries
+    got = restore_witness_entries(
+        [{'kind': 'pasted', 'text': 'aleph bet gimel',
+          'seed_digest': 'deadbeefcafe0001'}], 'Pasted text')
+    assert got[0]['seed_digest'] == 'deadbeefcafe0001'
 
 
 def test_the_seed_is_modelled_as_a_witness():
@@ -648,3 +658,256 @@ def test_a_witness_added_later_is_searched_with_the_same_settings():
     assert 'p_state.last_passage_ctx = {' in src
     run_src = _func_source('_run_one_witness_search')
     assert 'p_state.last_passage_ctx' in run_src
+
+
+# ---------------------------------------------------------------------------
+# A standing Stop stops the witnesses too.
+# ---------------------------------------------------------------------------
+
+def _clears_flag_false(func: str, attr: str) -> bool:
+    """Does `func` assign `p_state.<attr> = False` anywhere inside it?
+
+    An AST test, because the point is an ASSIGNMENT: the function's own
+    comment explains at length why the flag must not be cleared here, so any
+    grep for the text would match the explanation forever.
+    """
+    for node in ast.walk(ast.parse(_source())):
+        if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == func):
+            for sub in ast.walk(node):
+                if not isinstance(sub, ast.Assign):
+                    continue
+                if not (isinstance(sub.value, ast.Constant)
+                        and sub.value.value is False):
+                    continue
+                for tgt in sub.targets:
+                    if (isinstance(tgt, ast.Attribute) and tgt.attr == attr
+                            and isinstance(tgt.value, ast.Name)
+                            and tgt.value.id == 'p_state'):
+                        return True
+            return False
+    raise AssertionError(f'{func} not found in web/pages/parallels.py')
+
+
+def test_the_shared_witness_search_never_clears_a_standing_stop():
+    """It cleared `is_cancelled` on entry -- and it is reached from the SEED
+    search and from every auto-expand round, not only from a button. So Stop
+    pressed while the seed was running was silently undone and the run
+    carried on through every pending witness."""
+    assert not _clears_flag_false('_search_pending_witnesses', 'is_cancelled'), (
+        '_search_pending_witnesses must not clear is_cancelled: a Stop the '
+        'user already pressed would be undone'
+    )
+
+
+def test_the_shared_witness_search_returns_early_on_a_standing_stop():
+    """Not clearing the flag is only half of it -- it must also be OBEYED
+    before any witness is dispatched."""
+    for node in ast.walk(ast.parse(_source())):
+        if (isinstance(node, ast.AsyncFunctionDef)
+                and node.name == '_search_pending_witnesses'):
+            guards = [
+                n for n in node.body
+                if isinstance(n, ast.If)
+                and isinstance(n.test, ast.Attribute)
+                and n.test.attr == 'is_cancelled'
+                and any(isinstance(b, ast.Return) for b in n.body)
+            ]
+            assert guards, (
+                'no top-level `if p_state.is_cancelled: return` guard -- a '
+                'standing Stop would be ignored'
+            )
+            # Before the witness loop, not after it.
+            loops = [n.lineno for n in node.body
+                     if isinstance(n, (ast.For, ast.Try))]
+            assert not loops or guards[0].lineno < min(loops)
+            return
+    raise AssertionError('_search_pending_witnesses not found')
+
+
+def test_only_explicit_user_actions_clear_the_stop():
+    """`_clear_stop` exists so the clearing sites are countable. The three
+    explicit entry points -- Retry, Run auto-expand, and the two buttons --
+    clear it; nothing on the seed or auto-expand-round path does."""
+    assert '_clear_stop' in _func_names()
+    assert '_clear_stop' in _calls_in('_retry_witness')
+    assert '_clear_stop' in _calls_in('_run_auto_expand')
+    # ...and the round loop itself must not, or Stop between rounds dies.
+    assert not _clears_flag_false('_run_auto_expand', 'is_cancelled')
+    assert not _clears_flag_false('_promote_checked', 'is_cancelled')
+    # Both witness buttons route through it (Search now, Search with these too).
+    assert _call_sites_of('_clear_stop') >= 4
+
+
+# ---------------------------------------------------------------------------
+# A restored manuscript witness must not search the empty string.
+# ---------------------------------------------------------------------------
+
+def test_a_restored_manuscript_witness_needs_its_text_back():
+    """The snapshot drops a manuscript witness's text on purpose (the corpus
+    still has it). Nothing re-fetched it, so after a reload that witness
+    searched '' and came back `searched, 0 matches` -- a false negative
+    indistinguishable from a real one."""
+    from web.pages.parallels import witnesses_needing_text
+    restored = {'id': 'w1', 'kind': 'manuscript', 'sys_id': '990001234560',
+                'text': '', 'status': 'pending'}
+    assert witnesses_needing_text([restored]) == [restored]
+
+
+def test_a_pasted_witness_is_never_refetched():
+    """Its text existed nowhere but the snapshot. There is nothing to fetch,
+    and asking the corpus for one would silently return someone else's."""
+    from web.pages.parallels import witnesses_needing_text
+    assert witnesses_needing_text(
+        [{'id': 'w1', 'kind': 'pasted', 'text': '', 'sys_id': None}]) == []
+
+
+def test_a_manuscript_witness_that_still_has_text_is_left_alone():
+    """Re-fetching a witness that already has its text would spend a Tantivy
+    read per witness on every single search."""
+    from web.pages.parallels import witnesses_needing_text
+    assert witnesses_needing_text([{
+        'id': 'w1', 'kind': 'manuscript', 'sys_id': '990001234560',
+        'text': '\u05d1\u05e8\u05d0\u05e9\u05d9\u05ea'}]) == []
+
+
+def test_a_manuscript_witness_with_no_sys_id_cannot_be_refetched():
+    from web.pages.parallels import witnesses_needing_text
+    assert witnesses_needing_text(
+        [{'id': 'w1', 'kind': 'manuscript', 'sys_id': None, 'text': ''}]) == []
+
+
+def test_whitespace_only_text_counts_as_no_text():
+    from web.pages.parallels import witnesses_needing_text
+    got = witnesses_needing_text(
+        [{'id': 'w1', 'kind': 'manuscript', 'sys_id': '990001234560',
+          'text': '   \n  '}])
+    assert len(got) == 1
+
+
+def test_the_rehydrator_is_wired_in_before_any_witness_is_dispatched():
+    """A predicate nothing calls is a comment."""
+    assert '_rehydrate_manuscript_witnesses' in _calls_in(
+        '_search_pending_witnesses')
+    calls = _calls_in('_rehydrate_manuscript_witnesses')
+    assert 'witnesses_needing_text' in calls, 'the rule must be the shared one'
+    assert 'collect_witness_texts' in calls
+    assert 'io_bound' in calls, (
+        'Tantivy lookups on the single uvicorn loop stall every other request'
+    )
+
+
+def test_an_empty_witness_is_failed_rather_than_reported_as_zero_matches():
+    """The backstop for anything the re-fetch could not recover. Reporting
+    "0 matches" for a search that never ran is the failure this whole fix is
+    about; the witness must say it could not be searched."""
+    found = False
+    for node in ast.walk(ast.parse(_source())):
+        if (isinstance(node, ast.AsyncFunctionDef)
+                and node.name == '_search_pending_witnesses'):
+            for sub in ast.walk(node):
+                if not isinstance(sub, ast.If):
+                    continue
+                if "'strip'" not in ast.dump(sub.test):
+                    continue
+                body = ast.dump(ast.Module(body=sub.body, type_ignores=[]))
+                if "'failed'" in body and 'Continue' in body:
+                    found = True
+    assert found, 'no empty-text guard that fails the witness and skips it'
+
+
+# ---------------------------------------------------------------------------
+# Restoring the witness list from a tab snapshot.
+#
+# These exist because a mutation sweep found the rules covered by NOTHING:
+# reverting the drop rule to the obvious `if not text.strip()` -- which
+# deletes every restored manuscript witness, since the snapshot stores those
+# without text on purpose -- left the whole page suite green.
+# ---------------------------------------------------------------------------
+
+def _restore(raw, cap=None):
+    from web.pages.parallels import restore_witness_entries
+    return restore_witness_entries(raw, 'Pasted text', cap)
+
+
+def test_a_manuscript_witness_survives_the_snapshot_without_its_text():
+    """`_persist_active_snapshot` drops a manuscript witness's text on
+    purpose. If restore treats missing text as "unusable", a reloaded
+    17-witness search silently comes back with only the pasted ones."""
+    got = _restore([{'id': 'w1', 'kind': 'manuscript',
+                     'sys_id': '990001234560', 'text': '', 'label': 'T-S 1.1'}])
+    assert len(got) == 1
+    assert got[0]['sys_id'] == '990001234560'
+    assert got[0]['status'] == 'pending'
+
+
+def test_a_pasted_witness_with_no_text_is_dropped():
+    """Nothing in the world can recover it, so it must not sit in the list
+    pretending it can be searched."""
+    assert _restore([{'id': 'w1', 'kind': 'pasted', 'text': '   '}]) == []
+
+
+def test_a_manuscript_witness_with_no_sys_id_and_no_text_is_dropped():
+    assert _restore([{'id': 'w1', 'kind': 'manuscript',
+                      'sys_id': None, 'text': ''}]) == []
+
+
+def test_ids_are_renumbered_over_the_survivors():
+    """Reusing the stored ids would leave gaps that `_witness_new_id` can
+    re-issue, and two witnesses sharing an id corrupt the per-witness row
+    cache -- one silently overwrites the other's rows."""
+    got = _restore([
+        {'id': 'w1', 'kind': 'pasted', 'text': 'aleph bet gimel'},
+        {'id': 'w2', 'kind': 'pasted', 'text': ''},            # dropped
+        {'id': 'w3', 'kind': 'pasted', 'text': 'dalet he vav'},
+    ])
+    assert [w['id'] for w in got] == ['w1', 'w2']
+
+
+def test_the_seed_stamp_survives_the_round_trip():
+    """Without it every restored witness looks like it belongs to whatever
+    text is in the box -- the bug the owner hit with Antiochus witnesses
+    sitting under a Birkat Hamazon query."""
+    got = _restore([{'id': 'w1', 'kind': 'pasted', 'text': 'aleph bet gimel',
+                     'seed_digest': 'deadbeefcafe0001'}])
+    assert got[0]['seed_digest'] == 'deadbeefcafe0001'
+
+
+def test_a_witness_with_no_label_falls_back_to_its_shelfmark_then_the_default():
+    got = _restore([
+        {'id': 'w1', 'kind': 'manuscript', 'sys_id': '990001234560', 'text': ''},
+        {'id': 'w2', 'kind': 'pasted', 'text': 'aleph bet gimel'},
+    ])
+    assert got[0]['label'] == '990001234560'
+    assert got[1]['label'] == 'Pasted text'
+
+
+def test_the_cap_bounds_the_restored_list():
+    got = _restore([{'id': f'w{i}', 'kind': 'pasted', 'text': 'aleph bet gimel'}
+                    for i in range(40)], cap=3)
+    assert len(got) == 3
+
+
+def test_junk_in_the_snapshot_costs_the_entry_not_the_page():
+    """A snapshot is user-adjacent storage; one bad entry must not take the
+    restore down with it."""
+    assert _restore(None) == []
+    assert _restore('not a list') == []
+    got = _restore(['junk', 42, {'kind': 'pasted', 'text': 'aleph bet gimel'}])
+    assert len(got) == 1
+
+
+def test_every_restored_witness_comes_back_pending():
+    """The snapshot holds the FUSED rows, so per-witness ranks cannot be
+    recovered. A fusion rebuilt from partial inputs would be quietly wrong
+    rather than visibly absent."""
+    got = _restore([{'id': 'w1', 'kind': 'pasted', 'text': 'aleph bet gimel',
+                     'status': 'searched', 'hits': 99}])
+    assert got[0]['status'] == 'pending'
+    assert got[0]['hits'] == 0
+
+
+def test_the_restore_closure_uses_the_shared_normaliser():
+    """A pure function nothing calls is a comment."""
+    assert 'restore_witness_entries' in _calls_in(
+        '_restore_witnesses_from_snapshot')
