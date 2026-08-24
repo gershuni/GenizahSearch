@@ -993,67 +993,82 @@ def create_parallels_page(initial_text: str = None):
                     # multi-witness there measured +2 positives of 74 with
                     # zero frontier gain at 4-6x the time.
                     with ui.column().classes('w-full gap-2') as witness_panel:
-                        ui.separator().classes('my-2')
-                        with ui.row().classes('w-full items-center gap-2'):
-                            ui.icon('groups').classes('text-lg').style(
-                                'color: var(--primary-600);')
-                            ui.label(tr('Witnesses')).classes('font-bold')
-                            witness_count_label = ui.label('').classes(
-                                'text-sm').style('color: var(--text-muted);')
-                            ui.space()
-                            ui.button(
-                                tr('Add witness text'), icon='add',
-                                on_click=lambda: _open_add_witness_dialog(),
-                            ).props('flat dense no-caps size=sm')
-                        witness_empty_label = ui.label(tr(
-                            'Add other copies of this work to search with. '
-                            'Each is searched on its own and the results are '
-                            'merged.'
-                        )).classes('text-xs').style('color: var(--text-muted);')
-                        witness_list = ui.column().classes('w-full gap-1')
-                        # Appears when the source text changed under a
-                        # witness list gathered for a different work.
-                        witness_stale_row = ui.column().classes('w-full')
-                        witness_stale_row.set_visibility(False)
-                        with ui.row().classes(
-                                'w-full items-center gap-2') as witness_run_row:
-                            witness_run_btn = ui.button(
-                                tr('Search now'), icon='play_arrow',
-                                on_click=lambda: _search_pending_witnesses(),
-                            ).props('outline dense no-caps size=sm')
-                            witness_progress_label = ui.label('').classes(
-                                'text-xs').style('color: var(--text-muted);')
-                        witness_run_row.set_visibility(False)
-
-                        # Auto-expand: promote the best results and search
-                        # with them too. An EXPLICIT button, never folded
-                        # into "Find Parallels" -- a user who wanted one
-                        # search must not get twenty.
+                        # ONE collapsed line by default (owner, 2026-08-24:
+                        # "the witnesses option should be less prominent").
+                        # Most searches use a single text; an always-open
+                        # block pushed the primary controls down the page for
+                        # a feature they never touch.
+                        #
+                        # It must not be invisible when it has something to
+                        # say, so the caption carries the live counts and
+                        # `_refresh_witness_panel` OPENS it whenever a witness
+                        # needs attention -- stale, pending or failed.
                         with ui.expansion(
-                                tr('Auto-expand (optional)'), icon='auto_awesome'
-                        ).classes('w-full').props('dense') as auto_expand_panel:
-                            with ui.column().classes('w-full gap-2 p-2'):
-                                ui.label(tr(
-                                    'Repeatedly search with the best results '
-                                    'as new witnesses. Reach goes up and '
-                                    'top-of-list precision goes down.'
+                                tr('Witnesses'), icon='groups',
+                        ).classes('w-full').props('dense') as witness_expansion:
+                            with ui.column().classes('w-full gap-2 p-1'):
+                                witness_empty_label = ui.label(tr(
+                                    'Add other copies of this work to search '
+                                    'with. Each is searched on its own and '
+                                    'the results are merged.'
                                 )).classes('text-xs').style(
                                     'color: var(--text-muted);')
-                                with ui.row().classes('items-center gap-3'):
-                                    auto_rounds = ui.number(
-                                        label=tr('Rounds'), value=3, min=1,
-                                        max=5, step=1,
-                                    ).props('outlined dense').classes('w-28')
-                                    auto_top_k = ui.number(
-                                        label=tr('Top-K per round'), value=5,
-                                        min=1, max=10, step=1,
-                                    ).props('outlined dense').classes('w-32')
-                                auto_expand_btn = ui.button(
-                                    tr('Run auto-expand now'),
-                                    icon='auto_awesome',
-                                    on_click=lambda: _run_auto_expand(),
-                                ).props('outline dense no-caps size=sm')
-                                auto_expand_btn.disable()
+                                witness_list = ui.column().classes('w-full gap-1')
+                                # Appears when the source text changed under a
+                                # witness list gathered for a different work.
+                                witness_stale_row = ui.column().classes('w-full')
+                                witness_stale_row.set_visibility(False)
+                                with ui.row().classes('w-full items-center gap-2'):
+                                    ui.button(
+                                        tr('Add witness text'), icon='add',
+                                        on_click=lambda: _open_add_witness_dialog(),
+                                    ).props('flat dense no-caps size=sm')
+                                    ui.space()
+                                with ui.row().classes(
+                                        'w-full items-center gap-2') as witness_run_row:
+                                    witness_run_btn = ui.button(
+                                        tr('Search now'), icon='play_arrow',
+                                        on_click=lambda: _search_pending_witnesses(),
+                                    ).props('outline dense no-caps size=sm')
+                                    witness_progress_label = ui.label('').classes(
+                                        'text-xs').style('color: var(--text-muted);')
+                                witness_run_row.set_visibility(False)
+
+                                # Auto-expand: promote the best results and
+                                # search with them too. An EXPLICIT button,
+                                # never folded into "Find Parallels" -- a user
+                                # who wanted one search must not get twenty.
+                                #
+                                # A plain section, not a nested expansion: an
+                                # expansion inside an expansion is two clicks
+                                # to reach a control and reads as a
+                                # sub-feature of a sub-feature.
+                                ui.separator().classes('my-1')
+                                with ui.column().classes('w-full gap-2'):
+                                    ui.label(tr('Auto-expand (optional)')).classes(
+                                        'text-xs font-bold').style(
+                                        'color: var(--text-secondary);')
+                                    ui.label(tr(
+                                        'Repeatedly search with the best results '
+                                        'as new witnesses. Reach goes up and '
+                                        'top-of-list precision goes down.'
+                                    )).classes('text-xs').style(
+                                        'color: var(--text-muted);')
+                                    with ui.row().classes('items-center gap-3'):
+                                        auto_rounds = ui.number(
+                                            label=tr('Rounds'), value=3, min=1,
+                                            max=5, step=1,
+                                        ).props('outlined dense').classes('w-28')
+                                        auto_top_k = ui.number(
+                                            label=tr('Top-K per round'), value=5,
+                                            min=1, max=10, step=1,
+                                        ).props('outlined dense').classes('w-32')
+                                    auto_expand_btn = ui.button(
+                                        tr('Run auto-expand now'),
+                                        icon='auto_awesome',
+                                        on_click=lambda: _run_auto_expand(),
+                                    ).props('outline dense no-caps size=sm')
+                                    auto_expand_btn.disable()
                     witness_panel.set_visibility(False)
 
                     # === Lab Mode and Boundary Search Settings (below text input) ===
@@ -2421,8 +2436,6 @@ def create_parallels_page(initial_text: str = None):
         witness_list.clear()
         pending = [w for w in p_state.witnesses if w['status'] == 'pending']
         witness_empty_label.set_visibility(not p_state.witnesses)
-        witness_count_label.text = (
-            f"({len(p_state.witnesses)})" if p_state.witnesses else '')
         with witness_list:
             for entry in p_state.witnesses:
                 with ui.row().classes(
@@ -2476,6 +2489,24 @@ def create_parallels_page(initial_text: str = None):
                         tr('Remove them'),
                         on_click=lambda: _remove_stale_witnesses(),
                     ).props('flat dense no-caps size=sm')
+        # The collapsed header is the only thing most users see, so it
+        # carries the counts -- and the panel opens ITSELF when a witness
+        # needs attention, since a warning inside a closed drawer is not a
+        # warning. Never auto-CLOSES: a user who opened it keeps it open.
+        failed_now = [w for w in p_state.witnesses if w['status'] == 'failed']
+        if p_state.witnesses:
+            bits = [tr('{n} witnesses').format(n=len(p_state.witnesses))]
+            if stale:
+                bits.append(tr('{n} from another text').format(n=len(stale)))
+            elif pending:
+                bits.append(tr('{n} pending').format(n=len(pending)))
+            if failed_now:
+                bits.append(tr('{n} failed').format(n=len(failed_now)))
+            witness_expansion.props('caption="' + ' · '.join(bits) + '"')
+        else:
+            witness_expansion.props(remove='caption')
+        if stale or pending or failed_now:
+            witness_expansion.value = True
         witness_run_row.set_visibility(bool(pending))
         witness_run_btn.text = tr('Search now ({n} pending)').format(
             n=len(pending))
