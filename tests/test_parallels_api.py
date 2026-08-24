@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import inspect  # noqa: F401
 import json  # noqa: F401
+import pathlib
 import time  # noqa: F401
 
 import pytest
@@ -499,6 +500,58 @@ def test_parallels_max_freq_populates_filtered(client, mock_searcher, clean_env,
     assert len(body['filtered']) >= 1
 
 
+@pytest.mark.parametrize('bad', [0.05, 0.5, 0.999, 0])
+def test_parallels_max_freq_below_one_is_rejected(client, mock_searcher,
+                                                  clean_env, bad):
+    """max_freq is a DOCUMENT COUNT, and a fractional one is a silent disaster.
+
+    The engine tests `len(hits) > max_freq`
+    (shared/search_engine.py::search_composition_logic), so any value under 1
+    is true for every chunk that matches anything: the whole result set is
+    diverted out of `results` and the caller gets an empty envelope with a
+    200. Until 2026-08-24 the field's own description and docs/SEARCH_API.md
+    called it a "0.0-1.0 ratio" and the documented example was 0.05 -- i.e.
+    following the documentation produced no results, silently. The `ge=1`
+    bound turns that into a loud 400.
+
+    This cannot break a working integration: a caller sending 0.05 today is
+    already getting nothing back.
+    """
+    r = client.post('/api/parallels', json={
+        'text': 'hello world', 'mode': 'exact', 'max_freq': bad,
+    })
+    assert r.status_code == 400, r.text
+    err = r.json()['error']
+    assert err['code'] == 'invalid_request'
+    assert 'max_freq' in err.get('fields', [])
+
+
+def test_max_freq_effective_ceiling_is_still_fifty():
+    """The documented effective range of max_freq is [1, 50). Guard the literal.
+
+    `shared/search_engine.py::search_composition_logic` retrieves at most 50
+    hits per chunk and then tests `len(hits) > max_freq`, so no value at or
+    above 50 can ever fire -- it is identical to None. That ceiling is not a
+    tuning detail: it is now stated in this endpoint's field description and
+    in docs/SEARCH_API.md, and a measurement on 2026-08-24 confirmed it
+    (identical results at max_freq 50 / 100 / 1000 / 100000, `filtered`
+    empty at every one).
+
+    If someone raises the retrieval cap, that documentation goes silently
+    wrong -- the API would start filtering where it says it cannot. This
+    test fails first so the docs get updated in the same change.
+    """
+    import re as _re
+    src = pathlib.Path(__file__).resolve().parents[1] / 'shared' / 'search_engine.py'
+    text = src.read_text(encoding='utf-8')
+    caps = _re.findall(r'\.search\(\s*\w+\s*,\s*(\d+)\s*\)\.hits', text)
+    assert caps, 'per-chunk retrieval call not found -- did the call shape change?'
+    assert set(caps) == {'50'}, (
+        f'per-chunk retrieval cap changed to {sorted(set(caps))}; max_freq\'s '
+        f'effective ceiling moved with it. Update the field description in '
+        f'web/search_api.py and the max_freq row in docs/SEARCH_API.md.')
+
+
 # ---------------------------------------------------------------------------
 # Hardening parity (5)
 # ---------------------------------------------------------------------------
@@ -692,7 +745,12 @@ def test_parallels_filtered_results_uncapped(client, mock_searcher, clean_env):
     }
 
     r = client.post('/api/parallels', json={
-        'text': 'hello world', 'mode': 'exact', 'max_freq': 0.001,
+        # 1 = the strictest LEGAL value: max_freq is a document count, so
+        # this means "a chunk matching more than one document is too common".
+        # Was 0.001 until 2026-08-24, written against a docstring that wrongly
+        # called the field a 0.0-1.0 ratio; the searcher is mocked here, so
+        # the value only has to be well-formed.
+        'text': 'hello world', 'mode': 'exact', 'max_freq': 1,
     })
     assert r.status_code == 200, r.text
     body = r.json()
@@ -1100,7 +1158,10 @@ def test_parallels_method_passage_nondefault_max_freq_returns_400(
     per-chunk frequency signal) -- rejected, not silently ignored."""
     monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
     r = client.post('/api/parallels', json={
-        'text': 'hello world', 'method': 'passage', 'max_freq': 0.05,
+        # 50 = a legal non-default count (was 0.05, which the ge=1 guard now
+        # rejects as invalid_request BEFORE the passage block is reached, so
+        # the test could no longer prove what it claims to).
+        'text': 'hello world', 'method': 'passage', 'max_freq': 50,
     })
     assert r.status_code == 400, r.text
     assert r.json()['error']['code'] == 'passage_option_unsupported'

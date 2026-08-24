@@ -749,9 +749,22 @@ class ParallelsRequest(BaseModel):
     - `chunk_size`: integer in [2, 20]; UI default is 5.
     - `mode`: locked enum 'exact' | 'variants' | 'fuzzy' (D-02). Lab Engine
       path is OUT OF SCOPE for v7.10.
-    - `max_freq`: optional float; when set, chunks whose match frequency
-      exceeds the threshold get diverted to filtered[]. When None, no
+    - `max_freq`: optional float >= 1, a DOCUMENT COUNT (not a ratio): when
+      set, a chunk matching more than `max_freq` documents is treated as too
+      common and its hits are diverted out of results[]. When None, no
       high-freq filtering — all hits in results[], filtered: [].
+      The engine tests `len(hits) > max_freq` directly
+      (shared/search_engine.py::search_composition_logic), so a fractional
+      value would suppress every chunk that matches anything; `ge=1` rejects
+      that instead of returning a silently empty result set. This field was
+      documented as a 0.0-1.0 ratio until 2026-08-24; the description was
+      wrong, never the code.
+      Its EFFECTIVE RANGE is [1, 50). The per-chunk Tantivy retrieval is
+      hard-capped at 50 hits (`self.searcher.search(query, 50)`), so
+      `len(hits)` never exceeds 50 and any `max_freq >= 50` is inert —
+      identical to None. The value is therefore not a corpus frequency at
+      all: it counts hits within a truncated top-50, and cannot distinguish
+      a chunk present in 51 manuscripts from one present in 5,000.
     - `boundary_mode`: only boundary knob exposed in v7.10 (D-03). Other 4
       core knobs use existing defaults.
     - `filters`: reuse Phase 78 FiltersModel verbatim.
@@ -792,7 +805,8 @@ class ParallelsRequest(BaseModel):
     )
     max_freq: Optional[float] = Field(
         default=None,
-        description="High-frequency cutoff ratio (0.0-1.0). Chunks appearing in more than max_freq fraction of corpus are moved to 'filtered'. None disables high-freq filtering.",
+        ge=1,
+        description="High-frequency cutoff as a DOCUMENT COUNT, not a ratio: a chunk matching more than max_freq documents is treated as too common and diverted out of 'results'. None disables high-freq filtering. Values below 1 are rejected — the engine tests `len(hits) > max_freq`, so 0.05 would discard every chunk that matches anything at all. IMPORTANT: the engine retrieves at most 50 hits per chunk, so any max_freq >= 50 can never fire and behaves exactly like None.",
     )
     boundary_mode: Literal['full', 'boundary', 'combined'] = Field(
         default='full',

@@ -2343,6 +2343,8 @@ TRANSLATIONS = {
     "No results": "אין תוצאות",
     "Max frequency": "תדירות מקסימלית",
     "Filter common phrases (lower = stricter)": "סנן ביטויים נפוצים (נמוך = מחמיר יותר)",
+    "Skip phrases found in more than this many manuscripts (lower = stricter)":
+        "דלג על ביטויים המופיעים ביותר כתבי יד ממספר זה (נמוך = מחמיר יותר)",
     "Lab Mode (experimental)": "מצב מעבדה (ניסיוני)",
     "Advanced search using fingerprint algorithm. Slower but more features.": "חיפוש מתקדם באמצעות אלגוריתם טביעת אצבע. איטי יותר אך עם יותר תכונות.",
     "Exhaustive search - slower but finds more results": "חיפוש ממצה - איטי יותר אך מוצא יותר תוצאות",

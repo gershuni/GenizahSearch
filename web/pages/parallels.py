@@ -1246,7 +1246,7 @@ def create_parallels_page(initial_text: str = None):
                     with ui.column().classes('gap-1') as freq_threshold_row:
                         h3(tr('Max frequency'), classes='text-sm font-medium', style='color: var(--text-secondary);')
                         freq_threshold = ui.slider(min=10, max=100, value=50).props('label-always')
-                        ui.label(tr('Filter common phrases (lower = stricter)')).classes('text-xs').style('color: var(--text-muted);')
+                        ui.label(tr('Skip phrases found in more than this many manuscripts (lower = stricter)')).classes('text-xs').style('color: var(--text-muted);')
 
                     # Min chunk matches (for regular full-text chunk search)
                     with ui.column().classes('gap-1') as min_chunks_row:
