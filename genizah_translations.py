@@ -5083,5 +5083,12 @@ TRANSLATIONS.update({
     "{n} of {m} witnesses": "{n} מתוך {m} עדים",
     "Witness list is full (max {n})": "רשימת העדים מלאה (עד {n})",
     "Search now": "חפשו עכשיו",
+    "Other source text": "טקסט מקור אחר",
+    "This witness was added for a different source text, so it was not searched.":
+        "עד זה נוסף עבור טקסט מקור אחר, ולכן לא נבדק.",
+    "{n} witnesses were added for a different source text.":
+        "{n} עדים נוספו עבור טקסט מקור אחר.",
+    "Use them anyway": "השתמשו בהם בכל זאת",
+    "Remove them": "הסירו אותם",
     "Label (optional)": "תוית (לא חובה)",
 })

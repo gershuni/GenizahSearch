@@ -473,6 +473,7 @@ def create_parallels_page(initial_text: str = None):
                 'witnesses': [
                     {'id': w.get('id'), 'label': w.get('label'),
                      'kind': w.get('kind'), 'sys_id': w.get('sys_id'),
+                     'seed_digest': w.get('seed_digest') or '',
                      'text': ('' if w.get('kind') == 'manuscript'
                               else (w.get('text') or ''))}
                     for w in (p_state.witnesses or [])
@@ -619,6 +620,7 @@ def create_parallels_page(initial_text: str = None):
                     sys_id or tr('Pasted text')),
                 'kind': kind,
                 'sys_id': sys_id,
+                'seed_digest': str(entry.get('seed_digest') or ''),
                 'text': text,
                 'status': 'pending',
                 'hits': 0,
@@ -1009,6 +1011,10 @@ def create_parallels_page(initial_text: str = None):
                             'merged.'
                         )).classes('text-xs').style('color: var(--text-muted);')
                         witness_list = ui.column().classes('w-full gap-1')
+                        # Appears when the source text changed under a
+                        # witness list gathered for a different work.
+                        witness_stale_row = ui.column().classes('w-full')
+                        witness_stale_row.set_visibility(False)
                         with ui.row().classes(
                                 'w-full items-center gap-2') as witness_run_row:
                             witness_run_btn = ui.button(
@@ -2353,10 +2359,18 @@ def create_parallels_page(initial_text: str = None):
         p_state.filtered_results = [r for r in fused_filtered
                                     if r.get('raw_header') not in in_main]
 
+    def _seed_digest() -> str:
+        from shared.passage_fusion import text_digest
+        return text_digest((text_input.value or '').strip())
+
     def _add_witness(text: str, label: str = '', kind: str = 'pasted',
                      sys_id: str = None) -> dict:
         entry = {
             'id': _witness_new_id(),
+            # The seed this witness was gathered FOR. A witness of one work is
+            # noise in another, so a later search against a different source
+            # text must not quietly include it.
+            'seed_digest': _seed_digest(),
             'label': (label or '').strip() or _witness_default_label(text),
             'kind': kind,
             'sys_id': sys_id,
@@ -2388,7 +2402,12 @@ def create_parallels_page(initial_text: str = None):
 
     def _witness_status_chip(entry: dict):
         status = entry.get('status')
-        if status == 'searched':
+        if status == 'stale':
+            ui.badge(tr('Other source text'), color='orange').classes(
+                'text-xs').tooltip(tr(
+                'This witness was added for a different source text, so it '
+                'was not searched.'))
+        elif status == 'searched':
             ui.badge(tr('{n} matches found').format(n=entry.get('hits', 0)),
                      color='green').classes('text-xs')
         elif status == 'failed':
@@ -2435,6 +2454,28 @@ def create_parallels_page(initial_text: str = None):
                             _remove_witness(_w),
                     ).props('flat round dense size=sm').tooltip(tr('Remove'))
         _sync_sort_options()
+        stale = [w for w in p_state.witnesses if w['status'] == 'stale']
+        witness_stale_row.clear()
+        witness_stale_row.set_visibility(bool(stale))
+        if stale:
+            with witness_stale_row:
+                with ui.row().classes('w-full items-center gap-2 p-2 rounded').style(
+                        'background: var(--bg-card); '
+                        'border: 1px solid var(--accent-amber);'):
+                    ui.icon('info').classes('text-sm').style(
+                        'color: var(--accent-amber);')
+                    ui.label(tr(
+                        '{n} witnesses were added for a different source text.'
+                    ).format(n=len(stale))).classes('text-xs')
+                    ui.space()
+                    ui.button(
+                        tr('Use them anyway'),
+                        on_click=lambda: _revive_stale_witnesses(),
+                    ).props('flat dense no-caps size=sm')
+                    ui.button(
+                        tr('Remove them'),
+                        on_click=lambda: _remove_stale_witnesses(),
+                    ).props('flat dense no-caps size=sm')
         witness_run_row.set_visibility(bool(pending))
         witness_run_btn.text = tr('Search now ({n} pending)').format(
             n=len(pending))
@@ -2443,6 +2484,24 @@ def create_parallels_page(initial_text: str = None):
             auto_expand_btn.enable()
         else:
             auto_expand_btn.disable()
+
+    def _revive_stale_witnesses() -> None:
+        """Adopt the stale witnesses into the CURRENT source text.
+
+        Re-stamping the digest is the point: without it they would go stale
+        again on the next search and the user would have to answer twice.
+        """
+        digest = _seed_digest()
+        for w in p_state.witnesses:
+            if w['status'] == 'stale':
+                w['status'] = 'pending'
+                w['seed_digest'] = digest
+        _refresh_witness_panel()
+
+    def _remove_stale_witnesses() -> None:
+        for w in [w for w in p_state.witnesses if w['status'] == 'stale']:
+            _remove_witness(w['id'])
+        _refresh_witness_panel()
 
     def _open_add_witness_dialog() -> None:
         with ui.dialog() as dialog, ui.card().classes('w-[36rem] max-w-full'):
@@ -4109,16 +4168,25 @@ def create_parallels_page(initial_text: str = None):
         results_header.text = tr('Searching...')
         results_container.clear()
 
-        # "Find Parallels" is a FULL FRESH RUN: the seed plus every witness,
-        # all reset to pending. The witness LIST survives (a user who pasted
-        # seventeen texts must not lose them by pressing the button), but no
-        # rows do -- rows found under the previous settings must never be
-        # fused with rows found under the new ones.
+        # "Find Parallels" is a FULL FRESH RUN: the seed plus every witness
+        # OF THIS TEXT, all reset to pending. The witness LIST survives (a
+        # user who pasted seventeen texts must not lose them by pressing the
+        # button), but no rows do -- rows found under the previous settings
+        # must never be fused with rows found under the new ones.
+        #
+        # A witness gathered under a DIFFERENT source text is marked stale
+        # instead: witnesses belong to the work they were gathered for, and
+        # searching Antiochus witnesses against Birkat Hamazon (owner-
+        # reported) fuses one work's witnesses into another work's results.
+        # Not deleted -- that would throw away seventeen hand-pasted texts on
+        # a typo edit; the panel offers both answers explicitly.
         p_state.witness_rows = {}
         p_state.witness_filtered = {}
         p_state.checked_for_promotion = set()
+        _digest_now = _seed_digest()
         for _w in p_state.witnesses:
-            _w['status'] = 'pending'
+            _stale = _w.get('seed_digest') not in (None, '', _digest_now)
+            _w['status'] = 'stale' if _stale else 'pending'
             _w['hits'] = 0
             _w['error'] = ''
 

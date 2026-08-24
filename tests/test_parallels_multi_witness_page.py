@@ -576,16 +576,63 @@ def test_witnesses_are_not_part_of_searched_config():
 # A fresh search is a fresh run.
 # ---------------------------------------------------------------------------
 
-def test_find_parallels_resets_every_witness_to_pending():
+def test_find_parallels_resets_every_witness_of_this_text_to_pending():
     """Rows found under the previous settings must never be fused with rows
     found under the new ones."""
     src = _func_source('execute_parallels')
     assert 'p_state.witness_rows = {}' in src
     # The loop TARGET matters, not just its body: `for _w in []:` keeps the
     # body verbatim and resets nothing.
-    assert re.search(
-        r"for _w in p_state\.witnesses:\s*\n\s*_w\['status'\] = 'pending'",
-        src), 'every witness must go back to pending on a fresh run'
+    assert 'for _w in p_state.witnesses:' in src
+    assert "_w['status'] = 'stale' if _stale else 'pending'" in src
+
+
+def test_a_witness_of_a_different_source_text_is_not_searched():
+    """Owner-reported: pasting Birkat Hamazon over the Antiochus source text
+    and searching also searched the fifteen Antiochus witnesses, fusing one
+    work's witnesses into another work's results. A witness belongs to the
+    work it was gathered for."""
+    src = _func_source('execute_parallels')
+    assert "_w.get('seed_digest') not in (None, '', _digest_now)" in src, (
+        'staleness must be decided by the seed the witness was gathered under'
+    )
+    # Marked, never deleted -- a typo edit must not destroy seventeen
+    # hand-pasted texts.
+    assert "'stale'" in src
+    assert 'p_state.witnesses = []' not in src
+    assert "'seed_digest': _seed_digest()" in _func_source('_add_witness')
+
+
+def test_a_stale_witness_is_not_in_the_pending_set():
+    """`_search_pending_witnesses` searches `pending`; stale must not be it,
+    or marking them changes nothing."""
+    src = _func_source('_search_pending_witnesses')
+    assert "if w['status'] == 'pending'" in src
+    assert "'stale'" not in src
+
+
+def test_stale_witnesses_offer_both_answers():
+    """Keeping them is the reported bug; deleting them silently is data loss.
+    The panel asks."""
+    src = _func_source('_refresh_witness_panel')
+    assert '_revive_stale_witnesses' in src
+    assert '_remove_stale_witnesses' in src
+    # Driven by whether any witness IS stale -- a hard-coded False hides the
+    # only route back and leaves the list silently unsearched.
+    assert 'witness_stale_row.set_visibility(bool(stale))' in src
+    # Adopting must RE-STAMP, or they go stale again on the next search and
+    # the user answers the same question twice.
+    revive = _func_source('_revive_stale_witnesses')
+    assert "w['seed_digest'] = digest" in revive
+
+
+def test_the_stale_stamp_survives_a_reload():
+    """Without it a restored list would look native to whatever text happens
+    to be in the box after the reload."""
+    assert "'seed_digest': w.get('seed_digest') or ''" in _func_source(
+        '_persist_active_snapshot')
+    assert "'seed_digest': str(entry.get('seed_digest') or '')" in _func_source(
+        '_restore_witnesses_from_snapshot')
 
 
 def test_the_seed_is_modelled_as_a_witness():
