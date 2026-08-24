@@ -135,6 +135,14 @@ _PARALLELS_ROW_ALLOWLIST = frozenset((
     'final_score', 'has_boundary_matches', 'boundary_quality',
     'boundary_match_count', 'filter_reason', 'is_text_filtered',
     'is_filtered',
+    # Multi-witness provenance -- four FLAT SCALARS, the same class as the
+    # live-UI scalars above. `witness_ids` is a comma-joined string rather
+    # than a list on purpose: _compact_parallels_result_row trusts allowed
+    # values without sanitising them, so a nested container on a row can
+    # bypass the snapshot's own size budget. A witness's TEXT is never a row
+    # field -- it lives once in the witness list, not once per matched page.
+    'witness_id', 'witness_label', 'witness_count', 'witness_ids',
+    'fusion_score',
 ))
 
 # Pre-compiled at module load for the per-row compaction hot path. Matches
@@ -805,6 +813,28 @@ def _canonical_parallels_filters(filters):
             for k, v in filters.items()}
 
 
+def _canonical_witnesses(witnesses) -> list:
+    """[(kind, identity)] for the fingerprint -- see its docstring.
+
+    A promoted manuscript is identified by its sys_id (stable, and the text
+    is re-fetchable from it); a pasted witness by a digest of its text, which
+    is the only thing that actually identifies what was searched.
+    """
+    from shared.passage_fusion import text_digest
+
+    out = []
+    for w in witnesses or []:
+        if not isinstance(w, dict):
+            out.append(('pasted', text_digest(str(w))))
+            continue
+        sys_id = w.get('sys_id')
+        if w.get('kind') == 'manuscript' and sys_id:
+            out.append(('promoted', str(sys_id)))
+        else:
+            out.append(('pasted', text_digest(w.get('text') or '')))
+    return out
+
+
 def compute_parallels_search_fingerprint(
     *,
     text,
@@ -829,6 +859,7 @@ def compute_parallels_search_fingerprint(
     restrict=None,
     excluded=None,
     filters=None,
+    witnesses=None,
 ) -> str:
     """Return the 16-hex identity of ONE parallels search.
 
@@ -874,6 +905,24 @@ def compute_parallels_search_fingerprint(
         'excluded': excluded,
         'filters': _canonical_parallels_filters(filters),
     }
+    # The WITNESS SET is part of a search's identity: the same seed text
+    # searched with three witnesses and with seventeen produces different
+    # results, and recovering one set's rows for the other would be silently
+    # wrong. Enters the payload only when non-empty, so every fingerprint
+    # recorded before witnesses existed keeps matching.
+    #
+    # Each witness canonicalises to ('promoted', sys_id) or ('pasted',
+    # digest-of-text) and the list is SORTED, so the order they were added in
+    # does not change the identity.
+    #
+    # Labels are deliberately NOT hashed and are not sufficient on their own:
+    # they are user-editable, so two different pastes can share one, and a
+    # metadata-only entry does not identify the text that was actually
+    # searched -- recover_richer_parallels_rows would then hand back rows
+    # belonging to a different witness set. Text is hashed rather than
+    # stored, so the payload stays small.
+    if witnesses:
+        payload['witnesses'] = sorted(_canonical_witnesses(witnesses))
     # `length` (the letter-level passage-length profile) joined this
     # signature on 2026-08-24 and enters the payload ONLY when it is not the
     # default. Two searches differing in it are genuinely different searches

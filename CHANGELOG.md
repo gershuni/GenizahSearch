@@ -1017,6 +1017,45 @@ A major overhaul of how LOCAL Hebrew PDFs are read into the My Library index, dr
 
 ## [Unreleased]
 
+### Letter-level search with several witnesses of one work (2026-08-24)
+
+One text per work is not enough, and no budget increase fixes that. A single Birkat Hamazon
+witness reaches 50–69% of the reachable census; the same 17 witnesses searched **separately and
+merged** reach **85%**. On Megillat Antiochus, a seed plus three rounds of promoted witnesses took
+frontier coverage from 2 to 9 of 20.
+
+- **A Witnesses panel on `/parallels`**, letter-level only. Add copies of the work by pasting
+  them (one at a time, or a whole file split on blank lines with a preview of what the split
+  found — and a count of anything dropped as too short), or promote manuscripts straight from
+  your own results. Each witness is searched on its own and the results are merged into one
+  re-sortable list that says which witnesses point at each manuscript.
+- **`witnesses[]` on `POST /api/parallels`** (`method='passage'`), with `sort` over the fused
+  groups and a `witness_fusion` block on each result. An entry is either a pasted `text` or a
+  `raw_header` the server resolves — so a recursive request stays small.
+- **Auto-expand (optional)**: seed → top-K → repeat. Measured frontier coverage 2 → 4 → 7 → 9 of
+  20 over three rounds, monotone, with all 15 promoted witnesses graded positive. It is an
+  explicit button with the trade-off written beside it, never folded into "Find Parallels": the
+  cost is the first page — rows go from 191 to 2,795 and positives in the top 100 fall from 48 to
+  32. Reach up, precision down.
+- **Never concatenated.** Joining witnesses into one query starves the engine's per-query posting
+  budget: 59% of the census concatenated against 85% fused, and every concatenated Antiochus
+  recursion round scored *below* the seed alone. Fusion is by **rank** (RRF, k=60), not score — a
+  passage score counts matched *query* letters, so a long witness mechanically outscores a short
+  one for reasons unrelated to match quality.
+- **Scoped to letter-level, as a measurement rather than an assumption.** On the chunk engine,
+  concatenation and union return the identical manuscript set (392 both ways, empty difference in
+  both directions), so there is no budget to starve — desktop's recursive composition search is
+  correct as it stands — and multi-witness there buys +2 positives of 74 with zero frontier gain
+  at 4–6× the time. The witness panel stays hidden for chunk, cross-paragraph and combined.
+- **Fixed while passing through**: the results list's group order was hard-coded to top score
+  regardless of the sort control, so two of its three options — *Sort by shelfmark* and *Sort by
+  matches* — had never had any visible effect.
+
+Behind `PASSAGE_MULTI_WITNESS_ENABLED` (ANDed with the existing passage readiness check), with
+`SEARCH_API_PASSAGE_MAX_WITNESSES` (default 25) as the cost control. Full contract in
+`docs/SEARCH_API.md`; the measurements and their scope in
+`docs/specs/passage-matching-algorithm.md` §10.2b.
+
 ### Letter-level search: a second control axis — passage length (2026-08-24)
 
 The Match-width control assumed one dimension. Chasing the Antiochus recall gap turned up a

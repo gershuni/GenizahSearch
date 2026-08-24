@@ -2777,7 +2777,8 @@ def init_api_routes(app_override=None):
         try:
             export_svc = get_export_service(state.meta_mgr)
             content, filename = export_svc.export_parallels_excel(
-                parallels_results, filtered_results, source_text=source_text
+                parallels_results, filtered_results, source_text=source_text,
+                witnesses=meta.get('witnesses') or None,
             )
             return Response(
                 content=content,
@@ -2809,7 +2810,8 @@ def init_api_routes(app_override=None):
         try:
             export_svc = get_export_service(state.meta_mgr)
             content, filename = export_svc.export_parallels_word(
-                parallels_results, filtered_results, source_text=source_text
+                parallels_results, filtered_results, source_text=source_text,
+                witnesses=meta.get('witnesses') or None,
             )
             return Response(
                 content=content,

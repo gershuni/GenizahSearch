@@ -44,6 +44,21 @@ from shared.browse_map_utils import (
     library_codes_with_manuscripts,
 )
 
+# --- Multi-witness letter-level search ------------------------------------
+# Module level, not closure level: the tab-snapshot restore runs during page
+# build, BEFORE the witness helpers are defined, and a constant it cannot see
+# is a NameError at build time -- the exact failure that once took the whole
+# page down (owner-reported 2026-08-23).
+WITNESS_SEED_ID = 'seed'
+WITNESS_CAP = 25          # mirrors SEARCH_API_PASSAGE_MAX_WITNESSES
+
+# Per-depth ceiling on how many witnesses ONE click may search. Deep and
+# deepest cost ~6s and ~19s per witness against normal's ~0.7s, so a flat cap
+# would mean a click that looks hung. Refused with a specific message instead
+# -- and auto-expand refuses to START a round that would breach the cap
+# rather than silently shrinking top-K, which would make the control a lie.
+WITNESS_DEPTH_CAP = {'normal': WITNESS_CAP, 'deep': 8, 'deepest': 4}
+
 # Phase 145: passage-matching parallels search (fail-closed -- flag AND
 # a loaded index; see web/passage_assets.py).
 from web.passage_assets import passage_available, get_passage_searcher
@@ -212,6 +227,37 @@ def create_parallels_page(initial_text: str = None):
             # DMF-09: library filter for parallels page (Phase 131-05)
             self.library_filter: list = []   # active library codes (for filter)
             self.library_mode: str = 'hide'  # 'show_only' | 'hide' (D-05 default)
+            # --- Multi-witness letter-level search --------------------------
+            # One work survives in many manuscripts and no single witness of
+            # it retrieves every other (17 Birkat Hamazon witnesses searched
+            # SEPARATELY and merged reach 85% of the reachable census, against
+            # 50-69% for any one of them).
+            #
+            # `witnesses` are the user's own entries; the SEED (the pasted
+            # source text) is modelled as a virtual witness with
+            # id=WITNESS_SEED_ID -- not listed in the panel, since it is
+            # already on screen, but tagged identically, so "found by 3 of 5"
+            # needs no +1 special case anywhere.
+            #
+            # `witness_rows` maps witness id -> that witness's OWN result
+            # rows, in engine order. Keeping them separate is what makes the
+            # page's incremental model work: adding a witness searches ONLY
+            # that witness and re-fuses, so an R-round auto-expansion costs
+            # 1 + rounds x K searches rather than re-running everything on
+            # every addition.
+            self.witnesses: list = []
+            self.witness_rows: dict = {}
+            self.witness_filtered: dict = {}
+            self.witness_seq: int = 0          # for unique ids across removals
+            self.checked_for_promotion: set = set()
+            self.auto_expanding: bool = False
+            self.witness_progress: str = ''
+            # The dispatch-time passage configuration of the LAST search, so
+            # a witness added afterwards is searched with the same settings
+            # the rows beside it were found with. A witness searched at a
+            # different width/depth than its neighbours would be fused into
+            # one list with them and be invisible as an anomaly.
+            self.last_passage_ctx: dict = {}
 
     p_state = ParallelsState()
 
@@ -335,6 +381,26 @@ def create_parallels_page(initial_text: str = None):
                                     else decoded_text)),
                 'search_config': dict(
                     getattr(p_state, 'searched_config', None) or {}),
+                # The witness LIST, so a reload does not lose seventeen
+                # pasted texts. Deliberately NOT part of `search_config`:
+                # that dict is re-applied by _apply_restored_search_config,
+                # which validates every value against a widget's `.options`,
+                # and a witness is not a select.
+                #
+                # A PROMOTED witness is stored WITHOUT its text (re-fetchable
+                # from its sys_id, like title_translations today); a PASTED
+                # one keeps its text, because nothing else in the world has
+                # it. Worst case is bounded by the two caps at 25 x 20,000
+                # ~= 500 KB -- small beside the incidents that motivated
+                # _EXPORT_RESULTS_CAP, which came from thousands of result
+                # rows carrying content, not a bounded list of typed queries.
+                'witnesses': [
+                    {'id': w.get('id'), 'label': w.get('label'),
+                     'kind': w.get('kind'), 'sys_id': w.get('sys_id'),
+                     'text': ('' if w.get('kind') == 'manuscript'
+                              else (w.get('text') or ''))}
+                    for w in (p_state.witnesses or [])
+                ],
             }
         except Exception:
             pass
@@ -438,6 +504,55 @@ def create_parallels_page(initial_text: str = None):
         except Exception:
             pass  # A broken snapshot costs the restore, never the page
 
+    def _restore_witnesses_from_snapshot(snapshot: dict) -> None:
+        """Rebuild the witness list after a reload.
+
+        Storing witnesses in the snapshot does nothing on its own -- the
+        restore path applies known primitive controls only, and search
+        history records the seed and config without witness inputs. Without
+        this, a restored multi-witness search would silently re-run as
+        seed-only while LOOKING identical, which is the worst failure this
+        feature could have.
+
+        Every restored witness comes back `pending`, and the per-witness row
+        cache is NOT reconstructed. That is deliberate: the snapshot holds
+        the FUSED rows, from which per-witness ranks cannot be recovered, and
+        a fusion rebuilt from incomplete inputs would be quietly wrong rather
+        than visibly absent. The rows already on screen are still shown; the
+        panel says the witnesses need re-running, and pressing Find Parallels
+        searches all of them again.
+        """
+        raw = snapshot.get('witnesses')
+        if not isinstance(raw, list) or not raw:
+            return
+        restored, seq = [], 0
+        for entry in raw[:WITNESS_CAP]:
+            if not isinstance(entry, dict):
+                continue
+            kind = 'manuscript' if entry.get('kind') == 'manuscript' else 'pasted'
+            text = str(entry.get('text') or '')
+            sys_id = entry.get('sys_id')
+            if kind == 'pasted' and not text.strip():
+                # A pasted witness with no text cannot be searched and must
+                # not sit in the list pretending otherwise.
+                continue
+            seq += 1
+            restored.append({
+                'id': f'w{seq}',
+                'label': str(entry.get('label') or '') or (
+                    sys_id or tr('Pasted text')),
+                'kind': kind,
+                'sys_id': sys_id,
+                'text': text,
+                'status': 'pending',
+                'hits': 0,
+                'error': '',
+            })
+        p_state.witnesses = restored
+        p_state.witness_seq = seq
+        p_state.witness_rows = {}
+        p_state.witness_filtered = {}
+
     _active_snapshot = _get_active_snapshot()
     if _active_snapshot:
         try:
@@ -452,6 +567,7 @@ def create_parallels_page(initial_text: str = None):
                                        if isinstance(_raw_search_config, dict)
                                        else {})
             _apply_restored_identity_state()
+            _restore_witnesses_from_snapshot(_active_snapshot)
             p_state.domain_exclusions = set(_active_snapshot.get('domain_exclusions', []))
             p_state.excluded_manuscript_ids = set(_active_snapshot.get('excluded_manuscript_ids', []))
             # Phase 88: per-session export payload is the sole writer path (singleton mirror removed).
@@ -789,6 +905,75 @@ def create_parallels_page(initial_text: str = None):
                             pass
                     asyncio.ensure_future(_deferred_word_count())
 
+                    # === Witnesses (letter-level multi-witness search) ===
+                    # One work survives in many manuscripts, and no single
+                    # witness of it retrieves every other -- 17 Birkat
+                    # Hamazon witnesses searched SEPARATELY and merged reach
+                    # 85% of the reachable census against 50-69% for any one
+                    # of them. Shown only in letter-level mode: the chunk
+                    # engine has no per-query budget to starve, and
+                    # multi-witness there measured +2 positives of 74 with
+                    # zero frontier gain at 4-6x the time.
+                    with ui.column().classes('w-full gap-2') as witness_panel:
+                        ui.separator().classes('my-2')
+                        with ui.row().classes('w-full items-center gap-2'):
+                            ui.icon('groups').classes('text-lg').style(
+                                'color: var(--primary-600);')
+                            ui.label(tr('Witnesses')).classes('font-bold')
+                            witness_count_label = ui.label('').classes(
+                                'text-sm').style('color: var(--text-muted);')
+                            ui.space()
+                            ui.button(
+                                tr('Add witness text'), icon='add',
+                                on_click=lambda: _open_add_witness_dialog(),
+                            ).props('flat dense no-caps size=sm')
+                        witness_empty_label = ui.label(tr(
+                            'Add other copies of this work to search with. '
+                            'Each is searched on its own and the results are '
+                            'merged.'
+                        )).classes('text-xs').style('color: var(--text-muted);')
+                        witness_list = ui.column().classes('w-full gap-1')
+                        with ui.row().classes(
+                                'w-full items-center gap-2') as witness_run_row:
+                            witness_run_btn = ui.button(
+                                tr('Search now'), icon='play_arrow',
+                                on_click=lambda: _search_pending_witnesses(),
+                            ).props('outline dense no-caps size=sm')
+                            witness_progress_label = ui.label('').classes(
+                                'text-xs').style('color: var(--text-muted);')
+                        witness_run_row.set_visibility(False)
+
+                        # Auto-expand: promote the best results and search
+                        # with them too. An EXPLICIT button, never folded
+                        # into "Find Parallels" -- a user who wanted one
+                        # search must not get twenty.
+                        with ui.expansion(
+                                tr('Auto-expand (optional)'), icon='auto_awesome'
+                        ).classes('w-full').props('dense') as auto_expand_panel:
+                            with ui.column().classes('w-full gap-2 p-2'):
+                                ui.label(tr(
+                                    'Repeatedly search with the best results '
+                                    'as new witnesses. Reach goes up and '
+                                    'top-of-list precision goes down.'
+                                )).classes('text-xs').style(
+                                    'color: var(--text-muted);')
+                                with ui.row().classes('items-center gap-3'):
+                                    auto_rounds = ui.number(
+                                        label=tr('Rounds'), value=3, min=1,
+                                        max=5, step=1,
+                                    ).props('outlined dense').classes('w-28')
+                                    auto_top_k = ui.number(
+                                        label=tr('Top-K per round'), value=5,
+                                        min=1, max=10, step=1,
+                                    ).props('outlined dense').classes('w-32')
+                                auto_expand_btn = ui.button(
+                                    tr('Run auto-expand now'),
+                                    icon='auto_awesome',
+                                    on_click=lambda: _run_auto_expand(),
+                                ).props('outline dense no-caps size=sm')
+                                auto_expand_btn.disable()
+                    witness_panel.set_visibility(False)
+
                     # === Lab Mode and Boundary Search Settings (below text input) ===
                     ui.separator().classes('my-3')
 
@@ -1001,6 +1186,13 @@ def create_parallels_page(initial_text: str = None):
                         if _letter_level_selected():
                             # Swap the pane's contents, do not merely grey it.
                             letter_options_col.set_visibility(True)
+                            # Multi-witness is letter-level ONLY, and that is
+                            # a measured finding rather than an assumption:
+                            # on the chunk engine multi-witness bought +2
+                            # positives of 74 with zero frontier gain at 4-6x
+                            # the time, because concatenation and union there
+                            # return the identical manuscript set.
+                            witness_panel.set_visibility(True)
                             for _row in (mode_select, chunk_size_row,
                                          freq_threshold_row, min_chunks_row):
                                 _row.set_visibility(False)
@@ -1051,6 +1243,10 @@ def create_parallels_page(initial_text: str = None):
                             min_chunks_input.disable()
                         else:
                             letter_options_col.set_visibility(False)
+                            # HIDDEN, never cleared: a user who switches to
+                            # chunk to check something and back must not
+                            # find their seventeen pasted witnesses gone.
+                            witness_panel.set_visibility(False)
                             for _row in (mode_select, chunk_size_row,
                                          freq_threshold_row, min_chunks_row):
                                 _row.set_visibility(True)
@@ -1977,9 +2173,725 @@ def create_parallels_page(initial_text: str = None):
                         'flat round dense disable'
                     ).tooltip(tr('Export JSON'))
 
+            # Appears when at least one result is checked for promotion.
+            promotion_bar = ui.column().classes('w-full')
+            promotion_bar.set_visibility(False)
             results_container = ui.column().classes('w-full gap-4').style('min-height: 300px;')
 
     # === Logic ===
+
+    # =====================================================================
+    # Multi-witness letter-level search
+    # =====================================================================
+    # The engine can fan out over a witness list inside ONE call, and the
+    # public API uses that. This page deliberately does not: it is a session,
+    # not a request. A user who adds a witness expects only THAT witness to be
+    # searched and its rows merged into what is already on screen. Re-running
+    # every witness on every addition would make an R-round auto-expansion
+    # quadratic instead of linear -- which would falsify the "cost is linear"
+    # premise the whole feature rests on.
+    #
+    # So both surfaces share ONE fusion module (shared/passage_fusion.py) and
+    # nothing else: the API fuses N results from one call, the page fuses N
+    # results accumulated across N calls. Same maths, one definition.
+
+    def _witness_depth_cap() -> int:
+        depth = (p_state.last_passage_ctx or {}).get('depth') \
+            or (passage_depth.value or 'normal')
+        return WITNESS_DEPTH_CAP.get(depth, WITNESS_CAP)
+
+    def _witness_new_id() -> str:
+        # Monotonic, never reused after a removal: a recycled id would let a
+        # removed witness's stale rows be attributed to its replacement.
+        p_state.witness_seq += 1
+        return f'w{p_state.witness_seq}'
+
+    def _witness_default_label(text: str) -> str:
+        words = [w for w in (text or '').split() if w][:5]
+        return ' '.join(words) or tr('Pasted text')
+
+    def _witness_labels() -> dict:
+        labels = {WITNESS_SEED_ID: tr('Your text')}
+        for w in p_state.witnesses:
+            labels[w['id']] = w.get('label') or ''
+        return labels
+
+    def _witness_order() -> list:
+        return [WITNESS_SEED_ID] + [w['id'] for w in p_state.witnesses]
+
+    def _searched_witness_count() -> int:
+        return sum(1 for wid in _witness_order()
+                   if p_state.witness_rows.get(wid) is not None)
+
+    def _fuse_and_store() -> None:
+        """Rebuild p_state.results/filtered_results from the per-witness rows.
+
+        With a single searched witness the rows pass through UNTOUCHED and
+        carry no fusion fields -- RRF over one list is a 1/(k+rank) rescale
+        that carries no information, and `score` must keep meaning matched
+        letters for the common case. This mirrors the engine's own
+        short-circuit exactly, so a one-witness page search and a one-witness
+        API search produce the same row shape.
+        """
+        from shared.passage_fusion import fuse, tag_rows
+
+        order = [wid for wid in _witness_order()
+                 if p_state.witness_rows.get(wid) is not None]
+        if not order:
+            p_state.results = []
+            p_state.filtered_results = []
+            return
+        if len(order) == 1:
+            wid = order[0]
+            p_state.results = list(p_state.witness_rows.get(wid) or [])
+            p_state.filtered_results = list(
+                p_state.witness_filtered.get(wid) or [])
+            return
+
+        labels = _witness_labels()
+        main_pairs, filt_pairs = [], []
+        for wid in order:
+            label = labels.get(wid, '')
+            main_pairs.append(
+                (wid, tag_rows(list(p_state.witness_rows.get(wid) or []),
+                               wid, label)))
+            filt_pairs.append(
+                (wid, tag_rows(list(p_state.witness_filtered.get(wid) or []),
+                               wid, label)))
+        fused_main = fuse(main_pairs)
+        fused_filtered = fuse(filt_pairs)
+        # A record is filtered only when EVERY witness that matched it
+        # filtered it -- otherwise the "known source text" filter would get
+        # STRICTER the more witnesses you add, the opposite of what it says.
+        in_main = {r.get('raw_header') for r in fused_main}
+        p_state.results = fused_main
+        p_state.filtered_results = [r for r in fused_filtered
+                                    if r.get('raw_header') not in in_main]
+
+    def _add_witness(text: str, label: str = '', kind: str = 'pasted',
+                     sys_id: str = None) -> dict:
+        entry = {
+            'id': _witness_new_id(),
+            'label': (label or '').strip() or _witness_default_label(text),
+            'kind': kind,
+            'sys_id': sys_id,
+            'text': text or '',
+            'status': 'pending',
+            'hits': 0,
+            'error': '',
+        }
+        p_state.witnesses.append(entry)
+        return entry
+
+    def _remove_witness(wid: str) -> None:
+        """Drop a witness AND every row it contributed.
+
+        Stripping the rows is not optional: leaving them would have the panel
+        say the witness is gone while its results -- up to a few thousand of
+        them, for a witness that found nothing useful -- stayed on screen with
+        no way to attribute or remove them.
+        """
+        p_state.witnesses = [w for w in p_state.witnesses if w['id'] != wid]
+        p_state.witness_rows.pop(wid, None)
+        p_state.witness_filtered.pop(wid, None)
+        _fuse_and_store()
+        _refresh_witness_panel()
+        if p_state.results or p_state.filtered_results:
+            render_results(p_state.results, p_state.filtered_results)
+        else:
+            results_container.clear()
+
+    def _witness_status_chip(entry: dict):
+        status = entry.get('status')
+        if status == 'searched':
+            ui.badge(tr('{n} matches found').format(n=entry.get('hits', 0)),
+                     color='green').classes('text-xs')
+        elif status == 'failed':
+            ui.badge(tr('Failed'), color='red').classes('text-xs')
+        elif status == 'running':
+            ui.spinner(size='sm')
+        else:
+            ui.badge(tr('Pending'), color='grey').classes('text-xs')
+
+    def _refresh_witness_panel() -> None:
+        witness_list.clear()
+        pending = [w for w in p_state.witnesses if w['status'] == 'pending']
+        witness_empty_label.set_visibility(not p_state.witnesses)
+        witness_count_label.text = (
+            f"({len(p_state.witnesses)})" if p_state.witnesses else '')
+        with witness_list:
+            for entry in p_state.witnesses:
+                with ui.row().classes(
+                        'w-full items-center gap-2 p-1 rounded').style(
+                        'background: var(--bg-subtle, rgba(0,0,0,0.03));'):
+                    ui.icon('menu_book' if entry['kind'] == 'manuscript'
+                            else 'notes').classes('text-sm').style(
+                        'color: var(--text-muted);')
+                    if entry['kind'] == 'manuscript' and entry.get('sys_id'):
+                        ui.link(entry['label'],
+                                f"/browse?sys_id={entry['sys_id']}",
+                                new_tab=True).classes(
+                            'text-sm no-underline hover:underline')
+                    else:
+                        ui.label(entry['label']).classes('text-sm')
+                    ui.label(f"{len(entry['text'])}").classes(
+                        'text-xs').style('color: var(--text-muted);')
+                    _witness_status_chip(entry)
+                    ui.space()
+                    if entry['status'] == 'failed':
+                        ui.button(
+                            tr('Retry'), icon='refresh',
+                            on_click=lambda _e=None, _w=entry['id']:
+                                _retry_witness(_w),
+                        ).props('flat dense no-caps size=sm')
+                    ui.button(
+                        icon='close',
+                        on_click=lambda _e=None, _w=entry['id']:
+                            _remove_witness(_w),
+                    ).props('flat round dense size=sm').tooltip(tr('Remove'))
+        _sync_sort_options()
+        witness_run_row.set_visibility(bool(pending))
+        witness_run_btn.text = tr('Search now ({n} pending)').format(
+            n=len(pending))
+        # Auto-expand needs results to promote FROM.
+        if p_state.results:
+            auto_expand_btn.enable()
+        else:
+            auto_expand_btn.disable()
+
+    def _open_add_witness_dialog() -> None:
+        with ui.dialog() as dialog, ui.card().classes('w-[36rem] max-w-full'):
+            ui.label(tr('Add witness text')).classes('text-lg font-bold')
+            label_input = ui.input(label=tr('Label (optional)')).classes(
+                'w-full').props('outlined dense')
+            body_input = ui.textarea(
+                placeholder=tr('Paste your Hebrew text here...'),
+            ).classes('w-full').props('outlined rows=10').style(
+                'direction: rtl;')
+            bulk_checkbox = ui.checkbox(tr(
+                'This paste contains several witnesses separated by blank '
+                'lines'))
+            preview_label = ui.label('').classes('text-sm').style(
+                'color: var(--text-muted);')
+
+            def _split_preview():
+                from shared.passage_fusion import split_pasted
+                texts, skipped = split_pasted(body_input.value or '')
+                parts = [tr('{n} witnesses detected').format(n=len(texts))]
+                if skipped:
+                    # Never a silent drop: a paste that quietly loses a third
+                    # of itself is the failure this repo treats as a defect.
+                    parts.append(tr('({n} skipped: too short)').format(
+                        n=skipped))
+                preview_label.text = '  '.join(parts)
+
+            preview_btn = ui.button(
+                tr('Preview split'), on_click=_split_preview,
+            ).props('flat dense no-caps size=sm')
+            preview_btn.bind_visibility_from(bulk_checkbox, 'value')
+
+            def _commit():
+                body = body_input.value or ''
+                label = (label_input.value or '').strip()
+                if bulk_checkbox.value:
+                    from shared.passage_fusion import split_pasted
+                    texts, skipped = split_pasted(body)
+                else:
+                    from shared.passage_fusion import MIN_WITNESS_WORDS
+                    body = body.strip()
+                    words = len([w for w in body.split() if w])
+                    texts = [body] if words >= MIN_WITNESS_WORDS else []
+                    skipped = 0 if texts else 1
+                if not texts:
+                    ui.notify(tr('Enter at least 3 words'), type='warning')
+                    return
+                room = _witness_depth_cap() - len(p_state.witnesses)
+                if len(texts) > room:
+                    ui.notify(
+                        tr('Witness list is full (max {n})').format(
+                            n=_witness_depth_cap()),
+                        type='warning')
+                    texts = texts[:max(0, room)]
+                    if not texts:
+                        return
+                for i, chunk in enumerate(texts):
+                    _add_witness(
+                        chunk,
+                        label=(label if len(texts) == 1 else
+                               (f'{label} {i + 1}' if label else '')))
+                dialog.close()
+                _refresh_witness_panel()
+                # Adding never auto-searches: witnesses land `pending` and
+                # the user chooses when to spend the time.
+                ui.notify(tr('{n} witnesses detected').format(n=len(texts)),
+                          type='positive')
+
+            with ui.row().classes('w-full justify-end gap-2'):
+                ui.button(tr('Cancel'), on_click=dialog.close).props(
+                    'flat no-caps')
+                ui.button(tr('Add'), on_click=_commit).props('no-caps')
+        dialog.open()
+
+    async def _run_one_witness_search(entry: dict):
+        """Search ONE witness through the SAME bounded passage budget the
+        seed search uses.
+
+        Each witness gets its own acquire/release, so the 30s ceiling bounds
+        ONE witness rather than a whole batch, and the shared pool of 4
+        interleaves with other users between witnesses. A witness that hits
+        `passage_search_busy` or `core_timeout` is marked failed, skipped, and
+        offered a Retry -- the run continues.
+        """
+        ctx = p_state.last_passage_ctx or {}
+
+        def _sync():
+            searcher = get_passage_searcher(
+                state.searcher,
+                preset=ctx.get('width') or 'widest-40',
+                length=ctx.get('length') or 'normal',
+                depth=ctx.get('depth') or 'normal',
+                render_cap=0,
+            )
+            if searcher is None:
+                return None
+            return searcher.search_composition_logic(
+                entry['text'],
+                filter_text=ctx.get('filter_text') or None,
+                boundary_mode='full',
+                min_boundary_matches=ctx.get('min_boundary_matches') or 0,
+                restrict_sys_ids=ctx.get('restrict_sys_ids'),
+            )
+
+        try:
+            return await run_passage_search(_sync)
+        except APIError as exc:
+            if exc.code == 'passage_search_busy':
+                entry['error'] = tr(
+                    'Letter-level search is busy right now — please try again '
+                    'in a moment.')
+            elif exc.code == 'core_timeout':
+                entry['error'] = tr(
+                    'Letter-level search timed out — try a shorter text.')
+            else:
+                entry['error'] = tr('Letter-level search failed.')
+            return None
+        except Exception as e:
+            logger.exception(f"Parallels witness search failed: {e}")
+            entry['error'] = tr('Letter-level search failed.')
+            return None
+
+    async def _search_pending_witnesses(_e=None) -> int:
+        """Search every `pending` witness and merge its rows into what is
+        already on screen. Additive by construction: a witness is searched at
+        most once, which is what makes an R-round expansion cost
+        `1 + rounds x K` searches rather than re-running everything.
+
+        Returns the number of witnesses that produced results.
+        """
+        if p_state.is_running:
+            return 0
+        pending = [w for w in p_state.witnesses if w['status'] == 'pending']
+        if not pending:
+            return 0
+        if not p_state.last_passage_ctx:
+            ui.notify(tr('Run a letter-level search first.'), type='warning')
+            return 0
+
+        p_state.is_running = True
+        p_state.is_cancelled = False
+        found = 0
+        try:
+            for i, entry in enumerate(pending, start=1):
+                # Cancellation is checked at the witness boundary, and only
+                # there: the passage engine emits no progress and cannot be
+                # interrupted mid-search (PassageSearcher accepts a
+                # progress_callback and never calls it), so an in-flight
+                # witness always runs to completion.
+                if p_state.is_cancelled:
+                    break
+                entry['status'] = 'running'
+                p_state.witness_progress = tr(
+                    'Witness {i}/{k}: {label}').format(
+                    i=i, k=len(pending), label=entry['label'])
+                witness_progress_label.text = p_state.witness_progress
+                _refresh_witness_panel()
+                result = await _run_one_witness_search(entry)
+                if result is None:
+                    entry['status'] = 'failed'
+                    continue
+                rows, filt = _apply_post_search_filters(
+                    result.get('main') or [], result.get('filtered') or [])
+                p_state.witness_rows[entry['id']] = rows
+                p_state.witness_filtered[entry['id']] = filt
+                entry['status'] = 'searched'
+                entry['hits'] = len(rows)
+                entry['error'] = ''
+                found += 1
+        finally:
+            p_state.is_running = False
+            p_state.witness_progress = ''
+            witness_progress_label.text = ''
+
+        _fuse_and_store()
+        _refresh_witness_panel()
+        render_results(p_state.results, p_state.filtered_results)
+        _refresh_export_payload()
+        _persist_witness_state()
+        failed = [w for w in p_state.witnesses if w['status'] == 'failed']
+        if failed:
+            ui.notify(
+                tr('{n} witnesses could not be searched — use Retry.').format(
+                    n=len(failed)), type='warning')
+        return found
+
+    async def _retry_witness(wid: str) -> None:
+        for w in p_state.witnesses:
+            if w['id'] == wid:
+                w['status'] = 'pending'
+                w['error'] = ''
+        _refresh_witness_panel()
+        await _search_pending_witnesses()
+
+    async def _promote_checked(_e=None) -> None:
+        """Add the checked manuscripts as witnesses and search them.
+
+        Text comes from get_full_manuscript(sys_id) -- EVERY page of the
+        manuscript, because a result GROUP spans several page-level hits and
+        promoting only the best-scoring page would throw away most of the
+        witness. Fetched off the event loop: Tantivy lookups on the single
+        uvicorn loop stall every other request.
+        """
+        # Skip manuscripts already in the list. Two witnesses with identical
+        # text would BOTH contribute to witness_count and to the RRF sum, so
+        # a manuscript found by one witness would report two -- a wrong
+        # number, not merely a redundant search. (Auto-expand already
+        # filtered these; the checkbox path did not.)
+        _already = {w.get('sys_id') for w in p_state.witnesses if w.get('sys_id')}
+        sys_ids = [s for s in p_state.checked_for_promotion
+                   if s and s not in _already]
+        if not sys_ids:
+            p_state.checked_for_promotion.clear()
+            _refresh_promotion_bar()
+            return
+        room = _witness_depth_cap() - len(p_state.witnesses)
+        if room <= 0:
+            ui.notify(tr('Witness list is full (max {n})').format(
+                n=_witness_depth_cap()), type='warning')
+            return
+        sys_ids = sys_ids[:room]
+
+        def _fetch():
+            out = {}
+            for sid in sys_ids:
+                try:
+                    pages = state.searcher.get_full_manuscript(sid) or []
+                except Exception:
+                    pages = []
+                text = "\n".join(p.get('text') or '' for p in pages).strip()
+                if text:
+                    out[sid] = text
+            return out
+
+        texts = await run.io_bound(_fetch)
+        added = 0
+        for sid in sys_ids:
+            text = texts.get(sid)
+            if not text:
+                ui.notify(tr('Could not load text for this manuscript.'),
+                          type='warning')
+                continue
+            label = sid
+            try:
+                shelf, _title = state.meta_mgr.get_meta_for_id(sid)
+                label = shelf or sid
+            except Exception:
+                pass
+            _add_witness(text, label=label, kind='manuscript', sys_id=sid)
+            added += 1
+        p_state.checked_for_promotion.clear()
+        _refresh_promotion_bar()
+        if not added:
+            _refresh_witness_panel()
+            return
+        _refresh_witness_panel()
+        found = await _search_pending_witnesses()
+        ui.notify(
+            tr('Added {n} witnesses — found {m} new matches.').format(
+                n=added, m=found), type='positive')
+
+    async def _run_auto_expand(_e=None) -> None:
+        """Seed -> top-K -> repeat. Measured on Megillat Antiochus: frontier
+        coverage 2 -> 4 -> 7 -> 9 of 20 over three rounds, monotone, with all
+        15 promoted witnesses graded positive.
+
+        The cost is the first page: rows go from 191 to 2,795 and positives in
+        the top 100 fall from 48 to 32. Reach up, precision down -- which is
+        why this is an explicit button with that trade-off written next to it,
+        never folded into "Find Parallels".
+        """
+        if p_state.auto_expanding or p_state.is_running:
+            return
+        if not p_state.results:
+            ui.notify(tr('Run a letter-level search first.'), type='warning')
+            return
+        rounds = int(auto_rounds.value or 3)
+        top_k = int(auto_top_k.value or 5)
+        p_state.auto_expanding = True
+        p_state.is_cancelled = False
+        try:
+            for rnd in range(1, rounds + 1):
+                if p_state.is_cancelled:
+                    break
+                cap = _witness_depth_cap()
+                if len(p_state.witnesses) + top_k > cap:
+                    # Refuse the ROUND rather than silently shrinking top-K --
+                    # a control that quietly does less than it says is a lie.
+                    ui.notify(
+                        tr('Auto-expand stopped: witness cap reached.'),
+                        type='info')
+                    break
+                already = {w.get('sys_id') for w in p_state.witnesses
+                           if w.get('sys_id')}
+                candidates = []
+                for sid in _ranked_sys_ids(p_state.results):
+                    if sid in already or sid in p_state.excluded_manuscript_ids:
+                        continue
+                    candidates.append(sid)
+                    if len(candidates) >= top_k:
+                        break
+                if not candidates:
+                    break
+                p_state.checked_for_promotion = set(candidates)
+                p_state.witness_progress = tr('Round {r}/{n}').format(
+                    r=rnd, n=rounds)
+                witness_progress_label.text = p_state.witness_progress
+                await _promote_checked()
+        finally:
+            p_state.auto_expanding = False
+            p_state.witness_progress = ''
+            witness_progress_label.text = ''
+
+    def _ranked_sys_ids(rows: list) -> list:
+        """sys_ids in the order the results present them, de-duplicated."""
+        seen, out = set(), []
+        for row in rows or []:
+            m = re.search(r'(99\d{8,})', row.get('raw_header') or '')
+            if not m:
+                continue
+            sid = m.group(1)
+            if sid in seen:
+                continue
+            seen.add(sid)
+            out.append(sid)
+        return out
+
+    def _group_witness_stats(group_data: dict) -> dict:
+        from shared.passage_fusion import group_stats
+        return group_stats(group_data.get('items') or [])
+
+    def _sort_groups(grouped_items, sort_by: str):
+        """Order manuscript GROUPS.
+
+        Group order used to be hard-coded to `max_score` regardless of the
+        sort control, so two of its three existing options -- 'shelfmark' and
+        'matches' -- had no visible effect at all. Routing every option
+        through one key function repairs those and adds the two
+        multi-witness orders in the same stroke.
+
+        `witnesses` counts DISTINCT witnesses pointing at the manuscript (a
+        union across its rows, not a sum -- two pages found by one witness
+        are one witness), and `fused` is the combined rank-fusion score, the
+        order the API returns.
+        """
+        if sort_by == 'shelfmark':
+            return sorted(grouped_items,
+                          key=lambda kv: ((kv[1].get('shelfmark') or '').lower(),
+                                          -(kv[1].get('max_score') or 0)))
+
+        def _key(kv):
+            data = kv[1]
+            top = float(data.get('max_score') or 0)
+            if sort_by == 'matches':
+                return (len(data.get('items') or []), top)
+            if sort_by in ('fused', 'witnesses'):
+                stats = _group_witness_stats(data)
+                if sort_by == 'witnesses':
+                    return (stats['witness_count'], stats['fusion_score'], top)
+                return (stats['fusion_score'], top)
+            return (top, 0.0)
+
+        return sorted(grouped_items, key=_key, reverse=True)
+
+    def _sync_sort_options() -> None:
+        """Offer the fusion orders only once there is fusion to order by.
+
+        An option reading "Sort by number of witnesses" on a single-text
+        search would sort by a column that is 1 everywhere.
+        """
+        base = {
+            'score': tr('Sort by score'),
+            'shelfmark': tr('Sort by shelfmark'),
+            'matches': tr('Sort by matches'),
+        }
+        if _searched_witness_count() > 1:
+            base['fused'] = tr('Sort by combined score')
+            base['witnesses'] = tr('Sort by number of witnesses')
+            value = sort_select.value if sort_select.value in base else 'fused'
+            # Default to the fused order the moment fusion exists: it is the
+            # order the ranking actually produced, and leaving 'score'
+            # selected would show a rank-fused result set sorted by raw
+            # matched letters.
+            if sort_select.value == 'score':
+                value = 'fused'
+        else:
+            value = sort_select.value if sort_select.value in base else 'score'
+        sort_select.set_options(base, value=value)
+
+    def _source_heading_for(item: dict) -> str:
+        """Heading over the query-side excerpt: the WITNESS it came from.
+
+        Falls back to 'Your text' for a single-witness search, where the rows
+        carry no witness tag at all (the fusion short-circuits) and the seed
+        is the only possible source.
+        """
+        wid = (item or {}).get('witness_id')
+        if not wid or wid == WITNESS_SEED_ID:
+            return tr('Your text')
+        return (item.get('witness_label')
+                or _witness_labels().get(wid) or tr('Pasted text'))
+
+    def _refresh_promotion_bar() -> None:
+        promotion_bar.clear()
+        chosen = p_state.checked_for_promotion
+        promotion_bar.set_visibility(bool(chosen))
+        if not chosen:
+            return
+        with promotion_bar:
+            with ui.row().classes('w-full items-center gap-3 p-2 rounded').style(
+                    'background: var(--bg-card); '
+                    'border: 1px solid var(--primary-600);'):
+                ui.icon('groups').classes('text-lg').style(
+                    'color: var(--primary-600);')
+                ui.label(tr('{n} manuscripts selected').format(
+                    n=len(chosen))).classes('text-sm font-medium')
+                ui.space()
+                ui.button(
+                    tr('Search with these too'), icon='playlist_add',
+                    on_click=lambda: _promote_checked(),
+                ).props('dense no-caps size=sm')
+                ui.button(
+                    tr('Clear selection'),
+                    on_click=lambda: (p_state.checked_for_promotion.clear(),
+                                      _refresh_promotion_bar(),
+                                      render_results(p_state.results,
+                                                     p_state.filtered_results)),
+                ).props('flat dense no-caps size=sm')
+
+    def _apply_post_search_filters(rows: list, filtered: list):
+        """Put a witness's rows through the same post-search passes the
+        seed's rows already went through.
+
+        Applied AT INGEST, before the rows enter `witness_rows`, so every
+        later re-fusion operates on already-filtered rows -- filtering after
+        the fusion would be undone by the next one.
+
+        The library pass is code-based and works on any row. The domain pass
+        can only exclude sys_ids whose domains were loaded for the seed's
+        results, so a newly-reached manuscript is never wrongly dropped; it
+        may simply not be excluded yet, which is the safe direction.
+        """
+        ctx = p_state.last_passage_ctx or {}
+        mode, codes = ctx.get('library_mode'), ctx.get('library_filter')
+        if mode == 'hide' and codes:
+            rows = _apply_parallels_library_filter(rows, mode, codes)
+            filtered = _apply_parallels_library_filter(filtered, mode, codes)
+        if p_state.domain_exclusions and p_state.has_domain_data:
+            rows = _filter_parallels_by_domain(rows)
+            filtered = _filter_parallels_by_domain(filtered) if filtered else filtered
+        if p_state.excluded_manuscript_ids:
+            rows = [r for r in rows
+                    if _row_sys_id(r) not in p_state.excluded_manuscript_ids]
+        return rows, filtered
+
+    def _row_sys_id(row: dict):
+        m = re.search(r'(99\d{8,})', (row or {}).get('raw_header') or '')
+        return m.group(1) if m else None
+
+    def _recompute_search_identity() -> str:
+        """The identity of the result set AS IT NOW STANDS.
+
+        The same seed searched with three witnesses and with seventeen
+        produces different results, so the fingerprint has to move when the
+        witness set does -- otherwise recover_richer_parallels_rows would
+        hand back rows belonging to a different set.
+
+        Built by REUSING the dispatch-time keyword capture rather than
+        re-listing the arguments: an identity rule written out twice is an
+        identity rule that drifts (web/export_state.py's own docstring says
+        so). Only witnesses that actually PRODUCED rows count -- a pending
+        or failed one did not shape these results.
+        """
+        from web.export_state import compute_parallels_search_fingerprint
+        kwargs = dict(getattr(p_state, 'last_fingerprint_kwargs', None) or {})
+        if not kwargs:
+            return getattr(p_state, 'search_fingerprint', '') or ''
+        kwargs['witnesses'] = [
+            {'kind': w.get('kind'), 'sys_id': w.get('sys_id'),
+             'text': w.get('text') or '', 'label': w.get('label') or ''}
+            for w in p_state.witnesses
+            if p_state.witness_rows.get(w['id']) is not None
+        ]
+        return compute_parallels_search_fingerprint(**kwargs)
+
+    def _refresh_export_payload() -> None:
+        """Re-publish the export payload after the row set changes.
+
+        Without this the downloadable workbook would still be the seed-only
+        result while the screen showed the fused one -- and it would carry
+        the seed-only identity, so a reload would 'recover' the wrong rows.
+        """
+        meta = dict(getattr(p_state, 'last_export_meta', None) or {})
+        if not meta:
+            return
+        try:
+            from web.export_state import set_parallels_export
+            fingerprint = _recompute_search_identity()
+            p_state.search_fingerprint = fingerprint
+            meta['search_fingerprint'] = fingerprint
+            meta['witnesses'] = [
+                {'label': w.get('label') or '', 'kind': w.get('kind'),
+                 'sys_id': w.get('sys_id')}
+                for w in p_state.witnesses
+                if p_state.witness_rows.get(w['id']) is not None
+            ] or None
+            p_state.last_export_meta = meta
+            set_parallels_export(results=p_state.results,
+                                 filtered=p_state.filtered_results,
+                                 meta=meta)
+        except Exception:
+            pass  # Export refresh is best-effort; the screen is still right
+
+    def _persist_witness_state() -> None:
+        """Mirror the witness list into the tab snapshot.
+
+        Witnesses are deliberately NOT part of `searched_config`: that dict is
+        re-applied by `_apply_restored_search_config`, which validates each
+        value against a widget's `.options`, and a witness is not a select.
+        """
+        try:
+            _persist_active_snapshot()
+        except Exception:
+            pass  # Browser storage operation failed; nothing else depends on it
+
+    # The panel's INITIAL state comes from the same refresh every later update
+    # uses -- never from the widget constructors, which would be a second
+    # definition of "empty" that nothing keeps in step. It has to sit HERE,
+    # below the helpers: called from the widget block above (the intuitive
+    # place) it raises UnboundLocalError and takes the whole page down with a
+    # 500. That is not hypothetical -- it is what happened on the first
+    # attempt, and only the render-smoke test saw it.
+    _refresh_witness_panel()
+
 
     # === DMF-09: Parallels Library Filter Button + Dialog (Phase 131-05) ===
 
@@ -3101,6 +4013,19 @@ def create_parallels_page(initial_text: str = None):
         results_header.text = tr('Searching...')
         results_container.clear()
 
+        # "Find Parallels" is a FULL FRESH RUN: the seed plus every witness,
+        # all reset to pending. The witness LIST survives (a user who pasted
+        # seventeen texts must not lose them by pressing the button), but no
+        # rows do -- rows found under the previous settings must never be
+        # fused with rows found under the new ones.
+        p_state.witness_rows = {}
+        p_state.witness_filtered = {}
+        p_state.checked_for_promotion = set()
+        for _w in p_state.witnesses:
+            _w['status'] = 'pending'
+            _w['hits'] = 0
+            _w['error'] = ''
+
         # Capture filter text in main thread to avoid closure issues in background thread
         captured_filter_text = get_filter_text()
         # The restorable PROXY for filter_text: the identity hashes the
@@ -3248,6 +4173,34 @@ def create_parallels_page(initial_text: str = None):
         captured_library_mode = p_state.library_mode
         captured_library_filter = list(p_state.library_filter or [])
         captured_excluded_ids = set(p_state.excluded_manuscript_ids or ())
+
+        # The settings a witness added AFTER this search must be searched
+        # with. A witness run at a different width or depth than the rows
+        # beside it would be fused into one list with them and be invisible
+        # as an anomaly -- the numbers would simply be wrong, quietly.
+        # The witness set this search is running with, captured at dispatch:
+        # the panel stays live during the await, and a fingerprint that read
+        # it afterwards could describe a list the search never used.
+        captured_witnesses = [
+            {'kind': w.get('kind'), 'sys_id': w.get('sys_id'),
+             'text': w.get('text') or '', 'label': w.get('label') or ''}
+            for w in (p_state.witnesses or [])
+        ] if captured_passage_mode else []
+
+        p_state.last_passage_ctx = {
+            'width': captured_passage_width,
+            'length': captured_passage_length,
+            'depth': captured_passage_depth,
+            'filter_text': captured_filter_text,
+            'min_boundary_matches': captured_min_boundary_matches,
+            'restrict_sys_ids': captured_restrict_sys_ids,
+            # The POST-search passes the seed's rows go through. A witness's
+            # rows must go through the same ones, or "hide this library"
+            # would silently stop applying to everything found after it was
+            # set -- and the user would have no way to tell.
+            'library_mode': captured_library_mode,
+            'library_filter': captured_library_filter,
+        } if captured_passage_mode else {}
 
         def run_search():
             try:
@@ -3481,7 +4434,7 @@ def create_parallels_page(initial_text: str = None):
                     from web.export_state import (
                         compute_parallels_search_fingerprint,
                     )
-                    _search_fingerprint = compute_parallels_search_fingerprint(
+                    _fingerprint_kwargs = dict(
                         text=text,
                         engine=captured_engine,
                         width=captured_passage_width,
@@ -3511,6 +4464,15 @@ def create_parallels_page(initial_text: str = None):
                         excluded=captured_excluded_ids,
                         filters=_parallels_filters,
                     )
+                    # The witness set is part of the identity, but at THIS
+                    # instant none has been searched -- these rows really are
+                    # seed-only. `_recompute_search_identity` re-runs this
+                    # exact keyword capture with the witnesses that produced
+                    # rows, as soon as any has. One construction, reused, so
+                    # the two cannot describe different searches.
+                    p_state.last_fingerprint_kwargs = _fingerprint_kwargs
+                    _search_fingerprint = compute_parallels_search_fingerprint(
+                        **_fingerprint_kwargs)
                     p_state.search_fingerprint = _search_fingerprint
                     p_state.searched_source_text = text
                     # The CONFIGURATION that produced these rows, from the
@@ -3546,6 +4508,16 @@ def create_parallels_page(initial_text: str = None):
                     _parallels_search_meta = {
                         'source_text': text,
                         'search_fingerprint': _search_fingerprint,
+                        # What the workbook was searched WITH. Labels, kinds
+                        # and shelfmarks only -- never the texts: a
+                        # downloaded file that carried twenty-five 20,000-
+                        # character witnesses would be mostly query.
+                        'witnesses': [
+                            {'label': w.get('label') or '',
+                             'kind': w.get('kind'),
+                             'sys_id': w.get('sys_id')}
+                            for w in captured_witnesses
+                        ] or None,
                         'chunk_size': captured_chunk_size,
                         'mode': captured_mode,
                         'max_freq': float(captured_freq_threshold) if captured_freq_threshold is not None else None,
@@ -3569,6 +4541,7 @@ def create_parallels_page(initial_text: str = None):
                         compact_parallels_result_rows,
                         set_parallels_export,
                     )
+                    p_state.last_export_meta = dict(_parallels_search_meta)
                     set_parallels_export(
                         results=main_results,
                         filtered=filtered_results,
@@ -3764,6 +4737,20 @@ def create_parallels_page(initial_text: str = None):
                     filtered_results = _filter_parallels_by_domain(filtered_results) if filtered_results else filtered_results
 
                 render_results(main_results, filtered_results, is_partial=is_partial)
+
+                # The seed is a witness too -- modelled with its own id so
+                # "found by 3 of 5" needs no +1 special case anywhere. Only
+                # letter-level: the panel is hidden for chunk and Lab, and
+                # fusing rows from an engine whose score means something else
+                # would be meaningless.
+                if captured_passage_mode:
+                    p_state.witness_rows[WITNESS_SEED_ID] = list(main_results)
+                    p_state.witness_filtered[WITNESS_SEED_ID] = list(
+                        filtered_results or [])
+                    _refresh_witness_panel()
+                    if any(_w['status'] == 'pending'
+                           for _w in p_state.witnesses):
+                        await _search_pending_witnesses()
             else:
                 if is_partial:
                     summary_label.text = f"{tr('Search cancelled')} \u2014 {total_elapsed_str} \u2014 {tr('no results yet')}"
@@ -4090,8 +5077,10 @@ def create_parallels_page(initial_text: str = None):
             scores = [item.get('score', 0) for item in grouped[key]['items']]
             grouped[key]['avg_score'] = sum(scores) / len(scores) if scores else 0
 
-        # Sort groups by max score
-        sorted_groups = sorted(grouped.items(), key=lambda x: x[1]['max_score'], reverse=True)
+        # Group order follows the SORT CONTROL (it used to be hard-coded to
+        # max_score, which is why 'shelfmark' and 'matches' never appeared to
+        # do anything).
+        sorted_groups = _sort_groups(grouped.items(), sort_by)
 
         # Group filtered results similarly
         filtered_grouped = {}
@@ -4127,7 +5116,7 @@ def create_parallels_page(initial_text: str = None):
                 scores = [item.get('score', 0) for item in filtered_grouped[key]['items']]
                 filtered_grouped[key]['avg_score'] = sum(scores) / len(scores) if scores else 0
 
-        sorted_filtered_groups = sorted(filtered_grouped.items(), key=lambda x: x[1]['max_score'], reverse=True)
+        sorted_filtered_groups = _sort_groups(filtered_grouped.items(), sort_by)
 
         # Separate per-manuscript excluded groups from main results
         excluded_ms_groups = []
@@ -4304,6 +5293,24 @@ def create_parallels_page(initial_text: str = None):
                         badge_color = 'amber' if is_filtered else 'blue'
                         ui.badge(f"{len(items)} {tr('matches')}", color=badge_color).classes('text-xs')
 
+                        # How many DISTINCT witnesses point at this
+                        # manuscript -- a union across its rows, not a sum:
+                        # two of its pages found by one witness are one
+                        # witness. Shown only when there is more than one
+                        # witness to distinguish.
+                        _wtotal = _searched_witness_count()
+                        if _wtotal > 1:
+                            _wstats = _group_witness_stats(group_data)
+                            if _wstats['witness_count']:
+                                _labels = _witness_labels()
+                                ui.badge(
+                                    tr('{n} of {m} witnesses').format(
+                                        n=_wstats['witness_count'], m=_wtotal),
+                                    color='purple',
+                                ).classes('text-xs').tooltip(', '.join(
+                                    _labels.get(wid, wid)
+                                    for wid in _wstats['witness_ids']))
+
                         # Printed material indicator
                         if sys_id and sys_id in p_state.printed_ids:
                             from shared.fjms_service import PRINTED_BADGE_COLORS, PRINTED_LABEL_EN, PRINTED_LABEL_HE
@@ -4354,6 +5361,25 @@ def create_parallels_page(initial_text: str = None):
                     ui.badge(f"{tr('Max')}: {int(max_score)}", color=max_color).classes('text-xs')
                     avg_color = 'green' if avg_score > 60 else 'amber' if avg_score > 35 else 'gray'
                     ui.badge(f"{tr('Avg')}: {int(avg_score)}", color=avg_color).classes('text-xs')
+
+                    # Promote this manuscript to a witness. State lives in
+                    # p_state, NOT on the widget: the checkbox is destroyed
+                    # and rebuilt on every re-render, so a selection held on
+                    # the widget would vanish the moment anything re-rendered.
+                    if (sys_id and not is_filtered
+                            and _letter_level_selected() and passage_available()):
+                        def _toggle_promotion(e, sid=sys_id):
+                            if e.value:
+                                p_state.checked_for_promotion.add(sid)
+                            else:
+                                p_state.checked_for_promotion.discard(sid)
+                            _refresh_promotion_bar()
+
+                        ui.checkbox(
+                            value=sys_id in p_state.checked_for_promotion,
+                            on_change=_toggle_promotion,
+                        ).props('dense size=sm').tooltip(
+                            tr('Search with this manuscript too'))
 
                     # Per-manuscript exclude button
                     if sys_id and not is_filtered:
@@ -4453,7 +5479,15 @@ def create_parallels_page(initial_text: str = None):
                 with ui.row().classes('w-full gap-3'):
                     # Source context
                     with ui.column().classes('flex-1 gap-2'):
-                        ui.label(tr('Your text')).classes('text-xs font-bold uppercase').style('color: var(--success);')
+                        # Which witness this highlight came from. A span
+                        # offset is a position in ONE witness's text, so the
+                        # context below belongs to that witness and to no
+                        # other -- labelling it "Your text" when it came from
+                        # a promoted manuscript would misattribute the
+                        # evidence.
+                        ui.label(_source_heading_for(item)).classes(
+                            'text-xs font-bold uppercase').style(
+                            'color: var(--success);')
                         with ui.element('div').classes('p-3 rounded-lg text-sm').style(
                             'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8; border: 1px solid var(--success); color: var(--text-primary);'
                         ):
@@ -4702,7 +5736,9 @@ def create_parallels_page(initial_text: str = None):
             with ui.row().classes('w-full gap-4'):
                 # Source context
                 with ui.column().classes('flex-1 gap-2'):
-                    ui.label(tr('Your text')).classes('text-xs font-bold uppercase').style('color: var(--success);')
+                    ui.label(_source_heading_for(item)).classes(
+                        'text-xs font-bold uppercase').style(
+                        'color: var(--success);')
                     with ui.element('div').classes('p-4 rounded-lg text-sm').style(
                         'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8; border: 1px solid var(--success); color: var(--text-primary);'
                     ):

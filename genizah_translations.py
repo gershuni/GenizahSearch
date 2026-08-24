@@ -2946,6 +2946,15 @@ TRANSLATIONS = {
     # Codex MEDIUM (2026-06-29): catalog→parallels handoff drops library (parallels can't scope by it)
     "Library filter is not applied to parallel search": "מסנן הספרייה אינו חל על חיפוש מקבילות",
     "Library filter": "מסנן ספרייה",
+    # Both capitalisations, deliberately. The dialog's "show the rest of the
+    # libraries" expander calls tr('All libraries') (sentence case) in
+    # web/pages/{parallels,search,catalog_browse}.py, but only the title-case
+    # key existed -- so the summary line rendered in English on an otherwise
+    # Hebrew page, in all three. Nothing calls tr('All Libraries') today;
+    # it is kept because a lookup miss is silent (tr falls back to the key),
+    # so dropping it would risk re-opening the same class of bug for the
+    # cost of one line.
+    "All libraries": "כל הספריות",
     "All Libraries": "כל הספריות",
     "Libraries": "ספריות",
     # SEED-026 GAP-C dialog (title-case dialog header + FINDING-1 hint)
@@ -5028,4 +5037,49 @@ TRANSLATIONS.update({
         "שוחזרו {shown} מתוך {total} תוצאות מהחיפוש האחרון — לרשימה המלאה יש להריץ את החיפוש שוב עם ההגדרות המקוריות.",
     "Letter-level search matched more than {cap} manuscripts — showing the strongest {cap}.":
         "החיפוש ברמת האות מצא יותר מ־{cap} כתבי יד — מוצגים ה־{cap} החזקים ביותר.",
+    # --- Multi-witness letter-level search ---------------------------------
+    # One work survives in many manuscripts and no single witness of it
+    # retrieves every other. "עדים" is the standard textual-criticism
+    # term the owner uses for manuscript witnesses of a work.
+    "Witnesses": "עדים",
+    "Add other copies of this work to search with. Each is searched on its own and the results are merged.":
+        "הוסיפו עותקים נוספים של החיבור לחפש איתם. כל אחד נבדק בנפרד והתוצאות ממוזגות.",
+    "Add witness text": "הוספת נוסח עד",
+    "This paste contains several witnesses separated by blank lines":
+        "הטקסט מכיל כמה עדים המופרדים בשורות ריקות",
+    "Preview split": "תצוגה מקדימה של הפיצול",
+    "{n} witnesses detected": "זוהו {n} עדים",
+    "({n} skipped: too short)": "({n} דולגו: קצרים מדי)",
+    "Pasted text": "טקסט שהודבק",
+    "Pending": "ממתין",
+    "Failed": "נכשל",
+    "{n} matches found": "נמצאו {n} התאמות",
+    "Search now ({n} pending)": "חפשו עכשיו ({n} ממתינים)",
+    "Search with these too": "חפשו גם עם אלו",
+    "Search with this manuscript too": "חפשו גם עם כתב יד זה",
+    "Clear selection": "נקו את הבחירה",
+    "{n} manuscripts selected": "נבחרו {n} כתבי יד",
+    "Added {n} witnesses — found {m} new matches.":
+        "נוספו {n} עדים — נמצאו {m} התאמות חדשות.",
+    "Could not load text for this manuscript.":
+        "לא ניתן לטעון את הטקסט של כתב יד זה.",
+    "Auto-expand (optional)": "הרחבה אוטומטית (לא חובה)",
+    "Repeatedly search with the best results as new witnesses. Reach goes up and top-of-list precision goes down.":
+        "חיפוש חוזר ונשנה עם התוצאות הטובות ביותר כעדים חדשים. ההיקף גדל והדיוק בראש הרשימה יורד.",
+    "Rounds": "סבבים",
+    "Top-K per round": "כמה לקחת בכל סבב",
+    "Run auto-expand now": "הפעילו הרחבה אוטומטית",
+    "Round {r}/{n}": "סבב {r}/{n}",
+    "Witness {i}/{k}: {label}": "עד {i}/{k}: {label}",
+    "Auto-expand stopped: witness cap reached.":
+        "ההרחבה האוטומטית נעצרה: הושג המקסימום של עדים.",
+    "{n} witnesses could not be searched — use Retry.":
+        "לא ניתן היה לחפש ב־{n} עדים — נסו שוב.",
+    "Run a letter-level search first.": "יש להריץ תחילה חיפוש ברמת האות.",
+    "Sort by combined score": "מיון לפי ציון משולב",
+    "Sort by number of witnesses": "מיון לפי מספר העדים",
+    "{n} of {m} witnesses": "{n} מתוך {m} עדים",
+    "Witness list is full (max {n})": "רשימת העדים מלאה (עד {n})",
+    "Search now": "חפשו עכשיו",
+    "Label (optional)": "תוית (לא חובה)",
 })

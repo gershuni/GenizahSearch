@@ -379,11 +379,30 @@ def test_the_tooltip_does_not_scope_to_the_genizah_corpus():
 # ---------------------------------------------------------------------------
 
 def _fingerprint_call_slice() -> str:
-    """The fresh-search call to the identity helper, arguments included."""
+    """The dispatch-time keyword CAPTURE that feeds the identity helper.
+
+    Was the call site itself until the multi-witness work, which builds the
+    keywords once into `_fingerprint_kwargs` and reuses them: the fresh
+    search calls the helper with them immediately, and the additive witness
+    path re-calls it with the same capture plus the witnesses that produced
+    rows. Reusing one construction is what stops the two describing
+    different searches -- but it also means the call site now reads
+    `**_fingerprint_kwargs` and would assert nothing.
+
+    Inspecting the capture instead makes this guard cover BOTH call sites,
+    which is strictly more than it covered before. A guard that silently
+    stops guarding is worse than no guard, so this is asserted, not assumed:
+    the call site must actually be fed by this capture.
+    """
     src = _read_source()
-    idx = src.index('_search_fingerprint = compute_parallels_search_fingerprint(')
+    idx = src.index('_fingerprint_kwargs = dict(')
     end = src.index('\n                    )', idx)
-    return src[idx:end]
+    captured = src[idx:end]
+    assert 'compute_parallels_search_fingerprint(\n                        **_fingerprint_kwargs)' in src, (
+        'the keyword capture is no longer what reaches the identity helper '
+        '-- this guard would be inspecting a dict nothing uses'
+    )
+    return captured
 
 
 def test_fingerprint_call_passes_every_result_affecting_input():

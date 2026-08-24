@@ -166,3 +166,79 @@ def test_a_legacy_pair_still_falls_back_to_source_text():
     assert _same_parallels_search({'source_text': 'x'}, {'source_text': 'x'})
     assert not _same_parallels_search({'source_text': 'x'},
                                       {'source_text': 'y'})
+
+
+# ---------------------------------------------------------------------------
+# The witness set is part of a search's identity.
+# ---------------------------------------------------------------------------
+
+W_PASTED_A = {'kind': 'pasted', 'text': 'aleph bet gimel', 'label': 'A'}
+W_PASTED_B = {'kind': 'pasted', 'text': 'dalet he vav', 'label': 'B'}
+W_PROMOTED = {'kind': 'manuscript', 'sys_id': '9912345678901234', 'label': 'C'}
+
+
+def test_no_witnesses_hashes_exactly_as_before_the_parameter_existed():
+    """Every fingerprint recorded before witnesses existed has to keep
+    matching, or a stored composition-history entry stops recognising its own
+    results."""
+    assert fp(**BASE) == fp(**BASE, witnesses=None)
+    assert fp(**BASE) == fp(**BASE, witnesses=[])
+
+
+def test_adding_a_witness_moves_the_hash():
+    """The same seed searched with three witnesses and with seventeen
+    produces different results; recovering one set's rows for the other would
+    be silently wrong."""
+    assert fp(**BASE, witnesses=[W_PASTED_A]) != fp(**BASE)
+    assert fp(**BASE, witnesses=[W_PASTED_A, W_PASTED_B]) != \
+        fp(**BASE, witnesses=[W_PASTED_A])
+
+
+def test_the_witness_list_is_order_insensitive():
+    """The set searched is what shapes the results; the order they were typed
+    in is not."""
+    assert fp(**BASE, witnesses=[W_PASTED_A, W_PASTED_B]) == \
+        fp(**BASE, witnesses=[W_PASTED_B, W_PASTED_A])
+
+
+def test_a_relabelled_witness_keeps_its_identity():
+    """Labels are user-editable. Hashing them would make a rename look like a
+    different search."""
+    renamed = dict(W_PASTED_A, label='renamed entirely')
+    assert fp(**BASE, witnesses=[renamed]) == fp(**BASE, witnesses=[W_PASTED_A])
+
+
+def test_two_witnesses_sharing_a_label_are_still_distinguished():
+    """The inverse, and the reason a label-only canonicalisation is not
+    enough: a metadata-only entry does not identify the text that was
+    searched, so two different pastes under one label would collide."""
+    same_label = dict(W_PASTED_B, label='A')
+    assert fp(**BASE, witnesses=[same_label]) != fp(**BASE, witnesses=[W_PASTED_A])
+
+
+def test_editing_a_pasted_witness_moves_the_hash():
+    edited = dict(W_PASTED_A, text=W_PASTED_A['text'] + ' zayin')
+    assert fp(**BASE, witnesses=[edited]) != fp(**BASE, witnesses=[W_PASTED_A])
+
+
+def test_a_promoted_witness_is_identified_by_its_sys_id():
+    """It carries no text (re-fetchable from the corpus), so the sys_id has
+    to be what identifies it."""
+    no_text = {'kind': 'manuscript', 'sys_id': '9912345678901234', 'label': 'x'}
+    assert fp(**BASE, witnesses=[no_text]) == fp(**BASE, witnesses=[W_PROMOTED])
+    other = dict(W_PROMOTED, sys_id='9999999999999999')
+    assert fp(**BASE, witnesses=[other]) != fp(**BASE, witnesses=[W_PROMOTED])
+
+
+def test_a_pasted_and_a_promoted_witness_never_collide():
+    collide = {'kind': 'pasted', 'text': '9912345678901234'}
+    assert fp(**BASE, witnesses=[collide]) != fp(**BASE, witnesses=[W_PROMOTED])
+
+
+def test_the_witness_payload_carries_a_digest_not_the_text():
+    """A 25 x 20,000-character payload would be hashed on every search; the
+    digest keeps it bounded. Asserted by behaviour: two texts sharing a long
+    prefix must still differ."""
+    a = {'kind': 'pasted', 'text': 'x' * 5000 + 'A'}
+    b = {'kind': 'pasted', 'text': 'x' * 5000 + 'B'}
+    assert fp(**BASE, witnesses=[a]) != fp(**BASE, witnesses=[b])
