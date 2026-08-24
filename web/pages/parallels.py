@@ -828,57 +828,9 @@ def create_parallels_page(initial_text: str = None):
                         def _letter_level_selected() -> bool:
                             return method_radio.value == 'passage'
 
-                        # The letter-level controls row, mirroring how the chunk
-                        # controls sit beside their method. ONE control on purpose:
-                        # match width (density_scale) is the single knob measured to
-                        # matter -- min_span and min_anchors were swept and found
-                        # inert -- and a row of decorative dials would be dishonest.
-                        passage_width = ui.select(
-                            options={
-                                'standard-40': tr('Narrow (near-exact)'),
-                                'wide-40': tr('Medium width'),
-                                'wider-40': tr('Wide width'),
-                                'widest-40': tr('Very wide (default)'),
-                                'max-40': tr('Maximal (may add noise)'),
-                            },
-                            value='widest-40',
-                            label=tr('Match width'),
-                        ).classes('w-44').props('outlined dense')
-                        passage_width.tooltip(tr(
-                            'How far a manuscript may drift from your text and '
-                            'still match. Wider finds more noisy witnesses; the '
-                            'strongest matches always rank first.'
-                        ))
-                        # The SECOND axis (2026-08-24). Width and passage
-                        # length are different questions -- "how corrupt a
-                        # copy may be" vs "how short a shared passage counts"
-                        # -- and the short profile is emphatically not a
-                        # wider width, so folding it into the width list
-                        # would mislabel it. Two knobs, each a small list of
-                        # named policies; never raw sliders, because
-                        # min_span and verify_margin are ONE coupled decision
-                        # (spec section 8.1) that a slider would present as
-                        # two independent ones.
-                        passage_length = ui.select(
-                            options={
-                                'normal': tr('Normal passages (default)'),
-                                'short': tr('Also short passages'),
-                            },
-                            value='normal',
-                            label=tr('Passage length'),
-                        ).classes('w-44').props('outlined dense')
-                        passage_length.tooltip(tr(
-                            'Whether a short shared passage counts as a match. '
-                            '"Also short" finds piyyutim, quotations and badly '
-                            'damaged copies that share only a phrase — measured '
-                            'at roughly double the results for a third fewer '
-                            'correct ones, so expect to skim more.'
-                        ))
                         if not passage_available():
                             method_radio.value = 'chunk'
                             method_radio.style('display: none;')
-                            passage_width.style('display: none;')
-                            passage_length.style('display: none;')
 
                     # === Boundary Search Settings ===
                     with ui.row().classes('w-full items-center gap-4 flex-wrap mt-2'):
@@ -1047,8 +999,11 @@ def create_parallels_page(initial_text: str = None):
                             lab_mode.value = False
                             on_lab_mode_change()
                         if _letter_level_selected():
-                            passage_width.style('display: inline-flex;')
-                            passage_length.style('display: inline-flex;')
+                            # Swap the pane's contents, do not merely grey it.
+                            letter_options_col.set_visibility(True)
+                            for _row in (mode_select, chunk_size_row,
+                                         freq_threshold_row, min_chunks_row):
+                                _row.set_visibility(False)
                             # Finding #2 (adversarial review): passage-matching
                             # has no cross-paragraph/token-boundary concept --
                             # PassageSearcher raises ValueError for anything but
@@ -1095,8 +1050,10 @@ def create_parallels_page(initial_text: str = None):
                             min_chunks_input.value = 1
                             min_chunks_input.disable()
                         else:
-                            passage_width.style('display: none;')
-                            passage_length.style('display: none;')
+                            letter_options_col.set_visibility(False)
+                            for _row in (mode_select, chunk_size_row,
+                                         freq_threshold_row, min_chunks_row):
+                                _row.set_visibility(True)
                             boundary_mode.enable()
                             chunk_size.enable()
                             mode_select.enable()
@@ -1112,6 +1069,60 @@ def create_parallels_page(initial_text: str = None):
                 with ui.column().classes('w-80 gap-4'):
                     # Changed to H2
                     h2(tr('Options'), classes='text-xl font-bold', style='color: var(--text-primary);')
+
+                    # Letter-level options live HERE, in the same pane as the
+                    # chunk options they replace -- owner feedback 2026-08-24.
+                    # The earlier shape put them in the method row and left
+                    # this whole pane visible-but-disabled, so the options a
+                    # letter-level search actually uses sat far from the four
+                    # greyed-out ones it does not. One pane, contents swapped
+                    # by method. The chunk controls stay force-set and
+                    # disabled underneath (web/search_api.py rejects a
+                    # non-default value of any of them for method='passage',
+                    # so disabling remains the guarantee); hiding is
+                    # presentation on top of that, never instead of it.
+                    with ui.column().classes('gap-4') as letter_options_col:
+                        passage_width = ui.select(
+                            options={
+                                'standard-40': tr('Narrow (near-exact)'),
+                                'wide-40': tr('Medium width'),
+                                'wider-40': tr('Wide width'),
+                                'widest-40': tr('Very wide (default)'),
+                                'max-40': tr('Maximal (may add noise)'),
+                            },
+                            value='widest-40',
+                            label=tr('Match width'),
+                        ).classes('w-44').props('outlined dense')
+                        passage_width.tooltip(tr(
+                            'How far a manuscript may drift from your text and '
+                            'still match. Wider finds more noisy witnesses; the '
+                            'strongest matches always rank first.'
+                        ))
+                        # The SECOND axis (2026-08-24). Width and passage
+                        # length are different questions -- "how corrupt a
+                        # copy may be" vs "how short a shared passage counts"
+                        # -- and the short profile is emphatically not a
+                        # wider width, so folding it into the width list
+                        # would mislabel it. Two knobs, each a small list of
+                        # named policies; never raw sliders, because
+                        # min_span and verify_margin are ONE coupled decision
+                        # (spec section 8.1) that a slider would present as
+                        # two independent ones.
+                        passage_length = ui.select(
+                            options={
+                                'normal': tr('Normal passages (default)'),
+                                'short': tr('Also short passages'),
+                            },
+                            value='normal',
+                            label=tr('Passage length'),
+                        ).classes('w-44').props('outlined dense')
+                        passage_length.tooltip(tr(
+                            'Whether a short shared passage counts as a match. '
+                            '"Also short" finds piyyutim, quotations and badly '
+                            'damaged copies that share only a phrase — measured '
+                            'at roughly double the results for a third fewer '
+                            'correct ones, so expect to skim more.'
+                        ))
 
                     # Mode
                     mode_select = ui.select(
@@ -1194,7 +1205,7 @@ def create_parallels_page(initial_text: str = None):
                     variant_controls_col.set_visibility(False)
 
                     # Chunk Size
-                    with ui.column().classes('gap-1'):
+                    with ui.column().classes('gap-1') as chunk_size_row:
                         # Changed to H3
                         h3(tr('Chunk size'), classes='text-sm font-medium', style='color: var(--text-secondary);')
                         chunk_size = ui.slider(min=2, max=12, value=5).props('label-always')

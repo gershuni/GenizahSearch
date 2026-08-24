@@ -329,7 +329,10 @@ def test_the_default_selection_state_is_applied_on_load():
 def _passage_width_creation_slice() -> str:
     src = _read_source()
     idx = src.index('passage_width = ui.select(')
-    end = src.index('if not passage_available():', idx)
+    # The letter-level controls now live in the Options pane (owner
+    # feedback 2026-08-24), so the slice ends at the first chunk-side
+    # control that follows them rather than at the old method-row marker.
+    end = src.index('mode_select = ui.select(', idx)
     return src[idx:end]
 
 
@@ -878,3 +881,40 @@ def test_passage_length_is_part_of_the_search_identity():
               length='normal') == base, 'the default must not shift old ids'
     assert fp(text='x', engine='passage', width='widest-40',
               length='short') != base
+
+
+def test_letter_options_live_in_the_options_pane_not_the_method_row():
+    """Owner feedback 2026-08-24: the letter-level controls belong in the
+    same pane as the chunk options they replace. The earlier shape put them
+    in the method row and left the whole Options pane visible-but-disabled,
+    so the options a letter-level search actually uses sat far away from the
+    four greyed-out ones it does not."""
+    src = _read_source()
+    opts = src.index("h2(tr('Options')")
+    assert src.index('passage_width = ui.select(') > opts, (
+        'passage_width must be created inside the Options pane')
+    assert src.index('passage_length = ui.select(') > opts
+    assert 'letter_options_col' in src
+
+
+def test_the_pane_swaps_contents_by_method_rather_than_greying_out():
+    src = _on_passage_mode_change_source()
+    true_branch = src[:src.index('else:')]
+    false_branch = src[src.index('else:'):]
+    assert 'letter_options_col.set_visibility(True)' in true_branch
+    assert 'letter_options_col.set_visibility(False)' in false_branch
+    for row in ('mode_select', 'chunk_size_row', 'freq_threshold_row',
+                'min_chunks_row'):
+        assert row in true_branch and row in false_branch, (
+            f'{row} must be hidden in letter mode and restored in chunk mode')
+
+
+def test_hiding_never_replaces_the_force_and_disable_guarantee():
+    """Hiding is presentation. web/search_api.py rejects a non-default value
+    of any chunk option for method='passage', so forcing + disabling remains
+    the actual guarantee and must survive the layout change."""
+    src = _on_passage_mode_change_source()
+    true_branch = src[:src.index('else:')]
+    for widget in ('chunk_size', 'mode_select', 'freq_threshold',
+                   'boundary_mode', 'min_chunks_input'):
+        assert f'{widget}.disable()' in true_branch
