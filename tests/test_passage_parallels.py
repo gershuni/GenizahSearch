@@ -1114,8 +1114,10 @@ def test_anchor_rows_are_labelled_scaled_and_last(anchor_corpus):
     assert min(r['score'] for r in span_rows) > \
         max(r['score'] for r in anchor_rows)
     for r in anchor_rows:
-        assert r['src_lbl'] == 'עדות עוגן (anchor evidence)'
-        assert r['anchor_codes'] >= 8
+        assert r['src_lbl'].startswith('עדות עוגן (anchor evidence)')
+        assert str(r['anchor_codes']) in r['src_lbl']
+        assert r['anchor_codes'] >= 4
+        assert r['anchor_weight'] > 0
         assert r['score'] == pytest.approx(r['anchor_codes'] / 1000.0)
         # Rendered like any row: highlighted windows on both sides.
         assert r['source_ctx'] and r['text']

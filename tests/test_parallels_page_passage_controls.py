@@ -837,3 +837,53 @@ def test_the_deferred_sefaria_restore_honours_the_snapshot_selection():
     assert ("_cfg_sefaria = (_restored_search_config.get('sefaria_enabled')"
             ' if isinstance(_restored_search_config, dict) else None)') in flat
     assert 'if isinstance(_cfg_sefaria, list): stored_enabled = set(_cfg_sefaria)' in flat
+
+
+# ---------------------------------------------------------------------------
+# The anchor-evidence tier must be VISIBLE as such in the rendered card.
+# PR #327 review (Codex P1): the searcher set match_tier/anchor_codes/src_lbl
+# and create_parallel_item read none of them, so an anchor row rendered with
+# the same styling and "Manuscript Text" heading as a verified alignment
+# while its fractional score rounded to a flat "0". Source-level pins are
+# used here (the row renderer needs a full result-group context to execute),
+# targeting the exact fields whose absence caused the defect.
+# ---------------------------------------------------------------------------
+
+def _create_parallel_item_source() -> str:
+    import inspect
+
+    import web.pages.parallels as pp
+    src = inspect.getsource(pp.create_parallels_page)
+    start = src.index('def create_parallel_item(')
+    nxt = src.find('\n    def ', start + 10)
+    return src[start:nxt if nxt != -1 else len(src)]
+
+
+def test_the_card_reads_the_tier_fields_the_searcher_sets():
+    src = _create_parallel_item_source()
+    assert "item.get('match_tier')" in src, (
+        'the row renderer must consume match_tier -- without it an '
+        'anchor-evidence row is indistinguishable from a verified match')
+    assert "item.get('anchor_codes'" in src
+
+
+def test_an_anchor_row_never_renders_a_rounded_zero_score():
+    """anchor rows score codes/1000, so round() shows 0. The card must take
+    a different branch that prints the evidence in its own unit."""
+    src = _create_parallel_item_source()
+    badge_region = src[src.index('# Score badge'):]
+    assert 'is_anchor_row' in badge_region, (
+        'the score badge must branch on the tier before rendering round(score)')
+    anchor_branch = badge_region[badge_region.index('is_anchor_row'):]
+    assert 'anchor_codes' in anchor_branch[:1500], (
+        'the anchor branch must show the distinct-code count, not the '
+        'scaled row score')
+
+
+def test_an_anchor_row_does_not_claim_an_aligned_manuscript_match():
+    src = _create_parallel_item_source()
+    assert "tr('Nearby text (no aligned match)')" in src, (
+        'anchor windows are neighbourhoods of shared terms, not verified '
+        'alignments; the heading must not promise one')
+    heading = src[src.index("Nearby text (no aligned match)") - 200:]
+    assert 'is_anchor_row' in heading[:400]

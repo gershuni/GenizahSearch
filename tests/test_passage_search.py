@@ -468,3 +468,143 @@ def test_anchor_tier_respects_record_restriction(scatter_index):
         idx, reference, policy,
         record_allowed=lambda rid: not rid.startswith('trn'))
     assert not any(h.record_id.startswith('trn') for h in hits)
+
+
+@pytest.fixture(scope='module')
+def formulaic_index(tmp_path_factory):
+    """The failure the 2026-08-24 Antiochus run exposed, in miniature.
+
+    MANY records share numerous SHORT COMMON phrases with the query (as
+    biblical Aramaic manuscripts share stock formulae with a Daniel-imitating
+    text); ONE short record shares a FEW RARE snippets (as an Arabic
+    translation shares only names). Every shared piece is short and
+    scattered, so nothing forms an acceptable span and all of it lands in the
+    anchor tier -- which is the situation the real run produced, where
+    99 כתובים / 35 Daniel / 25 Targum filled the cap and the true finds sat
+    on its floor.
+    """
+    d = str(tmp_path_factory.mktemp('pformula'))
+    stock = [_aperiodic(12, salt=4242 + i) for i in range(20)]  # df ~40 each
+    rare = [_aperiodic(12, salt=900 + i) for i in range(6)]     # df 1 each
+
+    # The query carries all of both, each piece isolated by filler so no long
+    # contiguous run exists on either side of any later comparison.
+    parts = []
+    for i, piece in enumerate(stock + rare):
+        parts.append(_aperiodic(40, salt=200 + i))
+        parts.append(piece)
+    query = ''.join(parts)
+
+    records = []
+    for r in range(40):
+        body = [_aperiodic(45, salt=6000 + r * 31 + i) for i in range(21)]
+        text = ''
+        for i, piece in enumerate(stock):
+            text += body[i] + piece
+        records.append((f'frm{r:03d}', text + body[20]))
+    # The target: short, sharing ONLY the rare snippets.
+    tgt = ''
+    for i, piece in enumerate(rare):
+        tgt += _aperiodic(45, salt=8000 + i) + piece
+    records.append(('rare000', tgt))
+
+    build_index(records, d, partitions=3, apply_hygiene=False)
+    idx = open_index(d)
+    assert idx is not None
+    return idx, query
+
+
+def test_rarity_gate_keeps_the_distinctive_record_over_the_formulaic_ones(
+        formulaic_index):
+    """The regression that motivated anchor_df_max + weight ordering."""
+    idx, query = formulaic_index
+    # Stock grams have df ~40, the rare ones df 1: a cutoff between the two
+    # is exactly what separates 'distinctive' from 'stock phrase'.
+    gated = PassagePolicy(name='t-gated', anchor_tier=True,
+                          anchor_df_max=10, anchor_min_codes=4)
+    hits, _report = search_passage(idx, query, gated)
+    anchors = [h for h in hits if h.tier == 'anchor']
+    by_id = {h.record_id: h for h in anchors}
+    assert 'rare000' in by_id, 'the distinctive record must survive'
+    assert anchors[0].record_id == 'rare000', 'and must rank first'
+    assert all(h.anchor_weight > 0 for h in anchors)
+
+    # Formula-bearers can still appear -- in a 22-letter synthetic alphabet
+    # random 5-gram collisions hand a few of them a rare code, which is a
+    # property of the fixture, not of the gate. What the gate must deliver is
+    # SEPARATION: the stock-phrase evidence has to collapse to noise level
+    # while the distinctive record keeps all of its.
+    frm = [h for h in anchors if h.record_id.startswith('frm')]
+    assert frm, 'fixture assumption: collisions do reach the tier'
+    assert by_id['rare000'].anchor_weight > 5 * max(h.anchor_weight
+                                                    for h in frm)
+
+    # Ungated (the pre-fix behaviour): the formulaic records flood the tier
+    # AND invert the raw count -- a stock-phrase record outscores the real
+    # one on codes, which is precisely why the cap used to keep the wrong
+    # records. Weight ordering survives the inversion; counting does not.
+    ungated = PassagePolicy(name='t-ungated', anchor_tier=True,
+                            anchor_df_max=10 ** 9, anchor_min_codes=4)
+    hits_u, _r = search_passage(idx, query, ungated)
+    anchors_u = [h for h in hits_u if h.tier == 'anchor']
+    frm_u = [h for h in anchors_u if h.record_id.startswith('frm')]
+    rare_u = next(h for h in anchors_u if h.record_id == 'rare000')
+    assert len(frm_u) > 2 * len(frm), 'the gate must thin the flood'
+    assert max(h.anchor_codes for h in frm_u) > rare_u.anchor_codes, \
+        'fixture must reproduce the COUNT inversion the fix is about'
+    assert anchors_u[0].record_id == 'rare000', \
+        'weight ordering must beat the count inversion even ungated'
+
+
+def test_anchor_cap_keeps_the_highest_WEIGHT_not_the_highest_count(
+        formulaic_index):
+    """A count-ordered cap keeps the records sharing the most stock phrases;
+    a weight-ordered cap keeps the distinctive one. With a single slot and
+    NO rarity gate, the rare record must still win -- that is the ordering
+    fix, independent of the membership gate."""
+    idx, query = formulaic_index
+    allp = PassagePolicy(name='t-all', anchor_tier=True,
+                         anchor_df_max=10 ** 9, anchor_min_codes=4)
+    everything = {h.record_id: h for h in search_passage(idx, query, allp)[0]
+                  if h.tier == 'anchor'}
+    assert 'rare000' in everything
+    assert max(h.anchor_codes for h in everything.values()) > \
+        everything['rare000'].anchor_codes, (
+        'fixture must have a formulaic record with a HIGHER raw count, '
+        'otherwise the weight ordering is not actually under test')
+
+    one = PassagePolicy(name='t-one', anchor_tier=True,
+                        anchor_df_max=10 ** 9, anchor_min_codes=4,
+                        anchor_cap=1)
+    hits, report = search_passage(idx, query, one)
+    anchors = [h for h in hits if h.tier == 'anchor']
+    assert len(anchors) == 1 and report.anchor_truncated is True
+    assert anchors[0].record_id == 'rare000', (
+        'the single kept anchor must be the rarest-evidenced record, not '
+        'the one sharing the most stock formula')
+
+
+def test_unverified_records_are_never_reported_as_anchor_only(scatter_index):
+    """PR #327 review (Codex P1). `merged` holds only records that were
+    actually verified AND accepted, so a record the verify cap never tried
+    trivially satisfies 'not in merged'. Reporting it as anchor-only asserts
+    'no alignment accepted' about a check that never ran -- and because
+    verification is ordered by anchor strength, the untried tail is exactly
+    where the anchor tier's own population sits, so this is the common case,
+    not a corner. Two verbatim carriers with verify_cap=1: the second must
+    NOT come back as an anchor hit."""
+    idx, reference = scatter_index
+    policy = PassagePolicy(name='t-cap1', density_scale=2.0, anchor_tier=True,
+                           anchor_min_codes=2, anchor_df_max=10 ** 9,
+                           verify_cap=1)
+    hits, report = search_passage(idx, reference, policy)
+    assert report.verify_truncated is True
+    spans = [h for h in hits if h.tier == 'span']
+    anchors = [h for h in hits if h.tier == 'anchor']
+    assert len(spans) == 1, 'verify_cap=1 admits exactly one accepted span'
+    # The carrier is a real contiguous match; it must never be demoted to
+    # anchor-only just because the cap stopped before its other clusters.
+    assert 'carrier015' not in {h.record_id for h in anchors}
+    # Records withheld for being untried are COUNTED, never silently dropped.
+    assert report.anchor_withheld_unverified >= 1
+    assert report.anchor_records == len(anchors)

@@ -418,18 +418,37 @@ capped raw material, gated by policy (`anchor_tier`, default **off** — behavio
   one-code diagonal, and dropping those would re-create exactly the blindness the tier removes.
   Stats are taken before `candidate_cap` (bookkeeping is cheap; that cap bounds Levenshtein
   work, which anchors never do).
+* **Rarity rule (2026-08-24, measured).** Only codes with `df <= anchor_df_max` count, and the
+  tier is ordered by **weight** — Σ log10(N/df) over those codes — not by how many there are.
+  The first build counted every shared code and was measured on the live Antiochus query: the
+  300 admitted records were 99 כתובים, 35 Daniel, 25 Targum sharing 14–37 *ubiquitous* grams,
+  the four real finds sat at 14–15 on the cap floor, and every Arabic and rhymed target the
+  tier was built for fell below it. Raw counting ranks by **record length**, because a long
+  formulaic codex shares many common grams while a short translation shares few rare ones.
+  Rarity therefore gates membership and weight orders the cap.
 * **Report rule.** After verification, a pooled record with at least `anchor_min_codes`
-  distinct codes and **no accepted span** is reported as a `tier='anchor'` hit — never a record
-  that already has a span hit. Ordered by (−codes, record), capped at `anchor_cap`, truncation
-  reported (`anchor_truncated`), count reported (`anchor_records`).
+  distinct distinctive codes and **no accepted span** is reported as a `tier='anchor'` hit —
+  never a record that already has a span hit. Ordered by (−weight, record), capped at
+  `anchor_cap`, truncation reported (`anchor_truncated`), count reported (`anchor_records`).
+* **Verified-only rule (PR #327 review).** A record whose clusters the `verify_cap` left
+  **untried** is withheld from the tier and counted in `anchor_withheld_unverified`, never
+  reported as anchor-only. `merged` holds only records that were verified *and* accepted, so
+  "not in merged" alone would let an unexamined record be labelled "no alignment accepted" —
+  a claim about a check that never ran. This is the common case, not a corner: verification
+  runs in anchor-strength order, so the untried tail is exactly where weak-evidence records
+  live, which is the anchor tier's own population.
 * **Honesty rules.** Anchor hits carry the kept clusters' *extents* as display windows, never
   alignments; density is the 1.0 upper bound ("no alignment accepted"); the score is the
   distinct-code count — a **different unit** from matched letters, so surfaces must keep the
   tiers separate rather than pretend one ordering (the web searcher scales anchor row scores
   below the span floor and labels the rows).
-* **Status: exploratory.** No held-out measurement yet. The intended first instrument is the
-  adjudicated 83-positive Antiochus deck (2026-08-23 session); the question it must answer is
-  what fraction of chunk-2's exclusive finds the tier recovers, at what candidate burden.
+* **Status: exploratory, one measurement in.** The adjudicated 83-positive Antiochus deck was
+  run against the first (count-based) build on 2026-08-24 and it **failed its own purpose**:
+  77% recall overall but only 4 of the 20 chunk-2-exclusive targets recovered, 4% precision in
+  the anchor tier, and the cap saturated at 300 with length-biased biblical manuscripts. That
+  measurement produced the rarity rule above. The rarity-gated build is **not yet measured** —
+  the same deck is the instrument, and `anchor_df_max` in particular is a reasoned starting
+  value, not a fitted one.
 
 ---
 
@@ -457,7 +476,9 @@ capped raw material, gated by policy (`anchor_tier`, default **off** — behavio
 | DF — batch, asymmetric | `REF_DF_CAP` | 128 raw postings per code — **known non-monotonic**, section 10.1 | `track1_match.py` |
 | DF — interactive | policy | band-allocated posting budget, section 10.2 | this spec |
 | Anchor tier | `anchor_tier` | off by default; opt-in per policy | section 10.4 |
-| | `anchor_min_codes` | 8 distinct admitted codes per record | section 10.4 — exploratory, unmeasured |
+| | `anchor_min_codes` | 4 distinct DISTINCTIVE codes per record | section 10.4 — exploratory |
+| | `anchor_df_max` | 5,000 postings; above this a code is "common" | section 10.4 — measured need, unmeasured value |
+| | ordering | Σ log10(N/df), **not** the raw count | section 10.4 — Antiochus run, 2026-08-24 |
 | | `anchor_cap` | 300 records, truncation reported | section 10.4 |
 | | extents per record | 8 display windows | `passage_search.py::_ANCHOR_EXTENTS_PER_RECORD` |
 | Measured noise | letter CER | 20.1% micro, 16.6% median, p25 8.9%, p90 42% | 209-page alignment against human transcriptions |

@@ -4293,6 +4293,11 @@ def create_parallels_page(initial_text: str = None):
         # Use round() instead of int() to avoid hiding small boosts
         score = round(item.get('score', 0))
         final_score = round(item.get('final_score', score))
+        # Anchor-evidence rows (letter-level "Recall sweep", spec 10.4) carry
+        # no accepted alignment; everything below that treats a row as a
+        # verified match must know the difference.
+        is_anchor_row = item.get('match_tier') == 'anchor'
+        anchor_codes = int(item.get('anchor_codes', 0) or 0)
         has_boundary_matches = item.get('has_boundary_matches', False)
         boundary_quality = item.get('boundary_quality', 0)
         boundary_match_count = item.get('boundary_match_count', 0)
@@ -4333,7 +4338,19 @@ def create_parallels_page(initial_text: str = None):
 
                     # Score badge - show boost if applied
                     # Note: Raw scores are typically 100-10000+, not percentages
-                    if final_score > score:
+                    if is_anchor_row:
+                        # Anchor-evidence tier (spec section 10.4): NO aligned
+                        # span was accepted, and the row score is a
+                        # distinct-code count scaled below the span floor --
+                        # so round() renders it as a flat "0" and the card
+                        # reads like a weak real match (PR #327 review, Codex
+                        # P1). Show the evidence in its own unit, with a badge
+                        # that says what the row is.
+                        ui.badge(tr('anchor evidence'),
+                                 color='purple').classes('text-xs')
+                        ui.badge(f"{anchor_codes} " + tr('shared terms'),
+                                 color='gray').classes('text-xs')
+                    elif final_score > score:
                         score_color = 'green' if final_score > 2000 else 'amber' if final_score > 500 else 'gray'
                         ui.badge(f"{score} → {final_score}", color=score_color).classes('text-xs')
                     else:
@@ -4373,7 +4390,13 @@ def create_parallels_page(initial_text: str = None):
 
                     # Manuscript match
                     with ui.column().classes('flex-1 gap-2'):
-                        ui.label(tr('Manuscript Text')).classes('text-xs font-bold uppercase').style('color: var(--accent-amber);')
+                        # An anchor row's windows are the neighbourhoods of
+                        # the shared terms, NOT a verified alignment -- the
+                        # heading must not promise one (PR #327 review).
+                        ui.label(tr('Nearby text (no aligned match)')
+                                 if is_anchor_row
+                                 else tr('Manuscript Text')
+                                 ).classes('text-xs font-bold uppercase').style('color: var(--accent-amber);')
                         with ui.element('div').classes('p-3 rounded-lg text-sm').style(
                             'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8; border: 1px solid var(--accent-amber); color: var(--text-primary);'
                         ):

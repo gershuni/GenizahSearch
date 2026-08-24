@@ -1037,8 +1037,18 @@ word-chunk matching at size 2 caught them, at 5% precision. The new **anchor-evi
   `anchor_truncated`), and a cap (300). Pre-existing presets keep byte-identical behaviour
   AND byte-identical `policy_id`s — the anchor fields join the identity hash only when the
   tier is on, so the measurement ledger's recorded ids stay valid (pinned by test).
-- **Status: exploratory.** No held-out measurement yet; the adjudicated Antiochus deck is the
-  intended first instrument.
+- **Measured, and corrected.** The adjudicated Antiochus deck was run against the first build
+  on 2026-08-24 and it failed its own purpose: 77% recall, but only 4 of the 20 targets the
+  tier was built for, at 4% precision in the tier, with the cap saturated by long biblical
+  manuscripts. Counting shared codes ranks by record LENGTH — a formulaic codex shares many
+  common grams, a short translation few rare ones. So membership is now gated on rarity
+  (`anchor_df_max`) and ordering uses Σ log10(N/df) weight, not the count. The gated build is
+  not yet measured.
+- **Also fixed from PR review:** a record the verify cap never tried is no longer reported as
+  "no alignment accepted" (it is withheld and counted in `anchor_withheld_unverified`) — the
+  untried tail is exactly where anchor-tier records live, so that mislabel was the common
+  case; and the result card now renders a tier badge and the shared-term count instead of
+  rounding the anchor row's scaled score to a flat "0" under a "Manuscript Text" heading.
 
 ### Download the computed identifications as a spreadsheet (2026-08-21)
 

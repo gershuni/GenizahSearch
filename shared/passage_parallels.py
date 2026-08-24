@@ -407,7 +407,8 @@ class PassageSearcher:
                 'raw_header': hit.record_id,
                 # Bilingual literal: shared/ is framework-agnostic (no tr()),
                 # and src_lbl renders raw -- the site is Hebrew-first.
-                'src_lbl': 'עדות עוגן (anchor evidence)' if is_anchor else '',
+                'src_lbl': (f'עדות עוגן (anchor evidence): '
+                            f'{hit.anchor_codes} codes' if is_anchor else ''),
                 'source_ctx': '',
                 'text': '',
                 'score': row_score,
@@ -419,6 +420,7 @@ class PassageSearcher:
                 # section 10.3) and no aligned span.
                 'match_tier': getattr(hit, 'tier', 'span'),
                 'anchor_codes': int(getattr(hit, 'anchor_codes', 0)),
+                'anchor_weight': float(getattr(hit, 'anchor_weight', 0.0)),
             }
             if filter_stream and self._is_source_text_filtered(
                 hit, filter_stream, q_nfc, q_offsets,

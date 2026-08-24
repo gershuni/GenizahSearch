@@ -99,7 +99,17 @@ class PassagePolicy:
     # caught at 5% precision. This tier is the rarity-weighted equivalent:
     # its anchors are DF-capped grams, not raw word pairs.
     anchor_tier: bool = False
-    anchor_min_codes: int = 8          # distinct admitted codes per RECORD
+    # DISTINCTIVE codes only (df <= anchor_df_max). Measured 2026-08-24 on the
+    # Antiochus GUI run: counting ALL shared codes ranked the tier by record
+    # LENGTH, not relatedness. The 300 admitted records were 99 כתובים, 35
+    # Daniel, 25 Targum -- long formulaic Aramaic manuscripts sharing 14-37
+    # ubiquitous grams -- while the four real finds sat at 14-15, on the cap
+    # floor, and every Arabic/rhymed target the tier was BUILT for fell below
+    # it. A long biblical codex shares many common grams by being long; a
+    # short translation shares few but rare ones. So rarity gates membership
+    # and weight orders the cap, and a common gram now contributes nothing.
+    anchor_min_codes: int = 4          # distinct DISTINCTIVE codes per record
+    anchor_df_max: int = 5_000         # postings; above this a code is common
     anchor_cap: int = 300              # anchor-tier records reported at most
     schema_version: int = POLICY_SCHEMA_VERSION
 
@@ -118,6 +128,8 @@ class PassagePolicy:
             raise ValueError('anchor_min_codes below 2 is weaker than the '
                              'two-hit rule and would report single-gram '
                              'coincidences')
+        if self.anchor_df_max < 1:
+            raise ValueError('anchor_df_max must be positive')
         for f_name in ('posting_budget', 'candidate_cap', 'verify_cap',
                        'anchor_cap'):
             if getattr(self, f_name) <= 0:
@@ -141,7 +153,8 @@ class PassagePolicy:
         """
         d = asdict(self)
         if not self.anchor_tier:
-            for f_name in ('anchor_tier', 'anchor_min_codes', 'anchor_cap'):
+            for f_name in ('anchor_tier', 'anchor_min_codes', 'anchor_df_max',
+                           'anchor_cap'):
                 del d[f_name]
         blob = json.dumps(d, sort_keys=True, ensure_ascii=True,
                           separators=(',', ':'))

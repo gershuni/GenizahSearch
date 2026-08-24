@@ -62,7 +62,10 @@ class PassageHit:
     # the tiers separate; mixing the two scores in one ordering is a
     # correctness defect, not a display choice.
     tier: str = 'span'
-    anchor_codes: int = 0        # distinct admitted gram codes on the record
+    anchor_codes: int = 0        # distinct DISTINCTIVE gram codes (df-gated)
+    anchor_weight: float = 0.0   # sum log10(N/df) over those codes; ORDERS
+                                 # the tier, because a count alone ranks by
+                                 # record length (measured 2026-08-24)
 
 
 @dataclass
@@ -89,6 +92,10 @@ class QueryReport:
     anchor_tier_enabled: bool = False
     anchor_records: int = 0
     anchor_truncated: bool = False
+    # Pool records withheld because verify_cap left a cluster of theirs
+    # untried: reported, never silent -- they are not "no alignment
+    # accepted", they are "not checked".
+    anchor_withheld_unverified: int = 0
     seconds: float = 0.0
 
     def as_dict(self) -> dict:
@@ -280,6 +287,20 @@ def _candidates(idx: PassageIndex, codes: np.ndarray, qpos: np.ndarray,
         # including one-code clusters, per the pool rule above.
         hit_in_pool = np.isin(rec, pool_recs)
         rec_h, code_h = rec[hit_in_pool], code[hit_in_pool]
+        # RARITY GATE (2026-08-24). Only DISTINCTIVE codes count. Measured on
+        # the Antiochus GUI run: counting every shared code ranked the tier by
+        # record length -- long formulaic biblical Aramaic swamped the cap
+        # (99 כתובים / 35 Daniel / 25 Targum of 300) and pushed every
+        # translation the tier exists for below the floor. A common gram now
+        # contributes nothing to membership OR to order.
+        if rec_h.size:
+            uniq = np.unique(code_h)
+            rare_codes = uniq[idx.dfs(uniq) <= policy.anchor_df_max]
+            rare_mask = np.isin(code_h, rare_codes)
+            rec_h, code_h = rec_h[rare_mask], code_h[rare_mask]
+        if not rec_h.size:
+            return (g_rec[kept_groups], min_q[kept_groups], max_q[kept_groups],
+                    min_r[kept_groups], max_r[kept_groups]), {}
         o3 = np.lexsort((code_h, rec_h))
         rec_h, code_h = rec_h[o3], code_h[o3]
         first = np.empty(rec_h.size, dtype=bool)
@@ -288,6 +309,18 @@ def _candidates(idx: PassageIndex, codes: np.ndarray, qpos: np.ndarray,
                       out=first[1:])
         u_recs, code_counts = np.unique(rec_h[first], return_counts=True)
         codes_by_rec = dict(zip(u_recs.tolist(), code_counts.tolist()))
+        # Ordering weight: sum of log10(n_records / df) over the DISTINCT
+        # distinctive codes. Two records with the same count are not equally
+        # interesting -- one sharing a rare name outranks one sharing three
+        # semi-common formulae -- and the cap must keep the distinctive ones.
+        d_rec, d_code = rec_h[first], code_h[first]
+        d_df = np.maximum(idx.dfs(d_code).astype(np.float64), 1.0)
+        w = np.log10(max(int(idx.n_records), 2) / d_df)
+        weight_by_rec = {int(r): float(v) for r, v in
+                         zip(u_recs.tolist(),
+                             np.bincount(np.searchsorted(u_recs, d_rec),
+                                         weights=w,
+                                         minlength=u_recs.size).tolist())}
         # Display extents: each record's kept clusters, strongest first,
         # at most _ANCHOR_EXTENTS_PER_RECORD -- windows for the renderer,
         # never alignments.
@@ -300,6 +333,7 @@ def _candidates(idx: PassageIndex, codes: np.ndarray, qpos: np.ndarray,
                 lst.append((int(min_q[g]), int(max_q[g]),
                             int(min_r[g]), int(max_r[g])))
         anchor_stats = {int(r): (codes_by_rec.get(int(r), 0),
+                                 weight_by_rec.get(int(r), 0.0),
                                  extents_by_rec.get(int(r), []))
                         for r in pool_recs.tolist()}
     # Order candidates by EVIDENCE STRENGTH (distinct anchors, descending),
@@ -324,7 +358,9 @@ def _verify_and_merge(idx: PassageIndex, qstream: str, cand, policy:
                       PassagePolicy, report: QueryReport) -> dict:
     """Extend, align, accept, and merge per record.
 
-    Returns record -> [(q0, q1, r0, r1, density), ...] merged spans. The
+    Returns (merged, skipped): record -> [(q0, q1, r0, r1, density), ...]
+    merged spans, and the set of records with at least one cluster left
+    UNVERIFIED by the cap -- those may not be reported as anchor-only. The
     verification order is the candidate order -- anchor strength descending,
     then (record, bucket) -- so verify_cap keeps the best-evidenced
     candidates and cuts deterministically; when it fires the envelope says
@@ -332,10 +368,19 @@ def _verify_and_merge(idx: PassageIndex, qstream: str, cand, policy:
     """
     g_rec, min_q, max_q, min_r, max_r = cand
     by_record: dict = {}
+    skipped: set = set()
     n_verified = 0
     for i in range(len(g_rec)):
         if n_verified >= policy.verify_cap:
             report.verify_truncated = True
+            # Every remaining candidate goes UNTRIED. Their records must not
+            # be called anchor-only afterwards: "no alignment accepted" is a
+            # claim about a check that was made (PR #327 review, Codex P1).
+            # Verification runs in anchor-strength order, so the tail is
+            # exactly where weak-evidence records live -- the anchor tier's
+            # own population -- which is what makes the mislabel likely
+            # rather than theoretical.
+            skipped.update(int(r) for r in g_rec[i:].tolist())
             break
         n_verified += 1
         ri = int(g_rec[i])
@@ -386,7 +431,7 @@ def _verify_and_merge(idx: PassageIndex, qstream: str, cand, policy:
                 out.append((q0, q1, r0, r1, d))
         merged[ri] = out
         report.accepted_spans += len(out)
-    return merged
+    return merged, skipped
 
 
 def search_passage(idx: PassageIndex, query_text: str,
@@ -422,7 +467,8 @@ def search_passage(idx: PassageIndex, query_text: str,
 
     cand, anchor_stats = _candidates(idx, codes, qpos, admitted, policy,
                                      report, record_allowed=record_allowed)
-    merged = _verify_and_merge(idx, qstream, cand, policy, report)
+    merged, skipped_unverified = _verify_and_merge(idx, qstream, cand,
+                                                   policy, report)
 
     hits = []
     for ri, spans in merged.items():
@@ -441,15 +487,22 @@ def search_passage(idx: PassageIndex, query_text: str,
     # ordered by (-anchor_codes, record), capped at anchor_cap with the
     # truncation reported.
     if policy.anchor_tier and anchor_stats:
-        pool = [(n_codes, ri, extents)
-                for ri, (n_codes, extents) in anchor_stats.items()
-                if n_codes >= policy.anchor_min_codes and ri not in merged]
-        pool.sort(key=lambda t: (-t[0], t[1]))
+        pool = [(weight, n_codes, ri, extents)
+                for ri, (n_codes, weight, extents) in anchor_stats.items()
+                if n_codes >= policy.anchor_min_codes and ri not in merged
+                and ri not in skipped_unverified]
+        # Ordered by RARITY WEIGHT, not raw count -- the cap must keep the
+        # distinctive records, and counting alone kept the long ones.
+        report.anchor_withheld_unverified = sum(
+            1 for ri, (n_codes, _w, _e) in anchor_stats.items()
+            if n_codes >= policy.anchor_min_codes and ri not in merged
+            and ri in skipped_unverified)
+        pool.sort(key=lambda t: (-t[0], t[2]))
         if len(pool) > policy.anchor_cap:
             report.anchor_truncated = True
             pool = pool[:policy.anchor_cap]
         report.anchor_records = len(pool)
-        for n_codes, ri, extents in pool:
+        for weight, n_codes, ri, extents in pool:
             spans = [(q0, min(len(qstream), q1 + K), r0, r1 + K, 1.0)
                      for q0, q1, r0, r1 in extents]
             hits.append(PassageHit(
@@ -458,7 +511,8 @@ def search_passage(idx: PassageIndex, query_text: str,
                 best_density=1.0,   # upper bound: no alignment was accepted
                 n_spans=len(spans), spans=spans,
                 score=float(n_codes), tier='anchor',
-                anchor_codes=int(n_codes)))
+                anchor_codes=int(n_codes),
+                anchor_weight=round(float(weight), 3)))
 
     report.seconds = round(time.time() - t0, 4)
     return hits, report

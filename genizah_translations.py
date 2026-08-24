@@ -4997,6 +4997,10 @@ TRANSLATIONS.update({
         "עד כמה כתב היד יכול לסטות מהטקסט שלך ועדיין להיחשב התאמה. רחב יותר מוצא יותר עדים משובשים; ההתאמות החזקות תמיד מדורגות ראשונות. סריקת העומק מוסיפה גם כתבי יד החולקים רק שמות או צירופים קצרים (תרגומים, עותקים פגומים) כשורות \"עדות עוגן\" אחרי כל ההתאמות הממשיות.",
     "anchor evidence":
         "עדות עוגן",
+    "shared terms":
+        "מונחים משותפים",
+    "Nearby text (no aligned match)":
+        "טקסט סמוך (ללא התאמה מיושרת)",
     "Letter-level search is busy right now — please try again in a moment.":
         "החיפוש ברמת האות עמוס כרגע — נסו שוב בעוד רגע.",
     "Letter-level search timed out — try a shorter text.":
