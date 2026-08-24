@@ -41,7 +41,8 @@ import threading
 from dataclasses import dataclass
 from typing import Optional, TYPE_CHECKING
 
-from web.feature_flags import PASSAGE_PARALLELS_ENABLED
+from web.feature_flags import (PASSAGE_MULTI_WITNESS_ENABLED,
+                               PASSAGE_PARALLELS_ENABLED)
 
 if TYPE_CHECKING:
     from shared.passage_parallels import PageTextFetcher
@@ -149,6 +150,17 @@ def passage_available() -> bool:
     alone is necessary but NOT sufficient.
     """
     return bool(PASSAGE_PARALLELS_ENABLED and _state.ready)
+
+
+def passage_multi_witness_available() -> bool:
+    """The ONE predicate for multi-witness passage search.
+
+    ANDs its own flag with ``passage_available()`` rather than replacing it:
+    there is nothing to fan a witness list out over without a loaded index,
+    and gating the costlier capability separately is what lets
+    single-witness passage stay broadly on while the fan-out is validated.
+    """
+    return bool(PASSAGE_MULTI_WITNESS_ENABLED and passage_available())
 
 
 def get_passage_searcher(text_fetcher: "PageTextFetcher",

@@ -49,6 +49,14 @@ ERROR_CODES = frozenset({
     'passage_scope_unsupported',  # 400 — method='passage' + filters.library includes 'LOCAL' (include mode); the passage index has no Local-corpus records
     'passage_search_busy',        # 503 — passage-matching concurrency budget (SEARCH_API_PASSAGE_CONCURRENCY) exhausted; fail-fast, Retry-After set
     'passage_option_unsupported', # 400 — method='passage' + boundary_mode != 'full'; passage has no cross-paragraph/token-boundary concept
+    # Multi-witness passage search additions:
+    'passage_multi_witness_unavailable',  # 503 — PASSAGE_MULTI_WITNESS_ENABLED off
+    'witnesses_require_passage_method',   # 400 — witnesses[] sent with method='chunk'; the chunk engine unions concatenated chunks and needs no fusion
+    'witnesses_and_text_conflict',        # 400 — both `text` and `witnesses` supplied; never silently pick one
+    'witnesses_required',                 # 400 — witnesses[] supplied but not one entry resolved to searchable text
+    'too_many_witnesses',                 # 400 — more than SEARCH_API_PASSAGE_MAX_WITNESSES entries
+    'witness_too_long',                   # 400 — a PASTED witness exceeds COMPOSITION_LENGTH_CAP (a resolved reference is skipped-and-reported instead)
+    'sort_requires_multi_witness',        # 400 — sort='fused'/'witness_count' without witnesses[]
 })
 
 # Surfaced in top-level `warnings: []` arrays (D-07), NOT as errors.
@@ -58,6 +66,11 @@ WARNING_CODES = frozenset({
     'truncated_to_200',         # D-07: parallels group count exceeds 200; top 200 returned
     # Phase 145 (method='passage') additions:
     'passage_text_lookup_failed',  # a row was DROPPED (never rendered) because its display-text lookup failed; carries a `count` field
+    # Multi-witness: a witness that could not be resolved to searchable text
+    # was SKIPPED, not fatal -- rejecting a 17-witness request over one stale
+    # reference wastes the sixteen the caller can still have. Carries `count`
+    # and a per-witness `witnesses` list saying which failed and why.
+    'witness_ref_unresolved',
 })
 
 
