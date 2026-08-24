@@ -105,6 +105,9 @@ def test_presets_are_registered_and_default_is_standard_40():
                             # tier (spec section 10.4, the Antiochus method
                             # comparison)
                             'anchor-sweep-40',
+                            # names-10: short contiguous evidence -- the
+                            # verify_margin finding (spec section 8.1)
+                            'names-10',
                             'flat-25', 'flat-25-noisy'}
     with pytest.raises(ValueError):
         get_preset('slider-17')
@@ -608,3 +611,93 @@ def test_unverified_records_are_never_reported_as_anchor_only(scatter_index):
     # Records withheld for being untried are COUNTED, never silently dropped.
     assert report.anchor_withheld_unverified >= 1
     assert report.anchor_records == len(anchors)
+
+
+# ---------------------------------------------------------------------------
+# verify_margin: below MIN_SPAN 40 the margin, not the span floor, decides.
+# Measured 2026-08-24 after the anchor tier failed on the Antiochus deck.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope='module')
+def short_name_index(tmp_path_factory):
+    """A 'translation': it shares only three SHORT contiguous runs with the
+    query, the way a Judeo-Arabic version shares transliterated proper nouns
+    (identical Hebrew letters) and nothing else. Also a clean copy and a
+    15%-CER noisy copy, so a margin change cannot quietly break the cases
+    that already work."""
+    d = str(tmp_path_factory.mktemp('pmargin'))
+    ref = _aperiodic(500, salt=4242)
+    names = [_aperiodic(9, salt=11), _aperiodic(12, salt=22),
+             _aperiodic(7, salt=33)]
+    parts = [ref]
+    for i, nm in enumerate(names):
+        parts += [_aperiodic(300, salt=100 + i), nm]
+    query = ''.join(parts)
+
+    def noisy(s, rate=0.15):
+        x, out = 13, []
+        for ch in s:
+            x = (x * 1_103_515_245 + 12_345) & 0x7FFFFFFF
+            out.append(chr(ALEF + ((x >> 11) % 22))
+                       if (x >> 7) % 100 < rate * 100 else ch)
+        return ''.join(out)
+
+    records = [
+        ('verbatim', _aperiodic(80, salt=1) + ref + _aperiodic(80, salt=2)),
+        ('noisy_copy', _aperiodic(80, salt=3) + noisy(ref)
+         + _aperiodic(80, salt=4)),
+        ('translation', ''.join(_aperiodic(200, salt=700 + i) + nm
+                                for i, nm in enumerate(names))),
+    ]
+    for r in range(40):
+        records.append((f'unrel{r:03d}', _aperiodic(700, salt=3000 + r)))
+    build_index(records, d, partitions=2, apply_hygiene=False)
+    idx = open_index(d)
+    assert idx is not None
+    return idx, query
+
+
+def _found(idx, query, **kw):
+    policy = PassagePolicy(name='t-margin', density_scale=1.8,
+                           verify_cap=200_000, candidate_cap=2_000_000, **kw)
+    hits, report = search_passage(idx, query, policy)
+    return {h.record_id for h in hits}, report
+
+
+def test_lowering_min_span_alone_changes_nothing(short_name_index):
+    """The negative half of the finding, and the reason this is a policy
+    field: at the default margin, dropping the span floor moves every
+    rejection from rejected_short to rejected_density and finds nothing
+    new."""
+    idx, query = short_name_index
+    wide, r_wide = _found(idx, query, min_span=40)
+    short, r_short = _found(idx, query, min_span=10)
+    assert 'translation' not in wide
+    assert 'translation' not in short, (
+        'min_span alone must NOT be credited with finding short matches')
+    assert r_short.rejected_short == 0 and r_short.rejected_density > 0
+
+
+def test_a_small_margin_is_what_finds_short_shared_names(short_name_index):
+    idx, query = short_name_index
+    ids, _r = _found(idx, query, min_span=10, verify_margin=8)
+    assert 'translation' in ids, (
+        'a 9-letter true match is only judgeable over a window near its own '
+        'size; margin 30 scores it across ~70 letters of unrelated text')
+    # And the cases that already work must survive the change.
+    assert {'verbatim', 'noisy_copy'} <= ids
+    assert not any(i.startswith('unrel') for i in ids)
+
+
+def test_the_default_margin_is_unchanged_for_long_spans(short_name_index):
+    """verify_margin is new; every policy that does not set it must behave
+    exactly as before, which is what keeps the pre-existing policy_ids
+    honest."""
+    idx, query = short_name_index
+    assert PassagePolicy(name='x').verify_margin == 30
+    assert (PassagePolicy(name='x').policy_id
+            == PassagePolicy(name='x', verify_margin=30).policy_id)
+    assert (PassagePolicy(name='x').policy_id
+            != PassagePolicy(name='x', verify_margin=8).policy_id)
+    with pytest.raises(ValueError):
+        PassagePolicy(name='x', verify_margin=-1)

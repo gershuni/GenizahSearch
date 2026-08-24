@@ -86,6 +86,17 @@ class PassagePolicy:
     candidate_cap: int = 200_000       # diagonal clusters kept at most
     verify_cap: int = 3_000            # Levenshtein calls at most
     min_anchors: int = 2               # distinct gram codes per cluster
+    # Verification half-window, letters (spec section 7). 30 comes from the
+    # research scripts, where every span was long: at MIN_SPAN 40 it is a 75%
+    # overhead and harmless. Below that it DECIDES the result. Measured
+    # 2026-08-24: a true 9-letter shared name (a transliterated proper noun,
+    # which is identical Hebrew letters in an Aramaic original and a
+    # Judeo-Arabic translation) is scored over ~70 letters of unrelated
+    # flanking text and rejected at ~0.85 density. Lowering min_span alone
+    # therefore changes NOTHING -- rejected_short falls to zero and
+    # rejected_density absorbs every one. The pair (min_span, verify_margin)
+    # has to move together, which is why this is policy and not a constant.
+    verify_margin: int = 30
     # Anchor-evidence tier (spec section 10.3, 2026-08-23). OFF by default:
     # every existing preset keeps byte-identical behaviour AND policy_id.
     # When ON, records whose kept clusters carry >= anchor_min_codes distinct
@@ -130,6 +141,8 @@ class PassagePolicy:
                              'coincidences')
         if self.anchor_df_max < 1:
             raise ValueError('anchor_df_max must be positive')
+        if self.verify_margin < 0:
+            raise ValueError('verify_margin must be >= 0')
         for f_name in ('posting_budget', 'candidate_cap', 'verify_cap',
                        'anchor_cap'):
             if getattr(self, f_name) <= 0:
@@ -152,6 +165,13 @@ class PassagePolicy:
         policies only, which is exactly the set whose results it can change.
         """
         d = asdict(self)
+        # Same identity-extension rule as the anchor fields: verify_margin
+        # joined the schema on 2026-08-24, and at its historical value (30)
+        # the query behaves exactly as before, so it enters the hash only
+        # when it has been moved off that value. Presets measured before the
+        # field existed keep the ids their results were recorded under.
+        if self.verify_margin == 30:
+            del d['verify_margin']
         if not self.anchor_tier:
             for f_name in ('anchor_tier', 'anchor_min_codes', 'anchor_df_max',
                            'anchor_cap'):
@@ -266,9 +286,35 @@ MAX_40 = PassagePolicy(name='max-40', density_scale=2.0)
 ANCHOR_SWEEP_40 = PassagePolicy(name='anchor-sweep-40', density_scale=2.0,
                                 anchor_tier=True)
 
+# names-10: SHORT contiguous evidence, the 2026-08-24 finding. A proper noun
+# transliterated into a Judeo-Arabic translation is the SAME Hebrew letters as
+# in the Aramaic original, so a translation shares real contiguous runs of
+# 7-14 letters with the query -- which is why word-chunk matching found the
+# Arabic Antiochus versions and every letter preset missed them. The blocker
+# was never min_span: it is verify_margin. At margin 30 a 9-letter true match
+# is scored across ~70 letters of unrelated flanking text (~0.85 density) and
+# rejected; drop the margin and it is found.
+#
+# Measured on a synthetic fixture (43 records, 15%-CER noisy copy, three
+# 7-12 letter shared names, random-text distractors):
+#   margin 30, min_span 40 -> verbatim + noisy found, translation MISSED
+#   margin 30, min_span 10 -> unchanged: rejected_short 0, all on density
+#   margin  8, min_span 10 -> verbatim + noisy + TRANSLATION, 0 false hits
+#   margin  4 / 2          -> translation found, 1 / 3 false hits appear
+#
+# EXPLORATORY, and the riskiest preset here: the fixture is random synthetic
+# text, where chance 10-letter collisions are far rarer than in real Hebrew,
+# whose stock phrases are highly repetitive. Expect a much higher false-hit
+# rate on the 700K-record corpus and expect to raise min_span. Sweep it with
+# scripts/compare_passage_policies.py --min-span/--verify-margin against the
+# adjudicated deck BEFORE offering this in the GUI.
+NAMES_10 = PassagePolicy(name='names-10', min_span=10, verify_margin=8,
+                         density_scale=1.8)
+
 PRESETS = {p.name: p for p in
            (STANDARD_40, STANDARD_40_NOISY, FLAT_25, FLAT_25_NOISY,
-            WIDE_40, WIDER_40, WIDEST_40, MAX_40, ANCHOR_SWEEP_40)}
+            WIDE_40, WIDER_40, WIDEST_40, MAX_40, ANCHOR_SWEEP_40,
+            NAMES_10)}
 DEFAULT_POLICY = STANDARD_40
 
 

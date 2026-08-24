@@ -264,6 +264,51 @@ Two consequences to hold onto:
 
 ---
 
+### 8.1 The margin decides short spans, not the span floor (2026-08-24)
+
+`MIN_SPAN` is only half of the short-match story, and the other half was implicit in a
+constant. Verification extends the matched region by `MARGIN` letters on each side before
+computing edit density (section 7). At `MIN_SPAN = 40` that 30-letter window is a 75% overhead
+and harmless. **Below about 25 it decides the outcome**: a true 9-letter shared run is scored
+across roughly 70 letters of unrelated flanking text and lands near 0.85 density, far above any
+boundary this spec defines.
+
+The consequence, measured after the anchor tier failed its Antiochus deck: **lowering
+`min_span` alone changes nothing.** `rejected_short` falls to zero and `rejected_density`
+absorbs every candidate it used to reject — the search looks looser and returns the same
+records.
+
+This matters because short contiguous evidence is exactly what the cross-version cases carry.
+A proper noun transliterated into a Judeo-Arabic translation is the *same Hebrew letters* as in
+the Aramaic original, so a translation genuinely shares 7–14 letter runs with the query — real
+contiguous alignments, not the scattered-gram coincidence the anchor tier chased. That is why
+word-chunk matching found the Arabic Antiochus versions and every letter preset missed them.
+
+The margin is therefore **query policy** (`verify_margin`), not a module constant, and it must
+be swept together with `min_span`. Measured on a synthetic fixture (43 records; a clean copy, a
+15%-CER noisy copy, a "translation" sharing only three 7–12 letter names, and random-text
+distractors):
+
+| `verify_margin` | `min_span` | clean copy | 15%-CER copy | translation | false hits |
+|---|---|---|---|---|---|
+| 30 | 40 | found | found | **missed** | 0 |
+| 30 | 10 | found | found | **missed** | 0 |
+| **8** | **10** | found | found | **found** | **0** |
+| 4 | 10 | found | found | found | 1 |
+| 2 | 10 | found | found | found | 3 |
+
+`min_anchors = 1` and uncapped verification were tested in the same sweep and contributed
+nothing: a 9-letter name already yields 5 grams, so it clears the two-hit rule, and dropping to
+1 multiplied candidates ~5x with no new finds.
+
+**Unmeasured on the real corpus, and the risk is precision.** The fixture is random synthetic
+text, where chance 10-letter collisions are far rarer than in real Hebrew with its highly
+repetitive stock phrases. Expect a materially higher false-hit rate at 700K records and expect
+`min_span` to need raising. The `names-10` preset carries these settings for sweeping; it must
+be measured against the adjudicated deck before any surface offers it.
+
+---
+
 ## 9. Stage-0 hygiene — mandatory, not optional
 
 The false-positive classes are empirically known and **all of them are mechanical**. Skipping
@@ -462,7 +507,7 @@ capped raw material, gated by policy (`anchor_tier`, default **off** — behavio
 | | encoding | base-27 positional; code space `27^5 = 14,348,907` | `engine_np.py` (`BASE = 27`) |
 | Candidates | `BAND` | 20 letters; cluster = bucket plus or minus 1 | `engine_np.py`, `track1_match.py` |
 | | `MIN_ANCHORS` | 2 **distinct** gram codes | section 6.1 |
-| Verification | `MARGIN` | 30 letters each side | `track1_match.py`, `motif_query.py`, `work_query.py` |
+| Verification | `MARGIN` / `verify_margin` | 30 letters each side (policy, section 8.1) | `track1_match.py`, `motif_query.py`, `work_query.py` |
 | | `MIN_SPAN` | **40** normalized letters | section 8 — settles a 25/30/40 conflict |
 | | random-alignment floor | density about 0.60 | method report |
 | | one-sided boundary | 0.28 below 100 letters, 0.35 at 100 and above | `track1_match.py::accept_density` |

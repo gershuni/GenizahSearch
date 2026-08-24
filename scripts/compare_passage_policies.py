@@ -165,6 +165,13 @@ def main() -> int:
                     help='override the candidate policy anchor_df_max (0=keep)')
     ap.add_argument('--anchor-min-codes', type=int, default=0,
                     help='override the candidate policy anchor_min_codes (0=keep)')
+    ap.add_argument('--min-span', type=int, default=0,
+                    help='override the candidate policy min_span (0=keep). '
+                         'Sweep together with --verify-margin: below 40 the '
+                         'margin, not the span floor, decides the result')
+    ap.add_argument('--verify-margin', type=int, default=-1,
+                    help='override the candidate policy verify_margin '
+                         '(-1=keep, 0 is legal and means no extension)')
     ap.add_argument('--rank-of', default='',
                     help='comma-separated shelfmark substrings: report each '
                          'one\'s RANK within the candidate run, or that it '
@@ -204,6 +211,10 @@ def main() -> int:
         overrides['anchor_df_max'] = args.anchor_df_max
     if args.anchor_min_codes:
         overrides['anchor_min_codes'] = args.anchor_min_codes
+    if args.min_span:
+        overrides['min_span'] = args.min_span
+    if args.verify_margin >= 0:
+        overrides['verify_margin'] = args.verify_margin
     if overrides:
         # A probe is a DIFFERENT policy, so it gets a different name and a
         # different policy_id -- never a preset's id on altered settings.

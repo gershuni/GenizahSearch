@@ -1050,6 +1050,32 @@ word-chunk matching at size 2 caught them, at 5% precision. The new **anchor-evi
   case; and the result card now renders a tier badge and the shared-term count instead of
   rounding the anchor row's scaled score to a flat "0" under a "Manuscript Text" heading.
 
+### Letter-level search: the verification margin is now policy (2026-08-24)
+
+Chasing the Antiochus recall gap turned up a parameter that had been deciding results
+invisibly. Verification extends a match by `MARGIN` letters each side before scoring edit
+density; at the default span floor of 40 that 30-letter window is harmless overhead, but below
+about 25 it *is* the result. A true 9-letter shared run gets scored across ~70 letters of
+unrelated flanking text and rejected at ~0.85 density.
+
+- **Lowering `min_span` alone does nothing** — measured. `rejected_short` falls to zero and
+  `rejected_density` absorbs every candidate it used to reject, so the search looks looser and
+  returns exactly the same records. The margin has to move with it, which is why it is now
+  `verify_margin` on the policy rather than a module constant.
+- **Why this matters for cross-version finds:** a proper noun transliterated into a
+  Judeo-Arabic translation is the *same Hebrew letters* as in the Aramaic original, so a
+  translation really does share 7–14 letter contiguous runs with the query. That is genuine
+  short-span evidence — the thing word-chunk matching was picking up and every letter preset
+  was throwing away. On the fixture, margin 8 + span 10 finds the clean copy, a 15%-CER copy
+  and the translation with no false hits, where margin 30 misses the translation at every span
+  floor.
+- New `names-10` preset carries those settings for sweeping, and
+  `scripts/compare_passage_policies.py` gained `--min-span` / `--verify-margin` probes. Not
+  offered in the GUI: the fixture is synthetic, real Hebrew has far more chance collisions at
+  10 letters, and this needs measuring against the adjudicated deck first.
+- Pre-existing presets keep byte-identical behaviour and `policy_id`s (the field enters the
+  identity hash only when moved off 30).
+
 ### Download the computed identifications as a spreadsheet (2026-08-21)
 
 `/computed-identifications` now has a download control. It returns **the reader's whole
