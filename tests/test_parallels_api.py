@@ -1135,6 +1135,43 @@ def test_parallels_method_passage_nondefault_chunk_size_returns_400(
     mock_searcher.search_composition_logic.assert_not_called()
 
 
+@pytest.mark.parametrize('field', ['chunk_size', 'mode', 'boundary_mode'])
+def test_passage_accepts_each_chunk_knob_at_its_own_model_default(
+    client, mock_searcher, clean_env, monkeypatch, field,
+):
+    """A caller who sends a knob at its declared default is never rejected.
+
+    `method='passage'` rejects non-default values of the chunk-only knobs, and
+    that check compared against bare literals with no link to the Field
+    defaults. Nothing stopped the two drifting apart: move a default and every
+    passage caller who omitted the field starts getting 400
+    `passage_option_unsupported`, told to omit a field they already omitted.
+
+    This reads each default off the model itself, so it fails the moment the
+    declared default and the validator's threshold stop agreeing -- whichever
+    side moved.
+    """
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    default = ParallelsRequest.model_fields[field].default
+    r = client.post('/api/parallels', json={
+        'text': 'hello world', 'method': 'passage', field: default,
+    })
+    assert r.status_code != 400, (
+        f'{field}={default!r} is this model\'s OWN default but the passage '
+        f'validator rejected it: {r.text}')
+
+
+def test_passage_accepts_a_request_that_omits_every_chunk_knob(
+    client, mock_searcher, clean_env, monkeypatch,
+):
+    """The plain passage request -- no chunk knobs at all -- must always pass."""
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    r = client.post('/api/parallels', json={
+        'text': 'hello world', 'method': 'passage',
+    })
+    assert r.status_code != 400, r.text
+
+
 @pytest.mark.parametrize('mode', ['variants', 'fuzzy'])
 def test_parallels_method_passage_nondefault_mode_returns_400(
     client, mock_searcher, clean_env, monkeypatch, mode,

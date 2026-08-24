@@ -695,6 +695,18 @@ MAX_BROWSE_TEXT_CAP = 10000
 # 'composition_too_long'. Empty after .strip() → 400 'composition_required'.
 COMPOSITION_LENGTH_CAP = 20000
 
+# The chunk-only knobs' defaults, named ONCE.
+#
+# `method='passage'` rejects any non-default value of these rather than
+# ignoring it silently, and that check used to compare against bare literals
+# (`if req.chunk_size != 5:`) with no link to the Field defaults below. The two
+# were therefore free to drift: changing a default would have started
+# rejecting every passage caller who simply omitted the field, with an error
+# message telling them to omit it. Both sides now read the same name.
+PARALLELS_CHUNK_SIZE_DEFAULT = 5
+PARALLELS_MODE_DEFAULT = 'exact'
+PARALLELS_BOUNDARY_MODE_DEFAULT = 'full'
+
 
 # ---------------------------------------------------------------------------
 # Phase 79 -- BrowseRequest model + NormalizedLocator + locator helpers.
@@ -794,13 +806,13 @@ class ParallelsRequest(BaseModel):
         description="Composition text to search for parallels. Max 20000 chars after stripping.",
     )
     chunk_size: int = Field(
-        default=5,
+        default=PARALLELS_CHUNK_SIZE_DEFAULT,
         ge=2,
         le=20,
         description="Number of words per chunk for sliding-window matching. Default 5.",
     )
     mode: Literal['exact', 'variants', 'fuzzy'] = Field(
-        default='exact',
+        default=PARALLELS_MODE_DEFAULT,
         description="Matching mode for each chunk: 'exact' (literal), 'variants' (morphological), 'fuzzy' (approximate).",
     )
     max_freq: Optional[float] = Field(
@@ -809,7 +821,7 @@ class ParallelsRequest(BaseModel):
         description="High-frequency cutoff as a DOCUMENT COUNT, not a ratio: a chunk matching more than max_freq documents is treated as too common and diverted out of 'results'. None disables high-freq filtering. Values below 1 are rejected — the engine tests `len(hits) > max_freq`, so 0.05 would discard every chunk that matches anything at all. IMPORTANT: the engine retrieves at most 50 hits per chunk, so any max_freq >= 50 can never fire and behaves exactly like None.",
     )
     boundary_mode: Literal['full', 'boundary', 'combined'] = Field(
-        default='full',
+        default=PARALLELS_BOUNDARY_MODE_DEFAULT,
         description="Chunk boundary strategy: 'full' (any position), 'boundary' (text boundary-aligned), 'combined' (prefer boundaries).",
     )
     filters: Optional[FiltersModel] = Field(
@@ -1909,7 +1921,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     "filters.library.",
                     http_status=400,
                 )
-            if req.boundary_mode != 'full':
+            if req.boundary_mode != PARALLELS_BOUNDARY_MODE_DEFAULT:
                 raise APIError(
                     'passage_option_unsupported',
                     f"method='passage' only supports boundary_mode='full' "
@@ -1928,7 +1940,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             # silent-degradation failure mode boundary_mode was fixed for
             # above. Only the request's OWN declared defaults pass; a
             # client that wants those knobs must use method='chunk'.
-            if req.chunk_size != 5:
+            if req.chunk_size != PARALLELS_CHUNK_SIZE_DEFAULT:
                 raise APIError(
                     'passage_option_unsupported',
                     f"method='passage' does not use chunk_size (got "
@@ -1936,7 +1948,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     f"sliding word windows). Omit it, or use method='chunk'.",
                     http_status=400,
                 )
-            if req.mode != 'exact':
+            if req.mode != PARALLELS_MODE_DEFAULT:
                 raise APIError(
                     'passage_option_unsupported',
                     f"method='passage' does not use mode (got {req.mode!r}; "
