@@ -95,6 +95,39 @@ def load_shelfmarks(csv_path: str) -> dict:
     return out
 
 
+# Library-name prefixes that libraries.csv embeds in `call_numbers` but the
+# app's own exports do not. Joining a delta CSV against a GUI export on the
+# raw string therefore fails silently and looks like "hundreds of new
+# manuscripts" -- it cost one real analysis (2026-08-24), so the normalized
+# key ships as its own column rather than being left to each consumer.
+_LIB_PREFIXES = (
+    'cambridge university library', 'the bodleian libraries',
+    'bodleian libraries', 'university of oxford', 'the british library',
+    'british library', 'the jewish theological seminary of america',
+    'jewish theological seminary of america', 'jewish theological seminary',
+    'the national library of russia', 'national library of russia',
+    'national library of israel', 'the university of manchester library',
+    'university of manchester library', 'alliance israelite universelle',
+    'westminster college', 'katz center', 'oriental studies library',
+    'adler, elkan nathan', 'adler elkan nathan',
+)
+
+
+def shelfmark_key(shelfmark: str) -> str:
+    """Case/punctuation/library-prefix-free join key for a shelfmark.
+
+    'Cambridge University Library Ms. T-S NS 312' and 'Ms. T-S NS 312' are
+    the same manuscript written two ways; so are 'Or. 2116.12.A.2' and
+    'Or.2116.12a.2'. Everything non-alphanumeric goes, because the variation
+    is entirely in spacing, dots and case.
+    """
+    s = (shelfmark or '').lower().strip()
+    for pref in sorted(_LIB_PREFIXES, key=len, reverse=True):
+        s = s.replace(pref, ' ')
+    s = s.replace('mss.', ' ').replace('ms.', ' ')
+    return ''.join(ch for ch in s if ch.isalnum())
+
+
 def sys_id_of(record_id: str) -> str:
     """Leading numeric component of '{sys}_{IE}_{P}_{FL}'."""
     head = record_id.split('_', 1)[0]
@@ -289,16 +322,17 @@ def main() -> int:
     if args.csv:
         with open(args.csv, 'w', encoding='utf-8-sig', newline='') as fh:
             w = csv.writer(fh)
-            w.writerow(['sys_id', 'shelfmark', 'library', 'title', 'presence',
-                        'tier', 'score', 'score_unit', 'record_id',
-                        'baseline_policy', 'candidate_policy'])
+            w.writerow(['sys_id', 'shelfmark', 'shelfmark_key', 'library',
+                        'title', 'presence', 'tier', 'score', 'score_unit',
+                        'record_id', 'baseline_policy', 'candidate_policy'])
             for sid in sorted(set(base) | set(cand)):
                 h = cand.get(sid) or base[sid]
                 presence = ('both' if sid in base and sid in cand
                             else ('candidate_only' if sid in cand
                                   else 'baseline_only'))
                 sm, lib, title = label(sid)
-                w.writerow([sid, sm, lib, title, presence, h.tier,
+                w.writerow([sid, sm, shelfmark_key(sm), lib, title, presence,
+                            h.tier,
                             int(h.score),
                             'anchor_codes' if h.tier == 'anchor'
                             else 'matched_letters',
