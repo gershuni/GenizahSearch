@@ -32,6 +32,7 @@ import argparse
 import csv
 import os
 import sys
+from dataclasses import replace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -153,6 +154,21 @@ def main() -> int:
     ap.add_argument('--csv', default='', help='write the full table here')
     ap.add_argument('--show', type=int, default=40,
                     help='rows of the ADDED-by-candidate list to print (0=all)')
+    # Probe knobs. The anchor tier's cap saturates on long queries, which
+    # hides WHERE a known target ranks -- and "absent" and "rank 900 of
+    # 4,000" call for completely different decisions (raise the cap vs
+    # abandon the signal). These let a known-answer query settle that
+    # without minting a preset for every probe.
+    ap.add_argument('--anchor-cap', type=int, default=0,
+                    help='override the candidate policy anchor_cap (0=keep)')
+    ap.add_argument('--anchor-df-max', type=int, default=0,
+                    help='override the candidate policy anchor_df_max (0=keep)')
+    ap.add_argument('--anchor-min-codes', type=int, default=0,
+                    help='override the candidate policy anchor_min_codes (0=keep)')
+    ap.add_argument('--rank-of', default='',
+                    help='comma-separated shelfmark substrings: report each '
+                         'one\'s RANK within the candidate run, or that it '
+                         'is genuinely absent')
     args = ap.parse_args()
 
     with open(args.query_file, 'r', encoding='utf-8-sig') as fh:
@@ -181,6 +197,18 @@ def main() -> int:
     shelf = load_shelfmarks(csv_path)
 
     base_p, cand_p = get_preset(args.baseline), get_preset(args.candidate)
+    overrides = {}
+    if args.anchor_cap:
+        overrides['anchor_cap'] = args.anchor_cap
+    if args.anchor_df_max:
+        overrides['anchor_df_max'] = args.anchor_df_max
+    if args.anchor_min_codes:
+        overrides['anchor_min_codes'] = args.anchor_min_codes
+    if overrides:
+        # A probe is a DIFFERENT policy, so it gets a different name and a
+        # different policy_id -- never a preset's id on altered settings.
+        cand_p = replace(cand_p, name=f'{cand_p.name}+probe', **overrides)
+        print(f'probe overrides: {overrides}')
     print(f'query: {len(text)} chars from {args.query_file}')
     print(f'index: {args.index}  ({idx.n_records:,} records)')
     if shelf:
@@ -230,6 +258,22 @@ def main() -> int:
               f'{lib:<12} {str(title)[:52]}')
     if len(added) > len(shown):
         print(f'  ... {len(added) - len(shown)} more (use --show 0 or --csv)')
+
+    if args.rank_of:
+        print()
+        print('--- rank probe (candidate run, manuscripts in returned order) ---')
+        ordered = sorted(cand.items(),
+                         key=lambda kv: (kv[1].tier != 'span', -kv[1].score))
+        for needle in [x.strip() for x in args.rank_of.split(',') if x.strip()]:
+            hitrows = [(i, sid, h) for i, (sid, h) in enumerate(ordered, 1)
+                       if needle in label(sid)[0] or needle == sid]
+            if not hitrows:
+                print(f'  {needle:<26} ABSENT -- not returned at all '
+                      f'(no cap would recover it)')
+            for i, sid, h in hitrows[:3]:
+                unit = 'codes' if h.tier == 'anchor' else 'letters'
+                print(f'  {needle:<26} rank {i} of {len(ordered)} '
+                      f'[{h.tier}] {int(h.score)} {unit}')
 
     if args.csv:
         with open(args.csv, 'w', encoding='utf-8-sig', newline='') as fh:
