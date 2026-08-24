@@ -170,13 +170,25 @@ def _cap_main_results_by_group(
     main_results: list[dict],
     meta_mgr: UidComponentParser,
     cap: int = PARALLELS_GROUP_CAP,
+    score_key: str = 'score',
 ) -> tuple[list[dict], bool]:
     """Apply D-07 group cap.
 
     Groups main_results by sys_id (using the same helper the serializer uses
-    so cap and envelope group identically), sorts groups desc by aggregate_score
-    (sum of per-row final_score within the group, falling back to score), takes
-    top `cap` groups, flattens back to a row list.
+    so cap and envelope group identically), sorts groups desc by
+    aggregate_score, takes top `cap` groups, flattens back to a row list.
+
+    aggregate_score is the SUM of each row's `score_key` within the group.
+    (An earlier version of this docstring said "final_score, falling back to
+    score"; the code has always summed `score`. The behaviour is unchanged --
+    only the description was wrong.)
+
+    `score_key` defaults to `'score'`, which is byte-for-byte today's
+    behaviour for every existing caller, chunk path included. The
+    multi-witness passage path passes `'fusion_score'` so the cap keeps the
+    groups RANK FUSION ranks highly rather than the ones with the most raw
+    matched letters -- without it, the 200-group cap would discard exactly
+    the groups the fusion promoted.
 
     Returns (capped_rows, truncated_flag). truncated_flag=True iff raw group
     count exceeded `cap`.
@@ -193,7 +205,8 @@ def _cap_main_results_by_group(
     # Late import to keep service import-time fast and avoid circular imports.
     from shared.search_serializer import _group_parallels_by_sys_id
 
-    groups = _group_parallels_by_sys_id(main_results, meta_mgr=meta_mgr)
+    groups = _group_parallels_by_sys_id(main_results, meta_mgr=meta_mgr,
+                                        score_key=score_key)
 
     if len(groups) <= cap:
         return main_results, False
@@ -206,10 +219,7 @@ def _cap_main_results_by_group(
         if isinstance(v, (int, float)):
             return float(v)
         items = g.get('items') or []
-        return float(sum(
-            (it.get('final_score') if it.get('final_score') is not None else it.get('score', 0)) or 0
-            for it in items
-        ))
+        return float(sum((it.get(score_key) or 0) for it in items))
 
     groups_sorted = sorted(groups, key=_agg, reverse=True)
     kept_groups = groups_sorted[:cap]

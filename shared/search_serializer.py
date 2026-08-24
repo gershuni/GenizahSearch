@@ -845,11 +845,24 @@ def serialize_browse_payload(
 # Public: serialize_parallels_payload
 # -----------------------------------------------------------------------------
 
-def _group_parallels_by_sys_id(items: list[dict], *, meta_mgr: Any) -> list[dict]:
+def _group_parallels_by_sys_id(items: list[dict], *, meta_mgr: Any,
+                               score_key: str = 'score') -> list[dict]:
     """Group raw parallels items by sys_id derived from raw_header. D-13 grouping core.
 
     Returns sorted-descending list of group dicts:
         {sys_id, representative, items: [...], aggregate_score: float}
+
+    `score_key` names the per-row field summed into `aggregate_score` (and so
+    into the envelope's `sort_score`). It defaults to `'score'`, which is
+    byte-for-byte today's behaviour for every existing caller -- the chunk
+    path included, whose contract this function also serves.
+
+    The multi-witness passage path passes `'fusion_score'` instead. That
+    matters because rank fusion (shared/passage_fusion.py) deliberately keeps
+    `score` on the matched-letters scale, so summing `score` here would order
+    groups by raw letters while the rows themselves were selected by RRF --
+    the returned order and the `sort_score` a consumer sorts by would
+    disagree. Whichever key ranks the groups is the key the envelope reports.
     """
     groups: dict[str, dict] = {}
     for item in items:
@@ -870,7 +883,7 @@ def _group_parallels_by_sys_id(items: list[dict], *, meta_mgr: Any) -> list[dict
         grp['items'].append(item)
         # Plan 01 lock: SUM aggregation across uids in same sys_id
         try:
-            grp['aggregate_score'] += float(item.get('score', 0.0) or 0.0)
+            grp['aggregate_score'] += float(item.get(score_key, 0.0) or 0.0)
         except (ValueError, TypeError):
             pass
     return sorted(groups.values(), key=lambda g: g['aggregate_score'], reverse=True)

@@ -165,6 +165,7 @@ from typing import Optional, Protocol
 
 from shared.parallels_service import PARALLELS_GROUP_CAP, _cap_main_results_by_group
 from shared.passage_hygiene import is_duplicate_photography
+from shared.passage_fusion import fuse, tag_rows, witness_id_for
 from shared.passage_index import PassageIndex
 from shared.passage_normalize import nfc, norm_stream, norm_stream_fast, project_span
 from shared.passage_policy import PassagePolicy, get_preset
@@ -193,6 +194,77 @@ HIGHLIGHT_CONTEXT_PAD = 60
 # `unique_id` field would hold for the SAME page).
 _UID_RE = re.compile(r'(IE\d+_P\d+_FL\d+)')
 _SYS_ID_RE = re.compile(r'((?:99|97)\d{8,})')
+
+# A witness reference is a page `raw_header` -- the exact value carried on
+# every result row and stored verbatim in Tantivy's `full_header` field, e.g.
+# `990001234560205171_IE12345_P00001_FL678`. Alphanumerics and underscores,
+# nothing else. THIS regex is the authoritative one (see
+# `PassageSearcher._resolve_witnesses`); web/search_api.py's copy is fail-fast
+# UX for a caller's benefit, not a second boundary.
+_WITNESS_REF_RE = re.compile(r'^[A-Za-z0-9_]+$')
+
+
+class NoWitnessesResolved(ValueError):
+    """Every witness in a non-empty witness list failed to resolve.
+
+    Carries the same `witness_report` the success path returns, so the caller
+    can tell the user WHICH witness failed and why. An empty result set would
+    be indistinguishable from an honest "no matches" -- the one thing a
+    search must never be ambiguous about.
+    """
+
+    def __init__(self, report: dict):
+        super().__init__('no witness resolved to searchable text')
+        self.report = report
+
+
+@dataclass
+class _WitnessRun:
+    """One witness's search plus everything its rows need to be rendered.
+
+    `q_nfc`, `q_offsets` and `span_index_of_q0` are PER WITNESS and are only
+    meaningful against that witness's own text -- which is why a fused row
+    records the witness that produced it and the renderer looks the context
+    up by that id rather than reusing whichever one happens to be in scope.
+    """
+    wid: str
+    label: str
+    hits: list
+    q_nfc: str
+    q_offsets: object
+    span_index_of_q0: dict
+    report: dict
+
+
+def _synthesize_query_report(reports: list) -> dict:
+    """Collapse N witnesses' QueryReports into the ONE `query_report` the
+    envelope contract exposes.
+
+    Booleans are OR-ed and counters summed, so a truncation on witness 7
+    still reaches the caller. Passing through only the first witness's report
+    -- the obvious shape -- would under-report exactly the case the report
+    exists for: "a truncated search that does not say so is a correctness
+    defect" (shared/passage_search.py::QueryReport).
+
+    A single report is returned UNCHANGED (identity, not a rebuild), which is
+    what keeps the single-witness result byte-identical to the pre-witness
+    behaviour.
+    """
+    if not reports:
+        return {}
+    if len(reports) == 1:
+        return reports[0]
+    out: dict = {}
+    for key, value in reports[0].items():
+        if isinstance(value, bool):
+            out[key] = any(bool(r.get(key)) for r in reports)
+        elif isinstance(value, (int, float)):
+            out[key] = sum((r.get(key) or 0) for r in reports)
+        else:
+            # policy_id / policy_name: identical across witnesses (one policy
+            # per request), so the first is the whole truth.
+            out[key] = value
+    return out
 
 
 def _derive_uid(record_id: str) -> str:
@@ -315,6 +387,9 @@ class PassageSearcher:
         min_delimiter_distance: int = 3,
         restrict_sys_ids: Optional[set] = None,
         corpus_scope: str = 'genizah',
+        *,
+        witnesses: Optional[list] = None,
+        witness_text_cap: Optional[int] = None,
         **_ignored,
     ) -> dict:
         """Same parameter names/order as
@@ -324,13 +399,41 @@ class PassageSearcher:
         See the module docstring for which parameters are honored vs
         accepted-but-ignored.
 
+        `witnesses` (keyword-only, additive) is the multi-witness entry
+        point: a list of `{'id', 'label', 'text' | 'raw_header'}` dicts, each
+        searched SEPARATELY and fused by rank. Omitted or empty, this method
+        behaves byte-for-byte as it did before the parameter existed -- which
+        is what makes every existing caller and test safe. `witnesses`
+        resolving to exactly ONE text short-circuits into the single-witness
+        path too: RRF over one list is a `1/(k+rank)` rescale that carries no
+        information, and `score` must keep meaning "matched letters" for the
+        common case however it arrived.
+
+        Note the `*` -- `witnesses` is keyword-only. The chunk engine's
+        `SearchEngine.search_composition_logic` has a fixed parameter list
+        with no `**kwargs`, so a `witnesses=` aimed at the wrong searcher
+        raises TypeError rather than being silently swallowed.
+
         Returns:
-            ``{'main': [...], 'filtered': [...],
-            'dropped_text_lookup_failures': int}`` -- the third key is
-            additive (existing consumers that only read 'main'/'filtered'
-            are unaffected); it counts rows that survived the group cap but
-            were DROPPED (never rendered, never returned) because
-            `get_full_text_by_header` failed for them (finding #16(b)).
+            ``{'main': [...], 'filtered': [...], 'truncated_to_200': bool,
+            'dropped_text_lookup_failures': int,
+            'duplicate_photography_demoted': int, 'query_report': {...}}``,
+            plus -- ONLY when `witnesses` was passed at all --
+            ``'per_witness_query_reports'`` and ``'witness_report'``. The
+            gate is "witnesses were requested", NOT "two or more resolved":
+            asking for seventeen and searching sixteen is precisely the case
+            a caller has to be able to see, and it would be hidden by an
+            N>=2 gate whenever the drop left a single survivor. Omitting
+            `witnesses` leaves the result byte-identical to what it was
+            before this parameter existed, which is the parity that protects
+            every existing consumer.
+
+            For N>=2 `query_report` is SYNTHESISED across the witnesses
+            (booleans OR-ed, counters summed) rather than being one witness's
+            report. Reporting only the first witness's would under-report a
+            truncation that happened on witness 7, and "a truncated search
+            that does not say so is a correctness defect" (QueryReport's own
+            contract).
 
         Raises:
             ValueError: if `boundary_mode != 'full'` -- passage-matching has
@@ -343,6 +446,13 @@ class PassageSearcher:
                 time, before any concurrency slot is acquired;
                 web/pages/parallels.py disables the boundary controls while
                 passage mode is selected).
+            ValueError: if BOTH `full_text` and `witnesses` are non-empty.
+                Never silently pick one: the query the user believes was
+                searched would differ from the one that ran.
+            NoWitnessesResolved: if `witnesses` was non-empty but not one
+                entry resolved to searchable text. Carries `.report`, so the
+                caller can say WHICH failed and why instead of returning an
+                empty result indistinguishable from "no matches".
         """
         if boundary_mode != 'full':
             raise ValueError(
@@ -351,68 +461,84 @@ class PassageSearcher:
                 f"paragraph/token-boundary concept over a letter stream."
             )
 
-        text = full_text or ''
-        # PR #324 round 5: the restriction goes INTO the engine so the
-        # candidate/verify caps are spent only on records the caller can
-        # receive. Filtering hits afterwards (the old shape, kept below as
-        # belt-and-braces) let out-of-set candidates consume the caps and
-        # produced false negatives on filtered searches over common texts.
-        _allowed = (None if restrict_sys_ids is None else
-                    (lambda rid: _extract_sys_id(rid) in restrict_sys_ids))
-        hits, report = search_passage(self.index, text, self.policy,
-                                      record_allowed=_allowed)
+        queries, witness_report = self._resolve_witnesses(
+            witnesses, full_text, witness_text_cap)
+        multi = len(queries) > 1
 
-        if min_boundary_matches:
-            hits = [h for h in hits if h.n_spans >= min_boundary_matches]
+        runs = [self._run_one_witness(wid, label, text, restrict_sys_ids,
+                                      min_boundary_matches)
+                for wid, label, text in queries]
 
-        if restrict_sys_ids is not None:
-            hits = [h for h in hits
-                    if _extract_sys_id(h.record_id) in restrict_sys_ids]
-
-        # Query-side offset map, computed ONCE per query (not per hit/span --
-        # this is O(query length), never O(corpus)) so every rendered span's
-        # source_ctx/chunk_hits text can be projected back onto the pasted
-        # composition exactly like the manuscript side.
-        q_nfc = nfc(text)
-        _q_stream, q_offsets = norm_stream(text)
         filter_stream = norm_stream_fast(filter_text) if filter_text else ''
 
-        # Finding #4: chunk_index is a position in the PASTED COMPOSITION,
-        # comparable across records -- the ordinal of a span's query-side
-        # start offset among ALL distinct start offsets across every
-        # surviving hit, computed once and shared by every record. Two
-        # different records whose spans start at the same query offset get
-        # the SAME chunk_index, mirroring the incumbent's sliding-window
-        # index exactly.
-        all_q_starts = sorted({span[0] for h in hits for span in h.spans})
-        span_index_of_q0 = {q0: i for i, q0 in enumerate(all_q_starts)}
+        # Per-witness buckets. `hit_by_key` is keyed by (witness, record) --
+        # NOT by record alone, which is the shape the single-witness code
+        # used and which COLLIDES the moment a second witness matches the
+        # same manuscript. Last-witness-wins there would silently reduce
+        # every witness_count to 1 while looking entirely healthy.
+        eligible_by_witness: dict = {}
+        filtered_by_witness: dict = {}
+        hit_by_key: dict = {}
+        run_by_witness: dict = {}
+        for run in runs:
+            run_by_witness[run.wid] = run
+            rows: list = []
+            for hit in run.hits:
+                hit_by_key[(run.wid, hit.record_id)] = hit
+                rows.append({
+                    'uid': _derive_uid(hit.record_id),
+                    'raw_header': hit.record_id,
+                    'src_lbl': '',
+                    'source_ctx': '',
+                    'text': '',
+                    'score': float(hit.score),
+                    'final_score': float(hit.score),
+                    'chunk_count': int(hit.n_spans),
+                    'chunk_hits': [],
+                })
+            if multi:
+                # Tag BEFORE the filter split: a witness's rank is its
+                # position in that witness's FULL result list. A rank derived
+                # from the post-filter list would shift with the caller's
+                # filter text, changing the fusion for a reason that has
+                # nothing to do with match quality.
+                tag_rows(rows, run.wid, run.label)
+            eligible, source_filtered = [], []
+            for row, hit in zip(rows, run.hits):
+                if filter_stream and self._is_source_text_filtered(
+                    hit, filter_stream, run.q_nfc, run.q_offsets,
+                ):
+                    # Matches SearchEngine.search_composition_logic's
+                    # filter_text semantics: a record is routed to `filtered`
+                    # (never `main`) when the composition text it matched is
+                    # itself known/printed source text.
+                    source_filtered.append(row)
+                else:
+                    eligible.append(row)
+            eligible_by_witness[run.wid] = eligible
+            filtered_by_witness[run.wid] = source_filtered
 
-        eligible_rows: list = []
-        filtered_candidate_rows: list = []
-        hit_by_header: dict = {}
-        for hit in hits:
-            hit_by_header[hit.record_id] = hit
-            row = {
-                'uid': _derive_uid(hit.record_id),
-                'raw_header': hit.record_id,
-                'src_lbl': '',
-                'source_ctx': '',
-                'text': '',
-                'score': float(hit.score),
-                'final_score': float(hit.score),
-                'chunk_count': int(hit.n_spans),
-                'chunk_hits': [],
-            }
-            if filter_stream and self._is_source_text_filtered(
-                hit, filter_stream, q_nfc, q_offsets,
-            ):
-                # Matches SearchEngine.search_composition_logic's filter_text
-                # semantics: a record is routed to `filtered` (never `main`)
-                # when the composition text it matched is itself known/
-                # printed source text.
-                filtered_candidate_rows.append(row)
-            else:
-                eligible_rows.append(row)
+        if multi:
+            eligible_rows = fuse([(r.wid, eligible_by_witness[r.wid])
+                                  for r in runs])
+            fused_filtered = fuse([(r.wid, filtered_by_witness[r.wid])
+                                   for r in runs])
+            # A record is `filtered` only when EVERY witness that matched it
+            # filtered it. One witness matching it on text the caller did NOT
+            # declare as a known source is a real result, and suppressing it
+            # would make the filter STRICTER the more witnesses you add --
+            # the opposite of what the control says it does.
+            in_main = {row['raw_header'] for row in eligible_rows}
+            filtered_candidate_rows = [r for r in fused_filtered
+                                       if r['raw_header'] not in in_main]
+            # The cap must rank by the key the rows were SELECTED by, or the
+            # group cap discards exactly the groups the fusion promoted.
+            score_key = 'fusion_score'
+        else:
+            only = runs[0]
+            eligible_rows = eligible_by_witness[only.wid]
+            filtered_candidate_rows = filtered_by_witness[only.wid]
+            score_key = 'score'
 
         # Finding #1 ("THE BIG ONE") + finding #16(a): apply the SAME
         # group-cap rule to BOTH buckets, so rendered rows == kept rows
@@ -422,9 +548,11 @@ class PassageSearcher:
         # passage's filter_text mechanism does not share).
         if self.render_cap and self.render_cap > 0:
             capped_main_candidates, main_truncated = _cap_main_results_by_group(
-                eligible_rows, _RegexSysIdParser(), cap=self.render_cap)
+                eligible_rows, _RegexSysIdParser(), cap=self.render_cap,
+                score_key=score_key)
             capped_filtered_candidates, _truncated_f = _cap_main_results_by_group(
-                filtered_candidate_rows, _RegexSysIdParser(), cap=self.render_cap)
+                filtered_candidate_rows, _RegexSysIdParser(), cap=self.render_cap,
+                score_key=score_key)
         else:
             # Uncapped: every group survives, so nothing is truncated by
             # definition and "rendered == kept" holds over the full set.
@@ -440,22 +568,28 @@ class PassageSearcher:
         # hygiene pass costs no extra Tantivy lookups.
         raw_text_by_header: dict = {}
 
+        def _render(row: dict) -> bool:
+            # The WINNING witness supplies the evidence. A span offset is a
+            # position in ONE witness's text, so projecting it through
+            # another witness's offset map would highlight the wrong letters
+            # -- and would still look entirely plausible on screen.
+            run = run_by_witness.get(row.get('witness_id') or runs[0].wid,
+                                     runs[0])
+            hit = hit_by_key[(run.wid, row['raw_header'])]
+            return self._render_highlights(row, hit, run.q_nfc, run.q_offsets,
+                                           run.span_index_of_q0,
+                                           raw_text_out=raw_text_by_header)
+
         main_results = []
         for row in capped_main_candidates:
-            hit = hit_by_header[row['raw_header']]
-            if self._render_highlights(row, hit, q_nfc, q_offsets,
-                                       span_index_of_q0,
-                                       raw_text_out=raw_text_by_header):
+            if _render(row):
                 main_results.append(row)
             else:
                 dropped += 1
 
         filtered_results = []
         for row in capped_filtered_candidates:
-            hit = hit_by_header[row['raw_header']]
-            if self._render_highlights(row, hit, q_nfc, q_offsets,
-                                       span_index_of_q0,
-                                       raw_text_out=raw_text_by_header):
+            if _render(row):
                 filtered_results.append(row)
             else:
                 dropped += 1
@@ -493,7 +627,7 @@ class PassageSearcher:
                     survivors.append(row)
             main_results = survivors
 
-        return {
+        result = {
             'main': main_results,
             'filtered': filtered_results,
             # PR #324 round 5: this flag used to be computed and DISCARDED.
@@ -510,8 +644,161 @@ class PassageSearcher:
             # this method bound it to `_report` and threw it away, so a
             # capped search looked complete to users AND to the evaluation
             # instruments.
-            'query_report': report.as_dict(),
+            'query_report': _synthesize_query_report([r.report for r in runs]),
         }
+        if witness_report:
+            # Present whenever `witnesses` was PASSED -- not merely when two
+            # or more resolved. Requesting seventeen and searching sixteen is
+            # exactly the case a caller must be able to see, and gating this
+            # on N>=2 would hide it whenever the drop left one survivor.
+            # Absent when `witnesses` was omitted, which is the parity that
+            # protects every existing consumer.
+            result['per_witness_query_reports'] = [
+                {'witness_id': r.wid, 'witness_label': r.label,
+                 'report': r.report} for r in runs
+            ]
+            result['witness_report'] = witness_report
+        return result
+
+    # -- multi-witness plumbing ---------------------------------------------
+
+    def _resolve_witnesses(self, witnesses, full_text: str,
+                           text_cap: Optional[int]):
+        """Turn the caller's witness list into `[(id, label, text), ...]`.
+
+        THE single place a `raw_header` reference is validated and resolved.
+        `web/search_api.py` also shape-checks the field, but that is
+        fail-fast UX and never a second security boundary -- two copies of a
+        validation rule drift, and the copy running closest to the fetch is
+        the one that has to be authoritative.
+
+        Resolution happens HERE, inside the searcher, because it is Tantivy
+        work: doing it in the route handler would block the single uvicorn
+        event loop, and this method already runs inside a bounded executor.
+
+        The length cap is re-checked AFTER resolution, because twenty-five
+        tiny references can resolve to twenty-five 20,000-character pages --
+        a payload-only cap bounds the REQUEST, not the WORK.
+
+        An unresolvable witness is SKIPPED AND REPORTED, never fatal:
+        rejecting a seventeen-witness request over one stale reference wastes
+        the sixteen searches the user asked for and can still have.
+        """
+        if not witnesses:
+            return [('seed', '', full_text or '')], {}
+        if (full_text or '').strip():
+            raise ValueError(
+                'PassageSearcher: pass EITHER full_text OR witnesses, never '
+                'both -- silently searching one of them would make the query '
+                'that actually ran invisible to the caller.'
+            )
+
+        queries: list = []
+        entries: list = []
+        for i, w in enumerate(witnesses):
+            w = w if isinstance(w, dict) else {'text': w}
+            wid = str(w.get('id') or witness_id_for(i))
+            label = str(w.get('label') or '')
+            text = w.get('text')
+            kind = 'pasted'
+            reason = None
+            if text is None or not str(text).strip():
+                kind = 'manuscript'
+                text = None
+                ref = str(w.get('raw_header') or '').strip()
+                if not ref:
+                    reason = 'empty'
+                elif not _WITNESS_REF_RE.match(ref):
+                    reason = 'bad_ref'
+                else:
+                    try:
+                        text = self.text_fetcher.get_full_text_by_header(ref)
+                    except Exception:
+                        logger.warning(
+                            'passage_parallels: witness ref lookup raised for '
+                            '%s', ref, exc_info=True,
+                        )
+                        text = None
+                    if not text:
+                        reason = 'not_found'
+            if reason is None and text_cap and len(text) > text_cap:
+                reason = 'too_long'
+            entries.append({
+                'id': wid,
+                'label': label,
+                'kind': kind,
+                'resolved': reason is None,
+                'reason': reason,
+                'letters': len(text or '') if reason is None else 0,
+            })
+            if reason is None:
+                queries.append((wid, label, text))
+
+        report = {
+            'requested': len(witnesses),
+            'searched': len(queries),
+            'witnesses': entries,
+            'unresolved': [e for e in entries if not e['resolved']],
+        }
+        if not queries:
+            raise NoWitnessesResolved(report)
+        return queries, report
+
+    def _run_one_witness(self, wid: str, label: str, text: str,
+                         restrict_sys_ids, min_boundary_matches: int):
+        """Search ONE witness and build everything its rendering will need.
+
+        Never call this with two witnesses joined into one string. The
+        passage engine spends a per-query POSTING BUDGET, so a concatenated
+        query starves: measured 59% of the reachable Birkat Hamazon census
+        concatenated against 85% fused, and on Antiochus every concatenated
+        recursion round scored BELOW the seed alone. See
+        shared/passage_fusion.py for the numbers, and for why this does not
+        generalise to the chunk engine.
+        """
+        text = text or ''
+        # PR #324 round 5: the restriction goes INTO the engine so the
+        # candidate/verify caps are spent only on records the caller can
+        # receive. Filtering hits afterwards (the old shape, kept below as
+        # belt-and-braces) let out-of-set candidates consume the caps and
+        # produced false negatives on filtered searches over common texts.
+        _allowed = (None if restrict_sys_ids is None else
+                    (lambda rid: _extract_sys_id(rid) in restrict_sys_ids))
+        hits, report = search_passage(self.index, text, self.policy,
+                                      record_allowed=_allowed)
+
+        if min_boundary_matches:
+            hits = [h for h in hits if h.n_spans >= min_boundary_matches]
+
+        if restrict_sys_ids is not None:
+            hits = [h for h in hits
+                    if _extract_sys_id(h.record_id) in restrict_sys_ids]
+
+        # Query-side offset map, computed ONCE per witness (not per hit/span
+        # -- this is O(query length), never O(corpus)) so every rendered
+        # span's source_ctx/chunk_hits text can be projected back onto that
+        # witness's own text exactly like the manuscript side.
+        q_nfc = nfc(text)
+        _q_stream, q_offsets = norm_stream(text)
+
+        # Finding #4: chunk_index is a position in the PASTED COMPOSITION,
+        # comparable across records -- the ordinal of a span's query-side
+        # start offset among ALL distinct start offsets across every
+        # surviving hit, computed once and shared by every record. Two
+        # different records whose spans start at the same query offset get
+        # the SAME chunk_index, mirroring the incumbent's sliding-window
+        # index exactly.
+        #
+        # It is PER WITNESS, and comparable only WITHIN one: offset 200 of
+        # witness A and offset 200 of witness B are different places in
+        # different texts. Every fused row records which witness produced it
+        # (`witness_id`), so the index is never read out of its context.
+        all_q_starts = sorted({span[0] for h in hits for span in h.spans})
+        return _WitnessRun(
+            wid=wid, label=label, hits=hits, q_nfc=q_nfc, q_offsets=q_offsets,
+            span_index_of_q0={q0: i for i, q0 in enumerate(all_q_starts)},
+            report=report.as_dict(),
+        )
 
     # -- filter_text parity (finding #3) -------------------------------------
 
