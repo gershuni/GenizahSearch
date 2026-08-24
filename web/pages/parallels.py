@@ -840,15 +840,6 @@ def create_parallels_page(initial_text: str = None):
                                 'wider-40': tr('Wide width'),
                                 'widest-40': tr('Very wide (default)'),
                                 'max-40': tr('Maximal (may add noise)'),
-                                # anchor-sweep-40: max-40's span results PLUS
-                                # the anchor-evidence tier (spec section 10.3)
-                                # -- translations, rhymed versions and badly
-                                # damaged copies that share only names/short
-                                # collocations with the pasted text. Those
-                                # extra rows are labelled 'anchor evidence'
-                                # and always rank below every aligned match.
-                                'anchor-sweep-40': tr(
-                                    'Recall sweep (adds anchor evidence)'),
                             },
                             value='widest-40',
                             label=tr('Match width'),
@@ -856,15 +847,38 @@ def create_parallels_page(initial_text: str = None):
                         passage_width.tooltip(tr(
                             'How far a manuscript may drift from your text and '
                             'still match. Wider finds more noisy witnesses; the '
-                            'strongest matches always rank first. The recall '
-                            'sweep also lists manuscripts sharing only names '
-                            'or short phrases (translations, damaged copies) '
-                            'as "anchor evidence" rows after all real matches.'
+                            'strongest matches always rank first.'
+                        ))
+                        # The SECOND axis (2026-08-24). Width and passage
+                        # length are different questions -- "how corrupt a
+                        # copy may be" vs "how short a shared passage counts"
+                        # -- and the short profile is emphatically not a
+                        # wider width, so folding it into the width list
+                        # would mislabel it. Two knobs, each a small list of
+                        # named policies; never raw sliders, because
+                        # min_span and verify_margin are ONE coupled decision
+                        # (spec section 8.1) that a slider would present as
+                        # two independent ones.
+                        passage_length = ui.select(
+                            options={
+                                'normal': tr('Normal passages (default)'),
+                                'short': tr('Also short passages'),
+                            },
+                            value='normal',
+                            label=tr('Passage length'),
+                        ).classes('w-44').props('outlined dense')
+                        passage_length.tooltip(tr(
+                            'Whether a short shared passage counts as a match. '
+                            '"Also short" finds piyyutim, quotations and badly '
+                            'damaged copies that share only a phrase — measured '
+                            'at roughly double the results for a third fewer '
+                            'correct ones, so expect to skim more.'
                         ))
                         if not passage_available():
                             method_radio.value = 'chunk'
                             method_radio.style('display: none;')
                             passage_width.style('display: none;')
+                            passage_length.style('display: none;')
 
                     # === Boundary Search Settings ===
                     with ui.row().classes('w-full items-center gap-4 flex-wrap mt-2'):
@@ -1034,6 +1048,7 @@ def create_parallels_page(initial_text: str = None):
                             on_lab_mode_change()
                         if _letter_level_selected():
                             passage_width.style('display: inline-flex;')
+                            passage_length.style('display: inline-flex;')
                             # Finding #2 (adversarial review): passage-matching
                             # has no cross-paragraph/token-boundary concept --
                             # PassageSearcher raises ValueError for anything but
@@ -1081,6 +1096,7 @@ def create_parallels_page(initial_text: str = None):
                             min_chunks_input.disable()
                         else:
                             passage_width.style('display: none;')
+                            passage_length.style('display: none;')
                             boundary_mode.enable()
                             chunk_size.enable()
                             mode_select.enable()
@@ -1243,6 +1259,8 @@ def create_parallels_page(initial_text: str = None):
                                 method_radio.value = 'passage'
                                 if cfg.get('width') in passage_width.options:
                                     passage_width.value = cfg['width']
+                                if cfg.get('length') in passage_length.options:
+                                    passage_length.value = cfg['length']
                             else:
                                 # 'chunk', or 'passage' degrading because the
                                 # index is unavailable (same rule as dispatch).
@@ -3072,6 +3090,7 @@ def create_parallels_page(initial_text: str = None):
         # unavailable must degrade to "not selected", never crash run_search().
         captured_passage_mode = _letter_level_selected() and passage_available() and not captured_lab_mode
         captured_passage_width = passage_width.value or 'widest-40'
+        captured_passage_length = passage_length.value or 'normal'
         # Phase 145 finding #10 (adversarial review): computed ONCE here
         # rather than the 'lab'/'passage'/'chunk' ternary being written twice
         # (PostHog capture + composition-history params) below.
@@ -3232,7 +3251,8 @@ def create_parallels_page(initial_text: str = None):
             # manuscripts from both surfaces (measured: 198 shown of 497
             # found on Birkat Hamazon).
             passage_searcher = get_passage_searcher(
-                state.searcher, preset=captured_passage_width, render_cap=0)
+                state.searcher, preset=captured_passage_width,
+                length=captured_passage_length, render_cap=0)
             if passage_searcher is None:
                 return None
             return passage_searcher.search_composition_logic(
@@ -3401,6 +3421,7 @@ def create_parallels_page(initial_text: str = None):
                         text=text,
                         engine=captured_engine,
                         width=captured_passage_width,
+                        length=captured_passage_length,
                         chunk_size=captured_chunk_size,
                         mode=captured_mode,
                         max_freq=captured_freq_threshold,
@@ -3439,6 +3460,7 @@ def create_parallels_page(initial_text: str = None):
                     p_state.searched_config = {
                         'engine': captured_engine,
                         'width': captured_passage_width,
+                        'length': captured_passage_length,
                         'chunk_size': captured_chunk_size,
                         'mode': captured_mode,
                         'max_freq': captured_freq_threshold,
@@ -4293,11 +4315,6 @@ def create_parallels_page(initial_text: str = None):
         # Use round() instead of int() to avoid hiding small boosts
         score = round(item.get('score', 0))
         final_score = round(item.get('final_score', score))
-        # Anchor-evidence rows (letter-level "Recall sweep", spec 10.4) carry
-        # no accepted alignment; everything below that treats a row as a
-        # verified match must know the difference.
-        is_anchor_row = item.get('match_tier') == 'anchor'
-        anchor_codes = int(item.get('anchor_codes', 0) or 0)
         has_boundary_matches = item.get('has_boundary_matches', False)
         boundary_quality = item.get('boundary_quality', 0)
         boundary_match_count = item.get('boundary_match_count', 0)
@@ -4338,19 +4355,7 @@ def create_parallels_page(initial_text: str = None):
 
                     # Score badge - show boost if applied
                     # Note: Raw scores are typically 100-10000+, not percentages
-                    if is_anchor_row:
-                        # Anchor-evidence tier (spec section 10.4): NO aligned
-                        # span was accepted, and the row score is a
-                        # distinct-code count scaled below the span floor --
-                        # so round() renders it as a flat "0" and the card
-                        # reads like a weak real match (PR #327 review, Codex
-                        # P1). Show the evidence in its own unit, with a badge
-                        # that says what the row is.
-                        ui.badge(tr('anchor evidence'),
-                                 color='purple').classes('text-xs')
-                        ui.badge(f"{anchor_codes} " + tr('shared terms'),
-                                 color='gray').classes('text-xs')
-                    elif final_score > score:
+                    if final_score > score:
                         score_color = 'green' if final_score > 2000 else 'amber' if final_score > 500 else 'gray'
                         ui.badge(f"{score} → {final_score}", color=score_color).classes('text-xs')
                     else:
@@ -4390,13 +4395,7 @@ def create_parallels_page(initial_text: str = None):
 
                     # Manuscript match
                     with ui.column().classes('flex-1 gap-2'):
-                        # An anchor row's windows are the neighbourhoods of
-                        # the shared terms, NOT a verified alignment -- the
-                        # heading must not promise one (PR #327 review).
-                        ui.label(tr('Nearby text (no aligned match)')
-                                 if is_anchor_row
-                                 else tr('Manuscript Text')
-                                 ).classes('text-xs font-bold uppercase').style('color: var(--accent-amber);')
+                        ui.label(tr('Manuscript Text')).classes('text-xs font-bold uppercase').style('color: var(--accent-amber);')
                         with ui.element('div').classes('p-3 rounded-lg text-sm').style(
                             'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8; border: 1px solid var(--accent-amber); color: var(--text-primary);'
                         ):

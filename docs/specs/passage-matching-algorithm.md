@@ -301,11 +301,24 @@ distractors):
 nothing: a 9-letter name already yields 5 grams, so it clears the two-hit rule, and dropping to
 1 multiplied candidates ~5x with no new finds.
 
-**Unmeasured on the real corpus, and the risk is precision.** The fixture is random synthetic
-text, where chance 10-letter collisions are far rarer than in real Hebrew with its highly
-repetitive stock phrases. Expect a materially higher false-hit rate at 700K records and expect
-`min_span` to need raising. The `names-10` preset carries these settings for sweeping; it must
-be measured against the adjudicated deck before any surface offers it.
+**Measured on the real corpus, 2026-08-24.** The synthetic pair (10, 8) was far too loose at
+700K records — 236 manuscripts at 32% precision, because chance 10-letter collisions are common
+in real Hebrew and rare in random text. The measured operating point is **(28, 12)**, offered
+as the `short` passage-length profile:
+
+| profile | manuscripts | precision | recall (of 83) |
+|---|---|---|---|
+| `normal` (40, 30) on widest-40 | 56 | 100% | 67% |
+| `short` (28, 12) on widest-40 | 104 | 61% | 72% |
+
+`short` adds five graded positives and one witness **no method had returned before**, word-chunk
+matching included (MS heb. e.45/36, catalogued מגילת אנטיוכוס). It does not reach cross-language
+witnesses — 1 of 20 — and score gives no usable cutoff inside the added rows (positives at
+35/35/39/58/255 against noise spanning 31–55), so the added tail is a skim, not a ranking.
+
+Because the two parameters are one decision, they are offered to users as a joint **profile**
+and never as independent controls: a slider on the span floor alone would visibly do nothing
+and read as a broken feature.
 
 ---
 
@@ -442,58 +455,36 @@ cost should be small — but it is unmeasured, so stride is a measured decision,
 manifest, not an assumption. Note that DF = 1 singletons are **kept** here, unlike the pair-wise
 arrangement: a singleton cannot form a pair, but it is a perfectly good query anchor.
 
-### 10.4 The anchor-evidence tier (2026-08-23, opt-in)
+### 10.4 The anchor-evidence tier — measured, rejected, removed
 
-Span acceptance (section 7) is a **contiguous-alignment** detector, and there is a class of
-true relationships it can never accept at any width: translations and rhymed reworkings (the
-only shared letters are names and short collocations), rubrics and citations that *name* the
-work, and copies so damaged that no 40-letter alignment survives the lacunae. The Megillat
-Antiochus method comparison (2026-08-23, 83 adjudicated positives) measured the cost: the span
-tiers missed **every** Arabic and rhymed-Hebrew version of the scroll, while word-chunk matching
-at size 2 caught them — at 5% precision, which is what an unweighted collocation detector costs.
+Recorded so it is not reinvented. Span acceptance is a contiguous-alignment detector, and it
+cannot reach witnesses that share no contiguous run with the query: translations, rhymed
+reworkings, rubrics that only *name* the work. An "anchor-evidence" tier was built to cover
+that class — report records that share many distinct DF-capped gram codes with the query but
+produce no accepted span — and measured twice on the Antiochus query against an 83-positive
+adjudicated deck. **Both runs failed, and the second was worse than the first.**
 
-The anchor-evidence tier is the same detector class built from this engine's own, already-DF-
-capped raw material, gated by policy (`anchor_tier`, default **off** — behaviour and
-`policy_id` of every pre-existing policy are unchanged):
+| build | anchor-tier precision | recall | targets recovered |
+|---|---|---|---|
+| count of shared codes | 4% | 77% | 4 of 20 |
+| rarity-gated + weight-ordered | 1% | 73% | 1 of 20 |
 
-* **Pool rule.** A record enters the pool only through at least one ordinary two-hit cluster
-  that survived the record restriction — the same gate the span path uses. Its **evidence**
-  then counts every distinct admitted gram code it shares with the query, *including* codes
-  whose own clusters fell below `MIN_ANCHORS`: for a translation, each scattered name is a
-  one-code diagonal, and dropping those would re-create exactly the blindness the tier removes.
-  Stats are taken before `candidate_cap` (bookkeeping is cheap; that cap bounds Levenshtein
-  work, which anchors never do).
-* **Rarity rule (2026-08-24, measured).** Only codes with `df <= anchor_df_max` count, and the
-  tier is ordered by **weight** — Σ log10(N/df) over those codes — not by how many there are.
-  The first build counted every shared code and was measured on the live Antiochus query: the
-  300 admitted records were 99 כתובים, 35 Daniel, 25 Targum sharing 14–37 *ubiquitous* grams,
-  the four real finds sat at 14–15 on the cap floor, and every Arabic and rhymed target the
-  tier was built for fell below it. Raw counting ranks by **record length**, because a long
-  formulaic codex shares many common grams while a short translation shares few rare ones.
-  Rarity therefore gates membership and weight orders the cap.
-* **Report rule.** After verification, a pooled record with at least `anchor_min_codes`
-  distinct distinctive codes and **no accepted span** is reported as a `tier='anchor'` hit —
-  never a record that already has a span hit. Ordered by (−weight, record), capped at
-  `anchor_cap`, truncation reported (`anchor_truncated`), count reported (`anchor_records`).
-* **Verified-only rule (PR #327 review).** A record whose clusters the `verify_cap` left
-  **untried** is withheld from the tier and counted in `anchor_withheld_unverified`, never
-  reported as anchor-only. `merged` holds only records that were verified *and* accepted, so
-  "not in merged" alone would let an unexamined record be labelled "no alignment accepted" —
-  a claim about a check that never ran. This is the common case, not a corner: verification
-  runs in anchor-strength order, so the untried tail is exactly where weak-evidence records
-  live, which is the anchor tier's own population.
-* **Honesty rules.** Anchor hits carry the kept clusters' *extents* as display windows, never
-  alignments; density is the 1.0 upper bound ("no alignment accepted"); the score is the
-  distinct-code count — a **different unit** from matched letters, so surfaces must keep the
-  tiers separate rather than pretend one ordering (the web searcher scales anchor row scores
-  below the span floor and labels the rows).
-* **Status: exploratory, one measurement in.** The adjudicated 83-positive Antiochus deck was
-  run against the first (count-based) build on 2026-08-24 and it **failed its own purpose**:
-  77% recall overall but only 4 of the 20 chunk-2-exclusive targets recovered, 4% precision in
-  the anchor tier, and the cap saturated at 300 with length-biased biblical manuscripts. That
-  measurement produced the rarity rule above. The rarity-gated build is **not yet measured** —
-  the same deck is the instrument, and `anchor_df_max` in particular is a reasoned starting
-  value, not a fitted one.
+The mechanism is instructive. Counting shared codes ranks by **record length**: the 300-record
+cap filled with 99 כתובים, 35 Daniel and 25 Targum manuscripts sharing 14–37 ubiquitous grams,
+while the four real finds sat at 14–15 on the cap floor. Gating on rarity did not fix it — it
+merely resampled the same noise pool at a lower count band (7–22) and dropped three of the four
+real finds. At ~1,000 query grams against ~700K records, "shares a handful of moderately rare
+5-grams" is what **coincidence** looks like; the base rate swamps the signal.
+
+And the targets could not win that competition anyway, because they have almost no letter-level
+evidence to compete with: a Judeo-Arabic translation shares essentially nothing with an Aramaic
+query beyond a few transliterated names. Cross-language retrieval needs a different mechanism
+(entity matching, a bilingual lexicon), not a better threshold on this one.
+
+The tier was removed on 2026-08-24. What survived it is more useful than it was: the
+`verify_margin` finding (section 8.1), which came out of asking why short matches never
+surfaced, and the operational conclusion that the recall gap for this class belongs to
+word-chunk matching plus vocabulary triage, not to the letter engine.
 
 ---
 

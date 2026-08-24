@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 
 POLICY_SCHEMA_VERSION = 1
 
@@ -97,31 +97,6 @@ class PassagePolicy:
     # rejected_density absorbs every one. The pair (min_span, verify_margin)
     # has to move together, which is why this is policy and not a constant.
     verify_margin: int = 30
-    # Anchor-evidence tier (spec section 10.3, 2026-08-23). OFF by default:
-    # every existing preset keeps byte-identical behaviour AND policy_id.
-    # When ON, records whose kept clusters carry >= anchor_min_codes distinct
-    # admitted gram codes but which produced NO accepted span are reported as
-    # a separate 'anchor' tier -- collocation evidence (names, short shared
-    # phrases across translation/paraphrase/heavy damage) that the contiguous
-    # span acceptance can never surface. Motivated by the Megillat Antiochus
-    # method comparison (2026-08-23): the span tiers missed every Arabic and
-    # rhymed-Hebrew version of the scroll because translations share only
-    # scattered names with the query -- exactly what word-chunk matching
-    # caught at 5% precision. This tier is the rarity-weighted equivalent:
-    # its anchors are DF-capped grams, not raw word pairs.
-    anchor_tier: bool = False
-    # DISTINCTIVE codes only (df <= anchor_df_max). Measured 2026-08-24 on the
-    # Antiochus GUI run: counting ALL shared codes ranked the tier by record
-    # LENGTH, not relatedness. The 300 admitted records were 99 כתובים, 35
-    # Daniel, 25 Targum -- long formulaic Aramaic manuscripts sharing 14-37
-    # ubiquitous grams -- while the four real finds sat at 14-15, on the cap
-    # floor, and every Arabic/rhymed target the tier was BUILT for fell below
-    # it. A long biblical codex shares many common grams by being long; a
-    # short translation shares few but rare ones. So rarity gates membership
-    # and weight orders the cap, and a common gram now contributes nothing.
-    anchor_min_codes: int = 4          # distinct DISTINCTIVE codes per record
-    anchor_df_max: int = 5_000         # postings; above this a code is common
-    anchor_cap: int = 300              # anchor-tier records reported at most
     schema_version: int = POLICY_SCHEMA_VERSION
 
     def __post_init__(self):
@@ -135,16 +110,9 @@ class PassagePolicy:
             raise ValueError('min_anchors must be >= 1')
         if not (0.1 <= self.density_scale <= 2.0):
             raise ValueError('density_scale outside [0.1, 2.0]')
-        if self.anchor_min_codes < 2:
-            raise ValueError('anchor_min_codes below 2 is weaker than the '
-                             'two-hit rule and would report single-gram '
-                             'coincidences')
-        if self.anchor_df_max < 1:
-            raise ValueError('anchor_df_max must be positive')
         if self.verify_margin < 0:
             raise ValueError('verify_margin must be >= 0')
-        for f_name in ('posting_budget', 'candidate_cap', 'verify_cap',
-                       'anchor_cap'):
+        for f_name in ('posting_budget', 'candidate_cap', 'verify_cap'):
             if getattr(self, f_name) <= 0:
                 raise ValueError(f'{f_name} must be positive')
 
@@ -154,28 +122,20 @@ class PassagePolicy:
     def policy_id(self) -> str:
         """Content hash over every field. Stable across processes and runs.
 
-        Identity extension rule: the anchor-tier fields joined the schema on
-        2026-08-23, AFTER measurements had been recorded against the original
-        field set (shared/retrieval_eval.py's ledger keys on policy_id). With
-        the tier OFF the query behaves byte-identically to the original
-        schema, so the anchor fields enter the hash ONLY when anchor_tier is
-        True -- every pre-existing preset keeps the id its measurements were
-        recorded under, and any anchor-enabled policy necessarily gets a new
-        id. A changed anchor default therefore changes the id of anchor
-        policies only, which is exactly the set whose results it can change.
+        Identity extension rule: a field added AFTER measurements were
+        recorded (shared/retrieval_eval.py's ledger keys on policy_id) enters
+        the hash only once it is moved off the value that reproduces the
+        historical behaviour. That way a preset measured before the field
+        existed keeps the id its results were filed under, and any policy
+        that actually behaves differently necessarily gets a new id.
         """
         d = asdict(self)
-        # Same identity-extension rule as the anchor fields: verify_margin
-        # joined the schema on 2026-08-24, and at its historical value (30)
-        # the query behaves exactly as before, so it enters the hash only
-        # when it has been moved off that value. Presets measured before the
-        # field existed keep the ids their results were recorded under.
+        # verify_margin joined the schema on 2026-08-24; at its historical
+        # value (30)
+        # the query behaves exactly as before, so it enters the
+        # hash only when moved off that value.
         if self.verify_margin == 30:
             del d['verify_margin']
-        if not self.anchor_tier:
-            for f_name in ('anchor_tier', 'anchor_min_codes', 'anchor_df_max',
-                           'anchor_cap'):
-                del d[f_name]
         blob = json.dumps(d, sort_keys=True, ensure_ascii=True,
                           separators=(',', ':'))
         return 'pp1-' + hashlib.sha256(blob.encode('ascii')).hexdigest()[:16]
@@ -269,52 +229,70 @@ WIDEST_40 = PassagePolicy(name='widest-40', density_scale=1.8)
 # fits, and becomes fully useful the day paging lands.
 MAX_40 = PassagePolicy(name='max-40', density_scale=2.0)
 
-# anchor-sweep-40: max-40 plus the anchor-evidence tier (2026-08-23, the
-# Megillat Antiochus method comparison). Span results are exactly max-40's
-# (density_scale 2.0); records that never form an acceptable span but share
-# >= 8 distinct DF-capped gram codes with the query are ADDED as a clearly
-# labelled 'anchor' tier -- the recall sweep for translations, rhymed
-# versions, rubrics and catastrophically damaged copies, where the only
-# surviving overlap is names and short collocations. Adjudicated baseline
-# for that comparison: word-chunk size 2 reached 98% recall at 5% precision;
-# this tier chases the same recall class with rarity-weighted anchors.
-# EXPLORATORY: its recall/precision has no held-out measurement yet -- the
-# adjudicated 83-positive Antiochus deck from the 2026-08-23 session is the
-# intended first instrument. Anchor scores are DISTINCT-CODE COUNTS, a
-# different unit from span scores (matched letters); surfaces must keep the
-# tiers visually separate rather than pretend one ordering.
-ANCHOR_SWEEP_40 = PassagePolicy(name='anchor-sweep-40', density_scale=2.0,
-                                anchor_tier=True)
+# ---------------------------------------------------------------------------
+# The SECOND axis: how short a shared passage may be and still count.
+#
+# min_span and verify_margin are ONE decision, not two (section 8.1): the span
+# floor is checked against the margin-extended window, so at margin 30 a floor
+# of 40 is cleared automatically and moving it alone does nothing. They are
+# therefore offered as a joint profile, never as independent controls.
+#
+# 'short' was measured 2026-08-24 on the Antiochus query against the
+# 83-positive adjudicated deck, composed onto widest-40:
+#
+#   widest-40 (span 40, margin 30):  56 manuscripts, 100% precision, 67% recall
+#   + short   (span 28, margin 12): 104 manuscripts,  61% precision, 72% recall
+#
+# It adds five graded positives (a piyyut versifying the scroll, a colophon
+# rubric, a Hanukkah piyyut quoting it, a Hebrew version in a siddur, a
+# damaged Aramaic copy) AND one witness no method had returned before,
+# including word-chunk matching: MS heb. e.45/36, catalogued מגילת אנטיוכוס.
+#
+# What it does NOT do is reach cross-language witnesses: 1 of the 20
+# Judeo-Arabic/rhymed targets. Those share too little contiguous Hebrew-letter
+# material with an Aramaic query for any span threshold, which two failed
+# experiments (docs/specs section 10.4) established independently.
+#
+# Score gives no cutoff inside the added rows: the five positives scored
+# 35/35/39/58/255 against noise spanning 31-55. The added tail needs eyes.
+LENGTH_PROFILES = {
+    'normal': (40, 30),   # the historical pair; every width preset's default
+    'short': (28, 12),    # measured 2026-08-24, see above
+}
+DEFAULT_LENGTH = 'normal'
 
-# names-10: SHORT contiguous evidence, the 2026-08-24 finding. A proper noun
-# transliterated into a Judeo-Arabic translation is the SAME Hebrew letters as
-# in the Aramaic original, so a translation shares real contiguous runs of
-# 7-14 letters with the query -- which is why word-chunk matching found the
-# Arabic Antiochus versions and every letter preset missed them. The blocker
-# was never min_span: it is verify_margin. At margin 30 a 9-letter true match
-# is scored across ~70 letters of unrelated flanking text (~0.85 density) and
-# rejected; drop the margin and it is found.
-#
-# Measured on a synthetic fixture (43 records, 15%-CER noisy copy, three
-# 7-12 letter shared names, random-text distractors):
-#   margin 30, min_span 40 -> verbatim + noisy found, translation MISSED
-#   margin 30, min_span 10 -> unchanged: rejected_short 0, all on density
-#   margin  8, min_span 10 -> verbatim + noisy + TRANSLATION, 0 false hits
-#   margin  4 / 2          -> translation found, 1 / 3 false hits appear
-#
-# EXPLORATORY, and the riskiest preset here: the fixture is random synthetic
-# text, where chance 10-letter collisions are far rarer than in real Hebrew,
-# whose stock phrases are highly repetitive. Expect a much higher false-hit
-# rate on the 700K-record corpus and expect to raise min_span. Sweep it with
-# scripts/compare_passage_policies.py --min-span/--verify-margin against the
-# adjudicated deck BEFORE offering this in the GUI.
-NAMES_10 = PassagePolicy(name='names-10', min_span=10, verify_margin=8,
+
+def compose(width: str, length: str = DEFAULT_LENGTH) -> PassagePolicy:
+    """A width preset plus a passage-length profile, as one named policy.
+
+    The surface offers two small selects rather than raw sliders: the space
+    is a handful of nameable, hashed points, and the two parameters inside
+    `length` are coupled in a way a slider would misrepresent (a user
+    lowering a span floor alone would see NO change and conclude the control
+    was broken). Composed policies carry a derived name and, because
+    policy_id is a content hash, their own id -- so a result is always
+    traceable to exactly the settings that produced it, measured or not.
+    """
+    base = get_preset(width)
+    if length == DEFAULT_LENGTH:
+        return base
+    try:
+        min_span, verify_margin = LENGTH_PROFILES[length]
+    except KeyError:
+        raise ValueError(f'unknown passage-length profile {length!r}; '
+                         f'known: {sorted(LENGTH_PROFILES)}')
+    return replace(base, name=f'{width}+{length}', min_span=min_span,
+                   verify_margin=verify_margin)
+
+
+# The one measured point on the short axis, registered so evaluation tooling
+# can name it directly.
+SHORT_28 = PassagePolicy(name='short-28', min_span=28, verify_margin=12,
                          density_scale=1.8)
 
 PRESETS = {p.name: p for p in
            (STANDARD_40, STANDARD_40_NOISY, FLAT_25, FLAT_25_NOISY,
-            WIDE_40, WIDER_40, WIDEST_40, MAX_40, ANCHOR_SWEEP_40,
-            NAMES_10)}
+            WIDE_40, WIDER_40, WIDEST_40, MAX_40, SHORT_28)}
 DEFAULT_POLICY = STANDARD_40
 
 

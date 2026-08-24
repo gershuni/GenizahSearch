@@ -1017,64 +1017,32 @@ A major overhaul of how LOCAL Hebrew PDFs are read into the My Library index, dr
 
 ## [Unreleased]
 
-### Letter-level search: anchor-evidence tier, opt-in "Recall sweep" width (2026-08-24)
+### Letter-level search: a second control axis — passage length (2026-08-24)
 
-The passage matcher's span acceptance is a contiguous-alignment detector, and the Megillat
-Antiochus method comparison (2026-08-23; 83 adjudicated positives across five search runs)
-measured what that costs: the letter presets missed **every** Arabic and rhymed-Hebrew version
-of the scroll — witnesses that share only names and short collocations with the query — while
-word-chunk matching at size 2 caught them, at 5% precision. The new **anchor-evidence tier**
-(spec section 10.4) is that detector class rebuilt from the engine's own DF-capped grams:
+The Match-width control assumed one dimension. Chasing the Antiochus recall gap turned up a
+second, and a parameter that had been deciding results invisibly.
 
-- **Opt-in per policy** (`anchor_tier`, default off) and exposed on the parallels page as the
-  Match-width step "Recall sweep (adds anchor evidence)" (`anchor-sweep-40` = max-40's span
-  results plus the tier). Records that never form an acceptable span but share ≥ 8 distinct
-  admitted gram codes with the query are ADDED as clearly labelled 'עדות עוגן (anchor
-  evidence)' rows that always rank below every aligned match — the two tiers' scores are
-  different units (distinct codes vs matched letters) and never interleave.
-- **Honest by construction:** anchor rows carry cluster extents as display windows (never
-  alignments), a 1.0 density upper bound, their own report fields (`anchor_records`,
-  `anchor_truncated`), and a cap (300). Pre-existing presets keep byte-identical behaviour
-  AND byte-identical `policy_id`s — the anchor fields join the identity hash only when the
-  tier is on, so the measurement ledger's recorded ids stay valid (pinned by test).
-- **Measured, and corrected.** The adjudicated Antiochus deck was run against the first build
-  on 2026-08-24 and it failed its own purpose: 77% recall, but only 4 of the 20 targets the
-  tier was built for, at 4% precision in the tier, with the cap saturated by long biblical
-  manuscripts. Counting shared codes ranks by record LENGTH — a formulaic codex shares many
-  common grams, a short translation few rare ones. So membership is now gated on rarity
-  (`anchor_df_max`) and ordering uses Σ log10(N/df) weight, not the count. The gated build is
-  not yet measured.
-- **Also fixed from PR review:** a record the verify cap never tried is no longer reported as
-  "no alignment accepted" (it is withheld and counted in `anchor_withheld_unverified`) — the
-  untried tail is exactly where anchor-tier records live, so that mislabel was the common
-  case; and the result card now renders a tier badge and the shared-term count instead of
-  rounding the anchor row's scaled score to a flat "0" under a "Manuscript Text" heading.
-
-### Letter-level search: the verification margin is now policy (2026-08-24)
-
-Chasing the Antiochus recall gap turned up a parameter that had been deciding results
-invisibly. Verification extends a match by `MARGIN` letters each side before scoring edit
-density; at the default span floor of 40 that 30-letter window is harmless overhead, but below
-about 25 it *is* the result. A true 9-letter shared run gets scored across ~70 letters of
-unrelated flanking text and rejected at ~0.85 density.
-
-- **Lowering `min_span` alone does nothing** — measured. `rejected_short` falls to zero and
-  `rejected_density` absorbs every candidate it used to reject, so the search looks looser and
-  returns exactly the same records. The margin has to move with it, which is why it is now
-  `verify_margin` on the policy rather than a module constant.
-- **Why this matters for cross-version finds:** a proper noun transliterated into a
-  Judeo-Arabic translation is the *same Hebrew letters* as in the Aramaic original, so a
-  translation really does share 7–14 letter contiguous runs with the query. That is genuine
-  short-span evidence — the thing word-chunk matching was picking up and every letter preset
-  was throwing away. On the fixture, margin 8 + span 10 finds the clean copy, a 15%-CER copy
-  and the translation with no false hits, where margin 30 misses the translation at every span
-  floor.
-- New `names-10` preset carries those settings for sweeping, and
-  `scripts/compare_passage_policies.py` gained `--min-span` / `--verify-margin` probes. Not
-  offered in the GUI: the fixture is synthetic, real Hebrew has far more chance collisions at
-  10 letters, and this needs measuring against the adjudicated deck first.
-- Pre-existing presets keep byte-identical behaviour and `policy_id`s (the field enters the
-  identity hash only when moved off 30).
+- **`verify_margin` is now policy.** Verification extends a match by 30 letters each side before
+  scoring edit density. At a span floor of 40 that is harmless overhead; below ~25 it *is* the
+  result — a true 9-letter shared run gets scored across ~70 letters of unrelated flanking text
+  and rejected at ~0.85 density. Consequence, measured: **lowering `min_span` alone does
+  nothing**, because the floor is checked against the margin-extended window. The two move
+  together or not at all.
+- **New "Passage length" control** — *Normal passages* (40, 30) or *Also short passages*
+  (28, 12) — beside the existing Match width. On the Antiochus query against an 83-positive
+  adjudicated deck, `short` takes widest-40 from 56 manuscripts at 100% precision / 67% recall to
+  104 at 61% / 72%: five more graded positives, plus one witness **no method had found before**,
+  word-chunk matching included (MS heb. e.45/36, catalogued מגילת אנטיוכוס). It does not reach
+  cross-language witnesses, and it roughly doubles what you skim.
+- **Two selects, not sliders.** `min_span` and `verify_margin` are one coupled decision; a slider
+  on the floor alone would visibly do nothing and read as broken. Each offered combination stays
+  a named, content-hashed policy, and passage length now forms part of the search identity used
+  by preserve/recover.
+- **The anchor-evidence tier is removed.** It was measured twice against the same deck and failed
+  both times — 4% then 1% precision inside the tier, recovering 4 then 1 of the 20 witnesses it
+  was built for. Counting shared grams ranks by record length, and rarity-gating merely resampled
+  the same noise. The negative result is kept in the spec (section 10.4) so it is not reinvented.
+- Pre-existing presets keep byte-identical behaviour and `policy_id`s.
 
 ### Download the computed identifications as a spreadsheet (2026-08-21)
 

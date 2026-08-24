@@ -19,7 +19,8 @@ from shared.passage_builder import build_index  # noqa: E402
 from shared.passage_index import open_index  # noqa: E402
 from shared.passage_normalize import norm_stream_fast  # noqa: E402
 from shared.passage_policy import (  # noqa: E402
-    DEFAULT_POLICY, FLAT_25, PRESETS, STANDARD_40, PassagePolicy, get_preset,
+    DEFAULT_POLICY, FLAT_25, LENGTH_PROFILES, PRESETS, STANDARD_40,
+    PassagePolicy, compose, get_preset,
 )
 from shared.passage_search import search_passage  # noqa: E402
 
@@ -101,13 +102,9 @@ def test_presets_are_registered_and_default_is_standard_40():
                             # max-40: the GUI's "Maximal" step (owner,
                             # 2026-08-23, Birkat Hamazon session)
                             'max-40',
-                            # anchor-sweep-40: max-40 plus the anchor-evidence
-                            # tier (spec section 10.4, the Antiochus method
-                            # comparison)
-                            'anchor-sweep-40',
-                            # names-10: short contiguous evidence -- the
-                            # verify_margin finding (spec section 8.1)
-                            'names-10',
+                            # short-28: the measured point on the SECOND
+                            # axis -- passage length (spec section 8.1)
+                            'short-28',
                             'flat-25', 'flat-25-noisy'}
     with pytest.raises(ValueError):
         get_preset('slider-17')
@@ -339,14 +336,12 @@ def test_no_cap_admits_the_same_grams_as_an_effectively_unlimited_cap(
 
 
 # ---------------------------------------------------------------------------
-# Anchor-evidence tier (spec section 10.4).
+# Policy identity across schema growth. The seven presets that predate the
+# 2026-08-24 fields keep the ids their ledger measurements were recorded
+# under (shared/retrieval_eval.py keys on policy_id); pinned so a future
+# field addition cannot silently orphan them again.
 # ---------------------------------------------------------------------------
 
-# The seven pre-2026-08-23 presets keep the ids their ledger measurements
-# were recorded under (shared/retrieval_eval.py keys on policy_id): the
-# anchor fields join the identity hash ONLY when anchor_tier is True.
-# Verified against HEAD before the anchor fields landed; pinned here so a
-# future field addition cannot silently orphan recorded measurements again.
 _MEASURED_PRESET_IDS = {
     'standard-40': 'pp1-dfd44076cf548ea5',
     'standard-40-noisy': 'pp1-a23d529e202fe27f',
@@ -358,259 +353,50 @@ _MEASURED_PRESET_IDS = {
 }
 
 
-def test_pre_anchor_presets_keep_their_measured_ids():
+def test_presets_keep_their_measured_ids():
     for name, pid in _MEASURED_PRESET_IDS.items():
         assert get_preset(name).policy_id == pid
 
 
-def test_anchor_fields_join_identity_only_when_enabled():
-    off_a = PassagePolicy(name='x')
-    off_b = PassagePolicy(name='x', anchor_min_codes=9, anchor_cap=7)
-    assert off_a.policy_id == off_b.policy_id
-    on_a = PassagePolicy(name='x', anchor_tier=True)
-    on_b = PassagePolicy(name='x', anchor_tier=True, anchor_min_codes=9)
-    assert on_a.policy_id != off_a.policy_id
-    assert on_a.policy_id != on_b.policy_id
+# ---------------------------------------------------------------------------
+# compose(): the two-axis control surface (width x passage length).
+# ---------------------------------------------------------------------------
+
+def test_compose_normal_is_the_width_preset_itself():
+    for name in _MEASURED_PRESET_IDS:
+        assert compose(name) is get_preset(name)
+        assert compose(name, 'normal') is get_preset(name)
+
+
+def test_compose_short_moves_both_coupled_parameters():
+    """min_span and verify_margin are ONE decision (spec 8.1); the profile
+    must move both or it silently does nothing."""
+    base, short = get_preset('widest-40'), compose('widest-40', 'short')
+    assert (base.min_span, base.verify_margin) == (40, 30)
+    assert (short.min_span, short.verify_margin) == (28, 12)
+    # width is preserved, identity is distinct and self-describing
+    assert short.density_scale == base.density_scale
+    assert short.name == 'widest-40+short'
+    assert short.policy_id != base.policy_id
+
+
+def test_compose_rejects_an_unknown_profile():
     with pytest.raises(ValueError):
-        PassagePolicy(name='x', anchor_min_codes=1)
+        compose('widest-40', 'medium-ish')
     with pytest.raises(ValueError):
-        PassagePolicy(name='x', anchor_cap=0)
+        compose('no-such-width', 'short')
 
 
-@pytest.fixture(scope='module')
-def scatter_index(tmp_path_factory):
-    """A synthetic 'translation' fixture: records that share only SCATTERED
-    SHORT collocations with the reference text -- names in a translation --
-    far below MIN_SPAN, so span acceptance can never fire on them."""
-    d = str(tmp_path_factory.mktemp('panchor'))
-    reference = _aperiodic(400)
-    snippets = [reference[40:54], reference[180:194], reference[320:334]]
-    records = []
-    # records 0..4: 'translations' -- unrelated body + the three snippets
-    # at scattered offsets (different diagonals, never one 40-letter run).
-    for r in range(5):
-        body = _aperiodic(360, salt=5000 + r)
-        text = (body[:90] + snippets[0] + body[90:200] + snippets[1]
-                + body[200:300] + snippets[2] + body[300:])
-        records.append((f'trn{r:03d}', text))
-    # records 5..14: pure unrelated text.
-    for r in range(5, 15):
-        records.append((f'unr{r:03d}', _aperiodic(400, salt=9000 + r)))
-    # record 15: a verbatim carrier of the reference -- a span hit.
-    records.append(('carrier015', _aperiodic(100, salt=77) + reference
-                    + _aperiodic(100, salt=78)))
-    build_index(records, d, partitions=3, apply_hygiene=False)
-    idx = open_index(d)
-    assert idx is not None
-    return idx, reference
-
-
-def test_anchor_tier_off_by_default_and_inert(scatter_index):
-    idx, reference = scatter_index
-    hits, report = search_passage(idx, reference, STANDARD_40)
-    assert report.anchor_tier_enabled is False
-    assert report.anchor_records == 0
-    assert all(h.tier == 'span' for h in hits)
-    # The scattered-collocation records are invisible to the span tiers --
-    # the blindness the anchor tier exists to remove.
-    assert not any(h.record_id.startswith('trn') for h in hits)
-
-
-def test_anchor_tier_reports_scattered_collocations(scatter_index):
-    idx, reference = scatter_index
-    policy = PassagePolicy(name='t-anchor', density_scale=2.0,
-                           anchor_tier=True)
-    hits, report = search_passage(idx, reference, policy)
-    assert report.anchor_tier_enabled is True
-    span_ids = {h.record_id for h in hits if h.tier == 'span'}
-    anchor_ids = {h.record_id for h in hits if h.tier == 'anchor'}
-    # The verbatim carrier is a span hit; NEVER duplicated as an anchor hit.
-    assert 'carrier015' in span_ids
-    assert not (span_ids & anchor_ids)
-    # Every 'translation' surfaces in the anchor tier; unrelated records not.
-    assert {f'trn{r:03d}' for r in range(5)} <= anchor_ids
-    assert not any(rid.startswith('unr') for rid in anchor_ids)
-    assert report.anchor_records == len(anchor_ids)
-    for h in hits:
-        if h.tier == 'anchor':
-            assert h.matched_letters == 0
-            assert h.best_density == 1.0
-            assert h.anchor_codes >= policy.anchor_min_codes
-            assert h.score == float(h.anchor_codes)
-            assert h.spans and all(len(s) == 5 for s in h.spans)
-    # Tiers never interleave: every span hit precedes every anchor hit.
-    tiers = [h.tier for h in hits]
-    assert tiers == sorted(tiers, key=lambda t: t != 'span')
-
-
-def test_anchor_tier_is_deterministic_and_cap_reports(scatter_index):
-    idx, reference = scatter_index
-    policy = PassagePolicy(name='t-anchor', density_scale=2.0,
-                           anchor_tier=True)
-    a = search_passage(idx, reference, policy)
-    b = search_passage(idx, reference, policy)
-    assert [(h.record_id, h.tier, h.score, h.spans) for h in a[0]] == \
-           [(h.record_id, h.tier, h.score, h.spans) for h in b[0]]
-    capped = PassagePolicy(name='t-anchor-cap', density_scale=2.0,
-                           anchor_tier=True, anchor_cap=2)
-    hits_c, report_c = search_passage(idx, reference, capped)
-    anchors_c = [h for h in hits_c if h.tier == 'anchor']
-    assert len(anchors_c) == 2
-    assert report_c.anchor_truncated is True
-    assert report_c.anchor_records == 2
-    # The cap keeps the strongest-evidenced records, in the full run's order.
-    full_anchors = [h.record_id for h in a[0] if h.tier == 'anchor']
-    assert [h.record_id for h in anchors_c] == full_anchors[:2]
-
-
-def test_anchor_tier_respects_record_restriction(scatter_index):
-    idx, reference = scatter_index
-    policy = PassagePolicy(name='t-anchor', density_scale=2.0,
-                           anchor_tier=True)
-    hits, _report = search_passage(
-        idx, reference, policy,
-        record_allowed=lambda rid: not rid.startswith('trn'))
-    assert not any(h.record_id.startswith('trn') for h in hits)
-
-
-@pytest.fixture(scope='module')
-def formulaic_index(tmp_path_factory):
-    """The failure the 2026-08-24 Antiochus run exposed, in miniature.
-
-    MANY records share numerous SHORT COMMON phrases with the query (as
-    biblical Aramaic manuscripts share stock formulae with a Daniel-imitating
-    text); ONE short record shares a FEW RARE snippets (as an Arabic
-    translation shares only names). Every shared piece is short and
-    scattered, so nothing forms an acceptable span and all of it lands in the
-    anchor tier -- which is the situation the real run produced, where
-    99 כתובים / 35 Daniel / 25 Targum filled the cap and the true finds sat
-    on its floor.
-    """
-    d = str(tmp_path_factory.mktemp('pformula'))
-    stock = [_aperiodic(12, salt=4242 + i) for i in range(20)]  # df ~40 each
-    rare = [_aperiodic(12, salt=900 + i) for i in range(6)]     # df 1 each
-
-    # The query carries all of both, each piece isolated by filler so no long
-    # contiguous run exists on either side of any later comparison.
-    parts = []
-    for i, piece in enumerate(stock + rare):
-        parts.append(_aperiodic(40, salt=200 + i))
-        parts.append(piece)
-    query = ''.join(parts)
-
-    records = []
-    for r in range(40):
-        body = [_aperiodic(45, salt=6000 + r * 31 + i) for i in range(21)]
-        text = ''
-        for i, piece in enumerate(stock):
-            text += body[i] + piece
-        records.append((f'frm{r:03d}', text + body[20]))
-    # The target: short, sharing ONLY the rare snippets.
-    tgt = ''
-    for i, piece in enumerate(rare):
-        tgt += _aperiodic(45, salt=8000 + i) + piece
-    records.append(('rare000', tgt))
-
-    build_index(records, d, partitions=3, apply_hygiene=False)
-    idx = open_index(d)
-    assert idx is not None
-    return idx, query
-
-
-def test_rarity_gate_keeps_the_distinctive_record_over_the_formulaic_ones(
-        formulaic_index):
-    """The regression that motivated anchor_df_max + weight ordering."""
-    idx, query = formulaic_index
-    # Stock grams have df ~40, the rare ones df 1: a cutoff between the two
-    # is exactly what separates 'distinctive' from 'stock phrase'.
-    gated = PassagePolicy(name='t-gated', anchor_tier=True,
-                          anchor_df_max=10, anchor_min_codes=4)
-    hits, _report = search_passage(idx, query, gated)
-    anchors = [h for h in hits if h.tier == 'anchor']
-    by_id = {h.record_id: h for h in anchors}
-    assert 'rare000' in by_id, 'the distinctive record must survive'
-    assert anchors[0].record_id == 'rare000', 'and must rank first'
-    assert all(h.anchor_weight > 0 for h in anchors)
-
-    # Formula-bearers can still appear -- in a 22-letter synthetic alphabet
-    # random 5-gram collisions hand a few of them a rare code, which is a
-    # property of the fixture, not of the gate. What the gate must deliver is
-    # SEPARATION: the stock-phrase evidence has to collapse to noise level
-    # while the distinctive record keeps all of its.
-    frm = [h for h in anchors if h.record_id.startswith('frm')]
-    assert frm, 'fixture assumption: collisions do reach the tier'
-    assert by_id['rare000'].anchor_weight > 5 * max(h.anchor_weight
-                                                    for h in frm)
-
-    # Ungated (the pre-fix behaviour): the formulaic records flood the tier
-    # AND invert the raw count -- a stock-phrase record outscores the real
-    # one on codes, which is precisely why the cap used to keep the wrong
-    # records. Weight ordering survives the inversion; counting does not.
-    ungated = PassagePolicy(name='t-ungated', anchor_tier=True,
-                            anchor_df_max=10 ** 9, anchor_min_codes=4)
-    hits_u, _r = search_passage(idx, query, ungated)
-    anchors_u = [h for h in hits_u if h.tier == 'anchor']
-    frm_u = [h for h in anchors_u if h.record_id.startswith('frm')]
-    rare_u = next(h for h in anchors_u if h.record_id == 'rare000')
-    assert len(frm_u) > 2 * len(frm), 'the gate must thin the flood'
-    assert max(h.anchor_codes for h in frm_u) > rare_u.anchor_codes, \
-        'fixture must reproduce the COUNT inversion the fix is about'
-    assert anchors_u[0].record_id == 'rare000', \
-        'weight ordering must beat the count inversion even ungated'
-
-
-def test_anchor_cap_keeps_the_highest_WEIGHT_not_the_highest_count(
-        formulaic_index):
-    """A count-ordered cap keeps the records sharing the most stock phrases;
-    a weight-ordered cap keeps the distinctive one. With a single slot and
-    NO rarity gate, the rare record must still win -- that is the ordering
-    fix, independent of the membership gate."""
-    idx, query = formulaic_index
-    allp = PassagePolicy(name='t-all', anchor_tier=True,
-                         anchor_df_max=10 ** 9, anchor_min_codes=4)
-    everything = {h.record_id: h for h in search_passage(idx, query, allp)[0]
-                  if h.tier == 'anchor'}
-    assert 'rare000' in everything
-    assert max(h.anchor_codes for h in everything.values()) > \
-        everything['rare000'].anchor_codes, (
-        'fixture must have a formulaic record with a HIGHER raw count, '
-        'otherwise the weight ordering is not actually under test')
-
-    one = PassagePolicy(name='t-one', anchor_tier=True,
-                        anchor_df_max=10 ** 9, anchor_min_codes=4,
-                        anchor_cap=1)
-    hits, report = search_passage(idx, query, one)
-    anchors = [h for h in hits if h.tier == 'anchor']
-    assert len(anchors) == 1 and report.anchor_truncated is True
-    assert anchors[0].record_id == 'rare000', (
-        'the single kept anchor must be the rarest-evidenced record, not '
-        'the one sharing the most stock formula')
-
-
-def test_unverified_records_are_never_reported_as_anchor_only(scatter_index):
-    """PR #327 review (Codex P1). `merged` holds only records that were
-    actually verified AND accepted, so a record the verify cap never tried
-    trivially satisfies 'not in merged'. Reporting it as anchor-only asserts
-    'no alignment accepted' about a check that never ran -- and because
-    verification is ordered by anchor strength, the untried tail is exactly
-    where the anchor tier's own population sits, so this is the common case,
-    not a corner. Two verbatim carriers with verify_cap=1: the second must
-    NOT come back as an anchor hit."""
-    idx, reference = scatter_index
-    policy = PassagePolicy(name='t-cap1', density_scale=2.0, anchor_tier=True,
-                           anchor_min_codes=2, anchor_df_max=10 ** 9,
-                           verify_cap=1)
-    hits, report = search_passage(idx, reference, policy)
-    assert report.verify_truncated is True
-    spans = [h for h in hits if h.tier == 'span']
-    anchors = [h for h in hits if h.tier == 'anchor']
-    assert len(spans) == 1, 'verify_cap=1 admits exactly one accepted span'
-    # The carrier is a real contiguous match; it must never be demoted to
-    # anchor-only just because the cap stopped before its other clusters.
-    assert 'carrier015' not in {h.record_id for h in anchors}
-    # Records withheld for being untried are COUNTED, never silently dropped.
-    assert report.anchor_withheld_unverified >= 1
-    assert report.anchor_records == len(anchors)
+def test_every_offered_combination_is_a_distinct_named_policy():
+    """The surface offers a small discrete grid, not a slider: each cell
+    must be nameable and separately identifiable."""
+    ids, names = set(), set()
+    for width in _MEASURED_PRESET_IDS:
+        for length in LENGTH_PROFILES:
+            p = compose(width, length)
+            ids.add(p.policy_id)
+            names.add(p.name)
+    assert len(ids) == len(names) == len(_MEASURED_PRESET_IDS) * len(LENGTH_PROFILES)
 
 
 # ---------------------------------------------------------------------------

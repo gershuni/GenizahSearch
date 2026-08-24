@@ -153,6 +153,7 @@ def passage_available() -> bool:
 
 def get_passage_searcher(text_fetcher: "PageTextFetcher",
                          preset: str = 'widest-40',
+                         length: str = 'normal',
                          render_cap: int | None = None):
     """A fresh ``PassageSearcher``, or ``None`` when unavailable.
 
@@ -173,7 +174,7 @@ def get_passage_searcher(text_fetcher: "PageTextFetcher",
     if idx is None:
         return None
     from shared.passage_parallels import PassageSearcher  # local: shared/ stays import-light for web/
-    from shared.passage_policy import get_preset
+    from shared.passage_policy import compose
     # widest-40 (density_scale 1.8) by owner ruling 2026-08-23, decided on two
     # live GUI case studies graded row-by-row by the owner: at the old default
     # (standard-40, 1.0) the Yom Shabbaton query surfaced 13 of his 28
@@ -184,10 +185,11 @@ def get_passage_searcher(text_fetcher: "PageTextFetcher",
     # web surface opts in HERE, deliberately: DEFAULT_POLICY stays
     # standard-40 so evaluation tooling keeps choosing its policy
     # explicitly. A user-facing control for this knob is planned (146A).
-    # `preset` is the page's Match-width control (owner ruling 2026-08-23:
-    # letter-level search gets its own controls); widest-40 stays the default
-    # per the same day's earlier ruling. An unknown name raises in get_preset
-    # -- fail loudly, never silently fall back to a different width.
+    # `preset` is the page's Match-width control and `length` its
+    # Passage-length control (two measured axes, 2026-08-24: how far a copy
+    # may drift vs how short a shared passage counts). widest-40 + normal
+    # stays the default. An unknown name raises inside compose() -- fail
+    # loudly, never silently fall back to different settings.
     # render_cap: None keeps the searcher's own default (the API's
     # 200-group envelope contract); the page passes 0 for UNCAPPED (owner
     # ruling 2026-08-23 -- its display layer batches, its export layer has
@@ -198,4 +200,4 @@ def get_passage_searcher(text_fetcher: "PageTextFetcher",
     # ask for one, so the searcher's own default still applies.
     kwargs = {} if render_cap is None else {'render_cap': render_cap}
     return PassageSearcher(index=idx, text_fetcher=text_fetcher,
-                           policy=get_preset(preset), **kwargs)
+                           policy=compose(preset, length), **kwargs)
