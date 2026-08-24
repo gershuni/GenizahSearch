@@ -301,6 +301,13 @@ distractors):
 nothing: a 9-letter name already yields 5 grams, so it clears the two-hit rule, and dropping to
 1 multiplied candidates ~5x with no new finds.
 
+The deck, the scorer and the five graded runs are committed at
+[`eval/antiochus/`](../../eval/antiochus/README.md) — every figure below is reproducible with
+`python scripts/score_antiochus_deck.py --all`, and a new policy is put on the same scale with
+`--run`. Read that README's "Known limits" before quoting a number: this is one query, the deck
+is a union of runs rather than the corpus, and the verdicts are LLM adjudication that was
+spot-checked, not audited.
+
 **Measured on the real corpus, 2026-08-24.** The synthetic pair (10, 8) was far too loose at
 700K records — 236 manuscripts at 32% precision, because chance 10-letter collisions are common
 in real Hebrew and rare in random text. The measured operating point is **(28, 12)**, offered
@@ -462,7 +469,8 @@ cannot reach witnesses that share no contiguous run with the query: translations
 reworkings, rubrics that only *name* the work. An "anchor-evidence" tier was built to cover
 that class — report records that share many distinct DF-capped gram codes with the query but
 produce no accepted span — and measured twice on the Antiochus query against an 83-positive
-adjudicated deck. **Both runs failed, and the second was worse than the first.**
+adjudicated deck ([`eval/antiochus/`](../../eval/antiochus/README.md)).
+**Both runs failed, and the second was worse than the first.**
 
 | build | anchor-tier precision | recall | targets recovered |
 |---|---|---|---|

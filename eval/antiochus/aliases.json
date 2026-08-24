@@ -1,0 +1,57 @@
+{
+  "_comment": [
+    "Hand-verified shelfmark equivalences that scripts/shelfmark_join.py::shelfmark_key",
+    "cannot derive, because the two catalogues genuinely disagree about the name rather",
+    "than about punctuation. Each pair was checked against the catalogue record by eye",
+    "on 2026-08-24 while grading the Antiochus deck.",
+    "",
+    "'canonical' is the form the adjudicated deck uses; 'variants' are the forms seen in",
+    "libraries.csv or in a GUI export of the same manuscript. Add an entry ONLY after",
+    "confirming the two names denote one manuscript -- a wrong entry silently merges two",
+    "distinct fragments and inflates precision."
+  ],
+  "aliases": [
+    {
+      "canonical": "Ms. Misc. 31",
+      "variants": ["L-G Misc. 31"],
+      "note": "Lewis-Gibson Miscellaneous 31; Westminster College numbering."
+    },
+    {
+      "canonical": "T-S A45.9",
+      "variants": ["T-S A 45.09"],
+      "note": "Zero-padded fraction in one catalogue, unpadded in the other."
+    },
+    {
+      "canonical": "Ms. 1774/1",
+      "variants": ["Gaster heb. ms 1774/1"],
+      "note": "Gaster collection, Manchester (John Rylands)."
+    },
+    {
+      "canonical": "Ms. Genizah 62",
+      "variants": ["Catalogue Halper, Philadelphia 62"],
+      "note": "Halper catalogue number vs Penn/Katz Center shelfmark."
+    },
+    {
+      "canonical": "ENA NS I.89c",
+      "variants": ["Adler, Elkan Nathan Ms. NS 1.89c"],
+      "note": "JTS ENA New Series; roman vs arabic numeral for the series."
+    }
+  ],
+  "_rejected": [
+    {
+      "canonical": "Ms. 1774",
+      "variants": ["Gaster, Moses Collection"],
+      "why_rejected": [
+        "Accepted during the 2026-08-24 grading session and REVERSED on 2026-08-24",
+        "when loading the deck through this table merged two entries carrying",
+        "OPPOSITE verdicts: 'Gaster, Moses Collection' is graded NOISE and",
+        "'Ms. 1774' is graded WITNESS. A conflict of that shape means one of two",
+        "things, and both forbid the alias: either the equation is wrong, or one",
+        "of the two gradings is. 'Gaster, Moses Collection' is a COLLECTION-level",
+        "string in libraries.csv covering many manuscripts, so it cannot be",
+        "equated with a single codex -- the equation is what is wrong.",
+        "Kept here rather than deleted so it is not re-derived and re-accepted."
+      ]
+    }
+  ]
+}

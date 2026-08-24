@@ -33,11 +33,13 @@ import sys
 from dataclasses import replace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from shared.passage_index import (  # noqa: E402
     MANIFEST_NAME, diagnose_index, open_index,
 )
 from shared.passage_policy import PRESETS, get_preset  # noqa: E402
+from shelfmark_join import shelfmark_key  # noqa: E402,F401
 from shared.passage_search import search_passage  # noqa: E402
 
 
@@ -93,37 +95,11 @@ def load_shelfmarks(csv_path: str) -> dict:
     return out
 
 
-# Library-name prefixes that libraries.csv embeds in `call_numbers` but the
-# app's own exports do not. Joining a delta CSV against a GUI export on the
-# raw string therefore fails silently and looks like "hundreds of new
-# manuscripts" -- it cost one real analysis (2026-08-24), so the normalized
-# key ships as its own column rather than being left to each consumer.
-_LIB_PREFIXES = (
-    'cambridge university library', 'the bodleian libraries',
-    'bodleian libraries', 'university of oxford', 'the british library',
-    'british library', 'the jewish theological seminary of america',
-    'jewish theological seminary of america', 'jewish theological seminary',
-    'the national library of russia', 'national library of russia',
-    'national library of israel', 'the university of manchester library',
-    'university of manchester library', 'alliance israelite universelle',
-    'westminster college', 'katz center', 'oriental studies library',
-    'adler, elkan nathan', 'adler elkan nathan',
-)
-
-
-def shelfmark_key(shelfmark: str) -> str:
-    """Case/punctuation/library-prefix-free join key for a shelfmark.
-
-    'Cambridge University Library Ms. T-S NS 312' and 'Ms. T-S NS 312' are
-    the same manuscript written two ways; so are 'Or. 2116.12.A.2' and
-    'Or.2116.12a.2'. Everything non-alphanumeric goes, because the variation
-    is entirely in spacing, dots and case.
-    """
-    s = (shelfmark or '').lower().strip()
-    for pref in sorted(_LIB_PREFIXES, key=len, reverse=True):
-        s = s.replace(pref, ' ')
-    s = s.replace('mss.', ' ').replace('ms.', ' ')
-    return ''.join(ch for ch in s if ch.isalnum())
+# The shelfmark join lives in ONE place (scripts/shelfmark_join.py), shared
+# with scripts/score_antiochus_deck.py: a join rule defined twice is a join
+# rule that drifts, and this one failing silently already cost two wrong
+# measurements. The normalized key ships as its own CSV column rather than
+# being left to each consumer to re-derive.
 
 
 def sys_id_of(record_id: str) -> str:

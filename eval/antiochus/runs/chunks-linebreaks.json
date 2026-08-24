@@ -1,0 +1,534 @@
+{
+"run": "chunks-linebreaks",
+"rows": 88,
+"results": [
+{
+"rank": 1,
+"shelfmark": "T-S A45.10",
+"score": 2466.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 2,
+"shelfmark": "T-S A45.12",
+"score": 1244.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 3,
+"shelfmark": "T-S A45.10",
+"score": 1194.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 4,
+"shelfmark": "Ms. Ebr. 4",
+"score": 1088.0,
+"library": "Oriental Studies Library, Turin"
+},
+{
+"rank": 5,
+"shelfmark": "T-S A45.10",
+"score": 1008.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 6,
+"shelfmark": "T-S A45.10",
+"score": 998.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 7,
+"shelfmark": "Or.2116.12a.5",
+"score": 850.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 8,
+"shelfmark": "Ms. Evr. Antonin B 385",
+"score": 806.0,
+"library": "The National Library of Russia"
+},
+{
+"rank": 9,
+"shelfmark": "T-S A45.15",
+"score": 745.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 10,
+"shelfmark": "T-S A45.12",
+"score": 692.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 11,
+"shelfmark": "T-S A45.11",
+"score": 614.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 12,
+"shelfmark": "Ms. Misc. 31",
+"score": 613.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 13,
+"shelfmark": "Ms. Evr. Antonin B 385",
+"score": 603.0,
+"library": "The National Library of Russia"
+},
+{
+"rank": 14,
+"shelfmark": "Or.2116.12a.5",
+"score": 582.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 15,
+"shelfmark": "T-S A45.12",
+"score": 554.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 16,
+"shelfmark": "T-S A45.12",
+"score": 540.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 17,
+"shelfmark": "Or.2116.12a.5",
+"score": 531.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 18,
+"shelfmark": "Ms. Evr. Antonin B 385",
+"score": 495.0,
+"library": "The National Library of Russia"
+},
+{
+"rank": 19,
+"shelfmark": "T-S A45.10",
+"score": 473.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 20,
+"shelfmark": "T-S A45.15",
+"score": 455.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 21,
+"shelfmark": "Ms. Misc. 31",
+"score": 433.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 22,
+"shelfmark": "T-S A45.11",
+"score": 421.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 23,
+"shelfmark": "MS heb. d.49/37",
+"score": 393.0,
+"library": "The Bodleian Libraries, University of Oxford"
+},
+{
+"rank": 24,
+"shelfmark": "T-S A45.13",
+"score": 382.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 25,
+"shelfmark": "MS heb. d.49/37",
+"score": 379.0,
+"library": "The Bodleian Libraries, University of Oxford"
+},
+{
+"rank": 26,
+"shelfmark": "T-S A45.13",
+"score": 361.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 27,
+"shelfmark": "MS heb. d.37/69",
+"score": 354.0,
+"library": "The Bodleian Libraries, University of Oxford"
+},
+{
+"rank": 28,
+"shelfmark": "T-S NS 311.121",
+"score": 348.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 29,
+"shelfmark": "T-S NS 311.121",
+"score": 320.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 30,
+"shelfmark": "Or. 5560A.4",
+"score": 317.0,
+"library": "The British Library"
+},
+{
+"rank": 31,
+"shelfmark": "T-S Misc.24.93",
+"score": 314.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 32,
+"shelfmark": "MS heb. d.37/69",
+"score": 295.0,
+"library": "The Bodleian Libraries, University of Oxford"
+},
+{
+"rank": 33,
+"shelfmark": "MS heb. d.37/69",
+"score": 295.0,
+"library": "The Bodleian Libraries, University of Oxford"
+},
+{
+"rank": 34,
+"shelfmark": "Ms. 1774/1",
+"score": 276.0,
+"library": "The University of Manchester Library"
+},
+{
+"rank": 35,
+"shelfmark": "T-S A45.15",
+"score": 257.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 36,
+"shelfmark": "T-S A45.15",
+"score": 253.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 37,
+"shelfmark": "MS heb. d.49/37",
+"score": 252.0,
+"library": "The Bodleian Libraries, University of Oxford"
+},
+{
+"rank": 38,
+"shelfmark": "MS heb. d.49/37",
+"score": 251.0,
+"library": "The Bodleian Libraries, University of Oxford"
+},
+{
+"rank": 39,
+"shelfmark": "Ms. 1774/1",
+"score": 250.0,
+"library": "The University of Manchester Library"
+},
+{
+"rank": 40,
+"shelfmark": "T-S A45.15",
+"score": 207.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 41,
+"shelfmark": "T-S AS 67.31",
+"score": 198.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 42,
+"shelfmark": "T-S A45.9",
+"score": 182.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 43,
+"shelfmark": "T-S Misc.20.199",
+"score": 175.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 44,
+"shelfmark": "Ms. VII A 44",
+"score": 172.0,
+"library": "Alliance Israélite Universelle"
+},
+{
+"rank": 45,
+"shelfmark": "Or.2116.12a.4",
+"score": 166.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 46,
+"shelfmark": "Or. 5560A.4",
+"score": 165.0,
+"library": "The British Library"
+},
+{
+"rank": 47,
+"shelfmark": "T-S Misc.20.199",
+"score": 161.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 48,
+"shelfmark": "Ms. VII A 44",
+"score": 151.0,
+"library": "Alliance Israélite Universelle"
+},
+{
+"rank": 49,
+"shelfmark": "Ms. Ebr. 4",
+"score": 147.0,
+"library": "Oriental Studies Library, Turin"
+},
+{
+"rank": 50,
+"shelfmark": "Or.2116.16",
+"score": 147.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 51,
+"shelfmark": "T-S Misc.24.93",
+"score": 144.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 52,
+"shelfmark": "T-S A45.12",
+"score": 117.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 53,
+"shelfmark": "T-S AS 67.31",
+"score": 115.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 54,
+"shelfmark": "Or.2116.12a.4",
+"score": 108.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 55,
+"shelfmark": "Ms. Ebr. 4",
+"score": 99.0,
+"library": "Oriental Studies Library, Turin"
+},
+{
+"rank": 56,
+"shelfmark": "Ms. Evr. Antonin B 59",
+"score": 96.0,
+"library": "The National Library of Russia"
+},
+{
+"rank": 57,
+"shelfmark": "Ms. VII A 44",
+"score": 95.0,
+"library": "Alliance Israélite Universelle"
+},
+{
+"rank": 58,
+"shelfmark": "Ms. Ebr. 4",
+"score": 77.0,
+"library": "Oriental Studies Library, Turin"
+},
+{
+"rank": 59,
+"shelfmark": "Or.2116.16",
+"score": 74.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 60,
+"shelfmark": "T-S NS 296.150",
+"score": 59.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 61,
+"shelfmark": "Ms. 1774/1",
+"score": 58.0,
+"library": "The University of Manchester Library"
+},
+{
+"rank": 62,
+"shelfmark": "Ms. EVR II B 111",
+"score": 49.0,
+"library": "The National Library of Russia"
+},
+{
+"rank": 63,
+"shelfmark": "Ms. EVR II B 1400",
+"score": 48.0,
+"library": "The National Library of Russia"
+},
+{
+"rank": 64,
+"shelfmark": "Ms. EVR II B 1383",
+"score": 39.0,
+"library": "The National Library of Russia"
+},
+{
+"rank": 65,
+"shelfmark": "Ms. EVR II B 126",
+"score": 37.0,
+"library": "The National Library of Russia"
+},
+{
+"rank": 66,
+"shelfmark": "Ms. EVR II B 3",
+"score": 35.0,
+"library": "The National Library of Russia"
+},
+{
+"rank": 67,
+"shelfmark": "Ms. EVR II B 3",
+"score": 35.0,
+"library": "The National Library of Russia"
+},
+{
+"rank": 68,
+"shelfmark": "Ms. Heb. 577.4.5=4",
+"score": 30.0,
+"library": "National Library of Israel"
+},
+{
+"rank": 69,
+"shelfmark": "Ms. Heb. 577.4.5=4",
+"score": 30.0,
+"library": "National Library of Israel"
+},
+{
+"rank": 70,
+"shelfmark": "T-S NS 266.133",
+"score": 27.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 71,
+"shelfmark": "Ms. EVR II B 71",
+"score": 27.0,
+"library": "The National Library of Russia"
+},
+{
+"rank": 72,
+"shelfmark": "MS heb. d.49/38",
+"score": 27.0,
+"library": "The Bodleian Libraries, University of Oxford"
+},
+{
+"rank": 73,
+"shelfmark": "Ms. EVR II B 34",
+"score": 25.0,
+"library": "The National Library of Russia"
+},
+{
+"rank": 74,
+"shelfmark": "Ms. EVR II B 859",
+"score": 25.0,
+"library": "The National Library of Russia"
+},
+{
+"rank": 75,
+"shelfmark": "Ms. EVR II B 94",
+"score": 24.0,
+"library": "The National Library of Russia"
+},
+{
+"rank": 76,
+"shelfmark": "Ms. 82",
+"score": 24.0,
+"library": "The University of Manchester Library"
+},
+{
+"rank": 77,
+"shelfmark": "Ms. VII A",
+"score": 16.0,
+"library": "Alliance Israélite Universelle"
+},
+{
+"rank": 78,
+"shelfmark": "Ms. Heb. 577.4.5=4",
+"score": 15.0,
+"library": "National Library of Israel"
+},
+{
+"rank": 79,
+"shelfmark": "MS heb. b.4/13",
+"score": 15.0,
+"library": "The Bodleian Libraries, University of Oxford"
+},
+{
+"rank": 80,
+"shelfmark": "Ms. Evr. Antonin A 12",
+"score": 15.0,
+"library": "The National Library of Russia"
+},
+{
+"rank": 81,
+"shelfmark": "T-S NS 266.133",
+"score": 14.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 82,
+"shelfmark": "Ms. EVR II B 862",
+"score": 13.0,
+"library": "The National Library of Russia"
+},
+{
+"rank": 83,
+"shelfmark": "Ms. EVR II B 1264",
+"score": 13.0,
+"library": "The National Library of Russia"
+},
+{
+"rank": 84,
+"shelfmark": "MS heb. d.49/38",
+"score": 13.0,
+"library": "The Bodleian Libraries, University of Oxford"
+},
+{
+"rank": 85,
+"shelfmark": "Ms. Evr. Antonin B 62",
+"score": 12.0,
+"library": "The National Library of Russia"
+},
+{
+"rank": 86,
+"shelfmark": "T-S B12.21",
+"score": 12.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 87,
+"shelfmark": "T-S B12.21",
+"score": 12.0,
+"library": "Cambridge University Library"
+},
+{
+"rank": 88,
+"shelfmark": "Ms. 82",
+"score": 12.0,
+"library": "The University of Manchester Library"
+}
+]
+}
