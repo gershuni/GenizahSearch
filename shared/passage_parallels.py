@@ -392,16 +392,33 @@ class PassageSearcher:
         hit_by_header: dict = {}
         for hit in hits:
             hit_by_header[hit.record_id] = hit
+            is_anchor = getattr(hit, 'tier', 'span') == 'anchor'
+            # Anchor-tier row scores are scaled BELOW the span floor
+            # (min_span >= 5 > any codes/1000), because the page re-sorts
+            # rows by 'score' and the two tiers' scores are different units
+            # (matched letters vs distinct anchor codes) -- the engine's
+            # contract says they must never interleave. The scaling is
+            # order-preserving within the tier; the true count stays on
+            # 'anchor_codes'.
+            row_score = (float(hit.anchor_codes) / 1000.0 if is_anchor
+                         else float(hit.score))
             row = {
                 'uid': _derive_uid(hit.record_id),
                 'raw_header': hit.record_id,
-                'src_lbl': '',
+                # Bilingual literal: shared/ is framework-agnostic (no tr()),
+                # and src_lbl renders raw -- the site is Hebrew-first.
+                'src_lbl': 'עדות עוגן (anchor evidence)' if is_anchor else '',
                 'source_ctx': '',
                 'text': '',
-                'score': float(hit.score),
-                'final_score': float(hit.score),
+                'score': row_score,
+                'final_score': row_score,
                 'chunk_count': int(hit.n_spans),
                 'chunk_hits': [],
+                # Additive keys: 'span' rows are verified alignments;
+                # 'anchor' rows carry collocation evidence only (spec
+                # section 10.3) and no aligned span.
+                'match_tier': getattr(hit, 'tier', 'span'),
+                'anchor_codes': int(getattr(hit, 'anchor_codes', 0)),
             }
             if filter_stream and self._is_source_text_filtered(
                 hit, filter_stream, q_nfc, q_offsets,

@@ -41,6 +41,7 @@ from shared.passage_policy import (
 BAND = 20          # diagonal bucket width, letters (spec section 6)
 MARGIN = 30        # verification extension, letters (spec section 7)
 MERGE_GAP = 30     # per-record span merge gap (track1_match convention)
+_ANCHOR_EXTENTS_PER_RECORD = 8   # display windows per anchor-tier record
 
 
 @dataclass
@@ -52,6 +53,16 @@ class PassageHit:
     n_spans: int
     spans: list                  # [(q0, q1, r0, r1, density), ...] merged
     score: float                 # = matched_letters (comparable to chunk path)
+    # Anchor-evidence tier (spec section 10.3). tier='span' rows are the
+    # verified alignments above; tier='anchor' rows carry NO accepted span --
+    # only distinct-code collocation evidence. Their `spans` are the kept
+    # clusters' EXTENTS (display windows, never alignments), their density is
+    # the 1.0 upper bound ("no alignment accepted"), and their `score` is
+    # `anchor_codes` -- a DIFFERENT UNIT from matched letters. Surfaces keep
+    # the tiers separate; mixing the two scores in one ordering is a
+    # correctness defect, not a display choice.
+    tier: str = 'span'
+    anchor_codes: int = 0        # distinct admitted gram codes on the record
 
 
 @dataclass
@@ -75,6 +86,9 @@ class QueryReport:
     rejected_short: int = 0
     rejected_density: int = 0
     below_min_span_query: bool = False
+    anchor_tier_enabled: bool = False
+    anchor_records: int = 0
+    anchor_truncated: bool = False
     seconds: float = 0.0
 
     def as_dict(self) -> dict:
@@ -169,9 +183,21 @@ def _candidates(idx: PassageIndex, codes: np.ndarray, qpos: np.ndarray,
                 report: QueryReport, record_allowed=None):
     """Diagonal two-hit with DISTINCT gram codes (spec section 6.1).
 
-    Returns (rec, min_q, max_q, min_r, max_r) arrays for clusters that carry
-    >= policy.min_anchors distinct codes, ordered by (record, bucket) --
-    which is also the deterministic truncation order for candidate_cap.
+    Returns ((rec, min_q, max_q, min_r, max_r), anchor_stats): cluster arrays
+    for clusters that carry >= policy.min_anchors distinct codes, ordered by
+    (record, bucket) -- which is also the deterministic truncation order for
+    candidate_cap -- plus, when policy.anchor_tier is on, the anchor-evidence
+    bookkeeping (spec section 10.3): record -> (distinct_codes, extents).
+
+    Anchor-pool rule: a record enters the pool only through at least one
+    two-hit cluster that survived the record restriction -- the same gate the
+    span path uses, so the pool costs no extra record-id decodes -- but its
+    EVIDENCE then counts every distinct admitted code it shares with the
+    query, including codes whose own clusters fell below min_anchors: for a
+    translation, each scattered name is a one-code diagonal, and dropping
+    those from the count would re-create exactly the blindness this tier
+    exists to remove. Stats are taken PRE-candidate_cap (bookkeeping is
+    cheap; the cap exists to bound Levenshtein work, which anchors never do).
     """
     parts_rec, parts_qp, parts_rp, parts_code = [], [], [], []
     for i in admitted.tolist():
@@ -183,7 +209,7 @@ def _candidates(idx: PassageIndex, codes: np.ndarray, qpos: np.ndarray,
         parts_qp.append(np.full(pages.size, int(qpos[i]), dtype=np.int64))
         parts_code.append(np.full(pages.size, int(codes[i]), dtype=np.int64))
     if not parts_rec:
-        return (np.empty(0, np.int64),) * 5
+        return (np.empty(0, np.int64),) * 5, None
     rec = np.concatenate(parts_rec)
     rp = np.concatenate(parts_rp)
     qp = np.concatenate(parts_qp)
@@ -239,6 +265,43 @@ def _candidates(idx: PassageIndex, codes: np.ndarray, qpos: np.ndarray,
 
     report.candidates = int(keep.sum())
     kept_groups = np.flatnonzero(keep)
+
+    min_q = np.minimum.reduceat(qp, starts)
+    max_q = np.maximum.reduceat(qp, starts)
+    min_r = np.minimum.reduceat(rp, starts)
+    max_r = np.maximum.reduceat(rp, starts)
+    g_rec = rec[starts]
+
+    anchor_stats = None
+    if policy.anchor_tier and kept_groups.size:
+        # Records in the pool: those with at least one kept cluster.
+        pool_recs = np.unique(g_rec[kept_groups])
+        # Distinct (record, code) pairs over ALL hits of pooled records --
+        # including one-code clusters, per the pool rule above.
+        hit_in_pool = np.isin(rec, pool_recs)
+        rec_h, code_h = rec[hit_in_pool], code[hit_in_pool]
+        o3 = np.lexsort((code_h, rec_h))
+        rec_h, code_h = rec_h[o3], code_h[o3]
+        first = np.empty(rec_h.size, dtype=bool)
+        first[0] = True
+        np.logical_or(rec_h[1:] != rec_h[:-1], code_h[1:] != code_h[:-1],
+                      out=first[1:])
+        u_recs, code_counts = np.unique(rec_h[first], return_counts=True)
+        codes_by_rec = dict(zip(u_recs.tolist(), code_counts.tolist()))
+        # Display extents: each record's kept clusters, strongest first,
+        # at most _ANCHOR_EXTENTS_PER_RECORD -- windows for the renderer,
+        # never alignments.
+        ext_order = kept_groups[np.lexsort(
+            (kept_groups, -distinct[kept_groups], g_rec[kept_groups]))]
+        extents_by_rec: dict = {}
+        for g in ext_order.tolist():
+            lst = extents_by_rec.setdefault(int(g_rec[g]), [])
+            if len(lst) < _ANCHOR_EXTENTS_PER_RECORD:
+                lst.append((int(min_q[g]), int(max_q[g]),
+                            int(min_r[g]), int(max_r[g])))
+        anchor_stats = {int(r): (codes_by_rec.get(int(r), 0),
+                                 extents_by_rec.get(int(r), []))
+                        for r in pool_recs.tolist()}
     # Order candidates by EVIDENCE STRENGTH (distinct anchors, descending),
     # tie-broken by (record, bucket) for determinism. The first version
     # ordered by (record, bucket) alone, which under a firing verify cap
@@ -253,13 +316,8 @@ def _candidates(idx: PassageIndex, codes: np.ndarray, qpos: np.ndarray,
         report.candidates_truncated = True
         kept_groups = kept_groups[:policy.candidate_cap]
 
-    min_q = np.minimum.reduceat(qp, starts)
-    max_q = np.maximum.reduceat(qp, starts)
-    min_r = np.minimum.reduceat(rp, starts)
-    max_r = np.maximum.reduceat(rp, starts)
-    g_rec = rec[starts]
     return (g_rec[kept_groups], min_q[kept_groups], max_q[kept_groups],
-            min_r[kept_groups], max_r[kept_groups])
+            min_r[kept_groups], max_r[kept_groups]), anchor_stats
 
 
 def _verify_and_merge(idx: PassageIndex, qstream: str, cand, policy:
@@ -342,7 +400,8 @@ def search_passage(idx: PassageIndex, query_text: str,
     character score.
     """
     t0 = time.time()
-    report = QueryReport(policy_id=policy.policy_id, policy_name=policy.name)
+    report = QueryReport(policy_id=policy.policy_id, policy_name=policy.name,
+                         anchor_tier_enabled=policy.anchor_tier)
     qstream, _offsets = norm_stream(query_text)
     report.query_letters = len(qstream)
     if len(qstream) < policy.min_span:
@@ -361,8 +420,8 @@ def search_passage(idx: PassageIndex, query_text: str,
         report.seconds = round(time.time() - t0, 4)
         return [], report
 
-    cand = _candidates(idx, codes, qpos, admitted, policy, report,
-                       record_allowed=record_allowed)
+    cand, anchor_stats = _candidates(idx, codes, qpos, admitted, policy,
+                                     report, record_allowed=record_allowed)
     merged = _verify_and_merge(idx, qstream, cand, policy, report)
 
     hits = []
@@ -374,5 +433,32 @@ def search_passage(idx: PassageIndex, query_text: str,
             best_density=min(d for *_x, d in spans),
             n_spans=len(spans), spans=spans, score=float(matched)))
     hits.sort(key=lambda h: (-h.score, h.record))
+
+    # Anchor-evidence tier (spec section 10.3): records that met the policy's
+    # record-level code threshold but produced NO accepted span. Appended
+    # AFTER every span hit -- the tiers never interleave, whatever the
+    # scores, because their scores are different units. Deterministic:
+    # ordered by (-anchor_codes, record), capped at anchor_cap with the
+    # truncation reported.
+    if policy.anchor_tier and anchor_stats:
+        pool = [(n_codes, ri, extents)
+                for ri, (n_codes, extents) in anchor_stats.items()
+                if n_codes >= policy.anchor_min_codes and ri not in merged]
+        pool.sort(key=lambda t: (-t[0], t[1]))
+        if len(pool) > policy.anchor_cap:
+            report.anchor_truncated = True
+            pool = pool[:policy.anchor_cap]
+        report.anchor_records = len(pool)
+        for n_codes, ri, extents in pool:
+            spans = [(q0, min(len(qstream), q1 + K), r0, r1 + K, 1.0)
+                     for q0, q1, r0, r1 in extents]
+            hits.append(PassageHit(
+                record=ri, record_id=idx.record_id(ri),
+                matched_letters=0,
+                best_density=1.0,   # upper bound: no alignment was accepted
+                n_spans=len(spans), spans=spans,
+                score=float(n_codes), tier='anchor',
+                anchor_codes=int(n_codes)))
+
     report.seconds = round(time.time() - t0, 4)
     return hits, report

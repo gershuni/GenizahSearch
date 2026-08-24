@@ -397,6 +397,40 @@ cost should be small — but it is unmeasured, so stride is a measured decision,
 manifest, not an assumption. Note that DF = 1 singletons are **kept** here, unlike the pair-wise
 arrangement: a singleton cannot form a pair, but it is a perfectly good query anchor.
 
+### 10.4 The anchor-evidence tier (2026-08-23, opt-in)
+
+Span acceptance (section 7) is a **contiguous-alignment** detector, and there is a class of
+true relationships it can never accept at any width: translations and rhymed reworkings (the
+only shared letters are names and short collocations), rubrics and citations that *name* the
+work, and copies so damaged that no 40-letter alignment survives the lacunae. The Megillat
+Antiochus method comparison (2026-08-23, 83 adjudicated positives) measured the cost: the span
+tiers missed **every** Arabic and rhymed-Hebrew version of the scroll, while word-chunk matching
+at size 2 caught them — at 5% precision, which is what an unweighted collocation detector costs.
+
+The anchor-evidence tier is the same detector class built from this engine's own, already-DF-
+capped raw material, gated by policy (`anchor_tier`, default **off** — behaviour and
+`policy_id` of every pre-existing policy are unchanged):
+
+* **Pool rule.** A record enters the pool only through at least one ordinary two-hit cluster
+  that survived the record restriction — the same gate the span path uses. Its **evidence**
+  then counts every distinct admitted gram code it shares with the query, *including* codes
+  whose own clusters fell below `MIN_ANCHORS`: for a translation, each scattered name is a
+  one-code diagonal, and dropping those would re-create exactly the blindness the tier removes.
+  Stats are taken before `candidate_cap` (bookkeeping is cheap; that cap bounds Levenshtein
+  work, which anchors never do).
+* **Report rule.** After verification, a pooled record with at least `anchor_min_codes`
+  distinct codes and **no accepted span** is reported as a `tier='anchor'` hit — never a record
+  that already has a span hit. Ordered by (−codes, record), capped at `anchor_cap`, truncation
+  reported (`anchor_truncated`), count reported (`anchor_records`).
+* **Honesty rules.** Anchor hits carry the kept clusters' *extents* as display windows, never
+  alignments; density is the 1.0 upper bound ("no alignment accepted"); the score is the
+  distinct-code count — a **different unit** from matched letters, so surfaces must keep the
+  tiers separate rather than pretend one ordering (the web searcher scales anchor row scores
+  below the span floor and labels the rows).
+* **Status: exploratory.** No held-out measurement yet. The intended first instrument is the
+  adjudicated 83-positive Antiochus deck (2026-08-23 session); the question it must answer is
+  what fraction of chunk-2's exclusive finds the tier recovers, at what candidate burden.
+
 ---
 
 ## 11. Parameter table
@@ -422,6 +456,10 @@ arrangement: a singleton cannot form a pair, but it is a perfectly good query an
 | | posting cap | 3,000 | method report |
 | DF — batch, asymmetric | `REF_DF_CAP` | 128 raw postings per code — **known non-monotonic**, section 10.1 | `track1_match.py` |
 | DF — interactive | policy | band-allocated posting budget, section 10.2 | this spec |
+| Anchor tier | `anchor_tier` | off by default; opt-in per policy | section 10.4 |
+| | `anchor_min_codes` | 8 distinct admitted codes per record | section 10.4 — exploratory, unmeasured |
+| | `anchor_cap` | 300 records, truncation reported | section 10.4 |
+| | extents per record | 8 display windows | `passage_search.py::_ANCHOR_EXTENTS_PER_RECORD` |
 | Measured noise | letter CER | 20.1% micro, 16.6% median, p25 8.9%, p90 42% | 209-page alignment against human transcriptions |
 | Corpus | records / letters | 948,549 records, 602,598,330 normalized letters, longest record 11,809 | measured 2026-08-20 |
 

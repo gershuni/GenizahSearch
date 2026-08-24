@@ -840,6 +840,15 @@ def create_parallels_page(initial_text: str = None):
                                 'wider-40': tr('Wide width'),
                                 'widest-40': tr('Very wide (default)'),
                                 'max-40': tr('Maximal (may add noise)'),
+                                # anchor-sweep-40: max-40's span results PLUS
+                                # the anchor-evidence tier (spec section 10.3)
+                                # -- translations, rhymed versions and badly
+                                # damaged copies that share only names/short
+                                # collocations with the pasted text. Those
+                                # extra rows are labelled 'anchor evidence'
+                                # and always rank below every aligned match.
+                                'anchor-sweep-40': tr(
+                                    'Recall sweep (adds anchor evidence)'),
                             },
                             value='widest-40',
                             label=tr('Match width'),
@@ -847,7 +856,10 @@ def create_parallels_page(initial_text: str = None):
                         passage_width.tooltip(tr(
                             'How far a manuscript may drift from your text and '
                             'still match. Wider finds more noisy witnesses; the '
-                            'strongest matches always rank first.'
+                            'strongest matches always rank first. The recall '
+                            'sweep also lists manuscripts sharing only names '
+                            'or short phrases (translations, damaged copies) '
+                            'as "anchor evidence" rows after all real matches.'
                         ))
                         if not passage_available():
                             method_radio.value = 'chunk'

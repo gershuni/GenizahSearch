@@ -4991,8 +4991,12 @@ TRANSLATIONS.update({
         "מרבי (עלול להוסיף רעש)",
     "Very wide (default)":
         "רחב מאוד (ברירת מחדל)",
-    "How far a manuscript may drift from your text and still match. Wider finds more noisy witnesses; the strongest matches always rank first.":
-        "עד כמה כתב היד יכול לסטות מהטקסט שלך ועדיין להיחשב התאמה. רחב יותר מוצא יותר עדים משובשים; ההתאמות החזקות תמיד מדורגות ראשונות.",
+    "Recall sweep (adds anchor evidence)":
+        "סריקת עומק (מוסיף עדויות עוגן)",
+    "How far a manuscript may drift from your text and still match. Wider finds more noisy witnesses; the strongest matches always rank first. The recall sweep also lists manuscripts sharing only names or short phrases (translations, damaged copies) as \"anchor evidence\" rows after all real matches.":
+        "עד כמה כתב היד יכול לסטות מהטקסט שלך ועדיין להיחשב התאמה. רחב יותר מוצא יותר עדים משובשים; ההתאמות החזקות תמיד מדורגות ראשונות. סריקת העומק מוסיפה גם כתבי יד החולקים רק שמות או צירופים קצרים (תרגומים, עותקים פגומים) כשורות \"עדות עוגן\" אחרי כל ההתאמות הממשיות.",
+    "anchor evidence":
+        "עדות עוגן",
     "Letter-level search is busy right now — please try again in a moment.":
         "החיפוש ברמת האות עמוס כרגע — נסו שוב בעוד רגע.",
     "Letter-level search timed out — try a shorter text.":

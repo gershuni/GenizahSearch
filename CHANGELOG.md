@@ -1017,6 +1017,29 @@ A major overhaul of how LOCAL Hebrew PDFs are read into the My Library index, dr
 
 ## [Unreleased]
 
+### Letter-level search: anchor-evidence tier, opt-in "Recall sweep" width (2026-08-24)
+
+The passage matcher's span acceptance is a contiguous-alignment detector, and the Megillat
+Antiochus method comparison (2026-08-23; 83 adjudicated positives across five search runs)
+measured what that costs: the letter presets missed **every** Arabic and rhymed-Hebrew version
+of the scroll — witnesses that share only names and short collocations with the query — while
+word-chunk matching at size 2 caught them, at 5% precision. The new **anchor-evidence tier**
+(spec section 10.4) is that detector class rebuilt from the engine's own DF-capped grams:
+
+- **Opt-in per policy** (`anchor_tier`, default off) and exposed on the parallels page as the
+  Match-width step "Recall sweep (adds anchor evidence)" (`anchor-sweep-40` = max-40's span
+  results plus the tier). Records that never form an acceptable span but share ≥ 8 distinct
+  admitted gram codes with the query are ADDED as clearly labelled 'עדות עוגן (anchor
+  evidence)' rows that always rank below every aligned match — the two tiers' scores are
+  different units (distinct codes vs matched letters) and never interleave.
+- **Honest by construction:** anchor rows carry cluster extents as display windows (never
+  alignments), a 1.0 density upper bound, their own report fields (`anchor_records`,
+  `anchor_truncated`), and a cap (300). Pre-existing presets keep byte-identical behaviour
+  AND byte-identical `policy_id`s — the anchor fields join the identity hash only when the
+  tier is on, so the measurement ledger's recorded ids stay valid (pinned by test).
+- **Status: exploratory.** No held-out measurement yet; the adjudicated Antiochus deck is the
+  intended first instrument.
+
 ### Download the computed identifications as a spreadsheet (2026-08-21)
 
 `/computed-identifications` now has a download control. It returns **the reader's whole

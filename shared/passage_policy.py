@@ -86,6 +86,21 @@ class PassagePolicy:
     candidate_cap: int = 200_000       # diagonal clusters kept at most
     verify_cap: int = 3_000            # Levenshtein calls at most
     min_anchors: int = 2               # distinct gram codes per cluster
+    # Anchor-evidence tier (spec section 10.3, 2026-08-23). OFF by default:
+    # every existing preset keeps byte-identical behaviour AND policy_id.
+    # When ON, records whose kept clusters carry >= anchor_min_codes distinct
+    # admitted gram codes but which produced NO accepted span are reported as
+    # a separate 'anchor' tier -- collocation evidence (names, short shared
+    # phrases across translation/paraphrase/heavy damage) that the contiguous
+    # span acceptance can never surface. Motivated by the Megillat Antiochus
+    # method comparison (2026-08-23): the span tiers missed every Arabic and
+    # rhymed-Hebrew version of the scroll because translations share only
+    # scattered names with the query -- exactly what word-chunk matching
+    # caught at 5% precision. This tier is the rarity-weighted equivalent:
+    # its anchors are DF-capped grams, not raw word pairs.
+    anchor_tier: bool = False
+    anchor_min_codes: int = 8          # distinct admitted codes per RECORD
+    anchor_cap: int = 300              # anchor-tier records reported at most
     schema_version: int = POLICY_SCHEMA_VERSION
 
     def __post_init__(self):
@@ -99,7 +114,12 @@ class PassagePolicy:
             raise ValueError('min_anchors must be >= 1')
         if not (0.1 <= self.density_scale <= 2.0):
             raise ValueError('density_scale outside [0.1, 2.0]')
-        for f_name in ('posting_budget', 'candidate_cap', 'verify_cap'):
+        if self.anchor_min_codes < 2:
+            raise ValueError('anchor_min_codes below 2 is weaker than the '
+                             'two-hit rule and would report single-gram '
+                             'coincidences')
+        for f_name in ('posting_budget', 'candidate_cap', 'verify_cap',
+                       'anchor_cap'):
             if getattr(self, f_name) <= 0:
                 raise ValueError(f'{f_name} must be positive')
 
@@ -107,8 +127,23 @@ class PassagePolicy:
 
     @property
     def policy_id(self) -> str:
-        """Content hash over every field. Stable across processes and runs."""
-        blob = json.dumps(asdict(self), sort_keys=True, ensure_ascii=True,
+        """Content hash over every field. Stable across processes and runs.
+
+        Identity extension rule: the anchor-tier fields joined the schema on
+        2026-08-23, AFTER measurements had been recorded against the original
+        field set (shared/retrieval_eval.py's ledger keys on policy_id). With
+        the tier OFF the query behaves byte-identically to the original
+        schema, so the anchor fields enter the hash ONLY when anchor_tier is
+        True -- every pre-existing preset keeps the id its measurements were
+        recorded under, and any anchor-enabled policy necessarily gets a new
+        id. A changed anchor default therefore changes the id of anchor
+        policies only, which is exactly the set whose results it can change.
+        """
+        d = asdict(self)
+        if not self.anchor_tier:
+            for f_name in ('anchor_tier', 'anchor_min_codes', 'anchor_cap'):
+                del d[f_name]
+        blob = json.dumps(d, sort_keys=True, ensure_ascii=True,
                           separators=(',', ':'))
         return 'pp1-' + hashlib.sha256(blob.encode('ascii')).hexdigest()[:16]
 
@@ -201,9 +236,26 @@ WIDEST_40 = PassagePolicy(name='widest-40', density_scale=1.8)
 # fits, and becomes fully useful the day paging lands.
 MAX_40 = PassagePolicy(name='max-40', density_scale=2.0)
 
+# anchor-sweep-40: max-40 plus the anchor-evidence tier (2026-08-23, the
+# Megillat Antiochus method comparison). Span results are exactly max-40's
+# (density_scale 2.0); records that never form an acceptable span but share
+# >= 8 distinct DF-capped gram codes with the query are ADDED as a clearly
+# labelled 'anchor' tier -- the recall sweep for translations, rhymed
+# versions, rubrics and catastrophically damaged copies, where the only
+# surviving overlap is names and short collocations. Adjudicated baseline
+# for that comparison: word-chunk size 2 reached 98% recall at 5% precision;
+# this tier chases the same recall class with rarity-weighted anchors.
+# EXPLORATORY: its recall/precision has no held-out measurement yet -- the
+# adjudicated 83-positive Antiochus deck from the 2026-08-23 session is the
+# intended first instrument. Anchor scores are DISTINCT-CODE COUNTS, a
+# different unit from span scores (matched letters); surfaces must keep the
+# tiers visually separate rather than pretend one ordering.
+ANCHOR_SWEEP_40 = PassagePolicy(name='anchor-sweep-40', density_scale=2.0,
+                                anchor_tier=True)
+
 PRESETS = {p.name: p for p in
            (STANDARD_40, STANDARD_40_NOISY, FLAT_25, FLAT_25_NOISY,
-            WIDE_40, WIDER_40, WIDEST_40, MAX_40)}
+            WIDE_40, WIDER_40, WIDEST_40, MAX_40, ANCHOR_SWEEP_40)}
 DEFAULT_POLICY = STANDARD_40
 
 
