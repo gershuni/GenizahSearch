@@ -605,7 +605,12 @@ def test_a_witness_of_a_different_source_text_is_not_searched():
     # hand-pasted texts.
     assert "'stale'" in src
     assert 'p_state.witnesses = []' not in src
-    assert "'seed_digest': _seed_digest()" in _func_source('_add_witness')
+    assert "'seed_digest': seed_digest or _seed_digest()" in _func_source(
+        '_add_witness'), (
+        'a witness with no explicit stamp still takes the live one -- see '
+        'test_a_promoted_witness_is_stamped_with_the_search_it_came_from '
+        'for why a promoted one must not'
+    )
 
 
 def test_a_stale_witness_is_not_in_the_pending_set():
@@ -911,3 +916,126 @@ def test_the_restore_closure_uses_the_shared_normaliser():
     """A pure function nothing calls is a comment."""
     assert 'restore_witness_entries' in _calls_in(
         '_restore_witnesses_from_snapshot')
+
+
+# ---------------------------------------------------------------------------
+# Promotion: the right stamp, and only once.
+# ---------------------------------------------------------------------------
+
+def test_a_promoted_witness_is_stamped_with_the_search_it_came_from():
+    """`_seed_digest()` reads the LIVE textarea. Search X, edit the box to Y
+    without searching, then promote a row from X's list: the witness was
+    stamped digest(Y) and the staleness check called it native -- the same
+    cross-work contamination the stamp exists to prevent, entering by a
+    second door. It must take the digest of the search on screen."""
+    src = _func_source('_promote_checked')
+    assert "(p_state.last_passage_ctx or {}).get(" in src, (
+        'the stamp must come from the dispatched search, not the live box'
+    )
+    assert 'seed_digest=promoted_digest' in src, (
+        'the captured digest must actually be passed to _add_witness'
+    )
+
+
+def test_the_promoted_stamp_is_captured_before_the_await():
+    """This repo has a recorded class of bug where a value read after an
+    `await` describes a configuration the search never used. The digest is
+    read from state that the user can change during the fetch."""
+    src = _func_source('_promote_checked')
+    capture = src.index('promoted_digest = ')
+    await_at = src.index('await run.io_bound')
+    assert capture < await_at, (
+        'promoted_digest is read after the await -- it would describe the '
+        'wrong search'
+    )
+
+
+def test_the_search_context_carries_the_seed_digest():
+    """Nothing else records which text produced the rows on screen."""
+    src = _func_source('execute_parallels')
+    assert "'seed_digest': _text_digest_of(text)" in src, (
+        'last_passage_ctx must carry the dispatched seed digest'
+    )
+
+
+def test_promotion_is_not_re_entrant():
+    """Two overlapping runs both read the pre-fetch witness list and both add
+    the same manuscripts. A duplicate witness contributes twice to
+    witness_count and to the RRF sum -- a wrong number, not a wasted search
+    (the function's own comment says so about the checkbox path)."""
+    src = _func_source('_promote_checked')
+    assert 'if p_state.promoting:' in src
+    assert 'p_state.promoting = True' in src
+    assert 'p_state.promoting = False' in src
+    # Released on the failure path too, or one exception disables promotion
+    # for the rest of the session.
+    guard = src[src.index('p_state.promoting = True'):]
+    assert 'finally:' in guard[:guard.index('p_state.promoting = False')], (
+        'the flag must be released in a finally, or a failed fetch wedges it'
+    )
+
+
+def test_the_witness_list_is_re_read_after_the_fetch():
+    """The re-entrancy guard stops a second promotion, but a witness can also
+    arrive from the Add dialog while the fetch is in flight."""
+    src = _func_source('_promote_checked')
+    after = src[src.index('await run.io_bound'):]
+    assert '_already = {' in after, (
+        'the already-a-witness set must be recomputed after the await'
+    )
+    assert 'sid in _already' in after, 'and actually consulted'
+
+
+# ---------------------------------------------------------------------------
+# Reset means reset, and a mutation reaches storage.
+# ---------------------------------------------------------------------------
+
+def test_reset_clears_the_witness_list():
+    """Reset clears the source text, the results, the exclusions, every
+    persisted key and the tab snapshot, then says "Composition reset". The
+    witnesses survived all of it -- and since `_clear_active_snapshot()` ran,
+    the screen and storage then disagreed: a reload resurrected nothing while
+    the panel still showed seventeen witnesses."""
+    src = _func_source('_reset_parallels')
+    assert 'p_state.witnesses = []' in src
+    assert 'p_state.witness_rows = {}' in src
+    assert 'p_state.witness_filtered = {}' in src
+    assert 'p_state.checked_for_promotion = set()' in src
+    assert 'p_state.witness_seq = 0' in src, (
+        'a stale sequence would re-issue ids the row cache still knows'
+    )
+
+
+def test_reset_repaints_the_panel():
+    """Clearing the list without repainting leaves the old witnesses on
+    screen -- the state is right and the user cannot tell."""
+    calls = _calls_in('_reset_parallels')
+    assert '_refresh_witness_panel' in calls
+    assert '_refresh_promotion_bar' in calls
+
+
+def test_reset_drops_the_search_context():
+    """`last_passage_ctx` is what a witness search runs with. Left behind, a
+    witness added after a Reset would be searched at the width, depth and
+    library scope of a search the user just deleted."""
+    assert 'p_state.last_passage_ctx = {}' in _func_source('_reset_parallels')
+
+
+def test_adding_and_removing_a_witness_reaches_storage():
+    """`_persist_witness_state` had ONE caller, at the end of
+    `_search_pending_witnesses`. So the snapshot was only in step at the end
+    of a witness search: paste three witnesses and reload before searching
+    and they are gone; remove one after a search and reload and it is back,
+    rows and all."""
+    assert '_persist_witness_state' in _calls_in('_remove_witness')
+    assert '_persist_witness_state' in _calls_in('_open_add_witness_dialog')
+    assert '_persist_witness_state' in _calls_in('_revive_stale_witnesses')
+    assert '_persist_witness_state' in _calls_in('_search_pending_witnesses')
+
+
+def test_the_panel_refresh_does_not_persist():
+    """`_refresh_witness_panel` runs once per witness during a search -- it
+    renders the progress line -- so persisting there would serialise the
+    whole result set seventeen times in a 17-witness run. The mutation
+    boundaries are called explicitly for exactly this reason."""
+    assert '_persist_witness_state' not in _calls_in('_refresh_witness_panel')

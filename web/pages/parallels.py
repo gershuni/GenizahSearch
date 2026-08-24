@@ -408,6 +408,8 @@ def create_parallels_page(initial_text: str = None):
             # different width/depth than its neighbours would be fused into
             # one list with them and be invisible as an anomaly.
             self.last_passage_ctx: dict = {}
+            # True while _promote_checked is fetching texts off the loop.
+            self.promoting: bool = False
 
     p_state = ParallelsState()
 
@@ -2428,18 +2430,34 @@ def create_parallels_page(initial_text: str = None):
         p_state.filtered_results = [r for r in fused_filtered
                                     if r.get('raw_header') not in in_main]
 
-    def _seed_digest() -> str:
+    def _text_digest_of(value: str) -> str:
         from shared.passage_fusion import text_digest
-        return text_digest((text_input.value or '').strip())
+        return text_digest((value or '').strip())
+
+    def _seed_digest() -> str:
+        """The digest of what is in the box RIGHT NOW.
+
+        Staleness is measured against this -- "was this witness gathered for
+        the text I am about to search?" -- so it is deliberately live. What
+        must NOT be read live is the stamp on a promoted witness; that one
+        comes from `last_passage_ctx`.
+        """
+        return _text_digest_of(text_input.value)
 
     def _add_witness(text: str, label: str = '', kind: str = 'pasted',
-                     sys_id: str = None) -> dict:
+                     sys_id: str = None, seed_digest: str = None) -> dict:
         entry = {
             'id': _witness_new_id(),
             # The seed this witness was gathered FOR. A witness of one work is
             # noise in another, so a later search against a different source
             # text must not quietly include it.
-            'seed_digest': _seed_digest(),
+            #
+            # Defaults to the LIVE box, which is right for a pasted witness --
+            # the user typed it for the query in front of them. A PROMOTED one
+            # passes the digest of the search that produced the row instead
+            # (`_promote_checked`): if the box was edited since, those two are
+            # different texts and the row belongs to the older one.
+            'seed_digest': seed_digest or _seed_digest(),
             'label': (label or '').strip() or _witness_default_label(text),
             'kind': kind,
             'sys_id': sys_id,
@@ -2468,6 +2486,10 @@ def create_parallels_page(initial_text: str = None):
             render_results(p_state.results, p_state.filtered_results)
         else:
             results_container.clear()
+        # The snapshot used to be written only at the end of a witness
+        # SEARCH, so a removal survived until the next one and then came back
+        # -- rows and all -- on reload.
+        _persist_witness_state()
 
     def _witness_status_chip(entry: dict):
         status = entry.get('status')
@@ -2582,6 +2604,7 @@ def create_parallels_page(initial_text: str = None):
                 w['status'] = 'pending'
                 w['seed_digest'] = digest
         _refresh_witness_panel()
+        _persist_witness_state()
 
     def _remove_stale_witnesses() -> None:
         for w in [w for w in p_state.witnesses if w['status'] == 'stale']:
@@ -2650,6 +2673,10 @@ def create_parallels_page(initial_text: str = None):
                                (f'{label} {i + 1}' if label else '')))
                 dialog.close()
                 _refresh_witness_panel()
+                # Once, after the loop -- a bulk paste adds up to 25 in one
+                # go and each would otherwise re-serialise the whole result
+                # set.
+                _persist_witness_state()
                 # Adding never auto-searches: witnesses land `pending` and
                 # the user chooses when to spend the time.
                 ui.notify(tr('{n} witnesses detected').format(n=len(texts)),
@@ -2860,6 +2887,12 @@ def create_parallels_page(initial_text: str = None):
         # a manuscript found by one witness would report two -- a wrong
         # number, not merely a redundant search. (Auto-expand already
         # filtered these; the checkbox path did not.)
+        if p_state.promoting:
+            # Re-entrancy is not a wasted search, it is a WRONG NUMBER: two
+            # overlapping runs both read the pre-fetch witness list and both
+            # add the same manuscripts, and the duplicate then contributes
+            # twice to witness_count and to the RRF sum.
+            return
         _already = {w.get('sys_id') for w in p_state.witnesses if w.get('sys_id')}
         sys_ids = [s for s in p_state.checked_for_promotion
                    if s and s not in _already]
@@ -2878,6 +2911,12 @@ def create_parallels_page(initial_text: str = None):
         # and must not read page state.
         rows_snapshot = list(p_state.results or [])
 
+        # The seed the promoted rows belong to -- the search that produced
+        # them, not whatever the box holds now. Captured before the await with
+        # everything else.
+        promoted_digest = (p_state.last_passage_ctx or {}).get(
+            'seed_digest') or _seed_digest()
+
         def _fetch():
             # The decision lives in collect_witness_texts (module level, pure,
             # directly tested); this only injects the two real fetchers.
@@ -2887,11 +2926,19 @@ def create_parallels_page(initial_text: str = None):
                 fetch_manuscript=state.searcher.get_full_manuscript,
             )
 
-        texts, failed = await run.io_bound(_fetch)
+        p_state.promoting = True
+        try:
+            texts, failed = await run.io_bound(_fetch)
+        finally:
+            p_state.promoting = False
+        # Re-read the list AFTER the await: the guard above stops a second
+        # promotion, but a witness can also arrive from the add dialog while
+        # the fetch is in flight.
+        _already = {w.get('sys_id') for w in p_state.witnesses if w.get('sys_id')}
         added = 0
         for sid in sys_ids:
             text = texts.get(sid)
-            if not text:
+            if not text or sid in _already:
                 continue
             label = sid
             try:
@@ -2899,7 +2946,8 @@ def create_parallels_page(initial_text: str = None):
                 label = shelf or sid
             except Exception:
                 pass
-            _add_witness(text, label=label, kind='manuscript', sys_id=sid)
+            _add_witness(text, label=label, kind='manuscript', sys_id=sid,
+                         seed_digest=promoted_digest)
             added += 1
         if failed:
             # ONE line naming what failed, not N identical toasts saying
@@ -4230,6 +4278,20 @@ def create_parallels_page(initial_text: str = None):
         safe_user_set('parallels_source_text', '')
         safe_user_set('parallels_domain_exclusions', [])
         safe_user_set('parallels_excluded_manuscript_ids', [])
+        # The witness list is part of the composition, so Reset must take it
+        # too. It did not: the panel kept up to 25 texts and their row caches
+        # while `_clear_active_snapshot()` below deleted the snapshot that
+        # held them, so the screen and storage disagreed until the next
+        # search. (Review finding.)
+        p_state.witnesses = []
+        p_state.witness_rows = {}
+        p_state.witness_filtered = {}
+        p_state.witness_seq = 0
+        p_state.checked_for_promotion = set()
+        p_state.witness_progress = ''
+        p_state.last_passage_ctx = {}
+        _refresh_witness_panel()
+        _refresh_promotion_bar()
         _clear_active_snapshot()
         # Phase 88: Clear per-session export payload — singleton mirror removed.
         from web.export_state import clear_parallels_export
@@ -4502,6 +4564,11 @@ def create_parallels_page(initial_text: str = None):
         ] if captured_passage_mode else []
 
         p_state.last_passage_ctx = {
+            # The seed digest of THIS search, captured at dispatch (`text` is
+            # read before the awaits above). A witness promoted from these
+            # rows belongs to this text, not to whatever the box holds by the
+            # time the user clicks.
+            'seed_digest': _text_digest_of(text),
             'width': captured_passage_width,
             'length': captured_passage_length,
             'depth': captured_passage_depth,
