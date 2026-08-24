@@ -525,6 +525,28 @@ edition's list, and the corpus holds unlisted witnesses in quantity. Floor-30 ra
 reachable ceiling by 21 witnesses but found at most +5 of them: the newly indexed sub-80-letter
 records rarely clear the span floor on this text.
 
+**Query hygiene dominates the caps (same day, same census).** The composite liturgy query
+above carried Psalm preludes and Al-HaNissim, which spent its budget on Bible/siddur matches.
+Re-run with the 17 *clean, complete* Birkat Hamazon texts of
+`same_work_spike/probe/data/full_birkot_hamazon.txt` (each a single rite's full text from a
+known Genizah fragment, 456–4,243 letters), floor-30 index, max-40+short:
+
+| configuration | witness recall (of 442 reachable) | cost |
+|---|---|---|
+| one clean text, `normal` | 50–69% each (mean 59%) | <1s per query |
+| union of 17, `normal` | **85%** (3,857 distinct mss) | 12s total |
+| union of 17, `deep` | **93%** (12,979 distinct mss) | 105s total |
+| union of 17, `deepest` | 91% — *lower*: the cap non-monotonicity again | 235s |
+
+A single clean text at `normal` beats the composite query at any depth; variant texts unioned
+at `normal` beat the composite's 71-second heroic ceiling. The 32 reachable witnesses no query
+finds are transcription-quality misses, not engine misses: 31 are stubs (32–707 indexed
+letters, mostly one or two records) and the one well-covered exception (T-S 8H 22.4, 15
+records) is scrambled HTR far beyond the measured CER p90 — on this census the engine has
+effectively exhausted what the corpus text allows. Returned manuscripts outside the census are
+not all noise: the census is comprehensive for its edition, and the searches are expected to
+surface additional genuine witnesses beyond it (per the owner, 2026-08-24).
+
 ### 10.3 Position stride
 
 Indexing every position is the default. Indexing every second or third position reduces the
