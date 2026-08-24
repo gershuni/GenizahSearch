@@ -5001,6 +5001,16 @@ TRANSLATIONS.update({
         "גם קטעים קצרים",
     "Whether a short shared passage counts as a match. \"Also short\" finds piyyutim, quotations and badly damaged copies that share only a phrase — measured at roughly double the results for a third fewer correct ones, so expect to skim more.":
         "האם קטע משותף קצר נחשב התאמה. \"גם קטעים קצרים\" מוצא פיוטים, ציטוטים ועותקים פגומים מאוד שחולקים רק צירוף אחד — נמדד כמכפיל את מספר התוצאות תמורת שליש פחות תוצאות נכונות, כך שיש לצפות לסינון ידני רב יותר.",
+    "Search depth":
+        "עומק החיפוש",
+    "Normal (fast, default)":
+        "רגיל (מהיר, ברירת מחדל)",
+    "Deep (slower, more witnesses)":
+        "עמוק (איטי יותר, יותר עדים)",
+    "Deepest (slowest, most)":
+        "עמוק ביותר (הכי איטי, הכי הרבה)",
+    "How much of the corpus the search may examine. Deeper searches take seconds longer and return more manuscripts — including badly damaged and reworked copies a fast pass misses. Long texts benefit the most.":
+        "כמה מן הקורפוס מותר לחיפוש לבדוק. חיפוש עמוק יותר אורך שניות נוספות ומחזיר יותר כתבי יד — כולל עותקים פגומים ומעובדים שסריקה מהירה מפספסת. טקסטים ארוכים מרוויחים הכי הרבה.",
     "Letter-level search is busy right now — please try again in a moment.":
         "החיפוש ברמת האות עמוס כרגע — נסו שוב בעוד רגע.",
     "Letter-level search timed out — try a shorter text.":

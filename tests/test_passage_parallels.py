@@ -1000,6 +1000,27 @@ def test_the_web_width_control_reaches_the_policy(synthetic_corpus, monkeypatch)
         pa.get_passage_searcher(_FakeTextFetcher(originals), preset='slider-17')
 
 
+def test_the_web_depth_control_reaches_the_policy(synthetic_corpus, monkeypatch):
+    """The page's Search-depth select passes a depth profile into
+    get_passage_searcher; the budgets must actually move (a depth control
+    the engine never read would be the exact defect Codex flagged for the
+    other letter controls), and an unknown name must raise."""
+    import web.passage_assets as pa
+
+    idx, originals, _motif = synthetic_corpus
+    monkeypatch.setattr(pa, 'PASSAGE_PARALLELS_ENABLED', True)
+    monkeypatch.setattr(pa, '_state', pa._PassageState(ready=True, index=idx))
+
+    s = pa.get_passage_searcher(_FakeTextFetcher(originals), depth='deep')
+    assert s.policy.name == 'widest-40+deep'
+    assert (s.policy.posting_budget, s.policy.verify_cap,
+            s.policy.candidate_cap) == (2_000_000, 50_000, 500_000)
+
+    with pytest.raises(Exception):
+        pa.get_passage_searcher(_FakeTextFetcher(originals),
+                                depth='bottomless')
+
+
 # ---------------------------------------------------------------------------
 # Owner ruling 2026-08-23 (Birkat Hamazon session): the page path is UNCAPPED.
 # Display batching pages it; the export layer bounds it. The engine's group

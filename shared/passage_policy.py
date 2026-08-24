@@ -261,28 +261,80 @@ LENGTH_PROFILES = {
 }
 DEFAULT_LENGTH = 'normal'
 
+# ---------------------------------------------------------------------------
+# The THIRD axis: how much of the corpus the query is allowed to LOOK AT.
+#
+# posting_budget, verify_cap and candidate_cap are one decision the way
+# (min_span, verify_margin) are: the defaults were tuned on short queries,
+# where 500K postings is generous -- but a 6,000-letter composition carries
+# ~10.6M postings, so the default budget admits under 5% of them and true
+# candidates never even form clusters. The same query put 26,280 candidates
+# against verify_cap 3,000, so weak-but-real witnesses were crowded out
+# below the cap (the envelope said `verify_truncated`; no surface showed
+# it). Starvation, not the density boundary, is the dominant recall loss on
+# long queries.
+#
+# Measured 2026-08-24 on the Antiochus query (5,979 letters) against the
+# 83-positive adjudicated deck, composed onto max-40+short:
+#
+#   normal  (500K /   3K / 200K):   189 mss, recall 76%, 0.6s
+#   deep    (2M   /  50K / 500K):   508 mss, recall 81%, ~8s
+#   deepest (5M   /  50K / 500K): 1,683 mss, recall 84%, ~19s
+#
+# deep recovered a running Aramaic copy (T-S AS 67.25) and three catalogued
+# Megillat Antiochus witnesses; deepest additionally reached very damaged
+# and cross-version copies (a rhymed Hebrew reworking, an Arabic tafsir).
+# The caps are non-monotonic in each other -- recovered sets at different
+# (budget, verify_cap) points are NOT nested -- which is exactly why these
+# are offered as a few named, hashed points and never as sliders.
+#
+# Latency scales with the budget (the work IS the postings), so depth is a
+# per-query researcher decision, not a new default: 'normal' stays every
+# preset's behaviour and every previously measured policy_id.
+DEPTH_PROFILES = {
+    # (posting_budget, verify_cap, candidate_cap)
+    'normal': (500_000, 3_000, 200_000),   # every width preset's defaults
+    'deep': (2_000_000, 50_000, 500_000),    # measured 2026-08-24
+    'deepest': (5_000_000, 50_000, 500_000),  # measured 2026-08-24
+}
+DEFAULT_DEPTH = 'normal'
 
-def compose(width: str, length: str = DEFAULT_LENGTH) -> PassagePolicy:
-    """A width preset plus a passage-length profile, as one named policy.
 
-    The surface offers two small selects rather than raw sliders: the space
-    is a handful of nameable, hashed points, and the two parameters inside
-    `length` are coupled in a way a slider would misrepresent (a user
-    lowering a span floor alone would see NO change and conclude the control
-    was broken). Composed policies carry a derived name and, because
-    policy_id is a content hash, their own id -- so a result is always
-    traceable to exactly the settings that produced it, measured or not.
+def compose(width: str, length: str = DEFAULT_LENGTH,
+            depth: str = DEFAULT_DEPTH) -> PassagePolicy:
+    """A width preset plus a passage-length profile plus a search depth,
+    as one named policy.
+
+    The surface offers three small selects rather than raw sliders: the
+    space is a handful of nameable, hashed points, and the parameters inside
+    `length` and `depth` are each coupled in a way a slider would
+    misrepresent (a user lowering a span floor alone would see NO change and
+    conclude the control was broken; a user raising the posting budget
+    without the verify cap would verify the same 3,000 candidates and see
+    almost none of what the budget admitted). Composed policies carry a
+    derived name and, because policy_id is a content hash, their own id --
+    so a result is always traceable to exactly the settings that produced
+    it, measured or not.
     """
-    base = get_preset(width)
-    if length == DEFAULT_LENGTH:
-        return base
-    try:
-        min_span, verify_margin = LENGTH_PROFILES[length]
-    except KeyError:
-        raise ValueError(f'unknown passage-length profile {length!r}; '
-                         f'known: {sorted(LENGTH_PROFILES)}')
-    return replace(base, name=f'{width}+{length}', min_span=min_span,
-                   verify_margin=verify_margin)
+    policy = get_preset(width)
+    if length != DEFAULT_LENGTH:
+        try:
+            min_span, verify_margin = LENGTH_PROFILES[length]
+        except KeyError:
+            raise ValueError(f'unknown passage-length profile {length!r}; '
+                             f'known: {sorted(LENGTH_PROFILES)}')
+        policy = replace(policy, name=f'{policy.name}+{length}',
+                         min_span=min_span, verify_margin=verify_margin)
+    if depth != DEFAULT_DEPTH:
+        try:
+            posting_budget, verify_cap, candidate_cap = DEPTH_PROFILES[depth]
+        except KeyError:
+            raise ValueError(f'unknown search-depth profile {depth!r}; '
+                             f'known: {sorted(DEPTH_PROFILES)}')
+        policy = replace(policy, name=f'{policy.name}+{depth}',
+                         posting_budget=posting_budget,
+                         verify_cap=verify_cap, candidate_cap=candidate_cap)
+    return policy
 
 
 # The one measured point on the short axis, registered so evaluation tooling

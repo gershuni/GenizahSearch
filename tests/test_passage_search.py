@@ -390,13 +390,56 @@ def test_compose_rejects_an_unknown_profile():
 def test_every_offered_combination_is_a_distinct_named_policy():
     """The surface offers a small discrete grid, not a slider: each cell
     must be nameable and separately identifiable."""
+    from shared.passage_policy import DEPTH_PROFILES
     ids, names = set(), set()
     for width in _MEASURED_PRESET_IDS:
         for length in LENGTH_PROFILES:
-            p = compose(width, length)
-            ids.add(p.policy_id)
-            names.add(p.name)
-    assert len(ids) == len(names) == len(_MEASURED_PRESET_IDS) * len(LENGTH_PROFILES)
+            for depth in DEPTH_PROFILES:
+                p = compose(width, length, depth)
+                ids.add(p.policy_id)
+                names.add(p.name)
+    expected = (len(_MEASURED_PRESET_IDS) * len(LENGTH_PROFILES)
+                * len(DEPTH_PROFILES))
+    assert len(ids) == len(names) == expected
+
+
+# ---------------------------------------------------------------------------
+# compose(): the THIRD axis -- search depth (posting/verify/candidate
+# budgets moved together). Measured 2026-08-24 on the Antiochus deck:
+# the default posting budget admits <5% of a 6K-letter query's postings,
+# and verify_cap 3,000 vs 26K candidates crowds real witnesses below the
+# cap. DEPTH_PROFILES in shared/passage_policy.py carries the numbers.
+# ---------------------------------------------------------------------------
+
+def test_compose_normal_depth_is_the_width_preset_itself():
+    for name in _MEASURED_PRESET_IDS:
+        assert compose(name, 'normal', 'normal') is get_preset(name)
+
+
+def test_compose_deep_moves_all_three_coupled_budgets():
+    """posting_budget, verify_cap and candidate_cap are ONE decision: more
+    budget without more verification changes almost nothing (measured), so
+    the profile must move all three or it silently underdelivers."""
+    base = get_preset('max-40')
+    deep = compose('max-40', 'short', 'deep')
+    assert (base.posting_budget, base.verify_cap, base.candidate_cap) \
+        == (500_000, 3_000, 200_000)
+    assert (deep.posting_budget, deep.verify_cap, deep.candidate_cap) \
+        == (2_000_000, 50_000, 500_000)
+    deepest = compose('max-40', 'normal', 'deepest')
+    assert (deepest.posting_budget, deepest.verify_cap,
+            deepest.candidate_cap) == (5_000_000, 50_000, 500_000)
+    # width and length are preserved; identity is distinct, self-describing
+    assert deep.density_scale == base.density_scale
+    assert (deep.min_span, deep.verify_margin) == (28, 12)
+    assert deep.name == 'max-40+short+deep'
+    assert deepest.name == 'max-40+deepest'
+    assert len({base.policy_id, deep.policy_id, deepest.policy_id}) == 3
+
+
+def test_compose_rejects_an_unknown_depth():
+    with pytest.raises(ValueError):
+        compose('widest-40', 'normal', 'bottomless')
 
 
 # ---------------------------------------------------------------------------

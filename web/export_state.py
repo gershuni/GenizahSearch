@@ -811,6 +811,7 @@ def compute_parallels_search_fingerprint(
     engine,
     width=None,
     length=None,
+    depth=None,
     chunk_size=None,
     mode=None,
     max_freq=None,
@@ -881,6 +882,12 @@ def compute_parallels_search_fingerprint(
     # entry stops recognising its own results.
     if length not in (None, 'normal'):
         payload['length'] = length
+    # `depth` (the letter-level search-depth profile) joined the same day,
+    # under the same rule: absent at its default so every earlier
+    # fingerprint keeps matching, present whenever the search genuinely ran
+    # with bigger budgets.
+    if depth not in (None, 'normal'):
+        payload['depth'] = depth
     for key in _PARALLELS_FINGERPRINT_SET_INPUTS:
         value = payload.get(key)
         if value is not None:

@@ -352,6 +352,17 @@ The stamp class was found late: a single apparent "unit" of 2,618 manuscripts sh
 a photographed ownership stamp. Both stamp and target-sheet records match each other across
 entirely unrelated manuscripts, which is what makes them dangerous rather than merely useless.
 
+**The 80-letter floor costs measured witnesses (2026-08-24, decision open).** Four of the
+Antiochus deck's missed positives were missing because their text side fell under the floor at
+build time (Ms. H 7's Antiochus records, T-S AS 67.25's second side, ENA 1629.10, parts of
+Ms. C 24) — no query policy can find a record that is not in the index. A measurement rebuild
+with the floor at **30** indexed 759,224 records (+56,758; the other two rules caught more of
+the newly admitted tiny records — `target_sheet` 9,007 → 16,698, `library_stamp` 5,397 →
+6,535), and on the deck it was strictly positive: +2 positives at `normal` depth (Ms. H 7,
+T-S AS 67.25), no positive lost at any depth, burden +1–3 manuscripts, latency unchanged.
+One query, one deck; whether the production floor moves is an owner decision, and the
+`short` exclusion's junk exposure on *other* queries is unmeasured.
+
 ### 9.2 Duplicate-photography detection (post-verify)
 
 The subtlest duplicate class is the **same physical page photographed twice** — different image
@@ -454,6 +465,41 @@ The three allocation policies (no cap, band-allocated, rarest-first) are to be c
 identical budgets** on measured recall before one is adopted. This spec fixes the *contract*, not
 the winner.
 
+### 10.2a Budget starvation on long queries — the depth axis (2026-08-24)
+
+The default budgets were tuned on short queries and quietly starve long ones. The Antiochus
+query (5,979 letters) carries **10.6M postings; `posting_budget = 500,000` admits under 5%** of
+them, so true candidates never even form clusters — and the ~26K clusters that do form compete
+for `verify_cap = 3,000`, which crowds weak-but-real witnesses below the cap (the envelope said
+`verify_truncated`; no surface showed it). Two prior findings misled here: the 2026-08-20 cap
+sweep that "changed self-retrieval not at all" measured strong verbatim matches, not marginal
+witnesses; and the near-miss analysis of section 8.1 was itself run under the starved budget,
+so some "zero-candidate" records actually had candidates the budget had excluded.
+
+Raising the three caps **together** (more budget without more verification changes almost
+nothing) is a pure query-policy change, offered as the third composition axis
+(`passage_policy.DEPTH_PROFILES`), measured on the 83-positive deck at max-40+short:
+
+| depth | (budget, verify, candidates) | manuscripts | recall | frontier | local time |
+|---|---|---|---|---|---|
+| `normal` | (500K, 3K, 200K) | 189 | 76% | 1/20 | 0.6s |
+| `deep` | (2M, 50K, 500K) | ~508 | 81% | 5/20 | 4–8s |
+| `deepest` | (5M, 50K, 500K) | ~1,683 | 84% | 7/20 | 11–19s |
+
+(`frontier` = the 20 positives only chunk-2 had ever returned, per `eval/antiochus/README.md`;
+recall figures are the by-sys-id join — the canonical scorer's stricter shelfmark join reads
+72%/77%/80% on the same runs.) `deep` recovers a running Aramaic copy (T-S AS 67.25) and three
+catalogued Megillat Antiochus witnesses; `deepest` additionally reaches an Arabic tafsir, a
+rhymed Hebrew reworking and a very damaged copy. The caps are **non-monotonic in each other**:
+recovered sets at different (budget, verify) points are not nested (Ms. 10808.8 is found at
+2M/50K and lost at uncapped/200K, where 1.6M candidates change the verification order). That is
+why depth ships as a few named, hashed profiles and never as sliders.
+
+Latency scales with the budget — the work *is* the postings — so depth is a per-query
+researcher decision, not a new default. Everything here is one query and one deck; the
+short-query instruments have not been re-measured under `deep`/`deepest` (they never hit the
+default budget, so no change is *expected*, but that is an inference, not a measurement).
+
 ### 10.3 Position stride
 
 Indexing every position is the default. Indexing every second or third position reduces the
@@ -520,6 +566,7 @@ word-chunk matching plus vocabulary triage, not to the letter engine.
 | DF — batch, asymmetric | `REF_DF_CAP` | 128 raw postings per code — **known non-monotonic**, section 10.1 | `track1_match.py` |
 | DF — interactive | policy | band-allocated posting budget, section 10.2 | this spec |
 | Length profile | `min_span` / `verify_margin` | `normal` = (40, 30), `short` = (28, 12) | `passage_policy.py::LENGTH_PROFILES`, section 8.1 |
+| Depth profile | `posting_budget` / `verify_cap` / `candidate_cap` | `normal` = (500K, 3K, 200K), `deep` = (2M, 50K, 500K), `deepest` = (5M, 50K, 500K) | `passage_policy.py::DEPTH_PROFILES`, section 10.2a |
 | Measured noise | letter CER | 20.1% micro, 16.6% median, p25 8.9%, p90 42% | 209-page alignment against human transcriptions |
 | Corpus | records / letters | 948,549 records, 602,598,330 normalized letters, longest record 11,809 | measured 2026-08-20 |
 

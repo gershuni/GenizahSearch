@@ -1123,6 +1123,37 @@ def create_parallels_page(initial_text: str = None):
                             'at roughly double the results for a third fewer '
                             'correct ones, so expect to skim more.'
                         ))
+                        # The THIRD axis (2026-08-24): search depth. The
+                        # engine's default budgets were tuned on short
+                        # queries; a full composition carries ~10M postings
+                        # of which the default budget admits under 5%, so
+                        # true witnesses never even reach verification --
+                        # starvation, not the match boundary, is the main
+                        # recall loss on long queries. Depth raises the
+                        # posting/verify/candidate budgets together (they
+                        # are ONE coupled decision -- more budget without
+                        # more verification changes almost nothing), at a
+                        # measured latency cost: ~8s for deep, ~19s for
+                        # deepest on the Antiochus benchmark vs 0.6s normal.
+                        # Named profiles, never sliders, like the two axes
+                        # above (DEPTH_PROFILES in shared/passage_policy.py
+                        # carries the full measurements).
+                        passage_depth = ui.select(
+                            options={
+                                'normal': tr('Normal (fast, default)'),
+                                'deep': tr('Deep (slower, more witnesses)'),
+                                'deepest': tr('Deepest (slowest, most)'),
+                            },
+                            value='normal',
+                            label=tr('Search depth'),
+                        ).classes('w-44').props('outlined dense')
+                        passage_depth.tooltip(tr(
+                            'How much of the corpus the search may examine. '
+                            'Deeper searches take seconds longer and return '
+                            'more manuscripts — including badly damaged and '
+                            'reworked copies a fast pass misses. Long texts '
+                            'benefit the most.'
+                        ))
 
                     # Mode
                     mode_select = ui.select(
@@ -1272,6 +1303,8 @@ def create_parallels_page(initial_text: str = None):
                                     passage_width.value = cfg['width']
                                 if cfg.get('length') in passage_length.options:
                                     passage_length.value = cfg['length']
+                                if cfg.get('depth') in passage_depth.options:
+                                    passage_depth.value = cfg['depth']
                             else:
                                 # 'chunk', or 'passage' degrading because the
                                 # index is unavailable (same rule as dispatch).
@@ -3102,6 +3135,7 @@ def create_parallels_page(initial_text: str = None):
         captured_passage_mode = _letter_level_selected() and passage_available() and not captured_lab_mode
         captured_passage_width = passage_width.value or 'widest-40'
         captured_passage_length = passage_length.value or 'normal'
+        captured_passage_depth = passage_depth.value or 'normal'
         # Phase 145 finding #10 (adversarial review): computed ONCE here
         # rather than the 'lab'/'passage'/'chunk' ternary being written twice
         # (PostHog capture + composition-history params) below.
@@ -3125,6 +3159,7 @@ def create_parallels_page(initial_text: str = None):
         if captured_engine != 'passage':
             captured_passage_width = 'widest-40'
             captured_passage_length = 'normal'
+            captured_passage_depth = 'normal'
         captured_freq_threshold = int(freq_threshold.value) if freq_threshold.value else 50
         captured_deep_scan = deep_scan.value if captured_lab_mode else False
         captured_chunk_size = int(chunk_size.value) if chunk_size.value else 5
@@ -3280,7 +3315,8 @@ def create_parallels_page(initial_text: str = None):
             # found on Birkat Hamazon).
             passage_searcher = get_passage_searcher(
                 state.searcher, preset=captured_passage_width,
-                length=captured_passage_length, render_cap=0)
+                length=captured_passage_length,
+                depth=captured_passage_depth, render_cap=0)
             if passage_searcher is None:
                 return None
             return passage_searcher.search_composition_logic(
@@ -3450,6 +3486,7 @@ def create_parallels_page(initial_text: str = None):
                         engine=captured_engine,
                         width=captured_passage_width,
                         length=captured_passage_length,
+                        depth=captured_passage_depth,
                         chunk_size=captured_chunk_size,
                         mode=captured_mode,
                         max_freq=captured_freq_threshold,
@@ -3489,6 +3526,7 @@ def create_parallels_page(initial_text: str = None):
                         'engine': captured_engine,
                         'width': captured_passage_width,
                         'length': captured_passage_length,
+                        'depth': captured_passage_depth,
                         'chunk_size': captured_chunk_size,
                         'mode': captured_mode,
                         'max_freq': captured_freq_threshold,

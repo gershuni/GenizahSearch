@@ -632,7 +632,9 @@ def test_the_restore_notice_states_its_condition():
 _CONFIG_KEYS = (
     # 'length' = the passage-length axis added 2026-08-24; it is part of the
     # search identity, so it must be stashed and fingerprinted like 'width'.
-    'engine', 'width', 'length', 'chunk_size', 'mode', 'max_freq', 'deep_scan',
+    # 'depth' = the search-depth axis added the same day, same rule.
+    'engine', 'width', 'length', 'depth',
+    'chunk_size', 'mode', 'max_freq', 'deep_scan',
     'boundary_mode', 'boundary_delimiter', 'boundary_boost',
     'min_boundary_matches', 'min_delimiter_distance',
     'variant_level', 'variant_max_changes',
@@ -912,6 +914,66 @@ def test_the_pinned_defaults_are_the_ones_that_cost_no_stored_identity():
               length='normal') == legacy
 
 
+# ---------------------------------------------------------------------------
+# The THIRD control axis: search depth (DEPTH_PROFILES, 2026-08-24). The
+# engine's default budgets starve long queries -- <5% of a composition's
+# postings admitted, real witnesses crowded below the verify cap -- so depth
+# raises the three budgets together, as one named profile per step.
+# ---------------------------------------------------------------------------
+
+def test_the_page_offers_a_search_depth_control():
+    import inspect
+
+    import web.pages.parallels as pp
+    src = inspect.getsource(pp.create_parallels_page)
+    assert 'passage_depth = ui.select(' in src
+    block = src[src.index('passage_depth = ui.select('):][:900]
+    assert "'normal'" in block and "'deep'" in block and "'deepest'" in block
+    assert "value='normal'" in block, 'normal must remain the default'
+
+
+def test_search_depth_is_captured_at_dispatch_and_reaches_the_searcher():
+    """A live widget read describes a configuration the search may not have
+    used -- the same rule the width and length controls already follow."""
+    import inspect
+
+    import web.pages.parallels as pp
+    src = inspect.getsource(pp.create_parallels_page)
+    assert 'captured_passage_depth = passage_depth.value' in src
+    assert 'depth=captured_passage_depth' in src
+
+
+def test_search_depth_is_part_of_the_search_identity():
+    """Two searches differing only in depth are different searches (they
+    can return different result sets); the default must not shift old ids."""
+    from web.export_state import compute_parallels_search_fingerprint as fp
+    base = fp(text='x', engine='passage', width='widest-40')
+    assert fp(text='x', engine='passage', width='widest-40',
+              depth='normal') == base, 'the default must not shift old ids'
+    assert fp(text='x', engine='passage', width='widest-40',
+              depth='deep') != base
+    assert fp(text='x', engine='passage', width='widest-40',
+              depth='deep') != fp(text='x', engine='passage',
+                                  width='widest-40', depth='deepest')
+
+
+def test_search_depth_is_pinned_for_non_letter_searches():
+    """Same rule as width/length (Codex P2, 2026-08-24): a control the
+    engine never read is not part of that search's identity."""
+    src = _read_source()
+    scope_at = src.index("if captured_engine != 'passage':")
+    block = src[scope_at:src.index('\n\n', scope_at)]
+    assert "captured_passage_depth = 'normal'" in block
+
+
+def test_search_depth_restores_with_the_other_letter_controls():
+    """The reload restore re-applies letter selects for engine=='passage';
+    depth must be among them or a restored search silently reruns shallow."""
+    src = _read_source()
+    assert "if cfg.get('depth') in passage_depth.options:" in src
+    assert "'depth': captured_passage_depth," in src
+
+
 def test_letter_options_live_in_the_options_pane_not_the_method_row():
     """Owner feedback 2026-08-24: the letter-level controls belong in the
     same pane as the chunk options they replace. The earlier shape put them
@@ -923,6 +985,7 @@ def test_letter_options_live_in_the_options_pane_not_the_method_row():
     assert src.index('passage_width = ui.select(') > opts, (
         'passage_width must be created inside the Options pane')
     assert src.index('passage_length = ui.select(') > opts
+    assert src.index('passage_depth = ui.select(') > opts
     assert 'letter_options_col' in src
 
 
