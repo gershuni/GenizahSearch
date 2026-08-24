@@ -386,15 +386,30 @@ def test_promotion_reports_failures_once_and_by_name():
     assert 'Could not load text for {n} manuscripts: {names}' in src
     # ONE notify for the whole batch, driven by the list the helper returns.
     assert 'texts, failed = await run.io_bound(_fetch)' in src
-    # Three notifies total: the witness-cap refusal, the failure summary and
-    # the success summary. NONE of them inside the per-manuscript loop, which
-    # is the shape this replaced (fifteen identical anonymous toasts).
-    assert src.count('ui.notify') == 3
-    loop_start = src.index('for sid in sys_ids:')
-    loop_end = src.index('if failed:', loop_start)
-    assert 'ui.notify' not in src[loop_start:loop_end], (
-        'a notify inside the per-manuscript loop fires once per manuscript'
-    )
+    # NONE of the notifies may sit inside the per-manuscript loop -- that is
+    # the shape this replaced (fifteen identical anonymous toasts). Asked of
+    # the AST, not of a substring span: this test used to find the loop's end
+    # by searching for the literal `if failed:`, so a summary added between
+    # the loop and that line counted as being inside it.
+    for node in ast.walk(ast.parse(_source())):
+        if not (isinstance(node, ast.AsyncFunctionDef)
+                and node.name == '_promote_checked'):
+            continue
+        for sub in ast.walk(node):
+            if not (isinstance(sub, ast.For)
+                    and isinstance(sub.target, ast.Name)
+                    and sub.target.id == 'sid'):
+                continue
+            for inner in ast.walk(sub):
+                assert not (isinstance(inner, ast.Call)
+                            and isinstance(inner.func, ast.Attribute)
+                            and inner.func.attr == 'notify'), (
+                    'a notify inside the per-manuscript loop fires once per '
+                    'manuscript'
+                )
+        break
+    else:
+        raise AssertionError('_promote_checked not found')
 
 
 def test_there_is_exactly_one_sys_id_pattern_on_the_page():
@@ -1039,3 +1054,88 @@ def test_the_panel_refresh_does_not_persist():
     whole result set seventeen times in a 17-witness run. The mutation
     boundaries are called explicitly for exactly this reason."""
     assert '_persist_witness_state' not in _calls_in('_refresh_witness_panel')
+
+
+# ---------------------------------------------------------------------------
+# The add dialog says what it dropped, and refuses what cannot be searched.
+# ---------------------------------------------------------------------------
+
+def test_a_bulk_paste_reports_what_it_skipped():
+    """`skipped` was computed and then never mentioned unless the user pressed
+    Preview. Paste seventeen witnesses of which three are under the three-word
+    floor and fourteen appear, with nothing to say the file was not fully
+    read."""
+    src = _func_source('_open_add_witness_dialog')
+    commit = src[src.index('def _commit'):]
+    assert 'if skipped:' in commit, (
+        'the commit path must report the drop, not only the Preview button'
+    )
+    assert "'({n} skipped: too short)'" in commit
+
+
+def test_an_over_long_witness_is_refused_before_it_is_searched():
+    src = _func_source('_open_add_witness_dialog')
+    assert 'MAX_WITNESS_CHARS' in src
+    assert "'Witness text is too long (max {cap} characters)'" in src
+
+
+def test_an_over_long_promoted_manuscript_is_skipped_and_named():
+    """Truncating it would search half a manuscript as if it were the whole
+    one -- a worse answer than none, and an invisible one."""
+    src = _func_source('_promote_checked')
+    assert 'MAX_WITNESS_CHARS' in src
+    assert 'too_long' in src
+    assert "'Witness text is too long (max {cap} characters)'" in src
+
+
+def test_the_export_meta_records_that_the_rows_are_fused():
+    """Without it the JSON export re-ranks the groups by summed matched
+    letters -- a different order than the page showed -- and drops the witness
+    facts, though every row still carries them."""
+    assert "meta['multi_witness']" in _func_source('_refresh_export_payload')
+
+
+def _guard_reports(func: str, flag: str) -> bool:
+    """Is there an `if <flag>:` in `func` whose body notifies?
+
+    From the AST, because the claim is that the report FIRES. A substring
+    assertion cannot tell `if too_long:` from `if False:` -- both still
+    contain the notify and its message literal, which is how three of these
+    mutations came back green the first time.
+    """
+    for node in ast.walk(ast.parse(_source())):
+        if not (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == func):
+            continue
+        for sub in ast.walk(node):
+            if not (isinstance(sub, ast.If) and isinstance(sub.test, ast.Name)
+                    and sub.test.id == flag):
+                continue
+            for inner in ast.walk(ast.Module(body=sub.body, type_ignores=[])):
+                if (isinstance(inner, ast.Call)
+                        and isinstance(inner.func, ast.Attribute)
+                        and inner.func.attr == 'notify'):
+                    return True
+        return False
+    raise AssertionError(f'{func} not found in web/pages/parallels.py')
+
+
+def test_the_paste_path_uses_the_shared_length_rule():
+    """Inline, the filter was covered only by a substring: replacing it with
+    `[]` -- which searches every over-long text -- left the suite green,
+    because the constant's name still appeared two lines above."""
+    assert 'split_by_length' in _calls_in('_open_add_witness_dialog')
+    assert _guard_reports('_open_add_witness_dialog', '_long'), (
+        'the over-long paste is dropped without a word'
+    )
+
+
+def test_the_promotion_path_uses_the_same_length_rule():
+    """A manuscript fetched from the corpus and one pasted by hand must not
+    disagree about what is searchable."""
+    assert 'split_by_length' in _calls_in('_promote_checked')
+    assert _guard_reports('_promote_checked', 'too_long')
+
+
+def test_the_bulk_paste_drop_is_reported_from_a_real_guard():
+    assert _guard_reports('_open_add_witness_dialog', 'skipped')

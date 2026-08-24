@@ -838,6 +838,7 @@ outcome, or a per-source enrichment soft failure — none of which are item-scop
 | `truncated_to_200` | parallels | group count exceeded 200; top 200 returned (Phase 80 D-07). |
 | `passage_text_lookup_failed` | parallels (`method='passage'`) | one or more matched rows were DROPPED (never returned in `results[]`/`filtered[]`) because their display-text lookup failed -- never a silently blank row. Object-shaped (not a bare string, unlike `truncated_to_200`): `{"code": "passage_text_lookup_failed", "count": N}`. |
 | `witness_ref_unresolved` | parallels (`witnesses`) | one or more witnesses were SKIPPED because their `raw_header` did not resolve, or resolved to a page over the length cap. Object-shaped: `{"code": "witness_ref_unresolved", "count": N, "witnesses": [{"id", "label", "reason"}]}` where `reason` is `not_found` \| `bad_ref` \| `empty` \| `too_long`. The other witnesses still ran. |
+| `sort_not_applied` | parallels (`witnesses` + `sort`) | fewer than two witnesses resolved, so no fusion happened and there is nothing for `fused` / `witness_count` to order by. The array is ordered by score. Object-shaped: `{"code": "sort_not_applied", "sort": "...", "reason": "..."}`. `request.sort` still echoes what was **asked for** — the echo reflects the request, this warning reports what was done. |
 
 **Worked Responsa cascade case.** A `/api/search` response showing both signals
 simultaneously:

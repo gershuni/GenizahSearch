@@ -2912,6 +2912,11 @@ def init_api_routes(app_override=None):
         source_text = meta.get('source_text') or ''
 
         try:
+            # A multi-witness export must present the fused ranking, not a
+            # re-rank by raw matched letters: the file would list the same
+            # manuscripts in a different order than the page that produced it,
+            # with nothing to explain the difference.
+            _multi = bool(meta.get('multi_witness'))
             payload = serialize_parallels_payload(
                 parallels_results,
                 filtered_results,
@@ -2922,6 +2927,8 @@ def init_api_routes(app_override=None):
                 max_freq=meta.get('max_freq'),
                 boundary_options=meta.get('boundary_options'),
                 warnings=meta.get('warnings') or [],
+                order_key='fusion_score' if _multi else None,
+                with_witness_fusion=_multi,
             )
             filename = build_parallels_filename()
             return JSONResponse(

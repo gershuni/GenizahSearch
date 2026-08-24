@@ -64,6 +64,7 @@ from web.services import get_service
 from shared.search_serializer import serialize_browse_payload, serialize_parallels_payload
 # Phase 80 imports.
 from shared.parallels_service import fetch_parallels_results, ParallelsResultBundle
+from shared.passage_fusion import MAX_WITNESS_CHARS
 
 logger = logging.getLogger(__name__)
 
@@ -694,6 +695,10 @@ MAX_BROWSE_TEXT_CAP = 10000
 # 20000 chars (~3000 Hebrew words) after .strip(). Above cap → 400
 # 'composition_too_long'. Empty after .strip() → 400 'composition_required'.
 COMPOSITION_LENGTH_CAP = 20000
+# The per-WITNESS ceiling is the same number, but it has ONE definition, in
+# shared/passage_fusion.py (imported at the top of this module), so the page
+# enforces exactly what the API does -- the page had no cap at all until a
+# review found it.
 
 # The chunk-only knobs' defaults, named ONCE.
 #
@@ -2029,11 +2034,11 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 )
             for _i, _w in enumerate(witnesses_in):
                 _wt = (_w.text or '').strip()
-                if _wt and len(_wt) > COMPOSITION_LENGTH_CAP:
+                if _wt and len(_wt) > MAX_WITNESS_CHARS:
                     raise APIError(
                         'witness_too_long',
                         f'witness {_i + 1} exceeds cap (max '
-                        f'{COMPOSITION_LENGTH_CAP} chars; submitted '
+                        f'{MAX_WITNESS_CHARS} chars; submitted '
                         f'{len(_wt)})',
                         http_status=400,
                     )
@@ -2263,7 +2268,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                         restrict_sys_ids=restrict_sys_ids,
                         executor=_passage_executor(),
                         witnesses=witness_payload,
-                        witness_text_cap=COMPOSITION_LENGTH_CAP,
+                        witness_text_cap=MAX_WITNESS_CHARS,
                     )
                 )
             except NoWitnessesResolved as exc:
@@ -2385,6 +2390,16 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
         # without saying so is the silent-content-loss failure this repo
         # treats as a defect -- the caller asked for seventeen searches and
         # got sixteen.
+        if req.sort and witnesses_in and not bundle.multi_witness:
+            # The echo below still reports what was ASKED for -- that is what
+            # an echo is -- so without this the response claims an ordering it
+            # does not have. One witness resolving short-circuits before any
+            # fusion, and `fused` / `witness_count` are facts fusion produces.
+            warnings_list.append({
+                'code': 'sort_not_applied',
+                'sort': req.sort,
+                'reason': 'fewer than two witnesses resolved',
+            })
         _unresolved_w = (bundle.witness_report or {}).get('unresolved') or []
         if _unresolved_w:
             warnings_list.append({

@@ -96,6 +96,34 @@ _PASTE_SPLIT_RE = re.compile(r"\n\s*(?:\*\s*)?\n")
 # able to smuggle in witnesses the page would have refused if typed.
 MIN_WITNESS_WORDS = 3
 
+# The per-witness length ceiling, in characters. Generous next to the
+# 456-5,979-letter reality of the measured witness sets, and identical to the
+# API's `COMPOSITION_LENGTH_CAP` -- it lives HERE so the page and the API
+# cannot drift into disagreeing about what a witness is. The page had no cap
+# at all, so an over-long paste became a witness that timed out after 30s,
+# once per witness.
+MAX_WITNESS_CHARS = 20000
+
+
+def split_by_length(texts, cap: int = None):
+    """Partition candidate witness texts into (searchable, too_long).
+
+    Module level and pure so the RULE is tested by calling it. Inline in the
+    page it was covered only by a substring assertion, and a mutation
+    replacing the whole filter with `[]` -- which searches every over-long
+    text -- left the suite green while the words `MAX_WITNESS_CHARS` sat two
+    lines above, still satisfying the grep.
+
+    An over-long witness is REJECTED, never truncated: half a manuscript
+    searched as if it were the whole one is a worse answer than none, and an
+    invisible one. The caller reports the rejects.
+    """
+    limit = MAX_WITNESS_CHARS if cap is None else cap
+    ok, too_long = [], []
+    for t in texts or []:
+        (too_long if len(t or '') > limit else ok).append(t)
+    return ok, too_long
+
 
 def witness_id_for(index: int) -> str:
     """Canonical id for the `index`-th witness (0-based).
@@ -225,19 +253,31 @@ def fuse(rows_by_witness: "Mapping[str, Sequence[dict]] | Iterable[tuple]",
     # record key -> {'contributors': [(order, rank, score, row)], 'rrf': float}
     acc: dict = {}
     for order, (_wid, rows) in enumerate(pairs):
+        # One contribution per witness per record. The engine keys its hits by
+        # (witness, record) and so should never emit the same record twice in
+        # one witness's list -- which is precisely why a duplicate would go
+        # unnoticed: it would not change `witness_count` (keyed by witness
+        # position), only inflate that witness's share of the RRF sum, and a
+        # ranking that is quietly wrong looks exactly like one that is right.
+        best_here: dict = {}
         for row in rows or []:
             rec = row.get(key)
             if not rec:
                 continue
             rank = _rank_of(row)
+            prev = best_here.get(rec)
+            if prev is None or rank < prev[1]:
+                best_here[rec] = (order, rank, _score_of(row), row)
+        for rec, contribution in best_here.items():
             entry = acc.get(rec)
             if entry is None:
                 entry = acc[rec] = {'contributors': [], 'rrf': 0.0}
-            # Accumulate, never last-witness-wins: `hit_by_header`-shaped
-            # dicts keyed by record collide across witnesses by design, and
-            # overwriting is how witness_count silently becomes 1.
-            entry['contributors'].append((order, rank, _score_of(row), row))
-            entry['rrf'] += 1.0 / (_RRF_K + rank)
+            # Accumulate ACROSS witnesses, never last-witness-wins:
+            # `hit_by_header`-shaped dicts keyed by record collide across
+            # witnesses by design, and overwriting is how witness_count
+            # silently becomes 1.
+            entry['contributors'].append(contribution)
+            entry['rrf'] += 1.0 / (_RRF_K + contribution[1])
 
     fused: list[dict] = []
     for rec, entry in acc.items():

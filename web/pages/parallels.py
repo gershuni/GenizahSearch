@@ -2657,6 +2657,26 @@ def create_parallels_page(initial_text: str = None):
                 if not texts:
                     ui.notify(tr('Enter at least 3 words'), type='warning')
                     return
+                # Never a silent drop -- the Preview button said so, but only
+                # if the user pressed it, and a paste that quietly loses part
+                # of a file is the failure this repo treats as a defect.
+                if skipped:
+                    ui.notify(
+                        tr('({n} skipped: too short)').format(n=skipped),
+                        type='warning')
+                from shared.passage_fusion import (
+                    MAX_WITNESS_CHARS, split_by_length)
+                texts, _long = split_by_length(texts)
+                if _long:
+                    # Refuse now, in one message. Accepted, each of these
+                    # becomes a witness that spends its whole 30s ceiling and
+                    # fails, and the user reads the same generic timeout up to
+                    # 25 times.
+                    ui.notify(
+                        tr('Witness text is too long (max {cap} characters)'
+                           ).format(cap=MAX_WITNESS_CHARS), type='warning')
+                    if not texts:
+                        return
                 room = _witness_depth_cap() - len(p_state.witnesses)
                 if len(texts) > room:
                     ui.notify(
@@ -2935,10 +2955,19 @@ def create_parallels_page(initial_text: str = None):
         # promotion, but a witness can also arrive from the add dialog while
         # the fetch is in flight.
         _already = {w.get('sys_id') for w in p_state.witnesses if w.get('sys_id')}
-        added = 0
+        from shared.passage_fusion import (
+            MAX_WITNESS_CHARS, split_by_length)
+        added, too_long = 0, []
         for sid in sys_ids:
             text = texts.get(sid)
             if not text or sid in _already:
+                continue
+            # The same rule the paste path applies, so a manuscript fetched
+            # from the corpus and a manuscript pasted by hand cannot disagree
+            # about what is searchable.
+            _ok, _over = split_by_length([text])
+            if _over:
+                too_long.append(sid)
                 continue
             label = sid
             try:
@@ -2949,6 +2978,10 @@ def create_parallels_page(initial_text: str = None):
             _add_witness(text, label=label, kind='manuscript', sys_id=sid,
                          seed_digest=promoted_digest)
             added += 1
+        if too_long:
+            ui.notify(
+                tr('Witness text is too long (max {cap} characters)').format(
+                    cap=MAX_WITNESS_CHARS), type='warning')
         if failed:
             # ONE line naming what failed, not N identical toasts saying
             # nothing (fifteen of them was the owner's first experience of
@@ -3217,6 +3250,12 @@ def create_parallels_page(initial_text: str = None):
                 for w in p_state.witnesses
                 if p_state.witness_rows.get(w['id']) is not None
             ] or None
+            # The rows are FUSED, so the exported file must be ordered and
+            # described the way the screen is. Without this flag the JSON
+            # export re-ranked the groups by summed matched letters -- a
+            # different order than the user saw -- and dropped the witness
+            # facts entirely, though every row still carried them.
+            meta['multi_witness'] = bool(meta['witnesses'])
             p_state.last_export_meta = meta
             set_parallels_export(results=p_state.results,
                                  filtered=p_state.filtered_results,

@@ -2004,3 +2004,50 @@ def test_a_single_witness_response_has_no_best_witness_score(
         'text': 'hello world', 'method': 'passage'})
     assert r.status_code == 200, r.text
     assert 'witness_fusion' not in r.json()['results'][0]
+
+
+def test_a_sort_that_could_not_be_applied_is_reported(client, mock_searcher,
+                                                      clean_env, monkeypatch):
+    """Send witnesses, have fewer than two resolve, and the response echoes
+    the requested sort over an array ordered by score: the single-witness path
+    short-circuits before fusing, so `fused` and `witness_count` are facts
+    nothing produced. The echo stays -- that is what an echo is -- and a
+    warning says the sort was dropped."""
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    monkeypatch.setattr(
+        'web.passage_assets.passage_multi_witness_available', lambda: True)
+    monkeypatch.setattr(
+        'web.passage_assets.get_passage_searcher',
+        lambda text_fetcher: mock_searcher)
+    mock_searcher.policy.as_dict.return_value = _fake_passage_policy()
+    # One witness resolved out of two requested -> no fusion happened.
+    mock_searcher.search_composition_logic.return_value = {
+        'main': [_make_main_row(uid='IE1_P1_FL1', sys_id='99001', score=5.0)],
+        'filtered': [],
+        'truncated_to_200': False,
+        'dropped_text_lookup_failures': 0,
+        'duplicate_photography_demoted': 0,
+        'query_report': {'candidates': 10, 'verify_truncated': False},
+        'witness_report': _witness_report(requested=2, searched=1),
+        'per_witness_query_reports': [],
+    }
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [W1, W2],
+        'sort': 'witness_count'})
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    codes = {w['code'] for w in body.get('warnings') or []}
+    assert 'sort_not_applied' in codes, (
+        'the response claims an ordering it does not have'
+    )
+    # The echo still reports what was asked for.
+    assert body['request']['sort'] == 'witness_count'
+
+
+def test_an_applied_sort_is_not_warned_about(client, multi_witness, clean_env):
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [W1, W2], 'sort': 'witness_count'})
+    assert r.status_code == 200, r.text
+    codes = {w['code'] for w in r.json().get('warnings') or []}
+    assert 'sort_not_applied' not in codes

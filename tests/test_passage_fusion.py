@@ -289,3 +289,77 @@ def test_group_stats_survives_junk_in_the_best_score():
         {'witness_ids': 'w3', 'fusion_score': 0.03, 'best_witness_score': 7},
     ])
     assert stats['best_witness_score'] == 7.0
+
+
+def test_one_witness_contributes_once_per_record():
+    """The RRF sum accumulated per ROW, so two rows carrying the same
+    `raw_header` in one witness's list gave that witness two contributions to
+    one record. The engine keys its hits by (witness, record) and should never
+    emit that -- which is exactly why it would go unnoticed if it did: it does
+    not move `witness_count` (keyed by witness position), only inflates one
+    witness's share of the ranking, and a ranking that is quietly wrong looks
+    like one that is right."""
+    dupes = pf.tag_rows([_row('REC', 300), _row('REC', 100)], 'w1', 'Seed')
+
+    row = pf.fuse({'w1': dupes})[0]
+
+    assert row['fusion_score'] == pytest.approx(1 / 61), (
+        'the duplicate added a second 1/(60+rank) term'
+    )
+    assert row['witness_count'] == 1
+
+
+def test_the_better_ranked_duplicate_is_the_one_kept():
+    dupes = pf.tag_rows([_row('OTHER', 500), _row('REC', 300),
+                         _row('REC', 100)], 'w1', 'Seed')
+    row = [r for r in pf.fuse({'w1': dupes}) if r['raw_header'] == 'REC'][0]
+    # 'REC' is rank 2 and rank 3; the better rank wins.
+    assert row['fusion_score'] == pytest.approx(1 / 62)
+    assert row['score'] == 300.0
+
+
+def test_duplicates_do_not_break_the_cross_witness_count():
+    a = pf.tag_rows([_row('REC', 300), _row('REC', 100)], 'w1', 'A')
+    b = pf.tag_rows([_row('REC', 900)], 'w2', 'B')
+    row = pf.fuse({'w1': a, 'w2': b})[0]
+    assert row['witness_count'] == 2
+    assert row['fusion_score'] == pytest.approx(1 / 61 + 1 / 61)
+
+
+def test_the_witness_length_cap_has_one_definition():
+    """The page had no cap at all, so an over-long paste became a witness that
+    spent its whole 30s ceiling and failed -- once per witness. The number
+    lives here so the page cannot enforce something different from the API."""
+    assert pf.MAX_WITNESS_CHARS == 20000
+
+
+def test_split_by_length_rejects_rather_than_truncates():
+    """Half a manuscript searched as if it were the whole one is a worse
+    answer than none, and an invisible one."""
+    short, long_one = 'x' * 10, 'y' * (pf.MAX_WITNESS_CHARS + 1)
+    ok, too_long = pf.split_by_length([short, long_one])
+    assert ok == [short]
+    assert too_long == [long_one]
+    assert too_long[0] == long_one, 'the reject is returned whole, not trimmed'
+
+
+def test_split_by_length_is_inclusive_at_the_cap():
+    exactly = 'x' * pf.MAX_WITNESS_CHARS
+    ok, too_long = pf.split_by_length([exactly])
+    assert ok == [exactly] and too_long == []
+
+
+def test_split_by_length_keeps_input_order():
+    a, b, c = 'a' * 5, 'b' * 7, 'c' * 3
+    ok, _ = pf.split_by_length([a, b, c])
+    assert ok == [a, b, c]
+
+
+def test_split_by_length_takes_an_explicit_cap():
+    ok, too_long = pf.split_by_length(['abcdef', 'ab'], cap=3)
+    assert ok == ['ab'] and too_long == ['abcdef']
+
+
+def test_split_by_length_survives_none_and_empty():
+    assert pf.split_by_length(None) == ([], [])
+    assert pf.split_by_length([None, '']) == ([None, ''], [])
