@@ -15,7 +15,8 @@ still exists, and a rebuilt deck would not be comparable to the recorded figures
 |---|---|
 | `deck.json` | 1767 manuscripts, each with a verdict and the reason for it |
 | `aliases.json` | 5 hand-verified shelfmark equivalences no rule can derive, plus 1 rejected |
-| `query.normalized.txt` | the 400-letter normalized query stream the runs used |
+| `query.source.txt` | the query text itself — the Aramaic scroll, verse-numbered |
+| `query.normalized.txt` | its 5,979-letter normalized stream (repaired 2026-08-24: the first commit wrote 400 chars of cp1255 mojibake that normalized to zero letters, so every run scored against it came back empty) |
 | `runs/*.json` | the five graded runs, by manuscript (rank, shelfmark, score, library) |
 
 Scored by [`scripts/score_antiochus_deck.py`](../../scripts/score_antiochus_deck.py);
