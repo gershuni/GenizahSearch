@@ -552,10 +552,23 @@ surface additional genuine witnesses beyond it (per the owner, 2026-08-24).
 Section 10.2a raises the budget for one query. This is the other half of the same problem: one
 text per work is not enough, and no budget fixes that.
 
+All Birkat Hamazon figures below were measured **through the shipped code**
+(`PassageSearcher` + `shared/passage_fusion.py`) at policy `max-40+short`,
+normal depth, floor30_v1, on 2026-08-24.
+
+**Read the denominator before comparing these to SS10.2a.** That table counts
+"of 442 reachable"; this one counts index membership over a 673-entry census,
+giving **614** (59 census entries have no indexed text at all, and a search
+cannot be held to those). The two fractions are not comparable. In absolute
+terms the shipped path finds **455** census manuscripts against SS10.2a's
+85% of 442 = 376, so it retrieves more, not less — it simply reports a
+smaller fraction of a larger denominator. Quote counts with their
+denominators; a bare percentage from either table means nothing on its own.
+
 | finding | evidence |
 |---|---|
-| One witness under-reaches | Birkat Hamazon: a single witness reaches **50–69%** of the reachable census; 17 witnesses searched separately and merged reach **85%** |
-| Concatenation is actively harmful **here** | BH 59% concatenated vs 85% fused. On Antiochus recursion **every** concatenated round scored below the seed alone (43–46 positives vs 50) |
+| One witness under-reaches | Birkat Hamazon: the best single witness reaches **348/614 = 56.7%** of the reachable census; the same 17 searched separately and merged reach **455/614 = 74.1%**. Page path and API path return the same 455 |
+| Concatenation is actively harmful **here** | The 17 joined into one 33,180-char query admit **499,662 of 21,093,233 postings (2.4%)**, hit the 3,000 verify cap against 27,106 candidates, and reach **296/614 = 48.2%** — *worse than the best single witness*. On Antiochus recursion **every** concatenated round scored below the seed alone (43–46 positives vs 50; design harness) |
 | Fusion must be by RANK | `score` is matched **query** letters, so a long witness mechanically outscores a short one. RRF (k=60) ties sum-of-scores at similar lengths (BH) and beats it decisively at mixed ones (Antiochus, 1,153–5,979 letters: 18/26 positives in the top 50/100 against 10/19) |
 | Length normalisation is dead | Worse than raw score at every cut-off on both instruments |
 | Recursion works, and promotion is safe | Seed → top-5 → repeat: frontier coverage **2 → 4 → 7 → 9 of 20**, positives 50 → 57 of 68, monotone over three rounds. All 15 promoted witnesses were graded positives |

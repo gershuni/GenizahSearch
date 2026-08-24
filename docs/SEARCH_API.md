@@ -486,10 +486,11 @@ The Lab Engine extended-parallels path is OUT OF SCOPE for v7.10 (Phase 80 D-02)
 ### Multi-witness search (`witnesses`, beta)
 
 One work survives in many manuscripts, and no single witness of it retrieves every other.
-Measured on two independent instruments: a single Birkat Hamazon witness reaches 50-69% of
-the reachable census, while the same 17 witnesses searched **separately and merged** reach
-85%; on Megillat Antiochus, a seed plus three rounds of promoted witnesses took frontier
-coverage from 2 to 9 of 20.
+Measured through the shipped code at policy `max-40+short`, against the 614 Birkat Hamazon
+census manuscripts that have any indexed text: the best single witness finds **348 (56.7%)**,
+while the same 17 searched **separately and merged** find **455 (74.1%)**. On Megillat Antiochus
+(design harness), a seed plus three rounds of promoted witnesses took frontier coverage from 2
+to 9 of 20.
 
 Send them as `witnesses` instead of `text`:
 
@@ -511,9 +512,10 @@ row, resolved server-side to that page's text — which keeps recursive requests
 `invalid_request`.
 
 **Do not concatenate witnesses into `text` yourself.** The passage engine spends a per-query
-posting budget, so one long joined query starves: measured 59% of a reachable census
-concatenated against 85% fused, and every concatenated recursion round scored *below* the
-seed alone. This is specific to `method='passage'`; the chunk engine decomposes a query into
+posting budget, so one long joined query starves: the 17 witnesses joined admit 2.4% of their
+own postings and reach **48.2%** of the reachable census — *worse than the best single witness
+(56.7%)* — against 74.1% fused, and every concatenated recursion round scored below the seed
+alone. This is specific to `method='passage'`; the chunk engine decomposes a query into
 independent per-chunk lookups with no shared budget, where concatenation and union were
 measured to return the identical manuscript set. `witnesses` with `method='chunk'` is
 therefore rejected with 400 `witnesses_require_passage_method` rather than quietly accepted.

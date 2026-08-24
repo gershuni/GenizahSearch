@@ -318,6 +318,23 @@ def test_a_single_witness_passes_through_unfused():
     assert 'return' in src
 
 
+def test_ranks_are_assigned_over_both_buckets_together():
+    """The engine's own fan-out tags the FULL result list before splitting it
+    into main/filtered, so a filtered row consumes a rank. Ranking each
+    bucket from 1 independently gave a filtered row the rank of a top hit and
+    left every main row short by however many rows were demoted ahead of it
+    -- so the page and the API computed different RRF sums for the same
+    witnesses. Measured on 17 Birkat Hamazon witnesses before the fix: the
+    two paths agreed on total census recall but not on the top 20."""
+    src = _func_source('_fuse_and_store')
+    assert 'combined = sorted(main + filt' in src, (
+        'ranks must be assigned over both buckets in score order'
+    )
+    assert re.search(r"tag_rows\(combined,", src)
+    # ... and NOT per bucket, which is the shape this replaced.
+    assert 'tag_rows(list(p_state.witness_rows' not in src
+
+
 def test_a_record_is_filtered_only_when_every_witness_filters_it():
     """Otherwise the "known source text" filter gets STRICTER the more
     witnesses you add -- the opposite of what the control says."""

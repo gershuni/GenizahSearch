@@ -2252,12 +2252,21 @@ def create_parallels_page(initial_text: str = None):
         main_pairs, filt_pairs = [], []
         for wid in order:
             label = labels.get(wid, '')
-            main_pairs.append(
-                (wid, tag_rows(list(p_state.witness_rows.get(wid) or []),
-                               wid, label)))
-            filt_pairs.append(
-                (wid, tag_rows(list(p_state.witness_filtered.get(wid) or []),
-                               wid, label)))
+            main = list(p_state.witness_rows.get(wid) or [])
+            filt = list(p_state.witness_filtered.get(wid) or [])
+            # Rank over BOTH buckets together, in score order -- the same
+            # basis the engine's own fan-out uses, which tags the full result
+            # list BEFORE splitting it. Ranking each bucket from 1
+            # independently gave a filtered row the rank of a top hit, and
+            # left every main row's rank short by however many rows the
+            # engine had demoted ahead of it. Either way the RRF sums came
+            # out different from the API's for the same witnesses.
+            combined = sorted(main + filt,
+                              key=lambda r: float(r.get('score') or 0.0),
+                              reverse=True)
+            tag_rows(combined, wid, label)
+            main_pairs.append((wid, main))
+            filt_pairs.append((wid, filt))
         fused_main = fuse(main_pairs)
         fused_filtered = fuse(filt_pairs)
         # A record is filtered only when EVERY witness that matched it

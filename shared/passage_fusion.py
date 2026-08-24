@@ -2,22 +2,44 @@
 """Rank fusion for multi-witness passage search (pure, dependency-free).
 
 One work survives in many manuscripts, and no single witness of it retrieves
-every other. Measured on two independent instruments (2026-08-24, normal
-depth, floor-30 index):
+every other.
 
-* Birkat Hamazon -- one witness reaches 50-69% of the reachable census; the
-  same 17 witnesses searched SEPARATELY and merged reach 85%.
-* Megillat Antiochus -- a seed plus three rounds of promoted witnesses took
-  frontier coverage from 2 to 9 of 20 and positives from 50 to 57 of 68.
+Measured THROUGH THIS MODULE and `PassageSearcher` (policy `max-40+short`,
+normal depth, floor30_v1 index) against the Birkat Hamazon census -- 673
+entries, of which 614 have any indexed text at all, that being the only
+denominator a search can be held to:
+
+    concatenated (17 texts joined)   296 / 614   48.2%
+    best SINGLE witness              348 / 614   56.7%
+    17 witnesses fused               455 / 614   74.1%
+
+Page path and API path return the same 455.
+
+NOT COMPARABLE to the 85% in docs/specs/passage-matching-algorithm.md SS10.2a,
+and the difference is the denominator, not the code: that table counts "of 442
+reachable" while this counts index membership over a 673-entry census (614).
+85% of 442 is 376 manuscripts, so the shipped path in fact finds MORE of the
+census (455) than the design harness reported -- it just reports a smaller
+fraction of a larger, more conservative denominator. Quote the COUNT and its
+denominator, never the bare percentage.
+
+On Megillat Antiochus a seed plus three rounds of promoted witnesses took
+frontier coverage from 2 to 9 of 20 and positives from 50 to 57 of 68 -- that
+one was measured in the DESIGN harness and has not been re-run through the
+shipped path.
 
 Two findings shape this module, and both are counter-intuitive enough that
 they are recorded here rather than in a commit message:
 
 1. **Never concatenate witnesses into one query.** The passage engine spends
    a per-query POSTING BUDGET (shared/passage_policy.py), so one long
-   concatenated text starves: BH scored 59% concatenated vs 85% fused, and on
-   Antiochus recursion EVERY concatenated round scored BELOW the seed alone
-   (43-46 positives vs 50). This is a property of `method='passage'`
+   concatenated text starves. Joining the 17 BH witnesses gives a 33,180-char
+   query carrying 21,093,233 postings, of which the budget admits 499,662 --
+   **2.4%** -- and the 27,106 candidates that survive are cut to the 3,000
+   verify cap. Result: **48.2%, WORSE than the best single witness's 56.7%**,
+   against 74.1% fused. On Antiochus recursion every concatenated round
+   likewise scored below the seed alone. This is a property of
+   `method='passage'`
    specifically. It does NOT generalise: the chunk engine decomposes a query
    into independent per-chunk lookups with no shared budget, and there
    concatenation and union were measured to return the IDENTICAL manuscript

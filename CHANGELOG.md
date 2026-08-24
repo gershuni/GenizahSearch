@@ -1019,10 +1019,12 @@ A major overhaul of how LOCAL Hebrew PDFs are read into the My Library index, dr
 
 ### Letter-level search with several witnesses of one work (2026-08-24)
 
-One text per work is not enough, and no budget increase fixes that. A single Birkat Hamazon
-witness reaches 50–69% of the reachable census; the same 17 witnesses searched **separately and
-merged** reach **85%**. On Megillat Antiochus, a seed plus three rounds of promoted witnesses took
-frontier coverage from 2 to 9 of 20.
+One text per work is not enough, and no budget increase fixes that. Measured through the shipped
+code against the 614 Birkat Hamazon census manuscripts that have any indexed text: the best single
+witness finds **348 (56.7%)**, while the same 17 searched **separately and merged** find
+**455 (74.1%)**. On
+Megillat Antiochus, a seed plus three rounds of promoted witnesses took frontier coverage from 2 to
+9 of 20.
 
 - **A Witnesses panel on `/parallels`**, letter-level only. Add copies of the work by pasting
   them (one at a time, or a whole file split on blank lines with a preview of what the split
@@ -1038,8 +1040,10 @@ frontier coverage from 2 to 9 of 20.
   cost is the first page — rows go from 191 to 2,795 and positives in the top 100 fall from 48 to
   32. Reach up, precision down.
 - **Never concatenated.** Joining witnesses into one query starves the engine's per-query posting
-  budget: 59% of the census concatenated against 85% fused, and every concatenated Antiochus
-  recursion round scored *below* the seed alone. Fusion is by **rank** (RRF, k=60), not score — a
+  budget. The 17 witnesses joined into one 33,180-character query admit 2.4% of their own postings
+  and reach **48.2%** — *worse than the best single witness* — against 74.1% fused; every
+  concatenated Antiochus recursion round likewise scored below the seed alone. Fusion is by
+  **rank** (RRF, k=60), not score — a
   passage score counts matched *query* letters, so a long witness mechanically outscores a short
   one for reasons unrelated to match quality.
 - **Scoped to letter-level, as a measurement rather than an assumption.** On the chunk engine,

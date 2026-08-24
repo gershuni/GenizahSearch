@@ -750,9 +750,10 @@ class PassageSearcher:
 
         Never call this with two witnesses joined into one string. The
         passage engine spends a per-query POSTING BUDGET, so a concatenated
-        query starves: measured 59% of the reachable Birkat Hamazon census
-        concatenated against 85% fused, and on Antiochus every concatenated
-        recursion round scored BELOW the seed alone. See
+        query starves: the 17 Birkat Hamazon witnesses joined into one query
+        admit 2.4% of their own postings and reach 48.2% of the reachable
+        census -- WORSE than the best single witness (56.7%) and well under
+        the 74.1% the same 17 reach fused. See
         shared/passage_fusion.py for the numbers, and for why this does not
         generalise to the chunk engine.
         """
