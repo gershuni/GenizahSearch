@@ -412,9 +412,14 @@ def test_real_multi_witness_report_sums_across_witnesses(searcher,
 # 6. The group cap must rank by the key the rows were SELECTED by.
 # ---------------------------------------------------------------------------
 
-def test_group_cap_ranks_by_fusion_score_when_asked_to():
+def test_group_cap_orders_by_fusion_score_when_asked_to():
     """Without this, the cap discards exactly the groups the fusion promoted:
     rows are chosen by RRF and then thrown away by raw matched letters.
+
+    `order_key`, NOT a score key: it decides which groups survive and must
+    never reach `aggregate_score`, which becomes the envelope's `sort_score`
+    and then the public `score`. Conflating the two turned that field into
+    ~0.03 on multi-witness responses (review finding).
 
     Unit-level on hand-built rows, because making a synthetic index produce a
     fusion/letters disagreement is a fixture puzzle, not a test.
@@ -433,7 +438,7 @@ def test_group_cap_ranks_by_fusion_score_when_asked_to():
     by_letters, _ = _cap_main_results_by_group(
         rows, _RegexSysIdParser(), cap=1)
     by_fusion, _ = _cap_main_results_by_group(
-        rows, _RegexSysIdParser(), cap=1, score_key='fusion_score')
+        rows, _RegexSysIdParser(), cap=1, order_key='fusion_score')
 
     assert by_letters[0]['score'] == 900.0        # today's default, unchanged
     assert by_fusion[0]['score'] == 100.0         # the fusion-ranked group

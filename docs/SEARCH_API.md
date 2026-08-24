@@ -530,9 +530,15 @@ beats it decisively at mixed ones. Each group in `results[]` gains a `witness_fu
 ```
 
 `witness_count` is the **union** of witnesses across the group's rows — a manuscript found on
-three pages by one witness is one witness. `sort_score` on a multi-witness response is the
-fusion score, so the order returned and the order `sort_score` implies always agree. Witness
-ids are assigned positionally (`w1`, `w2`, ...) in request order.
+three pages by one witness is one witness. Witness ids are assigned positionally (`w1`, `w2`,
+…) in request order.
+
+**`score` and `sort_score` stay matched letters on a multi-witness response**, exactly as on
+every other method — one scale everywhere. The array is ordered by
+`witness_fusion.fusion_score` instead, because that is the ranking that actually selected the
+rows. So a consumer that re-sorts a multi-witness response by `score` will get a *different*
+order than the one returned; that is deliberate. Use `witness_fusion.fusion_score` to reproduce
+the returned order.
 
 **Partial resolution is normal.** A `raw_header` that does not resolve (or resolves to a page
 over the length cap) is **skipped and reported**, never fatal — rejecting a 17-witness

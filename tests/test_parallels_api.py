@@ -1854,3 +1854,111 @@ def test_a_request_without_witnesses_is_untouched_by_the_feature(
     echo2 = r2.json()['request']
     assert 'witnesses' not in echo2 and 'sort' not in echo2
     assert 'witness_fusion' not in r2.json()['results'][0]
+
+
+def test_multi_witness_score_is_still_matched_letters(client, multi_witness,
+                                                      clean_env):
+    """THE contract: `score` means matched letters on every method and every
+    response. It was ~0.03 on a multi-witness response, because the group's
+    fusion sum became `aggregate_score` -> `sort_score` -> the item's
+    top-level `score` (`_serialize_item` prefers `sort_score`). A documented
+    field silently changed meaning, and the UI badges and export columns read
+    it. Found by review, not by any test here.
+    """
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [W1, W2]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    for item in body['results']:
+        # The fixture rows carry scores of 100 and 900 matched letters. An RRF
+        # sum is ~0.016-0.05, so any value below 1 means fusion leaked into
+        # the field.
+        assert item['score'] >= 1, (
+            f"score={item['score']} is an RRF sum, not matched letters"
+        )
+    # The two fixture groups sum to exactly their rows' letters.
+    assert sorted(i['score'] for i in body['results']) == [100.0, 900.0]
+
+
+def test_multi_witness_groups_are_ordered_by_fusion_not_by_score(
+    client, multi_witness, clean_env,
+):
+    """The order must still be the ranking that produced the rows. The fixture
+    is built so the two disagree: the shared row has 100 matched letters and
+    twice the RRF, the singleton has 900 letters and half."""
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [W1, W2]})
+    assert r.status_code == 200, r.text
+    results = r.json()['results']
+
+    assert results[0]['witness_fusion']['witness_count'] == 2
+    assert results[0]['score'] == 100.0, (
+        'the fusion-ranked group must come first even though it has fewer '
+        'matched letters'
+    )
+    assert results[1]['score'] == 900.0
+    # ... so a consumer sorting by `score` gets a DIFFERENT order than the
+    # array's. That is the documented consequence of keeping one scale.
+    assert [i['score'] for i in results] != sorted(
+        (i['score'] for i in results), reverse=True)
+
+
+def test_a_single_witness_response_score_is_unchanged(client, mock_searcher,
+                                                      clean_env, monkeypatch):
+    """The other half of the same contract: nothing about the ordinary
+    response moved."""
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    monkeypatch.setattr(
+        'web.passage_assets.get_passage_searcher',
+        lambda text_fetcher: mock_searcher)
+    mock_searcher.policy.as_dict.return_value = _fake_passage_policy()
+    r = client.post('/api/parallels', json={
+        'text': 'hello world', 'method': 'passage'})
+    assert r.status_code == 200, r.text
+    assert r.json()['results'][0]['score'] == 5.0
+
+
+def test_the_service_orders_the_group_cap_by_fusion(client, multi_witness,
+                                                    clean_env, monkeypatch):
+    """The cap must SELECT by the fusion key on a multi-witness run.
+
+    Asserted at the call, because the cap is a no-op below 200 groups and no
+    fixture here reaches that -- a mutation removing `order_key` from this
+    call stayed green against every other test in the suite.
+    """
+    import shared.parallels_service as svc
+
+    seen = {}
+    real = svc._cap_main_results_by_group
+
+    def spy(rows, meta_mgr, cap=None, order_key=None):
+        seen['order_key'] = order_key
+        kw = {} if cap is None else {'cap': cap}
+        return real(rows, meta_mgr, order_key=order_key, **kw)
+
+    monkeypatch.setattr(svc, '_cap_main_results_by_group', spy)
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [W1, W2]})
+    assert r.status_code == 200, r.text
+    assert seen.get('order_key') == 'fusion_score'
+
+
+def test_the_service_leaves_the_chunk_cap_alone(client, mock_searcher,
+                                                clean_env, monkeypatch):
+    """...and the chunk path must still pass nothing, or its 200-group cap
+    starts selecting on a field it does not have."""
+    import shared.parallels_service as svc
+
+    seen = {}
+    real = svc._cap_main_results_by_group
+
+    def spy(rows, meta_mgr, cap=None, order_key=None):
+        seen['order_key'] = order_key
+        kw = {} if cap is None else {'cap': cap}
+        return real(rows, meta_mgr, order_key=order_key, **kw)
+
+    monkeypatch.setattr(svc, '_cap_main_results_by_group', spy)
+    r = client.post('/api/parallels', json={'text': 'hello world'})
+    assert r.status_code == 200, r.text
+    assert seen.get('order_key') is None

@@ -182,7 +182,7 @@ def _cap_main_results_by_group(
     main_results: list[dict],
     meta_mgr: UidComponentParser,
     cap: int = PARALLELS_GROUP_CAP,
-    score_key: str = 'score',
+    order_key: str = None,
 ) -> tuple[list[dict], bool]:
     """Apply D-07 group cap.
 
@@ -190,17 +190,23 @@ def _cap_main_results_by_group(
     so cap and envelope group identically), sorts groups desc by
     aggregate_score, takes top `cap` groups, flattens back to a row list.
 
-    aggregate_score is the SUM of each row's `score_key` within the group.
+    aggregate_score is the SUM of each row's `score` within the group.
     (An earlier version of this docstring said "final_score, falling back to
     score"; the code has always summed `score`. The behaviour is unchanged --
     only the description was wrong.)
 
-    `score_key` defaults to `'score'`, which is byte-for-byte today's
+    `order_key` decides WHICH groups survive the cap, WITHOUT changing what
+    `aggregate_score` reports. It defaults to None -- byte-for-byte today's
     behaviour for every existing caller, chunk path included. The
     multi-witness passage path passes `'fusion_score'` so the cap keeps the
     groups RANK FUSION ranks highly rather than the ones with the most raw
     matched letters -- without it, the 200-group cap would discard exactly
     the groups the fusion promoted.
+
+    The two were ONE parameter until a review found the consequence:
+    aggregate_score becomes the envelope's sort_score, which becomes the
+    public `score`, so summing fusion there silently redefined a documented
+    field from ~200 matched letters to ~0.03.
 
     Returns (capped_rows, truncated_flag). truncated_flag=True iff raw group
     count exceeded `cap`.
@@ -218,7 +224,7 @@ def _cap_main_results_by_group(
     from shared.search_serializer import _group_parallels_by_sys_id
 
     groups = _group_parallels_by_sys_id(main_results, meta_mgr=meta_mgr,
-                                        score_key=score_key)
+                                        order_key=order_key)
 
     if len(groups) <= cap:
         return main_results, False
@@ -227,11 +233,15 @@ def _cap_main_results_by_group(
     # _group_parallels_by_sys_id already sets aggregate_score per group
     # (sum of final_score / score values). Defensively recompute if missing.
     def _agg(g: dict) -> float:
+        items = g.get('items') or []
+        if order_key:
+            # Must match the order _group_parallels_by_sys_id returned, or
+            # the cap keeps a different set than the ranking chose.
+            return float(sum((it.get(order_key) or 0) for it in items))
         v = g.get('aggregate_score')
         if isinstance(v, (int, float)):
             return float(v)
-        items = g.get('items') or []
-        return float(sum((it.get(score_key) or 0) for it in items))
+        return float(sum((it.get('score') or 0) for it in items))
 
     groups_sorted = sorted(groups, key=_agg, reverse=True)
     kept_groups = groups_sorted[:cap]
@@ -418,7 +428,7 @@ async def fetch_parallels_results(
     searcher_truncated = bool((result or {}).get('truncated_to_200'))
     capped_main, truncated = _cap_main_results_by_group(
         main_results, meta_mgr,
-        score_key='fusion_score' if multi_witness else 'score')
+        order_key='fusion_score' if multi_witness else None)
     truncated = truncated or searcher_truncated
 
     # Boundary options for envelope echo (D-06 inherited from Phase 77).

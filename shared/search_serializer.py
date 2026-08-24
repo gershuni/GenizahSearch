@@ -846,23 +846,31 @@ def serialize_browse_payload(
 # -----------------------------------------------------------------------------
 
 def _group_parallels_by_sys_id(items: list[dict], *, meta_mgr: Any,
-                               score_key: str = 'score') -> list[dict]:
+                               order_key: str = None) -> list[dict]:
     """Group raw parallels items by sys_id derived from raw_header. D-13 grouping core.
 
     Returns sorted-descending list of group dicts:
         {sys_id, representative, items: [...], aggregate_score: float}
 
-    `score_key` names the per-row field summed into `aggregate_score` (and so
-    into the envelope's `sort_score`). It defaults to `'score'`, which is
-    byte-for-byte today's behaviour for every existing caller -- the chunk
-    path included, whose contract this function also serves.
+    `aggregate_score` is ALWAYS the sum of each row's `score` -- matched
+    letters -- because it becomes the envelope's `sort_score`, which
+    `_serialize_item` in turn emits as the item's top-level `score`. One scale,
+    every method, every response.
 
-    The multi-witness passage path passes `'fusion_score'` instead. That
-    matters because rank fusion (shared/passage_fusion.py) deliberately keeps
-    `score` on the matched-letters scale, so summing `score` here would order
-    groups by raw letters while the rows themselves were selected by RRF --
-    the returned order and the `sort_score` a consumer sorts by would
-    disagree. Whichever key ranks the groups is the key the envelope reports.
+    `order_key` decides ONLY the order of the returned groups, and defaults to
+    the same aggregate. The multi-witness passage path passes `'fusion_score'`:
+    the rows were selected by rank fusion, so ordering them by raw matched
+    letters would present a ranking nothing produced. The fusion value is
+    reported per group under `witness_fusion.fusion_score`.
+
+    These were ONE parameter until a review found the consequence: summing
+    fusion into `aggregate_score` turned the public `score` field into ~0.03
+    on multi-witness responses, silently redefining a documented field that
+    the UI badges and the export columns read.
+
+    A consumer sorting a multi-witness response by `score` therefore gets a
+    different order than the array's. That is deliberate and documented; the
+    alternative was a `score` that means two different things.
     """
     groups: dict[str, dict] = {}
     for item in items:
@@ -883,10 +891,24 @@ def _group_parallels_by_sys_id(items: list[dict], *, meta_mgr: Any,
         grp['items'].append(item)
         # Plan 01 lock: SUM aggregation across uids in same sys_id
         try:
-            grp['aggregate_score'] += float(item.get(score_key, 0.0) or 0.0)
+            grp['aggregate_score'] += float(item.get('score', 0.0) or 0.0)
         except (ValueError, TypeError):
             pass
-    return sorted(groups.values(), key=lambda g: g['aggregate_score'], reverse=True)
+        if order_key:
+            try:
+                grp['_order'] = grp.get('_order', 0.0) + float(
+                    item.get(order_key, 0.0) or 0.0)
+            except (ValueError, TypeError):
+                pass
+
+    def _rank(g: dict) -> float:
+        return float(g.get('_order', g['aggregate_score']) if order_key
+                     else g['aggregate_score'])
+
+    ordered = sorted(groups.values(), key=_rank, reverse=True)
+    for g in ordered:
+        g.pop('_order', None)   # internal; never reaches the envelope
+    return ordered
 
 
 def _sort_parallels_groups(groups: list[dict], sort: str) -> list[dict]:
@@ -1083,7 +1105,9 @@ def serialize_parallels_payload(
     request_echo: Optional[dict] = None,
     # Multi-witness passage search. Both default to today's behaviour, so
     # every existing caller -- the whole chunk path included -- is unchanged.
-    score_key: str = 'score',
+    # `order_key` reorders the groups WITHOUT touching aggregate_score /
+    # sort_score / score, which stay matched letters on every path.
+    order_key: Optional[str] = None,
     sort: Optional[str] = None,
     with_witness_fusion: bool = False,
 ) -> dict:
@@ -1105,9 +1129,9 @@ def serialize_parallels_payload(
     filtered_results = filtered_results or []
 
     main_groups = _group_parallels_by_sys_id(main_results, meta_mgr=meta_mgr,
-                                             score_key=score_key)
+                                             order_key=order_key)
     filt_groups = _group_parallels_by_sys_id(filtered_results, meta_mgr=meta_mgr,
-                                             score_key=score_key)
+                                             order_key=order_key)
     if sort:
         main_groups = _sort_parallels_groups(main_groups, sort)
         filt_groups = _sort_parallels_groups(filt_groups, sort)

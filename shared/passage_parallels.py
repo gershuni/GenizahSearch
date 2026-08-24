@@ -531,14 +531,16 @@ class PassageSearcher:
             in_main = {row['raw_header'] for row in eligible_rows}
             filtered_candidate_rows = [r for r in fused_filtered
                                        if r['raw_header'] not in in_main]
-            # The cap must rank by the key the rows were SELECTED by, or the
-            # group cap discards exactly the groups the fusion promoted.
-            score_key = 'fusion_score'
+            # The cap must ORDER by the key the rows were SELECTED by, or it
+            # discards exactly the groups the fusion promoted. It must NOT
+            # change what aggregate_score reports -- that becomes the public
+            # `score`, which stays matched letters (review finding).
+            order_key = 'fusion_score'
         else:
             only = runs[0]
             eligible_rows = eligible_by_witness[only.wid]
             filtered_candidate_rows = filtered_by_witness[only.wid]
-            score_key = 'score'
+            order_key = None
 
         # Finding #1 ("THE BIG ONE") + finding #16(a): apply the SAME
         # group-cap rule to BOTH buckets, so rendered rows == kept rows
@@ -549,10 +551,10 @@ class PassageSearcher:
         if self.render_cap and self.render_cap > 0:
             capped_main_candidates, main_truncated = _cap_main_results_by_group(
                 eligible_rows, _RegexSysIdParser(), cap=self.render_cap,
-                score_key=score_key)
+                order_key=order_key)
             capped_filtered_candidates, _truncated_f = _cap_main_results_by_group(
                 filtered_candidate_rows, _RegexSysIdParser(), cap=self.render_cap,
-                score_key=score_key)
+                order_key=order_key)
         else:
             # Uncapped: every group survives, so nothing is truncated by
             # definition and "rendered == kept" holds over the full set.

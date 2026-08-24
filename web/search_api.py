@@ -2463,11 +2463,12 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             boundary_options=echo_boundary_options,
             warnings=warnings_list,
             request_echo=parallels_echo,
-            # Rank the groups by the key the ROWS were selected by. Without
-            # this the envelope would order by raw matched letters a result
-            # set that rank fusion chose -- so sort_score and the returned
-            # order would disagree.
-            score_key='fusion_score' if bundle.multi_witness else 'score',
+            # ORDER the groups by the key the rows were selected by -- but
+            # never let it reach aggregate_score/sort_score/score, which
+            # stay matched letters on every path. Conflating the two turned
+            # the public `score` into ~0.03 on multi-witness responses
+            # (review finding).
+            order_key='fusion_score' if bundle.multi_witness else None,
             sort=(req.sort or 'fused') if bundle.multi_witness else None,
             with_witness_fusion=bundle.multi_witness,
         )
