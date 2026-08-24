@@ -79,6 +79,27 @@ def _calls_in(name: str) -> set:
     raise AssertionError(f'{name} not found in web/pages/parallels.py')
 
 
+def _call_lineno(func: str, name: str) -> int:
+    """Line of the first CALL to `name` inside `func`.
+
+    From the AST, not a string index: a docstring mentioning the function
+    would otherwise decide the answer -- which is exactly what happened when
+    this file first tried to assert the order of two calls (the stale
+    docstring said "Text comes from get_full_manuscript", putting it at
+    character 139 of a function that calls it at character 2,900).
+    """
+    src = _source()
+    for node in ast.walk(ast.parse(src)):
+        if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == func):
+            for sub in ast.walk(node):
+                if (isinstance(sub, ast.Call)
+                        and isinstance(sub.func, ast.Attribute)
+                        and sub.func.attr == name):
+                    return sub.lineno
+    raise AssertionError(f'{func} does not call {name}')
+
+
 def _call_sites_of(name: str) -> int:
     """How many times `name` is CALLED anywhere in the page, excluding its
     own definition -- so "the function exists" can never stand in for "the
@@ -250,17 +271,145 @@ def test_promotion_state_lives_in_p_state_not_on_the_widget():
     assert 'p_state.checked_for_promotion' in src
 
 
-def test_promotion_fetches_every_page_of_the_manuscript():
-    """A result GROUP spans several page-level hits; promoting only the
-    best-scoring page would throw away most of the witness."""
-    calls = _calls_in('_promote_checked')
-    assert 'get_full_manuscript' in calls, (
-        'promotion must fetch EVERY page of the manuscript'
+def test_promotion_reads_the_matched_pages_not_the_browse_map():
+    """`get_full_manuscript` resolves through Config.BROWSE_MAP, which is not
+    guaranteed to be populated for an arbitrary manuscript -- owner-reported,
+    every promotion failed because that map held two entries.
+
+    The primary source is the matched pages' own `raw_header`s through
+    `get_full_text_by_header`, the same fetcher that just rendered those rows,
+    which needs no auxiliary map and cannot fail for a row on screen.
+    `get_full_manuscript` stays only as a fallback."""
+    from web.pages.parallels import collect_witness_texts
+
+    seen = []
+
+    def fetch_header(h):
+        seen.append(h)
+        return 'text-of-' + h
+
+    def fetch_manuscript(sid):
+        raise AssertionError('the browse-map path must not be the primary')
+
+    rows = [
+        {'raw_header': 'S1_IE1_P1_FL1'},
+        {'raw_header': 'S1_IE1_P2_FL2'},
+        {'raw_header': 'OTHER_IE9_P1_FL9'},
+    ]
+    texts, failed = collect_witness_texts(
+        ['9900000001'], rows, fetch_header=fetch_header,
+        fetch_manuscript=fetch_manuscript)
+    # Nothing matched: the fixture headers carry no sys_id, so this proves the
+    # extraction is really applied rather than assumed.
+    assert texts == {} and failed == ['9900000001']
+
+    seen.clear()
+    rows = [
+        {'raw_header': '9900000001_IE1_P000001_FL1'},
+        {'raw_header': '9900000001_IE1_P000002_FL2'},
+        {'raw_header': '9900000002_IE9_P000001_FL9'},
+    ]
+    texts, failed = collect_witness_texts(
+        ['9900000001'], rows, fetch_header=fetch_header,
+        fetch_manuscript=fetch_manuscript)
+
+    assert failed == []
+    assert seen == ['9900000001_IE1_P000001_FL1',
+                    '9900000001_IE1_P000002_FL2'], (
+        'a result GROUP spans several page-level hits and ALL of them are '
+        'the witness -- one page is usually a fraction of it'
     )
-    assert 'io_bound' in calls, (
+    assert texts['9900000001'] == ('text-of-9900000001_IE1_P000001_FL1'
+                                   + chr(10)
+                                   + 'text-of-9900000001_IE1_P000002_FL2')
+    # And the wiring is still off the event loop.
+    assert 'io_bound' in _calls_in('_promote_checked'), (
         'Tantivy lookups on the single uvicorn event loop stall every other '
         'request'
     )
+
+
+def test_a_97_prefixed_manuscript_can_be_promoted():
+    """A 99-only pattern silently skips every 97-prefixed manuscript, so
+    auto-expand could never promote one. Three copies of that regex existed
+    on this page; there is now one."""
+    from web.pages.parallels import collect_witness_texts, witness_sys_id
+
+    assert witness_sys_id({'raw_header': '9700000001_IE1_P1_FL1'}) == '9700000001'
+    texts, failed = collect_witness_texts(
+        ['9700000001'], [{'raw_header': '9700000001_IE1_P000001_FL1'}],
+        fetch_header=lambda h: 'ok')
+    assert texts == {'9700000001': 'ok'} and failed == []
+
+
+def test_promotion_falls_back_to_the_whole_manuscript_only_when_needed():
+    from web.pages.parallels import collect_witness_texts
+
+    texts, failed = collect_witness_texts(
+        ['9900000001'], [{'raw_header': '9900000001_IE1_P000001_FL1'}],
+        fetch_header=lambda h: None,
+        fetch_manuscript=lambda sid: [{'text': 'whole'}, {'text': 'thing'}])
+    assert texts == {'9900000001': 'whole' + chr(10) + 'thing'}
+    assert failed == []
+
+
+def test_promotion_reports_a_manuscript_it_could_not_load():
+    """Returned, never logged-and-dropped: the caller has to be able to name
+    what failed instead of emitting one anonymous toast per manuscript."""
+    from web.pages.parallels import collect_witness_texts
+
+    texts, failed = collect_witness_texts(
+        ['9900000001', '9900000002'],
+        [{'raw_header': '9900000001_IE1_P000001_FL1'}],
+        fetch_header=lambda h: 'ok', fetch_manuscript=lambda sid: [])
+    assert texts == {'9900000001': 'ok'}
+    assert failed == ['9900000002']
+
+
+def test_promotion_survives_a_fetcher_that_raises():
+    from web.pages.parallels import collect_witness_texts
+
+    def boom(_h):
+        raise RuntimeError('tantivy hiccup')
+
+    texts, failed = collect_witness_texts(
+        ['9900000001'], [{'raw_header': '9900000001_IE1_P000001_FL1'}],
+        fetch_header=boom,
+        fetch_manuscript=lambda sid: [{'text': 'recovered'}])
+    assert texts == {'9900000001': 'recovered'} and failed == []
+
+
+def test_promotion_reports_failures_once_and_by_name():
+    """Fifteen identical toasts naming no manuscript was the owner's first
+    experience of this feature."""
+    src = _func_source('_promote_checked')
+    assert 'Could not load text for {n} manuscripts: {names}' in src
+    # ONE notify for the whole batch, driven by the list the helper returns.
+    assert 'texts, failed = await run.io_bound(_fetch)' in src
+    # Three notifies total: the witness-cap refusal, the failure summary and
+    # the success summary. NONE of them inside the per-manuscript loop, which
+    # is the shape this replaced (fifteen identical anonymous toasts).
+    assert src.count('ui.notify') == 3
+    loop_start = src.index('for sid in sys_ids:')
+    loop_end = src.index('if failed:', loop_start)
+    assert 'ui.notify' not in src[loop_start:loop_end], (
+        'a notify inside the per-manuscript loop fires once per manuscript'
+    )
+
+
+def test_there_is_exactly_one_sys_id_pattern_on_the_page():
+    """Three copies existed, one of them 99-only. Behaviour is pinned by
+    test_a_97_prefixed_manuscript_can_be_promoted; this pins that the copies
+    do not come back."""
+    src = _source()
+    assert src.count("(?:99|97)") == 1, (
+        'the sys_id pattern has been duplicated again'
+    )
+    for closure in ('_ranked_sys_ids', '_row_sys_id'):
+        assert 're.search' not in _func_source(closure), (
+            f'{closure} builds its own pattern instead of using '
+            f'witness_sys_id()'
+        )
 
 
 def test_promotion_skips_manuscripts_already_in_the_witness_list():

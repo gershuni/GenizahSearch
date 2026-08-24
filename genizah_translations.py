@@ -5063,6 +5063,8 @@ TRANSLATIONS.update({
         "נוספו {n} עדים — נמצאו {m} התאמות חדשות.",
     "Could not load text for this manuscript.":
         "לא ניתן לטעון את הטקסט של כתב יד זה.",
+    "Could not load text for {n} manuscripts: {names}":
+        "לא ניתן לטעון את הטקסט של {n} כתבי יד: {names}",
     "Auto-expand (optional)": "הרחבה אוטומטית (לא חובה)",
     "Repeatedly search with the best results as new witnesses. Reach goes up and top-of-list precision goes down.":
         "חיפוש חוזר ונשנה עם התוצאות הטובות ביותר כעדים חדשים. ההיקף גדל והדיוק בראש הרשימה יורד.",

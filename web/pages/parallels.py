@@ -59,6 +59,82 @@ WITNESS_CAP = 25          # mirrors SEARCH_API_PASSAGE_MAX_WITNESSES
 # rather than silently shrinking top-K, which would make the control a lie.
 WITNESS_DEPTH_CAP = {'normal': WITNESS_CAP, 'deep': 8, 'deepest': 4}
 
+WITNESS_SYS_ID_RE = re.compile(r'((?:99|97)\d{8,})')
+
+
+def witness_sys_id(row) -> str:
+    """The sys_id a result row belongs to.
+
+    Mirrors shared/passage_parallels.py::_SYS_ID_RE, 97 included. THE one
+    copy on this page: three separate 99-only patterns silently skipped every
+    97-prefixed manuscript, so auto-expand could never promote one.
+    """
+    m = WITNESS_SYS_ID_RE.search((row or {}).get('raw_header') or '')
+    return m.group(1) if m else None
+
+
+def collect_witness_texts(sys_ids, rows, fetch_header,
+                          fetch_manuscript=None):
+    """Gather the text to search a promoted manuscript WITH.
+
+    Module level and dependency-injected so it can be tested without building
+    a page: the AST tests that covered this logic in the closure were proven
+    vacuous against the exact bug it was written to fix -- a source-text
+    assertion cannot tell `for header in headers` from `for header in []`.
+
+    Two rules, both learned the hard way:
+
+    * **The matched pages' own `raw_header`s are the PRIMARY source.** The
+      first version used `get_full_manuscript(sys_id)`, which resolves through
+      `Config.BROWSE_MAP` -- an auxiliary pickle with no guarantee of holding
+      an arbitrary manuscript. Owner-reported: every promotion failed, because
+      that map held two entries. `fetch_header` is the same fetcher the engine
+      just used to render those rows, so it cannot fail for a row on screen.
+    * **Every matched page, not the best one.** A result GROUP spans several
+      page-level hits; one page is usually a fraction of the witness.
+
+    `fetch_manuscript` (optional) is the whole-manuscript fallback, tried only
+    when no header resolves.
+
+    Returns `(texts_by_sys_id, failed_sys_ids)` -- failures are RETURNED, not
+    logged and dropped, so the caller can name them once instead of emitting
+    one anonymous toast per manuscript.
+    """
+    # `wanted` bounds MEMORY, not the result: the fetch loop below iterates
+    # sys_ids, so an unwanted manuscript's headers would never be read. On a
+    # 3,000-row result set with five promotions it is the difference between
+    # keeping five lists and keeping two thousand.
+    wanted = set(sys_ids)
+    headers_by_sid = {}
+    for row in rows or []:
+        sid = witness_sys_id(row)
+        if sid in wanted and row.get('raw_header'):
+            headers_by_sid.setdefault(sid, []).append(row['raw_header'])
+
+    out, failed = {}, []
+    for sid in sys_ids:
+        parts = []
+        for header in (headers_by_sid.get(sid) or []):
+            try:
+                page = fetch_header(header)
+            except Exception:
+                page = None
+            if page:
+                parts.append(page)
+        text = "\n".join(parts).strip()
+        if not text and fetch_manuscript is not None:
+            try:
+                pages = fetch_manuscript(sid) or []
+            except Exception:
+                pages = []
+            text = "\n".join(p.get('text') or '' for p in pages).strip()
+        if text:
+            out[sid] = text
+        else:
+            failed.append(sid)
+    return out, failed
+
+
 # Phase 145: passage-matching parallels search (fail-closed -- flag AND
 # a loaded index; see web/passage_assets.py).
 from web.passage_assets import passage_available, get_passage_searcher
@@ -2564,11 +2640,11 @@ def create_parallels_page(initial_text: str = None):
     async def _promote_checked(_e=None) -> None:
         """Add the checked manuscripts as witnesses and search them.
 
-        Text comes from get_full_manuscript(sys_id) -- EVERY page of the
-        manuscript, because a result GROUP spans several page-level hits and
-        promoting only the best-scoring page would throw away most of the
-        witness. Fetched off the event loop: Tantivy lookups on the single
-        uvicorn loop stall every other request.
+        Text comes from the manuscript's MATCHED pages, resolved by their own
+        `raw_header`s -- all of them, because a result GROUP spans several
+        page-level hits and promoting only the best-scoring page would throw
+        away most of the witness. Fetched off the event loop: Tantivy lookups
+        on the single uvicorn loop stall every other request.
         """
         # Skip manuscripts already in the list. Two witnesses with identical
         # text would BOTH contribute to witness_count and to the RRF sum, so
@@ -2589,25 +2665,24 @@ def create_parallels_page(initial_text: str = None):
             return
         sys_ids = sys_ids[:room]
 
-        def _fetch():
-            out = {}
-            for sid in sys_ids:
-                try:
-                    pages = state.searcher.get_full_manuscript(sid) or []
-                except Exception:
-                    pages = []
-                text = "\n".join(p.get('text') or '' for p in pages).strip()
-                if text:
-                    out[sid] = text
-            return out
+        # Captured HERE, on the event loop: the fetch below runs off-loop
+        # and must not read page state.
+        rows_snapshot = list(p_state.results or [])
 
-        texts = await run.io_bound(_fetch)
+        def _fetch():
+            # The decision lives in collect_witness_texts (module level, pure,
+            # directly tested); this only injects the two real fetchers.
+            return collect_witness_texts(
+                sys_ids, rows_snapshot,
+                fetch_header=state.searcher.get_full_text_by_header,
+                fetch_manuscript=state.searcher.get_full_manuscript,
+            )
+
+        texts, failed = await run.io_bound(_fetch)
         added = 0
         for sid in sys_ids:
             text = texts.get(sid)
             if not text:
-                ui.notify(tr('Could not load text for this manuscript.'),
-                          type='warning')
                 continue
             label = sid
             try:
@@ -2617,6 +2692,22 @@ def create_parallels_page(initial_text: str = None):
                 pass
             _add_witness(text, label=label, kind='manuscript', sys_id=sid)
             added += 1
+        if failed:
+            # ONE line naming what failed, not N identical toasts saying
+            # nothing (fifteen of them was the owner's first experience of
+            # this feature).
+            names = []
+            for sid in failed[:5]:
+                try:
+                    shelf, _t = state.meta_mgr.get_meta_for_id(sid)
+                except Exception:
+                    shelf = None
+                names.append(shelf or sid)
+            more = f' (+{len(failed) - 5})' if len(failed) > 5 else ''
+            ui.notify(
+                tr('Could not load text for {n} manuscripts: {names}').format(
+                    n=len(failed), names=', '.join(names) + more),
+                type='warning')
         p_state.checked_for_promotion.clear()
         _refresh_promotion_bar()
         if not added:
@@ -2684,11 +2775,8 @@ def create_parallels_page(initial_text: str = None):
         """sys_ids in the order the results present them, de-duplicated."""
         seen, out = set(), []
         for row in rows or []:
-            m = re.search(r'(99\d{8,})', row.get('raw_header') or '')
-            if not m:
-                continue
-            sid = m.group(1)
-            if sid in seen:
+            sid = witness_sys_id(row)
+            if not sid or sid in seen:
                 continue
             seen.add(sid)
             out.append(sid)
@@ -2823,8 +2911,7 @@ def create_parallels_page(initial_text: str = None):
         return rows, filtered
 
     def _row_sys_id(row: dict):
-        m = re.search(r'(99\d{8,})', (row or {}).get('raw_header') or '')
-        return m.group(1) if m else None
+        return witness_sys_id(row)
 
     def _recompute_search_identity() -> str:
         """The identity of the result set AS IT NOW STANDS.
