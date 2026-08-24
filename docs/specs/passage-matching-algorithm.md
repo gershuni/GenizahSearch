@@ -496,9 +496,34 @@ recovered sets at different (budget, verify) points are not nested (Ms. 10808.8 
 why depth ships as a few named, hashed profiles and never as sliders.
 
 Latency scales with the budget — the work *is* the postings — so depth is a per-query
-researcher decision, not a new default. Everything here is one query and one deck; the
-short-query instruments have not been re-measured under `deep`/`deepest` (they never hit the
-default budget, so no change is *expected*, but that is an inference, not a measurement).
+researcher decision, not a new default. The short-query instruments have not been re-measured
+under `deep`/`deepest` (they never hit the default budget, so no change is *expected*, but that
+is an inference, not a measurement).
+
+**Confirmed on a second, independent instrument (2026-08-24).** Birkat Hamazon, scored against
+the witness census in `same_work_spike/probe/data/bh_witnesses.json` — 471 sigla from a
+critical edition's own index resolved to sys_ids, an oracle independent of any search run
+(unlike the union-of-runs Antiochus deck). Query: the staged liturgy reference text; index
+coverage ceiling 421/471 witnesses reachable (floor-80), 442/471 (floor-30). On a
+many-witness liturgical text the starvation is far worse than on Antiochus — the query drowns
+in its own candidates (650K clusters at 5M postings) and `verify_cap = 3,000` buries most true
+witnesses:
+
+| config (floor-80) | manuscripts | witness recall (of reachable) | time |
+|---|---|---|---|
+| widest-40, `normal` | 1,341 | 35% | 0.9s |
+| max-40+short, `normal` | 1,567 | 36% | 0.4s |
+| max-40+short, `deep` | 6,491 | **80%** | 4.7s |
+| max-40+short, `deepest` | 7,212 | 81% | 10s |
+| heroic (all postings, 500K verify) | 11,273 | 83% | 71s |
+
+Two things Antiochus could not show: **width barely matters when the verify cap binds** (35%
+vs 36% at `normal` — the boundary was never the constraint on this query), and **`deep` is the
+knee** (deepest buys 1 point for 2× time; the heroic point 3 more for 7×). The returned-set
+share found in the oracle (~6% at `deep`) is *not* a precision figure — the census is one
+edition's list, and the corpus holds unlisted witnesses in quantity. Floor-30 raised the
+reachable ceiling by 21 witnesses but found at most +5 of them: the newly indexed sub-80-letter
+records rarely clear the span floor on this text.
 
 ### 10.3 Position stride
 
