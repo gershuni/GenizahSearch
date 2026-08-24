@@ -511,12 +511,7 @@ word-chunk matching plus vocabulary triage, not to the letter engine.
 | | posting cap | 3,000 | method report |
 | DF — batch, asymmetric | `REF_DF_CAP` | 128 raw postings per code — **known non-monotonic**, section 10.1 | `track1_match.py` |
 | DF — interactive | policy | band-allocated posting budget, section 10.2 | this spec |
-| Anchor tier | `anchor_tier` | off by default; opt-in per policy | section 10.4 |
-| | `anchor_min_codes` | 4 distinct DISTINCTIVE codes per record | section 10.4 — exploratory |
-| | `anchor_df_max` | 5,000 postings; above this a code is "common" | section 10.4 — measured need, unmeasured value |
-| | ordering | Σ log10(N/df), **not** the raw count | section 10.4 — Antiochus run, 2026-08-24 |
-| | `anchor_cap` | 300 records, truncation reported | section 10.4 |
-| | extents per record | 8 display windows | `passage_search.py::_ANCHOR_EXTENTS_PER_RECORD` |
+| Length profile | `min_span` / `verify_margin` | `normal` = (40, 30), `short` = (28, 12) | `passage_policy.py::LENGTH_PROFILES`, section 8.1 |
 | Measured noise | letter CER | 20.1% micro, 16.6% median, p25 8.9%, p90 42% | 209-page alignment against human transcriptions |
 | Corpus | records / letters | 948,549 records, 602,598,330 normalized letters, longest record 11,809 | measured 2026-08-20 |
 

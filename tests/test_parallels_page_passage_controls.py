@@ -883,6 +883,35 @@ def test_passage_length_is_part_of_the_search_identity():
               length='short') != base
 
 
+def test_letter_only_controls_leave_a_non_letter_search_identity_alone():
+    """Codex P2, 2026-08-24. Both letter-level selects keep their value while
+    hidden, so an unscoped capture let a chunk search's identity depend on a
+    control the chunk engine never read -- and since the reload restore
+    re-applies those selects only for engine == 'passage', the reloaded page
+    could not reproduce that identity and row recovery silently failed.
+
+    Pinned to the defaults rather than dropped, so no fingerprint recorded
+    before the rule changes."""
+    src = _read_source()
+    scope_at = src.index("if captured_engine != 'passage':")
+    fp_at = src.index(
+        '_search_fingerprint = compute_parallels_search_fingerprint(')
+    assert scope_at < fp_at, 'the scoping must precede the identity call'
+    block = src[scope_at:src.index('\n\n', scope_at)]
+    assert "captured_passage_width = 'widest-40'" in block
+    assert "captured_passage_length = 'normal'" in block
+
+
+def test_the_pinned_defaults_are_the_ones_that_cost_no_stored_identity():
+    """The pin above is only backward-compatible if those two values hash
+    exactly as a pre-rule chunk search did: the widget defaults, and (for
+    length) a value the payload omits."""
+    from web.export_state import compute_parallels_search_fingerprint as fp
+    legacy = fp(text='x', engine='chunk', width='widest-40')
+    assert fp(text='x', engine='chunk', width='widest-40',
+              length='normal') == legacy
+
+
 def test_letter_options_live_in_the_options_pane_not_the_method_row():
     """Owner feedback 2026-08-24: the letter-level controls belong in the
     same pane as the chunk options they replace. The earlier shape put them

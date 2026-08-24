@@ -3108,6 +3108,23 @@ def create_parallels_page(initial_text: str = None):
         captured_engine = 'lab' if captured_lab_mode else (
             'passage' if captured_passage_mode else 'chunk'
         )
+        # A control the engine never READ is not part of that search's
+        # identity (Codex review, 2026-08-24). Both letter-level selects keep
+        # their value while hidden in chunk/Lab mode, so a chunk search run
+        # after a letter-level one fingerprinted DIFFERENTLY from the same
+        # chunk search run before it -- and _apply_restored_search_config
+        # re-applies these selects only for engine == 'passage', so the
+        # reloaded page could not reproduce that identity and same-search row
+        # recovery silently failed.
+        #
+        # Pinned to their defaults rather than dropped: every chunk
+        # fingerprint recorded before this rule already hashed exactly these
+        # values (the selects sat at their build defaults), so the fix costs
+        # no stored identity. `length` is excluded from the payload at its
+        # default, so 'normal' and "absent" are the same hash.
+        if captured_engine != 'passage':
+            captured_passage_width = 'widest-40'
+            captured_passage_length = 'normal'
         captured_freq_threshold = int(freq_threshold.value) if freq_threshold.value else 50
         captured_deep_scan = deep_scan.value if captured_lab_mode else False
         captured_chunk_size = int(chunk_size.value) if chunk_size.value else 5
