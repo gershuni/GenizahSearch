@@ -712,7 +712,7 @@ from web.atlas_assets import (
     atlas_manifest_etag,
 )
 from web.discovery_assets import load_discovery_state, discovery_available  # noqa: F401 -- discovery_available is the Phase 135+ gating predicate; no surface calls it yet in Phase 134 (NO discovery UI ships this phase), imported now so downstream plans wire it without touching this import block
-from web.passage_assets import load_passage_state  # Phase 145: passage-matching parallels search
+from web.passage_assets import load_passage_state, passage_available  # Phase 145: passage-matching parallels search
 from web.discovery import (  # Phase 135 (BAND-05): /help methods-section wiring — noindex predicate + band-precision/claim-count readers (patched as web.main.* in the render-smoke test)
     discovery_methods_noindex,
     get_all_band_precision,
@@ -1849,7 +1849,14 @@ def create_layout():
                     ('/start', 'explore', tr('Start Here'), None),
                     ('/about', 'info', tr('About the Genizah'), None),
                     ('/search', 'search', tr('Search'), None),
-                    ('/parallels', 'compare_arrows', tr('Find Parallels'), None),
+                    # Badge gated on passage_available() -- the flag ANDed
+                    # with a loaded index -- and NOT on the flag alone, the
+                    # same discipline the Atlas and Computed Identifications
+                    # entries below use. A box without the index hides the
+                    # method selector entirely, so advertising it there would
+                    # promote something the page does not offer.
+                    ('/parallels', 'compare_arrows', tr('Find Parallels'),
+                     tr('New') if passage_available() else None),
                     ('/browse', 'menu_book', tr('Browse by Shelfmark'), None),
                     ('/catalog-browse', 'category', tr('Browse by Identification'), None),
                     ('/discoveries', 'lightbulb', tr('Community'), None),

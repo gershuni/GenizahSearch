@@ -1166,11 +1166,38 @@ def create_parallels_page(initial_text: str = None):
                             },
                             value='passage',
                         ).props('inline dense')
-                        method_radio.tooltip(tr(
-                            'Letter-level search: fast, yields fewer irrelevant '
-                            'results, and tolerates transcription errors, nikkud '
-                            'and line breaks.'
-                        ))
+                        # A live help line, NOT a tooltip: `ui.radio` renders
+                        # one QOptionGroup, so a tooltip attached to it fires
+                        # for BOTH options -- hovering "Chunk search" described
+                        # letter-level search (owner-reported 2026-08-25). Same
+                        # shape as `boundary_mode_help` below, and visible
+                        # without hovering.
+                        method_help = ui.label('').classes(
+                            'text-xs mt-1').style('color: var(--text-muted);')
+
+                        _METHOD_HELP = {
+                            # Neither claim mentions nikkud or line breaks any
+                            # more. Both engines strip nikkud (the chunk one
+                            # per token, at tokenization) and both treat a
+                            # newline as an ordinary separator, so neither was
+                            # ever a difference between them.
+                            'passage': tr(
+                                'Faster, with fewer irrelevant results. '
+                                'Tolerates spelling and transcription '
+                                'differences.'),
+                            'chunk': tr(
+                                'The older method. Slower, but offers Exact / '
+                                'Variants / Fuzzy modes and cross-paragraph '
+                                'filtering.'),
+                        }
+
+                        def _update_method_help() -> None:
+                            method_help.text = _METHOD_HELP.get(
+                                method_radio.value, '')
+
+                        method_radio.on_value_change(
+                            lambda _e: _update_method_help())
+                        _update_method_help()
 
                         def _letter_level_selected() -> bool:
                             return method_radio.value == 'passage'
@@ -5899,8 +5926,12 @@ def create_parallels_page(initial_text: str = None):
                         'color: var(--text-secondary); direction: rtl; text-align: right;'
                     )
 
-                    # Expand indicator
-                    ui.icon('expand_more').classes('text-lg transition-transform').style('color: var(--text-muted);')
+                    # NO expand indicator here. QExpansionItem draws its own
+                    # chevron at the end of the header and rotates it on open;
+                    # this one was a SECOND arrow that never rotated, because
+                    # nothing ever changed its transform. Owner-reported
+                    # 2026-08-25: "why do the results have two down arrow
+                    # 'open' symbols?"
 
             # Expanded content (shown on click)
             with ui.column().classes('w-full p-4 gap-4').style('background: var(--bg-card);'):

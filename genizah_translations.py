@@ -4990,6 +4990,15 @@ TRANSLATIONS.update({
         "חיפוש מקטעים (איטי יותר)",
     "Letter-level search: fast, yields fewer irrelevant results, and tolerates transcription errors, nikkud and line breaks.":
         "חיפוש ברמת האות: מהיר, מחזיר פחות תוצאות לא רלוונטיות, ועמיד לשיבושי פענוח, לניקוד ולשבירות שורה.",
+    # Replaced that single group tooltip on 2026-08-25. It claimed
+    # tolerance of nikkud and line breaks as though they distinguished the
+    # two engines; they do not. The chunk engine strips nikkud per token at
+    # tokenization, and both treat a newline as an ordinary separator. The
+    # old key stays so an already-open page keeps rendering Hebrew.
+    "Faster, with fewer irrelevant results. Tolerates spelling and transcription differences.":
+        "מהיר יותר, עם פחות תוצאות לא רלוונטיות. עמיד להבדלי כתיב ולשיבושי פענוח.",
+    "The older method. Slower, but offers Exact / Variants / Fuzzy modes and cross-paragraph filtering.":
+        "השיטה הוותיקה. איטית יותר, אך מציעה מצבי מדויק / וריאנטים / מקורב, וסינון חוצה-פסקאות.",
     "Match width":
         "רוחב התאמה",
     "Narrow (near-exact)":

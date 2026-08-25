@@ -1029,3 +1029,123 @@ def test_hiding_never_replaces_the_force_and_disable_guarantee():
     for widget in ('chunk_size', 'mode_select', 'freq_threshold',
                    'boundary_mode', 'min_chunks_input'):
         assert f'{widget}.disable()' in true_branch
+
+
+# ---------------------------------------------------------------------------
+# The method selector describes the option you are pointing at, accurately.
+# ---------------------------------------------------------------------------
+
+def _method_help_values() -> dict:
+    """The `_METHOD_HELP` mapping, read from the AST.
+
+    Read rather than grepped because the point is which STRING belongs to
+    which option -- a substring test would pass with the two swapped, which is
+    a version of the very bug this replaced (the chunk option describing
+    letter-level search).
+    """
+    src = _read_source()
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id == '_METHOD_HELP'):
+            continue
+        out = {}
+        for key, value in zip(node.value.keys, node.value.values):
+            # tr('...') -> the literal inside
+            text = value
+            if isinstance(text, ast.Call) and text.args:
+                text = text.args[0]
+            parts = []
+            def _walk(n):
+                if isinstance(n, ast.Constant):
+                    parts.append(n.value)
+                elif isinstance(n, ast.JoinedStr):
+                    for v in n.values:
+                        _walk(v)
+                elif isinstance(n, ast.BinOp):
+                    _walk(n.left)
+                    _walk(n.right)
+            _walk(text)
+            out[key.value] = ''.join(parts)
+        return out
+    raise AssertionError('_METHOD_HELP not found in web/pages/parallels.py')
+
+
+def test_each_method_has_its_own_description():
+    """`ui.radio` renders ONE QOptionGroup, so a tooltip attached to it fires
+    for both options -- hovering "Chunk search" described letter-level search
+    (owner-reported 2026-08-25)."""
+    helps = _method_help_values()
+    assert set(helps) == {'passage', 'chunk'}
+    assert helps['passage'] != helps['chunk']
+    # Each names what IT is, not what the other is.
+    assert 'older method' in helps['chunk']
+    assert 'Faster' in helps['passage']
+
+
+def test_the_method_descriptions_claim_nothing_false():
+    """Two of the old tooltip's three claims were not true of the difference
+    between the engines. The CHUNK engine strips nikkud too -- per token, at
+    tokenization -- and both treat a newline as an ordinary separator, so
+    neither ever distinguished the two.
+    """
+    helps = _method_help_values()
+    for key, text in helps.items():
+        assert 'nikkud' not in text.lower(), (
+            f'{key}: both engines strip nikkud; it is not a difference'
+        )
+        assert 'line break' not in text.lower(), (
+            f'{key}: both engines treat a newline as a space'
+        )
+
+
+def test_the_method_radio_carries_no_group_tooltip():
+    """The whole point: a group tooltip cannot be per-option."""
+    src = _read_source()
+    for node in ast.walk(ast.parse(src)):
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == 'tooltip'
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == 'method_radio'):
+            raise AssertionError(
+                'method_radio.tooltip() is back -- it fires for BOTH options'
+            )
+
+
+def test_the_description_updates_when_the_method_changes():
+    """A help line that never changes is worse than the tooltip it replaced."""
+    src = _read_source()
+    assert '_update_method_help' in src
+    assert 'method_radio.on_value_change(' in src, (
+        'nothing re-renders the help line when the method changes'
+    )
+
+
+# ---------------------------------------------------------------------------
+# One expand chevron per result row.
+# ---------------------------------------------------------------------------
+
+def test_a_result_row_draws_exactly_one_expand_chevron():
+    """QExpansionItem renders its own chevron and rotates it on open. The
+    header slot added a SECOND one that nothing ever rotated, so expanding a
+    row turned one arrow and left the other pointing down (owner-reported
+    2026-08-25: "why do the results have two down arrow 'open' symbols?").
+    """
+    src = _read_source()
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.FunctionDef)
+                and node.name == 'create_parallel_item'):
+            continue
+        for sub in ast.walk(node):
+            if not (isinstance(sub, ast.Call)
+                    and isinstance(sub.func, ast.Attribute)
+                    and sub.func.attr == 'icon'
+                    and sub.args
+                    and isinstance(sub.args[0], ast.Constant)):
+                continue
+            assert sub.args[0].value != 'expand_more', (
+                'a second, non-rotating chevron is back in the header slot'
+            )
+        return
+    raise AssertionError('create_parallel_item not found')
