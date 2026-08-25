@@ -1085,40 +1085,110 @@ def test_page_requests_the_uncapped_searcher(synthetic_corpus, monkeypatch):
     )
 
 
-def test_the_two_buckets_partition_the_hits(grouped_corpus):
-    """`main` and `filtered` never overlap, and together they account for
-    every hit -- each row renders exactly once.
+# ---------------------------------------------------------------------------
+# The bucket arithmetic the render-cost bound rests on -- BOTH cap regimes.
+# ---------------------------------------------------------------------------
 
-    This is not housekeeping: the module docstring's render-cost bound is
-    derived from it. Two versions of that note got it wrong in opposite
-    directions -- "a worst-case full cap on BOTH buckets" treated the two as
-    independently reaching `verify_cap` (2x too pessimistic), and a later
-    correction claimed a `filter_text` HALVES the row threshold "since both
-    buckets render" (Codex review, PR #328). Both readings die if the
-    partition is pinned rather than assumed.
+@pytest.fixture(scope='module')
+def mixed_filter_corpus(tmp_path_factory):
+    """4 groups x 3 pages over TWO motifs, and a filter naming only one.
+
+    The existing `grouped_corpus` cannot express this: every page carries the
+    same motif, so every record matches the same query-side span and a
+    `filter_text` sends them ALL to one bucket. To split the hits ACROSS the
+    buckets the records have to match DIFFERENT parts of the query.
+
+    Returns `(idx, originals, query, filter_text)`, where the filter covers
+    the query's first half -- generously, because `verify_margin` can extend a
+    span past its motif and `_is_source_text_filtered` requires the span's
+    normalized stream to be a SUBSTRING of the filter's. A filter of exactly
+    `motif_a` matches nothing, which is how the first attempt at this fixture
+    silently produced an unsplit result.
     """
-    # Its own searcher: the module `searcher` fixture is bound to
-    # synthetic_corpus, which carries the motif on ONE record -- too thin to
-    # tell a partition from a coincidence. grouped_corpus has 12.
-    idx, originals, motif = grouped_corpus
-    searcher = PassageSearcher(index=idx,
-                               text_fetcher=_FakeTextFetcher(originals))
+    d = str(tmp_path_factory.mktemp('ppar_mixed'))
+    motif_a = _aperiodic(80, salt=101)
+    filler = _aperiodic(60, salt=303)
+    motif_b = _aperiodic(80, salt=202)
+    query = motif_a + ' ' + filler + ' ' + motif_b
 
-    unfiltered = searcher.search_composition_logic(full_text=motif)
-    total = len(unfiltered['main']) + len(unfiltered['filtered'])
+    originals: dict = {}
+    records = []
+    for group in range(4):
+        motif = motif_a if group < 2 else motif_b
+        for page in range(3):
+            rid = _grouped_record_id(group, page)
+            body = _aperiodic(200, salt=7000 + group * 10 + page)
+            text = body[:50] + ' ' + motif + ' ' + body[50:]
+            originals[rid] = text
+            records.append((rid, text))
+
+    build_index(records, d, partitions=2, apply_hygiene=False)
+    idx = open_index(d)
+    assert idx is not None
+    return idx, originals, query, motif_a + ' ' + filler
+
+
+def _totals(idx, originals, query, filter_text, render_cap):
+    s = PassageSearcher(index=idx, text_fetcher=_FakeTextFetcher(originals),
+                        render_cap=render_cap)
+    plain = s.search_composition_logic(full_text=query)
+    split = s.search_composition_logic(full_text=query,
+                                       filter_text=filter_text)
+    return plain, split
+
+
+def test_uncapped_the_buckets_partition_and_a_filter_only_redistributes(
+    mixed_filter_corpus,
+):
+    """`render_cap=0` is the PAGE path, and the one the module docstring's
+    render-cost threshold is about. No cap, so each hit lands in exactly one
+    bucket and a `filter_text` moves rows between them without creating any.
+    """
+    idx, originals, query, filt = mixed_filter_corpus
+    plain, split = _totals(idx, originals, query, filt, render_cap=0)
+
+    total = len(plain['main']) + len(plain['filtered'])
     assert total, 'fixture precondition: at least one hit'
-
-    # A filter REDISTRIBUTES the same rows; it does not create any.
-    split = searcher.search_composition_logic(full_text=motif,
-                                              filter_text=motif)
     assert len(split['main']) + len(split['filtered']) == total, (
-        'the buckets do not partition -- the render cost is not the hit count'
+        'a filter changed the RENDERED ROW COUNT on the uncapped path, so the '
+        'render cost is not the hit count'
     )
+    # ...and it really did split, or the assertion above is vacuous.
+    assert split['main'] and split['filtered'], (
+        'the fixture did not split across both buckets -- this test would '
+        'pass with the partition broken'
+    )
+    for result in (plain, split):
+        both = ({r['raw_header'] for r in result['main']}
+                & {r['raw_header'] for r in result['filtered']})
+        assert not both, f'{len(both)} records are in BOTH buckets'
 
-    for result in (unfiltered, split):
-        main_ids = {r['raw_header'] for r in result['main']}
-        filt_ids = {r['raw_header'] for r in result['filtered']}
-        assert not (main_ids & filt_ids), (
-            f'{len(main_ids & filt_ids)} records are in BOTH buckets, so they '
-            f'render twice'
-        )
+
+def test_capped_a_split_filter_can_double_the_rendered_rows(
+    mixed_filter_corpus,
+):
+    """`render_cap > 0` is the API path, and it behaves the OPPOSITE way: the
+    two buckets are capped INDEPENDENTLY, so a filter splitting hits across
+    both raises the rendered total from one cap toward two.
+
+    This is the case the previous version of this test missed -- its fixture
+    never reached a cap, so it "pinned" an invariant that does not hold where
+    a cap applies (Codex review, PR #328). The module docstring has now been
+    wrong about this in both directions; the point of the test is that it can
+    no longer be wrong in either.
+    """
+    idx, originals, query, filt = mixed_filter_corpus
+    plain, split = _totals(idx, originals, query, filt, render_cap=2)
+
+    plain_total = len(plain['main']) + len(plain['filtered'])
+    split_total = len(split['main']) + len(split['filtered'])
+    assert plain_total, 'fixture precondition: at least one hit'
+    assert split['main'] and split['filtered'], 'the filter did not split'
+    assert split_total > plain_total, (
+        'a split filter did not raise the rendered total under a cap -- if '
+        "the buckets now share one cap, the docstring's API-path worst case "
+        'is wrong'
+    )
+    assert split_total <= 2 * plain_total, (
+        'more than two caps worth of rows rendered'
+    )

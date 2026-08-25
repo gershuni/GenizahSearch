@@ -161,13 +161,26 @@ site:
     ON TOP of the 2,431 already rendered, written as though it were the
     total. Subtract the search cost, not the whole measured run.
   * It said a `filter_text` halves the threshold "since both buckets
-    render". They do both render, but each hit lands in
-    `filtered_candidate_rows` OR `eligible_rows` -- one `if/else`, one loop
-    -- so the buckets PARTITION the hits and each row renders exactly once.
-    A filter redistributes the cost; it adds none. The pre-existing
-    "worst-case full cap on BOTH buckets" phrasing had the same error in
-    the opposite direction: the partition makes 2x `verify_cap`
-    unreachable.
+    render", and then that the pre-existing "worst-case full cap on BOTH
+    buckets" was 2x too pessimistic. Both statements are wrong, because
+    the answer depends on `render_cap` and neither said which regime it
+    meant (Codex, again, on the test written to pin the first correction):
+
+      - `render_cap == 0` -- the PAGE path, and the one this threshold is
+        about. No cap, so each hit lands in `filtered_candidate_rows` OR
+        `eligible_rows` (one `if/else`, one loop), the buckets PARTITION
+        the hits, and every row renders exactly once. A `filter_text`
+        redistributes the cost and adds none.
+      - `render_cap > 0` -- the API path. The two buckets are capped
+        INDEPENDENTLY, so a filter splitting hits across both raises the
+        rendered total from one cap to as many as two. Measured on a
+        4-group fixture at `render_cap=2`: 6 rows unfiltered, 12 with a
+        mixed filter. The pre-existing "full cap on BOTH buckets" was
+        RIGHT for this path.
+
+    `tests/test_passage_parallels.py::test_the_two_buckets_partition_the_hits`
+    now pins both regimes, because this paragraph has been corrected three
+    times and been wrong in a different direction each time.
   * 11,150 assumes `search` stays at 15.5s while accepting 4.6x more rows,
     and verification is what PRODUCES rows -- so a query returning 11,000
     hits spends longer searching too, and the real breach comes earlier.
