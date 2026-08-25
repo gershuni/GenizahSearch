@@ -14,6 +14,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 
 import pytest
@@ -195,6 +196,138 @@ def test_load_passage_state_retries_a_transient_open_failure(
     assert state.index.n_records == len(c.records)
     assert calls['n'] >= 2
     pl.install_passage_state(state)  # let the autouse fixture release it
+
+
+# ---------------------------------------------------------------------------
+# 0c. Reader leases: a search still touching the index must block a
+#     force-close, not lose the race to one.
+# ---------------------------------------------------------------------------
+
+class _NullTextFetcher:
+    def get_full_text_by_header(self, full_header):
+        return None
+
+
+def _shrink_lease_window(monkeypatch, timeout=0.2, poll=0.02):
+    """Every negative (never-drains) test needs a short window, or it pays
+    the full production timeout; every positive (drains-in-time) test needs
+    the window wide enough that its background release always lands inside
+    it. Centralised so both kinds of test tune the same two knobs the same
+    way."""
+    monkeypatch.setattr(pl, 'LEASE_DRAIN_TIMEOUT_SECONDS', timeout)
+    monkeypatch.setattr(pl, 'LEASE_DRAIN_POLL_SECONDS', poll)
+
+
+def test_close_refuses_while_a_lease_is_outstanding_then_succeeds_after_release(
+        tmp_path, monkeypatch):
+    _shrink_lease_window(monkeypatch)
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+
+    lease = pl.get_passage_searcher(_NullTextFetcher())
+    assert lease is not None
+    with lease as searcher:
+        # "mid-query": still holding a reference to the live index.
+        assert searcher.index.n_records == len(c.records)
+        assert pl.close_passage_state() is False, (
+            'a live reader must block a force-close, not lose the race to it')
+        assert pl.passage_available(), (
+            'a refused close must leave the state installed and usable')
+
+    # The `with` block released the lease on exit -- a close now succeeds.
+    assert pl.close_passage_state() is True
+    assert not pl.passage_available()
+
+
+def test_a_released_lease_is_harmless_to_release_twice(tmp_path):
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+
+    lease = pl.get_passage_searcher(_NullTextFetcher())
+    lease.release()
+    lease.release()  # must not raise, must not under/over-count
+
+    assert pl.close_passage_state() is True
+
+
+def test_lease_drained_inside_the_wait_window_lets_the_same_close_through(
+        tmp_path, monkeypatch):
+    """A lease released WHILE `close_passage_state` is still polling must let
+    THAT SAME call succeed -- proving the window is a real wait, not an
+    instant refusal dressed up as one."""
+    _shrink_lease_window(monkeypatch, timeout=2.0, poll=0.02)
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+
+    lease = pl.get_passage_searcher(_NullTextFetcher())
+
+    def _release_soon():
+        time.sleep(0.15)
+        lease.release()
+
+    t = threading.Thread(target=_release_soon)
+    t.start()
+    try:
+        assert pl.close_passage_state() is True, (
+            'a lease released inside the wait window must let the close '
+            'through on the same call, not force the caller to retry')
+    finally:
+        t.join()
+
+
+def test_run_build_and_swap_refuses_while_a_lease_is_outstanding_and_cleans_staging(
+        tmp_path, monkeypatch):
+    _shrink_lease_window(monkeypatch)
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+    staging = os.path.join(c.root, pl.STAGING_DIRNAME)
+
+    lease = pl.get_passage_searcher(_NullTextFetcher())
+    with lease:
+        res = pl.run_build_and_swap(
+            c.root, c.records, c.source_paths, c.corpus_path, partitions=2,
+            release_live_state=pl.close_passage_state)
+
+        assert res.status == 'readers_active'
+        assert pl.passage_available(), (
+            'a refused swap must leave the old, still-live index installed')
+        assert not os.path.isdir(staging), (
+            'a swap abandoned before promotion must still clean its staging '
+            '-- an unswapped build is a build this run will never use')
+
+    # Lease released -- a fresh build+swap now proceeds normally.
+    res2 = pl.run_build_and_swap(
+        c.root, c.records, c.source_paths, c.corpus_path, partitions=2,
+        release_live_state=pl.close_passage_state)
+    assert res2.status == 'installed'
+    pl.install_passage_state(
+        pl.PassageState(index=res2.index, live_dir=res2.live_dir))
+
+
+def test_install_passage_state_refuses_to_replace_a_leased_outgoing_state(
+        tmp_path, monkeypatch):
+    _shrink_lease_window(monkeypatch)
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+    outgoing_index = pl._state.index
+
+    other = str(tmp_path / 'other')
+    shutil.copytree(c.live_dir, other)
+    idx2 = open_index(other)
+    assert idx2 is not None
+
+    lease = pl.get_passage_searcher(_NullTextFetcher())
+    try:
+        assert pl.install_passage_state(
+            pl.PassageState(index=idx2, live_dir=other)) is False
+        assert pl._state.index is outgoing_index, (
+            'a refused install must leave the ORIGINAL state installed, '
+            'not the new one half-swapped in')
+    finally:
+        lease.release()
+        pl._release_index_handles(idx2)  # never installed -- release by hand
+
+    assert pl.close_passage_state() is True
 
 
 # ---------------------------------------------------------------------------
@@ -921,6 +1054,48 @@ def test_rename_blocked_on_rebuild_rolls_back_to_old_live(tmp_path,
 
     assert swap.status == 'rename_blocked'
     assert open_index(live) is not None, 'rollback must restore the old live'
+    assert not os.path.isdir(built.staging_dir), (
+        'a blocked promotion whose restore SUCCEEDED must still clean its '
+        'staging -- nothing downstream (the terminal recovery walk never '
+        'looks inside passage_index.building) will ever do it otherwise')
+
+
+def test_blocked_promotion_with_successful_restore_cleans_staging_end_to_end(
+        tmp_path, monkeypatch):
+    """Same scenario as the test above, driven through the full
+    `run_build_and_swap` entry point: the caller must get back a WORKING
+    index (the terminal recovery walk reopens the restored `live`) and the
+    validated staging artifact must not be left stranded on disk."""
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+    staging = os.path.join(c.root, pl.STAGING_DIRNAME)
+
+    monkeypatch.setattr(pl, 'RENAME_RETRY_ATTEMPTS', 2)
+    monkeypatch.setattr(pl, 'RENAME_RETRY_DELAY_SECONDS', 0)
+
+    real_rename = os.rename
+
+    def _blocked_rename(src, dst):
+        if os.path.normpath(src) == os.path.normpath(staging):
+            raise PermissionError('synthetic: staging->live blocked')
+        return real_rename(src, dst)
+
+    monkeypatch.setattr(pl.os, 'rename', _blocked_rename)
+
+    res = pl.run_build_and_swap(
+        c.root, c.records, c.source_paths, c.corpus_path, partitions=2,
+        release_live_state=pl.close_passage_state)
+
+    assert res.status == 'rename_blocked'
+    assert res.index is not None, (
+        'a promotion block with a successful restore must still hand the '
+        'caller a working index')
+    assert not os.path.isdir(staging), (
+        'a validated staging artifact must not be stranded on disk once '
+        'the swap has definitively failed and the old generation was '
+        'restored')
+    pl.install_passage_state(
+        pl.PassageState(index=res.index, live_dir=res.live_dir))
 
 
 def test_cancelled_latch_before_any_rename_leaves_live_untouched(tmp_path):

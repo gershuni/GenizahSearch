@@ -276,7 +276,7 @@ def load_passage_state(root: Optional[str] = None) -> Optional[PassageState]:
     return PassageState(index=idx, live_dir=live_dir)
 
 
-def install_passage_state(state: Optional[PassageState]) -> None:
+def install_passage_state(state: Optional[PassageState]) -> bool:
     """UI-thread-only, like `close_passage_state` (see its docstring for the
     ownership rule). An install that REPLACES a live state must release the
     outgoing one first: `_state` is the only reference this process holds to
@@ -286,21 +286,38 @@ def install_passage_state(state: Optional[PassageState]) -> None:
     re-releasing handles this process no longer holds is a no-op at best and
     a double-close at worst. A staleness check computed against the artifact
     this replaces is now for a different generation, so any in-flight banner
-    state is discarded here too."""
+    state is discarded here too.
+
+    Returns False -- refusing to touch `_state` at all -- when the outgoing
+    index has an outstanding `get_passage_searcher()` lease that never
+    drained (see `_release_live_index`); True otherwise, including the
+    same-object and None-outgoing no-ops above."""
     global _state
     outgoing = _state
     if outgoing is not None and outgoing is not state:
-        _release_index_handles(outgoing.index)
+        if not _release_live_index(outgoing.index):
+            return False
         gc.collect()
     _state = state
     _reset_freshness()
+    return True
 
 
-def close_passage_state() -> None:
+def close_passage_state() -> bool:
     """Release the live memmaps, then drop the reference. An open memmap
     blocks os.rename/rmtree on Windows for as long as it -- or a traceback
     holding it -- survives, so this is the mandatory step between "the UI
     stops using the live index" and "a rename may touch `current`".
+
+    Returns False -- leaving `_state` exactly as it was, nothing closed --
+    when a `get_passage_searcher()` lease is still outstanding after
+    `_release_live_index`'s wait window (see that function): a search thread
+    mid-query holds this SAME PassageIndex object, and force-closing it
+    would invalidate its numpy memmaps out from under that read, which is an
+    access violation, not an exception. Callers that treat every call as
+    unconditionally successful are the bug this return value exists to
+    catch -- see `run_build_and_swap`'s handling of its `release_live_state`
+    seam.
 
     OWNERSHIP RULE (stated once, here): `_state` is mutated ONLY on the UI
     thread -- this function, `install_passage_state`, and nowhere else. A
@@ -310,20 +327,134 @@ def close_passage_state() -> None:
     the UI thread even though the request to do it originates off it."""
     global _state
     if _state is not None:
-        _release_index_handles(_state.index)
+        if not _release_live_index(_state.index):
+            return False
     _state = None
     gc.collect()
     _reset_freshness()
+    return True
 
 
 def passage_available() -> bool:
     return _state is not None
 
 
+# ---------------------------------------------------------------------------
+# Reader leases. `get_passage_searcher()` hands the caller a raw
+# `PassageIndex` reference (wrapped in a `PassageSearcher`) that a worker
+# thread may still be reading -- a numpy memmap access with no natural end
+# this module can observe -- long after the call that produced it returns.
+# `close_passage_state()`/`install_passage_state()` must know such a read is
+# in flight before they force-close that SAME index's memmaps: a concurrent
+# read off a mapping closed out from under it is an access violation, not a
+# catchable exception. This lease is the single owner-side mechanism that
+# makes that provable rather than merely hoped for.
+# ---------------------------------------------------------------------------
+
+LEASE_DRAIN_TIMEOUT_SECONDS = 5.0
+LEASE_DRAIN_POLL_SECONDS = 0.05
+
+_lease_lock = threading.Lock()
+_outstanding_leases = 0
+
+
+def _acquire_lease() -> None:
+    global _outstanding_leases
+    with _lease_lock:
+        _outstanding_leases += 1
+
+
+def _release_lease() -> None:
+    global _outstanding_leases
+    with _lease_lock:
+        # Floored at 0 rather than trusting callers to release exactly
+        # once -- `PassageSearcherLease.release()` already enforces that
+        # itself (see its docstring), but the floor is what keeps a defect
+        # THERE from ever wedging this count below zero and refusing every
+        # close forever.
+        if _outstanding_leases > 0:
+            _outstanding_leases -= 1
+
+
+def _leases_outstanding() -> bool:
+    with _lease_lock:
+        return _outstanding_leases > 0
+
+
+def _wait_for_leases_to_drain(
+        timeout: float = LEASE_DRAIN_TIMEOUT_SECONDS) -> bool:
+    """Polls rather than blocking on a condition variable: a lease is
+    released from whichever worker thread's query happens to finish, an
+    arbitrary and unpredictable thread from this function's point of view,
+    so there is no single event object it could wait on instead."""
+    deadline = time.monotonic() + timeout
+    while _leases_outstanding():
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(LEASE_DRAIN_POLL_SECONDS)
+    return True
+
+
+def _release_live_index(idx: PassageIndex) -> bool:
+    """The one seam `close_passage_state` and `install_passage_state` both
+    route their outgoing-index release through. Waits out
+    `_wait_for_leases_to_drain`'s bounded window, then either force-closes
+    `idx` (leases gone) or refuses entirely (leases survived) -- there is no
+    partial outcome: an index this function did not report closed is still
+    exactly as open as it was before the call."""
+    if not _wait_for_leases_to_drain():
+        return False
+    _release_index_handles(idx)
+    return True
+
+
+class PassageSearcherLease:
+    """What `get_passage_searcher()` returns instead of a bare
+    `PassageSearcher`. The searcher is reachable ONLY through the `with`
+    block -- there is no public accessor for it otherwise -- so a caller
+    cannot end up holding a reference to the index without the lease that
+    reference requires being counted.
+
+    `release()` is the non-context escape hatch, for a caller that truly
+    cannot use `with`; it is what `__exit__` itself calls, and it is
+    idempotent -- safe to call again, from a retry or a stray `finally` --
+    because a second call is a no-op rather than a double decrement, which
+    is what makes "release exactly once" true regardless of how many times
+    release is actually requested.
+    """
+
+    def __init__(self, searcher) -> None:
+        self._searcher = searcher
+        self._released = False
+        _acquire_lease()
+
+    def __enter__(self):
+        return self._searcher
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        self.release()
+        return False
+
+    def release(self) -> None:
+        if self._released:
+            return
+        self._released = True
+        _release_lease()
+
+
 def get_passage_searcher(text_fetcher, width: str = _DEFAULT_WIDTH,
                           length: str = DEFAULT_LENGTH,
                           depth: str = DEFAULT_DEPTH):
-    """A fresh PassageSearcher, or None when no index is installed.
+    """A `PassageSearcherLease` wrapping a fresh PassageSearcher, or None
+    when no index is installed. Use it as a `with` block:
+
+        with get_passage_searcher(text_fetcher) as searcher:
+            ... run the search ...
+
+    The lease is what keeps `close_passage_state()`/`install_passage_state()`
+    from force-closing the mmap this searcher reads while the `with` block
+    -- typically the composition thread's terminal -- is still inside it;
+    see `PassageSearcherLease`.
 
     Each axis is validated INDEPENDENTLY against the finite set `compose()`
     actually knows, falling back to the default on anything unrecognised --
@@ -343,8 +474,9 @@ def get_passage_searcher(text_fetcher, width: str = _DEFAULT_WIDTH,
     if depth != DEFAULT_DEPTH and depth not in DEPTH_PROFILES:
         depth = DEFAULT_DEPTH
     from shared.passage_parallels import PassageSearcher  # local: keep this module import-light
-    return PassageSearcher(index=_state.index, text_fetcher=text_fetcher,
-                           policy=compose(width, length, depth))
+    searcher = PassageSearcher(index=_state.index, text_fetcher=text_fetcher,
+                               policy=compose(width, length, depth))
+    return PassageSearcherLease(searcher)
 
 
 # ---------------------------------------------------------------------------
@@ -675,7 +807,15 @@ def _swap_rebuild(root: str, live: str, staging_dir: str,
         except PermissionError:
             # Same reasoning as the cancel path above: report a status the
             # terminal recovery walk handles instead of raising past it.
+            _cleanup_staging(staging_dir)
             return SwapResult(status='rollback_failed')
+        # The restore succeeded -- the caller ends up with a WORKING index,
+        # so this is a routine failure, not the last-resort `rollback_failed`
+        # above. Staging is still this function's to dispose of here: the
+        # terminal recovery walk (`_recover_at_startup`) never looks inside
+        # `passage_index.building`, so a validated multi-GB artifact would
+        # otherwise sit on disk until some later build happened to clear it.
+        _cleanup_staging(staging_dir)
         return SwapResult(status='rename_blocked')
 
     idx = _open_with_retry(live)
@@ -740,7 +880,7 @@ def run_build_and_swap(root: str, records, source_paths: list,
                        df_cap: Optional[int] = None, corpus_label: str = '',
                        progress: Optional[Callable] = None,
                        cancel_check: Optional[Callable[[], bool]] = None,
-                       release_live_state: Callable[[], None]
+                       release_live_state: Callable[[], Optional[bool]]
                        ) -> BuildAndSwapResult:
     """Build -> validate -> swap, with the cross-process lock held for the
     whole run and released exactly once, in `finally`, regardless of which
@@ -759,10 +899,21 @@ def run_build_and_swap(root: str, records, source_paths: list,
     there, and block until that release has actually happened before
     returning -- only THEN does this function proceed to `perform_swap`'s
     renames. The real Qt wiring supplies a callable that does that hop (e.g.
-    a blocking queued signal/slot); a test may pass `close_passage_state`
+    a blocking queued signal/slot) and PROPAGATES `close_passage_state`'s own
+    return value back across it; a test may pass `close_passage_state`
     directly since nothing in a test is actually multi-threaded. Required,
     not defaulted to `close_passage_state`, so this module can never again
     grow a path that touches the global itself.
+
+    A return of `False` -- and ONLY `False`, checked with `is`, never plain
+    falsiness -- means the release was explicitly refused: a
+    `get_passage_searcher()` lease never drained (see `_release_live_index`).
+    This function then abandons the swap without ever calling `perform_swap`
+    (nothing was released, so nothing may be renamed) and cleans staging like
+    every other unswapped terminal. A seam returning `None` (a legacy no-op,
+    or a caller that has not been taught the new contract yet) is NOT treated
+    as a refusal -- it proceeds exactly as before, so whatever the OS/rename
+    layer does about a still-open handle is what happens, unchanged.
 
     A concurrent second run (another window, a leftover process) is refused
     up front rather than left to race the filesystem.
@@ -798,7 +949,14 @@ def run_build_and_swap(root: str, records, source_paths: list,
                                       index=recovered.index,
                                       live_dir=recovered.live_dir)
 
-        release_live_state()  # two-phase handoff: caller releases on the UI thread
+        # Two-phase handoff: caller releases on the UI thread. `is False`,
+        # never bare falsiness -- see the docstring above for why `None`
+        # (a seam that does not yet return anything) must NOT be read as a
+        # refusal.
+        released = release_live_state()
+        if released is False:
+            _cleanup_staging(staging)
+            return BuildAndSwapResult(status='readers_active')
         swap = perform_swap(root, staging, cancel_check=cancel_check)
 
         if swap.status == 'installed':
