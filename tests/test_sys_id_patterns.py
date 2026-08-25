@@ -195,15 +195,15 @@ class TestPrefixCheckScript:
     """
 
     @staticmethod
-    def _build_index(path, headers):
+    def _build_index(path, headers, field="full_header"):
         tantivy = pytest.importorskip("tantivy")
         path.mkdir(parents=True, exist_ok=True)
         builder = tantivy.SchemaBuilder()
-        builder.add_text_field("full_header", stored=True)
+        builder.add_text_field(field, stored=True)
         index = tantivy.Index(builder.build(), path=str(path))
         writer = index.writer()
         for header in headers:
-            writer.add_document(tantivy.Document(full_header=[header]))
+            writer.add_document(tantivy.Document(**{field: [header]}))
         writer.commit()
         writer.wait_merging_threads()
         return path
@@ -225,8 +225,9 @@ class TestPrefixCheckScript:
         assert proc.returncode == 0, f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
         assert "ModuleNotFoundError" not in proc.stderr
         assert "AttributeError" not in proc.stderr
-        # Guards the enumeration defect: every document must actually be walked.
-        assert "(scanned 3 of 3 index documents)" in proc.stdout
+        # Guards the enumeration defect: every document must actually be walked,
+        # and every one of them must have been genuinely classified.
+        assert "3 classified, 0 unreadable, 0 with no sys_id" in proc.stdout
         assert "RESULT: OK" in proc.stdout
 
     def test_runs_from_an_unrelated_cwd(self, tmp_path):
@@ -292,6 +293,78 @@ class TestPrefixCheckScript:
         monkeypatch.setattr(_t.Index, "open",
                             staticmethod(lambda d: _Idx(real_open(d))))
         result = mod.scan_tantivy(str(idx))
-        assert "__incomplete__" in result, (
+        assert "__walk_problems__" in result, (
             "a truncated walk reported a clean result -- that is indistinguishable "
             "from a corpus with no 97 in it")
+        assert "incomplete walk" in result["__walk_problems__"]
+
+    # --- second review round: the completeness guard had two holes of its own.
+
+    def test_CONTROL_an_index_whose_schema_lacks_the_header_field_fails(self, tmp_path):
+        """A walk that inspected NO header must not come back clean.
+
+        The first version incremented its scanned counter BEFORE reading the
+        document, so `scanned == total` held even when every read yielded
+        nothing -- and it printed RESULT: OK off zero inspected headers.
+        """
+        idx = self._build_index(tmp_path / "wrong", ["990051620920205171_IE1_P1_FL2"],
+                                field="other_field")
+        proc = self._run(idx, REPO_ROOT)
+        assert proc.returncode == 1, f"stdout:\n{proc.stdout}"
+        assert "RESULT: FAIL" in proc.stdout
+        assert "nothing classified" in proc.stdout
+
+    def test_CONTROL_a_brand_new_prefix_is_detected(self, tmp_path):
+        """THE point of this script: find a prefix nobody has seen before.
+
+        Detection must not run through the constants under test. A 99/97-only
+        pattern cannot match a 98, so the document contributed nothing, the
+        counters still balanced, and an index of nothing but 98s reported
+        RESULT: OK -- the check blind to its own subject.
+        """
+        idx = self._build_index(tmp_path / "p98", ["980051620920205171_IE1_P1_FL2"])
+        proc = self._run(idx, REPO_ROOT)
+        assert proc.returncode == 1, f"stdout:\n{proc.stdout}"
+        assert "RESULT: FAIL" in proc.stdout
+        assert "'98'" in proc.stdout, "the new prefix was not named in the report"
+        assert "980051620920205171" in proc.stdout
+
+    def test_an_unreadable_document_is_not_counted_as_inspected(self, tmp_path,
+                                                                monkeypatch):
+        """A raising `doc()` must land in `unreadable`, not in the inspected count."""
+        pytest.importorskip("tantivy")
+        idx = self._build_index(tmp_path / "raise",
+                                ["990051620920205171_IE1_P1_FL2"] * 3)
+        spec = importlib.util.spec_from_file_location(
+            "_chk3", REPO_ROOT / "scripts" / "check_sys_id_prefixes.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        import tantivy as _t
+        real_open = _t.Index.open
+
+        class _Raising:
+            def __init__(self, inner):
+                self._inner = inner
+                self.num_docs = inner.num_docs
+            def search(self, *a, **kw):
+                return self._inner.search(*a, **kw)
+            def doc(self, address):
+                raise RuntimeError("simulated unreadable document")
+
+        monkeypatch.setattr(_t.Index, "open",
+                            staticmethod(lambda d: SimpleNamespace(
+                                searcher=lambda: _Raising(real_open(d).searcher()))))
+        result = mod.scan_tantivy(str(idx))
+        assert "__walk_problems__" in result, (
+            "documents that could not be read were counted as inspected")
+        assert "unreadable documents" in result["__walk_problems__"]
+
+    def test_a_clean_corpus_index_still_passes(self, tmp_path):
+        """The guards must not have made a good index un-passable."""
+        idx = self._build_index(tmp_path / "clean", [
+            "990051620920205171_IE167198813_P000003_FL167198817",
+            "990030907670205171_IE1_P000001_FL2",
+        ])
+        proc = self._run(idx, REPO_ROOT)
+        assert proc.returncode == 0, f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        assert "2 classified, 0 unreadable, 0 with no sys_id" in proc.stdout

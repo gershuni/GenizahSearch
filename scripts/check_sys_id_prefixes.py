@@ -26,6 +26,7 @@ import argparse
 import collections
 import csv
 import os
+import re
 import sqlite3
 import sys
 
@@ -39,6 +40,16 @@ if REPO_ROOT not in sys.path:
 CORPUS_PREFIX = "99"
 #: Documents per offset page when walking a Tantivy index.
 TANTIVY_PAGE = 10000
+
+#: Prefix-AGNOSTIC sys_id shape, and deliberately NOT one of the shared
+#: constants. This script exists to discover whether a prefix OUTSIDE the known
+#: namespaces has appeared; a pattern that only matches 99 and 97 cannot see a
+#: 98, so using the constants under test as the instrument of the test would
+#: make the check blind to its own subject. (An earlier revision did exactly
+#: that and reported RESULT: OK on an index of nothing but 98-prefixed records.)
+#: Any digit run of sys_id length at a digit boundary: the IE/P/FL components of
+#: a header are all shorter than 10 digits, so they cannot be mistaken for one.
+_ANY_PREFIX_SYS_ID_RE = re.compile(r'(?<!\d)(\d{10,})')
 LOCAL_PREFIX = "97"
 
 
@@ -122,7 +133,10 @@ def scan_tantivy(index_dir):
     except ImportError:
         print("\nTantivy index: `tantivy` not installed -- skipped")
         return {}
-    from shared.sys_id_patterns import ANY_SYS_ID_RE
+    # Imported to CROSS-CHECK the constant against real data, never to do the
+    # prefix detection itself (see _ANY_PREFIX_SYS_ID_RE).
+    from shared.sys_id_patterns import extract_corpus_sys_id
+
     index = tantivy.Index.open(index_dir)
     searcher = index.searcher()
     counter = collections.Counter()
@@ -134,7 +148,18 @@ def scan_tantivy(index_dir):
     # held for the whole walk, so paging is over a fixed index snapshot.
     total = searcher.num_docs
     query = tantivy.Query.all_query()
-    scanned = 0
+
+    # Every document lands in EXACTLY ONE of these three, and they must sum to
+    # `total`. A document that could not be read, or whose header carried no
+    # sys_id-shaped run, is NOT an inspected document -- counting it as one is
+    # how a walk that examined nothing still reported clean.
+    classified = 0
+    unreadable = 0
+    unparsed = 0
+    unreadable_samples = []
+    unparsed_samples = []
+    missed = []  # ids the shared CORPUS pattern failed to pull from the header
+
     offset = 0
     while offset < total:
         hits = searcher.search(
@@ -142,27 +167,61 @@ def scan_tantivy(index_dir):
         if not hits:
             break
         for _score, address in hits:
-            scanned += 1
             try:
-                header = searcher.doc(address).get_first("full_header")
-            except Exception:
+                header = str(searcher.doc(address).get_first("full_header") or "")
+            except Exception as exc:
+                unreadable += 1
+                if len(unreadable_samples) < 3:
+                    unreadable_samples.append(f"{type(exc).__name__}: {exc}")
                 continue
-            m = ANY_SYS_ID_RE.search(str(header or ""))
-            if not m:
+            match = _ANY_PREFIX_SYS_ID_RE.search(header)
+            if not match:
+                unparsed += 1
+                if len(unparsed_samples) < 3:
+                    unparsed_samples.append(header[:80] or "<empty>")
                 continue
-            sid = m.group(1)
+            sid = match.group(1)
+            classified += 1
             counter[sid[:2]] += 1
             if len(samples[sid[:2]]) < 3:
                 samples[sid[:2]].append(sid)
+            # The script's own subject: does the shared corpus constant actually
+            # pull this id out of this real header?
+            if sid.startswith(CORPUS_PREFIX) and extract_corpus_sys_id(header) != sid:
+                if len(missed) < 3:
+                    missed.append((header[:80], sid))
         offset += len(hits)
 
-    print(f"\n(scanned {scanned:,} of {total:,} index documents)")
-    if scanned != total:
-        # Never report a clean result off a partial walk -- a short scan is
-        # indistinguishable from a corpus with no 97 in it.
-        print(f"    INCOMPLETE WALK: saw {scanned:,} of {total:,} documents.")
-        return {"__incomplete__": scanned}
-    return _report("Tantivy index", counter, samples)
+    print(f"\n(of {total:,} index documents: {classified:,} classified, "
+          f"{unreadable:,} unreadable, {unparsed:,} with no sys_id)")
+
+    problems = {}
+    seen = classified + unreadable + unparsed
+    if seen != total:
+        print(f"    INCOMPLETE WALK: accounted for {seen:,} of {total:,} documents.")
+        problems["incomplete walk"] = seen
+    if unreadable:
+        print(f"    UNREADABLE: {unreadable:,} document(s) could not be read; "
+              f"e.g. {unreadable_samples}")
+        problems["unreadable documents"] = unreadable
+    if unparsed:
+        print(f"    NO SYS_ID: {unparsed:,} header(s) carried no sys_id-shaped "
+              f"run; e.g. {unparsed_samples}")
+        problems["headers with no sys_id"] = unparsed
+    if total and not classified:
+        print("    NOTHING CLASSIFIED: not one header yielded a sys_id.")
+        problems["nothing classified"] = total
+    if missed:
+        print(f"    CORPUS PATTERN MISSED its own id in {len(missed)} header(s); "
+              f"e.g. {missed}")
+        problems["corpus pattern missed"] = len(missed)
+
+    off = _report("Tantivy index", counter, samples)
+    if problems:
+        # A walk with holes proves nothing either way, so it must not be able to
+        # come back clean -- whatever the prefixes it did manage to see.
+        return {"__walk_problems__": problems}
+    return off
 
 
 def main():
@@ -184,9 +243,13 @@ def main():
     off.update(scan_tantivy(os.path.expanduser(args.index) if args.index else None))
 
     print()
-    if off.pop("__incomplete__", None) is not None:
-        print("RESULT: FAIL -- the index walk was incomplete, so this run proves")
-        print("nothing either way. Fix the walk before trusting the measurement.")
+    walk_problems = off.pop("__walk_problems__", None)
+    if walk_problems:
+        print("RESULT: FAIL -- the index walk had holes, so this run proves")
+        print("nothing either way:")
+        for kind, count in walk_problems.items():
+            print(f"    - {kind}: {count:,}")
+        print("Fix the walk before trusting the measurement.")
         return 1
     if off:
         print("RESULT: FAIL -- a non-99 prefix is present in corpus data.")

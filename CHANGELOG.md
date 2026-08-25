@@ -1054,6 +1054,16 @@ and a repo lint fails CI if a new site spells its own.
   pages a match-all query through the supported API, and refuses to report a clean result off
   a short walk — a partial scan is indistinguishable from a corpus with no 97 in it. Covered
   now by tests that build a real index and run the script as documented.
+- **Then the completeness guard itself turned out to have two holes, found by a second review
+  pass.** Both made the script answer "no new prefix here" without having looked. It counted a
+  document as inspected *before* reading it, so an index whose schema lacks `full_header`
+  balanced its own books and reported clean off zero headers. And it detected prefixes using
+  the very constants it exists to check — a 99/97 pattern cannot match a `98`, so an index of
+  nothing but 98-prefixed records also reported clean. Prefix detection is now deliberately
+  independent of those constants, every document lands in exactly one of
+  classified/unreadable/unparsed and the three must sum to the index total, and the shared
+  corpus pattern is additionally cross-checked against every real header it should match. A
+  walk with any hole in it can no longer come back clean.
 
 ### Letter-level search with several witnesses of one work (2026-08-24)
 
