@@ -102,12 +102,16 @@ def test_the_other_gated_entries_are_untouched(other):
 
 
 def test_the_badge_says_what_is_new():
-    """"New" alone does not tell a returning reader what changed. Owner,
-    2026-08-25: "we should write 'New fast search feature!'"."""
+    """"New" alone does not tell a returning reader what changed.
+
+    The exclamation sits after "New", not at the end: it marks the novelty,
+    not the feature, and it mirrors the Hebrew the badge renders in
+    (owner, 2026-08-25).
+    """
     badge = _nav_tuple('/parallels').elts[3]
     text = badge.body.args[0]
     assert isinstance(text, ast.Constant)
-    assert text.value == 'New fast search feature!'
+    assert text.value == 'New! Fast search feature'
 
 
 def test_the_badge_actually_has_a_hebrew_translation():

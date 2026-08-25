@@ -1856,7 +1856,7 @@ def create_layout():
                     # method selector entirely, so advertising it there would
                     # promote something the page does not offer.
                     ('/parallels', 'compare_arrows', tr('Find Parallels'),
-                     tr('New fast search feature!') if passage_available()
+                     tr('New! Fast search feature') if passage_available()
                      else None),
                     ('/browse', 'menu_book', tr('Browse by Shelfmark'), None),
                     ('/catalog-browse', 'category', tr('Browse by Identification'), None),
