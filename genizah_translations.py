@@ -5073,6 +5073,7 @@ TRANSLATIONS.update({
         "הטקסט מכיל כמה עדים המופרדים בשורות ריקות",
     "Preview split": "תצוגה מקדימה של הפיצול",
     "{n} witnesses detected": "זוהו {n} עדים",
+    "({n} skipped: already added)": "({n} דולגו: כבר נוספו)",
     "({n} skipped: too short)": "({n} דולגו: קצרים מדי)",
     "Pasted text": "טקסט שהודבק",
     "Pending": "ממתין",

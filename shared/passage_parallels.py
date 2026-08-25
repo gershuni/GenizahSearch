@@ -227,8 +227,8 @@ from typing import Optional, Protocol
 
 from shared.parallels_service import PARALLELS_GROUP_CAP, _cap_main_results_by_group
 from shared.passage_hygiene import is_duplicate_photography
-from shared.passage_fusion import (fuse_routed, tag_rows, text_digest,
-                                   witness_id_for)
+from shared.passage_fusion import (fuse_routed, tag_rows, witness_id_for,
+                                   witness_text_key)
 from shared.passage_index import PassageIndex
 from shared.passage_normalize import nfc, norm_stream, norm_stream_fast, project_span
 from shared.passage_policy import PassagePolicy, get_preset
@@ -795,7 +795,7 @@ class PassageSearcher:
                 reason = 'too_long'
             duplicate_of = None
             if reason is None:
-                digest = text_digest(str(text).strip())
+                digest = witness_text_key(text)
                 duplicate_of = seen_text.get(digest)
                 if duplicate_of is None:
                     seen_text[digest] = wid

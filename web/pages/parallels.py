@@ -2597,8 +2597,23 @@ def create_parallels_page(initial_text: str = None):
             main_pairs, filt_pairs)
 
     def _text_digest_of(value: str) -> str:
-        from shared.passage_fusion import text_digest
-        return text_digest((value or '').strip())
+        # Delegates: the page and the API must agree about when two witnesses
+        # are the same witness, and the rule was written out twice.
+        from shared.passage_fusion import witness_text_key
+        return witness_text_key(value)
+
+    def _witness_text_keys() -> set:
+        """Every witness text already represented, THE SEED INCLUDED.
+
+        The seed is a witness -- it is fused under `WITNESS_SEED_ID` like any
+        other -- so a paste identical to the box above counts the same text
+        twice, and `witness_count` then reports two witnesses where there is
+        one. Read live, because that is the text the search is about to run.
+        """
+        keys = {_seed_digest()}
+        keys.update(_text_digest_of(w.get('text'))
+                    for w in p_state.witnesses if (w.get('text') or '').strip())
+        return keys
 
     def _seed_digest() -> str:
         """The digest of what is in the box RIGHT NOW.
@@ -2867,6 +2882,29 @@ def create_parallels_page(initial_text: str = None):
                     ui.notify(
                         tr('Witness text is too long (max {cap} characters)'
                            ).format(cap=MAX_WITNESS_CHARS), type='warning')
+                    if not texts:
+                        return
+                # Same rule the API applies to a `witnesses` array: one
+                # witness supplied twice is one witness. `fuse()` counts
+                # contributors positionally, so a repeat inflates
+                # `witness_count` and `fusion_score` and reorders the results.
+                _keys = _witness_text_keys()
+                _fresh, _dupes = [], 0
+                for _chunk in texts:
+                    _k = _text_digest_of(_chunk)
+                    if _k in _keys:
+                        _dupes += 1
+                        continue
+                    _keys.add(_k)
+                    _fresh.append(_chunk)
+                texts = _fresh
+                if _dupes:
+                    # Counted and reported, never dropped in silence -- a
+                    # paste that quietly loses part of a file is the failure
+                    # this repo treats as a defect.
+                    ui.notify(
+                        tr('({n} skipped: already added)').format(n=_dupes),
+                        type='warning')
                     if not texts:
                         return
                 room = _witness_depth_cap() - len(p_state.witnesses)
@@ -3234,11 +3272,19 @@ def create_parallels_page(initial_text: str = None):
         _already = {w.get('sys_id') for w in p_state.witnesses if w.get('sys_id')}
         from shared.passage_fusion import (
             MAX_WITNESS_CHARS, split_by_length)
-        added, too_long = 0, []
+        # By TEXT as well as by sys_id: a pasted witness has no sys_id, so
+        # the guard above cannot see that a promoted manuscript repeats it.
+        _keys = _witness_text_keys()
+        added, too_long, dupes = 0, [], 0
         for sid in sys_ids:
             text = texts.get(sid)
             if not text or sid in _already:
                 continue
+            _key = _text_digest_of(text)
+            if _key in _keys:
+                dupes += 1
+                continue
+            _keys.add(_key)
             # The same rule the paste path applies, so a manuscript fetched
             # from the corpus and a manuscript pasted by hand cannot disagree
             # about what is searchable.
@@ -3255,6 +3301,9 @@ def create_parallels_page(initial_text: str = None):
             _add_witness(text, label=label, kind='manuscript', sys_id=sid,
                          seed_digest=promoted_digest)
             added += 1
+        if dupes:
+            ui.notify(tr('({n} skipped: already added)').format(n=dupes),
+                      type='warning')
         if too_long:
             ui.notify(
                 tr('Witness text is too long (max {cap} characters)').format(

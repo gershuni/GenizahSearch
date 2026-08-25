@@ -1763,3 +1763,64 @@ def test_nothing_to_fuse_from_never_wipes_the_rows_on_screen():
         'the empty-order branch discards rows it did not produce: '
         + repr(clobbers)
     )
+
+
+def test_the_page_dedupes_witness_texts_like_the_api_does():
+    """Codex reported duplicate witnesses against the API. The same mistake
+    was available here and unguarded: the page deduped promotion by `sys_id`
+    and nothing by TEXT, so the same text pasted twice, a paste identical to
+    the SEED, or a promoted manuscript repeating a pasted witness each counted
+    one witness twice -- `fuse()` counts contributors positionally on both
+    paths, so `witness_count` and `fusion_score` inflate identically.
+
+    RED if either add path stops consulting the key set.
+    """
+    import ast
+    for func in ('_promote_checked',):
+        src = _func_source(func)
+        tree = ast.parse(src.lstrip())
+        calls = [n for n in ast.walk(tree)
+                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                 and n.func.id == '_witness_text_keys']
+        assert calls, f'{func} does not dedupe by witness text'
+    # The paste path lives in a dialog closure, so it is checked in the page
+    # source rather than by function name.
+    page = _source()
+    assert page.count('_witness_text_keys()') >= 2, (
+        'only one add path dedupes by text; the other can still admit a '
+        'duplicate witness'
+    )
+
+
+def test_the_seed_counts_as_an_existing_witness_text():
+    """The seed is fused under WITNESS_SEED_ID like any other witness, so a
+    paste identical to the box above is the same text twice. RED if the key
+    set stops including it."""
+    import ast
+    src = _func_source('_witness_text_keys')
+    tree = ast.parse(src.lstrip())
+    calls = {ast.unparse(n.func) for n in ast.walk(tree)
+             if isinstance(n, ast.Call)}
+    assert '_seed_digest' in calls, (
+        'the seed is missing from the witness key set, so a paste identical '
+        'to the search box counts the same text twice'
+    )
+
+
+def test_a_skipped_duplicate_is_reported_not_dropped():
+    """A paste that quietly loses part of a file is the failure this repo
+    treats as a defect -- the same reason the too-short and too-long skips are
+    counted and announced."""
+    page = _source()
+    # BOTH add paths must report, so the count is asserted rather than the
+    # presence: the paste path and the promotion path each carry this
+    # literal, and a mutation removing either one left an `in page` check
+    # green on the survivor.
+    assert page.count("'({n} skipped: already added)'") >= 2, (
+        'an add path drops duplicates without telling the user'
+    )
+    from genizah_translations import TRANSLATIONS
+    assert '({n} skipped: already added)' in TRANSLATIONS, (
+        'tr() falls back to English, so an untranslated notice renders '
+        'perfectly in the wrong language'
+    )

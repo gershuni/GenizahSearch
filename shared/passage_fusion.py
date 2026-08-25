@@ -146,6 +146,24 @@ def text_digest(text: str) -> str:
     return hashlib.sha256((text or '').encode('utf-8')).hexdigest()[:16]
 
 
+def witness_text_key(text: str) -> str:
+    """The identity of a witness TEXT, for duplicate detection.
+
+    ONE definition, because the page and the API must agree about when two
+    witnesses are the same witness. They had two: the page hashed
+    `text_digest(stripped)` for its search fingerprint and the engine hashed
+    the same thing inline for its own dedup, so a change to either would have
+    made the surfaces disagree about a count they both publish.
+
+    Leading and trailing whitespace only. NOT the passage normalizer: that
+    folds orthography deliberately, and two genuinely different witnesses of
+    one work normalize to something much closer than they are -- collapsing
+    them would silently discard a real witness, which is far worse than
+    searching a near-duplicate twice.
+    """
+    return text_digest((text or '').strip())
+
+
 def split_pasted(blob: str) -> tuple[list[str], int]:
     """Split a bulk paste into witness texts on blank lines.
 

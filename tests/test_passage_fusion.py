@@ -505,3 +505,35 @@ def test_without_filter_text_the_result_is_identical_to_a_plain_fuse():
         for field in ('fusion_score', 'witness_count', 'witness_ids',
                       'score', 'final_score', 'best_witness_score'):
             assert a[field] == b[field], (field, a[field], b[field])
+
+
+def test_witness_text_key_ignores_surrounding_whitespace_only():
+    """The identity rule the page and the API both use.
+
+    Whitespace only -- NOT the passage normalizer, which folds orthography
+    deliberately. Two genuinely different witnesses of one work normalize to
+    something far closer than they are, and collapsing them would silently
+    discard a real witness: much worse than searching a near-duplicate twice.
+    """
+    from shared.passage_fusion import witness_text_key as k
+    assert k('  aleph bet  ') == k('aleph bet')
+    assert k('aleph bet') != k('aleph bet gimel')
+    # Internal spacing is part of the text, not decoration around it.
+    assert k('aleph  bet') != k('aleph bet')
+    assert k(None) == k('')
+
+
+def test_the_engine_and_the_page_share_one_identity_rule():
+    """They had two -- the page hashed `text_digest(stripped)` for its search
+    fingerprint, the engine hashed the same thing inline for its dedup -- so a
+    change to either would have made the two surfaces disagree about a count
+    they both publish. RED if a second definition reappears in the engine.
+    """
+    import io as _io
+    src = _io.open(r'shared/passage_parallels.py', encoding='utf-8').read()
+    assert 'witness_text_key(' in src, (
+        'the engine no longer uses the shared witness-identity rule'
+    )
+    assert 'text_digest(str(text)' not in src, (
+        'the engine has its own copy of the identity rule again'
+    )
