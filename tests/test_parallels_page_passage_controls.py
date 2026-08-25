@@ -329,7 +329,10 @@ def test_the_default_selection_state_is_applied_on_load():
 def _passage_width_creation_slice() -> str:
     src = _read_source()
     idx = src.index('passage_width = ui.select(')
-    end = src.index('if not passage_available():', idx)
+    # The letter-level controls now live in the Options pane (owner
+    # feedback 2026-08-24), so the slice ends at the first chunk-side
+    # control that follows them rather than at the old method-row marker.
+    end = src.index('mode_select = ui.select(', idx)
     return src[idx:end]
 
 
@@ -376,11 +379,46 @@ def test_the_tooltip_does_not_scope_to_the_genizah_corpus():
 # ---------------------------------------------------------------------------
 
 def _fingerprint_call_slice() -> str:
-    """The fresh-search call to the identity helper, arguments included."""
+    """The dispatch-time keyword CAPTURE that feeds the identity helper.
+
+    Was the call site itself until the multi-witness work, which builds the
+    keywords once into `_fingerprint_kwargs` and reuses them: the fresh
+    search calls the helper with them immediately, and the additive witness
+    path re-calls it with the same capture plus the witnesses that produced
+    rows. Reusing one construction is what stops the two describing
+    different searches -- but it also means the call site now reads
+    `**_fingerprint_kwargs` and would assert nothing.
+
+    Inspecting the capture instead makes this guard cover BOTH call sites,
+    which is strictly more than it covered before. A guard that silently
+    stops guarding is worse than no guard, so this is asserted, not assumed:
+    the call site must actually be fed by this capture.
+    """
     src = _read_source()
-    idx = src.index('_search_fingerprint = compute_parallels_search_fingerprint(')
-    end = src.index('\n                    )', idx)
-    return src[idx:end]
+    # Anchored on the AST, not on leading spaces: matching the literal
+    # source made this guard depend on how deeply the block was nested, so
+    # hoisting it one level out of a result guard turned five tests red
+    # without changing a character of what they check.
+    assigns = [
+        n for n in ast.walk(ast.parse(src))
+        if isinstance(n, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == '_fingerprint_kwargs'
+                for t in n.targets)
+    ]
+    assert len(assigns) == 1, (
+        f'expected exactly one _fingerprint_kwargs capture, found '
+        f'{len(assigns)} -- two would be two definitions of "what a search '
+        f'is", which is the drift this guard exists to catch'
+    )
+    captured = ast.get_source_segment(src, assigns[0]) or ''
+    assert captured, 'could not recover the capture source'
+    assert re.search(
+        r'compute_parallels_search_fingerprint\(\s*\*\*_fingerprint_kwargs\s*\)',
+        src), (
+        'the keyword capture is no longer what reaches the identity helper '
+        '-- this guard would be inspecting a dict nothing uses'
+    )
+    return captured
 
 
 def test_fingerprint_call_passes_every_result_affecting_input():
@@ -627,7 +665,11 @@ def test_the_restore_notice_states_its_condition():
 # =========================================================================
 
 _CONFIG_KEYS = (
-    'engine', 'width', 'chunk_size', 'mode', 'max_freq', 'deep_scan',
+    # 'length' = the passage-length axis added 2026-08-24; it is part of the
+    # search identity, so it must be stashed and fingerprinted like 'width'.
+    # 'depth' = the search-depth axis added the same day, same rule.
+    'engine', 'width', 'length', 'depth',
+    'chunk_size', 'mode', 'max_freq', 'deep_scan',
     'boundary_mode', 'boundary_delimiter', 'boundary_boost',
     'min_boundary_matches', 'min_delimiter_distance',
     'variant_level', 'variant_max_changes',
@@ -837,3 +879,526 @@ def test_the_deferred_sefaria_restore_honours_the_snapshot_selection():
     assert ("_cfg_sefaria = (_restored_search_config.get('sefaria_enabled')"
             ' if isinstance(_restored_search_config, dict) else None)') in flat
     assert 'if isinstance(_cfg_sefaria, list): stored_enabled = set(_cfg_sefaria)' in flat
+
+# ---------------------------------------------------------------------------
+# The SECOND control axis: passage length (spec section 8.1). Width and
+# length are different questions and the short profile is not a wider width,
+# so it gets its own select rather than another step in the width list.
+# ---------------------------------------------------------------------------
+
+def test_the_page_offers_a_passage_length_control():
+    import inspect
+
+    import web.pages.parallels as pp
+    src = inspect.getsource(pp.create_parallels_page)
+    assert 'passage_length = ui.select(' in src
+    block = src[src.index('passage_length = ui.select('):][:900]
+    assert "'normal'" in block and "'short'" in block
+    assert "value='normal'" in block, 'normal must remain the default'
+
+
+def test_passage_length_is_captured_at_dispatch_and_reaches_the_searcher():
+    """A live widget read describes a configuration the search may not have
+    used -- the same rule the width control already follows."""
+    import inspect
+
+    import web.pages.parallels as pp
+    src = inspect.getsource(pp.create_parallels_page)
+    assert 'captured_passage_length = passage_length.value' in src
+    assert 'length=captured_passage_length' in src
+
+
+def test_passage_length_is_part_of_the_search_identity():
+    """Two searches differing only in passage length are different searches;
+    if the fingerprint ignored it, a restore would hand back the wrong
+    results."""
+    from web.export_state import compute_parallels_search_fingerprint as fp
+    base = fp(text='x', engine='passage', width='widest-40')
+    assert fp(text='x', engine='passage', width='widest-40',
+              length='normal') == base, 'the default must not shift old ids'
+    assert fp(text='x', engine='passage', width='widest-40',
+              length='short') != base
+
+
+def test_letter_only_controls_leave_a_non_letter_search_identity_alone():
+    """Codex P2, 2026-08-24. Both letter-level selects keep their value while
+    hidden, so an unscoped capture let a chunk search's identity depend on a
+    control the chunk engine never read -- and since the reload restore
+    re-applies those selects only for engine == 'passage', the reloaded page
+    could not reproduce that identity and row recovery silently failed.
+
+    Pinned to the defaults rather than dropped, so no fingerprint recorded
+    before the rule changes."""
+    src = _read_source()
+    scope_at = src.index("if captured_engine != 'passage':")
+    fp_at = src.index(
+        '_search_fingerprint = compute_parallels_search_fingerprint(')
+    assert scope_at < fp_at, 'the scoping must precede the identity call'
+    block = src[scope_at:src.index('\n\n', scope_at)]
+    assert "captured_passage_width = 'widest-40'" in block
+    assert "captured_passage_length = 'normal'" in block
+
+
+def test_the_pinned_defaults_are_the_ones_that_cost_no_stored_identity():
+    """The pin above is only backward-compatible if those two values hash
+    exactly as a pre-rule chunk search did: the widget defaults, and (for
+    length) a value the payload omits."""
+    from web.export_state import compute_parallels_search_fingerprint as fp
+    legacy = fp(text='x', engine='chunk', width='widest-40')
+    assert fp(text='x', engine='chunk', width='widest-40',
+              length='normal') == legacy
+
+
+# ---------------------------------------------------------------------------
+# The THIRD control axis: search depth (DEPTH_PROFILES, 2026-08-24). The
+# engine's default budgets starve long queries -- <5% of a composition's
+# postings admitted, real witnesses crowded below the verify cap -- so depth
+# raises the three budgets together, as one named profile per step.
+# ---------------------------------------------------------------------------
+
+def test_the_page_offers_a_search_depth_control():
+    import inspect
+
+    import web.pages.parallels as pp
+    src = inspect.getsource(pp.create_parallels_page)
+    assert 'passage_depth = ui.select(' in src
+    block = src[src.index('passage_depth = ui.select('):][:900]
+    assert "'normal'" in block and "'deep'" in block and "'deepest'" in block
+    assert "value='normal'" in block, 'normal must remain the default'
+
+
+def test_search_depth_is_captured_at_dispatch_and_reaches_the_searcher():
+    """A live widget read describes a configuration the search may not have
+    used -- the same rule the width and length controls already follow."""
+    import inspect
+
+    import web.pages.parallels as pp
+    src = inspect.getsource(pp.create_parallels_page)
+    assert 'captured_passage_depth = passage_depth.value' in src
+    assert 'depth=captured_passage_depth' in src
+
+
+def test_search_depth_is_part_of_the_search_identity():
+    """Two searches differing only in depth are different searches (they
+    can return different result sets); the default must not shift old ids."""
+    from web.export_state import compute_parallels_search_fingerprint as fp
+    base = fp(text='x', engine='passage', width='widest-40')
+    assert fp(text='x', engine='passage', width='widest-40',
+              depth='normal') == base, 'the default must not shift old ids'
+    assert fp(text='x', engine='passage', width='widest-40',
+              depth='deep') != base
+    assert fp(text='x', engine='passage', width='widest-40',
+              depth='deep') != fp(text='x', engine='passage',
+                                  width='widest-40', depth='deepest')
+
+
+def test_search_depth_is_pinned_for_non_letter_searches():
+    """Same rule as width/length (Codex P2, 2026-08-24): a control the
+    engine never read is not part of that search's identity."""
+    src = _read_source()
+    scope_at = src.index("if captured_engine != 'passage':")
+    block = src[scope_at:src.index('\n\n', scope_at)]
+    assert "captured_passage_depth = 'normal'" in block
+
+
+def test_search_depth_restores_with_the_other_letter_controls():
+    """The reload restore re-applies letter selects for engine=='passage';
+    depth must be among them or a restored search silently reruns shallow."""
+    src = _read_source()
+    assert "if cfg.get('depth') in passage_depth.options:" in src
+    assert "'depth': captured_passage_depth," in src
+
+
+def test_letter_options_live_in_the_options_pane_not_the_method_row():
+    """Owner feedback 2026-08-24: the letter-level controls belong in the
+    same pane as the chunk options they replace. The earlier shape put them
+    in the method row and left the whole Options pane visible-but-disabled,
+    so the options a letter-level search actually uses sat far away from the
+    four greyed-out ones it does not."""
+    src = _read_source()
+    opts = src.index("h2(tr('Options')")
+    assert src.index('passage_width = ui.select(') > opts, (
+        'passage_width must be created inside the Options pane')
+    assert src.index('passage_length = ui.select(') > opts
+    assert src.index('passage_depth = ui.select(') > opts
+    assert 'letter_options_col' in src
+
+
+def test_the_pane_swaps_contents_by_method_rather_than_greying_out():
+    src = _on_passage_mode_change_source()
+    true_branch = src[:src.index('else:')]
+    false_branch = src[src.index('else:'):]
+    assert 'letter_options_col.set_visibility(True)' in true_branch
+    assert 'letter_options_col.set_visibility(False)' in false_branch
+    for row in ('mode_select', 'chunk_size_row', 'freq_threshold_row',
+                'min_chunks_row'):
+        assert row in true_branch and row in false_branch, (
+            f'{row} must be hidden in letter mode and restored in chunk mode')
+
+
+def test_hiding_never_replaces_the_force_and_disable_guarantee():
+    """Hiding is presentation. web/search_api.py rejects a non-default value
+    of any chunk option for method='passage', so forcing + disabling remains
+    the actual guarantee and must survive the layout change."""
+    src = _on_passage_mode_change_source()
+    true_branch = src[:src.index('else:')]
+    for widget in ('chunk_size', 'mode_select', 'freq_threshold',
+                   'boundary_mode', 'min_chunks_input'):
+        assert f'{widget}.disable()' in true_branch
+
+
+# ---------------------------------------------------------------------------
+# The method selector describes the option you are pointing at, accurately.
+# ---------------------------------------------------------------------------
+
+def _method_help_values() -> dict:
+    """The `_METHOD_HELP` mapping, read from the AST.
+
+    Read rather than grepped because the point is which STRING belongs to
+    which option -- a substring test would pass with the two swapped, which is
+    a version of the very bug this replaced (the chunk option describing
+    letter-level search).
+    """
+    src = _read_source()
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id == '_METHOD_HELP'):
+            continue
+        out = {}
+        for key, value in zip(node.value.keys, node.value.values):
+            # tr('...') -> the literal inside
+            text = value
+            if isinstance(text, ast.Call) and text.args:
+                text = text.args[0]
+            parts = []
+            def _walk(n):
+                if isinstance(n, ast.Constant):
+                    parts.append(n.value)
+                elif isinstance(n, ast.JoinedStr):
+                    for v in n.values:
+                        _walk(v)
+                elif isinstance(n, ast.BinOp):
+                    _walk(n.left)
+                    _walk(n.right)
+            _walk(text)
+            out[key.value] = ''.join(parts)
+        return out
+    raise AssertionError('_METHOD_HELP not found in web/pages/parallels.py')
+
+
+def test_each_method_has_its_own_description():
+    """`ui.radio` renders ONE QOptionGroup, so a tooltip attached to it fires
+    for both options -- hovering "Chunk search" described letter-level search
+    (owner-reported 2026-08-25)."""
+    helps = _method_help_values()
+    assert set(helps) == {'passage', 'chunk'}
+    assert helps['passage'] != helps['chunk']
+    # Each names what IT is, not what the other is.
+    assert 'older method' in helps['chunk']
+    assert 'Faster' in helps['passage']
+
+
+def test_the_method_descriptions_claim_nothing_false():
+    """Two of the old tooltip's three claims were not true of the difference
+    between the engines. The CHUNK engine strips nikkud too -- per token, at
+    tokenization -- and both treat a newline as an ordinary separator, so
+    neither ever distinguished the two.
+    """
+    helps = _method_help_values()
+    for key, text in helps.items():
+        assert 'nikkud' not in text.lower(), (
+            f'{key}: both engines strip nikkud; it is not a difference'
+        )
+        assert 'line break' not in text.lower(), (
+            f'{key}: both engines treat a newline as a space'
+        )
+
+
+def test_the_method_radio_carries_no_group_tooltip():
+    """The whole point: a group tooltip cannot be per-option."""
+    src = _read_source()
+    for node in ast.walk(ast.parse(src)):
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == 'tooltip'
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == 'method_radio'):
+            raise AssertionError(
+                'method_radio.tooltip() is back -- it fires for BOTH options'
+            )
+
+
+def test_the_description_updates_when_the_method_changes():
+    """A help line that never changes is worse than the tooltip it replaced."""
+    src = _read_source()
+    assert '_update_method_help' in src
+    assert 'method_radio.on_value_change(' in src, (
+        'nothing re-renders the help line when the method changes'
+    )
+
+
+# ---------------------------------------------------------------------------
+# One expand chevron per result row.
+# ---------------------------------------------------------------------------
+
+def test_a_result_row_draws_exactly_one_expand_chevron():
+    """QExpansionItem renders its own chevron and rotates it on open. The
+    header slot added a SECOND one that nothing ever rotated, so expanding a
+    row turned one arrow and left the other pointing down (owner-reported
+    2026-08-25: "why do the results have two down arrow 'open' symbols?").
+    """
+    src = _read_source()
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.FunctionDef)
+                and node.name == 'create_parallel_item'):
+            continue
+        for sub in ast.walk(node):
+            if not (isinstance(sub, ast.Call)
+                    and isinstance(sub.func, ast.Attribute)
+                    and sub.func.attr == 'icon'
+                    and sub.args
+                    and isinstance(sub.args[0], ast.Constant)):
+                continue
+            assert sub.args[0].value != 'expand_more', (
+                'a second, non-rotating chevron is back in the header slot'
+            )
+        return
+    raise AssertionError('create_parallel_item not found')
+
+
+# ---------------------------------------------------------------------------
+# The options pane must sit BESIDE the text, not below it.
+# ---------------------------------------------------------------------------
+
+def _left_column_classes() -> str:
+    """The class string of the flex column that holds the text input."""
+    src = _read_source()
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == 'classes'
+                and node.args
+                and isinstance(node.args[0], ast.Constant)):
+            continue
+        value = node.args[0].value
+        if isinstance(value, str) and 'flex-grow' in value and 'gap-4' in value:
+            return value
+    raise AssertionError('the text-input column was not found')
+
+
+def test_the_text_column_cannot_push_the_options_pane_off_its_side():
+    """A flex item's default `min-width: auto` lets a wide child set the
+    column's minimum width. An 88-character help sentence in the method row
+    did exactly that, and the row holding both columns wrapped -- the options
+    pane landed under the text instead of beside it (owner-reported
+    2026-08-25)."""
+    assert 'min-w-0' in _left_column_classes(), (
+        'without min-w-0 any long child can push the options pane below'
+    )
+
+
+def test_the_method_help_is_not_inside_the_method_row():
+    """It is a full sentence; inside the non-wrapping row it inflated the
+    column's min-content width. It belongs under the row, where
+    `boundary_mode_help` sits relative to ITS row."""
+    src = _read_source()
+    assignment = src.index('method_help = ui.label(')
+    radio = src.index('method_radio = ui.radio(')
+    assert assignment > radio, 'sanity: the help line follows the radio'
+    # Same indentation as the row itself (20 spaces), not the row's contents
+    # (24). Measured from the line start rather than guessed.
+    line_start = src.rindex('\n', 0, assignment) + 1
+    indent = assignment - line_start
+    assert indent == 20, (
+        f'method_help is indented {indent} spaces -- inside the row again'
+    )
+
+
+# ---------------------------------------------------------------------------
+# Lab Mode belongs with the chunk options.
+# ---------------------------------------------------------------------------
+
+def test_lab_mode_is_defined_in_the_options_pane_not_the_method_row():
+    """It is a third BACKEND, not a third search method; beside the two radio
+    options it read as a peer of them."""
+    src = _read_source()
+    lab = src.index('lab_mode = ui.checkbox(')
+    options_heading = src.index("h2(tr('Options')")
+    assert lab > options_heading, (
+        'lab_mode is still defined above the options pane'
+    )
+
+
+def test_lab_mode_follows_the_chunk_visibility_rule():
+    """A control hidden by hand in one branch and forgotten in the other is
+    how a hidden checkbox stays ON."""
+    src = _read_source()
+    assert src.count('lab_mode_row') >= 3, (
+        'lab_mode_row must be created AND switched in both branches'
+    )
+
+
+def test_the_lab_mode_handler_is_registered_after_the_widget_exists():
+    """The `.on()` call is the ONLY build-time reference to the widget. Above
+    its definition it is a NameError, which takes the whole page down with a
+    500 -- this page has that exact history."""
+    src = _read_source()
+    definition = src.index('lab_mode = ui.checkbox(')
+    registration = src.index("lab_mode.on('update:model-value'")
+    assert registration > definition, (
+        'lab_mode.on(...) runs before lab_mode exists'
+    )
+
+
+# ---------------------------------------------------------------------------
+# The boundary stats cannot creep back on a blur.
+# ---------------------------------------------------------------------------
+
+def test_the_boundary_stats_are_guarded_at_their_source():
+    """`text_input.on('blur', update_boundary_stats)` calls this directly, so
+    hiding the label from the method handler alone would have "N boundaries
+    detected" reappear the moment a letter-level user clicked out of the
+    textarea."""
+    src = _read_source()
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.FunctionDef)
+                and node.name == 'update_boundary_stats'):
+            continue
+        body = ast.get_source_segment(src, node) or ''
+        guard = body.index('_letter_level_selected()')
+        first_try = body.index('try:')
+        assert guard < first_try, (
+            'the method guard must come before the stats are computed'
+        )
+        return
+    raise AssertionError('update_boundary_stats not found')
+
+
+def _method_branch_calls(target: str, attr: str) -> dict:
+    """For `on_passage_mode_change`, the literal argument each branch passes
+    to `<target>.<attr>(...)`, keyed by branch ('if' / 'else').
+
+    An AST test rather than a render one: NiceGUI's User harness does not
+    deliver a Quasar option group's `update:model-value`, so a simulated
+    method switch changes nothing and any render test of it passes
+    vacuously. What CAN be checked decisively is that both branches act, and
+    in opposite directions -- which is exactly the mutation that survived
+    (deleting the un-hide left the row visible by default, so the pinned-to-
+    chunk render could not tell).
+    """
+    src = _read_source()
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.FunctionDef)
+                and node.name == 'on_passage_mode_change'):
+            continue
+        out = {}
+        # The FIRST `if` in this function is the lab-mode exclusivity check,
+        # which has no else. The method branch is the one with both halves.
+        for sub in node.body:
+            if not (isinstance(sub, ast.If) and sub.orelse):
+                continue
+            for branch, body in (('if', sub.body), ('else', sub.orelse)):
+                for inner in ast.walk(ast.Module(body=body, type_ignores=[])):
+                    if (isinstance(inner, ast.Call)
+                            and isinstance(inner.func, ast.Attribute)
+                            and inner.func.attr == attr
+                            and isinstance(inner.func.value, ast.Name)
+                            and inner.func.value.id == target
+                            and inner.args
+                            and isinstance(inner.args[0], ast.Constant)):
+                        out[branch] = inner.args[0].value
+        return out
+    raise AssertionError('on_passage_mode_change not found')
+
+
+def test_the_paragraph_settings_are_hidden_AND_restored():
+    """One-way hiding is the easy half. Without the restore, a user who
+    glances at letter-level search loses the paragraph controls for the rest
+    of the session."""
+    calls = _method_branch_calls('boundary_row', 'set_visibility')
+    assert calls.get('if') is False, 'letter-level must hide them'
+    assert calls.get('else') is True, (
+        'nothing restores the paragraph settings when chunk is re-selected'
+    )
+
+
+def test_the_paragraph_help_labels_are_recomputed_not_just_unhidden():
+    """They are inline-styled by `update_boundary_ui`, and which of them
+    belongs on screen depends on the boundary mode and on whether the text
+    has any breaks -- so the chunk branch recomputes rather than un-hides."""
+    src = _read_source()
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.FunctionDef)
+                and node.name == 'on_passage_mode_change'):
+            continue
+        for sub in node.body:
+            if not (isinstance(sub, ast.If) and sub.orelse):
+                continue
+            names = {
+                inner.func.id for inner in ast.walk(
+                    ast.Module(body=sub.orelse, type_ignores=[]))
+                if isinstance(inner, ast.Call)
+                and isinstance(inner.func, ast.Name)
+            }
+            assert 'update_boundary_ui' in names, (
+                'the chunk branch must recompute the boundary labels'
+            )
+            return
+    raise AssertionError('on_passage_mode_change not found')
+
+# ---------------------------------------------------------------------------
+# Max frequency counts PAGE HITS, and the label has to say so.
+# ---------------------------------------------------------------------------
+
+def _freq_help_label() -> str:
+    """The literal inside the `ui.label(tr(...))` under the freq slider."""
+    src = _read_source()
+    start = src.index('as freq_threshold_row:')
+    block = src[start:src.index('min_chunks_row', start)]
+    m = re.search(r"ui\.label\(tr\('([^']+)'\)\)", block)
+    assert m, 'no help label under the frequency slider'
+    return m.group(1)
+
+
+def test_the_frequency_label_does_not_promise_manuscripts():
+    """`shared/search_engine.py` tests `len(hits) > max_freq` against
+    `searcher.search(query, 50).hits` -- a truncated top-50 of Tantivy
+    DOCUMENTS, and a document is a page. Eleven pages of one manuscript trip a
+    threshold of ten, and hits outside the selected filters count too, because
+    manuscript restrictions and regex verification happen afterwards.
+
+    5cd2bb7e retired the "manuscripts" wording in docs/SEARCH_API.md and even
+    edited this string's Hebrew, but left the English label behind (Codex
+    review, PR #328).
+    """
+    label = _freq_help_label()
+    assert 'manuscript' not in label.lower(), (
+        f'the frequency label promises manuscripts again: {label!r}'
+    )
+    assert 'page' in label.lower(), 'it must say what it actually counts'
+
+
+def test_the_frequency_label_says_the_upper_half_is_inert():
+    """The retrieval is hard-capped at 50, so no value at or above 50 can ever
+    fire -- and 50 is the slider's DEFAULT, so the control does nothing until
+    it is dragged left. Measured in 5cd2bb7e: identical results at
+    50 / 100 / 1000 / 100000."""
+    assert '50' in _freq_help_label(), (
+        'nothing tells the user the default setting disables the filter'
+    )
+
+
+def test_the_frequency_label_is_translated():
+    """`tr()` falls back to the English string when a key is missing, so an
+    untranslated label renders perfectly in the wrong language."""
+    from web.translations import tr, set_language, get_language
+    label = _freq_help_label()
+    saved = get_language()
+    try:
+        set_language('he')
+        rendered = tr(label)
+    finally:
+        set_language(saved)
+    assert rendered != label, f'{label!r} has no Hebrew entry'
+    assert any('\u0590' <= ch <= '\u05ea' for ch in rendered)

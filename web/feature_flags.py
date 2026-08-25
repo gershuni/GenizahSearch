@@ -54,6 +54,16 @@ DISCOVERY_PUBLIC_RELEASED = _env_enabled("DISCOVERY_PUBLIC_RELEASED", False)
 # flag-ON/index-missing-or-corrupt window still hides cleanly.
 PASSAGE_PARALLELS_ENABLED = _env_enabled("PASSAGE_PARALLELS_ENABLED", False)
 
+# Multi-witness passage search: one work searched with SEVERAL of its
+# witnesses at once, fused by rank. Default OFF and gated separately from
+# PASSAGE_PARALLELS_ENABLED on purpose -- single-witness passage can stay
+# broadly on while the costlier fan-out (N searches per request, N up to
+# SEARCH_API_PASSAGE_MAX_WITNESSES) is validated in the wild. Necessary but
+# not sufficient: passage_available() still has to be True, since there is
+# nothing to fan out over without a loaded index.
+PASSAGE_MULTI_WITNESS_ENABLED = _env_enabled("PASSAGE_MULTI_WITNESS_ENABLED",
+                                             False)
+
 
 def web_fgp_enabled() -> bool:
     """Whether FGP transcriptions surface in the WEB version chooser.

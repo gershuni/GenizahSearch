@@ -1000,6 +1000,27 @@ def test_the_web_width_control_reaches_the_policy(synthetic_corpus, monkeypatch)
         pa.get_passage_searcher(_FakeTextFetcher(originals), preset='slider-17')
 
 
+def test_the_web_depth_control_reaches_the_policy(synthetic_corpus, monkeypatch):
+    """The page's Search-depth select passes a depth profile into
+    get_passage_searcher; the budgets must actually move (a depth control
+    the engine never read would be the exact defect Codex flagged for the
+    other letter controls), and an unknown name must raise."""
+    import web.passage_assets as pa
+
+    idx, originals, _motif = synthetic_corpus
+    monkeypatch.setattr(pa, 'PASSAGE_PARALLELS_ENABLED', True)
+    monkeypatch.setattr(pa, '_state', pa._PassageState(ready=True, index=idx))
+
+    s = pa.get_passage_searcher(_FakeTextFetcher(originals), depth='deep')
+    assert s.policy.name == 'widest-40+deep'
+    assert (s.policy.posting_budget, s.policy.verify_cap,
+            s.policy.candidate_cap) == (2_000_000, 50_000, 500_000)
+
+    with pytest.raises(Exception):
+        pa.get_passage_searcher(_FakeTextFetcher(originals),
+                                depth='bottomless')
+
+
 # ---------------------------------------------------------------------------
 # Owner ruling 2026-08-23 (Birkat Hamazon session): the page path is UNCAPPED.
 # Display batching pages it; the export layer bounds it. The engine's group
@@ -1062,3 +1083,217 @@ def test_page_requests_the_uncapped_searcher(synthetic_corpus, monkeypatch):
         "the page's get_passage_searcher CALL no longer passes render_cap=0 "
         "-- found manuscripts are hidden from display AND export again"
     )
+
+
+# ---------------------------------------------------------------------------
+# The bucket arithmetic the render-cost bound rests on -- BOTH cap regimes.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope='module')
+def mixed_filter_corpus(tmp_path_factory):
+    """4 groups x 3 pages over TWO motifs, and a filter naming only one.
+
+    The existing `grouped_corpus` cannot express this: every page carries the
+    same motif, so every record matches the same query-side span and a
+    `filter_text` sends them ALL to one bucket. To split the hits ACROSS the
+    buckets the records have to match DIFFERENT parts of the query.
+
+    Returns `(idx, originals, query, filter_text)`, where the filter covers
+    the query's first half -- generously, because `verify_margin` can extend a
+    span past its motif and `_is_source_text_filtered` requires the span's
+    normalized stream to be a SUBSTRING of the filter's. A filter of exactly
+    `motif_a` matches nothing, which is how the first attempt at this fixture
+    silently produced an unsplit result.
+    """
+    d = str(tmp_path_factory.mktemp('ppar_mixed'))
+    motif_a = _aperiodic(80, salt=101)
+    filler = _aperiodic(60, salt=303)
+    motif_b = _aperiodic(80, salt=202)
+    query = motif_a + ' ' + filler + ' ' + motif_b
+
+    originals: dict = {}
+    records = []
+    for group in range(4):
+        motif = motif_a if group < 2 else motif_b
+        for page in range(3):
+            rid = _grouped_record_id(group, page)
+            body = _aperiodic(200, salt=7000 + group * 10 + page)
+            text = body[:50] + ' ' + motif + ' ' + body[50:]
+            originals[rid] = text
+            records.append((rid, text))
+
+    build_index(records, d, partitions=2, apply_hygiene=False)
+    idx = open_index(d)
+    assert idx is not None
+    return idx, originals, query, motif_a + ' ' + filler
+
+
+def _totals(idx, originals, query, filter_text, render_cap):
+    s = PassageSearcher(index=idx, text_fetcher=_FakeTextFetcher(originals),
+                        render_cap=render_cap)
+    plain = s.search_composition_logic(full_text=query)
+    split = s.search_composition_logic(full_text=query,
+                                       filter_text=filter_text)
+    return plain, split
+
+
+def test_uncapped_the_buckets_partition_and_a_filter_only_redistributes(
+    mixed_filter_corpus,
+):
+    """`render_cap=0` is the PAGE path, and the one the module docstring's
+    render-cost threshold is about. No cap, so each hit lands in exactly one
+    bucket and a `filter_text` moves rows between them without creating any.
+    """
+    idx, originals, query, filt = mixed_filter_corpus
+    plain, split = _totals(idx, originals, query, filt, render_cap=0)
+
+    total = len(plain['main']) + len(plain['filtered'])
+    assert total, 'fixture precondition: at least one hit'
+    assert len(split['main']) + len(split['filtered']) == total, (
+        'a filter changed the RENDERED ROW COUNT on the uncapped path, so the '
+        'render cost is not the hit count'
+    )
+    # ...and it really did split, or the assertion above is vacuous.
+    assert split['main'] and split['filtered'], (
+        'the fixture did not split across both buckets -- this test would '
+        'pass with the partition broken'
+    )
+    for result in (plain, split):
+        both = ({r['raw_header'] for r in result['main']}
+                & {r['raw_header'] for r in result['filtered']})
+        assert not both, f'{len(both)} records are in BOTH buckets'
+
+
+def test_capped_a_split_filter_can_double_the_rendered_rows(
+    mixed_filter_corpus,
+):
+    """`render_cap > 0` is the API path, and it behaves the OPPOSITE way: the
+    two buckets are capped INDEPENDENTLY, so a filter splitting hits across
+    both raises the rendered total from one cap toward two.
+
+    This is the case the previous version of this test missed -- its fixture
+    never reached a cap, so it "pinned" an invariant that does not hold where
+    a cap applies (Codex review, PR #328). The module docstring has now been
+    wrong about this in both directions; the point of the test is that it can
+    no longer be wrong in either.
+    """
+    idx, originals, query, filt = mixed_filter_corpus
+    plain, split = _totals(idx, originals, query, filt, render_cap=2)
+
+    plain_total = len(plain['main']) + len(plain['filtered'])
+    split_total = len(split['main']) + len(split['filtered'])
+    assert plain_total, 'fixture precondition: at least one hit'
+    assert split['main'] and split['filtered'], 'the filter did not split'
+    assert split_total > plain_total, (
+        'a split filter did not raise the rendered total under a cap -- if '
+        "the buckets now share one cap, the docstring's API-path worst case "
+        'is wrong'
+    )
+    assert split_total <= 2 * plain_total, (
+        'more than two caps worth of rows rendered'
+    )
+
+
+# ---------------------------------------------------------------------------
+# PR #329 review round 4: a witness supplied twice is one witness.
+# ---------------------------------------------------------------------------
+
+class _DupeFetcher:
+    """Resolves refs to text, so duplicate references can be exercised."""
+
+    def __init__(self, by_header):
+        self._by_header = dict(by_header)
+
+    def get_full_text_by_header(self, header):
+        return self._by_header.get(header)
+
+
+def _resolver(by_header=None):
+    """A PassageSearcher shell whose only live part is `_resolve_witnesses`.
+
+    Built with `__new__` so no index is needed: the method under test touches
+    nothing but `self.text_fetcher`.
+    """
+    from shared.passage_parallels import PassageSearcher
+    s = PassageSearcher.__new__(PassageSearcher)
+    s.text_fetcher = _DupeFetcher(by_header or {})
+    return s
+
+
+def test_the_same_ref_twice_is_searched_once():
+    """`fuse()` counts contributors by POSITION -- deliberately, so an
+    untagged '' cannot collapse a real count. So the same page supplied twice
+    became two independent witnesses, inflating `witness_count` and
+    `fusion_score` and reordering results on the strength of one witness. It
+    also spent a whole extra search from a budget whose design premise is that
+    witness cost is linear.
+    """
+    s = _resolver({'PAGE_A': 'aleph bet gimel dalet'})
+    queries, report = s._resolve_witnesses(
+        [{'raw_header': 'PAGE_A'}, {'raw_header': 'PAGE_A'}], '', text_cap=20000)
+    assert len(queries) == 1, 'the identical page was searched twice'
+    assert report['searched'] == 1
+    assert len(report['duplicates']) == 1
+    assert report['duplicates'][0]['duplicate_of'] == queries[0][0]
+
+
+def test_two_different_refs_resolving_to_one_page_are_one_witness():
+    """Deduplication is on the RESOLVED TEXT, not the reference -- the count
+    inflates identically either way, and a fix covering only the reported
+    shape would be back next round."""
+    s = _resolver({'PAGE_A': 'aleph bet gimel', 'PAGE_B': 'aleph bet gimel'})
+    queries, report = s._resolve_witnesses(
+        [{'raw_header': 'PAGE_A'}, {'raw_header': 'PAGE_B'}], '', text_cap=20000)
+    assert len(queries) == 1
+    assert len(report['duplicates']) == 1
+
+
+def test_the_same_text_pasted_twice_is_one_witness():
+    s = _resolver()
+    queries, report = s._resolve_witnesses(
+        [{'text': 'aleph bet gimel'}, {'text': '  aleph bet gimel  '}],
+        '', text_cap=20000)
+    assert len(queries) == 1, 'the same pasted text counted as two witnesses'
+    assert len(report['duplicates']) == 1
+
+
+def test_a_paste_identical_to_a_resolved_ref_is_one_witness():
+    s = _resolver({'PAGE_A': 'aleph bet gimel'})
+    queries, report = s._resolve_witnesses(
+        [{'raw_header': 'PAGE_A'}, {'text': 'aleph bet gimel'}],
+        '', text_cap=20000)
+    assert len(queries) == 1
+    assert len(report['duplicates']) == 1
+
+
+def test_distinct_witnesses_are_all_kept():
+    """The guard against a dedupe that eats real witnesses."""
+    s = _resolver({'PAGE_A': 'aleph bet gimel'})
+    queries, report = s._resolve_witnesses(
+        [{'raw_header': 'PAGE_A'}, {'text': 'dalet he vav'},
+         {'text': 'zayin het tet'}], '', text_cap=20000)
+    assert len(queries) == 3
+    assert report['searched'] == 3
+    assert not report['duplicates']
+
+
+def test_a_duplicate_is_not_reported_as_an_unresolved_reference():
+    """It resolved perfectly. Filing it under `witness_ref_unresolved` would
+    send a caller looking for a stale shelfmark that does not exist."""
+    s = _resolver({'PAGE_A': 'aleph bet gimel'})
+    _queries, report = s._resolve_witnesses(
+        [{'raw_header': 'PAGE_A'}, {'raw_header': 'PAGE_A'},
+         {'raw_header': 'MISSING'}], '', text_cap=20000)
+    assert [e['id'] for e in report['duplicates']] == ['w2']
+    assert [e['reason'] for e in report['unresolved']] == ['not_found'], (
+        'the duplicate leaked into the unresolved list'
+    )
+
+
+def test_every_witness_duplicated_still_leaves_one_to_search():
+    """Deduplication must never empty the query list and turn a recoverable
+    request into a 400."""
+    s = _resolver()
+    queries, _report = s._resolve_witnesses(
+        [{'text': 'aleph bet gimel'}] * 5, '', text_cap=20000)
+    assert len(queries) == 1

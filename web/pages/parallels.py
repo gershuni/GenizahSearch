@@ -43,16 +43,260 @@ from shared.browse_map_utils import (
     LIBRARY_CODES, get_library_display, sanitize_library_codes,
     library_codes_with_manuscripts,
 )
+from shared.sys_id_patterns import CORPUS_SYS_ID_RE
+
+# --- Multi-witness letter-level search ------------------------------------
+# Module level, not closure level: the tab-snapshot restore runs during page
+# build, BEFORE the witness helpers are defined, and a constant it cannot see
+# is a NameError at build time -- the exact failure that once took the whole
+# page down (owner-reported 2026-08-23).
+WITNESS_SEED_ID = 'seed'
+WITNESS_CAP = 25          # mirrors SEARCH_API_PASSAGE_MAX_WITNESSES
+
+# Per-depth ceiling on how many witnesses ONE click may search. Deep and
+# deepest cost ~6s and ~19s per witness against normal's ~0.7s, so a flat cap
+# would mean a click that looks hung. Refused with a specific message instead
+# -- and auto-expand refuses to START a round that would breach the cap
+# rather than silently shrinking top-K, which would make the control a lie.
+WITNESS_DEPTH_CAP = {'normal': WITNESS_CAP, 'deep': 8, 'deepest': 4}
+
+WITNESS_SYS_ID_RE = CORPUS_SYS_ID_RE
+
+
+def witness_depth_cap(ctx, widget_depth: str = None) -> int:
+    """How many witnesses one click may search, at the depth they will
+    actually RUN at.
+
+    `ctx` wins over the dropdown, and that is the whole subtlety: a witness
+    search takes its depth from `last_passage_ctx`, the settings of the last
+    seed search (`_run_one_witness_search`), not from whatever the control
+    shows now. Reading the widget first would cap a batch against a depth
+    nothing was going to use -- refusing work that is cheap, and admitting
+    work that is not.
+
+    The dropdown is the fallback for the one case where there is no ctx yet:
+    adding witnesses before the first search.
+    """
+    depth = (ctx or {}).get('depth') or widget_depth or 'normal'
+    return WITNESS_DEPTH_CAP.get(depth, WITNESS_CAP)
+
+
+def witnesses_over_dispatch_cap(pending, ctx, widget_depth: str = None):
+    """`(pending_count, cap)` when a batch must be REFUSED, else `None`.
+
+    The cap was enforced only while adding and promoting witnesses, which
+    bounded the wrong quantity: `Find Parallels` resets every non-stale
+    witness to `pending` and dispatches the batch, so twenty-five witnesses
+    added at normal depth all re-run the moment the seed is re-run at
+    `deepest` -- roughly eight minutes of work from one click, taking a slot
+    of the shared passage budget twenty-five times over, against a documented
+    deepest cap of four.
+
+    Returns the pair rather than a bool so the refusal can name both numbers;
+    a message reading only "too many witnesses" leaves the user guessing how
+    many to remove.
+    """
+    count = len(pending or [])
+    cap = witness_depth_cap(ctx, widget_depth)
+    return (count, cap) if count > cap else None
+
+
+def witness_sys_id(row) -> str:
+    r"""The sys_id a result row belongs to. THE one copy on this page.
+
+    Now `shared.sys_id_patterns.CORPUS_SYS_ID_RE`, the single definition every
+    corpus-facing site in the repo shares. The earlier note here recorded the
+    divergence this page sat in the middle of and deferred it as corpus-wide
+    work; that reconciliation has since happened, and it settled the question
+    the other way. Both halves of the old rationale turned out to be wrong:
+
+    * **97 is not a corpus prefix at all.** It is the LOCAL "My Library"
+      namespace (Phase 95, `shared/local_sys_id.py`) -- a user's own files,
+      generated on the desktop, 18 digits, never a Genizah record and never
+      present on the web. Measured on `libraries.csv`: 255,723 of 255,723
+      corpus records begin 99, including all 473 NLI rows. So there is no
+      97-prefixed MANUSCRIPT for a narrow pattern to skip.
+    * **The wide pattern was not the safe direction.** `re.search` scans
+      anywhere, so a corpus pattern run over a LOCAL header can match a 99
+      INSIDE the LOCAL id's own digits and return a truncated, wrong sys_id
+      (6.36% of LOCAL ids, measured). The shared constants are anchored on a
+      digit boundary so that a LOCAL header misses cleanly instead.
+
+    "A witness resolved by the engine cannot fail to resolve on the page" is
+    still the invariant, and it is why this narrowed: the engine
+    (`shared/passage_parallels.py::_SYS_ID_RE`) is the same corpus constant
+    now, so mirroring it means corpus-only. Staying wide would have recreated
+    the divergence pointing the other way -- the page admitting a witness the
+    engine cannot resolve.
+
+    Do not re-widen, and do not add a second copy on this page; both are
+    enforced by tests/test_sys_id_patterns.py and the page's own
+    test_there_is_exactly_one_sys_id_pattern_on_the_page.
+    """
+    m = WITNESS_SYS_ID_RE.search((row or {}).get('raw_header') or '')
+    return m.group(1) if m else None
+
+
+def restore_witness_entries(raw, default_label: str, cap: int = None) -> list:
+    """Normalise a tab snapshot's witness list back into witness dicts.
+
+    Pure, module level and dependency-injected (`default_label` is the only
+    thing it would otherwise need `tr()` for) so the RULES are testable.
+    A mutation sweep proved they were not: reverting the drop rule below to
+    the obvious `if not text.strip()` -- which deletes every restored
+    manuscript witness -- left the entire page suite green.
+
+    Three rules:
+
+    * **A manuscript witness with a `sys_id` survives without text.** The
+      snapshot drops its text deliberately (the corpus still has it) and
+      `witnesses_needing_text` / the rehydrator put it back before dispatch.
+      Dropping it here would quietly shrink a restored 17-witness search.
+    * **Anything else with no text is dropped**, because nothing in the world
+      can recover it and a witness that cannot be searched must not sit in
+      the list pretending otherwise.
+    * **Ids are renumbered `w1..wN` over the SURVIVORS.** Reusing the stored
+      ids would leave gaps that `_witness_new_id` could then re-issue, and
+      two witnesses sharing an id corrupt the per-witness row cache.
+
+    Every witness comes back `pending`: the snapshot holds the FUSED rows, so
+    per-witness ranks cannot be recovered, and a fusion rebuilt from partial
+    inputs would be quietly wrong rather than visibly absent.
+
+    Returns the list; the caller assigns it and resets the row caches.
+    """
+    if not isinstance(raw, list) or not raw:
+        return []
+    out = []
+    for entry in raw[:(cap if cap is not None else WITNESS_CAP)]:
+        if not isinstance(entry, dict):
+            continue
+        kind = 'manuscript' if entry.get('kind') == 'manuscript' else 'pasted'
+        text = str(entry.get('text') or '')
+        sys_id = entry.get('sys_id')
+        if not text.strip() and not (kind == 'manuscript' and sys_id):
+            continue
+        out.append({
+            'id': f'w{len(out) + 1}',
+            'label': str(entry.get('label') or '') or (sys_id or default_label),
+            'kind': kind,
+            'sys_id': sys_id,
+            'seed_digest': str(entry.get('seed_digest') or ''),
+            'headers': [str(h) for h in (entry.get('headers') or []) if h],
+            'text': text,
+            'status': 'pending',
+            'hits': 0,
+            'error': '',
+        })
+    return out
+
+
+def witnesses_needing_text(pending) -> list:
+    """Which pending witnesses have no text to search and can get one back.
+
+    `_persist_active_snapshot` stores a MANUSCRIPT witness without its text on
+    purpose -- the corpus still has it, and copying up to 25 x 20,000 chars of
+    corpus text into a tab snapshot buys nothing. Nothing re-fetched it on
+    restore, so after a reload those witnesses searched the empty string and
+    reported `searched, 0 matches`: a false negative indistinguishable from a
+    real one. (Found by review, not by any test here.)
+
+    Module level and pure so the RULE is tested rather than its plumbing. A
+    pasted witness is never included -- its text existed nowhere but the
+    snapshot, so there is nothing to re-fetch -- and neither is one with no
+    `sys_id` to fetch by. Both are refused at dispatch instead.
+    """
+    return [w for w in (pending or [])
+            if w.get('kind') == 'manuscript'
+            and w.get('sys_id')
+            and not (w.get('text') or '').strip()]
+
+
+def witness_headers_for(sys_ids, rows) -> dict:
+    """Which page headers make up each promoted manuscript's witness text.
+
+    Extracted from `collect_witness_texts` so the promotion can RECORD its
+    choice. A promoted witness is not a deterministic function of its
+    `sys_id`: it is the concatenation of the pages that MATCHED, which is a
+    property of the result set on screen at that moment. Re-deriving it later
+    from a different result set yields a different witness under the same
+    label.
+    """
+    wanted = set(sys_ids)
+    headers_by_sid: dict = {}
+    for row in rows or []:
+        sid = witness_sys_id(row)
+        if sid in wanted and row.get('raw_header'):
+            headers_by_sid.setdefault(sid, []).append(row['raw_header'])
+    return headers_by_sid
+
+
+def collect_witness_texts(sys_ids, rows, fetch_header,
+                          fetch_manuscript=None, headers_by_sid=None):
+    """Gather the text to search a promoted manuscript WITH.
+
+    Module level and dependency-injected so it can be tested without building
+    a page: the AST tests that covered this logic in the closure were proven
+    vacuous against the exact bug it was written to fix -- a source-text
+    assertion cannot tell `for header in headers` from `for header in []`.
+
+    Two rules, both learned the hard way:
+
+    * **The matched pages' own `raw_header`s are the PRIMARY source.** The
+      first version used `get_full_manuscript(sys_id)`, which resolves through
+      `Config.BROWSE_MAP` -- an auxiliary pickle with no guarantee of holding
+      an arbitrary manuscript. Owner-reported: every promotion failed, because
+      that map held two entries. `fetch_header` is the same fetcher the engine
+      just used to render those rows, so it cannot fail for a row on screen.
+    * **Every matched page, not the best one.** A result GROUP spans several
+      page-level hits; one page is usually a fraction of the witness.
+
+    `fetch_manuscript` (optional) is the whole-manuscript fallback, tried only
+    when no header resolves.
+
+    Returns `(texts_by_sys_id, failed_sys_ids)` -- failures are RETURNED, not
+    logged and dropped, so the caller can name them once instead of emitting
+    one anonymous toast per manuscript.
+    """
+    # Caller-supplied headers win: on a REHYDRATE those are the headers the
+    # promotion actually used, and re-deriving them from whatever rows are on
+    # screen now would rebuild a different witness under the same label.
+    if headers_by_sid is None:
+        headers_by_sid = witness_headers_for(sys_ids, rows)
+
+    out, failed = {}, []
+    for sid in sys_ids:
+        parts = []
+        for header in (headers_by_sid.get(sid) or []):
+            try:
+                page = fetch_header(header)
+            except Exception:
+                page = None
+            if page:
+                parts.append(page)
+        text = "\n".join(parts).strip()
+        if not text and fetch_manuscript is not None:
+            try:
+                pages = fetch_manuscript(sid) or []
+            except Exception:
+                pages = []
+            text = "\n".join(p.get('text') or '' for p in pages).strip()
+        if text:
+            out[sid] = text
+        else:
+            failed.append(sid)
+    return out, failed
+
 
 # Phase 145: passage-matching parallels search (fail-closed -- flag AND
 # a loaded index; see web/passage_assets.py).
-from web.passage_assets import passage_available, get_passage_searcher
+from web.passage_assets import (passage_available, get_passage_searcher,
+                                passage_multi_witness_available)
 # Codex review finding #15: route the page's passage search through the
 # SAME bounded execution budget POST /api/parallels uses -- one semaphore,
 # one dedicated ThreadPoolExecutor, one timeout ceiling, for BOTH surfaces.
 from web.search_api import run_passage_search
 from shared.api_errors import APIError
-from shared.sys_id_patterns import CORPUS_SYS_ID_RE
 
 
 def get_source_display_name(ref: str) -> str:
@@ -213,6 +457,39 @@ def create_parallels_page(initial_text: str = None):
             # DMF-09: library filter for parallels page (Phase 131-05)
             self.library_filter: list = []   # active library codes (for filter)
             self.library_mode: str = 'hide'  # 'show_only' | 'hide' (D-05 default)
+            # --- Multi-witness letter-level search --------------------------
+            # One work survives in many manuscripts and no single witness of
+            # it retrieves every other (17 Birkat Hamazon witnesses searched
+            # SEPARATELY and merged reach 85% of the reachable census, against
+            # 50-69% for any one of them).
+            #
+            # `witnesses` are the user's own entries; the SEED (the pasted
+            # source text) is modelled as a virtual witness with
+            # id=WITNESS_SEED_ID -- not listed in the panel, since it is
+            # already on screen, but tagged identically, so "found by 3 of 5"
+            # needs no +1 special case anywhere.
+            #
+            # `witness_rows` maps witness id -> that witness's OWN result
+            # rows, in engine order. Keeping them separate is what makes the
+            # page's incremental model work: adding a witness searches ONLY
+            # that witness and re-fuses, so an R-round auto-expansion costs
+            # 1 + rounds x K searches rather than re-running everything on
+            # every addition.
+            self.witnesses: list = []
+            self.witness_rows: dict = {}
+            self.witness_filtered: dict = {}
+            self.witness_seq: int = 0          # for unique ids across removals
+            self.checked_for_promotion: set = set()
+            self.auto_expanding: bool = False
+            self.witness_progress: str = ''
+            # The dispatch-time passage configuration of the LAST search, so
+            # a witness added afterwards is searched with the same settings
+            # the rows beside it were found with. A witness searched at a
+            # different width/depth than its neighbours would be fused into
+            # one list with them and be invisible as an anomaly.
+            self.last_passage_ctx: dict = {}
+            # True while _promote_checked is fetching texts off the loop.
+            self.promoting: bool = False
 
     p_state = ParallelsState()
 
@@ -336,6 +613,34 @@ def create_parallels_page(initial_text: str = None):
                                     else decoded_text)),
                 'search_config': dict(
                     getattr(p_state, 'searched_config', None) or {}),
+                # The witness LIST, so a reload does not lose seventeen
+                # pasted texts. Deliberately NOT part of `search_config`:
+                # that dict is re-applied by _apply_restored_search_config,
+                # which validates every value against a widget's `.options`,
+                # and a witness is not a select.
+                #
+                # A PROMOTED witness is stored WITHOUT its text (re-fetchable
+                # from its sys_id, like title_translations today); a PASTED
+                # one keeps its text, because nothing else in the world has
+                # it. Worst case is bounded by the two caps at 25 x 20,000
+                # ~= 500 KB -- small beside the incidents that motivated
+                # _EXPORT_RESULTS_CAP, which came from thousands of result
+                # rows carrying content, not a bounded list of typed queries.
+                'witnesses': [
+                    {'id': w.get('id'), 'label': w.get('label'),
+                     'kind': w.get('kind'), 'sys_id': w.get('sys_id'),
+                     'seed_digest': w.get('seed_digest') or '',
+                     # The pages a PROMOTED witness was built from. Kept
+                     # instead of its text, which is the cheaper half of the
+                     # same guarantee -- a header is ~45 characters against a
+                     # page of manuscript -- and the only thing that makes the
+                     # rebuilt witness the same witness.
+                     'headers': (list(w.get('headers') or [])
+                                 if w.get('kind') == 'manuscript' else []),
+                     'text': ('' if w.get('kind') == 'manuscript'
+                              else (w.get('text') or ''))}
+                    for w in (p_state.witnesses or [])
+                ],
             }
         except Exception:
             pass
@@ -439,6 +744,34 @@ def create_parallels_page(initial_text: str = None):
         except Exception:
             pass  # A broken snapshot costs the restore, never the page
 
+    def _restore_witnesses_from_snapshot(snapshot: dict) -> None:
+        """Rebuild the witness list after a reload.
+
+        Storing witnesses in the snapshot does nothing on its own -- the
+        restore path applies known primitive controls only, and search
+        history records the seed and config without witness inputs. Without
+        this, a restored multi-witness search would silently re-run as
+        seed-only while LOOKING identical, which is the worst failure this
+        feature could have.
+
+        Every restored witness comes back `pending`, and the per-witness row
+        cache is NOT reconstructed. That is deliberate: the snapshot holds
+        the FUSED rows, from which per-witness ranks cannot be recovered, and
+        a fusion rebuilt from incomplete inputs would be quietly wrong rather
+        than visibly absent. The rows already on screen are still shown; the
+        panel says the witnesses need re-running, and pressing Find Parallels
+        searches all of them again.
+        """
+        # The rules live in `restore_witness_entries` (module level, pure,
+        # directly tested) -- a mutation sweep proved that a copy of them
+        # inside this closure was covered by nothing.
+        restored = restore_witness_entries(
+            snapshot.get('witnesses'), tr('Pasted text'))
+        p_state.witnesses = restored
+        p_state.witness_seq = len(restored)
+        p_state.witness_rows = {}
+        p_state.witness_filtered = {}
+
     _active_snapshot = _get_active_snapshot()
     if _active_snapshot:
         try:
@@ -453,6 +786,7 @@ def create_parallels_page(initial_text: str = None):
                                        if isinstance(_raw_search_config, dict)
                                        else {})
             _apply_restored_identity_state()
+            _restore_witnesses_from_snapshot(_active_snapshot)
             p_state.domain_exclusions = set(_active_snapshot.get('domain_exclusions', []))
             p_state.excluded_manuscript_ids = set(_active_snapshot.get('excluded_manuscript_ids', []))
             # Phase 88: per-session export payload is the sole writer path (singleton mirror removed).
@@ -758,8 +1092,13 @@ def create_parallels_page(initial_text: str = None):
         with ui.card().classes('w-full p-6'):
             with ui.row().classes('w-full gap-6'):
 
-                # Left: Text Input
-                with ui.column().classes('flex-grow gap-4'):
+                # Left: Text Input.
+                #
+                # `min-w-0` is load-bearing, not decoration: a flex item's
+                # default `min-width: auto` lets a wide child set the column's
+                # minimum width, which pushed the `w-80` options pane below
+                # the text instead of beside it (owner-reported 2026-08-25).
+                with ui.column().classes('flex-grow min-w-0 gap-4'):
                     # Changed to H2
                     h2(tr('Source text'), classes='text-xl font-bold', style='color: var(--text-primary);')
 
@@ -790,18 +1129,105 @@ def create_parallels_page(initial_text: str = None):
                             pass
                     asyncio.ensure_future(_deferred_word_count())
 
+                    # === Witnesses (letter-level multi-witness search) ===
+                    # One work survives in many manuscripts, and no single
+                    # witness of it retrieves every other -- 17 Birkat
+                    # Hamazon witnesses searched SEPARATELY and merged reach
+                    # 85% of the reachable census against 50-69% for any one
+                    # of them. Shown only in letter-level mode: the chunk
+                    # engine has no per-query budget to starve, and
+                    # multi-witness there measured +2 positives of 74 with
+                    # zero frontier gain at 4-6x the time.
+                    with ui.column().classes('w-full gap-2') as witness_panel:
+                        # ONE collapsed line by default (owner, 2026-08-24:
+                        # "the witnesses option should be less prominent").
+                        # Most searches use a single text; an always-open
+                        # block pushed the primary controls down the page for
+                        # a feature they never touch.
+                        #
+                        # It must not be invisible when it has something to
+                        # say, so the caption carries the live counts and
+                        # `_refresh_witness_panel` OPENS it whenever a witness
+                        # needs attention -- stale, pending or failed.
+                        with ui.expansion(
+                                tr('Witnesses'), icon='groups',
+                        ).classes('w-full').props('dense') as witness_expansion:
+                            with ui.column().classes('w-full gap-2 p-1'):
+                                witness_empty_label = ui.label(tr(
+                                    'Add other copies of this work to search '
+                                    'with. Each is searched on its own and '
+                                    'the results are merged.'
+                                )).classes('text-xs').style(
+                                    'color: var(--text-muted);')
+                                witness_list = ui.column().classes('w-full gap-1')
+                                # Appears when the source text changed under a
+                                # witness list gathered for a different work.
+                                witness_stale_row = ui.column().classes('w-full')
+                                witness_stale_row.set_visibility(False)
+                                with ui.row().classes('w-full items-center gap-2'):
+                                    ui.button(
+                                        tr('Add witness text'), icon='add',
+                                        on_click=lambda: _open_add_witness_dialog(),
+                                    ).props('flat dense no-caps size=sm')
+                                    ui.space()
+                                with ui.row().classes(
+                                        'w-full items-center gap-2') as witness_run_row:
+                                    witness_run_btn = ui.button(
+                                        tr('Search now'), icon='play_arrow',
+                                        on_click=lambda: (
+                                            _clear_stop(),
+                                            _search_pending_witnesses())[-1],
+                                    ).props('outline dense no-caps size=sm')
+                                    witness_progress_label = ui.label('').classes(
+                                        'text-xs').style('color: var(--text-muted);')
+                                witness_run_row.set_visibility(False)
+
+                                # Auto-expand: promote the best results and
+                                # search with them too. An EXPLICIT button,
+                                # never folded into "Find Parallels" -- a user
+                                # who wanted one search must not get twenty.
+                                #
+                                # A plain section, not a nested expansion: an
+                                # expansion inside an expansion is two clicks
+                                # to reach a control and reads as a
+                                # sub-feature of a sub-feature.
+                                ui.separator().classes('my-1')
+                                with ui.column().classes('w-full gap-2'):
+                                    ui.label(tr('Auto-expand (optional)')).classes(
+                                        'text-xs font-bold').style(
+                                        'color: var(--text-secondary);')
+                                    ui.label(tr(
+                                        'Repeatedly search with the best results '
+                                        'as new witnesses. Reach goes up and '
+                                        'top-of-list precision goes down.'
+                                    )).classes('text-xs').style(
+                                        'color: var(--text-muted);')
+                                    with ui.row().classes('items-center gap-3'):
+                                        auto_rounds = ui.number(
+                                            label=tr('Rounds'), value=3, min=1,
+                                            max=5, step=1,
+                                        ).props('outlined dense').classes('w-28')
+                                        auto_top_k = ui.number(
+                                            label=tr('Top-K per round'), value=5,
+                                            min=1, max=10, step=1,
+                                        ).props('outlined dense').classes('w-32')
+                                    auto_expand_btn = ui.button(
+                                        tr('Run auto-expand now'),
+                                        icon='auto_awesome',
+                                        on_click=lambda: _run_auto_expand(),
+                                    ).props('outline dense no-caps size=sm')
+                                    auto_expand_btn.disable()
+                    witness_panel.set_visibility(False)
+
                     # === Lab Mode and Boundary Search Settings (below text input) ===
                     ui.separator().classes('my-3')
 
-                    # Lab Mode Toggle Row
+                    # Search-method row. Lab Mode used to sit here, beside
+                    # the two radio options, which read as though it were a
+                    # third one; it is a different BACKEND, mutually exclusive
+                    # with both, and it now lives in the options pane with the
+                    # chunk settings it belongs to (owner, 2026-08-25).
                     with ui.row().classes('w-full items-center gap-4'):
-                        lab_mode = ui.checkbox(tr('Lab Mode (experimental)'))
-                        lab_mode.tooltip(tr('Advanced search using fingerprint algorithm. Slower but more features.'))
-
-                        # Deep Scan (Lab Mode only - initially hidden)
-                        deep_scan = ui.checkbox(tr('Deep Scan')).style('display: none;')
-                        deep_scan.tooltip(tr('Exhaustive search - slower but finds more results'))
-
                         # Method selector (owner ruling 2026-08-23): letter-level
                         # search is the DEFAULT when available, chunk is the explicit
                         # alternative -- a radio, no longer an opt-in checkbox. The flip
@@ -820,43 +1246,53 @@ def create_parallels_page(initial_text: str = None):
                             },
                             value='passage',
                         ).props('inline dense')
-                        method_radio.tooltip(tr(
-                            'Letter-level search: fast, yields fewer irrelevant '
-                            'results, and tolerates transcription errors, nikkud '
-                            'and line breaks.'
-                        ))
-
                         def _letter_level_selected() -> bool:
                             return method_radio.value == 'passage'
 
-                        # The letter-level controls row, mirroring how the chunk
-                        # controls sit beside their method. ONE control on purpose:
-                        # match width (density_scale) is the single knob measured to
-                        # matter -- min_span and min_anchors were swept and found
-                        # inert -- and a row of decorative dials would be dishonest.
-                        passage_width = ui.select(
-                            options={
-                                'standard-40': tr('Narrow (near-exact)'),
-                                'wide-40': tr('Medium width'),
-                                'wider-40': tr('Wide width'),
-                                'widest-40': tr('Very wide (default)'),
-                                'max-40': tr('Maximal (may add noise)'),
-                            },
-                            value='widest-40',
-                            label=tr('Match width'),
-                        ).classes('w-44').props('outlined dense')
-                        passage_width.tooltip(tr(
-                            'How far a manuscript may drift from your text and '
-                            'still match. Wider finds more noisy witnesses; the '
-                            'strongest matches always rank first.'
-                        ))
                         if not passage_available():
                             method_radio.value = 'chunk'
                             method_radio.style('display: none;')
-                            passage_width.style('display: none;')
 
-                    # === Boundary Search Settings ===
-                    with ui.row().classes('w-full items-center gap-4 flex-wrap mt-2'):
+                    # A live help line, NOT a tooltip: `ui.radio` renders one
+                    # QOptionGroup, so a tooltip attached to it fires for BOTH
+                    # options -- hovering "Chunk search" described letter-level
+                    # search (owner-reported 2026-08-25).
+                    #
+                    # OUTSIDE the row above, mirroring `boundary_mode_help`:
+                    # inside it, this sentence's min-content width propagated
+                    # out through the flex column and pushed the options pane
+                    # off its side of the card.
+                    method_help = ui.label('').classes(
+                        'text-xs mt-1').style('color: var(--text-muted);')
+
+                    _METHOD_HELP = {
+                        # Neither claim mentions nikkud or line breaks any
+                        # more. Both engines strip nikkud (the chunk one per
+                        # token, at tokenization) and both treat a newline as
+                        # an ordinary separator, so neither was ever a
+                        # difference between them.
+                        'passage': tr(
+                            'Faster, with fewer irrelevant results. '
+                            'Tolerates spelling and transcription '
+                            'differences.'),
+                        'chunk': tr(
+                            'The older method. Slower, but offers Exact / '
+                            'Variants / Fuzzy modes and cross-paragraph '
+                            'filtering.'),
+                    }
+
+                    def _update_method_help() -> None:
+                        method_help.text = _METHOD_HELP.get(
+                            method_radio.value, '')
+
+                    method_radio.on_value_change(
+                        lambda _e: _update_method_help())
+                    _update_method_help()
+
+                    # === Boundary Search Settings (CHUNK ONLY) ===
+                    with ui.row().classes(
+                            'w-full items-center gap-4 flex-wrap mt-2'
+                    ).mark('boundary-settings') as boundary_row:
                         # Paragraph delimiter (always editable - affects display even in full mode)
                         with ui.column().classes('gap-1') as delimiter_col:
                             delimiter_label = ui.label(tr('Paragraph separator')).classes('text-xs font-medium').style('color: var(--text-muted);')
@@ -950,7 +1386,18 @@ def create_parallels_page(initial_text: str = None):
                         update_boundary_stats()
 
                     def update_boundary_stats():
-                        """Update pre-search boundary statistics."""
+                        """Update pre-search boundary statistics.
+
+                        Guarded HERE rather than in the method handler because
+                        `text_input.on('blur', ...)` calls this directly: a
+                        letter-level user who clicked out of the textarea would
+                        otherwise see "N boundaries detected" reappear under a
+                        method that has no paragraph boundaries at all.
+                        """
+                        if _letter_level_selected():
+                            boundary_stats_label.style('display: none;')
+                            boundary_warning_label.style('display: none;')
+                            return
                         try:
                             from genizah_core import get_boundary_stats
                             text = text_input.value or ""
@@ -1013,8 +1460,6 @@ def create_parallels_page(initial_text: str = None):
                             # Lower default for regular mode
                             min_chunks_input.value = 1
 
-                    lab_mode.on('update:model-value', on_lab_mode_change)
-
                     # Phase 145: passage-matching toggle handler -- reciprocal
                     # mutual exclusivity with Lab Mode.
                     def on_passage_mode_change():
@@ -1022,7 +1467,28 @@ def create_parallels_page(initial_text: str = None):
                             lab_mode.value = False
                             on_lab_mode_change()
                         if _letter_level_selected():
-                            passage_width.style('display: inline-flex;')
+                            # Swap the pane's contents, do not merely grey it.
+                            letter_options_col.set_visibility(True)
+                            # Multi-witness is letter-level ONLY, and that is
+                            # a measured finding rather than an assumption:
+                            # on the chunk engine multi-witness bought +2
+                            # positives of 74 with zero frontier gain at 4-6x
+                            # the time, because concatenation and union there
+                            # return the identical manuscript set.
+                            # ANDs the multi-witness flag, not just
+                            # letter-level: `PASSAGE_MULTI_WITNESS_ENABLED` is
+                            # default-off and separate from
+                            # `PASSAGE_PARALLELS_ENABLED` precisely so
+                            # single-witness passage can stay broadly on while
+                            # the costly fan-out is validated. Gated on
+                            # letter-level alone, the page offered the whole
+                            # capability while the API refused it.
+                            witness_panel.set_visibility(
+                                passage_multi_witness_available())
+                            for _row in (mode_select, chunk_size_row,
+                                         freq_threshold_row, min_chunks_row,
+                                         lab_mode_row):
+                                _row.set_visibility(False)
                             # Finding #2 (adversarial review): passage-matching
                             # has no cross-paragraph/token-boundary concept --
                             # PassageSearcher raises ValueError for anything but
@@ -1031,6 +1497,15 @@ def create_parallels_page(initial_text: str = None):
                             # here means the UI can never even SEND the
                             # unsupported value, rather than relying only on
                             # that rejection.
+                            # HIDDEN as well as disabled. The force-set and
+                            # disable below stay exactly as they were -- they
+                            # are what guarantees the UI can never SEND an
+                            # unsupported value -- but a greyed-out control
+                            # still reads as an option you might have, and
+                            # letter-level search has no paragraph boundaries
+                            # to offer (owner, 2026-08-25).
+                            boundary_row.set_visibility(False)
+                            boundary_mode_help.style('display: none;')
                             boundary_mode.value = 'full'
                             # NiceGUI fires no event for a programmatic
                             # .value write, so boundary_mode's own handler
@@ -1069,12 +1544,26 @@ def create_parallels_page(initial_text: str = None):
                             min_chunks_input.value = 1
                             min_chunks_input.disable()
                         else:
-                            passage_width.style('display: none;')
+                            letter_options_col.set_visibility(False)
+                            # HIDDEN, never cleared: a user who switches to
+                            # chunk to check something and back must not
+                            # find their seventeen pasted witnesses gone.
+                            witness_panel.set_visibility(False)
+                            for _row in (mode_select, chunk_size_row,
+                                         freq_threshold_row, min_chunks_row,
+                                         lab_mode_row):
+                                _row.set_visibility(True)
+                            boundary_row.set_visibility(True)
                             boundary_mode.enable()
                             chunk_size.enable()
                             mode_select.enable()
                             freq_threshold.enable()
                             min_chunks_input.enable()
+                            # Recompute the three inline-styled labels rather
+                            # than un-hiding them: which of them belongs on
+                            # screen depends on the boundary mode and on
+                            # whether the text has any breaks.
+                            update_boundary_ui()
 
                     method_radio.on('update:model-value', on_passage_mode_change)
 
@@ -1085,6 +1574,91 @@ def create_parallels_page(initial_text: str = None):
                 with ui.column().classes('w-80 gap-4'):
                     # Changed to H2
                     h2(tr('Options'), classes='text-xl font-bold', style='color: var(--text-primary);')
+
+                    # Letter-level options live HERE, in the same pane as the
+                    # chunk options they replace -- owner feedback 2026-08-24.
+                    # The earlier shape put them in the method row and left
+                    # this whole pane visible-but-disabled, so the options a
+                    # letter-level search actually uses sat far from the four
+                    # greyed-out ones it does not. One pane, contents swapped
+                    # by method. The chunk controls stay force-set and
+                    # disabled underneath (web/search_api.py rejects a
+                    # non-default value of any of them for method='passage',
+                    # so disabling remains the guarantee); hiding is
+                    # presentation on top of that, never instead of it.
+                    with ui.column().classes('gap-4') as letter_options_col:
+                        passage_width = ui.select(
+                            options={
+                                'standard-40': tr('Narrow (near-exact)'),
+                                'wide-40': tr('Medium width'),
+                                'wider-40': tr('Wide width'),
+                                'widest-40': tr('Very wide (default)'),
+                                'max-40': tr('Maximal (may add noise)'),
+                            },
+                            value='widest-40',
+                            label=tr('Match width'),
+                        ).classes('w-44').props('outlined dense')
+                        passage_width.tooltip(tr(
+                            'How far a manuscript may drift from your text and '
+                            'still match. Wider finds more noisy witnesses; the '
+                            'strongest matches always rank first.'
+                        ))
+                        # The SECOND axis (2026-08-24). Width and passage
+                        # length are different questions -- "how corrupt a
+                        # copy may be" vs "how short a shared passage counts"
+                        # -- and the short profile is emphatically not a
+                        # wider width, so folding it into the width list
+                        # would mislabel it. Two knobs, each a small list of
+                        # named policies; never raw sliders, because
+                        # min_span and verify_margin are ONE coupled decision
+                        # (spec section 8.1) that a slider would present as
+                        # two independent ones.
+                        passage_length = ui.select(
+                            options={
+                                'normal': tr('Normal passages (default)'),
+                                'short': tr('Also short passages'),
+                            },
+                            value='normal',
+                            label=tr('Passage length'),
+                        ).classes('w-44').props('outlined dense')
+                        passage_length.tooltip(tr(
+                            'Whether a short shared passage counts as a match. '
+                            '"Also short" finds piyyutim, quotations and badly '
+                            'damaged copies that share only a phrase — measured '
+                            'at roughly double the results for a third fewer '
+                            'correct ones, so expect to skim more.'
+                        ))
+                        # The THIRD axis (2026-08-24): search depth. The
+                        # engine's default budgets were tuned on short
+                        # queries; a full composition carries ~10M postings
+                        # of which the default budget admits under 5%, so
+                        # true witnesses never even reach verification --
+                        # starvation, not the match boundary, is the main
+                        # recall loss on long queries. Depth raises the
+                        # posting/verify/candidate budgets together (they
+                        # are ONE coupled decision -- more budget without
+                        # more verification changes almost nothing), at a
+                        # measured latency cost: ~8s for deep, ~19s for
+                        # deepest on the Antiochus benchmark vs 0.6s normal.
+                        # Named profiles, never sliders, like the two axes
+                        # above (DEPTH_PROFILES in shared/passage_policy.py
+                        # carries the full measurements).
+                        passage_depth = ui.select(
+                            options={
+                                'normal': tr('Normal (fast, default)'),
+                                'deep': tr('Deep (slower, more witnesses)'),
+                                'deepest': tr('Deepest (slowest, most)'),
+                            },
+                            value='normal',
+                            label=tr('Search depth'),
+                        ).classes('w-44').props('outlined dense')
+                        passage_depth.tooltip(tr(
+                            'How much of the corpus the search may examine. '
+                            'Deeper searches take seconds longer and return '
+                            'more manuscripts — including badly damaged and '
+                            'reworked copies a fast pass misses. Long texts '
+                            'benefit the most.'
+                        ))
 
                     # Mode
                     mode_select = ui.select(
@@ -1167,17 +1741,36 @@ def create_parallels_page(initial_text: str = None):
                     variant_controls_col.set_visibility(False)
 
                     # Chunk Size
-                    with ui.column().classes('gap-1'):
+                    with ui.column().classes('gap-1') as chunk_size_row:
                         # Changed to H3
                         h3(tr('Chunk size'), classes='text-sm font-medium', style='color: var(--text-secondary);')
                         chunk_size = ui.slider(min=2, max=12, value=5).props('label-always')
                         ui.label(tr('Words per search chunk (recommended: 4-7)')).classes('text-xs').style('color: var(--text-muted);')
 
-                    # Frequency threshold (for standard mode - filters results appearing in too many documents)
+                    # Frequency threshold (chunk search only -- hidden for
+                    # letter-level, which has no per-chunk frequency signal).
+                    #
+                    # It counts PAGE HITS, not manuscripts: the engine tests
+                    # `len(hits) > max_freq` against `searcher.search(query,
+                    # 50).hits`, a truncated top-50 of Tantivy documents, and a
+                    # document is a page. Eleven pages of one manuscript trip a
+                    # threshold of ten. The label said "manuscripts" until
+                    # 2026-08-25; 5cd2bb7e had already retired that wording in
+                    # docs/SEARCH_API.md and even touched this string's Hebrew,
+                    # but left the English behind.
+                    #
+                    # The 50-hit retrieval cap also means no value at or above
+                    # 50 can ever fire -- and 50 is the DEFAULT, so the control
+                    # does nothing until it is dragged left. Measured in
+                    # 5cd2bb7e (identical results at 50/100/1000/100000). The
+                    # range and default are deliberately unchanged here:
+                    # narrowing to [10, 49] forces a new default, and that
+                    # changes the results of every chunk search -- a product
+                    # decision, not a labelling fix.
                     with ui.column().classes('gap-1') as freq_threshold_row:
                         h3(tr('Max frequency'), classes='text-sm font-medium', style='color: var(--text-secondary);')
                         freq_threshold = ui.slider(min=10, max=100, value=50).props('label-always')
-                        ui.label(tr('Filter common phrases (lower = stricter)')).classes('text-xs').style('color: var(--text-muted);')
+                        ui.label(tr('Skip phrases matching more than this many pages (lower = stricter; 50 or above turns it off)')).classes('text-xs').style('color: var(--text-muted);')
 
                     # Min chunk matches (for regular full-text chunk search)
                     with ui.column().classes('gap-1') as min_chunks_row:
@@ -1187,6 +1780,25 @@ def create_parallels_page(initial_text: str = None):
                             format='%d'
                         ).classes('w-24').props('outlined dense')
                         ui.label(tr('Minimum matching chunks per manuscript')).classes('text-xs').style('color: var(--text-muted);')
+
+                    # Lab Mode: a third BACKEND, not a third search method.
+                    # It lives with the chunk settings because it is only
+                    # reachable from chunk search -- selecting letter-level
+                    # turns it off (`on_passage_mode_change`), so it can never
+                    # be left ON behind a hidden control.
+                    with ui.column().classes('gap-1').mark(
+                            'lab-mode-row') as lab_mode_row:
+                        lab_mode = ui.checkbox(tr('Lab Mode (experimental)'))
+                        lab_mode.tooltip(tr('Advanced search using fingerprint algorithm. Slower but more features.'))
+
+                        # Deep Scan (Lab Mode only - initially hidden)
+                        deep_scan = ui.checkbox(tr('Deep Scan')).style('display: none;')
+                        deep_scan.tooltip(tr('Exhaustive search - slower but finds more results'))
+
+                    # Registered HERE, not beside `on_lab_mode_change`: this is
+                    # the only BUILD-TIME reference to the widget, so it has to
+                    # follow the definition above or the page 500s.
+                    lab_mode.on('update:model-value', on_lab_mode_change)
 
                     def _apply_restored_search_config():
                         """Re-apply the snapshot's search configuration to
@@ -1232,6 +1844,10 @@ def create_parallels_page(initial_text: str = None):
                                 method_radio.value = 'passage'
                                 if cfg.get('width') in passage_width.options:
                                     passage_width.value = cfg['width']
+                                if cfg.get('length') in passage_length.options:
+                                    passage_length.value = cfg['length']
+                                if cfg.get('depth') in passage_depth.options:
+                                    passage_depth.value = cfg['depth']
                             else:
                                 # 'chunk', or 'passage' degrading because the
                                 # index is unavailable (same rule as dispatch).
@@ -1904,9 +2520,1183 @@ def create_parallels_page(initial_text: str = None):
                         'flat round dense disable'
                     ).tooltip(tr('Export JSON'))
 
+            # Appears when at least one result is checked for promotion.
+            promotion_bar = ui.column().classes('w-full')
+            promotion_bar.set_visibility(False)
             results_container = ui.column().classes('w-full gap-4').style('min-height: 300px;')
 
     # === Logic ===
+
+    # =====================================================================
+    # Multi-witness letter-level search
+    # =====================================================================
+    # The engine can fan out over a witness list inside ONE call, and the
+    # public API uses that. This page deliberately does not: it is a session,
+    # not a request. A user who adds a witness expects only THAT witness to be
+    # searched and its rows merged into what is already on screen. Re-running
+    # every witness on every addition would make an R-round auto-expansion
+    # quadratic instead of linear -- which would falsify the "cost is linear"
+    # premise the whole feature rests on.
+    #
+    # So both surfaces share ONE fusion module (shared/passage_fusion.py) and
+    # nothing else: the API fuses N results from one call, the page fuses N
+    # results accumulated across N calls. Same maths, one definition.
+
+    def _witness_depth_cap() -> int:
+        # Delegates: the rule is module level so it can be called by a test.
+        return witness_depth_cap(p_state.last_passage_ctx,
+                                 passage_depth.value)
+
+    def _witness_new_id() -> str:
+        # Monotonic, never reused after a removal: a recycled id would let a
+        # removed witness's stale rows be attributed to its replacement.
+        p_state.witness_seq += 1
+        return f'w{p_state.witness_seq}'
+
+    def _witness_default_label(text: str) -> str:
+        words = [w for w in (text or '').split() if w][:5]
+        return ' '.join(words) or tr('Pasted text')
+
+    def _witness_labels() -> dict:
+        labels = {WITNESS_SEED_ID: tr('Your text')}
+        for w in p_state.witnesses:
+            labels[w['id']] = w.get('label') or ''
+        return labels
+
+    def _witness_order() -> list:
+        return [WITNESS_SEED_ID] + [w['id'] for w in p_state.witnesses]
+
+    def _searched_witness_count() -> int:
+        return sum(1 for wid in _witness_order()
+                   if p_state.witness_rows.get(wid) is not None)
+
+    def _fuse_and_store() -> None:
+        """Rebuild p_state.results/filtered_results from the per-witness rows.
+
+        With a single searched witness the rows pass through UNTOUCHED and
+        carry no fusion fields -- RRF over one list is a 1/(k+rank) rescale
+        that carries no information, and `score` must keep meaning matched
+        letters for the common case. This mirrors the engine's own
+        short-circuit exactly, so a one-witness page search and a one-witness
+        API search produce the same row shape.
+        """
+        from shared.passage_fusion import fuse_routed, tag_rows
+
+        order = [wid for wid in _witness_order()
+                 if p_state.witness_rows.get(wid) is not None]
+        if not order:
+            # Nothing to fuse FROM, which is not the same as "the result set
+            # is empty" -- and conflating the two destroyed data.
+            #
+            # In a live session this is unreachable: a search always stores
+            # the seed under WITNESS_SEED_ID, so `order` holds at least one
+            # entry. It IS reachable in the one state this feature creates on
+            # purpose -- after a reload `_restore_witnesses_from_snapshot`
+            # leaves `witness_rows` empty (per-witness ranks cannot be
+            # recovered from fused rows) while `p_state.results` holds the
+            # restored rows. Removing a witness then wiped every one of them,
+            # and the republish and snapshot persist in `_remove_witness`
+            # wrote that loss to storage.
+            #
+            # Rows this function did not produce are not its to discard. They
+            # are left exactly as they are; the panel already says the
+            # witnesses need re-running, which is what actually rebuilds them.
+            return
+        if len(order) == 1:
+            wid = order[0]
+            p_state.results = list(p_state.witness_rows.get(wid) or [])
+            p_state.filtered_results = list(
+                p_state.witness_filtered.get(wid) or [])
+            return
+
+        labels = _witness_labels()
+        main_pairs, filt_pairs = [], []
+        for wid in order:
+            label = labels.get(wid, '')
+            main = list(p_state.witness_rows.get(wid) or [])
+            filt = list(p_state.witness_filtered.get(wid) or [])
+            # Rank over BOTH buckets together, in score order -- the same
+            # basis the engine's own fan-out uses, which tags the full result
+            # list BEFORE splitting it. Ranking each bucket from 1
+            # independently gave a filtered row the rank of a top hit, and
+            # left every main row's rank short by however many rows the
+            # engine had demoted ahead of it. Either way the RRF sums came
+            # out different from the API's for the same witnesses.
+            combined = sorted(main + filt,
+                              key=lambda r: float(r.get('score') or 0.0),
+                              reverse=True)
+            tag_rows(combined, wid, label)
+            main_pairs.append((wid, main))
+            filt_pairs.append((wid, filt))
+        # Routing and the contributor arithmetic both live in `fuse_routed`,
+        # so the page and the API cannot disagree about either. (They did
+        # disagree about neither, but the rule was written out twice, which
+        # is how they start to.)
+        p_state.results, p_state.filtered_results = fuse_routed(
+            main_pairs, filt_pairs)
+
+    def _text_digest_of(value: str) -> str:
+        # Delegates: the page and the API must agree about when two witnesses
+        # are the same witness, and the rule was written out twice.
+        from shared.passage_fusion import witness_text_key
+        return witness_text_key(value)
+
+    def _witness_text_keys() -> set:
+        """Every witness text already represented, THE SEED INCLUDED.
+
+        The seed is a witness -- it is fused under `WITNESS_SEED_ID` like any
+        other -- so a paste identical to the box above counts the same text
+        twice, and `witness_count` then reports two witnesses where there is
+        one. Read live, because that is the text the search is about to run.
+        """
+        keys = {_seed_digest()}
+        keys.update(_text_digest_of(w.get('text'))
+                    for w in p_state.witnesses if (w.get('text') or '').strip())
+        return keys
+
+    def _seed_digest() -> str:
+        """The digest of what is in the box RIGHT NOW.
+
+        Staleness is measured against this -- "was this witness gathered for
+        the text I am about to search?" -- so it is deliberately live. What
+        must NOT be read live is the stamp on a promoted witness; that one
+        comes from `last_passage_ctx`.
+        """
+        return _text_digest_of(text_input.value)
+
+    def _add_witness(text: str, label: str = '', kind: str = 'pasted',
+                     sys_id: str = None, seed_digest: str = None,
+                     headers: list = None) -> dict:
+        entry = {
+            'id': _witness_new_id(),
+            # The seed this witness was gathered FOR. A witness of one work is
+            # noise in another, so a later search against a different source
+            # text must not quietly include it.
+            #
+            # Defaults to the LIVE box, which is right for a pasted witness --
+            # the user typed it for the query in front of them. A PROMOTED one
+            # passes the digest of the search that produced the row instead
+            # (`_promote_checked`): if the box was edited since, those two are
+            # different texts and the row belongs to the older one.
+            'seed_digest': seed_digest or _seed_digest(),
+            'label': (label or '').strip() or _witness_default_label(text),
+            'kind': kind,
+            'sys_id': sys_id,
+            # The pages this witness was BUILT FROM. A promoted witness is not
+            # a function of its sys_id -- it is the concatenation of the pages
+            # that matched -- so without this a reload rebuilds a different
+            # witness under the same label. See `_rehydrate_manuscript_witnesses`.
+            'headers': list(headers or []),
+            'text': text or '',
+            'status': 'pending',
+            'hits': 0,
+            'error': '',
+        }
+        p_state.witnesses.append(entry)
+        return entry
+
+    def _remove_witness(wid: str) -> None:
+        """Drop a witness AND every row it contributed.
+
+        Stripping the rows is not optional: leaving them would have the panel
+        say the witness is gone while its results -- up to a few thousand of
+        them, for a witness that found nothing useful -- stayed on screen with
+        no way to attribute or remove them.
+        """
+        p_state.witnesses = [w for w in p_state.witnesses if w['id'] != wid]
+        p_state.witness_rows.pop(wid, None)
+        p_state.witness_filtered.pop(wid, None)
+        # Can this removal actually take its rows with it?
+        #
+        # Only if there is something to re-fuse FROM. After a reload the
+        # per-witness caches are deliberately empty -- per-witness ranks
+        # cannot be recovered from fused rows -- so the rows on screen keep
+        # the removed witness's contributions whatever happens here. In a
+        # live session the seed is always cached under WITNESS_SEED_ID, so
+        # this is true whenever a search has run in this tab.
+        #
+        # Discarding the rows instead would honour the docstring's promise by
+        # destroying a restored result set that exists nowhere else -- the
+        # data loss the guard in `_fuse_and_store` was added to stop. The
+        # answer is to say so, not to delete.
+        _can_restrip = bool(p_state.witness_rows)
+        _fuse_and_store()
+        _refresh_witness_panel()
+        if p_state.results or p_state.filtered_results:
+            render_results(p_state.results, p_state.filtered_results)
+        else:
+            results_header.text = tr('No results')
+            results_container.clear()
+            with results_container:
+                show_empty_state()
+        # A removal changes the ROW SET, and everything that describes the row
+        # set has to change with it. This is the same debt a witness SEARCH
+        # owes and pays; here it went unpaid, with three consequences, the
+        # third serious:
+        #
+        #   * the downloadable Word/XLSX/JSON still held the removed
+        #     witness's rows and named it in the manifest;
+        #   * the summary line and library-filter button described the old
+        #     set;
+        #   * `p_state.search_fingerprint` stayed the identity of the OLD
+        #     witness set, and `_persist_witness_state()` below then wrote the
+        #     snapshot under it -- so on reload `recover_richer_parallels_rows`
+        #     matched that fingerprint, judged the stored payload to be the
+        #     same search, and restored the removed witness's contributions.
+        #     The removal silently undid itself.
+        #
+        # `_refresh_export_payload` recomputes the identity and republishes,
+        # so it MUST run before the snapshot is persisted.
+        summary_label.text = ''
+        parallels_library_filter_btn.set_visibility(
+            bool(p_state.results or p_state.filtered_results))
+        _update_parallels_library_filter_btn()
+        if not _can_restrip and (p_state.results or p_state.filtered_results):
+            # The panel now shows the witness gone while its rows are still on
+            # screen. Presenting that as a completed removal is the kind of
+            # quiet disagreement between what a surface says and what it holds
+            # that this feature has already been bitten by twice.
+            ui.notify(
+                tr('Witness removed. The results on screen were found with '
+                   'the previous witness list — run the search again to '
+                   'update them.'),
+                type='warning')
+        _refresh_export_payload()
+        # The snapshot used to be written only at the end of a witness
+        # SEARCH, so a removal survived until the next one and then came back
+        # -- rows and all -- on reload.
+        _persist_witness_state()
+
+    def _witness_status_chip(entry: dict):
+        status = entry.get('status')
+        if status == 'stale':
+            ui.badge(tr('Other source text'), color='orange').classes(
+                'text-xs').tooltip(tr(
+                'This witness was added for a different source text, so it '
+                'was not searched.'))
+        elif status == 'searched':
+            ui.badge(tr('{n} matches found').format(n=entry.get('hits', 0)),
+                     color='green').classes('text-xs')
+        elif status == 'failed':
+            ui.badge(tr('Failed'), color='red').classes('text-xs')
+        elif status == 'running':
+            ui.spinner(size='sm')
+        else:
+            ui.badge(tr('Pending'), color='grey').classes('text-xs')
+
+    def _refresh_witness_panel() -> None:
+        witness_list.clear()
+        pending = [w for w in p_state.witnesses if w['status'] == 'pending']
+        witness_empty_label.set_visibility(not p_state.witnesses)
+        with witness_list:
+            for entry in p_state.witnesses:
+                with ui.row().classes(
+                        'w-full items-center gap-2 p-1 rounded').style(
+                        'background: var(--bg-subtle, rgba(0,0,0,0.03));'):
+                    ui.icon('menu_book' if entry['kind'] == 'manuscript'
+                            else 'notes').classes('text-sm').style(
+                        'color: var(--text-muted);')
+                    if entry['kind'] == 'manuscript' and entry.get('sys_id'):
+                        ui.link(entry['label'],
+                                f"/browse?sys_id={entry['sys_id']}",
+                                new_tab=True).classes(
+                            'text-sm no-underline hover:underline')
+                    else:
+                        ui.label(entry['label']).classes('text-sm')
+                    ui.label(f"{len(entry['text'])}").classes(
+                        'text-xs').style('color: var(--text-muted);')
+                    _witness_status_chip(entry)
+                    ui.space()
+                    if entry['status'] == 'failed':
+                        ui.button(
+                            tr('Retry'), icon='refresh',
+                            on_click=lambda _e=None, _w=entry['id']:
+                                _retry_witness(_w),
+                        ).props('flat dense no-caps size=sm')
+                    ui.button(
+                        icon='close',
+                        on_click=lambda _e=None, _w=entry['id']:
+                            _remove_witness(_w),
+                    ).props('flat round dense size=sm').tooltip(tr('Remove'))
+        _sync_sort_options()
+        stale = [w for w in p_state.witnesses if w['status'] == 'stale']
+        witness_stale_row.clear()
+        witness_stale_row.set_visibility(bool(stale))
+        if stale:
+            with witness_stale_row:
+                with ui.row().classes('w-full items-center gap-2 p-2 rounded').style(
+                        'background: var(--bg-card); '
+                        'border: 1px solid var(--accent-amber);'):
+                    ui.icon('info').classes('text-sm').style(
+                        'color: var(--accent-amber);')
+                    ui.label(tr(
+                        '{n} witnesses were added for a different source text.'
+                    ).format(n=len(stale))).classes('text-xs')
+                    ui.space()
+                    ui.button(
+                        tr('Use them anyway'),
+                        on_click=lambda: _revive_stale_witnesses(),
+                    ).props('flat dense no-caps size=sm')
+                    ui.button(
+                        tr('Remove them'),
+                        on_click=lambda: _remove_stale_witnesses(),
+                    ).props('flat dense no-caps size=sm')
+        # The collapsed header is the only thing most users see, so it
+        # carries the counts -- and the panel opens ITSELF when a witness
+        # needs attention, since a warning inside a closed drawer is not a
+        # warning. Never auto-CLOSES: a user who opened it keeps it open.
+        failed_now = [w for w in p_state.witnesses if w['status'] == 'failed']
+        if p_state.witnesses:
+            bits = [tr('{n} witnesses').format(n=len(p_state.witnesses))]
+            if stale:
+                bits.append(tr('{n} from another text').format(n=len(stale)))
+            elif pending:
+                bits.append(tr('{n} pending').format(n=len(pending)))
+            if failed_now:
+                bits.append(tr('{n} failed').format(n=len(failed_now)))
+            witness_expansion.props('caption="' + ' · '.join(bits) + '"')
+        else:
+            witness_expansion.props(remove='caption')
+        if stale or pending or failed_now:
+            witness_expansion.value = True
+        witness_run_row.set_visibility(bool(pending))
+        witness_run_btn.text = tr('Search now ({n} pending)').format(
+            n=len(pending))
+        # Auto-expand needs results to promote FROM.
+        if p_state.results:
+            auto_expand_btn.enable()
+        else:
+            auto_expand_btn.disable()
+
+    def _revive_stale_witnesses() -> None:
+        """Adopt the stale witnesses into the CURRENT source text.
+
+        Re-stamping the digest is the point: without it they would go stale
+        again on the next search and the user would have to answer twice.
+        """
+        digest = _seed_digest()
+        for w in p_state.witnesses:
+            if w['status'] == 'stale':
+                w['status'] = 'pending'
+                w['seed_digest'] = digest
+        _refresh_witness_panel()
+        _persist_witness_state()
+
+    def _remove_stale_witnesses() -> None:
+        for w in [w for w in p_state.witnesses if w['status'] == 'stale']:
+            _remove_witness(w['id'])
+        _refresh_witness_panel()
+
+    def _open_add_witness_dialog() -> None:
+        with ui.dialog() as dialog, ui.card().classes('w-[36rem] max-w-full'):
+            ui.label(tr('Add witness text')).classes('text-lg font-bold')
+            label_input = ui.input(label=tr('Label (optional)')).classes(
+                'w-full').props('outlined dense')
+            body_input = ui.textarea(
+                placeholder=tr('Paste your Hebrew text here...'),
+            ).classes('w-full').props('outlined rows=10').style(
+                'direction: rtl;')
+            bulk_checkbox = ui.checkbox(tr(
+                'This paste contains several witnesses separated by blank '
+                'lines'))
+            preview_label = ui.label('').classes('text-sm').style(
+                'color: var(--text-muted);')
+
+            def _split_preview():
+                from shared.passage_fusion import split_pasted
+                texts, skipped = split_pasted(body_input.value or '')
+                parts = [tr('{n} witnesses detected').format(n=len(texts))]
+                if skipped:
+                    # Never a silent drop: a paste that quietly loses a third
+                    # of itself is the failure this repo treats as a defect.
+                    parts.append(tr('({n} skipped: too short)').format(
+                        n=skipped))
+                preview_label.text = '  '.join(parts)
+
+            preview_btn = ui.button(
+                tr('Preview split'), on_click=_split_preview,
+            ).props('flat dense no-caps size=sm')
+            preview_btn.bind_visibility_from(bulk_checkbox, 'value')
+
+            def _commit():
+                body = body_input.value or ''
+                label = (label_input.value or '').strip()
+                if bulk_checkbox.value:
+                    from shared.passage_fusion import split_pasted
+                    texts, skipped = split_pasted(body)
+                else:
+                    from shared.passage_fusion import MIN_WITNESS_WORDS
+                    body = body.strip()
+                    words = len([w for w in body.split() if w])
+                    texts = [body] if words >= MIN_WITNESS_WORDS else []
+                    skipped = 0 if texts else 1
+                if not texts:
+                    ui.notify(tr('Enter at least 3 words'), type='warning')
+                    return
+                # Never a silent drop -- the Preview button said so, but only
+                # if the user pressed it, and a paste that quietly loses part
+                # of a file is the failure this repo treats as a defect.
+                if skipped:
+                    ui.notify(
+                        tr('({n} skipped: too short)').format(n=skipped),
+                        type='warning')
+                from shared.passage_fusion import (
+                    MAX_WITNESS_CHARS, split_by_length)
+                texts, _long = split_by_length(texts)
+                if _long:
+                    # Refuse now, in one message. Accepted, each of these
+                    # becomes a witness that spends its whole 30s ceiling and
+                    # fails, and the user reads the same generic timeout up to
+                    # 25 times.
+                    ui.notify(
+                        tr('Witness text is too long (max {cap} characters)'
+                           ).format(cap=MAX_WITNESS_CHARS), type='warning')
+                    if not texts:
+                        return
+                # Same rule the API applies to a `witnesses` array: one
+                # witness supplied twice is one witness. `fuse()` counts
+                # contributors positionally, so a repeat inflates
+                # `witness_count` and `fusion_score` and reorders the results.
+                _keys = _witness_text_keys()
+                _fresh, _dupes = [], 0
+                for _chunk in texts:
+                    _k = _text_digest_of(_chunk)
+                    if _k in _keys:
+                        _dupes += 1
+                        continue
+                    _keys.add(_k)
+                    _fresh.append(_chunk)
+                texts = _fresh
+                if _dupes:
+                    # Counted and reported, never dropped in silence -- a
+                    # paste that quietly loses part of a file is the failure
+                    # this repo treats as a defect.
+                    ui.notify(
+                        tr('({n} skipped: already added)').format(n=_dupes),
+                        type='warning')
+                    if not texts:
+                        return
+                room = _witness_depth_cap() - len(p_state.witnesses)
+                if len(texts) > room:
+                    ui.notify(
+                        tr('Witness list is full (max {n})').format(
+                            n=_witness_depth_cap()),
+                        type='warning')
+                    texts = texts[:max(0, room)]
+                    if not texts:
+                        return
+                for i, chunk in enumerate(texts):
+                    _add_witness(
+                        chunk,
+                        label=(label if len(texts) == 1 else
+                               (f'{label} {i + 1}' if label else '')))
+                dialog.close()
+                _refresh_witness_panel()
+                # Once, after the loop -- a bulk paste adds up to 25 in one
+                # go and each would otherwise re-serialise the whole result
+                # set.
+                _persist_witness_state()
+                # Adding never auto-searches: witnesses land `pending` and
+                # the user chooses when to spend the time.
+                ui.notify(tr('{n} witnesses detected').format(n=len(texts)),
+                          type='positive')
+
+            with ui.row().classes('w-full justify-end gap-2'):
+                ui.button(tr('Cancel'), on_click=dialog.close).props(
+                    'flat no-caps')
+                ui.button(tr('Add'), on_click=_commit).props('no-caps')
+        dialog.open()
+
+    async def _run_one_witness_search(entry: dict):
+        """Search ONE witness through the SAME bounded passage budget the
+        seed search uses.
+
+        Each witness gets its own acquire/release, so the 30s ceiling bounds
+        ONE witness rather than a whole batch, and the shared pool of 4
+        interleaves with other users between witnesses. A witness that hits
+        `passage_search_busy` or `core_timeout` is marked failed, skipped, and
+        offered a Retry -- the run continues.
+        """
+        ctx = p_state.last_passage_ctx or {}
+
+        def _sync():
+            searcher = get_passage_searcher(
+                state.searcher,
+                preset=ctx.get('width') or 'widest-40',
+                length=ctx.get('length') or 'normal',
+                depth=ctx.get('depth') or 'normal',
+                render_cap=0,
+            )
+            if searcher is None:
+                return None
+            return searcher.search_composition_logic(
+                entry['text'],
+                filter_text=ctx.get('filter_text') or None,
+                boundary_mode='full',
+                min_boundary_matches=ctx.get('min_boundary_matches') or 0,
+                restrict_sys_ids=ctx.get('restrict_sys_ids'),
+            )
+
+        try:
+            return await run_passage_search(_sync)
+        except APIError as exc:
+            if exc.code == 'passage_search_busy':
+                entry['error'] = tr(
+                    'Letter-level search is busy right now — please try again '
+                    'in a moment.')
+            elif exc.code == 'core_timeout':
+                entry['error'] = tr(
+                    'Letter-level search timed out — try a shorter text.')
+            else:
+                entry['error'] = tr('Letter-level search failed.')
+            return None
+        except Exception as e:
+            logger.exception(f"Parallels witness search failed: {e}")
+            entry['error'] = tr('Letter-level search failed.')
+            return None
+
+    def _clear_stop() -> None:
+        """Fresh user intent clears a standing Stop.
+
+        Deliberately NOT inside `_search_pending_witnesses`: that runs from
+        the seed search and from each auto-expand round too, where clearing
+        would undo a Stop the user already pressed.
+        """
+        p_state.is_cancelled = False
+
+    async def _rehydrate_manuscript_witnesses(pending: list) -> None:
+        """Re-fetch the text of restored manuscript witnesses.
+
+        `_persist_active_snapshot` stores manuscript witnesses WITHOUT their
+        text on purpose -- the corpus still has it, and duplicating up to
+        25 x 20,000 characters of it into a tab snapshot buys nothing. But
+        nothing re-fetched it on restore, so after a reload those witnesses
+        searched the empty string and came back `searched, 0 matches`: a
+        false negative that looks exactly like a real one.
+
+        Fetched off the event loop, in ONE batch, through the same
+        `collect_witness_texts` the promotion path uses. Anything still
+        unresolved keeps its empty text and is failed at dispatch with a
+        reason.
+        """
+        stale = witnesses_needing_text(pending)
+        if not stale:
+            return
+        sys_ids = [w['sys_id'] for w in stale]
+        # Captured HERE, on the event loop: the fetch runs off-loop and must
+        # not read page state.
+        rows_snapshot = list(p_state.results or [])
+        # The headers the PROMOTION used, where the snapshot preserved them.
+        # Without this the rebuild derives headers from whatever rows are on
+        # screen NOW -- and after `execute_parallels` has reset the fused rows
+        # that is the SEED-ONLY set, so a promoted witness came back built
+        # from fewer pages, or from none and hence the whole manuscript. The
+        # re-run then searched a different witness under the same label, and
+        # nothing on screen said so.
+        _derived = witness_headers_for(sys_ids, rows_snapshot)
+        _headers = {w['sys_id']: (list(w.get('headers') or [])
+                                  or _derived.get(w['sys_id']) or [])
+                    for w in stale if w.get('sys_id')}
+
+        def _fetch():
+            return collect_witness_texts(
+                sys_ids, rows_snapshot,
+                fetch_header=state.searcher.get_full_text_by_header,
+                fetch_manuscript=state.searcher.get_full_manuscript,
+                headers_by_sid=_headers,
+            )
+
+        try:
+            texts, _failed = await run.io_bound(_fetch)
+        except Exception as exc:
+            logger.exception(f"Witness rehydrate failed: {exc}")
+            return
+        # The length cap has to be re-applied HERE, not only where a witness
+        # is added. What comes back is not what was promoted: the refetch
+        # reads whatever headers the RESTORED row set holds, and falls back
+        # to `get_full_manuscript`, which returns the whole manuscript. A
+        # reload could therefore turn a capped witness into an uncapped one --
+        # and the cap exists because an over-long witness spends its entire
+        # 30s ceiling and fails, once per witness.
+        from shared.passage_fusion import MAX_WITNESS_CHARS, split_by_length
+        _over_cap = 0
+        for w in stale:
+            _text = texts.get(w['sys_id']) or ''
+            _fits, _too_long = split_by_length([_text]) if _text else ([], [])
+            if _too_long:
+                # Emptied, not truncated -- half a manuscript searched as if
+                # it were the whole one is a worse answer than none, and an
+                # invisible one. The dispatch loop fails it; the error is set
+                # here because only here is the REASON known.
+                w['text'] = ''
+                w['error'] = tr(
+                    'Witness text is too long (max {cap} characters)'
+                ).format(cap=MAX_WITNESS_CHARS)
+                _over_cap += 1
+                continue
+            w['text'] = _text
+        if _over_cap:
+            ui.notify(
+                tr('Witness text is too long (max {cap} characters)').format(
+                    cap=MAX_WITNESS_CHARS), type='warning')
+
+    async def _search_pending_witnesses(_e=None) -> int:
+        """Search every `pending` witness and merge its rows into what is
+        already on screen. Additive by construction: a witness is searched at
+        most once, which is what makes an R-round expansion cost
+        `1 + rounds x K` searches rather than re-running everything.
+
+        Returns the number of witnesses that produced results.
+        """
+        if not passage_multi_witness_available():
+            # The rollout flag enforced where the WORK happens, not only where
+            # the button is drawn. Hiding the panel stops a witness being
+            # added; it does not stop one that is already there. A tab
+            # snapshot taken while the flag was ON restores its witness list
+            # `pending`, and the seed search dispatches whatever is pending --
+            # so the fan-out could run from browser storage alone after the
+            # flag was turned off. All four call sites funnel through here.
+            return 0
+        if p_state.is_running:
+            return 0
+        if p_state.is_cancelled:
+            # A standing Stop stops the witnesses too. This function used to
+            # clear the flag on entry -- but it is reached from the SEED search
+            # and from each auto-expand round, not only from a button, so a
+            # Stop the user had already pressed was silently undone and the
+            # run continued. Only the explicit entry points clear it now
+            # (`_clear_stop`).
+            return 0
+        pending = [w for w in p_state.witnesses if w['status'] == 'pending']
+        if not pending:
+            return 0
+        if not p_state.last_passage_ctx:
+            ui.notify(tr('Run a letter-level search first.'), type='warning')
+            return 0
+        # The depth cap is a DISPATCH cap. Enforced only while adding and
+        # promoting, it bounded the wrong quantity: `Find Parallels` resets
+        # every non-stale witness to `pending` and dispatches the batch, so
+        # twenty-five witnesses added at normal depth all re-run the moment
+        # the seed is re-run at `deepest` -- roughly eight minutes of work
+        # from one click, taking a slot of the shared passage budget
+        # twenty-five times over, against a documented deepest cap of four.
+        #
+        # Checked AFTER the ctx guard because the cap READS that ctx. A
+        # witness search runs at the depth of the LAST SEED SEARCH
+        # (`_run_one_witness_search` takes its depth from the same dict), not
+        # at whatever the dropdown shows now -- so moving the dropdown alone
+        # changes nothing here, and re-running the seed changes everything.
+        _over = witnesses_over_dispatch_cap(
+            pending, p_state.last_passage_ctx, passage_depth.value)
+        if _over:
+            # Refuse the whole batch rather than searching a cap's worth:
+            # a run that quietly does less than the panel lists is the same
+            # lie the auto-expand round already refuses to tell. The
+            # witnesses stay `pending`, so removing some or dropping the
+            # depth and pressing again is all that is needed.
+            ui.notify(
+                tr('{n} witnesses are waiting, but only {cap} can be searched '
+                   'at this depth — remove some, or choose a shallower '
+                   'depth.').format(n=_over[0], cap=_over[1]),
+                type='warning')
+            return 0
+        await _rehydrate_manuscript_witnesses(pending)
+
+        p_state.is_running = True
+        found = 0
+        try:
+            for i, entry in enumerate(pending, start=1):
+                # Cancellation is checked at the witness boundary, and only
+                # there: the passage engine emits no progress and cannot be
+                # interrupted mid-search (PassageSearcher accepts a
+                # progress_callback and never calls it), so an in-flight
+                # witness always runs to completion.
+                if p_state.is_cancelled:
+                    break
+                if not (entry.get('text') or '').strip():
+                    # Never dispatch an empty query. The engine answers it
+                    # with nothing, and the panel would then report a
+                    # perfectly honest-looking "0 matches" for a search that
+                    # never ran -- a false negative no user could detect.
+                    entry['status'] = 'failed'
+                    # Only when nothing more specific is known. Rehydration
+                    # empties an over-long witness and records WHY; saying
+                    # "could not load" over that replaces the true reason
+                    # with a false one, and the user retries forever.
+                    if not entry.get('error'):
+                        entry['error'] = tr(
+                            'Could not load text for this manuscript.')
+                    continue
+                entry['status'] = 'running'
+                p_state.witness_progress = tr(
+                    'Witness {i}/{k}: {label}').format(
+                    i=i, k=len(pending), label=entry['label'])
+                witness_progress_label.text = p_state.witness_progress
+                _refresh_witness_panel()
+                result = await _run_one_witness_search(entry)
+                if result is None:
+                    entry['status'] = 'failed'
+                    continue
+                rows, filt = _apply_post_search_filters(
+                    result.get('main') or [], result.get('filtered') or [])
+                p_state.witness_rows[entry['id']] = rows
+                p_state.witness_filtered[entry['id']] = filt
+                entry['status'] = 'searched'
+                entry['hits'] = len(rows)
+                entry['error'] = ''
+                found += 1
+        finally:
+            p_state.is_running = False
+            p_state.witness_progress = ''
+            witness_progress_label.text = ''
+
+        _fuse_and_store()
+        _refresh_witness_panel()
+        render_results(p_state.results, p_state.filtered_results)
+        # `render_results` rewrites the results header from the rows it is
+        # given; the summary line and the library-filter button are set once
+        # by the seed search and never again. After a witness run the summary
+        # described the SEED's count beneath a list showing the fused one --
+        # and on the empty-seed path it read "no results yet" above a full
+        # page of results. Cleared rather than rewritten: the header already
+        # carries the count, and a second count is a second thing to drift.
+        summary_label.text = ''
+        parallels_library_filter_btn.set_visibility(
+            bool(p_state.results or p_state.filtered_results))
+        _update_parallels_library_filter_btn()
+        _refresh_export_payload()
+        _persist_witness_state()
+        failed = [w for w in p_state.witnesses if w['status'] == 'failed']
+        if failed:
+            ui.notify(
+                tr('{n} witnesses could not be searched — use Retry.').format(
+                    n=len(failed)), type='warning')
+        return found
+
+    async def _retry_witness(wid: str) -> None:
+        _clear_stop()   # pressing Retry is fresh intent
+        for w in p_state.witnesses:
+            if w['id'] == wid:
+                w['status'] = 'pending'
+                w['error'] = ''
+        _refresh_witness_panel()
+        await _search_pending_witnesses()
+
+    async def _promote_checked(_e=None) -> None:
+        """Add the checked manuscripts as witnesses and search them.
+
+        Text comes from the manuscript's MATCHED pages, resolved by their own
+        `raw_header`s -- all of them, because a result GROUP spans several
+        page-level hits and promoting only the best-scoring page would throw
+        away most of the witness. Fetched off the event loop: Tantivy lookups
+        on the single uvicorn loop stall every other request.
+        """
+        # Skip manuscripts already in the list. Two witnesses with identical
+        # text would BOTH contribute to witness_count and to the RRF sum, so
+        # a manuscript found by one witness would report two -- a wrong
+        # number, not merely a redundant search. (Auto-expand already
+        # filtered these; the checkbox path did not.)
+        if p_state.promoting:
+            # Re-entrancy is not a wasted search, it is a WRONG NUMBER: two
+            # overlapping runs both read the pre-fetch witness list and both
+            # add the same manuscripts, and the duplicate then contributes
+            # twice to witness_count and to the RRF sum.
+            return
+        _already = {w.get('sys_id') for w in p_state.witnesses if w.get('sys_id')}
+        sys_ids = [s for s in p_state.checked_for_promotion
+                   if s and s not in _already]
+        if not sys_ids:
+            p_state.checked_for_promotion.clear()
+            _refresh_promotion_bar()
+            return
+        room = _witness_depth_cap() - len(p_state.witnesses)
+        if room <= 0:
+            ui.notify(tr('Witness list is full (max {n})').format(
+                n=_witness_depth_cap()), type='warning')
+            return
+        if len(sys_ids) > room:
+            # The add-witness dialog already reports its own truncation; this
+            # path dropped the excess in silence, so ten checked manuscripts
+            # with room for three became three with no sign of the seven.
+            # Same message, so the two doors say the same thing.
+            ui.notify(tr('Witness list is full (max {n})').format(
+                n=_witness_depth_cap()), type='warning')
+        sys_ids = sys_ids[:room]
+
+        # Captured HERE, on the event loop: the fetch below runs off-loop
+        # and must not read page state.
+        rows_snapshot = list(p_state.results or [])
+        # WHICH pages this promotion is built from, decided once and recorded
+        # on the witness. Pure and cheap (a scan of rows already in memory),
+        # so it stays on the loop with the rest of the capture.
+        promoted_headers = witness_headers_for(sys_ids, rows_snapshot)
+
+        # The seed the promoted rows belong to -- the search that produced
+        # them, not whatever the box holds now. Captured before the await with
+        # everything else.
+        promoted_digest = (p_state.last_passage_ctx or {}).get(
+            'seed_digest') or _seed_digest()
+
+        def _fetch():
+            # The decision lives in collect_witness_texts (module level, pure,
+            # directly tested); this only injects the two real fetchers.
+            return collect_witness_texts(
+                sys_ids, rows_snapshot,
+                fetch_header=state.searcher.get_full_text_by_header,
+                fetch_manuscript=state.searcher.get_full_manuscript,
+                headers_by_sid=promoted_headers,
+            )
+
+        p_state.promoting = True
+        try:
+            texts, failed = await run.io_bound(_fetch)
+        finally:
+            p_state.promoting = False
+        # Re-read the list AFTER the await: the guard above stops a second
+        # promotion, but a witness can also arrive from the add dialog while
+        # the fetch is in flight.
+        _already = {w.get('sys_id') for w in p_state.witnesses if w.get('sys_id')}
+        from shared.passage_fusion import (
+            MAX_WITNESS_CHARS, split_by_length)
+        # By TEXT as well as by sys_id: a pasted witness has no sys_id, so
+        # the guard above cannot see that a promoted manuscript repeats it.
+        _keys = _witness_text_keys()
+        added, too_long, dupes = 0, [], 0
+        for sid in sys_ids:
+            text = texts.get(sid)
+            if not text or sid in _already:
+                continue
+            _key = _text_digest_of(text)
+            if _key in _keys:
+                dupes += 1
+                continue
+            _keys.add(_key)
+            # The same rule the paste path applies, so a manuscript fetched
+            # from the corpus and a manuscript pasted by hand cannot disagree
+            # about what is searchable.
+            _ok, _over = split_by_length([text])
+            if _over:
+                too_long.append(sid)
+                continue
+            label = sid
+            try:
+                shelf, _title = state.meta_mgr.get_meta_for_id(sid)
+                label = shelf or sid
+            except Exception:
+                pass
+            _add_witness(text, label=label, kind='manuscript', sys_id=sid,
+                         seed_digest=promoted_digest,
+                         headers=promoted_headers.get(sid) or [])
+            added += 1
+        if dupes:
+            ui.notify(tr('({n} skipped: already added)').format(n=dupes),
+                      type='warning')
+        if too_long:
+            ui.notify(
+                tr('Witness text is too long (max {cap} characters)').format(
+                    cap=MAX_WITNESS_CHARS), type='warning')
+        if failed:
+            # ONE line naming what failed, not N identical toasts saying
+            # nothing (fifteen of them was the owner's first experience of
+            # this feature).
+            names = []
+            for sid in failed[:5]:
+                try:
+                    shelf, _t = state.meta_mgr.get_meta_for_id(sid)
+                except Exception:
+                    shelf = None
+                names.append(shelf or sid)
+            more = f' (+{len(failed) - 5})' if len(failed) > 5 else ''
+            ui.notify(
+                tr('Could not load text for {n} manuscripts: {names}').format(
+                    n=len(failed), names=', '.join(names) + more),
+                type='warning')
+        p_state.checked_for_promotion.clear()
+        _refresh_promotion_bar()
+        if not added:
+            _refresh_witness_panel()
+            return
+        _refresh_witness_panel()
+        found = await _search_pending_witnesses()
+        ui.notify(
+            tr('Added {n} witnesses — found {m} new matches.').format(
+                n=added, m=found), type='positive')
+
+    async def _run_auto_expand(_e=None) -> None:
+        """Seed -> top-K -> repeat. Measured on Megillat Antiochus: frontier
+        coverage 2 -> 4 -> 7 -> 9 of 20 over three rounds, monotone, with all
+        15 promoted witnesses graded positive.
+
+        The cost is the first page: rows go from 191 to 2,795 and positives in
+        the top 100 fall from 48 to 32. Reach up, precision down -- which is
+        why this is an explicit button with that trade-off written next to it,
+        never folded into "Find Parallels".
+        """
+        if p_state.auto_expanding or p_state.is_running:
+            return
+        if not p_state.results:
+            ui.notify(tr('Run a letter-level search first.'), type='warning')
+            return
+        rounds = int(auto_rounds.value or 3)
+        top_k = int(auto_top_k.value or 5)
+        p_state.auto_expanding = True
+        _clear_stop()   # pressing Run auto-expand is fresh intent
+        try:
+            for rnd in range(1, rounds + 1):
+                if p_state.is_cancelled:
+                    break
+                cap = _witness_depth_cap()
+                if len(p_state.witnesses) + top_k > cap:
+                    # Refuse the ROUND rather than silently shrinking top-K --
+                    # a control that quietly does less than it says is a lie.
+                    ui.notify(
+                        tr('Auto-expand stopped: witness cap reached.'),
+                        type='info')
+                    break
+                already = {w.get('sys_id') for w in p_state.witnesses
+                           if w.get('sys_id')}
+                candidates = []
+                for sid in _ranked_sys_ids(p_state.results):
+                    if sid in already or sid in p_state.excluded_manuscript_ids:
+                        continue
+                    candidates.append(sid)
+                    if len(candidates) >= top_k:
+                        break
+                if not candidates:
+                    break
+                p_state.checked_for_promotion = set(candidates)
+                p_state.witness_progress = tr('Round {r}/{n}').format(
+                    r=rnd, n=rounds)
+                witness_progress_label.text = p_state.witness_progress
+                await _promote_checked()
+        finally:
+            p_state.auto_expanding = False
+            p_state.witness_progress = ''
+            witness_progress_label.text = ''
+
+    def _ranked_sys_ids(rows: list) -> list:
+        """sys_ids in the order the results present them, de-duplicated."""
+        seen, out = set(), []
+        for row in rows or []:
+            sid = witness_sys_id(row)
+            if not sid or sid in seen:
+                continue
+            seen.add(sid)
+            out.append(sid)
+        return out
+
+    def _group_witness_stats(group_data: dict) -> dict:
+        from shared.passage_fusion import group_stats
+        return group_stats(group_data.get('items') or [])
+
+    def _sort_groups(grouped_items, sort_by: str):
+        """Order manuscript GROUPS.
+
+        Group order used to be hard-coded to `max_score` regardless of the
+        sort control, so two of its three existing options -- 'shelfmark' and
+        'matches' -- had no visible effect at all. Routing every option
+        through one key function repairs those and adds the two
+        multi-witness orders in the same stroke.
+
+        `witnesses` counts DISTINCT witnesses pointing at the manuscript (a
+        union across its rows, not a sum -- two pages found by one witness
+        are one witness), and `fused` is the combined rank-fusion score, the
+        order the API returns.
+        """
+        if sort_by == 'shelfmark':
+            return sorted(grouped_items,
+                          key=lambda kv: ((kv[1].get('shelfmark') or '').lower(),
+                                          -(kv[1].get('max_score') or 0)))
+
+        def _key(kv):
+            data = kv[1]
+            top = float(data.get('max_score') or 0)
+            if sort_by == 'matches':
+                return (len(data.get('items') or []), top)
+            if sort_by in ('fused', 'witnesses'):
+                stats = _group_witness_stats(data)
+                if sort_by == 'witnesses':
+                    return (stats['witness_count'], stats['fusion_score'], top)
+                return (stats['fusion_score'], top)
+            return (top, 0.0)
+
+        return sorted(grouped_items, key=_key, reverse=True)
+
+    def _sync_sort_options() -> None:
+        """Offer the fusion orders only once there is fusion to order by.
+
+        An option reading "Sort by number of witnesses" on a single-text
+        search would sort by a column that is 1 everywhere.
+        """
+        base = {
+            'score': tr('Sort by score'),
+            'shelfmark': tr('Sort by shelfmark'),
+            'matches': tr('Sort by matches'),
+        }
+        if _searched_witness_count() > 1:
+            base['fused'] = tr('Sort by combined score')
+            base['witnesses'] = tr('Sort by number of witnesses')
+            value = sort_select.value if sort_select.value in base else 'fused'
+            # Default to the fused order the moment fusion exists: it is the
+            # order the ranking actually produced, and leaving 'score'
+            # selected would show a rank-fused result set sorted by raw
+            # matched letters.
+            if sort_select.value == 'score':
+                value = 'fused'
+        else:
+            value = sort_select.value if sort_select.value in base else 'score'
+        sort_select.set_options(base, value=value)
+
+    def _source_heading_for(item: dict) -> str:
+        """Heading over the query-side excerpt: the WITNESS it came from.
+
+        Falls back to 'Your text' for a single-witness search, where the rows
+        carry no witness tag at all (the fusion short-circuits) and the seed
+        is the only possible source.
+        """
+        wid = (item or {}).get('witness_id')
+        if not wid or wid == WITNESS_SEED_ID:
+            return tr('Your text')
+        return (item.get('witness_label')
+                or _witness_labels().get(wid) or tr('Pasted text'))
+
+    def _refresh_promotion_bar() -> None:
+        promotion_bar.clear()
+        chosen = p_state.checked_for_promotion
+        promotion_bar.set_visibility(bool(chosen))
+        if not chosen:
+            return
+        with promotion_bar:
+            with ui.row().classes('w-full items-center gap-3 p-2 rounded').style(
+                    'background: var(--bg-card); '
+                    'border: 1px solid var(--primary-600);'):
+                ui.icon('groups').classes('text-lg').style(
+                    'color: var(--primary-600);')
+                ui.label(tr('{n} manuscripts selected').format(
+                    n=len(chosen))).classes('text-sm font-medium')
+                ui.space()
+                ui.button(
+                    tr('Search with these too'), icon='playlist_add',
+                    on_click=lambda: (_clear_stop(), _promote_checked())[-1],
+                ).props('dense no-caps size=sm')
+                ui.button(
+                    tr('Clear selection'),
+                    on_click=lambda: (p_state.checked_for_promotion.clear(),
+                                      _refresh_promotion_bar(),
+                                      render_results(p_state.results,
+                                                     p_state.filtered_results)),
+                ).props('flat dense no-caps size=sm')
+
+    def _apply_post_search_filters(rows: list, filtered: list):
+        """Put a witness's rows through the same post-search passes the
+        seed's rows already went through.
+
+        Applied AT INGEST, before the rows enter `witness_rows`, so every
+        later re-fusion operates on already-filtered rows -- filtering after
+        the fusion would be undone by the next one.
+
+        The library pass is code-based and works on any row. The domain pass
+        can only exclude sys_ids whose domains were loaded for the seed's
+        results, so a newly-reached manuscript is never wrongly dropped; it
+        may simply not be excluded yet, which is the safe direction.
+        """
+        ctx = p_state.last_passage_ctx or {}
+        mode, codes = ctx.get('library_mode'), ctx.get('library_filter')
+        if mode == 'hide' and codes:
+            rows = _apply_parallels_library_filter(rows, mode, codes)
+            filtered = _apply_parallels_library_filter(filtered, mode, codes)
+        if p_state.domain_exclusions and p_state.has_domain_data:
+            rows = _filter_parallels_by_domain(rows)
+            filtered = _filter_parallels_by_domain(filtered) if filtered else filtered
+        if p_state.excluded_manuscript_ids:
+            rows = [r for r in rows
+                    if _row_sys_id(r) not in p_state.excluded_manuscript_ids]
+        return rows, filtered
+
+    def _row_sys_id(row: dict):
+        return witness_sys_id(row)
+
+    def _recompute_search_identity() -> str:
+        """The identity of the result set AS IT NOW STANDS.
+
+        The same seed searched with three witnesses and with seventeen
+        produces different results, so the fingerprint has to move when the
+        witness set does -- otherwise recover_richer_parallels_rows would
+        hand back rows belonging to a different set.
+
+        Built by REUSING the dispatch-time keyword capture rather than
+        re-listing the arguments: an identity rule written out twice is an
+        identity rule that drifts (web/export_state.py's own docstring says
+        so). Only witnesses that actually PRODUCED rows count -- a pending
+        or failed one did not shape these results.
+        """
+        from web.export_state import compute_parallels_search_fingerprint
+        kwargs = dict(getattr(p_state, 'last_fingerprint_kwargs', None) or {})
+        if not kwargs:
+            return getattr(p_state, 'search_fingerprint', '') or ''
+        kwargs['witnesses'] = [
+            {'kind': w.get('kind'), 'sys_id': w.get('sys_id'),
+             'text': w.get('text') or '', 'label': w.get('label') or ''}
+            for w in p_state.witnesses
+            if p_state.witness_rows.get(w['id']) is not None
+        ]
+        return compute_parallels_search_fingerprint(**kwargs)
+
+    def _refresh_export_payload() -> None:
+        """Re-publish the export payload after the row set changes.
+
+        Without this the downloadable workbook would still be the seed-only
+        result while the screen showed the fused one -- and it would carry
+        the seed-only identity, so a reload would 'recover' the wrong rows.
+        """
+        meta = dict(getattr(p_state, 'last_export_meta', None) or {})
+        if not meta:
+            return
+        try:
+            from web.export_state import set_parallels_export
+            fingerprint = _recompute_search_identity()
+            p_state.search_fingerprint = fingerprint
+            meta['search_fingerprint'] = fingerprint
+            meta['witnesses'] = [
+                {'label': w.get('label') or '', 'kind': w.get('kind'),
+                 'sys_id': w.get('sys_id')}
+                for w in p_state.witnesses
+                if p_state.witness_rows.get(w['id']) is not None
+            ] or None
+            # The rows are FUSED, so the exported file must be ordered and
+            # described the way the screen is. Without this flag the JSON
+            # export re-ranked the groups by summed matched letters -- a
+            # different order than the user saw -- and dropped the witness
+            # facts entirely, though every row still carried them.
+            meta['multi_witness'] = bool(meta['witnesses'])
+            p_state.last_export_meta = meta
+            set_parallels_export(results=p_state.results,
+                                 filtered=p_state.filtered_results,
+                                 meta=meta)
+        except Exception:
+            pass  # Export refresh is best-effort; the screen is still right
+
+    def _persist_witness_state() -> None:
+        """Mirror the witness list into the tab snapshot.
+
+        Witnesses are deliberately NOT part of `searched_config`: that dict is
+        re-applied by `_apply_restored_search_config`, which validates each
+        value against a widget's `.options`, and a witness is not a select.
+        """
+        try:
+            _persist_active_snapshot()
+        except Exception:
+            pass  # Browser storage operation failed; nothing else depends on it
+
+    # The panel's INITIAL state comes from the same refresh every later update
+    # uses -- never from the widget constructors, which would be a second
+    # definition of "empty" that nothing keeps in step. It has to sit HERE,
+    # below the helpers: called from the widget block above (the intuitive
+    # place) it raises UnboundLocalError and takes the whole page down with a
+    # 500. That is not hypothetical -- it is what happened on the first
+    # attempt, and only the render-smoke test saw it.
+    _refresh_witness_panel()
+
 
     # === DMF-09: Parallels Library Filter Button + Dialog (Phase 131-05) ===
 
@@ -2940,6 +4730,20 @@ def create_parallels_page(initial_text: str = None):
         safe_user_set('parallels_source_text', '')
         safe_user_set('parallels_domain_exclusions', [])
         safe_user_set('parallels_excluded_manuscript_ids', [])
+        # The witness list is part of the composition, so Reset must take it
+        # too. It did not: the panel kept up to 25 texts and their row caches
+        # while `_clear_active_snapshot()` below deleted the snapshot that
+        # held them, so the screen and storage disagreed until the next
+        # search. (Review finding.)
+        p_state.witnesses = []
+        p_state.witness_rows = {}
+        p_state.witness_filtered = {}
+        p_state.witness_seq = 0
+        p_state.checked_for_promotion = set()
+        p_state.witness_progress = ''
+        p_state.last_passage_ctx = {}
+        _refresh_witness_panel()
+        _refresh_promotion_bar()
         _clear_active_snapshot()
         # Phase 88: Clear per-session export payload — singleton mirror removed.
         from web.export_state import clear_parallels_export
@@ -3028,6 +4832,28 @@ def create_parallels_page(initial_text: str = None):
         results_header.text = tr('Searching...')
         results_container.clear()
 
+        # "Find Parallels" is a FULL FRESH RUN: the seed plus every witness
+        # OF THIS TEXT, all reset to pending. The witness LIST survives (a
+        # user who pasted seventeen texts must not lose them by pressing the
+        # button), but no rows do -- rows found under the previous settings
+        # must never be fused with rows found under the new ones.
+        #
+        # A witness gathered under a DIFFERENT source text is marked stale
+        # instead: witnesses belong to the work they were gathered for, and
+        # searching Antiochus witnesses against Birkat Hamazon (owner-
+        # reported) fuses one work's witnesses into another work's results.
+        # Not deleted -- that would throw away seventeen hand-pasted texts on
+        # a typo edit; the panel offers both answers explicitly.
+        p_state.witness_rows = {}
+        p_state.witness_filtered = {}
+        p_state.checked_for_promotion = set()
+        _digest_now = _seed_digest()
+        for _w in p_state.witnesses:
+            _stale = _w.get('seed_digest') not in (None, '', _digest_now)
+            _w['status'] = 'stale' if _stale else 'pending'
+            _w['hits'] = 0
+            _w['error'] = ''
+
         # Capture filter text in main thread to avoid closure issues in background thread
         captured_filter_text = get_filter_text()
         # The restorable PROXY for filter_text: the identity hashes the
@@ -3061,12 +4887,32 @@ def create_parallels_page(initial_text: str = None):
         # unavailable must degrade to "not selected", never crash run_search().
         captured_passage_mode = _letter_level_selected() and passage_available() and not captured_lab_mode
         captured_passage_width = passage_width.value or 'widest-40'
+        captured_passage_length = passage_length.value or 'normal'
+        captured_passage_depth = passage_depth.value or 'normal'
         # Phase 145 finding #10 (adversarial review): computed ONCE here
         # rather than the 'lab'/'passage'/'chunk' ternary being written twice
         # (PostHog capture + composition-history params) below.
         captured_engine = 'lab' if captured_lab_mode else (
             'passage' if captured_passage_mode else 'chunk'
         )
+        # A control the engine never READ is not part of that search's
+        # identity (Codex review, 2026-08-24). Both letter-level selects keep
+        # their value while hidden in chunk/Lab mode, so a chunk search run
+        # after a letter-level one fingerprinted DIFFERENTLY from the same
+        # chunk search run before it -- and _apply_restored_search_config
+        # re-applies these selects only for engine == 'passage', so the
+        # reloaded page could not reproduce that identity and same-search row
+        # recovery silently failed.
+        #
+        # Pinned to their defaults rather than dropped: every chunk
+        # fingerprint recorded before this rule already hashed exactly these
+        # values (the selects sat at their build defaults), so the fix costs
+        # no stored identity. `length` is excluded from the payload at its
+        # default, so 'normal' and "absent" are the same hash.
+        if captured_engine != 'passage':
+            captured_passage_width = 'widest-40'
+            captured_passage_length = 'normal'
+            captured_passage_depth = 'normal'
         captured_freq_threshold = int(freq_threshold.value) if freq_threshold.value else 50
         captured_deep_scan = deep_scan.value if captured_lab_mode else False
         captured_chunk_size = int(chunk_size.value) if chunk_size.value else 5
@@ -3156,6 +5002,36 @@ def create_parallels_page(initial_text: str = None):
         captured_library_filter = list(p_state.library_filter or [])
         captured_excluded_ids = set(p_state.excluded_manuscript_ids or ())
 
+        # The settings a witness added AFTER this search must be searched
+        # with. A witness run at a different width or depth than the rows
+        # beside it would be fused into one list with them and be invisible
+        # as an anomaly -- the numbers would simply be wrong, quietly.
+        # (There is deliberately no dispatch-time witness capture. The export
+        # manifest is built AFTER the run from `witness_rows`, by
+        # `_refresh_export_payload`, so it can only name witnesses that
+        # actually produced rows; and the search identity re-derives its own
+        # via `_recompute_search_identity` for the same reason.)
+
+        p_state.last_passage_ctx = {
+            # The seed digest of THIS search, captured at dispatch (`text` is
+            # read before the awaits above). A witness promoted from these
+            # rows belongs to this text, not to whatever the box holds by the
+            # time the user clicks.
+            'seed_digest': _text_digest_of(text),
+            'width': captured_passage_width,
+            'length': captured_passage_length,
+            'depth': captured_passage_depth,
+            'filter_text': captured_filter_text,
+            'min_boundary_matches': captured_min_boundary_matches,
+            'restrict_sys_ids': captured_restrict_sys_ids,
+            # The POST-search passes the seed's rows go through. A witness's
+            # rows must go through the same ones, or "hide this library"
+            # would silently stop applying to everything found after it was
+            # set -- and the user would have no way to tell.
+            'library_mode': captured_library_mode,
+            'library_filter': captured_library_filter,
+        } if captured_passage_mode else {}
+
         def run_search():
             try:
                 if captured_lab_mode:
@@ -3221,7 +5097,9 @@ def create_parallels_page(initial_text: str = None):
             # manuscripts from both surfaces (measured: 198 shown of 497
             # found on Birkat Hamazon).
             passage_searcher = get_passage_searcher(
-                state.searcher, preset=captured_passage_width, render_cap=0)
+                state.searcher, preset=captured_passage_width,
+                length=captured_passage_length,
+                depth=captured_passage_depth, render_cap=0)
             if passage_searcher is None:
                 return None
             return passage_searcher.search_composition_logic(
@@ -3334,6 +5212,192 @@ def create_parallels_page(initial_text: str = None):
                     type='info',
                 )
 
+            # Built from DISPATCH-TIME captures, so it describes the search
+            # that RAN -- which is why it sits outside the result guard below
+            # rather than inside it. Nested there, a seed that matched nothing
+            # left `last_export_meta` and `last_fingerprint_kwargs` unset (or,
+            # worse, holding the PREVIOUS search's), and a witness run that
+            # then found rows published them under the wrong identity or not
+            # at all. Every statement in here is empty-list-safe.
+            try:
+                # Phase 88: build per-session export payload for /api/export/parallels/*
+                # (singleton mirror removed). Variable provenance (verified live in
+                # web/pages/parallels.py):
+                #   captured_chunk_size      — int(chunk_size.value) or 5
+                #   captured_freq_threshold  — int(freq_threshold.value) or 50
+                #   captured_mode            — mode_select.value
+                #   text_input.value         — NiceGUI textarea, source text
+                # HIGH-02 fix (historical Phase 77): capture the active filter dict (same
+                # 10-key shape as the live snapshot at parallels.py:2202-2213) so envelope
+                # replay matches what history-restore reconstructs.
+                _parallels_filters = {
+                    'domains': list(getattr(p_state, 'filter_domains', None) or []),
+                    'authors': list(getattr(p_state, 'filter_authors', None) or []),
+                    'works': list(getattr(p_state, 'filter_works', None) or []),
+                    'include_mode': getattr(p_state, 'filter_include_mode', True),
+                    'date_from': getattr(p_state, 'filter_date_from', None),
+                    'date_to': getattr(p_state, 'filter_date_to', None),
+                    'material_exclude': list(getattr(p_state, 'filter_material_exclude', None) or []),
+                    'text_all': list(getattr(p_state, 'filter_text_all', None) or []),
+                    'text_any': list(getattr(p_state, 'filter_text_any', None) or []),
+                    'text_not': list(getattr(p_state, 'filter_text_not', None) or []),
+                } if _has_active_filters() else None
+                # Search identity: ONE definition, in export_state --
+                # executable by tests, canonicalizing its own set-like
+                # inputs (PR #325 rounds 2-5, plus the workflow review
+                # that found the same rule being rebuilt, differently, by
+                # the history-restore path). Every value passed here is a
+                # DISPATCH-TIME capture: a live read describes a
+                # configuration the search may not have used.
+                from web.export_state import (
+                    compute_parallels_search_fingerprint,
+                )
+                _fingerprint_kwargs = dict(
+                    text=text,
+                    engine=captured_engine,
+                    width=captured_passage_width,
+                    length=captured_passage_length,
+                    depth=captured_passage_depth,
+                    chunk_size=captured_chunk_size,
+                    mode=captured_mode,
+                    max_freq=captured_freq_threshold,
+                    filter_text=captured_filter_text or '',
+                    deep_scan=captured_deep_scan,
+                    boundary_mode=captured_boundary_mode,
+                    boundary_delimiter=captured_boundary_delimiter,
+                    boundary_boost=captured_boundary_boost,
+                    min_boundary_matches=captured_min_boundary_matches,
+                    min_delimiter_distance=captured_min_delimiter_distance,
+                    variant_level=captured_variant_level,
+                    variant_max_changes=captured_variant_max_changes,
+                    # The library 'hide' pass below reads these same
+                    # captures, so the identity and the filtering that
+                    # shaped the rows cannot disagree.
+                    library_mode=captured_library_mode,
+                    library_filter=captured_library_filter,
+                    # Pre-query scope: advanced filters + show_only
+                    # libraries + per-manuscript exclusions, merged into
+                    # one set at dispatch.
+                    restrict=captured_restrict_sys_ids,
+                    excluded=captured_excluded_ids,
+                    filters=_parallels_filters,
+                )
+                # The witness set is part of the identity, but at THIS
+                # instant none has been searched -- these rows really are
+                # seed-only. `_recompute_search_identity` re-runs this
+                # exact keyword capture with the witnesses that produced
+                # rows, as soon as any has. One construction, reused, so
+                # the two cannot describe different searches.
+                p_state.last_fingerprint_kwargs = _fingerprint_kwargs
+                _search_fingerprint = compute_parallels_search_fingerprint(
+                    **_fingerprint_kwargs)
+                p_state.search_fingerprint = _search_fingerprint
+                p_state.searched_source_text = text
+                # The CONFIGURATION that produced these rows, from the
+                # SAME dispatch-time captures the fingerprint hashes --
+                # one list of "what defines a search", so the restored
+                # controls and the stored identity cannot disagree.
+                # Persisted by _persist_active_snapshot and re-applied to
+                # the widgets by _apply_restored_search_config on reload
+                # (docs/OPEN_ISSUES.md: reload restored the rows but left
+                # the controls at build-time defaults, so the restore
+                # notice pointed at a DIFFERENT search).
+                p_state.searched_config = {
+                    'engine': captured_engine,
+                    'width': captured_passage_width,
+                    'length': captured_passage_length,
+                    'depth': captured_passage_depth,
+                    'chunk_size': captured_chunk_size,
+                    'mode': captured_mode,
+                    'max_freq': captured_freq_threshold,
+                    'deep_scan': captured_deep_scan,
+                    'boundary_mode': captured_boundary_mode,
+                    'boundary_delimiter': captured_boundary_delimiter,
+                    'boundary_boost': captured_boundary_boost,
+                    'min_boundary_matches': captured_min_boundary_matches,
+                    'min_delimiter_distance': captured_min_delimiter_distance,
+                    'variant_level': captured_variant_level,
+                    'variant_max_changes': captured_variant_max_changes,
+                    'filters': _parallels_filters,
+                    'library_mode': captured_library_mode,
+                    'library_filter': captured_library_filter,
+                    'sefaria_enabled': captured_sefaria_enabled,
+                }
+                _parallels_search_meta = {
+                    'source_text': text,
+                    'search_fingerprint': _search_fingerprint,
+                    # What the workbook was searched WITH. Labels, kinds
+                    # and shelfmarks only -- never the texts: a
+                    # downloaded file that carried twenty-five 20,000-
+                    # character witnesses would be mostly query.
+                    # None at dispatch, ALWAYS: at this instant no witness
+                    # has contributed a row, so these results really are
+                    # seed-only -- the same reasoning the fingerprint capture
+                    # above states for itself. Naming them here made the
+                    # Word/XLSX exports claim "Searched with" witnesses that
+                    # never ran, and add multi-witness columns to seed-only
+                    # rows, whenever dispatch returned early: a new seed marks
+                    # the existing witnesses `stale` so nothing is pending, and
+                    # the depth-cap refusal does the same. Neither path reaches
+                    # `_refresh_export_payload`, which is what publishes the
+                    # real manifest -- derived from `witness_rows`, so it names
+                    # only witnesses that actually produced rows.
+                    'witnesses': None,
+                    'chunk_size': captured_chunk_size,
+                    'mode': captured_mode,
+                    'max_freq': float(captured_freq_threshold) if captured_freq_threshold is not None else None,
+                    'filters': _parallels_filters,
+                    'boundary_options': None,  # Phase 77: not yet exposed as user-settable; placeholder for parity with /api/parallels API-02
+                    'warnings': [],  # Phase 78 will populate
+                }
+                # DMF-09 HYBRID Hide post-fetch filter (Phase 131-05 / Codex MED #6).
+                # Applied BEFORE set_parallels_export / safe_user_set so exports + stored
+                # payloads are scoped.  Show-only is already scoped pre-query (restrict_sys_ids)
+                # so no post-fetch pass needed for Show-only.
+                if captured_library_mode == 'hide' and captured_library_filter:
+                    main_results = _apply_parallels_library_filter(
+                        main_results, captured_library_mode,
+                        captured_library_filter)
+                    if filtered_results:
+                        filtered_results = _apply_parallels_library_filter(
+                            filtered_results, captured_library_mode,
+                            captured_library_filter)
+                from web.export_state import (
+                    compact_parallels_result_rows,
+                    set_parallels_export,
+                )
+                p_state.last_export_meta = dict(_parallels_search_meta)
+                set_parallels_export(
+                    results=main_results,
+                    filtered=filtered_results,
+                    meta=_parallels_search_meta,
+                )
+                main_results = compact_parallels_result_rows(main_results)
+                filtered_results = compact_parallels_result_rows(filtered_results)
+                p_state.results = main_results
+                p_state.filtered_results = filtered_results
+                # Also store in user storage (for UI persistence across page reloads)
+                safe_user_set('parallels_results', _compact_result_rows(
+                    main_results[:_PARALLELS_ACTIVE_USER_FALLBACK_LIMIT]
+                ))
+                # Round 6: stamp the fallback's identity beside it. The
+                # legacy bootstrap folds it into its meta, so the
+                # mixed-pair rule in _same_parallels_search can VERIFY
+                # same-search instead of trusting source_text.
+                safe_user_set('parallels_results_fingerprint',
+                              _search_fingerprint)
+                # Workflow review W4: mirror the config beside the rows
+                # and identity, so the legacy bootstrap restores controls
+                # too, not only in the tab that searched.
+                safe_user_set('parallels_search_config',
+                              dict(p_state.searched_config))
+                safe_user_set('parallels_filtered', _compact_result_rows(
+                    (filtered_results or [])[:_PARALLELS_ACTIVE_USER_FALLBACK_LIMIT]
+                ))
+                _persist_active_snapshot()
+            except Exception:
+                pass  # Browser storage operation failed; preference not persisted
+
             if main_results or filtered_results:
                 p_state.results = main_results
                 p_state.filtered_results = filtered_results
@@ -3353,153 +5417,6 @@ def create_parallels_page(initial_text: str = None):
                     'engine': captured_engine,
                 })
 
-                try:
-                    # Phase 88: build per-session export payload for /api/export/parallels/*
-                    # (singleton mirror removed). Variable provenance (verified live in
-                    # web/pages/parallels.py):
-                    #   captured_chunk_size      — int(chunk_size.value) or 5
-                    #   captured_freq_threshold  — int(freq_threshold.value) or 50
-                    #   captured_mode            — mode_select.value
-                    #   text_input.value         — NiceGUI textarea, source text
-                    # HIGH-02 fix (historical Phase 77): capture the active filter dict (same
-                    # 10-key shape as the live snapshot at parallels.py:2202-2213) so envelope
-                    # replay matches what history-restore reconstructs.
-                    _parallels_filters = {
-                        'domains': list(getattr(p_state, 'filter_domains', None) or []),
-                        'authors': list(getattr(p_state, 'filter_authors', None) or []),
-                        'works': list(getattr(p_state, 'filter_works', None) or []),
-                        'include_mode': getattr(p_state, 'filter_include_mode', True),
-                        'date_from': getattr(p_state, 'filter_date_from', None),
-                        'date_to': getattr(p_state, 'filter_date_to', None),
-                        'material_exclude': list(getattr(p_state, 'filter_material_exclude', None) or []),
-                        'text_all': list(getattr(p_state, 'filter_text_all', None) or []),
-                        'text_any': list(getattr(p_state, 'filter_text_any', None) or []),
-                        'text_not': list(getattr(p_state, 'filter_text_not', None) or []),
-                    } if _has_active_filters() else None
-                    # Search identity: ONE definition, in export_state --
-                    # executable by tests, canonicalizing its own set-like
-                    # inputs (PR #325 rounds 2-5, plus the workflow review
-                    # that found the same rule being rebuilt, differently, by
-                    # the history-restore path). Every value passed here is a
-                    # DISPATCH-TIME capture: a live read describes a
-                    # configuration the search may not have used.
-                    from web.export_state import (
-                        compute_parallels_search_fingerprint,
-                    )
-                    _search_fingerprint = compute_parallels_search_fingerprint(
-                        text=text,
-                        engine=captured_engine,
-                        width=captured_passage_width,
-                        chunk_size=captured_chunk_size,
-                        mode=captured_mode,
-                        max_freq=captured_freq_threshold,
-                        filter_text=captured_filter_text or '',
-                        deep_scan=captured_deep_scan,
-                        boundary_mode=captured_boundary_mode,
-                        boundary_delimiter=captured_boundary_delimiter,
-                        boundary_boost=captured_boundary_boost,
-                        min_boundary_matches=captured_min_boundary_matches,
-                        min_delimiter_distance=captured_min_delimiter_distance,
-                        variant_level=captured_variant_level,
-                        variant_max_changes=captured_variant_max_changes,
-                        # The library 'hide' pass below reads these same
-                        # captures, so the identity and the filtering that
-                        # shaped the rows cannot disagree.
-                        library_mode=captured_library_mode,
-                        library_filter=captured_library_filter,
-                        # Pre-query scope: advanced filters + show_only
-                        # libraries + per-manuscript exclusions, merged into
-                        # one set at dispatch.
-                        restrict=captured_restrict_sys_ids,
-                        excluded=captured_excluded_ids,
-                        filters=_parallels_filters,
-                    )
-                    p_state.search_fingerprint = _search_fingerprint
-                    p_state.searched_source_text = text
-                    # The CONFIGURATION that produced these rows, from the
-                    # SAME dispatch-time captures the fingerprint hashes --
-                    # one list of "what defines a search", so the restored
-                    # controls and the stored identity cannot disagree.
-                    # Persisted by _persist_active_snapshot and re-applied to
-                    # the widgets by _apply_restored_search_config on reload
-                    # (docs/OPEN_ISSUES.md: reload restored the rows but left
-                    # the controls at build-time defaults, so the restore
-                    # notice pointed at a DIFFERENT search).
-                    p_state.searched_config = {
-                        'engine': captured_engine,
-                        'width': captured_passage_width,
-                        'chunk_size': captured_chunk_size,
-                        'mode': captured_mode,
-                        'max_freq': captured_freq_threshold,
-                        'deep_scan': captured_deep_scan,
-                        'boundary_mode': captured_boundary_mode,
-                        'boundary_delimiter': captured_boundary_delimiter,
-                        'boundary_boost': captured_boundary_boost,
-                        'min_boundary_matches': captured_min_boundary_matches,
-                        'min_delimiter_distance': captured_min_delimiter_distance,
-                        'variant_level': captured_variant_level,
-                        'variant_max_changes': captured_variant_max_changes,
-                        'filters': _parallels_filters,
-                        'library_mode': captured_library_mode,
-                        'library_filter': captured_library_filter,
-                        'sefaria_enabled': captured_sefaria_enabled,
-                    }
-                    _parallels_search_meta = {
-                        'source_text': text,
-                        'search_fingerprint': _search_fingerprint,
-                        'chunk_size': captured_chunk_size,
-                        'mode': captured_mode,
-                        'max_freq': float(captured_freq_threshold) if captured_freq_threshold is not None else None,
-                        'filters': _parallels_filters,
-                        'boundary_options': None,  # Phase 77: not yet exposed as user-settable; placeholder for parity with /api/parallels API-02
-                        'warnings': [],  # Phase 78 will populate
-                    }
-                    # DMF-09 HYBRID Hide post-fetch filter (Phase 131-05 / Codex MED #6).
-                    # Applied BEFORE set_parallels_export / safe_user_set so exports + stored
-                    # payloads are scoped.  Show-only is already scoped pre-query (restrict_sys_ids)
-                    # so no post-fetch pass needed for Show-only.
-                    if captured_library_mode == 'hide' and captured_library_filter:
-                        main_results = _apply_parallels_library_filter(
-                            main_results, captured_library_mode,
-                            captured_library_filter)
-                        if filtered_results:
-                            filtered_results = _apply_parallels_library_filter(
-                                filtered_results, captured_library_mode,
-                                captured_library_filter)
-                    from web.export_state import (
-                        compact_parallels_result_rows,
-                        set_parallels_export,
-                    )
-                    set_parallels_export(
-                        results=main_results,
-                        filtered=filtered_results,
-                        meta=_parallels_search_meta,
-                    )
-                    main_results = compact_parallels_result_rows(main_results)
-                    filtered_results = compact_parallels_result_rows(filtered_results)
-                    p_state.results = main_results
-                    p_state.filtered_results = filtered_results
-                    # Also store in user storage (for UI persistence across page reloads)
-                    safe_user_set('parallels_results', _compact_result_rows(
-                        main_results[:_PARALLELS_ACTIVE_USER_FALLBACK_LIMIT]
-                    ))
-                    # Round 6: stamp the fallback's identity beside it. The
-                    # legacy bootstrap folds it into its meta, so the
-                    # mixed-pair rule in _same_parallels_search can VERIFY
-                    # same-search instead of trusting source_text.
-                    safe_user_set('parallels_results_fingerprint',
-                                  _search_fingerprint)
-                    # Workflow review W4: mirror the config beside the rows
-                    # and identity, so the legacy bootstrap restores controls
-                    # too, not only in the tab that searched.
-                    safe_user_set('parallels_search_config',
-                                  dict(p_state.searched_config))
-                    safe_user_set('parallels_filtered', _compact_result_rows(
-                        (filtered_results or [])[:_PARALLELS_ACTIVE_USER_FALLBACK_LIMIT]
-                    ))
-                    _persist_active_snapshot()
-                except Exception:
-                    pass  # Browser storage operation failed; preference not persisted
 
                 # Add to composition history
                 try:
@@ -3671,6 +5588,35 @@ def create_parallels_page(initial_text: str = None):
                 results_header.text = tr('No results')
                 with results_container:
                     show_empty_state()
+
+            # The seed is a witness too -- modelled with its own id so
+            # "found by 3 of 5" needs no +1 special case anywhere. Only
+            # letter-level: the panel is hidden for chunk and Lab, and
+            # fusing rows from an engine whose score means something else
+            # would be meaningless.
+            #
+            # OUTSIDE the result guard above, and that is the whole point.
+            # Nested inside it, a seed that matched nothing left every
+            # witness unsearched and the page said "No results" -- in a
+            # feature that exists precisely because no single witness of a
+            # work retrieves what the others do. The measured case is not
+            # exotic: one BH witness reaches 56.7% of the census where the
+            # fused seventeen reach 74.1%, so a seed landing on the empty
+            # side of that gap is ordinary, not pathological.
+            #
+            # An empty seed is stored as an empty SEARCHED witness, never
+            # skipped: a seed missing from `witness_rows` also drops out of
+            # `_searched_witness_count()`, which would hide the fusion sort
+            # options and, with exactly one other witness, turn the fusion
+            # into a single-witness passthrough.
+            if captured_passage_mode:
+                p_state.witness_rows[WITNESS_SEED_ID] = list(main_results)
+                p_state.witness_filtered[WITNESS_SEED_ID] = list(
+                    filtered_results or [])
+                _refresh_witness_panel()
+                if any(_w['status'] == 'pending'
+                       for _w in p_state.witnesses):
+                    await _search_pending_witnesses()
         else:
             results_header.text = tr('No results')
             with results_container:
@@ -3991,8 +5937,10 @@ def create_parallels_page(initial_text: str = None):
             scores = [item.get('score', 0) for item in grouped[key]['items']]
             grouped[key]['avg_score'] = sum(scores) / len(scores) if scores else 0
 
-        # Sort groups by max score
-        sorted_groups = sorted(grouped.items(), key=lambda x: x[1]['max_score'], reverse=True)
+        # Group order follows the SORT CONTROL (it used to be hard-coded to
+        # max_score, which is why 'shelfmark' and 'matches' never appeared to
+        # do anything).
+        sorted_groups = _sort_groups(grouped.items(), sort_by)
 
         # Group filtered results similarly
         filtered_grouped = {}
@@ -4028,7 +5976,7 @@ def create_parallels_page(initial_text: str = None):
                 scores = [item.get('score', 0) for item in filtered_grouped[key]['items']]
                 filtered_grouped[key]['avg_score'] = sum(scores) / len(scores) if scores else 0
 
-        sorted_filtered_groups = sorted(filtered_grouped.items(), key=lambda x: x[1]['max_score'], reverse=True)
+        sorted_filtered_groups = _sort_groups(filtered_grouped.items(), sort_by)
 
         # Separate per-manuscript excluded groups from main results
         excluded_ms_groups = []
@@ -4205,6 +6153,24 @@ def create_parallels_page(initial_text: str = None):
                         badge_color = 'amber' if is_filtered else 'blue'
                         ui.badge(f"{len(items)} {tr('matches')}", color=badge_color).classes('text-xs')
 
+                        # How many DISTINCT witnesses point at this
+                        # manuscript -- a union across its rows, not a sum:
+                        # two of its pages found by one witness are one
+                        # witness. Shown only when there is more than one
+                        # witness to distinguish.
+                        _wtotal = _searched_witness_count()
+                        if _wtotal > 1:
+                            _wstats = _group_witness_stats(group_data)
+                            if _wstats['witness_count']:
+                                _labels = _witness_labels()
+                                ui.badge(
+                                    tr('{n} of {m} witnesses').format(
+                                        n=_wstats['witness_count'], m=_wtotal),
+                                    color='purple',
+                                ).classes('text-xs').tooltip(', '.join(
+                                    _labels.get(wid, wid)
+                                    for wid in _wstats['witness_ids']))
+
                         # Printed material indicator
                         if sys_id and sys_id in p_state.printed_ids:
                             from shared.fjms_service import PRINTED_BADGE_COLORS, PRINTED_LABEL_EN, PRINTED_LABEL_HE
@@ -4255,6 +6221,26 @@ def create_parallels_page(initial_text: str = None):
                     ui.badge(f"{tr('Max')}: {int(max_score)}", color=max_color).classes('text-xs')
                     avg_color = 'green' if avg_score > 60 else 'amber' if avg_score > 35 else 'gray'
                     ui.badge(f"{tr('Avg')}: {int(avg_score)}", color=avg_color).classes('text-xs')
+
+                    # Promote this manuscript to a witness. State lives in
+                    # p_state, NOT on the widget: the checkbox is destroyed
+                    # and rebuilt on every re-render, so a selection held on
+                    # the widget would vanish the moment anything re-rendered.
+                    if (sys_id and not is_filtered
+                            and _letter_level_selected()
+                            and passage_multi_witness_available()):
+                        def _toggle_promotion(e, sid=sys_id):
+                            if e.value:
+                                p_state.checked_for_promotion.add(sid)
+                            else:
+                                p_state.checked_for_promotion.discard(sid)
+                            _refresh_promotion_bar()
+
+                        ui.checkbox(
+                            value=sys_id in p_state.checked_for_promotion,
+                            on_change=_toggle_promotion,
+                        ).props('dense size=sm').tooltip(
+                            tr('Search with this manuscript too'))
 
                     # Per-manuscript exclude button
                     if sys_id and not is_filtered:
@@ -4345,8 +6331,12 @@ def create_parallels_page(initial_text: str = None):
                         'color: var(--text-secondary); direction: rtl; text-align: right;'
                     )
 
-                    # Expand indicator
-                    ui.icon('expand_more').classes('text-lg transition-transform').style('color: var(--text-muted);')
+                    # NO expand indicator here. QExpansionItem draws its own
+                    # chevron at the end of the header and rotates it on open;
+                    # this one was a SECOND arrow that never rotated, because
+                    # nothing ever changed its transform. Owner-reported
+                    # 2026-08-25: "why do the results have two down arrow
+                    # 'open' symbols?"
 
             # Expanded content (shown on click)
             with ui.column().classes('w-full p-4 gap-4').style('background: var(--bg-card);'):
@@ -4354,7 +6344,15 @@ def create_parallels_page(initial_text: str = None):
                 with ui.row().classes('w-full gap-3'):
                     # Source context
                     with ui.column().classes('flex-1 gap-2'):
-                        ui.label(tr('Your text')).classes('text-xs font-bold uppercase').style('color: var(--success);')
+                        # Which witness this highlight came from. A span
+                        # offset is a position in ONE witness's text, so the
+                        # context below belongs to that witness and to no
+                        # other -- labelling it "Your text" when it came from
+                        # a promoted manuscript would misattribute the
+                        # evidence.
+                        ui.label(_source_heading_for(item)).classes(
+                            'text-xs font-bold uppercase').style(
+                            'color: var(--success);')
                         with ui.element('div').classes('p-3 rounded-lg text-sm').style(
                             'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8; border: 1px solid var(--success); color: var(--text-primary);'
                         ):
@@ -4603,7 +6601,9 @@ def create_parallels_page(initial_text: str = None):
             with ui.row().classes('w-full gap-4'):
                 # Source context
                 with ui.column().classes('flex-1 gap-2'):
-                    ui.label(tr('Your text')).classes('text-xs font-bold uppercase').style('color: var(--success);')
+                    ui.label(_source_heading_for(item)).classes(
+                        'text-xs font-bold uppercase').style(
+                        'color: var(--success);')
                     with ui.element('div').classes('p-4 rounded-lg text-sm').style(
                         'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8; border: 1px solid var(--success); color: var(--text-primary);'
                     ):

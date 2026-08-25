@@ -11,6 +11,10 @@ from web.translations import get_language
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.discovery_assets import discovery_available
 from web.atlas_assets import atlas_preview_available
+from web.passage_assets import (
+    passage_available,
+    passage_multi_witness_available,
+)
 from web.components.typography import h1, h2, h3
 from shared.discovery_band_labels import (
     BAND_LABELS,
@@ -1060,7 +1064,80 @@ This tool is designed for researchers wishing to find **parallel texts** for a c
 textual witnesses\u2014both direct and indirect.
         ''').style('color: var(--text-secondary);').classes('mb-4')
 
-        h3('How it Works', classes='text-lg font-semibold mb-2', style='color: var(--text-primary);')
+        if passage_available():
+            h3('Choosing a Search Method', classes='text-lg font-semibold mb-2', style='color: var(--text-primary);')
+            ui.markdown('''
+The page offers two engines, chosen with the radio buttons above the text box.
+
+**Letter-level search is the default, and it is the one to use unless you need
+something specific from the other.** It compares your text to the corpus as a
+stream of letters rather than as words, so differences in spelling, word
+division, punctuation and transcription do not break a match. It answers in
+about a second where the older method takes minutes, and in a graded comparison
+of live runs it returned far fewer irrelevant results.
+
+**Chunk search** is the older method, kept because it can do things
+letter-level search cannot: word-level Exact / Variants / Fuzzy modes,
+cross-paragraph filtering, and a tunable chunk size. It is much slower.
+
+Two differences people expect but will not find: **both methods ignore
+nikkud**, and **both treat a line break as an ordinary space**. Neither is a
+reason to pick one over the other.
+            ''').style('color: var(--text-secondary);').classes('mb-4')
+
+            h3('How Letter-level Search Works', classes='text-lg font-semibold mb-2', style='color: var(--text-primary);')
+            ui.markdown('''
+Your text and the whole corpus are reduced to a stream of Hebrew base letters:
+final forms are folded to their normal form, and everything else \u2014 nikkud,
+cantillation, punctuation, digits, Latin characters and all whitespace \u2014 is
+dropped. The engine then looks for the longest passages the two streams share.
+
+Because it never sees a word boundary, it is unaffected by the things that most
+often break a word-based search of manuscript text: a scribe who splits or joins
+words differently, a transcription that reads one letter wrong, a line break in
+the middle of a word.
+
+Three controls shape the result:
+
+- **Match width** \u2014 how close a passage must be to count. Narrow finds
+  near-identical text; wider settings admit more variation and more noise.
+- **Minimum length** \u2014 how long a shared passage must be. Short settings
+  surface formulaic phrases; longer settings keep only substantial overlap.
+- **Search depth** \u2014 how hard the engine looks. Deeper settings find more and
+  cost proportionally more time (roughly one second, six seconds and twenty
+  seconds per search).
+            ''').style('color: var(--text-secondary);').classes('mb-4')
+
+        if passage_multi_witness_available():
+            h3('Searching With Several Witnesses', classes='text-lg font-semibold mb-2', style='color: var(--text-primary);')
+            ui.markdown('''
+One copy of a work is rarely enough to find all the others. If you have several
+manuscript copies of the same composition, the **Witnesses** panel lets you
+search with all of them at once and merges the results into one list.
+
+Each witness is searched **separately** and the lists are then combined by rank.
+They are never joined into one long query \u2014 that measurably finds *less* than
+the best single witness would, because each search has a fixed budget to spend
+and a long query spreads it too thin.
+
+**Adding witnesses** \u2014 paste them with **Add witness text** (tick the box if
+your paste holds several copies separated by blank lines and they will be split
+apart), or tick results you already have and press **Search with these too**.
+**Auto-expand** repeats that promotion for you over several rounds.
+
+**What it costs.** Reach goes up and the top of the list gets noisier: more
+manuscripts are found, but more of the first page is irrelevant. The sort
+control reorders by combined score, by best single match, or by how many
+witnesses point at each manuscript \u2014 the last is often the quickest way to see
+which results are well attested.
+
+**Witness quality varies enormously.** In one measured set of ten manuscript
+witnesses, six found nothing at all and added thousands of junk rows, while the
+best found nineteen genuine parallels. Each witness shows how many matches it
+contributed, and removing it takes its rows with it.
+            ''').style('color: var(--text-secondary);').classes('mb-4')
+
+        h3('How Chunk Search Works', classes='text-lg font-semibold mb-2', style='color: var(--text-primary);')
         ui.markdown('''
 Unlike a regular search, the engine does **not** search for the entire text as a single unit. The process works as follows:
 
@@ -1074,6 +1151,9 @@ You can also search in Lab mode, using an algorithm based on the **Shmidman-Kopp
 
         h3('Important Parameters', classes='text-lg font-semibold mb-2', style='color: var(--text-primary);')
         ui.markdown('''
+These belong to **chunk search** and Lab mode. Letter-level search has its own
+three controls, described above.
+
 - **Chunk Size:** The number of words in each search unit. A low value (2\u20133) will result in slower search and many irrelevant results; a high value (10+) may miss true matches.
 - **Search Mode:** Like regular search\u2014Exact, Variants, or Fuzzy.
 - **Variant Level / Num Changes:** Controls flexibility of letter substitutions (see Search Modes above).
@@ -1118,7 +1198,14 @@ Results are **grouped by manuscript** and sorted by score:
 - **Max Score:** The highest-scoring match found in that manuscript
 - **Avg Score:** Average score across all matches in the manuscript
 
-Click on a result to expand and see your source chunk alongside the matching manuscript text, with matching words **highlighted** for easy comparison.
+What the score counts depends on the method: in **letter-level search** it is
+the number of letters the two texts share in that match, so a longer shared
+passage scores higher. In **chunk search** it reflects the quality of a matching
+chunk. The two are not comparable to each other, and a result list only ever
+contains one method's scores.
+
+Click on a result to expand and see your source text alongside the matching
+manuscript text, with the matching part **highlighted** for easy comparison.
         ''').style('color: var(--text-secondary);')
 
     # === Joins Lab ===
@@ -1747,7 +1834,46 @@ def _create_hebrew_content(precision=None, band_counts=None):
 כלי זה מיועד לחוקרים המעוניינים למצוא **טקסטים מקבילים** לחיבור ספרותי שלם (כגון פיוט, פירוש מימי הביניים או יצירה נדירה אחרת) בתוך הגניזה, ובכך לאתר עדי נוסח נוספים – ישירים ועקיפים.
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
 
-        h3('איך זה עובד?', classes='text-lg font-semibold mb-2', style='color: var(--text-primary); direction: rtl; text-align: right;')
+        if passage_available():
+            h3('בחירת שיטת חיפוש', classes='text-lg font-semibold mb-2', style='color: var(--text-primary); direction: rtl; text-align: right;')
+            ui.markdown('''
+בדף קיימות שתי שיטות חיפוש, הנבחרות בכפתורי הבחירה שמעל תיבת הטקסט.
+
+**חיפוש ברמת האות הוא ברירת המחדל, והוא המומלץ אלא אם כן דרושה לכם יכולת מסוימת של השנייה.** הוא משווה את הטקסט שלכם למאגר כרצף של אותיות ולא כרצף של מילים, ולכן הבדלי כתיב, חלוקת מילים, פיסוק ושיבושי פענוח אינם שוברים התאמה. הוא מחזיר תשובה תוך כשנייה, במקום דקות בשיטה הוותיקה, ובהשוואה מדורגת של חיפושים אמיתיים הוא החזיר הרבה פחות תוצאות לא רלוונטיות.
+
+**חיפוש מקטעים** הוא השיטה הוותיקה, שנשמרה משום שהיא מאפשרת דברים שחיפוש ברמת האות אינו מאפשר: מצבי מדויק / וריאנטים / מקורב ברמת המילה, סינון חוצה-פסקאות, וגודל מקטע ניתן לכיול. היא איטית בהרבה.
+
+שני הבדלים שמצפים להם ואינם קיימים: **שתי השיטות מתעלמות מניקוד**, ו**שתיהן מתייחסות לשבירת שורה כאל רווח רגיל**. אין באלו סיבה להעדיף אחת על פני האחרת.
+            ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
+
+            h3('איך עובד חיפוש ברמת האות?', classes='text-lg font-semibold mb-2', style='color: var(--text-primary); direction: rtl; text-align: right;')
+            ui.markdown('''
+הטקסט שלכם והמאגר כולו מצומצמים לרצף של אותיות עבריות בלבד: אותיות סופיות מוחלפות לצורתן הרגילה, וכל השאר – ניקוד, טעמים, פיסוק, ספרות, אותיות לועזיות וכל רווח – נשמט. המנוע מחפש אז את הקטעים הארוכים ביותר המשותפים לשני הרצפים.
+
+משום שהוא אינו רואה גבולות מילים, הוא חסין בפני הדברים ששוברים לרוב חיפוש מבוסס-מילים בכתבי יד: סופר שחילק או חיבר מילים אחרת, פענוח שקרא אות אחת בטעות, או שבירת שורה באמצע מילה.
+
+שלושה בקרים מעצבים את התוצאה:
+
+- **רוחב התאמה** – כמה קרוב חייב קטע להיות כדי להיספר. צר מוצא טקסט כמעט זהה; הגדרות רחבות יותר מקבלות יותר שונות וגם יותר רעש.
+- **אורך מינימלי** – כמה ארוך חייב להיות קטע משותף. הגדרות קצרות מעלות צירופים נוסחאיים; ארוכות משאירות רק חפיפה משמעותית.
+- **עומק החיפוש** – כמה קשה המנוע מחפש. הגדרות עמוקות יותר מוצאות יותר, ועולות בזמן בהתאם (בערך שנייה, שש שניות ועשרים שניות לחיפוש).
+            ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
+
+        if passage_multi_witness_available():
+            h3('חיפוש עם כמה עדי נוסח', classes='text-lg font-semibold mb-2', style='color: var(--text-primary); direction: rtl; text-align: right;')
+            ui.markdown('''
+עד נוסח אחד של חיבור אינו מספיק בדרך כלל כדי למצוא את כל האחרים. אם בידכם כמה עדי נוסח של אותו חיבור, פאנל **עדי נוסח** מאפשר לחפש בכולם בבת אחת וממזג את התוצאות לרשימה אחת.
+
+כל עד נוסח נשלח לחיפוש **בנפרד**, והרשימות ממוזגות לפי דירוג. הם לעולם אינם מחוברים לשאילתה ארוכה אחת – מדידות מראות שחיבור כזה מוצא *פחות* מעד הנוסח הטוב ביותר לבדו, משום שלכל חיפוש תקציב קבוע, ושאילתה ארוכה מפזרת אותו דק מדי.
+
+**הוספת עדי נוסח** – הדביקו אותם במקש **הוסף טקסט עד נוסח** (סמנו את תיבת הסימון אם ההדבקה מכילה כמה עדים המופרדים בשורות ריקות, והם יפוצלו), או סמנו תוצאות שכבר בידכם ולחצו **חפש גם באלו**. **הרחבה אוטומטית** חוזרת על פעולה זו עבורכם על פני כמה סבבים.
+
+**המחיר.** ההיקף גדל וראש הרשימה נעשה רועש יותר: נמצאים יותר כתבי יד, אך חלק גדול יותר מהעמוד הראשון אינו רלוונטי. בקרת המיון מאפשרת לסדר מחדש לפי ציון משולב, לפי ההתאמה הטובה ביותר, או לפי מספר עדי הנוסח המצביעים על כל כתב יד – האחרון הוא לעיתים הדרך המהירה ביותר לראות אילו תוצאות מבוססות היטב.
+
+**איכות עדי הנוסח משתנה מאוד.** בקבוצה שנמדדה של עשרה עדי נוסח, שישה לא מצאו דבר והוסיפו אלפי שורות רעש, בעוד שהטוב ביותר מצא תשע עשרה מקבילות אמיתיות. ליד כל עד נוסח מוצג כמה תוצאות תרם, והסרתו מסירה את שורותיו איתו.
+            ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
+
+        h3('איך עובד חיפוש מקטעים?', classes='text-lg font-semibold mb-2', style='color: var(--text-primary); direction: rtl; text-align: right;')
         ui.markdown('''
 בניגוד לחיפוש רגיל, המנוע **לא** מחפש את הטקסט כולו כמקשה אחת. התהליך מתבצע כך:
 
@@ -1761,6 +1887,8 @@ def _create_hebrew_content(precision=None, band_counts=None):
 
         h3('פרמטרים חשובים', classes='text-lg font-semibold mb-2', style='color: var(--text-primary); direction: rtl; text-align: right;')
         ui.markdown('''
+אלו שייכים ל**חיפוש מקטעים** ולמצב מעבדה. לחיפוש ברמת האות שלושה בקרים משלו, המתוארים למעלה.
+
 - **גודל מקטע:** מספר המילים בכל יחידת חיפוש. ערך נמוך (2–3) יגרור חיפוש איטי ותוצאות לא רלוונטיות רבות; ערך גבוה (10+) עלול להחמיץ התאמות אמיתיות.
 - **מצב חיפוש:** כמו בחיפוש רגיל — מדויק, וריאנטים, או מקורב.
 - **רמת וריאנטים / מספר שינויים:** שליטה בגמישות חילופי האותיות (ראו מצבי חיפוש לעיל).
@@ -1801,6 +1929,8 @@ def _create_hebrew_content(precision=None, band_counts=None):
 התוצאות **מקובצות לפי כתב יד** וממוינות לפי ציון:
 - **ציון מקסימלי:** ההתאמה בעלת הציון הגבוה ביותר שנמצאה בכתב היד
 - **ציון ממוצע:** ממוצע הציונים של כל ההתאמות בכתב היד
+
+מה שהציון סופר תלוי בשיטה: ב**חיפוש ברמת האות** זהו מספר האותיות המשותפות לשני הטקסטים באותה התאמה, ולכן קטע משותף ארוך יותר מקבל ציון גבוה יותר. ב**חיפוש מקטעים** הוא משקף את איכות המקטע שהותאם. השניים אינם ברי-השוואה זה לזה, ורשימת תוצאות מכילה תמיד ציונים של שיטה אחת בלבד.
 
 לחצו על תוצאה כדי להרחיב ולראות את המקטע מהמקור שלכם לצד הטקסט המקביל מכתב יד הגניזה, עם מילים תואמות **מודגשות** להשוואה קלה.
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')

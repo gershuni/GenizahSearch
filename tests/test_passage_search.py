@@ -19,7 +19,8 @@ from shared.passage_builder import build_index  # noqa: E402
 from shared.passage_index import open_index  # noqa: E402
 from shared.passage_normalize import norm_stream_fast  # noqa: E402
 from shared.passage_policy import (  # noqa: E402
-    DEFAULT_POLICY, FLAT_25, PRESETS, STANDARD_40, PassagePolicy, get_preset,
+    DEFAULT_POLICY, FLAT_25, LENGTH_PROFILES, PRESETS, STANDARD_40,
+    PassagePolicy, compose, get_preset,
 )
 from shared.passage_search import search_passage  # noqa: E402
 
@@ -101,6 +102,9 @@ def test_presets_are_registered_and_default_is_standard_40():
                             # max-40: the GUI's "Maximal" step (owner,
                             # 2026-08-23, Birkat Hamazon session)
                             'max-40',
+                            # short-28: the measured point on the SECOND
+                            # axis -- passage length (spec section 8.1)
+                            'short-28',
                             'flat-25', 'flat-25-noisy'}
     with pytest.raises(ValueError):
         get_preset('slider-17')
@@ -329,3 +333,200 @@ def test_no_cap_admits_the_same_grams_as_an_effectively_unlimited_cap(
         'no-cap and an unlimited cap admit the same grams by definition; they '
         'disagreed, so one of them is in the wrong index space'
     )
+
+
+# ---------------------------------------------------------------------------
+# Policy identity across schema growth. The seven presets that predate the
+# 2026-08-24 fields keep the ids their ledger measurements were recorded
+# under (shared/retrieval_eval.py keys on policy_id); pinned so a future
+# field addition cannot silently orphan them again.
+# ---------------------------------------------------------------------------
+
+_MEASURED_PRESET_IDS = {
+    'standard-40': 'pp1-dfd44076cf548ea5',
+    'standard-40-noisy': 'pp1-a23d529e202fe27f',
+    'flat-25': 'pp1-1257aa52cd805830',
+    'wide-40': 'pp1-15deb93f5e8bd8b9',
+    'wider-40': 'pp1-b8e2c872ae959003',
+    'widest-40': 'pp1-c10214cb51ce763d',
+    'max-40': 'pp1-73d07b8e18eb1215',
+}
+
+
+def test_presets_keep_their_measured_ids():
+    for name, pid in _MEASURED_PRESET_IDS.items():
+        assert get_preset(name).policy_id == pid
+
+
+# ---------------------------------------------------------------------------
+# compose(): the two-axis control surface (width x passage length).
+# ---------------------------------------------------------------------------
+
+def test_compose_normal_is_the_width_preset_itself():
+    for name in _MEASURED_PRESET_IDS:
+        assert compose(name) is get_preset(name)
+        assert compose(name, 'normal') is get_preset(name)
+
+
+def test_compose_short_moves_both_coupled_parameters():
+    """min_span and verify_margin are ONE decision (spec 8.1); the profile
+    must move both or it silently does nothing."""
+    base, short = get_preset('widest-40'), compose('widest-40', 'short')
+    assert (base.min_span, base.verify_margin) == (40, 30)
+    assert (short.min_span, short.verify_margin) == (28, 12)
+    # width is preserved, identity is distinct and self-describing
+    assert short.density_scale == base.density_scale
+    assert short.name == 'widest-40+short'
+    assert short.policy_id != base.policy_id
+
+
+def test_compose_rejects_an_unknown_profile():
+    with pytest.raises(ValueError):
+        compose('widest-40', 'medium-ish')
+    with pytest.raises(ValueError):
+        compose('no-such-width', 'short')
+
+
+def test_every_offered_combination_is_a_distinct_named_policy():
+    """The surface offers a small discrete grid, not a slider: each cell
+    must be nameable and separately identifiable."""
+    from shared.passage_policy import DEPTH_PROFILES
+    ids, names = set(), set()
+    for width in _MEASURED_PRESET_IDS:
+        for length in LENGTH_PROFILES:
+            for depth in DEPTH_PROFILES:
+                p = compose(width, length, depth)
+                ids.add(p.policy_id)
+                names.add(p.name)
+    expected = (len(_MEASURED_PRESET_IDS) * len(LENGTH_PROFILES)
+                * len(DEPTH_PROFILES))
+    assert len(ids) == len(names) == expected
+
+
+# ---------------------------------------------------------------------------
+# compose(): the THIRD axis -- search depth (posting/verify/candidate
+# budgets moved together). Measured 2026-08-24 on the Antiochus deck:
+# the default posting budget admits <5% of a 6K-letter query's postings,
+# and verify_cap 3,000 vs 26K candidates crowds real witnesses below the
+# cap. DEPTH_PROFILES in shared/passage_policy.py carries the numbers.
+# ---------------------------------------------------------------------------
+
+def test_compose_normal_depth_is_the_width_preset_itself():
+    for name in _MEASURED_PRESET_IDS:
+        assert compose(name, 'normal', 'normal') is get_preset(name)
+
+
+def test_compose_deep_moves_all_three_coupled_budgets():
+    """posting_budget, verify_cap and candidate_cap are ONE decision: more
+    budget without more verification changes almost nothing (measured), so
+    the profile must move all three or it silently underdelivers."""
+    base = get_preset('max-40')
+    deep = compose('max-40', 'short', 'deep')
+    assert (base.posting_budget, base.verify_cap, base.candidate_cap) \
+        == (500_000, 3_000, 200_000)
+    assert (deep.posting_budget, deep.verify_cap, deep.candidate_cap) \
+        == (2_000_000, 50_000, 500_000)
+    deepest = compose('max-40', 'normal', 'deepest')
+    assert (deepest.posting_budget, deepest.verify_cap,
+            deepest.candidate_cap) == (5_000_000, 50_000, 500_000)
+    # width and length are preserved; identity is distinct, self-describing
+    assert deep.density_scale == base.density_scale
+    assert (deep.min_span, deep.verify_margin) == (28, 12)
+    assert deep.name == 'max-40+short+deep'
+    assert deepest.name == 'max-40+deepest'
+    assert len({base.policy_id, deep.policy_id, deepest.policy_id}) == 3
+
+
+def test_compose_rejects_an_unknown_depth():
+    with pytest.raises(ValueError):
+        compose('widest-40', 'normal', 'bottomless')
+
+
+# ---------------------------------------------------------------------------
+# verify_margin: below MIN_SPAN 40 the margin, not the span floor, decides.
+# Measured 2026-08-24 after the anchor tier failed on the Antiochus deck.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope='module')
+def short_name_index(tmp_path_factory):
+    """A 'translation': it shares only three SHORT contiguous runs with the
+    query, the way a Judeo-Arabic version shares transliterated proper nouns
+    (identical Hebrew letters) and nothing else. Also a clean copy and a
+    15%-CER noisy copy, so a margin change cannot quietly break the cases
+    that already work."""
+    d = str(tmp_path_factory.mktemp('pmargin'))
+    ref = _aperiodic(500, salt=4242)
+    names = [_aperiodic(9, salt=11), _aperiodic(12, salt=22),
+             _aperiodic(7, salt=33)]
+    parts = [ref]
+    for i, nm in enumerate(names):
+        parts += [_aperiodic(300, salt=100 + i), nm]
+    query = ''.join(parts)
+
+    def noisy(s, rate=0.15):
+        x, out = 13, []
+        for ch in s:
+            x = (x * 1_103_515_245 + 12_345) & 0x7FFFFFFF
+            out.append(chr(ALEF + ((x >> 11) % 22))
+                       if (x >> 7) % 100 < rate * 100 else ch)
+        return ''.join(out)
+
+    records = [
+        ('verbatim', _aperiodic(80, salt=1) + ref + _aperiodic(80, salt=2)),
+        ('noisy_copy', _aperiodic(80, salt=3) + noisy(ref)
+         + _aperiodic(80, salt=4)),
+        ('translation', ''.join(_aperiodic(200, salt=700 + i) + nm
+                                for i, nm in enumerate(names))),
+    ]
+    for r in range(40):
+        records.append((f'unrel{r:03d}', _aperiodic(700, salt=3000 + r)))
+    build_index(records, d, partitions=2, apply_hygiene=False)
+    idx = open_index(d)
+    assert idx is not None
+    return idx, query
+
+
+def _found(idx, query, **kw):
+    policy = PassagePolicy(name='t-margin', density_scale=1.8,
+                           verify_cap=200_000, candidate_cap=2_000_000, **kw)
+    hits, report = search_passage(idx, query, policy)
+    return {h.record_id for h in hits}, report
+
+
+def test_lowering_min_span_alone_changes_nothing(short_name_index):
+    """The negative half of the finding, and the reason this is a policy
+    field: at the default margin, dropping the span floor moves every
+    rejection from rejected_short to rejected_density and finds nothing
+    new."""
+    idx, query = short_name_index
+    wide, r_wide = _found(idx, query, min_span=40)
+    short, r_short = _found(idx, query, min_span=10)
+    assert 'translation' not in wide
+    assert 'translation' not in short, (
+        'min_span alone must NOT be credited with finding short matches')
+    assert r_short.rejected_short == 0 and r_short.rejected_density > 0
+
+
+def test_a_small_margin_is_what_finds_short_shared_names(short_name_index):
+    idx, query = short_name_index
+    ids, _r = _found(idx, query, min_span=10, verify_margin=8)
+    assert 'translation' in ids, (
+        'a 9-letter true match is only judgeable over a window near its own '
+        'size; margin 30 scores it across ~70 letters of unrelated text')
+    # And the cases that already work must survive the change.
+    assert {'verbatim', 'noisy_copy'} <= ids
+    assert not any(i.startswith('unrel') for i in ids)
+
+
+def test_the_default_margin_is_unchanged_for_long_spans(short_name_index):
+    """verify_margin is new; every policy that does not set it must behave
+    exactly as before, which is what keeps the pre-existing policy_ids
+    honest."""
+    idx, query = short_name_index
+    assert PassagePolicy(name='x').verify_margin == 30
+    assert (PassagePolicy(name='x').policy_id
+            == PassagePolicy(name='x', verify_margin=30).policy_id)
+    assert (PassagePolicy(name='x').policy_id
+            != PassagePolicy(name='x', verify_margin=8).policy_id)
+    with pytest.raises(ValueError):
+        PassagePolicy(name='x', verify_margin=-1)

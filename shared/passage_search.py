@@ -39,7 +39,9 @@ from shared.passage_policy import (
 )
 
 BAND = 20          # diagonal bucket width, letters (spec section 6)
-MARGIN = 30        # verification extension, letters (spec section 7)
+MARGIN = 30        # DEFAULT verification extension (spec section 7). The
+                   # live value is policy.verify_margin -- below MIN_SPAN 40
+                   # this parameter decides the result, see the policy field.
 MERGE_GAP = 30     # per-record span merge gap (track1_match convention)
 
 
@@ -52,7 +54,6 @@ class PassageHit:
     n_spans: int
     spans: list                  # [(q0, q1, r0, r1, density), ...] merged
     score: float                 # = matched_letters (comparable to chunk path)
-
 
 @dataclass
 class QueryReport:
@@ -239,6 +240,13 @@ def _candidates(idx: PassageIndex, codes: np.ndarray, qpos: np.ndarray,
 
     report.candidates = int(keep.sum())
     kept_groups = np.flatnonzero(keep)
+
+    min_q = np.minimum.reduceat(qp, starts)
+    max_q = np.maximum.reduceat(qp, starts)
+    min_r = np.minimum.reduceat(rp, starts)
+    max_r = np.maximum.reduceat(rp, starts)
+    g_rec = rec[starts]
+
     # Order candidates by EVIDENCE STRENGTH (distinct anchors, descending),
     # tie-broken by (record, bucket) for determinism. The first version
     # ordered by (record, bucket) alone, which under a firing verify cap
@@ -253,11 +261,6 @@ def _candidates(idx: PassageIndex, codes: np.ndarray, qpos: np.ndarray,
         report.candidates_truncated = True
         kept_groups = kept_groups[:policy.candidate_cap]
 
-    min_q = np.minimum.reduceat(qp, starts)
-    max_q = np.maximum.reduceat(qp, starts)
-    min_r = np.minimum.reduceat(rp, starts)
-    max_r = np.maximum.reduceat(rp, starts)
-    g_rec = rec[starts]
     return (g_rec[kept_groups], min_q[kept_groups], max_q[kept_groups],
             min_r[kept_groups], max_r[kept_groups])
 
@@ -282,8 +285,9 @@ def _verify_and_merge(idx: PassageIndex, qstream: str, cand, policy:
         n_verified += 1
         ri = int(g_rec[i])
         rstream = idx.stream(ri)
-        q0 = max(0, int(min_q[i]) - MARGIN)
-        q1 = min(len(qstream), int(max_q[i]) + K + MARGIN)
+        margin = policy.verify_margin
+        q0 = max(0, int(min_q[i]) - margin)
+        q1 = min(len(qstream), int(max_q[i]) + K + margin)
         # MIRRORED extension -- an arrangement-C necessity the research code
         # never needed. Its streamed side was always a full page, so +-MARGIN
         # on both sides extended into real flanking text symmetrically. Here
@@ -374,5 +378,6 @@ def search_passage(idx: PassageIndex, query_text: str,
             best_density=min(d for *_x, d in spans),
             n_spans=len(spans), spans=spans, score=float(matched)))
     hits.sort(key=lambda h: (-h.score, h.record))
+
     report.seconds = round(time.time() - t0, 4)
     return hits, report

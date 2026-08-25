@@ -1039,7 +1039,91 @@ and a repo lint fails CI if a new site spells its own.
   the anti-corruption property and the Phase 95 regression; three mutations (re-widening a
   site, un-anchoring the pattern, over-narrowing a desktop parser) each fail it distinctly.
   `scripts/check_sys_id_prefixes.py` re-takes the measurement, since the corpus grows.
+- **The witness panel's pattern came in with the multi-witness merge and was narrowed too.**
+  `web/pages/parallels.py::WITNESS_SYS_ID_RE` had consolidated three copies on that page into
+  one — the right fix — but chose the wide dialect on the premise that 97-prefixed
+  *manuscripts* exist. They do not. And once the engine it deliberately mirrors
+  (`shared/passage_parallels.py`) became corpus-only, staying wide would have recreated the
+  divergence pointing the other way: the page admitting a witness the engine cannot resolve.
+  The page's own "exactly one pattern" guard is kept and strengthened — it now asserts the
+  page holds no pattern of its own at all.
+- **The verification script's index walk was broken, and a review caught it.** Two defects,
+  both on the one path nothing ever executed: the repo root was missing from `sys.path`, so
+  the documented `--index` invocation died on `ModuleNotFoundError`; and the walk called
+  `Searcher.segment_readers()`, which the Tantivy Python binding does not expose. It now
+  pages a match-all query through the supported API, and refuses to report a clean result off
+  a short walk — a partial scan is indistinguishable from a corpus with no 97 in it. Covered
+  now by tests that build a real index and run the script as documented.
 
+### Letter-level search with several witnesses of one work (2026-08-24)
+
+One text per work is not enough, and no budget increase fixes that. Measured through the shipped
+code against the 614 Birkat Hamazon census manuscripts that have any indexed text: the best single
+witness finds **348 (56.7%)**, while the same 17 searched **separately and merged** find
+**455 (74.1%)**. On
+Megillat Antiochus, a seed plus three rounds of promoted witnesses took frontier coverage from 2 to
+9 of 20.
+
+- **A Witnesses panel on `/parallels`**, letter-level only. Add copies of the work by pasting
+  them (one at a time, or a whole file split on blank lines with a preview of what the split
+  found — and a count of anything dropped as too short), or promote manuscripts straight from
+  your own results. Each witness is searched on its own and the results are merged into one
+  re-sortable list that says which witnesses point at each manuscript.
+- **`witnesses[]` on `POST /api/parallels`** (`method='passage'`), with `sort` over the fused
+  groups and a `witness_fusion` block on each result. An entry is either a pasted `text` or a
+  `raw_header` the server resolves — so a recursive request stays small.
+- **Auto-expand (optional)**: seed → top-K → repeat. Measured frontier coverage 2 → 4 → 7 → 9 of
+  20 over three rounds, monotone, with all 15 promoted witnesses graded positive. It is an
+  explicit button with the trade-off written beside it, never folded into "Find Parallels": the
+  cost is the first page — rows go from 191 to 2,795 and positives in the top 100 fall from 48 to
+  32. Reach up, precision down.
+- **Never concatenated.** Joining witnesses into one query starves the engine's per-query posting
+  budget. The 17 witnesses joined into one 33,180-character query admit 2.4% of their own postings
+  and reach **48.2%** — *worse than the best single witness* — against 74.1% fused; every
+  concatenated Antiochus recursion round likewise scored below the seed alone. Fusion is by
+  **rank** (RRF, k=60), not score — a
+  passage score counts matched *query* letters, so a long witness mechanically outscores a short
+  one for reasons unrelated to match quality.
+- **Scoped to letter-level, as a measurement rather than an assumption.** On the chunk engine,
+  concatenation and union return the identical manuscript set (392 both ways, empty difference in
+  both directions), so there is no budget to starve — desktop's recursive composition search is
+  correct as it stands — and multi-witness there buys +2 positives of 74 with zero frontier gain
+  at 4–6× the time. The witness panel stays hidden for chunk, cross-paragraph and combined.
+- **Fixed while passing through**: the results list's group order was hard-coded to top score
+  regardless of the sort control, so two of its three options — *Sort by shelfmark* and *Sort by
+  matches* — had never had any visible effect.
+
+Behind `PASSAGE_MULTI_WITNESS_ENABLED` (ANDed with the existing passage readiness check), with
+`SEARCH_API_PASSAGE_MAX_WITNESSES` (default 25) as the cost control. Full contract in
+`docs/SEARCH_API.md`; the measurements and their scope in
+`docs/specs/passage-matching-algorithm.md` §10.2b.
+
+### Letter-level search: a second control axis — passage length (2026-08-24)
+
+The Match-width control assumed one dimension. Chasing the Antiochus recall gap turned up a
+second, and a parameter that had been deciding results invisibly.
+
+- **`verify_margin` is now policy.** Verification extends a match by 30 letters each side before
+  scoring edit density. At a span floor of 40 that is harmless overhead; below ~25 it *is* the
+  result — a true 9-letter shared run gets scored across ~70 letters of unrelated flanking text
+  and rejected at ~0.85 density. Consequence, measured: **lowering `min_span` alone does
+  nothing**, because the floor is checked against the margin-extended window. The two move
+  together or not at all.
+- **New "Passage length" control** — *Normal passages* (40, 30) or *Also short passages*
+  (28, 12) — beside the existing Match width. On the Antiochus query against an 83-positive
+  adjudicated deck, `short` takes widest-40 from 56 manuscripts at 100% precision / 67% recall to
+  104 at 61% / 72%: five more graded positives, plus one witness **no method had found before**,
+  word-chunk matching included (MS heb. e.45/36, catalogued מגילת אנטיוכוס). It does not reach
+  cross-language witnesses, and it roughly doubles what you skim.
+- **Two selects, not sliders.** `min_span` and `verify_margin` are one coupled decision; a slider
+  on the floor alone would visibly do nothing and read as broken. Each offered combination stays
+  a named, content-hashed policy, and passage length now forms part of the search identity used
+  by preserve/recover.
+- **The anchor-evidence tier is removed.** It was measured twice against the same deck and failed
+  both times — 4% then 1% precision inside the tier, recovering 4 then 1 of the 20 witnesses it
+  was built for. Counting shared grams ranks by record length, and rarity-gating merely resampled
+  the same noise. The negative result is kept in the spec (section 10.4) so it is not reinvented.
+- Pre-existing presets keep byte-identical behaviour and `policy_id`s.
 
 ### Download the computed identifications as a spreadsheet (2026-08-21)
 

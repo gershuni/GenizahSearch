@@ -1028,10 +1028,19 @@ class ExportService:
         self,
         main_results: List[Dict[str, Any]],
         filtered_results: List[Dict[str, Any]] = None,
-        source_text: str = ""
+        source_text: str = "",
+        witnesses: List[Dict[str, Any]] = None,
     ) -> tuple:
         """
         Export parallels results to Excel format.
+
+        `witnesses` is the manifest of a multi-witness letter-level search
+        (label / kind / sys_id -- never the texts). When present, the sheet
+        gains a "Witness" column naming which witness found each row, and a
+        second sheet lists what the search was run with. Both are CONDITIONAL:
+        a column empty on every row of an ordinary export is noise, and making
+        it unconditional would change the shape of every workbook this project
+        has produced.
 
         Returns:
             (bytes, filename) tuple
@@ -1048,12 +1057,18 @@ class ExportService:
 
         wb, ws = create_excel_workbook("Parallels Results")
 
+        multi_witness = bool(witnesses)
         headers = ["#", "Shelfmark", "Library", "Title", "Score", "Source Context", "Manuscript Match", "Filtered"]
+        widths = {
+            'A': 6, 'B': 25, 'C': 15, 'D': 35, 'E': 10, 'F': 50, 'G': 60, 'H': 10,
+        }
+        if multi_witness:
+            headers += ["Witness", "Witnesses"]
+            widths['I'] = 28
+            widths['J'] = 12
         style_excel_header(ws, headers)
 
-        set_excel_column_widths(ws, {
-            'A': 6, 'B': 25, 'C': 15, 'D': 35, 'E': 10, 'F': 50, 'G': 60, 'H': 10,
-        })
+        set_excel_column_widths(ws, widths)
 
         rtl_align = get_cell_alignment('rtl')
         ltr_align = get_cell_alignment('ltr')
@@ -1081,6 +1096,14 @@ class ExportService:
                     None,  # Manuscript Match -- rich-text below.
                     'Yes' if is_filtered else '',
                 ]
+                if multi_witness:
+                    # The WINNING witness -- the one whose text produced the
+                    # highlighted Source Context in this row. Blank means the
+                    # seed text found it.
+                    row += [
+                        sanitize_text_for_excel(item.get('witness_label') or ''),
+                        item.get('witness_count') or 1,
+                    ]
                 ws.append(row)
 
                 current_row = ws.max_row
@@ -1102,12 +1125,32 @@ class ExportService:
                 ws.cell(row=current_row, column=6).alignment = rtl_align     # Source Context
                 ws.cell(row=current_row, column=7).alignment = rtl_align     # Manuscript Match
                 ws.cell(row=current_row, column=8).alignment = center_align  # Filtered
+                if multi_witness:
+                    ws.cell(row=current_row, column=9).alignment = rtl_align     # Witness
+                    ws.cell(row=current_row, column=10).alignment = center_align  # Witnesses
 
             return start_idx + len(results)
 
         next_idx = add_results(main_results or [], 1, False)
         if filtered_results:
             add_results(filtered_results, next_idx, True)
+
+        if multi_witness:
+            # What the search was run WITH, on its own sheet -- so a workbook
+            # that outlives the session still says where its rows came from.
+            # Labels and shelfmarks only; a witness text can be 20,000
+            # characters and the file would be mostly query.
+            ws_w = wb.create_sheet("Witnesses")
+            w_headers = ["#", "Witness", "Kind", "Shelfmark ID"]
+            style_excel_header(ws_w, w_headers)
+            set_excel_column_widths(ws_w, {'A': 6, 'B': 40, 'C': 14, 'D': 24})
+            for w_idx, witness in enumerate(witnesses, 1):
+                ws_w.append([
+                    w_idx,
+                    sanitize_text_for_excel(witness.get('label') or ''),
+                    sanitize_text_for_excel(witness.get('kind') or ''),
+                    sanitize_text_for_excel(str(witness.get('sys_id') or '')),
+                ])
 
         add_excel_credits(ws)
 
@@ -1124,10 +1167,15 @@ class ExportService:
         self,
         main_results: List[Dict[str, Any]],
         filtered_results: List[Dict[str, Any]] = None,
-        source_text: str = ""
+        source_text: str = "",
+        witnesses: List[Dict[str, Any]] = None,
     ) -> tuple:
         """
         Export parallels results to Word format.
+
+        `witnesses`, when present, adds a "Searched with" line naming what the
+        multi-witness search was run with -- labels only, never the texts.
+        Conditional for the same reason as the xlsx column.
 
         Returns:
             (bytes, filename) tuple
@@ -1146,6 +1194,12 @@ class ExportService:
             doc.add_heading(f'Parallels for: "{source_preview}"', 0)
         else:
             doc.add_heading('Genizah Parallels Search Results', 0)
+
+        if witnesses:
+            names = ', '.join(
+                str(w.get('label') or '').strip() or '?' for w in witnesses)
+            doc.add_paragraph(f'Searched with {len(witnesses)} further '
+                              f'witness(es): {names}')
 
         def add_results(results: List[Dict], start_idx: int, section_title: str = None) -> int:
             if section_title:
