@@ -143,7 +143,17 @@ def _select_side(rows, side):
             'only the baseline found.\n'
             'Pass --side candidate | baseline | union.')
     keep = SIDE_KEEP[side]
-    return [r for r in rows if str(r.get('presence') or '') in keep]
+    picked = [r for r in rows if str(r.get('presence') or '') in keep]
+    if side == 'baseline' and picked and 'baseline_score' in picked[0]:
+        # `score` and `record_id` are the CANDIDATE's by contract (see the
+        # writer in compare_passage_policies.py). Reading them for the
+        # baseline would report the candidate's numbers under the baseline's
+        # name -- the same substitution this whole guard exists to stop, one
+        # column over. Repoint rather than teach `load_run` a second column
+        # vocabulary.
+        picked = [dict(r, score=r.get('baseline_score'),
+                       record_id=r.get('baseline_record_id')) for r in picked]
+    return picked
 
 
 def _rows_from_xlsx(path):

@@ -123,13 +123,41 @@ site:
   `manuscript_snippet`) is built for exactly the rows this method RETURNS
   (both `main` and `filtered`, each capped independently to `render_cap`
   groups) -- a BOUNDED re-normalization per the plan's display-span
-  contract. Row count per bucket is itself bounded upstream by
-  `policy.verify_cap` (default 3,000 -- shared/passage_policy.py: at most
-  one hit per verified candidate); at a measured ~1.3 ms/row render cost, a
-  worst-case full cap on BOTH buckets is a handful of seconds, comfortably
-  inside `SEARCH_API_PASSAGE_TIMEOUT` (30s default). This is an ACCEPTED
-  cost, not further sub-capped, specifically so "rendered == kept" holds
-  even in that worst case.
+  contract. Row count per bucket is bounded upstream by `policy.verify_cap`
+  (shared/passage_policy.py: at most one hit per verified candidate), at a
+  measured ~1.3 ms/row render cost. This is an ACCEPTED cost, not further
+  sub-capped, specifically so "rendered == kept" holds even in the worst
+  case.
+
+  **That bound is 3,000 only at `normal` depth.** This paragraph used to
+  say "default 3,000 ... comfortably inside SEARCH_API_PASSAGE_TIMEOUT
+  (30s)", which was true when written and stopped being true when the
+  search-depth axis raised `verify_cap` to 50,000 for `deep` and `deepest`
+  -- a 16x larger bound argued as safe on the smaller one (Codex review,
+  PR #328).
+
+  Measured rather than projected, on the real index (759,224 records) with
+  a real 7,562-char query at `max-40+short`:
+
+      depth     verify_cap    hits   search   render    total
+      normal         3,000     272     1.2s     0.4s     1.5s
+      deep          50,000     725     6.3s     0.9s     7.3s
+      deepest       50,000   2,431    15.5s     3.2s    18.6s
+
+  Acceptance runs at roughly 5% of `verify_cap`, not 100%, so the ~65s
+  render a full cap would imply does not occur. What HAS gone is the
+  margin: `deepest` spends about two thirds of the 30s budget where this
+  paragraph once described a tenth of it. The breach condition is roughly
+  **8,000 accepted rows** at `deepest` (or half that with a `filter_text`
+  set, since both buckets render) -- three times anything measured, but no
+  longer the comfortable distance the word "comfortably" claimed.
+
+  A render sub-cap was considered and NOT added: it would partially undo
+  the owner's 2026-08-23 ruling that `render_cap=0` exists so found
+  manuscripts stop being hidden (198 shown of 497 found on Birkat Hamazon),
+  and the measurement does not justify that price. Anyone widening
+  `verify_cap` further should redo the table above rather than trust this
+  one -- which is exactly the mistake this note records.
 * Two costs are deliberately NOT optimized away (adversarial review,
   "deliberately skipped" items): (1) `nfc()` runs twice per rendered row's
   manuscript text -- once explicitly here, once again inside

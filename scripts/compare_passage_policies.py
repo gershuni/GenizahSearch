@@ -293,19 +293,39 @@ def main() -> int:
             # write identical provenance and their archives cannot be told
             # apart. policy_id is a content hash, so it pins the settings even
             # for a composition nobody has named.
+            # `score`/`record_id` are the CANDIDATE's, and the baseline's
+            # get their own columns. They used to be whichever hit
+            # `cand.get(sid) or base[sid]` returned -- always the candidate
+            # for a `both` row -- so the baseline's score for a shared
+            # manuscript was simply discarded, and `--side baseline` in
+            # score_antiochus_deck.py would have read the candidate's number
+            # as the baseline's. Two policies that accept different spans, or
+            # pick a different best page for one manuscript, are exactly what
+            # the length and depth axes produce, so this is the common case
+            # rather than a corner.
+            #
+            # The old names keep their old meaning (the candidate's) so an
+            # existing reader is not silently repointed -- a column that
+            # changes meaning under a stable name is the defect this file has
+            # now hit twice.
             w.writerow(['sys_id', 'shelfmark', 'shelfmark_key', 'library',
                         'title', 'presence', 'score', 'score_unit',
                         'record_id',
+                        'baseline_score', 'baseline_record_id',
                         'baseline_policy', 'baseline_policy_id',
                         'candidate_policy', 'candidate_policy_id'])
             for sid in sorted(set(base) | set(cand)):
-                h = cand.get(sid) or base[sid]
-                presence = ('both' if sid in base and sid in cand
-                            else ('candidate_only' if sid in cand
+                b_hit, c_hit = base.get(sid), cand.get(sid)
+                presence = ('both' if b_hit and c_hit
+                            else ('candidate_only' if c_hit
                                   else 'baseline_only'))
                 sm, lib, title = label(sid)
                 w.writerow([sid, sm, shelfmark_key(sm), lib, title, presence,
-                            int(h.score), 'matched_letters', h.record_id,
+                            int(c_hit.score) if c_hit else '',
+                            'matched_letters',
+                            c_hit.record_id if c_hit else '',
+                            int(b_hit.score) if b_hit else '',
+                            b_hit.record_id if b_hit else '',
                             base_p.name, base_p.policy_id,
                             cand_p.name, cand_p.policy_id])
         print(f'\nwrote {args.csv}')
