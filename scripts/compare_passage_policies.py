@@ -38,7 +38,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from shared.passage_index import (  # noqa: E402
     MANIFEST_NAME, diagnose_index, open_index,
 )
-from shared.passage_policy import PRESETS, get_preset  # noqa: E402
+from shared.passage_policy import (  # noqa: E402
+    DEFAULT_DEPTH, DEFAULT_LENGTH, DEPTH_PROFILES, LENGTH_PROFILES, PRESETS,
+    compose,
+)
 from shelfmark_join import shelfmark_key  # noqa: E402,F401
 from shared.passage_search import search_passage  # noqa: E402
 
@@ -143,6 +146,23 @@ def main() -> int:
     ap.add_argument('--baseline', default='widest-40', choices=sorted(PRESETS))
     ap.add_argument('--candidate', default='short-28',
                     choices=sorted(PRESETS))
+    # The other two policy axes, per side. `--baseline`/`--candidate` name a
+    # WIDTH preset only, so before these existed the committed instrument
+    # could not express -- let alone reproduce -- the depth measurements this
+    # milestone rests on: `--candidate deep` was simply rejected by argparse,
+    # because `deep` lives in DEPTH_PROFILES and reaches a policy only through
+    # `compose()`. Per side, because the depth table compares depths against
+    # each other at a fixed width, which is a baseline-vs-candidate run.
+    for _side, _dflt in (('baseline', 'widest-40'), ('candidate', 'short-28')):
+        ap.add_argument(f'--{_side}-length', default=DEFAULT_LENGTH,
+                        choices=sorted(LENGTH_PROFILES),
+                        help=f'passage-length profile for the {_side} '
+                             f'(default: {DEFAULT_LENGTH})')
+        ap.add_argument(f'--{_side}-depth', default=DEFAULT_DEPTH,
+                        choices=sorted(DEPTH_PROFILES),
+                        help=f'search-depth profile for the {_side} '
+                             f'(default: {DEFAULT_DEPTH}). Deeper costs '
+                             f'proportionally more time')
     ap.add_argument('--libraries-csv', default='',
                     help='libraries.csv for shelfmarks (optional; '
                          'default: <index>/../libraries.csv then ./libraries.csv)')
@@ -155,7 +175,10 @@ def main() -> int:
     ap.add_argument('--min-span', type=int, default=0,
                     help='override the candidate policy min_span (0=keep). '
                          'Sweep together with --verify-margin: below 40 the '
-                         'margin, not the span floor, decides the result')
+                         'margin, not the span floor, decides the result. '
+                         'Applied ON TOP of --candidate-length, for sweeping '
+                         'BETWEEN the named points rather than instead of '
+                         'them')
     ap.add_argument('--verify-margin', type=int, default=-1,
                     help='override the candidate policy verify_margin '
                          '(-1=keep, 0 is legal and means no extension)')
@@ -190,7 +213,13 @@ def main() -> int:
                 break
     shelf = load_shelfmarks(csv_path)
 
-    base_p, cand_p = get_preset(args.baseline), get_preset(args.candidate)
+    # Through compose(), never a hand-rolled replace(): it is the shared
+    # entry point for all three axes, it derives the composed name, and
+    # policy_id is a content hash -- so a probe run stays traceable to
+    # exactly the settings that produced it.
+    base_p = compose(args.baseline, args.baseline_length, args.baseline_depth)
+    cand_p = compose(args.candidate, args.candidate_length,
+                     args.candidate_depth)
     overrides = {}
     if args.min_span:
         overrides['min_span'] = args.min_span
@@ -199,6 +228,8 @@ def main() -> int:
     if overrides:
         cand_p = replace(cand_p, name=f'{cand_p.name}+probe', **overrides)
         print(f'probe overrides: {overrides}')
+    if base_p.name != args.baseline or cand_p.name != args.candidate:
+        print(f'policies: baseline={base_p.name}  candidate={cand_p.name}')
     print(f'query: {len(text)} chars from {args.query_file}')
     print(f'index: {args.index}  ({idx.n_records:,} records)')
     if shelf:

@@ -282,12 +282,30 @@ def open_index(index_dir: str) -> Optional[PassageIndex]:
         if not os.path.isfile(ids_path):
             return None
 
-        def _map(name, dtype, shape=None):
-            return np.memmap(os.path.join(index_dir, name), dtype=dtype,
-                             mode='r', shape=shape)
+        def _map(name, dtype, count):
+            """Map `count` elements of `name`, or an empty array when count is 0.
 
-        gram_offsets = _map(GRAM_OFFSETS_NAME, '<u8',
-                            (GRAM_CODE_SPACE + 1,))
+            `np.memmap` RAISES on a zero-byte file, and a zero-length section
+            is not corruption: `_apply_df_cap` zeroes the histogram bucket of
+            every gram over the cap, so a small or low-diversity corpus can
+            legitimately produce an empty postings.bin. Such an index is
+            valid and simply matches nothing.
+
+            Guarded HERE rather than at the call sites because this is the
+            THIRD time the same hazard has been patched ad hoc in this
+            codebase -- `record_ids` below (guarded from the first commit,
+            so the hazard was known) and `streams` in passage_builder.py --
+            and each previous patch left the next call site exposed. The
+            result was a zero-postings index that `diagnose_index` called
+            "opens cleanly" while `open_index` returned None: exactly the
+            contradiction that docstring promises never to produce.
+            """
+            if not count:
+                return np.empty(0, dtype=dtype)
+            return np.memmap(os.path.join(index_dir, name), dtype=dtype,
+                             mode='r', shape=(count,))
+
+        gram_offsets = _map(GRAM_OFFSETS_NAME, '<u8', GRAM_CODE_SPACE + 1)
         # CSR sanity: monotone, starts at 0, ends at the declared total. A
         # non-monotone offsets array would slice postings from other grams.
         if int(gram_offsets[0]) != 0:
@@ -309,12 +327,11 @@ def open_index(index_dir: str) -> Optional[PassageIndex]:
         if not csr_is_monotone(gram_offsets):
             return None
         postings = _map(POSTINGS_NAME, np.uint8,
-                        (counts['n_postings'] * POSTING_BYTES,))
-        streams = _map(STREAMS_NAME, np.uint8, (counts['n_letters'],))
-        records = _map(RECORDS_NAME, RECORD_DTYPE, (counts['n_records'],))
-        ids_size = os.path.getsize(ids_path)
-        record_ids = (_map(RECORD_IDS_NAME, np.uint8, (ids_size,))
-                      if ids_size else np.empty(0, dtype=np.uint8))
+                        counts['n_postings'] * POSTING_BYTES)
+        streams = _map(STREAMS_NAME, np.uint8, counts['n_letters'])
+        records = _map(RECORDS_NAME, RECORD_DTYPE, counts['n_records'])
+        record_ids = _map(RECORD_IDS_NAME, np.uint8,
+                          os.path.getsize(ids_path))
         return PassageIndex(index_dir=index_dir, manifest=manifest,
                             gram_offsets=gram_offsets, postings=postings,
                             streams=streams, records=records,
