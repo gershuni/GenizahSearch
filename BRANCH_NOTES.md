@@ -1,4 +1,4 @@
-# Branch: `claude/antiochus-scroll-search-eval-uiesx5`
+# Branch: `claude/multi-witness-passage-search`
 
 **Multi-witness passage search** — searching one composition with several manuscript
 copies of it at once, on `/parallels` and `POST /api/parallels`.
@@ -7,7 +7,10 @@ copies of it at once, on `/parallels` and `POST /api/parallels`.
 > knows what was decided and, more importantly, **what was tried and rejected** — several
 > of the obvious implementations here are measurably wrong, not merely different.
 
-Base: `3e493cbf`. 14 commits, ~6,750 insertions across 31 files.
+Base: `3e493cbf`, the head of `claude/letter-level-search-policy` -- this PR
+is **stacked on that one** and its diff only makes sense against it.
+16 commits, 7,277 insertions across 32 files.
+
 Owning plan: `C:\Users\gersh\.claude\plans\let-s-plan-the-great-snoopy-shannon.md`.
 
 ---
