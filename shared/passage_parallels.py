@@ -227,7 +227,7 @@ from typing import Optional, Protocol
 
 from shared.parallels_service import PARALLELS_GROUP_CAP, _cap_main_results_by_group
 from shared.passage_hygiene import is_duplicate_photography
-from shared.passage_fusion import fuse, tag_rows, witness_id_for
+from shared.passage_fusion import fuse_routed, tag_rows, witness_id_for
 from shared.passage_index import PassageIndex
 from shared.passage_normalize import nfc, norm_stream, norm_stream_fast, project_span
 from shared.passage_policy import PassagePolicy, get_preset
@@ -581,18 +581,17 @@ class PassageSearcher:
             filtered_by_witness[run.wid] = source_filtered
 
         if multi:
-            eligible_rows = fuse([(r.wid, eligible_by_witness[r.wid])
-                                  for r in runs])
-            fused_filtered = fuse([(r.wid, filtered_by_witness[r.wid])
-                                   for r in runs])
-            # A record is `filtered` only when EVERY witness that matched it
-            # filtered it. One witness matching it on text the caller did NOT
-            # declare as a known source is a real result, and suppressing it
-            # would make the filter STRICTER the more witnesses you add --
-            # the opposite of what the control says it does.
-            in_main = {row['raw_header'] for row in eligible_rows}
-            filtered_candidate_rows = [r for r in fused_filtered
-                                       if r['raw_header'] not in in_main]
+            # Routing AND the contributor arithmetic in one place --
+            # `fuse_routed` owns both, so this path and the page's cannot
+            # drift. A record is `filtered` only when EVERY witness that
+            # matched it filtered it, and a main record's fusion statistics
+            # count every contributor, including those whose own row was
+            # routed to `filtered`; the rendered row still comes from an
+            # eligible one.
+            eligible_rows, filtered_candidate_rows = fuse_routed(
+                [(r.wid, eligible_by_witness[r.wid]) for r in runs],
+                [(r.wid, filtered_by_witness[r.wid]) for r in runs],
+            )
             # The cap must ORDER by the key the rows were SELECTED by, or it
             # discards exactly the groups the fusion promoted. It must NOT
             # change what aggregate_score reports -- that becomes the public

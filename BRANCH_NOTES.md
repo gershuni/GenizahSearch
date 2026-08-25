@@ -133,10 +133,25 @@ flagship case is a 17-witness set).
   screen held the right number. Any new fused row field must be added there, and the test
   must assert its **value** — the existing export test set the field in its fixture and
   asserted only `witness_count`, which is exactly why this went unnoticed.
+* **Routing a row is not the same as describing a record.** `filter_text` decides which
+  BUCKET a witness's row lands in; a record's `fusion_score` / `witness_count` /
+  `witness_ids` / `best_witness_score` describe the record. Fusing the two buckets separately
+  conflated them, so a manuscript found by two witnesses — one of them on known source text —
+  reported one, and ranked below records whose contributors happened to avoid the filter. Both
+  the routing rule and the contributor arithmetic now live in
+  `shared/passage_fusion.py::fuse_routed`, called by the page and the API: the rule had been
+  written out twice, which is the drift that module exists to prevent. With no `filter_text`
+  every filtered bucket is empty and the result is identical to a plain `fuse` — the common
+  path is untouched.
 * **Anything that changes the row set must also refresh the chrome around it.**
   `render_results` rewrites the results header from the rows it is handed; the summary line
   and the library-filter button are set once by the seed search and never again. After a
   witness run the summary described the seed's count beneath a list showing the fused one.
+  TWO functions change the row set and both owe this: `_search_pending_witnesses` and
+  `_remove_witness`. The second was missed on the first pass, and its unpaid debt was the
+  worse one — the snapshot was persisted under the OLD witness set's fingerprint, so a reload
+  matched it, judged the stored payload to be the same search, and restored the removed
+  witness's contributions. The removal silently undid itself.
 * **The page and the API return different manuscript SETS** (3,682 vs 3,850 on a
   17-witness run) while finding the same 455 census manuscripts. Cause: the
   duplicate-photography pass runs per-witness on the page and once post-fusion in the API.

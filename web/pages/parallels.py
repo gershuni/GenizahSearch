@@ -2541,7 +2541,7 @@ def create_parallels_page(initial_text: str = None):
         short-circuit exactly, so a one-witness page search and a one-witness
         API search produce the same row shape.
         """
-        from shared.passage_fusion import fuse, tag_rows
+        from shared.passage_fusion import fuse_routed, tag_rows
 
         order = [wid for wid in _witness_order()
                  if p_state.witness_rows.get(wid) is not None]
@@ -2575,15 +2575,12 @@ def create_parallels_page(initial_text: str = None):
             tag_rows(combined, wid, label)
             main_pairs.append((wid, main))
             filt_pairs.append((wid, filt))
-        fused_main = fuse(main_pairs)
-        fused_filtered = fuse(filt_pairs)
-        # A record is filtered only when EVERY witness that matched it
-        # filtered it -- otherwise the "known source text" filter would get
-        # STRICTER the more witnesses you add, the opposite of what it says.
-        in_main = {r.get('raw_header') for r in fused_main}
-        p_state.results = fused_main
-        p_state.filtered_results = [r for r in fused_filtered
-                                    if r.get('raw_header') not in in_main]
+        # Routing and the contributor arithmetic both live in `fuse_routed`,
+        # so the page and the API cannot disagree about either. (They did
+        # disagree about neither, but the rule was written out twice, which
+        # is how they start to.)
+        p_state.results, p_state.filtered_results = fuse_routed(
+            main_pairs, filt_pairs)
 
     def _text_digest_of(value: str) -> str:
         from shared.passage_fusion import text_digest
@@ -2640,7 +2637,33 @@ def create_parallels_page(initial_text: str = None):
         if p_state.results or p_state.filtered_results:
             render_results(p_state.results, p_state.filtered_results)
         else:
+            results_header.text = tr('No results')
             results_container.clear()
+            with results_container:
+                show_empty_state()
+        # A removal changes the ROW SET, and everything that describes the row
+        # set has to change with it. This is the same debt a witness SEARCH
+        # owes and pays; here it went unpaid, with three consequences, the
+        # third serious:
+        #
+        #   * the downloadable Word/XLSX/JSON still held the removed
+        #     witness's rows and named it in the manifest;
+        #   * the summary line and library-filter button described the old
+        #     set;
+        #   * `p_state.search_fingerprint` stayed the identity of the OLD
+        #     witness set, and `_persist_witness_state()` below then wrote the
+        #     snapshot under it -- so on reload `recover_richer_parallels_rows`
+        #     matched that fingerprint, judged the stored payload to be the
+        #     same search, and restored the removed witness's contributions.
+        #     The removal silently undid itself.
+        #
+        # `_refresh_export_payload` recomputes the identity and republishes,
+        # so it MUST run before the snapshot is persisted.
+        summary_label.text = ''
+        parallels_library_filter_btn.set_visibility(
+            bool(p_state.results or p_state.filtered_results))
+        _update_parallels_library_filter_btn()
+        _refresh_export_payload()
         # The snapshot used to be written only at the end of a witness
         # SEARCH, so a removal survived until the next one and then came back
         # -- rows and all -- on reload.

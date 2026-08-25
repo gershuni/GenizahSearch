@@ -390,3 +390,118 @@ def test_the_fallback_never_overrides_a_real_fused_value():
         {'score': 500.0, 'best_witness_score': 500.0},
     ])
     assert stats['best_witness_score'] == 900.0
+
+
+# ---------------------------------------------------------------------------
+# PR #329 review round 3: routing vs. the contributor arithmetic.
+# ---------------------------------------------------------------------------
+
+def _r(rec, rank, score, **extra):
+    row = {'raw_header': rec, 'witness_rank': rank, 'score': float(score),
+           'final_score': float(score)}
+    row.update(extra)
+    return row
+
+
+def test_a_main_record_counts_contributors_from_the_filtered_bucket_too():
+    """`filter_text` routes a ROW. The fusion facts describe a RECORD, and
+    fusing each bucket separately conflated the two: a manuscript found by two
+    witnesses, one of them on known source text, reported `witness_count` 1 --
+    contradicting that field's documented meaning ("how many distinct
+    witnesses point at this manuscript") and under-ranking it against records
+    whose contributors happened to avoid the filter.
+    """
+    from shared.passage_fusion import fuse_routed
+    main, filtered = fuse_routed(
+        [('w1', [_r('A', 1, 500, witness_id='w1')]), ('w2', [])],
+        [('w1', []), ('w2', [_r('A', 1, 900, witness_id='w2')])],
+    )
+    assert len(main) == 1 and not filtered
+    assert main[0]['witness_count'] == 2, 'the filtered contributor was lost'
+    assert main[0]['witness_ids'] == 'w1,w2'
+    assert main[0]['best_witness_score'] == 900.0
+
+
+def test_the_rendered_row_still_comes_from_an_eligible_contributor():
+    """A row shows ONE witness's highlighted span, and a filtered span is
+    exactly the text the caller asked to discount. So the arithmetic counts
+    every contributor while the evidence stays eligible -- even when the
+    filtered contributor ranked the record higher.
+    """
+    from shared.passage_fusion import fuse_routed
+    main, _ = fuse_routed(
+        [('w1', [_r('A', 5, 100, witness_id='w1')]), ('w2', [])],
+        [('w1', []), ('w2', [_r('A', 1, 900, witness_id='w2')])],
+    )
+    assert main[0]['witness_id'] == 'w1', (
+        'the rendered row came from the filtered bucket, so the highlighted '
+        'span is text the caller asked to discount'
+    )
+    assert main[0]['score'] == 100.0, 'score must describe the rendered span'
+    assert main[0]['best_witness_score'] == 900.0
+
+
+def test_the_overlay_reorders_main():
+    """The overlay changes the key `fuse` had just sorted by, so the list has
+    to be re-sorted or the returned order contradicts the scores on it.
+
+    A: eligible at rank 50 (1/110) plus a filtered contributor at rank 1
+       (1/61) -> complete 0.0255
+    B: eligible at rank 2 (1/62) -> complete 0.0161
+    Eligible-only arithmetic puts B first; the complete one puts A first.
+    """
+    from shared.passage_fusion import fuse_routed
+    main, _ = fuse_routed(
+        [('w1', [_r('B', 2, 300, witness_id='w1'),
+                 _r('A', 50, 100, witness_id='w1')]), ('w2', [])],
+        [('w1', []), ('w2', [_r('A', 1, 900, witness_id='w2')])],
+    )
+    assert [r['raw_header'] for r in main] == ['A', 'B'], (
+        'main was not re-sorted after the contributor overlay'
+    )
+
+
+def test_a_record_every_witness_filtered_stays_filtered():
+    """The routing rule itself, now executed rather than grepped for: a record
+    is `filtered` only when EVERY witness that matched it filtered it."""
+    from shared.passage_fusion import fuse_routed
+    main, filtered = fuse_routed(
+        [('w1', []), ('w2', [])],
+        [('w1', [_r('A', 1, 500, witness_id='w1')]),
+         ('w2', [_r('A', 3, 400, witness_id='w2')])],
+    )
+    assert not main
+    assert len(filtered) == 1
+    assert filtered[0]['witness_count'] == 2
+
+
+def test_one_eligible_witness_is_enough_to_keep_a_record_in_main():
+    """Suppressing it would make the filter STRICTER the more witnesses are
+    added -- the opposite of what the control says."""
+    from shared.passage_fusion import fuse_routed
+    main, filtered = fuse_routed(
+        [('w1', [_r('A', 2, 500, witness_id='w1')]), ('w2', [])],
+        [('w1', []), ('w2', [_r('A', 1, 900, witness_id='w2')])],
+    )
+    assert [r['raw_header'] for r in main] == ['A']
+    assert not filtered, 'the record was returned in BOTH buckets'
+
+
+def test_without_filter_text_the_result_is_identical_to_a_plain_fuse():
+    """The common path: every filtered bucket empty, so the overlay is a
+    no-op. Guards the blast radius of the whole change."""
+    from shared.passage_fusion import fuse, fuse_routed
+    pairs = [('w1', [_r('A', 1, 500, witness_id='w1'),
+                     _r('B', 2, 300, witness_id='w1')]),
+             ('w2', [_r('B', 1, 400, witness_id='w2')])]
+    plain = fuse([(w, [dict(r) for r in rows]) for w, rows in pairs])
+    main, filtered = fuse_routed(
+        [(w, [dict(r) for r in rows]) for w, rows in pairs],
+        [('w1', []), ('w2', [])],
+    )
+    assert not filtered
+    assert [r['raw_header'] for r in main] == [r['raw_header'] for r in plain]
+    for a, b in zip(main, plain):
+        for field in ('fusion_score', 'witness_count', 'witness_ids',
+                      'score', 'final_score', 'best_witness_score'):
+            assert a[field] == b[field], (field, a[field], b[field])

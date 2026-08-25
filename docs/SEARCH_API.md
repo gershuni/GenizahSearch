@@ -538,6 +538,14 @@ beats it decisively at mixed ones. Each group in `results[]` gains a `witness_fu
 three pages by one witness is one witness. Witness ids are assigned positionally (`w1`, `w2`,
 …) in request order.
 
+`filter_text` routes a **row**, not a record. When one witness matches a manuscript on text you
+declared as a known source and another matches it on text you did not, the manuscript stays in
+`results` — suppressing it would make the filter *stricter* the more witnesses you add — and its
+`witness_count`, `witness_ids`, `fusion_score` and `best_witness_score` count **both** witnesses.
+The rendered row is still supplied by a witness whose match was *not* filtered, so the
+highlighted span is never text you asked to discount. Evidence from the eligible contributor,
+arithmetic over all of them.
+
 `best_witness_score` is the strongest single match **any** witness made on this manuscript. It
 is reported here, and not as a row's `score`, because it may belong to a witness whose evidence
 no returned row renders: each row carries the label, highlighted span and `score` of the one

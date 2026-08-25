@@ -247,8 +247,7 @@ def fuse(rows_by_witness: "Mapping[str, Sequence[dict]] | Iterable[tuple]",
     evidence now come from the same row; the maximum is still reported, under
     a name that says what it is.
     """
-    pairs = (list(rows_by_witness.items())
-             if hasattr(rows_by_witness, 'items') else list(rows_by_witness))
+    pairs = _as_pairs(rows_by_witness)
 
     # record key -> {'contributors': [(order, rank, score, row)], 'rrf': float}
     acc: dict = {}
@@ -307,6 +306,80 @@ def fuse(rows_by_witness: "Mapping[str, Sequence[dict]] | Iterable[tuple]",
     fused.sort(key=lambda r: (r['fusion_score'], r['score'],
                               str(r.get(key) or '')), reverse=True)
     return fused
+
+
+def _as_pairs(rows_by_witness):
+    return (list(rows_by_witness.items())
+            if hasattr(rows_by_witness, 'items') else list(rows_by_witness))
+
+
+def fuse_routed(eligible_pairs, filtered_pairs, key: str = 'raw_header'):
+    """Fuse two ROUTED buckets into `(main, filtered)`.
+
+    `filter_text` routes a witness's match to `filtered` when the composition
+    text it matched is itself known/printed source. That is a statement about
+    a ROW. The fusion facts are statements about a RECORD, and the two were
+    being conflated: fusing each bucket separately built a main record's
+    `fusion_score`, `witness_count`, `witness_ids` and `best_witness_score`
+    from its ELIGIBLE contributors only, then dropped its filtered twin. A
+    manuscript found by two witnesses, one of them on known source text,
+    therefore reported one -- contradicting `witness_count`'s own documented
+    meaning ("how many distinct witnesses point at this manuscript") and
+    under-ranking it against records whose contributors happened to avoid the
+    filter.
+
+    So: the rendered row still comes from an ELIGIBLE contributor -- a row
+    shows one witness's highlighted span, and a filtered span is precisely the
+    text the caller asked to discount -- while the fusion statistics count
+    EVERY contributor. Evidence from the eligible bucket, arithmetic over all
+    of it.
+
+    Routing itself is unchanged and stays here rather than in either caller:
+    a record is `filtered` only when EVERY witness that matched it filtered
+    it, or the filter would grow STRICTER the more witnesses are added, the
+    opposite of what the control says. That rule had been written out twice,
+    in `shared/passage_parallels.py` and in `web/pages/parallels.py`, which is
+    the drift this module's docstring says it exists to prevent.
+
+    With no `filter_text` every filtered bucket is empty, the overlay is a
+    no-op and the result is byte-identical to fusing the eligible bucket
+    alone -- which is the common path.
+    """
+    e_pairs = _as_pairs(eligible_pairs)
+    f_pairs = _as_pairs(filtered_pairs)
+
+    main = fuse(e_pairs, key=key)
+    filtered = fuse(f_pairs, key=key)
+
+    # Complete contributor set, per witness, in witness order. `fuse` keeps
+    # ONE contribution per witness per record, so a witness appearing in both
+    # buckets for the same record cannot double-count; and the ranks were
+    # stamped on that witness's FULL list before the split, so ranks from the
+    # two buckets are directly comparable.
+    f_by_wid = dict(f_pairs)
+    combined = [(wid, list(rows) + list(f_by_wid.pop(wid, None) or []))
+                for wid, rows in e_pairs]
+    combined.extend((wid, list(rows)) for wid, rows in f_by_wid.items())
+
+    complete = {row.get(key): row for row in fuse(combined, key=key)}
+    for row in main:
+        stats = complete.get(row.get(key))
+        if not stats:
+            continue
+        for field in ('fusion_score', 'witness_count', 'witness_ids',
+                      'best_witness_score'):
+            row[field] = stats[field]
+    # `score` / `final_score` are deliberately NOT overlaid: they belong to
+    # the row being rendered, and the strongest match across every
+    # contributor is reported as `best_witness_score` under a name that says
+    # so.
+
+    # Re-sorted because the overlay changed the key it was sorted by.
+    main.sort(key=lambda r: (r['fusion_score'], r['score'],
+                             str(r.get(key) or '')), reverse=True)
+
+    in_main = {row.get(key) for row in main}
+    return main, [r for r in filtered if r.get(key) not in in_main]
 
 
 def _wid_of(row: dict) -> str:

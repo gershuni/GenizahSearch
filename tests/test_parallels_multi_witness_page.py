@@ -488,7 +488,7 @@ def test_the_page_fuses_through_the_shared_module():
     """One definition of the ranking, two callers. A second implementation
     on the page would drift from the API's."""
     src = _func_source('_fuse_and_store')
-    assert 'from shared.passage_fusion import fuse, tag_rows' in src
+    assert 'from shared.passage_fusion import fuse_routed, tag_rows' in src
 
 
 def test_a_single_witness_passes_through_unfused():
@@ -520,10 +520,22 @@ def test_ranks_are_assigned_over_both_buckets_together():
 
 def test_a_record_is_filtered_only_when_every_witness_filters_it():
     """Otherwise the "known source text" filter gets STRICTER the more
-    witnesses you add -- the opposite of what the control says."""
+    witnesses you add -- the opposite of what the control says.
+
+    The rule itself now lives in `shared/passage_fusion.py::fuse_routed` and
+    is EXECUTED by tests there, rather than asserted as a substring of a
+    closure here -- it had been written out twice, once in this page and once
+    in `shared/passage_parallels.py`, which is the drift that module exists to
+    prevent. What remains to check here is that the page delegates.
+    """
     src = _func_source('_fuse_and_store')
-    assert 'in_main' in src
-    assert re.search(r"not in in_main", src)
+    assert 'fuse_routed(' in src, (
+        'the page no longer routes through the shared rule'
+    )
+    assert 'in_main' not in src, (
+        'the routing rule has been copied back into the page, so it can '
+        'drift from the API path again'
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1686,4 +1698,39 @@ def test_the_real_manifest_is_derived_from_rows_that_exist():
     assert 'witness_rows' in built, (
         'the export manifest no longer filters on witnesses that produced '
         f'rows: {built!r}'
+    )
+
+
+def test_removing_a_witness_republishes_the_export_and_the_identity():
+    """A removal changes the ROW SET, and everything describing it has to
+    change too. `_fuse_and_store()` updated the screen; nothing updated the
+    export.
+
+    Three consequences, the third serious: the downloadable Word/XLSX/JSON
+    still held the removed witness's rows and named it in the manifest; the
+    summary line described the old set; and `p_state.search_fingerprint`
+    stayed the OLD witness set's identity, under which the snapshot was then
+    persisted -- so on reload `recover_richer_parallels_rows` matched that
+    fingerprint, judged the stored payload to be the same search, and
+    restored the removed witness's contributions. The removal silently undid
+    itself.
+
+    RED if the republish is removed, and RED if it moves after the snapshot
+    persist (which would write the stale identity first).
+    """
+    import ast
+    src = _func_source('_remove_witness')
+    tree = ast.parse(src.lstrip())
+    called = {ast.unparse(n.func) for n in ast.walk(tree)
+              if isinstance(n, ast.Call)}
+    assert '_refresh_export_payload' in called, (
+        'removing a witness leaves the export payload and the search '
+        'fingerprint describing the witness set that no longer exists'
+    )
+    body = ast.unparse(tree)
+    i_export = body.find('_refresh_export_payload')
+    i_persist = body.find('_persist_witness_state')
+    assert 0 <= i_export < i_persist, (
+        'the snapshot is persisted before the identity is recomputed, so it '
+        'is stamped with the old witness set'
     )
