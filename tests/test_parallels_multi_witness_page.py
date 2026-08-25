@@ -148,9 +148,28 @@ def test_the_panel_is_shown_only_for_letter_level_search():
     zero frontier gain at 4-6x the time, because concatenation and union
     there return the identical manuscript set. Showing the panel for chunk
     would offer a control that does almost nothing, slowly."""
+    import ast
     src = _func_source('on_passage_mode_change')
-    assert 'witness_panel.set_visibility(True)' in src
-    assert 'witness_panel.set_visibility(False)' in src
+    calls = [n for n in ast.walk(ast.parse(src.lstrip()))
+             if isinstance(n, ast.Call)
+             and isinstance(n.func, ast.Attribute)
+             and n.func.attr == 'set_visibility'
+             and isinstance(n.func.value, ast.Name)
+             and n.func.value.id == 'witness_panel']
+    assert calls, 'nothing sets the witness panel visibility'
+
+    def _is_false(call):
+        a = call.args[0] if call.args else None
+        return isinstance(a, ast.Constant) and a.value is False
+
+    # Pinned on the SPLIT, not the spelling: the shown-branch expression is no
+    # longer the literal `True` (it ANDs the multi-witness rollout flag), and
+    # an assertion on the old literal was guarding the wording rather than the
+    # behaviour.
+    assert any(_is_false(c) for c in calls), (
+        'the chunk branch no longer hides the witness panel')
+    assert any(not _is_false(c) for c in calls), (
+        'the letter-level branch no longer shows the witness panel')
 
 
 def test_a_method_switch_never_clears_the_witness_list():
@@ -1507,4 +1526,164 @@ def test_promotion_says_when_it_drops_manuscripts_over_the_cap():
     assert reported, (
         'promotion truncates to the cap without telling the user how many '
         'of their checked manuscripts were dropped'
+    )
+
+
+# ---------------------------------------------------------------------------
+# PR #329 review round 2.
+# ---------------------------------------------------------------------------
+
+
+def _calls_to(node, name):
+    """Every `ast.Call` to a bare function `name` inside `node`.
+
+    A CALL, never the name: `'passage_multi_witness_available' in src` is
+    satisfied by the import line alone, which is how a cap assertion in the
+    previous round passed on its own mutation.
+    """
+    import ast
+    return [n for n in ast.walk(node)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+            and n.func.id == name]
+
+
+def test_the_witness_panel_is_gated_on_the_multi_witness_flag():
+    """`PASSAGE_MULTI_WITNESS_ENABLED` is default-off and separate from
+    `PASSAGE_PARALLELS_ENABLED` precisely so single-witness passage can stay
+    broadly on while the costly fan-out is validated.
+
+    Gated on letter-level alone, the page showed the entire panel -- and ran
+    the fan-out -- under the SHIPPED default pair, while the API refused the
+    same request. RED if the visibility call stops consulting the predicate.
+    """
+    import ast
+    tree, _src = _parallels_ast()
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+              and n.name == 'on_passage_mode_change')
+    shows = [n for n in ast.walk(fn)
+             if isinstance(n, ast.Call)
+             and isinstance(n.func, ast.Attribute)
+             and n.func.attr == 'set_visibility'
+             and isinstance(n.func.value, ast.Name)
+             and n.func.value.id == 'witness_panel']
+    assert shows, 'nothing sets the witness panel visibility here'
+    gated = [s for s in shows
+             if any(_calls_to(a, 'passage_multi_witness_available')
+                    for a in s.args)]
+    assert gated, (
+        'the witness panel is shown without consulting '
+        'passage_multi_witness_available()'
+    )
+
+
+def test_the_promotion_checkbox_is_gated_on_the_multi_witness_flag():
+    """The per-result checkbox is a SECOND door into the same witness list and
+    was gated only on `passage_available()`. RED if it reverts."""
+    import ast
+    tree, src = _parallels_ast()
+    checkbox_ifs = [
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.If)
+        and 'checked_for_promotion' in (ast.unparse(n) or '')
+        and _calls_to(n.test, 'passage_available')
+        + _calls_to(n.test, 'passage_multi_witness_available')
+    ]
+    assert checkbox_ifs, 'could not find the promotion-checkbox guard'
+    for node in checkbox_ifs:
+        assert _calls_to(node.test, 'passage_multi_witness_available'), (
+            'the promotion checkbox is offered on passage_available() alone, '
+            'so the fan-out has a second door open with the flag off'
+        )
+
+
+def test_the_dispatch_itself_refuses_when_the_flag_is_off():
+    """Hiding the panel stops a witness being ADDED; it does not stop one that
+    is already there. A tab snapshot taken while the flag was ON restores its
+    witness list `pending`, and the seed search dispatches whatever is pending
+    -- so the fan-out could run from browser storage alone after the flag was
+    turned off.
+
+    RED if the guard is removed, and RED if it is moved after the first
+    witness has been searched.
+    """
+    import ast
+    tree, _src = _parallels_ast()
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+              and n.name == '_search_pending_witnesses')
+    guards = [n for n in ast.walk(fn)
+              if isinstance(n, ast.If)
+              and _calls_to(n.test, 'passage_multi_witness_available')]
+    assert guards, (
+        'the dispatch chokepoint does not consult the rollout flag'
+    )
+    assert any(any(isinstance(b, ast.Return) for b in g.body) for g in guards), (
+        'the flag guard does not actually stop the dispatch'
+    )
+    body = ast.unparse(fn)
+    i_flag = body.find('passage_multi_witness_available')
+    i_run = body.find('_run_one_witness_search')
+    assert 0 <= i_flag < i_run, (
+        'the flag is checked after a witness has already been searched'
+    )
+
+
+def test_the_dispatch_time_export_meta_claims_no_witnesses():
+    """`captured_witnesses` named every CONFIGURED witness, regardless of
+    status, and that list became `meta['witnesses']` -- from which
+    `web/export_service.py` derives `multi_witness`, adding a Witnesses sheet
+    and multi-witness columns to the XLSX and a "Searched with N further..."
+    line to the Word file.
+
+    Two paths reach the export without correcting it, both returning before
+    `_refresh_export_payload`: a new seed marks the existing witnesses
+    `stale`, and the depth-cap refusal. At dispatch no witness has contributed
+    a row, so the honest manifest is None.
+
+    RED if a comprehension goes back into the dispatch-time meta.
+    """
+    import ast
+    tree, src = _parallels_ast()
+    def _keys(d):
+        return {k.value for k in d.keys
+                if isinstance(k, ast.Constant)}
+
+    # BOTH keys: `search_fingerprint` alone also matches the tab snapshot,
+    # which legitimately stores the witness list (with text) because restore
+    # needs it. The history-restore meta carries neither key, so the pair
+    # identifies exactly one dict -- asserted, so a selector that silently
+    # stops matching fails here instead of looping over nothing.
+    metas = [n for n in ast.walk(tree)
+             if isinstance(n, ast.Dict)
+             and {'search_fingerprint', 'boundary_options'} <= _keys(n)]
+    assert len(metas) == 1, (
+        f'expected exactly one dispatch-time export meta, found {len(metas)}'
+    )
+    for meta in metas:
+        for key, value in zip(meta.keys, meta.values):
+            if isinstance(key, ast.Constant) and key.value == 'witnesses':
+                assert isinstance(value, ast.Constant) and value.value is None, (
+                    'the dispatch-time export meta names witnesses before any '
+                    f'has run: {ast.unparse(value)!r}'
+                )
+
+
+def test_the_real_manifest_is_derived_from_rows_that_exist():
+    """The manifest that DOES reach a workbook must name only witnesses that
+    produced rows. RED if it starts iterating the configured list instead."""
+    import ast
+    src = _func_source('_refresh_export_payload')
+    tree = ast.parse(src.lstrip())
+    assigns = [n for n in ast.walk(tree)
+               if isinstance(n, ast.Assign)
+               and any(isinstance(t, ast.Subscript)
+                       and isinstance(t.slice, ast.Constant)
+                       and t.slice.value == 'witnesses'
+                       for t in n.targets)]
+    assert len(assigns) == 1, f'expected one manifest build, got {len(assigns)}'
+    built = ast.unparse(assigns[0])
+    assert 'witness_rows' in built, (
+        'the export manifest no longer filters on witnesses that produced '
+        f'rows: {built!r}'
     )

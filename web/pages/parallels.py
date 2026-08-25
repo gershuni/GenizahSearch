@@ -258,7 +258,8 @@ def collect_witness_texts(sys_ids, rows, fetch_header,
 
 # Phase 145: passage-matching parallels search (fail-closed -- flag AND
 # a loaded index; see web/passage_assets.py).
-from web.passage_assets import passage_available, get_passage_searcher
+from web.passage_assets import (passage_available, get_passage_searcher,
+                                passage_multi_witness_available)
 # Codex review finding #15: route the page's passage search through the
 # SAME bounded execution budget POST /api/parallels uses -- one semaphore,
 # one dedicated ThreadPoolExecutor, one timeout ceiling, for BOTH surfaces.
@@ -1435,7 +1436,16 @@ def create_parallels_page(initial_text: str = None):
                             # positives of 74 with zero frontier gain at 4-6x
                             # the time, because concatenation and union there
                             # return the identical manuscript set.
-                            witness_panel.set_visibility(True)
+                            # ANDs the multi-witness flag, not just
+                            # letter-level: `PASSAGE_MULTI_WITNESS_ENABLED` is
+                            # default-off and separate from
+                            # `PASSAGE_PARALLELS_ENABLED` precisely so
+                            # single-witness passage can stay broadly on while
+                            # the costly fan-out is validated. Gated on
+                            # letter-level alone, the page offered the whole
+                            # capability while the API refused it.
+                            witness_panel.set_visibility(
+                                passage_multi_witness_available())
                             for _row in (mode_select, chunk_size_row,
                                          freq_threshold_row, min_chunks_row,
                                          lab_mode_row):
@@ -2982,6 +2992,15 @@ def create_parallels_page(initial_text: str = None):
 
         Returns the number of witnesses that produced results.
         """
+        if not passage_multi_witness_available():
+            # The rollout flag enforced where the WORK happens, not only where
+            # the button is drawn. Hiding the panel stops a witness being
+            # added; it does not stop one that is already there. A tab
+            # snapshot taken while the flag was ON restores its witness list
+            # `pending`, and the seed search dispatches whatever is pending --
+            # so the fan-out could run from browser storage alone after the
+            # flag was turned off. All four call sites funnel through here.
+            return 0
         if p_state.is_running:
             return 0
         if p_state.is_cancelled:
@@ -4814,14 +4833,11 @@ def create_parallels_page(initial_text: str = None):
         # with. A witness run at a different width or depth than the rows
         # beside it would be fused into one list with them and be invisible
         # as an anomaly -- the numbers would simply be wrong, quietly.
-        # The witness set this search is running with, captured at dispatch:
-        # the panel stays live during the await, and a fingerprint that read
-        # it afterwards could describe a list the search never used.
-        captured_witnesses = [
-            {'kind': w.get('kind'), 'sys_id': w.get('sys_id'),
-             'text': w.get('text') or '', 'label': w.get('label') or ''}
-            for w in (p_state.witnesses or [])
-        ] if captured_passage_mode else []
+        # (There is deliberately no dispatch-time witness capture. The export
+        # manifest is built AFTER the run from `witness_rows`, by
+        # `_refresh_export_payload`, so it can only name witnesses that
+        # actually produced rows; and the search identity re-derives its own
+        # via `_recompute_search_identity` for the same reason.)
 
         p_state.last_passage_ctx = {
             # The seed digest of THIS search, captured at dispatch (`text` is
@@ -5141,12 +5157,19 @@ def create_parallels_page(initial_text: str = None):
                     # and shelfmarks only -- never the texts: a
                     # downloaded file that carried twenty-five 20,000-
                     # character witnesses would be mostly query.
-                    'witnesses': [
-                        {'label': w.get('label') or '',
-                         'kind': w.get('kind'),
-                         'sys_id': w.get('sys_id')}
-                        for w in captured_witnesses
-                    ] or None,
+                    # None at dispatch, ALWAYS: at this instant no witness
+                    # has contributed a row, so these results really are
+                    # seed-only -- the same reasoning the fingerprint capture
+                    # above states for itself. Naming them here made the
+                    # Word/XLSX exports claim "Searched with" witnesses that
+                    # never ran, and add multi-witness columns to seed-only
+                    # rows, whenever dispatch returned early: a new seed marks
+                    # the existing witnesses `stale` so nothing is pending, and
+                    # the depth-cap refusal does the same. Neither path reaches
+                    # `_refresh_export_payload`, which is what publishes the
+                    # real manifest -- derived from `witness_rows`, so it names
+                    # only witnesses that actually produced rows.
+                    'witnesses': None,
                     'chunk_size': captured_chunk_size,
                     'mode': captured_mode,
                     'max_freq': float(captured_freq_threshold) if captured_freq_threshold is not None else None,
@@ -6031,7 +6054,8 @@ def create_parallels_page(initial_text: str = None):
                     # and rebuilt on every re-render, so a selection held on
                     # the widget would vanish the moment anything re-rendered.
                     if (sys_id and not is_filtered
-                            and _letter_level_selected() and passage_available()):
+                            and _letter_level_selected()
+                            and passage_multi_witness_available()):
                         def _toggle_promotion(e, sid=sys_id):
                             if e.value:
                                 p_state.checked_for_promotion.add(sid)
