@@ -1931,3 +1931,44 @@ def test_restore_tolerates_a_snapshot_without_headers():
         [{'id': 'w1', 'kind': 'manuscript', 'sys_id': '990000000000001',
           'label': 'Ms A'}], 'Pasted text')
     assert got and got[0]['headers'] == []
+
+
+def test_a_removal_that_cannot_strip_its_rows_says_so():
+    """The round-4 guard stopped `_fuse_and_store` wiping a restored result
+    set -- real data loss -- and traded it for a quieter fault: after a reload
+    the per-witness caches are deliberately empty, so nothing can be re-fused
+    and the rows keep the removed witness's contributions while the panel
+    shows it gone. `_remove_witness` promises "Drop a witness AND every row it
+    contributed", a promise it cannot keep in that state.
+
+    Keeping the rows is right -- discarding a restored set to honour the
+    docstring would be the data loss the guard exists to prevent. Disclosing
+    is what was missing.
+
+    RED if the disclosure is removed, or if it stops being conditional (which
+    would fire it on every ordinary removal, where the rows DID go).
+    """
+    import ast
+    src = _func_source('_remove_witness')
+    tree = ast.parse(src.lstrip())
+
+    assert '_can_restrip = bool(p_state.witness_rows)' in src, (
+        'the removal no longer distinguishes a removal that can strip its '
+        'rows from one that cannot'
+    )
+    guards = [n for n in ast.walk(tree)
+              if isinstance(n, ast.If) and '_can_restrip' in ast.unparse(n.test)]
+    assert guards, 'the disclosure is not guarded, so it fires on every removal'
+    notified = [n for g in guards for n in ast.walk(g)
+                if isinstance(n, ast.Call)
+                and 'notify' in ast.unparse(n.func)]
+    assert notified, 'the removal stays silent about what it could not do'
+
+
+def test_the_removal_disclosure_is_translated():
+    """`tr()` falls back to English, so an untranslated notice renders
+    perfectly in the wrong language."""
+    from genizah_translations import TRANSLATIONS
+    key = ('Witness removed. The results on screen were found with the '
+           'previous witness list — run the search again to update them.')
+    assert key in TRANSLATIONS, 'the removal disclosure has no Hebrew'

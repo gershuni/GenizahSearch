@@ -2689,6 +2689,20 @@ def create_parallels_page(initial_text: str = None):
         p_state.witnesses = [w for w in p_state.witnesses if w['id'] != wid]
         p_state.witness_rows.pop(wid, None)
         p_state.witness_filtered.pop(wid, None)
+        # Can this removal actually take its rows with it?
+        #
+        # Only if there is something to re-fuse FROM. After a reload the
+        # per-witness caches are deliberately empty -- per-witness ranks
+        # cannot be recovered from fused rows -- so the rows on screen keep
+        # the removed witness's contributions whatever happens here. In a
+        # live session the seed is always cached under WITNESS_SEED_ID, so
+        # this is true whenever a search has run in this tab.
+        #
+        # Discarding the rows instead would honour the docstring's promise by
+        # destroying a restored result set that exists nowhere else -- the
+        # data loss the guard in `_fuse_and_store` was added to stop. The
+        # answer is to say so, not to delete.
+        _can_restrip = bool(p_state.witness_rows)
         _fuse_and_store()
         _refresh_witness_panel()
         if p_state.results or p_state.filtered_results:
@@ -2720,6 +2734,16 @@ def create_parallels_page(initial_text: str = None):
         parallels_library_filter_btn.set_visibility(
             bool(p_state.results or p_state.filtered_results))
         _update_parallels_library_filter_btn()
+        if not _can_restrip and (p_state.results or p_state.filtered_results):
+            # The panel now shows the witness gone while its rows are still on
+            # screen. Presenting that as a completed removal is the kind of
+            # quiet disagreement between what a surface says and what it holds
+            # that this feature has already been bitten by twice.
+            ui.notify(
+                tr('Witness removed. The results on screen were found with '
+                   'the previous witness list — run the search again to '
+                   'update them.'),
+                type='warning')
         _refresh_export_payload()
         # The snapshot used to be written only at the end of a witness
         # SEARCH, so a removal survived until the next one and then came back
