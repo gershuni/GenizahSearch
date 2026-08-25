@@ -1734,3 +1734,32 @@ def test_removing_a_witness_republishes_the_export_and_the_identity():
         'the snapshot is persisted before the identity is recomputed, so it '
         'is stamped with the old witness set'
     )
+
+
+def test_nothing_to_fuse_from_never_wipes_the_rows_on_screen():
+    """`_fuse_and_store` treated an empty `order` as "clear the results".
+
+    Unreachable in a live session -- a search always stores the seed under
+    WITNESS_SEED_ID, so `order` holds at least one entry -- but reachable in
+    the one state this feature creates on purpose: after a reload
+    `_restore_witnesses_from_snapshot` leaves `witness_rows` EMPTY (per-witness
+    ranks cannot be recovered from fused rows) while `p_state.results` holds
+    the restored rows. Removing any witness then wiped every restored row, and
+    `_remove_witness` republished the export and persisted the snapshot on top
+    of the loss.
+
+    RED if the branch starts assigning the result lists again.
+    """
+    import ast
+    src = _func_source('_fuse_and_store')
+    tree = ast.parse(src.lstrip())
+    guards = [n for n in ast.walk(tree)
+              if isinstance(n, ast.If) and ast.unparse(n.test) == 'not order']
+    assert len(guards) == 1, f'expected one empty-order guard, got {len(guards)}'
+    clobbers = [ast.unparse(n) for n in ast.walk(guards[0])
+                if isinstance(n, ast.Assign)
+                and any('results' in ast.unparse(t) for t in n.targets)]
+    assert not clobbers, (
+        'the empty-order branch discards rows it did not produce: '
+        + repr(clobbers)
+    )

@@ -2546,8 +2546,22 @@ def create_parallels_page(initial_text: str = None):
         order = [wid for wid in _witness_order()
                  if p_state.witness_rows.get(wid) is not None]
         if not order:
-            p_state.results = []
-            p_state.filtered_results = []
+            # Nothing to fuse FROM, which is not the same as "the result set
+            # is empty" -- and conflating the two destroyed data.
+            #
+            # In a live session this is unreachable: a search always stores
+            # the seed under WITNESS_SEED_ID, so `order` holds at least one
+            # entry. It IS reachable in the one state this feature creates on
+            # purpose -- after a reload `_restore_witnesses_from_snapshot`
+            # leaves `witness_rows` empty (per-witness ranks cannot be
+            # recovered from fused rows) while `p_state.results` holds the
+            # restored rows. Removing a witness then wiped every one of them,
+            # and the republish and snapshot persist in `_remove_witness`
+            # wrote that loss to storage.
+            #
+            # Rows this function did not produce are not its to discard. They
+            # are left exactly as they are; the panel already says the
+            # witnesses need re-running, which is what actually rebuilds them.
             return
         if len(order) == 1:
             wid = order[0]
