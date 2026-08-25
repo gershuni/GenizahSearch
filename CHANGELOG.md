@@ -1017,6 +1017,33 @@ A major overhaul of how LOCAL Hebrew PDFs are read into the My Library index, dr
 
 ## [Unreleased]
 
+### Letter-level search: a second control axis — passage length (2026-08-24)
+
+The Match-width control assumed one dimension. Chasing the Antiochus recall gap turned up a
+second, and a parameter that had been deciding results invisibly.
+
+- **`verify_margin` is now policy.** Verification extends a match by 30 letters each side before
+  scoring edit density. At a span floor of 40 that is harmless overhead; below ~25 it *is* the
+  result — a true 9-letter shared run gets scored across ~70 letters of unrelated flanking text
+  and rejected at ~0.85 density. Consequence, measured: **lowering `min_span` alone does
+  nothing**, because the floor is checked against the margin-extended window. The two move
+  together or not at all.
+- **New "Passage length" control** — *Normal passages* (40, 30) or *Also short passages*
+  (28, 12) — beside the existing Match width. On the Antiochus query against an 83-positive
+  adjudicated deck, `short` takes widest-40 from 56 manuscripts at 100% precision / 67% recall to
+  104 at 61% / 72%: five more graded positives, plus one witness **no method had found before**,
+  word-chunk matching included (MS heb. e.45/36, catalogued מגילת אנטיוכוס). It does not reach
+  cross-language witnesses, and it roughly doubles what you skim.
+- **Two selects, not sliders.** `min_span` and `verify_margin` are one coupled decision; a slider
+  on the floor alone would visibly do nothing and read as broken. Each offered combination stays
+  a named, content-hashed policy, and passage length now forms part of the search identity used
+  by preserve/recover.
+- **The anchor-evidence tier is removed.** It was measured twice against the same deck and failed
+  both times — 4% then 1% precision inside the tier, recovering 4 then 1 of the 20 witnesses it
+  was built for. Counting shared grams ranks by record length, and rarity-gating merely resampled
+  the same noise. The negative result is kept in the spec (section 10.4) so it is not reinvented.
+- Pre-existing presets keep byte-identical behaviour and `policy_id`s.
+
 ### Download the computed identifications as a spreadsheet (2026-08-21)
 
 `/computed-identifications` now has a download control. It returns **the reader's whole

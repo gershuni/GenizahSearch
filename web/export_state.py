@@ -810,6 +810,8 @@ def compute_parallels_search_fingerprint(
     text,
     engine,
     width=None,
+    length=None,
+    depth=None,
     chunk_size=None,
     mode=None,
     max_freq=None,
@@ -872,6 +874,20 @@ def compute_parallels_search_fingerprint(
         'excluded': excluded,
         'filters': _canonical_parallels_filters(filters),
     }
+    # `length` (the letter-level passage-length profile) joined this
+    # signature on 2026-08-24 and enters the payload ONLY when it is not the
+    # default. Two searches differing in it are genuinely different searches
+    # and must not collide -- but every fingerprint recorded before the
+    # parameter existed has to keep matching, or a stored composition-history
+    # entry stops recognising its own results.
+    if length not in (None, 'normal'):
+        payload['length'] = length
+    # `depth` (the letter-level search-depth profile) joined the same day,
+    # under the same rule: absent at its default so every earlier
+    # fingerprint keeps matching, present whenever the search genuinely ran
+    # with bigger budgets.
+    if depth not in (None, 'normal'):
+        payload['depth'] = depth
     for key in _PARALLELS_FINGERPRINT_SET_INPUTS:
         value = payload.get(key)
         if value is not None:

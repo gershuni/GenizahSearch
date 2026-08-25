@@ -459,7 +459,7 @@ mode is `mode`, NOT `search_mode` — see "Naming Inconsistency" below.
   "text": "<the composition text — up to 20000 chars>",
   "chunk_size": 5,
   "mode": "variants",
-  "max_freq": 0.05,
+  "max_freq": 50,
   "boundary_mode": "combined",
   "filters": {
     "domains": ["Liturgy"]
@@ -474,7 +474,7 @@ mode is `mode`, NOT `search_mode` — see "Naming Inconsistency" below.
 | `text` | string | 1..20000 chars (post-strip; `COMPOSITION_LENGTH_CAP=20000`; empty → `composition_required`; over cap → `composition_too_long`) | required | |
 | `chunk_size` | integer | `2..20` | `5` | size of sliding chunks |
 | `mode` | enum | `exact \| variants \| fuzzy` | `"exact"` | **field name is `mode`, not `search_mode`** — see "Naming Inconsistency" |
-| `max_freq` | float \| null | `null` disables high-frequency filtering (no chunks routed to `filtered`) | `null` | |
+| `max_freq` | float \| null | `>= 1`. A **document count**, not a ratio: a chunk matching more than `max_freq` documents is treated as too common. `null` disables high-frequency filtering | `null` | **Effective range is `[1, 50)`.** The engine tests `len(hits) > max_freq` against a per-chunk retrieval hard-capped at 50 hits, so any `max_freq >= 50` can never fire and behaves exactly like `null`. It is therefore not a corpus frequency: it counts hits inside a truncated top-50 and cannot tell a chunk in 51 manuscripts from one in 5,000. A value below 1 would discard every chunk that matches anything, so such values are rejected with `invalid_request` rather than silently returning an empty result set. Documented as a `0.0-1.0` ratio until 2026-08-24 — the docs were wrong, not the code |
 | `boundary_mode` | enum | `full \| boundary \| combined` | `"full"` | only boundary knob exposed in v7.10 (Phase 80 D-03) |
 | `filters` | object \| null | reuses Phase 78 `FiltersModel` verbatim | `null` | same shape as `/api/search.filters` |
 | `method` | enum | `chunk \| passage` | `"chunk"` | Phase 145 (beta). `chunk` is the pre-Phase-145 sliding-window Tantivy engine described above, byte-for-byte unchanged. `passage` is a character-level matching engine, tolerant of OCR/HTR noise and reflowed line breaks — see "`method='passage'` (beta)" below. |
@@ -497,7 +497,7 @@ the two apart from the envelope shape alone.
   `library_filter_mode="include"` returns 400 `passage_scope_unsupported` rather than a
   silently-empty result that would look identical to "no matches found". Excluding `"LOCAL"`
   (`library_filter_mode="exclude"`) is a no-op for passage and is NOT rejected.
-- **Display name.** The web GUI presents this method as “Letter-level search” (owner naming, 2026-08-23) and selects it by default when the index is available; `method='passage'` remains the stable wire value — API clients should never parse display names.
+- **Display name.** The web GUI presents this method as “Letter-level search” (owner naming, 2026-08-23) and selects it by default when the index is available; `method='passage'` remains the stable wire value — API clients should never parse display names.
 - **Span-shaped `matches[]`.** Each accepted contiguous span of matched text on a manuscript
   page is one `matches[]` entry (`chunk_count` = number of spans, unlike the incumbent's
   Tantivy-hit-derived count; `chunk_index` is the ordinal of the span's position within the
@@ -574,7 +574,7 @@ the two apart from the envelope shape alone.
   "request": {
     "mode": "variants",
     "chunk_size": 5,
-    "max_freq": 0.05,
+    "max_freq": 50,
     "boundary_options": {
       "boundary_mode": "combined",
       "boundary_delimiter": "...",

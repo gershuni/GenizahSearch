@@ -282,12 +282,30 @@ def open_index(index_dir: str) -> Optional[PassageIndex]:
         if not os.path.isfile(ids_path):
             return None
 
-        def _map(name, dtype, shape=None):
-            return np.memmap(os.path.join(index_dir, name), dtype=dtype,
-                             mode='r', shape=shape)
+        def _map(name, dtype, count):
+            """Map `count` elements of `name`, or an empty array when count is 0.
 
-        gram_offsets = _map(GRAM_OFFSETS_NAME, '<u8',
-                            (GRAM_CODE_SPACE + 1,))
+            `np.memmap` RAISES on a zero-byte file, and a zero-length section
+            is not corruption: `_apply_df_cap` zeroes the histogram bucket of
+            every gram over the cap, so a small or low-diversity corpus can
+            legitimately produce an empty postings.bin. Such an index is
+            valid and simply matches nothing.
+
+            Guarded HERE rather than at the call sites because this is the
+            THIRD time the same hazard has been patched ad hoc in this
+            codebase -- `record_ids` below (guarded from the first commit,
+            so the hazard was known) and `streams` in passage_builder.py --
+            and each previous patch left the next call site exposed. The
+            result was a zero-postings index that `diagnose_index` called
+            "opens cleanly" while `open_index` returned None: exactly the
+            contradiction that docstring promises never to produce.
+            """
+            if not count:
+                return np.empty(0, dtype=dtype)
+            return np.memmap(os.path.join(index_dir, name), dtype=dtype,
+                             mode='r', shape=(count,))
+
+        gram_offsets = _map(GRAM_OFFSETS_NAME, '<u8', GRAM_CODE_SPACE + 1)
         # CSR sanity: monotone, starts at 0, ends at the declared total. A
         # non-monotone offsets array would slice postings from other grams.
         if int(gram_offsets[0]) != 0:
@@ -309,18 +327,99 @@ def open_index(index_dir: str) -> Optional[PassageIndex]:
         if not csr_is_monotone(gram_offsets):
             return None
         postings = _map(POSTINGS_NAME, np.uint8,
-                        (counts['n_postings'] * POSTING_BYTES,))
-        streams = _map(STREAMS_NAME, np.uint8, (counts['n_letters'],))
-        records = _map(RECORDS_NAME, RECORD_DTYPE, (counts['n_records'],))
-        ids_size = os.path.getsize(ids_path)
-        record_ids = (_map(RECORD_IDS_NAME, np.uint8, (ids_size,))
-                      if ids_size else np.empty(0, dtype=np.uint8))
+                        counts['n_postings'] * POSTING_BYTES)
+        streams = _map(STREAMS_NAME, np.uint8, counts['n_letters'])
+        records = _map(RECORDS_NAME, RECORD_DTYPE, counts['n_records'])
+        record_ids = _map(RECORD_IDS_NAME, np.uint8,
+                          os.path.getsize(ids_path))
         return PassageIndex(index_dir=index_dir, manifest=manifest,
                             gram_offsets=gram_offsets, postings=postings,
                             streams=streams, records=records,
                             record_ids=record_ids)
     except Exception:
         return None
+
+
+def diagnose_index(index_dir: str) -> str:
+    """Why would `open_index(index_dir)` return None? One human sentence.
+
+    `open_index` is deliberately silent: it returns None at a dozen points
+    and logs nothing, because on the WEB path a bad artifact must hide
+    cleanly rather than announce its internals. That is the right production
+    behaviour and it is not changed here. But it leaves an operator running a
+    CLI tool with "index failed to open" and no next step, which is how this
+    function came to exist (2026-08-24).
+
+    Read-only and never raises: it re-walks the same checks in the same order
+    and describes the FIRST one that fails, so the answer always names an
+    actionable thing (wrong directory, stale layout, truncated file). Returns
+    'opens cleanly' when nothing fails -- callers should treat a passing
+    diagnosis with a failing open as a bug report, not a contradiction to
+    paper over.
+
+    Kept beside `open_index` on purpose: two copies of these checks in two
+    files would drift, and a diagnosis that describes checks the loader no
+    longer makes is worse than no diagnosis.
+    """
+    try:
+        if sys.byteorder != 'little':
+            return (f'this machine is {sys.byteorder}-endian; the artifact '
+                    f'format is little-endian only')
+        if not os.path.isdir(index_dir):
+            return f'not a directory: {os.path.abspath(index_dir)}'
+        mpath = os.path.join(index_dir, MANIFEST_NAME)
+        if not os.path.isfile(mpath):
+            present = sorted(os.listdir(index_dir))[:12]
+            return (f'no {MANIFEST_NAME} in {os.path.abspath(index_dir)} '
+                    f'(contains: {", ".join(present) or "nothing"})')
+        try:
+            with open(mpath, encoding='utf-8') as fh:
+                manifest = json.load(fh)
+        except Exception as exc:
+            return f'{MANIFEST_NAME} is unreadable/unparseable: {exc}'
+
+        want = layout_fingerprint()
+        got = manifest.get('layout')
+        if got != want:
+            if not isinstance(got, dict):
+                return f'{MANIFEST_NAME} has no layout fingerprint'
+            diffs = [f'{k}: artifact={got.get(k)!r} reader={v!r}'
+                     for k, v in want.items() if got.get(k) != v]
+            return ('layout mismatch -- the artifact was built by a different '
+                    'version and must be rebuilt: ' + '; '.join(diffs))
+
+        counts = manifest.get('counts') or {}
+        for key in ('n_records', 'n_letters', 'n_postings'):
+            if not isinstance(counts.get(key), int) or counts[key] < 0:
+                return f'{MANIFEST_NAME} counts.{key} is missing or invalid'
+        if counts['n_records'] > MAX_RECORDS:
+            return (f'manifest declares {counts["n_records"]:,} records, '
+                    f'above the format maximum {MAX_RECORDS:,}')
+        for name, expected in _expected_sizes(counts).items():
+            path = os.path.join(index_dir, name)
+            if not os.path.isfile(path):
+                return f'missing data file: {name}'
+            actual = os.path.getsize(path)
+            if actual != expected:
+                return (f'{name} is {actual:,} bytes but the manifest implies '
+                        f'{expected:,} -- truncated or mismatched artifact')
+        if not os.path.isfile(os.path.join(index_dir, RECORD_IDS_NAME)):
+            return f'missing data file: {RECORD_IDS_NAME}'
+
+        gram_offsets = np.memmap(os.path.join(index_dir, GRAM_OFFSETS_NAME),
+                                 dtype='<u8', mode='r',
+                                 shape=(GRAM_CODE_SPACE + 1,))
+        if int(gram_offsets[0]) != 0:
+            return f'{GRAM_OFFSETS_NAME} does not start at 0 (corrupt CSR)'
+        if int(gram_offsets[-1]) != counts['n_postings']:
+            return (f'{GRAM_OFFSETS_NAME} ends at {int(gram_offsets[-1]):,} '
+                    f'but the manifest declares {counts["n_postings"]:,} '
+                    f'postings (corrupt CSR)')
+        if not csr_is_monotone(gram_offsets):
+            return f'{GRAM_OFFSETS_NAME} is not monotone (corrupt CSR)'
+        return 'opens cleanly'
+    except Exception as exc:  # never raise from a diagnostic
+        return f'unexpected error while diagnosing: {exc!r}'
 
 
 CSR_SCAN_CHUNK = 1 << 20

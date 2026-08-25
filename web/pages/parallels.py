@@ -828,31 +828,9 @@ def create_parallels_page(initial_text: str = None):
                         def _letter_level_selected() -> bool:
                             return method_radio.value == 'passage'
 
-                        # The letter-level controls row, mirroring how the chunk
-                        # controls sit beside their method. ONE control on purpose:
-                        # match width (density_scale) is the single knob measured to
-                        # matter -- min_span and min_anchors were swept and found
-                        # inert -- and a row of decorative dials would be dishonest.
-                        passage_width = ui.select(
-                            options={
-                                'standard-40': tr('Narrow (near-exact)'),
-                                'wide-40': tr('Medium width'),
-                                'wider-40': tr('Wide width'),
-                                'widest-40': tr('Very wide (default)'),
-                                'max-40': tr('Maximal (may add noise)'),
-                            },
-                            value='widest-40',
-                            label=tr('Match width'),
-                        ).classes('w-44').props('outlined dense')
-                        passage_width.tooltip(tr(
-                            'How far a manuscript may drift from your text and '
-                            'still match. Wider finds more noisy witnesses; the '
-                            'strongest matches always rank first.'
-                        ))
                         if not passage_available():
                             method_radio.value = 'chunk'
                             method_radio.style('display: none;')
-                            passage_width.style('display: none;')
 
                     # === Boundary Search Settings ===
                     with ui.row().classes('w-full items-center gap-4 flex-wrap mt-2'):
@@ -1021,7 +999,11 @@ def create_parallels_page(initial_text: str = None):
                             lab_mode.value = False
                             on_lab_mode_change()
                         if _letter_level_selected():
-                            passage_width.style('display: inline-flex;')
+                            # Swap the pane's contents, do not merely grey it.
+                            letter_options_col.set_visibility(True)
+                            for _row in (mode_select, chunk_size_row,
+                                         freq_threshold_row, min_chunks_row):
+                                _row.set_visibility(False)
                             # Finding #2 (adversarial review): passage-matching
                             # has no cross-paragraph/token-boundary concept --
                             # PassageSearcher raises ValueError for anything but
@@ -1068,7 +1050,10 @@ def create_parallels_page(initial_text: str = None):
                             min_chunks_input.value = 1
                             min_chunks_input.disable()
                         else:
-                            passage_width.style('display: none;')
+                            letter_options_col.set_visibility(False)
+                            for _row in (mode_select, chunk_size_row,
+                                         freq_threshold_row, min_chunks_row):
+                                _row.set_visibility(True)
                             boundary_mode.enable()
                             chunk_size.enable()
                             mode_select.enable()
@@ -1084,6 +1069,91 @@ def create_parallels_page(initial_text: str = None):
                 with ui.column().classes('w-80 gap-4'):
                     # Changed to H2
                     h2(tr('Options'), classes='text-xl font-bold', style='color: var(--text-primary);')
+
+                    # Letter-level options live HERE, in the same pane as the
+                    # chunk options they replace -- owner feedback 2026-08-24.
+                    # The earlier shape put them in the method row and left
+                    # this whole pane visible-but-disabled, so the options a
+                    # letter-level search actually uses sat far from the four
+                    # greyed-out ones it does not. One pane, contents swapped
+                    # by method. The chunk controls stay force-set and
+                    # disabled underneath (web/search_api.py rejects a
+                    # non-default value of any of them for method='passage',
+                    # so disabling remains the guarantee); hiding is
+                    # presentation on top of that, never instead of it.
+                    with ui.column().classes('gap-4') as letter_options_col:
+                        passage_width = ui.select(
+                            options={
+                                'standard-40': tr('Narrow (near-exact)'),
+                                'wide-40': tr('Medium width'),
+                                'wider-40': tr('Wide width'),
+                                'widest-40': tr('Very wide (default)'),
+                                'max-40': tr('Maximal (may add noise)'),
+                            },
+                            value='widest-40',
+                            label=tr('Match width'),
+                        ).classes('w-44').props('outlined dense')
+                        passage_width.tooltip(tr(
+                            'How far a manuscript may drift from your text and '
+                            'still match. Wider finds more noisy witnesses; the '
+                            'strongest matches always rank first.'
+                        ))
+                        # The SECOND axis (2026-08-24). Width and passage
+                        # length are different questions -- "how corrupt a
+                        # copy may be" vs "how short a shared passage counts"
+                        # -- and the short profile is emphatically not a
+                        # wider width, so folding it into the width list
+                        # would mislabel it. Two knobs, each a small list of
+                        # named policies; never raw sliders, because
+                        # min_span and verify_margin are ONE coupled decision
+                        # (spec section 8.1) that a slider would present as
+                        # two independent ones.
+                        passage_length = ui.select(
+                            options={
+                                'normal': tr('Normal passages (default)'),
+                                'short': tr('Also short passages'),
+                            },
+                            value='normal',
+                            label=tr('Passage length'),
+                        ).classes('w-44').props('outlined dense')
+                        passage_length.tooltip(tr(
+                            'Whether a short shared passage counts as a match. '
+                            '"Also short" finds piyyutim, quotations and badly '
+                            'damaged copies that share only a phrase — measured '
+                            'at roughly double the results for a third fewer '
+                            'correct ones, so expect to skim more.'
+                        ))
+                        # The THIRD axis (2026-08-24): search depth. The
+                        # engine's default budgets were tuned on short
+                        # queries; a full composition carries ~10M postings
+                        # of which the default budget admits under 5%, so
+                        # true witnesses never even reach verification --
+                        # starvation, not the match boundary, is the main
+                        # recall loss on long queries. Depth raises the
+                        # posting/verify/candidate budgets together (they
+                        # are ONE coupled decision -- more budget without
+                        # more verification changes almost nothing), at a
+                        # measured latency cost: ~8s for deep, ~19s for
+                        # deepest on the Antiochus benchmark vs 0.6s normal.
+                        # Named profiles, never sliders, like the two axes
+                        # above (DEPTH_PROFILES in shared/passage_policy.py
+                        # carries the full measurements).
+                        passage_depth = ui.select(
+                            options={
+                                'normal': tr('Normal (fast, default)'),
+                                'deep': tr('Deep (slower, more witnesses)'),
+                                'deepest': tr('Deepest (slowest, most)'),
+                            },
+                            value='normal',
+                            label=tr('Search depth'),
+                        ).classes('w-44').props('outlined dense')
+                        passage_depth.tooltip(tr(
+                            'How much of the corpus the search may examine. '
+                            'Deeper searches take seconds longer and return '
+                            'more manuscripts — including badly damaged and '
+                            'reworked copies a fast pass misses. Long texts '
+                            'benefit the most.'
+                        ))
 
                     # Mode
                     mode_select = ui.select(
@@ -1166,17 +1236,36 @@ def create_parallels_page(initial_text: str = None):
                     variant_controls_col.set_visibility(False)
 
                     # Chunk Size
-                    with ui.column().classes('gap-1'):
+                    with ui.column().classes('gap-1') as chunk_size_row:
                         # Changed to H3
                         h3(tr('Chunk size'), classes='text-sm font-medium', style='color: var(--text-secondary);')
                         chunk_size = ui.slider(min=2, max=12, value=5).props('label-always')
                         ui.label(tr('Words per search chunk (recommended: 4-7)')).classes('text-xs').style('color: var(--text-muted);')
 
-                    # Frequency threshold (for standard mode - filters results appearing in too many documents)
+                    # Frequency threshold (chunk search only -- hidden for
+                    # letter-level, which has no per-chunk frequency signal).
+                    #
+                    # It counts PAGE HITS, not manuscripts: the engine tests
+                    # `len(hits) > max_freq` against `searcher.search(query,
+                    # 50).hits`, a truncated top-50 of Tantivy documents, and a
+                    # document is a page. Eleven pages of one manuscript trip a
+                    # threshold of ten. The label said "manuscripts" until
+                    # 2026-08-25; 5cd2bb7e had already retired that wording in
+                    # docs/SEARCH_API.md and even touched this string's Hebrew,
+                    # but left the English behind.
+                    #
+                    # The 50-hit retrieval cap also means no value at or above
+                    # 50 can ever fire -- and 50 is the DEFAULT, so the control
+                    # does nothing until it is dragged left. Measured in
+                    # 5cd2bb7e (identical results at 50/100/1000/100000). The
+                    # range and default are deliberately unchanged here:
+                    # narrowing to [10, 49] forces a new default, and that
+                    # changes the results of every chunk search -- a product
+                    # decision, not a labelling fix.
                     with ui.column().classes('gap-1') as freq_threshold_row:
                         h3(tr('Max frequency'), classes='text-sm font-medium', style='color: var(--text-secondary);')
                         freq_threshold = ui.slider(min=10, max=100, value=50).props('label-always')
-                        ui.label(tr('Filter common phrases (lower = stricter)')).classes('text-xs').style('color: var(--text-muted);')
+                        ui.label(tr('Skip phrases matching more than this many pages (lower = stricter; 50 or above turns it off)')).classes('text-xs').style('color: var(--text-muted);')
 
                     # Min chunk matches (for regular full-text chunk search)
                     with ui.column().classes('gap-1') as min_chunks_row:
@@ -1231,6 +1320,10 @@ def create_parallels_page(initial_text: str = None):
                                 method_radio.value = 'passage'
                                 if cfg.get('width') in passage_width.options:
                                     passage_width.value = cfg['width']
+                                if cfg.get('length') in passage_length.options:
+                                    passage_length.value = cfg['length']
+                                if cfg.get('depth') in passage_depth.options:
+                                    passage_depth.value = cfg['depth']
                             else:
                                 # 'chunk', or 'passage' degrading because the
                                 # index is unavailable (same rule as dispatch).
@@ -3060,12 +3153,32 @@ def create_parallels_page(initial_text: str = None):
         # unavailable must degrade to "not selected", never crash run_search().
         captured_passage_mode = _letter_level_selected() and passage_available() and not captured_lab_mode
         captured_passage_width = passage_width.value or 'widest-40'
+        captured_passage_length = passage_length.value or 'normal'
+        captured_passage_depth = passage_depth.value or 'normal'
         # Phase 145 finding #10 (adversarial review): computed ONCE here
         # rather than the 'lab'/'passage'/'chunk' ternary being written twice
         # (PostHog capture + composition-history params) below.
         captured_engine = 'lab' if captured_lab_mode else (
             'passage' if captured_passage_mode else 'chunk'
         )
+        # A control the engine never READ is not part of that search's
+        # identity (Codex review, 2026-08-24). Both letter-level selects keep
+        # their value while hidden in chunk/Lab mode, so a chunk search run
+        # after a letter-level one fingerprinted DIFFERENTLY from the same
+        # chunk search run before it -- and _apply_restored_search_config
+        # re-applies these selects only for engine == 'passage', so the
+        # reloaded page could not reproduce that identity and same-search row
+        # recovery silently failed.
+        #
+        # Pinned to their defaults rather than dropped: every chunk
+        # fingerprint recorded before this rule already hashed exactly these
+        # values (the selects sat at their build defaults), so the fix costs
+        # no stored identity. `length` is excluded from the payload at its
+        # default, so 'normal' and "absent" are the same hash.
+        if captured_engine != 'passage':
+            captured_passage_width = 'widest-40'
+            captured_passage_length = 'normal'
+            captured_passage_depth = 'normal'
         captured_freq_threshold = int(freq_threshold.value) if freq_threshold.value else 50
         captured_deep_scan = deep_scan.value if captured_lab_mode else False
         captured_chunk_size = int(chunk_size.value) if chunk_size.value else 5
@@ -3220,7 +3333,9 @@ def create_parallels_page(initial_text: str = None):
             # manuscripts from both surfaces (measured: 198 shown of 497
             # found on Birkat Hamazon).
             passage_searcher = get_passage_searcher(
-                state.searcher, preset=captured_passage_width, render_cap=0)
+                state.searcher, preset=captured_passage_width,
+                length=captured_passage_length,
+                depth=captured_passage_depth, render_cap=0)
             if passage_searcher is None:
                 return None
             return passage_searcher.search_composition_logic(
@@ -3389,6 +3504,8 @@ def create_parallels_page(initial_text: str = None):
                         text=text,
                         engine=captured_engine,
                         width=captured_passage_width,
+                        length=captured_passage_length,
+                        depth=captured_passage_depth,
                         chunk_size=captured_chunk_size,
                         mode=captured_mode,
                         max_freq=captured_freq_threshold,
@@ -3427,6 +3544,8 @@ def create_parallels_page(initial_text: str = None):
                     p_state.searched_config = {
                         'engine': captured_engine,
                         'width': captured_passage_width,
+                        'length': captured_passage_length,
+                        'depth': captured_passage_depth,
                         'chunk_size': captured_chunk_size,
                         'mode': captured_mode,
                         'max_freq': captured_freq_threshold,

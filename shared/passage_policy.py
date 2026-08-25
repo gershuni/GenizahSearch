@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 
 POLICY_SCHEMA_VERSION = 1
 
@@ -86,6 +86,17 @@ class PassagePolicy:
     candidate_cap: int = 200_000       # diagonal clusters kept at most
     verify_cap: int = 3_000            # Levenshtein calls at most
     min_anchors: int = 2               # distinct gram codes per cluster
+    # Verification half-window, letters (spec section 7). 30 comes from the
+    # research scripts, where every span was long: at MIN_SPAN 40 it is a 75%
+    # overhead and harmless. Below that it DECIDES the result. Measured
+    # 2026-08-24: a true 9-letter shared name (a transliterated proper noun,
+    # which is identical Hebrew letters in an Aramaic original and a
+    # Judeo-Arabic translation) is scored over ~70 letters of unrelated
+    # flanking text and rejected at ~0.85 density. Lowering min_span alone
+    # therefore changes NOTHING -- rejected_short falls to zero and
+    # rejected_density absorbs every one. The pair (min_span, verify_margin)
+    # has to move together, which is why this is policy and not a constant.
+    verify_margin: int = 30
     schema_version: int = POLICY_SCHEMA_VERSION
 
     def __post_init__(self):
@@ -99,6 +110,8 @@ class PassagePolicy:
             raise ValueError('min_anchors must be >= 1')
         if not (0.1 <= self.density_scale <= 2.0):
             raise ValueError('density_scale outside [0.1, 2.0]')
+        if self.verify_margin < 0:
+            raise ValueError('verify_margin must be >= 0')
         for f_name in ('posting_budget', 'candidate_cap', 'verify_cap'):
             if getattr(self, f_name) <= 0:
                 raise ValueError(f'{f_name} must be positive')
@@ -107,8 +120,23 @@ class PassagePolicy:
 
     @property
     def policy_id(self) -> str:
-        """Content hash over every field. Stable across processes and runs."""
-        blob = json.dumps(asdict(self), sort_keys=True, ensure_ascii=True,
+        """Content hash over every field. Stable across processes and runs.
+
+        Identity extension rule: a field added AFTER measurements were
+        recorded (shared/retrieval_eval.py's ledger keys on policy_id) enters
+        the hash only once it is moved off the value that reproduces the
+        historical behaviour. That way a preset measured before the field
+        existed keeps the id its results were filed under, and any policy
+        that actually behaves differently necessarily gets a new id.
+        """
+        d = asdict(self)
+        # verify_margin joined the schema on 2026-08-24; at its historical
+        # value (30)
+        # the query behaves exactly as before, so it enters the
+        # hash only when moved off that value.
+        if self.verify_margin == 30:
+            del d['verify_margin']
+        blob = json.dumps(d, sort_keys=True, ensure_ascii=True,
                           separators=(',', ':'))
         return 'pp1-' + hashlib.sha256(blob.encode('ascii')).hexdigest()[:16]
 
@@ -201,9 +229,122 @@ WIDEST_40 = PassagePolicy(name='widest-40', density_scale=1.8)
 # fits, and becomes fully useful the day paging lands.
 MAX_40 = PassagePolicy(name='max-40', density_scale=2.0)
 
+# ---------------------------------------------------------------------------
+# The SECOND axis: how short a shared passage may be and still count.
+#
+# min_span and verify_margin are ONE decision, not two (section 8.1): the span
+# floor is checked against the margin-extended window, so at margin 30 a floor
+# of 40 is cleared automatically and moving it alone does nothing. They are
+# therefore offered as a joint profile, never as independent controls.
+#
+# 'short' was measured 2026-08-24 on the Antiochus query against the
+# 83-positive adjudicated deck, composed onto widest-40:
+#
+#   widest-40 (span 40, margin 30):  56 manuscripts, 100% precision, 67% recall
+#   + short   (span 28, margin 12): 104 manuscripts,  61% precision, 72% recall
+#
+# It adds five graded positives (a piyyut versifying the scroll, a colophon
+# rubric, a Hanukkah piyyut quoting it, a Hebrew version in a siddur, a
+# damaged Aramaic copy) AND one witness no method had returned before,
+# including word-chunk matching: MS heb. e.45/36, catalogued מגילת אנטיוכוס.
+#
+# What it does NOT do is reach cross-language witnesses: 1 of the 20
+# Judeo-Arabic/rhymed targets. Those share too little contiguous Hebrew-letter
+# material with an Aramaic query for any span threshold, which two failed
+# experiments (docs/specs section 10.4) established independently.
+#
+# Score gives no cutoff inside the added rows: the five positives scored
+# 35/35/39/58/255 against noise spanning 31-55. The added tail needs eyes.
+LENGTH_PROFILES = {
+    'normal': (40, 30),   # the historical pair; every width preset's default
+    'short': (28, 12),    # measured 2026-08-24, see above
+}
+DEFAULT_LENGTH = 'normal'
+
+# ---------------------------------------------------------------------------
+# The THIRD axis: how much of the corpus the query is allowed to LOOK AT.
+#
+# posting_budget, verify_cap and candidate_cap are one decision the way
+# (min_span, verify_margin) are: the defaults were tuned on short queries,
+# where 500K postings is generous -- but a 6,000-letter composition carries
+# ~10.6M postings, so the default budget admits under 5% of them and true
+# candidates never even form clusters. The same query put 26,280 candidates
+# against verify_cap 3,000, so weak-but-real witnesses were crowded out
+# below the cap (the envelope said `verify_truncated`; no surface showed
+# it). Starvation, not the density boundary, is the dominant recall loss on
+# long queries.
+#
+# Measured 2026-08-24 on the Antiochus query (5,979 letters) against the
+# 83-positive adjudicated deck, composed onto max-40+short:
+#
+#   normal  (500K /   3K / 200K):   189 mss, recall 76%, 0.6s
+#   deep    (2M   /  50K / 500K):   508 mss, recall 81%, ~8s
+#   deepest (5M   /  50K / 500K): 1,683 mss, recall 84%, ~19s
+#
+# deep recovered a running Aramaic copy (T-S AS 67.25) and three catalogued
+# Megillat Antiochus witnesses; deepest additionally reached very damaged
+# and cross-version copies (a rhymed Hebrew reworking, an Arabic tafsir).
+# The caps are non-monotonic in each other -- recovered sets at different
+# (budget, verify_cap) points are NOT nested -- which is exactly why these
+# are offered as a few named, hashed points and never as sliders.
+#
+# Latency scales with the budget (the work IS the postings), so depth is a
+# per-query researcher decision, not a new default: 'normal' stays every
+# preset's behaviour and every previously measured policy_id.
+DEPTH_PROFILES = {
+    # (posting_budget, verify_cap, candidate_cap)
+    'normal': (500_000, 3_000, 200_000),   # every width preset's defaults
+    'deep': (2_000_000, 50_000, 500_000),    # measured 2026-08-24
+    'deepest': (5_000_000, 50_000, 500_000),  # measured 2026-08-24
+}
+DEFAULT_DEPTH = 'normal'
+
+
+def compose(width: str, length: str = DEFAULT_LENGTH,
+            depth: str = DEFAULT_DEPTH) -> PassagePolicy:
+    """A width preset plus a passage-length profile plus a search depth,
+    as one named policy.
+
+    The surface offers three small selects rather than raw sliders: the
+    space is a handful of nameable, hashed points, and the parameters inside
+    `length` and `depth` are each coupled in a way a slider would
+    misrepresent (a user lowering a span floor alone would see NO change and
+    conclude the control was broken; a user raising the posting budget
+    without the verify cap would verify the same 3,000 candidates and see
+    almost none of what the budget admitted). Composed policies carry a
+    derived name and, because policy_id is a content hash, their own id --
+    so a result is always traceable to exactly the settings that produced
+    it, measured or not.
+    """
+    policy = get_preset(width)
+    if length != DEFAULT_LENGTH:
+        try:
+            min_span, verify_margin = LENGTH_PROFILES[length]
+        except KeyError:
+            raise ValueError(f'unknown passage-length profile {length!r}; '
+                             f'known: {sorted(LENGTH_PROFILES)}')
+        policy = replace(policy, name=f'{policy.name}+{length}',
+                         min_span=min_span, verify_margin=verify_margin)
+    if depth != DEFAULT_DEPTH:
+        try:
+            posting_budget, verify_cap, candidate_cap = DEPTH_PROFILES[depth]
+        except KeyError:
+            raise ValueError(f'unknown search-depth profile {depth!r}; '
+                             f'known: {sorted(DEPTH_PROFILES)}')
+        policy = replace(policy, name=f'{policy.name}+{depth}',
+                         posting_budget=posting_budget,
+                         verify_cap=verify_cap, candidate_cap=candidate_cap)
+    return policy
+
+
+# The one measured point on the short axis, registered so evaluation tooling
+# can name it directly.
+SHORT_28 = PassagePolicy(name='short-28', min_span=28, verify_margin=12,
+                         density_scale=1.8)
+
 PRESETS = {p.name: p for p in
            (STANDARD_40, STANDARD_40_NOISY, FLAT_25, FLAT_25_NOISY,
-            WIDE_40, WIDER_40, WIDEST_40, MAX_40)}
+            WIDE_40, WIDER_40, WIDEST_40, MAX_40, SHORT_28)}
 DEFAULT_POLICY = STANDARD_40
 
 

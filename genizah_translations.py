@@ -2343,6 +2343,18 @@ TRANSLATIONS = {
     "No results": "אין תוצאות",
     "Max frequency": "תדירות מקסימלית",
     "Filter common phrases (lower = stricter)": "סנן ביטויים נפוצים (נמוך = מחמיר יותר)",
+    # Replaced 2026-08-25: the old wording said "manuscripts", but the engine
+    # counts PAGE HITS inside a top-50 retrieval, and 50 or above never fires.
+    # Kept as a key so an already-open page still renders Hebrew.
+    "Skip phrases matching more than this many pages (lower = stricter; 50 or above turns it off)":
+        "\u05d3\u05dc\u05d2 \u05e2\u05dc \u05e6\u05d9\u05e8\u05d5\u05e4\u05d9\u05dd "
+        "\u05d4\u05de\u05ea\u05d0\u05d9\u05de\u05d9\u05dd \u05dc\u05d9\u05d5\u05ea\u05e8 "
+        "\u05de\u05db\u05de\u05d5\u05ea \u05d6\u05d5 \u05e9\u05dc \u05e2\u05de\u05d5\u05d3\u05d9\u05dd "
+        "(\u05e0\u05de\u05d5\u05da \u05d9\u05d5\u05ea\u05e8 = \u05de\u05d7\u05de\u05d9\u05e8 "
+        "\u05d9\u05d5\u05ea\u05e8; 50 \u05d5\u05de\u05e2\u05dc\u05d4 \u05de\u05db\u05d1\u05d4 "
+        "\u05d0\u05ea \u05d4\u05e1\u05d9\u05e0\u05d5\u05df)",
+    "Skip phrases found in more than this many manuscripts (lower = stricter)":
+        "דלג על ביטויים המופיעים ביותר כתבי יד ממספר זה (נמוך = מחמיר יותר)",
     "Lab Mode (experimental)": "מצב מעבדה (ניסיוני)",
     "Advanced search using fingerprint algorithm. Slower but more features.": "חיפוש מתקדם באמצעות אלגוריתם טביעת אצבע. איטי יותר אך עם יותר תכונות.",
     "Exhaustive search - slower but finds more results": "חיפוש ממצה - איטי יותר אך מוצא יותר תוצאות",
@@ -4993,6 +5005,24 @@ TRANSLATIONS.update({
         "רחב מאוד (ברירת מחדל)",
     "How far a manuscript may drift from your text and still match. Wider finds more noisy witnesses; the strongest matches always rank first.":
         "עד כמה כתב היד יכול לסטות מהטקסט שלך ועדיין להיחשב התאמה. רחב יותר מוצא יותר עדים משובשים; ההתאמות החזקות תמיד מדורגות ראשונות.",
+    "Passage length":
+        "אורך הקטע",
+    "Normal passages (default)":
+        "קטעים רגילים (ברירת מחדל)",
+    "Also short passages":
+        "גם קטעים קצרים",
+    "Whether a short shared passage counts as a match. \"Also short\" finds piyyutim, quotations and badly damaged copies that share only a phrase — measured at roughly double the results for a third fewer correct ones, so expect to skim more.":
+        "האם קטע משותף קצר נחשב התאמה. \"גם קטעים קצרים\" מוצא פיוטים, ציטוטים ועותקים פגומים מאוד שחולקים רק צירוף אחד — נמדד כמכפיל את מספר התוצאות תמורת שליש פחות תוצאות נכונות, כך שיש לצפות לסינון ידני רב יותר.",
+    "Search depth":
+        "עומק החיפוש",
+    "Normal (fast, default)":
+        "רגיל (מהיר, ברירת מחדל)",
+    "Deep (slower, more witnesses)":
+        "עמוק (איטי יותר, יותר עדים)",
+    "Deepest (slowest, most)":
+        "עמוק ביותר (הכי איטי, הכי הרבה)",
+    "How much of the corpus the search may examine. Deeper searches take seconds longer and return more manuscripts — including badly damaged and reworked copies a fast pass misses. Long texts benefit the most.":
+        "כמה מן הקורפוס מותר לחיפוש לבדוק. חיפוש עמוק יותר אורך שניות נוספות ומחזיר יותר כתבי יד — כולל עותקים פגומים ומעובדים שסריקה מהירה מפספסת. טקסטים ארוכים מרוויחים הכי הרבה.",
     "Letter-level search is busy right now — please try again in a moment.":
         "החיפוש ברמת האות עמוס כרגע — נסו שוב בעוד רגע.",
     "Letter-level search timed out — try a shorter text.":

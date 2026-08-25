@@ -329,7 +329,10 @@ def test_the_default_selection_state_is_applied_on_load():
 def _passage_width_creation_slice() -> str:
     src = _read_source()
     idx = src.index('passage_width = ui.select(')
-    end = src.index('if not passage_available():', idx)
+    # The letter-level controls now live in the Options pane (owner
+    # feedback 2026-08-24), so the slice ends at the first chunk-side
+    # control that follows them rather than at the old method-row marker.
+    end = src.index('mode_select = ui.select(', idx)
     return src[idx:end]
 
 
@@ -627,7 +630,11 @@ def test_the_restore_notice_states_its_condition():
 # =========================================================================
 
 _CONFIG_KEYS = (
-    'engine', 'width', 'chunk_size', 'mode', 'max_freq', 'deep_scan',
+    # 'length' = the passage-length axis added 2026-08-24; it is part of the
+    # search identity, so it must be stashed and fingerprinted like 'width'.
+    # 'depth' = the search-depth axis added the same day, same rule.
+    'engine', 'width', 'length', 'depth',
+    'chunk_size', 'mode', 'max_freq', 'deep_scan',
     'boundary_mode', 'boundary_delimiter', 'boundary_boost',
     'min_boundary_matches', 'min_delimiter_distance',
     'variant_level', 'variant_max_changes',
@@ -837,3 +844,226 @@ def test_the_deferred_sefaria_restore_honours_the_snapshot_selection():
     assert ("_cfg_sefaria = (_restored_search_config.get('sefaria_enabled')"
             ' if isinstance(_restored_search_config, dict) else None)') in flat
     assert 'if isinstance(_cfg_sefaria, list): stored_enabled = set(_cfg_sefaria)' in flat
+
+# ---------------------------------------------------------------------------
+# The SECOND control axis: passage length (spec section 8.1). Width and
+# length are different questions and the short profile is not a wider width,
+# so it gets its own select rather than another step in the width list.
+# ---------------------------------------------------------------------------
+
+def test_the_page_offers_a_passage_length_control():
+    import inspect
+
+    import web.pages.parallels as pp
+    src = inspect.getsource(pp.create_parallels_page)
+    assert 'passage_length = ui.select(' in src
+    block = src[src.index('passage_length = ui.select('):][:900]
+    assert "'normal'" in block and "'short'" in block
+    assert "value='normal'" in block, 'normal must remain the default'
+
+
+def test_passage_length_is_captured_at_dispatch_and_reaches_the_searcher():
+    """A live widget read describes a configuration the search may not have
+    used -- the same rule the width control already follows."""
+    import inspect
+
+    import web.pages.parallels as pp
+    src = inspect.getsource(pp.create_parallels_page)
+    assert 'captured_passage_length = passage_length.value' in src
+    assert 'length=captured_passage_length' in src
+
+
+def test_passage_length_is_part_of_the_search_identity():
+    """Two searches differing only in passage length are different searches;
+    if the fingerprint ignored it, a restore would hand back the wrong
+    results."""
+    from web.export_state import compute_parallels_search_fingerprint as fp
+    base = fp(text='x', engine='passage', width='widest-40')
+    assert fp(text='x', engine='passage', width='widest-40',
+              length='normal') == base, 'the default must not shift old ids'
+    assert fp(text='x', engine='passage', width='widest-40',
+              length='short') != base
+
+
+def test_letter_only_controls_leave_a_non_letter_search_identity_alone():
+    """Codex P2, 2026-08-24. Both letter-level selects keep their value while
+    hidden, so an unscoped capture let a chunk search's identity depend on a
+    control the chunk engine never read -- and since the reload restore
+    re-applies those selects only for engine == 'passage', the reloaded page
+    could not reproduce that identity and row recovery silently failed.
+
+    Pinned to the defaults rather than dropped, so no fingerprint recorded
+    before the rule changes."""
+    src = _read_source()
+    scope_at = src.index("if captured_engine != 'passage':")
+    fp_at = src.index(
+        '_search_fingerprint = compute_parallels_search_fingerprint(')
+    assert scope_at < fp_at, 'the scoping must precede the identity call'
+    block = src[scope_at:src.index('\n\n', scope_at)]
+    assert "captured_passage_width = 'widest-40'" in block
+    assert "captured_passage_length = 'normal'" in block
+
+
+def test_the_pinned_defaults_are_the_ones_that_cost_no_stored_identity():
+    """The pin above is only backward-compatible if those two values hash
+    exactly as a pre-rule chunk search did: the widget defaults, and (for
+    length) a value the payload omits."""
+    from web.export_state import compute_parallels_search_fingerprint as fp
+    legacy = fp(text='x', engine='chunk', width='widest-40')
+    assert fp(text='x', engine='chunk', width='widest-40',
+              length='normal') == legacy
+
+
+# ---------------------------------------------------------------------------
+# The THIRD control axis: search depth (DEPTH_PROFILES, 2026-08-24). The
+# engine's default budgets starve long queries -- <5% of a composition's
+# postings admitted, real witnesses crowded below the verify cap -- so depth
+# raises the three budgets together, as one named profile per step.
+# ---------------------------------------------------------------------------
+
+def test_the_page_offers_a_search_depth_control():
+    import inspect
+
+    import web.pages.parallels as pp
+    src = inspect.getsource(pp.create_parallels_page)
+    assert 'passage_depth = ui.select(' in src
+    block = src[src.index('passage_depth = ui.select('):][:900]
+    assert "'normal'" in block and "'deep'" in block and "'deepest'" in block
+    assert "value='normal'" in block, 'normal must remain the default'
+
+
+def test_search_depth_is_captured_at_dispatch_and_reaches_the_searcher():
+    """A live widget read describes a configuration the search may not have
+    used -- the same rule the width and length controls already follow."""
+    import inspect
+
+    import web.pages.parallels as pp
+    src = inspect.getsource(pp.create_parallels_page)
+    assert 'captured_passage_depth = passage_depth.value' in src
+    assert 'depth=captured_passage_depth' in src
+
+
+def test_search_depth_is_part_of_the_search_identity():
+    """Two searches differing only in depth are different searches (they
+    can return different result sets); the default must not shift old ids."""
+    from web.export_state import compute_parallels_search_fingerprint as fp
+    base = fp(text='x', engine='passage', width='widest-40')
+    assert fp(text='x', engine='passage', width='widest-40',
+              depth='normal') == base, 'the default must not shift old ids'
+    assert fp(text='x', engine='passage', width='widest-40',
+              depth='deep') != base
+    assert fp(text='x', engine='passage', width='widest-40',
+              depth='deep') != fp(text='x', engine='passage',
+                                  width='widest-40', depth='deepest')
+
+
+def test_search_depth_is_pinned_for_non_letter_searches():
+    """Same rule as width/length (Codex P2, 2026-08-24): a control the
+    engine never read is not part of that search's identity."""
+    src = _read_source()
+    scope_at = src.index("if captured_engine != 'passage':")
+    block = src[scope_at:src.index('\n\n', scope_at)]
+    assert "captured_passage_depth = 'normal'" in block
+
+
+def test_search_depth_restores_with_the_other_letter_controls():
+    """The reload restore re-applies letter selects for engine=='passage';
+    depth must be among them or a restored search silently reruns shallow."""
+    src = _read_source()
+    assert "if cfg.get('depth') in passage_depth.options:" in src
+    assert "'depth': captured_passage_depth," in src
+
+
+def test_letter_options_live_in_the_options_pane_not_the_method_row():
+    """Owner feedback 2026-08-24: the letter-level controls belong in the
+    same pane as the chunk options they replace. The earlier shape put them
+    in the method row and left the whole Options pane visible-but-disabled,
+    so the options a letter-level search actually uses sat far away from the
+    four greyed-out ones it does not."""
+    src = _read_source()
+    opts = src.index("h2(tr('Options')")
+    assert src.index('passage_width = ui.select(') > opts, (
+        'passage_width must be created inside the Options pane')
+    assert src.index('passage_length = ui.select(') > opts
+    assert src.index('passage_depth = ui.select(') > opts
+    assert 'letter_options_col' in src
+
+
+def test_the_pane_swaps_contents_by_method_rather_than_greying_out():
+    src = _on_passage_mode_change_source()
+    true_branch = src[:src.index('else:')]
+    false_branch = src[src.index('else:'):]
+    assert 'letter_options_col.set_visibility(True)' in true_branch
+    assert 'letter_options_col.set_visibility(False)' in false_branch
+    for row in ('mode_select', 'chunk_size_row', 'freq_threshold_row',
+                'min_chunks_row'):
+        assert row in true_branch and row in false_branch, (
+            f'{row} must be hidden in letter mode and restored in chunk mode')
+
+
+def test_hiding_never_replaces_the_force_and_disable_guarantee():
+    """Hiding is presentation. web/search_api.py rejects a non-default value
+    of any chunk option for method='passage', so forcing + disabling remains
+    the actual guarantee and must survive the layout change."""
+    src = _on_passage_mode_change_source()
+    true_branch = src[:src.index('else:')]
+    for widget in ('chunk_size', 'mode_select', 'freq_threshold',
+                   'boundary_mode', 'min_chunks_input'):
+        assert f'{widget}.disable()' in true_branch
+
+
+# ---------------------------------------------------------------------------
+# Max frequency counts PAGE HITS, and the label has to say so.
+# ---------------------------------------------------------------------------
+
+def _freq_help_label() -> str:
+    """The literal inside the `ui.label(tr(...))` under the freq slider."""
+    src = _read_source()
+    start = src.index('as freq_threshold_row:')
+    block = src[start:src.index('min_chunks_row', start)]
+    m = re.search(r"ui\.label\(tr\('([^']+)'\)\)", block)
+    assert m, 'no help label under the frequency slider'
+    return m.group(1)
+
+
+def test_the_frequency_label_does_not_promise_manuscripts():
+    """`shared/search_engine.py` tests `len(hits) > max_freq` against
+    `searcher.search(query, 50).hits` -- a truncated top-50 of Tantivy
+    DOCUMENTS, and a document is a page. Eleven pages of one manuscript trip a
+    threshold of ten, and hits outside the selected filters count too, because
+    manuscript restrictions and regex verification happen afterwards.
+
+    5cd2bb7e retired the "manuscripts" wording in docs/SEARCH_API.md and even
+    edited this string's Hebrew, but left the English label behind (Codex
+    review, PR #328).
+    """
+    label = _freq_help_label()
+    assert 'manuscript' not in label.lower(), (
+        f'the frequency label promises manuscripts again: {label!r}'
+    )
+    assert 'page' in label.lower(), 'it must say what it actually counts'
+
+
+def test_the_frequency_label_says_the_upper_half_is_inert():
+    """The retrieval is hard-capped at 50, so no value at or above 50 can ever
+    fire -- and 50 is the slider's DEFAULT, so the control does nothing until
+    it is dragged left. Measured in 5cd2bb7e: identical results at
+    50 / 100 / 1000 / 100000."""
+    assert '50' in _freq_help_label(), (
+        'nothing tells the user the default setting disables the filter'
+    )
+
+
+def test_the_frequency_label_is_translated():
+    """`tr()` falls back to the English string when a key is missing, so an
+    untranslated label renders perfectly in the wrong language."""
+    from web.translations import tr, set_language, get_language
+    label = _freq_help_label()
+    saved = get_language()
+    try:
+        set_language('he')
+        rendered = tr(label)
+    finally:
+        set_language(saved)
+    assert rendered != label, f'{label!r} has no Hebrew entry'
+    assert any('\u0590' <= ch <= '\u05ea' for ch in rendered)
