@@ -208,14 +208,37 @@ class TestPrefixCheckScript:
         writer.wait_merging_threads()
         return path
 
-    def _run(self, index_dir, cwd):
-        return subprocess.run(
-            [sys.executable, str(REPO_ROOT / "scripts" / "check_sys_id_prefixes.py"),
-             "--index", str(index_dir)],
-            cwd=cwd, capture_output=True, text=True)
+    @staticmethod
+    def _tiny_libraries_csv(tmp_path):
+        """A 2-row stand-in for the real 49 MB libraries.csv.
+
+        These tests exercise the INDEX path; re-parsing the whole corpus CSV in
+        every subprocess is ~1.8s of pure waste per invocation locally and
+        several times that on a cold Windows runner. One test below deliberately
+        runs the bare documented invocation (real CSV and all) so the default
+        path stays covered.
+        """
+        csv_path = tmp_path / "tiny_libraries.csv"
+        csv_path.write_text(
+            "system_number,oxford_part_id,call_numbers,library_code,,,,titles\n"
+            "990053835020205171,,\"Moss. III,27O\",Mosseri,,,,\n"
+            "990053835750205171,,\"Moss. IV,281A\",Mosseri,,,,\n",
+            encoding="utf-8")
+        return csv_path
+
+    def _run(self, index_dir, cwd, libraries=None):
+        argv = [sys.executable, str(REPO_ROOT / "scripts" / "check_sys_id_prefixes.py"),
+                "--index", str(index_dir)]
+        if libraries is not None:
+            argv += ["--libraries", str(libraries)]
+        return subprocess.run(argv, cwd=cwd, capture_output=True, text=True)
 
     def test_documented_invocation_succeeds_on_a_corpus_index(self, tmp_path):
-        """Guards the sys.path defect: run exactly as the docstring documents."""
+        """Guards the sys.path defect: run exactly as the docstring documents.
+
+        Deliberately BARE -- no --libraries override -- so the real default
+        path (repo-root libraries.csv) stays covered by at least one test.
+        """
         idx = self._build_index(tmp_path / "idx", [
             "990051620920205171_IE167198813_P000003_FL167198817",
             "990000000000000944_IE1_P000002_FL3",
@@ -233,7 +256,7 @@ class TestPrefixCheckScript:
     def test_runs_from_an_unrelated_cwd(self, tmp_path):
         """The repo root must be found regardless of where the script is invoked."""
         idx = self._build_index(tmp_path / "idx2", ["990051620920205171_IE1_P1_FL2"])
-        proc = self._run(idx, tmp_path)
+        proc = self._run(idx, tmp_path, libraries=self._tiny_libraries_csv(tmp_path))
         assert proc.returncode == 0, f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
         assert "RESULT: OK" in proc.stdout
 
@@ -243,7 +266,7 @@ class TestPrefixCheckScript:
             "990051620920205171_IE1_P000003_FL2",
             "970012345601234567_LOCAL_P3_F0042",
         ])
-        proc = self._run(idx, REPO_ROOT)
+        proc = self._run(idx, REPO_ROOT, libraries=self._tiny_libraries_csv(tmp_path))
         assert proc.returncode == 1, f"stdout:\n{proc.stdout}"
         assert "RESULT: FAIL" in proc.stdout
         assert "970012345601234567" in proc.stdout
@@ -309,7 +332,7 @@ class TestPrefixCheckScript:
         """
         idx = self._build_index(tmp_path / "wrong", ["990051620920205171_IE1_P1_FL2"],
                                 field="other_field")
-        proc = self._run(idx, REPO_ROOT)
+        proc = self._run(idx, REPO_ROOT, libraries=self._tiny_libraries_csv(tmp_path))
         assert proc.returncode == 1, f"stdout:\n{proc.stdout}"
         assert "RESULT: FAIL" in proc.stdout
         assert "nothing classified" in proc.stdout
@@ -323,7 +346,7 @@ class TestPrefixCheckScript:
         RESULT: OK -- the check blind to its own subject.
         """
         idx = self._build_index(tmp_path / "p98", ["980051620920205171_IE1_P1_FL2"])
-        proc = self._run(idx, REPO_ROOT)
+        proc = self._run(idx, REPO_ROOT, libraries=self._tiny_libraries_csv(tmp_path))
         assert proc.returncode == 1, f"stdout:\n{proc.stdout}"
         assert "RESULT: FAIL" in proc.stdout
         assert "'98'" in proc.stdout, "the new prefix was not named in the report"
@@ -365,6 +388,6 @@ class TestPrefixCheckScript:
             "990051620920205171_IE167198813_P000003_FL167198817",
             "990030907670205171_IE1_P000001_FL2",
         ])
-        proc = self._run(idx, REPO_ROOT)
+        proc = self._run(idx, REPO_ROOT, libraries=self._tiny_libraries_csv(tmp_path))
         assert proc.returncode == 0, f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
         assert "2 classified, 0 unreadable, 0 with no sys_id" in proc.stdout
