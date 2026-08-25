@@ -814,11 +814,28 @@ def _canonical_parallels_filters(filters):
 
 
 def _canonical_witnesses(witnesses) -> list:
-    """[(kind, identity)] for the fingerprint -- see its docstring.
+    """[(kind, identity...)] for the fingerprint -- see its docstring.
 
-    A promoted manuscript is identified by its sys_id (stable, and the text
-    is re-fetchable from it); a pasted witness by a digest of its text, which
-    is the only thing that actually identifies what was searched.
+    Every witness is identified by a digest of the TEXT THAT WAS SEARCHED,
+    promoted and pasted alike.
+
+    A promoted manuscript used to be identified by its sys_id alone, on the
+    reasoning that the sys_id is stable and the text re-fetchable from it.
+    The second half is false: a promoted witness is the concatenation of the
+    pages that MATCHED, which is a property of the result set on screen when
+    it was promoted. The same manuscript promoted from a seed-only result set
+    and from a richer one is two different witnesses, and under the old rule
+    the two searches hashed identically -- so `recover_richer_parallels_rows`
+    would judge them the same search and restore the wrong set's rows.
+
+    The sys_id stays in the tuple: it keeps a promoted witness from colliding
+    with a pasted one whose text happens to be that sys_id, and it keeps the
+    payload legible when a mismatch has to be debugged.
+
+    A promoted witness with no text falls back to ('promoted', sys_id) --
+    exactly today's identity -- so a snapshot written before witnesses
+    carried their text keeps hashing as it did, instead of collapsing every
+    textless promotion onto a digest of ''.
     """
     from shared.passage_fusion import text_digest
 
@@ -828,10 +845,14 @@ def _canonical_witnesses(witnesses) -> list:
             out.append(('pasted', text_digest(str(w))))
             continue
         sys_id = w.get('sys_id')
+        text = w.get('text') or ''
         if w.get('kind') == 'manuscript' and sys_id:
-            out.append(('promoted', str(sys_id)))
+            if text.strip():
+                out.append(('promoted', str(sys_id), text_digest(text)))
+            else:
+                out.append(('promoted', str(sys_id)))
         else:
-            out.append(('pasted', text_digest(w.get('text') or '')))
+            out.append(('pasted', text_digest(text)))
     return out
 
 
