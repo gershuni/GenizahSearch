@@ -1192,3 +1192,108 @@ def test_capped_a_split_filter_can_double_the_rendered_rows(
     assert split_total <= 2 * plain_total, (
         'more than two caps worth of rows rendered'
     )
+
+
+# ---------------------------------------------------------------------------
+# PR #329 review round 4: a witness supplied twice is one witness.
+# ---------------------------------------------------------------------------
+
+class _DupeFetcher:
+    """Resolves refs to text, so duplicate references can be exercised."""
+
+    def __init__(self, by_header):
+        self._by_header = dict(by_header)
+
+    def get_full_text_by_header(self, header):
+        return self._by_header.get(header)
+
+
+def _resolver(by_header=None):
+    """A PassageSearcher shell whose only live part is `_resolve_witnesses`.
+
+    Built with `__new__` so no index is needed: the method under test touches
+    nothing but `self.text_fetcher`.
+    """
+    from shared.passage_parallels import PassageSearcher
+    s = PassageSearcher.__new__(PassageSearcher)
+    s.text_fetcher = _DupeFetcher(by_header or {})
+    return s
+
+
+def test_the_same_ref_twice_is_searched_once():
+    """`fuse()` counts contributors by POSITION -- deliberately, so an
+    untagged '' cannot collapse a real count. So the same page supplied twice
+    became two independent witnesses, inflating `witness_count` and
+    `fusion_score` and reordering results on the strength of one witness. It
+    also spent a whole extra search from a budget whose design premise is that
+    witness cost is linear.
+    """
+    s = _resolver({'PAGE_A': 'aleph bet gimel dalet'})
+    queries, report = s._resolve_witnesses(
+        [{'raw_header': 'PAGE_A'}, {'raw_header': 'PAGE_A'}], '', text_cap=20000)
+    assert len(queries) == 1, 'the identical page was searched twice'
+    assert report['searched'] == 1
+    assert len(report['duplicates']) == 1
+    assert report['duplicates'][0]['duplicate_of'] == queries[0][0]
+
+
+def test_two_different_refs_resolving_to_one_page_are_one_witness():
+    """Deduplication is on the RESOLVED TEXT, not the reference -- the count
+    inflates identically either way, and a fix covering only the reported
+    shape would be back next round."""
+    s = _resolver({'PAGE_A': 'aleph bet gimel', 'PAGE_B': 'aleph bet gimel'})
+    queries, report = s._resolve_witnesses(
+        [{'raw_header': 'PAGE_A'}, {'raw_header': 'PAGE_B'}], '', text_cap=20000)
+    assert len(queries) == 1
+    assert len(report['duplicates']) == 1
+
+
+def test_the_same_text_pasted_twice_is_one_witness():
+    s = _resolver()
+    queries, report = s._resolve_witnesses(
+        [{'text': 'aleph bet gimel'}, {'text': '  aleph bet gimel  '}],
+        '', text_cap=20000)
+    assert len(queries) == 1, 'the same pasted text counted as two witnesses'
+    assert len(report['duplicates']) == 1
+
+
+def test_a_paste_identical_to_a_resolved_ref_is_one_witness():
+    s = _resolver({'PAGE_A': 'aleph bet gimel'})
+    queries, report = s._resolve_witnesses(
+        [{'raw_header': 'PAGE_A'}, {'text': 'aleph bet gimel'}],
+        '', text_cap=20000)
+    assert len(queries) == 1
+    assert len(report['duplicates']) == 1
+
+
+def test_distinct_witnesses_are_all_kept():
+    """The guard against a dedupe that eats real witnesses."""
+    s = _resolver({'PAGE_A': 'aleph bet gimel'})
+    queries, report = s._resolve_witnesses(
+        [{'raw_header': 'PAGE_A'}, {'text': 'dalet he vav'},
+         {'text': 'zayin het tet'}], '', text_cap=20000)
+    assert len(queries) == 3
+    assert report['searched'] == 3
+    assert not report['duplicates']
+
+
+def test_a_duplicate_is_not_reported_as_an_unresolved_reference():
+    """It resolved perfectly. Filing it under `witness_ref_unresolved` would
+    send a caller looking for a stale shelfmark that does not exist."""
+    s = _resolver({'PAGE_A': 'aleph bet gimel'})
+    _queries, report = s._resolve_witnesses(
+        [{'raw_header': 'PAGE_A'}, {'raw_header': 'PAGE_A'},
+         {'raw_header': 'MISSING'}], '', text_cap=20000)
+    assert [e['id'] for e in report['duplicates']] == ['w2']
+    assert [e['reason'] for e in report['unresolved']] == ['not_found'], (
+        'the duplicate leaked into the unresolved list'
+    )
+
+
+def test_every_witness_duplicated_still_leaves_one_to_search():
+    """Deduplication must never empty the query list and turn a recoverable
+    request into a 400."""
+    s = _resolver()
+    queries, _report = s._resolve_witnesses(
+        [{'text': 'aleph bet gimel'}] * 5, '', text_cap=20000)
+    assert len(queries) == 1

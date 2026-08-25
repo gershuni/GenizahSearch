@@ -227,7 +227,8 @@ from typing import Optional, Protocol
 
 from shared.parallels_service import PARALLELS_GROUP_CAP, _cap_main_results_by_group
 from shared.passage_hygiene import is_duplicate_photography
-from shared.passage_fusion import fuse_routed, tag_rows, witness_id_for
+from shared.passage_fusion import (fuse_routed, tag_rows, text_digest,
+                                   witness_id_for)
 from shared.passage_index import PassageIndex
 from shared.passage_normalize import nfc, norm_stream, norm_stream_fast, project_span
 from shared.passage_policy import PassagePolicy, get_preset
@@ -758,6 +759,12 @@ class PassageSearcher:
 
         queries: list = []
         entries: list = []
+        # Resolved-text digest -> the id of the witness that claimed it. Keyed
+        # on the TEXT, not the reference: two different `raw_header`s can
+        # resolve to the same page, and a pasted text can duplicate a resolved
+        # one. Every such pair inflates `witness_count` and `fusion_score`
+        # identically, because `fuse()` counts contributors by POSITION.
+        seen_text: dict = {}
         for i, w in enumerate(witnesses):
             w = w if isinstance(w, dict) else {'text': w}
             wid = str(w.get('id') or witness_id_for(i))
@@ -786,14 +793,28 @@ class PassageSearcher:
                         reason = 'not_found'
             if reason is None and text_cap and len(text) > text_cap:
                 reason = 'too_long'
-            entries.append({
+            duplicate_of = None
+            if reason is None:
+                digest = text_digest(str(text).strip())
+                duplicate_of = seen_text.get(digest)
+                if duplicate_of is None:
+                    seen_text[digest] = wid
+                else:
+                    # Searching it again would spend a slot of the witness
+                    # budget to arrive at rows already in hand, and then count
+                    # them twice.
+                    reason = 'duplicate'
+            entry = {
                 'id': wid,
                 'label': label,
                 'kind': kind,
                 'resolved': reason is None,
                 'reason': reason,
                 'letters': len(text or '') if reason is None else 0,
-            })
+            }
+            if duplicate_of is not None:
+                entry['duplicate_of'] = duplicate_of
+            entries.append(entry)
             if reason is None:
                 queries.append((wid, label, text))
 
@@ -801,7 +822,13 @@ class PassageSearcher:
             'requested': len(witnesses),
             'searched': len(queries),
             'witnesses': entries,
-            'unresolved': [e for e in entries if not e['resolved']],
+            # A duplicate is NOT an unresolved reference: it resolved
+            # perfectly, and reporting it as unresolved would send a caller
+            # looking for a stale shelfmark that is not there. Separate list,
+            # separate warning code.
+            'unresolved': [e for e in entries
+                           if not e['resolved'] and e['reason'] != 'duplicate'],
+            'duplicates': [e for e in entries if e['reason'] == 'duplicate'],
         }
         if not queries:
             raise NoWitnessesResolved(report)

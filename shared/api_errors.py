@@ -71,6 +71,14 @@ WARNING_CODES = frozenset({
     # reference wastes the sixteen the caller can still have. Carries `count`
     # and a per-witness `witnesses` list saying which failed and why.
     'witness_ref_unresolved',
+    # Multi-witness: an entry resolving to text ALREADY supplied by an earlier
+    # witness was skipped. Not an unresolved reference -- it resolved fine --
+    # and reported separately so a caller is not sent hunting for a stale
+    # shelfmark. Searching it would spend a witness slot to re-derive rows
+    # already in hand and then count them twice, inflating `witness_count`
+    # and `fusion_score`. Carries `count` and a `witnesses` list naming each
+    # skipped entry and the one it duplicates.
+    'witness_duplicate_skipped',
 })
 
 

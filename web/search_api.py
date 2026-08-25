@@ -2409,6 +2409,19 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                                'reason': w.get('reason')}
                               for w in _unresolved_w],
             })
+        # Reported separately from the above: a duplicate RESOLVED, it was
+        # simply the same text twice, and filing it under
+        # `witness_ref_unresolved` would send the caller looking for a stale
+        # shelfmark that does not exist.
+        _dupe_w = (bundle.witness_report or {}).get('duplicates') or []
+        if _dupe_w:
+            warnings_list.append({
+                'code': 'witness_duplicate_skipped',
+                'count': len(_dupe_w),
+                'witnesses': [{'id': w.get('id'), 'label': w.get('label'),
+                               'duplicate_of': w.get('duplicate_of')}
+                              for w in _dupe_w],
+            })
 
         # 81A D-07 — request echo for /api/parallels. Field name `mode` is
         # PRESERVED here (NOT renamed to search_mode); the rename is deferred
