@@ -471,15 +471,132 @@ mode is `mode`, NOT `search_mode` — see "Naming Inconsistency" below.
 
 | Name | Type | Constraint | Default | Notes |
 | ---- | ---- | ---------- | ------- | ----- |
-| `text` | string | 1..20000 chars (post-strip; `COMPOSITION_LENGTH_CAP=20000`; empty → `composition_required`; over cap → `composition_too_long`) | required | |
+| `text` | string \| null | 1..20000 chars (post-strip; `COMPOSITION_LENGTH_CAP=20000`; empty → `composition_required`; over cap → `composition_too_long`) | required *unless* `witnesses` is sent | Omit it ONLY when sending `witnesses` instead. Sending both → 400 `witnesses_and_text_conflict`; sending neither → 400 `invalid_request` (unchanged). |
 | `chunk_size` | integer | `2..20` | `5` | size of sliding chunks |
 | `mode` | enum | `exact \| variants \| fuzzy` | `"exact"` | **field name is `mode`, not `search_mode`** — see "Naming Inconsistency" |
 | `max_freq` | float \| null | `>= 1`. A **document count**, not a ratio: a chunk matching more than `max_freq` documents is treated as too common. `null` disables high-frequency filtering | `null` | **Effective range is `[1, 50)`.** The engine tests `len(hits) > max_freq` against a per-chunk retrieval hard-capped at 50 hits, so any `max_freq >= 50` can never fire and behaves exactly like `null`. It is therefore not a corpus frequency: it counts hits inside a truncated top-50 and cannot tell a chunk in 51 manuscripts from one in 5,000. A value below 1 would discard every chunk that matches anything, so such values are rejected with `invalid_request` rather than silently returning an empty result set. Documented as a `0.0-1.0` ratio until 2026-08-24 — the docs were wrong, not the code |
 | `boundary_mode` | enum | `full \| boundary \| combined` | `"full"` | only boundary knob exposed in v7.10 (Phase 80 D-03) |
 | `filters` | object \| null | reuses Phase 78 `FiltersModel` verbatim | `null` | same shape as `/api/search.filters` |
 | `method` | enum | `chunk \| passage` | `"chunk"` | Phase 145 (beta). `chunk` is the pre-Phase-145 sliding-window Tantivy engine described above, byte-for-byte unchanged. `passage` is a character-level matching engine, tolerant of OCR/HTR noise and reflowed line breaks — see "`method='passage'` (beta)" below. |
+| `witnesses` | array \| null | 1..`SEARCH_API_PASSAGE_MAX_WITNESSES` (default 25) objects; `method='passage'` only | `null` | Several witnesses of ONE work, each searched **separately** and merged by rank fusion — see "Multi-witness search" below. Mutually exclusive with `text`. |
+| `sort` | enum \| null | `fused \| best_match \| witness_count`; requires `witnesses` | `null` (→ `fused`) | Group ordering for a multi-witness search. Without `witnesses` → 400 `sort_requires_multi_witness`. |
 
 The Lab Engine extended-parallels path is OUT OF SCOPE for v7.10 (Phase 80 D-02).
+
+### Multi-witness search (`witnesses`, beta)
+
+One work survives in many manuscripts, and no single witness of it retrieves every other.
+Measured through the shipped code at policy `max-40+short`, against the 614 Birkat Hamazon
+census manuscripts that have any indexed text: the best single witness finds **348 (56.7%)**,
+while the same 17 searched **separately and merged** find **455 (74.1%)**. On Megillat Antiochus
+(design harness), a seed plus three rounds of promoted witnesses took frontier coverage from 2
+to 9 of 20.
+
+Send them as `witnesses` instead of `text`:
+
+```json
+{
+  "method": "passage",
+  "witnesses": [
+    {"label": "T-S H6.37", "text": "..."},
+    {"label": "Or. 1080", "text": "..."},
+    {"label": "promoted from results", "raw_header": "990001234560205171_IE12345_P00001_FL678"}
+  ]
+}
+```
+
+Each entry needs **exactly one** of `text` (a pasted witness, capped at
+`COMPOSITION_LENGTH_CAP`) or `raw_header` (a page header exactly as carried on every result
+row, resolved server-side to that page's text — which keeps recursive requests small).
+`label` is echoed back and never used for matching. Both, or neither, → 400
+`invalid_request`.
+
+**Do not concatenate witnesses into `text` yourself.** The passage engine spends a per-query
+posting budget, so one long joined query starves: the 17 witnesses joined admit 2.4% of their
+own postings and reach **48.2%** of the reachable census — *worse than the best single witness
+(56.7%)* — against 74.1% fused, and every concatenated recursion round scored below the seed
+alone. This is specific to `method='passage'`; the chunk engine decomposes a query into
+independent per-chunk lookups with no shared budget, where concatenation and union were
+measured to return the identical manuscript set. `witnesses` with `method='chunk'` is
+therefore rejected with 400 `witnesses_require_passage_method` rather than quietly accepted.
+
+**Ranking.** Results are merged by Reciprocal Rank Fusion (k=60), not by score. A passage
+score counts matched *query* letters, so a long witness mechanically outscores a short one
+for reasons unrelated to match quality; RRF ties sum-of-scores at similar witness lengths and
+beats it decisively at mixed ones. Each group in `results[]` gains a `witness_fusion` object:
+
+```json
+"witness_fusion": {
+  "witness_count": 4,
+  "witness_ids": ["w1", "w3", "w5", "w7"],
+  "fusion_score": 0.0621,
+  "best_witness_score": 880.0
+}
+```
+
+`witness_count` is the **union** of witnesses across the group's rows — a manuscript found on
+three pages by one witness is one witness. Witness ids are assigned positionally (`w1`, `w2`,
+…) in request order.
+
+`filter_text` routes a **row**, not a record. When one witness matches a manuscript on text you
+declared as a known source and another matches it on text you did not, the manuscript stays in
+`results` — suppressing it would make the filter *stricter* the more witnesses you add — and its
+`witness_count`, `witness_ids`, `fusion_score` and `best_witness_score` count **both** witnesses.
+The rendered row is still supplied by a witness whose match was *not* filtered, so the
+highlighted span is never text you asked to discount. Evidence from the eligible contributor,
+arithmetic over all of them.
+
+`best_witness_score` is the strongest single match **any** witness made on this manuscript. It
+is reported here, and not as a row's `score`, because it may belong to a witness whose evidence
+no returned row renders: each row carries the label, highlighted span and `score` of the one
+witness that ranked it best, and a score borrowed from another witness would describe text the
+response does not contain.
+
+Each `sort` value orders the groups by a **named field of that same response**, so a consumer
+can reproduce any of them locally:
+
+| `sort` | orders groups by | ties broken by |
+|---|---|---|
+| `fused` (default) | `witness_fusion.fusion_score` | the grouping order — this is a no-op, the array already arrives in it |
+| `best_match` | `witness_fusion.best_witness_score` — the strongest single match any witness made | summed `score` |
+| `witness_count` | `witness_fusion.witness_count` | summed `score` |
+
+`sort` reorders the groups the response already contains — it does not re-select them. The
+200-group cap is applied on `fusion_score` first, so `best_match` and `witness_count` rank the
+fused top 200 and cannot surface a manuscript the fusion had already cut. The cap has to rank by
+something, and fusion is the ranking that chose the rows; widen the result set with more or
+better witnesses, not with `sort`.
+
+`best_match` deliberately does **not** read the rows' `score`. That field carries the *rank
+winner's* matched letters, so ordering by it reproduces `fused` under a second name rather than
+answering "which manuscript holds the strongest match" — a manuscript ranked first by a short
+witness and thirty-first by a long one renders the short witness's score.
+
+**`score` and `sort_score` stay matched letters on a multi-witness response**, exactly as on
+every other method — one scale everywhere. The array is ordered by
+`witness_fusion.fusion_score` instead, because that is the ranking that actually selected the
+rows. So a consumer that re-sorts a multi-witness response by `score` will get a *different*
+order than the one returned; that is deliberate. Use `witness_fusion.fusion_score` to reproduce
+the returned order.
+
+**Partial resolution is normal.** A `raw_header` that does not resolve (or resolves to a page
+over the length cap) is **skipped and reported**, never fatal — rejecting a 17-witness
+request over one stale reference would waste the sixteen you can still have. The response
+carries a `witness_ref_unresolved` warning naming which failed and why, and
+`request.witnesses` reports `requested` vs `searched`. The request fails (400
+`witnesses_required`) only when *not one* entry resolves.
+
+**Budget.** One HTTP request is one concurrency slot, with the witnesses searched
+sequentially inside it, under the same `SEARCH_API_PASSAGE_TIMEOUT` ceiling as a
+single-witness request. The witness **cap** — not a raised ceiling — is the control on cost:
+on timeout the slot keeps its executor thread until the work really finishes, so a longer
+ceiling would let timed-out requests occupy every slot while clients retry. A witness list
+whose projected cost could not fit the ceiling is refused up front with 400
+`too_many_witnesses`, before any slot is acquired.
+
+Gated by `PASSAGE_MULTI_WITNESS_ENABLED` **and** `passage_available()`; when off, 503
+`passage_multi_witness_unavailable`. Witness *texts* are never echoed back — only counts,
+ids, labels, kinds and resolution status.
 
 ### `method='passage'` (beta, Phase 145)
 
@@ -526,6 +643,8 @@ the two apart from the envelope shape alone.
   top level and inside `request`) and adds `request.passage_policy` — the actual policy
   (`policy_id`, `min_span`, `regime`, `posting_budget`, ...) that drove the search — so nothing
   in the envelope reads as "this knob was applied" when it was not.
+- **Multi-witness.** One work can be searched with several of its witnesses at once — see
+  the next section.
 - **Filtering.** `filters` (domains/authors/works/materials/dates/other libraries) applies as
   a plain sys_id restriction, same as `chunk`. `filtered[]` is always `[]` via the public API
   specifically: `filter_text` (the "known source text" a row's match can be checked against,
@@ -721,6 +840,13 @@ public API surface — renaming any is a breaking change).
 | `passage_unavailable` | 503 | Phase 145: `method='passage'` requested but `PASSAGE_PARALLELS_ENABLED` is off, or the passage index did not load |
 | `passage_scope_unsupported` | 400 | Phase 145: `method='passage'` + `filters.library` includes `"LOCAL"` in include mode — the passage index holds no Local-corpus records |
 | `passage_option_unsupported` | 400 | Phase 145: `method='passage'` + `boundary_mode` other than `"full"` — passage-matching has no cross-paragraph/token-boundary concept over a letter stream |
+| `passage_multi_witness_unavailable` | 503 | `witnesses` requested but `PASSAGE_MULTI_WITNESS_ENABLED` is off (or passage itself is unavailable) |
+| `witnesses_require_passage_method` | 400 | `witnesses` sent with `method='chunk'` — the chunk engine has no per-query budget to starve, so joining witnesses into `text` there is equivalent and cheaper |
+| `witnesses_and_text_conflict` | 400 | both `text` and `witnesses` supplied — never silently pick one |
+| `witnesses_required` | 400 | `witnesses` supplied but not one entry resolved to searchable text; the message names each failure and its reason |
+| `too_many_witnesses` | 400 | more than `SEARCH_API_PASSAGE_MAX_WITNESSES` entries, OR a list whose projected cost exceeds `SEARCH_API_PASSAGE_TIMEOUT` |
+| `witness_too_long` | 400 | a **pasted** witness exceeds `COMPOSITION_LENGTH_CAP`; a resolved `raw_header` over the cap is skipped-and-reported instead |
+| `sort_requires_multi_witness` | 400 | `sort` sent without `witnesses` |
 | `passage_search_busy` | 503 + `Retry-After` | Phase 145: passage-matching concurrency budget (`SEARCH_API_PASSAGE_CONCURRENCY`, default 4) exhausted; fail-fast; retry shortly |
 
 See [shared/api_errors.py](../shared/api_errors.py) for the authoritative frozenset.
@@ -739,6 +865,9 @@ outcome, or a per-source enrichment soft failure — none of which are item-scop
 | `enrichment_failed` | browse | per-source PGP/FJMS/NLI fetch raised an exception; soft failure; partial bundle returned (same null-out behavior). |
 | `truncated_to_200` | parallels | group count exceeded 200; top 200 returned (Phase 80 D-07). |
 | `passage_text_lookup_failed` | parallels (`method='passage'`) | one or more matched rows were DROPPED (never returned in `results[]`/`filtered[]`) because their display-text lookup failed -- never a silently blank row. Object-shaped (not a bare string, unlike `truncated_to_200`): `{"code": "passage_text_lookup_failed", "count": N}`. |
+| `witness_ref_unresolved` | parallels (`witnesses`) | one or more witnesses were SKIPPED because their `raw_header` did not resolve, or resolved to a page over the length cap. Object-shaped: `{"code": "witness_ref_unresolved", "count": N, "witnesses": [{"id", "label", "reason"}]}` where `reason` is `not_found` \| `bad_ref` \| `empty` \| `too_long`. The other witnesses still ran. |
+| `witness_duplicate_skipped` | parallels (`witnesses`) | an entry resolved to text an earlier witness had already supplied, and was skipped rather than searched again. Deduplication is on the RESOLVED TEXT, so it also catches two different `raw_header`s naming the same page, and a `text` identical to a resolved reference. Searching it would spend a witness slot to re-derive rows already in hand and then count them twice — `fuse()` counts contributors positionally, so the same witness supplied twice inflates `witness_count` and `fusion_score` and reorders results. Object-shaped: `{"code": "witness_duplicate_skipped", "count": N, "witnesses": [{"id": "...", "label": "...", "duplicate_of": "..."}]}`. NOT reported as `witness_ref_unresolved` — it resolved. |
+| `sort_not_applied` | parallels (`witnesses`) | fewer than two witnesses resolved, so no fusion happened and there is nothing for `fused` / `witness_count` to order by. The array is ordered by score. Object-shaped: `{"code": "sort_not_applied", "sort": "...", "reason": "..."}`. `request.sort` still echoes what was **asked for** — the echo reflects the request, this warning reports what was done. |
 
 **Worked Responsa cascade case.** A `/api/search` response showing both signals
 simultaneously:
@@ -779,6 +908,7 @@ Every server-side var that affects the three endpoints, plus the two skill-side 
 | `SEARCH_API_PARALLELS_TIMEOUT` | `300.0` | server | Timeout for `/api/parallels` composition search with `method='chunk'` (default), in seconds. Re-read per request. |
 | `SEARCH_API_PASSAGE_TIMEOUT` | `30.0` | server | Phase 145. Timeout for `/api/parallels` with `method='passage'`, in seconds — its own ceiling, unrelated to `SEARCH_API_PARALLELS_TIMEOUT`. Re-read per request. |
 | `SEARCH_API_HEAVY_CONCURRENCY` | `2` | server | Maximum simultaneous in-flight heavy requests (variants/fuzzy/`method='chunk'` parallels). Beyond this, new requests fail fast with 503 `heavy_search_busy` + `Retry-After: 5`. Re-read per request (semaphore rebuilt when config changes and all slots are free). |
+| `SEARCH_API_PASSAGE_MAX_WITNESSES` | `25` | server | Maximum `witnesses` entries per request. 25 rather than a rounder number because the flagship case is a 17-witness Birkat Hamazon set; a cap of twelve would reject the workflow the feature exists for. Raising it past what `SEARCH_API_PASSAGE_TIMEOUT` can serve does not extend reach — such requests are refused up front with `too_many_witnesses`. Re-read per request. |
 | `SEARCH_API_PASSAGE_CONCURRENCY` | `4` | server | Phase 145. Maximum simultaneous in-flight `method='passage'` requests — its OWN bounded budget (semaphore + its own dedicated `ThreadPoolExecutor(max_workers=4)`, never the default executor `method='chunk'` dispatches into; docs/specs/discovery-budgets.md SS2/SS3's two-budgets lesson). Beyond this, 503 `passage_search_busy` + `Retry-After: 5`. Re-read per request. |
 | `SEARCH_API_FUZZY_MAX_LIMIT` | `500` | server | Result-count ceiling for `fuzzy` mode (recall over precision). Bounded `[1, 2000]` (FUZZY_HARD_MAX). Non-fuzzy modes keep MAX_LIMIT=100. Re-read per request. |
 | `SEARCH_API_BROWSE_TEXT_CAP` | `4000` | server | Default character cap for transcription text on `/api/browse`. Per-request override via `?text_cap=N`, bounded `[100, 10000]`. |

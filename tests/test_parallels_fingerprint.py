@@ -166,3 +166,137 @@ def test_a_legacy_pair_still_falls_back_to_source_text():
     assert _same_parallels_search({'source_text': 'x'}, {'source_text': 'x'})
     assert not _same_parallels_search({'source_text': 'x'},
                                       {'source_text': 'y'})
+
+
+# ---------------------------------------------------------------------------
+# The witness set is part of a search's identity.
+# ---------------------------------------------------------------------------
+
+W_PASTED_A = {'kind': 'pasted', 'text': 'aleph bet gimel', 'label': 'A'}
+W_PASTED_B = {'kind': 'pasted', 'text': 'dalet he vav', 'label': 'B'}
+W_PROMOTED = {'kind': 'manuscript', 'sys_id': '9912345678901234', 'label': 'C'}
+
+
+def test_no_witnesses_hashes_exactly_as_before_the_parameter_existed():
+    """Every fingerprint recorded before witnesses existed has to keep
+    matching, or a stored composition-history entry stops recognising its own
+    results."""
+    assert fp(**BASE) == fp(**BASE, witnesses=None)
+    assert fp(**BASE) == fp(**BASE, witnesses=[])
+
+
+def test_adding_a_witness_moves_the_hash():
+    """The same seed searched with three witnesses and with seventeen
+    produces different results; recovering one set's rows for the other would
+    be silently wrong."""
+    assert fp(**BASE, witnesses=[W_PASTED_A]) != fp(**BASE)
+    assert fp(**BASE, witnesses=[W_PASTED_A, W_PASTED_B]) != \
+        fp(**BASE, witnesses=[W_PASTED_A])
+
+
+def test_the_witness_list_is_order_insensitive():
+    """The set searched is what shapes the results; the order they were typed
+    in is not."""
+    assert fp(**BASE, witnesses=[W_PASTED_A, W_PASTED_B]) == \
+        fp(**BASE, witnesses=[W_PASTED_B, W_PASTED_A])
+
+
+def test_a_relabelled_witness_keeps_its_identity():
+    """Labels are user-editable. Hashing them would make a rename look like a
+    different search."""
+    renamed = dict(W_PASTED_A, label='renamed entirely')
+    assert fp(**BASE, witnesses=[renamed]) == fp(**BASE, witnesses=[W_PASTED_A])
+
+
+def test_two_witnesses_sharing_a_label_are_still_distinguished():
+    """The inverse, and the reason a label-only canonicalisation is not
+    enough: a metadata-only entry does not identify the text that was
+    searched, so two different pastes under one label would collide."""
+    same_label = dict(W_PASTED_B, label='A')
+    assert fp(**BASE, witnesses=[same_label]) != fp(**BASE, witnesses=[W_PASTED_A])
+
+
+def test_editing_a_pasted_witness_moves_the_hash():
+    edited = dict(W_PASTED_A, text=W_PASTED_A['text'] + ' zayin')
+    assert fp(**BASE, witnesses=[edited]) != fp(**BASE, witnesses=[W_PASTED_A])
+
+
+def test_a_textless_promoted_witness_still_hashes_by_its_sys_id():
+    """The fallback, kept so a snapshot written before witnesses carried
+    their text hashes exactly as it did -- rather than collapsing every
+    textless promotion onto a digest of ''."""
+    no_text = {'kind': 'manuscript', 'sys_id': '9912345678901234', 'label': 'x'}
+    assert fp(**BASE, witnesses=[no_text]) == fp(**BASE, witnesses=[W_PROMOTED])
+    other = dict(W_PROMOTED, sys_id='9999999999999999')
+    assert fp(**BASE, witnesses=[other]) != fp(**BASE, witnesses=[W_PROMOTED])
+
+
+def test_the_same_manuscript_promoted_from_different_pages_is_a_different_search():
+    """A promoted witness is NOT a function of its sys_id: it is the
+    concatenation of the pages that MATCHED, a property of the result set on
+    screen when it was promoted. Promote M from a seed-only set (two pages)
+    and from a richer one (nine), and the old rule hashed both identically --
+    so `recover_richer_parallels_rows` would judge them the same search and
+    restore the wrong set's rows.
+    """
+    two_pages = dict(W_PROMOTED, text='page one\npage two')
+    nine_pages = dict(W_PROMOTED, text='page one\npage two\npage three')
+    assert fp(**BASE, witnesses=[two_pages]) != fp(**BASE, witnesses=[nine_pages]), (
+        'the same manuscript promoted from different pages hashes the same, '
+        'so a reload can restore a different witness set\'s rows'
+    )
+    # ...and the sys_id still matters, so two manuscripts with identical text
+    # stay distinct.
+    same_text_other_ms = dict(two_pages, sys_id='9999999999999999')
+    assert fp(**BASE, witnesses=[same_text_other_ms]) != \
+        fp(**BASE, witnesses=[two_pages])
+
+
+def test_a_promoted_witness_with_text_differs_from_the_textless_form():
+    """Otherwise the fallback would silently absorb a real promotion."""
+    with_text = dict(W_PROMOTED, text='page one')
+    assert fp(**BASE, witnesses=[with_text]) != fp(**BASE, witnesses=[W_PROMOTED])
+
+
+def test_the_textless_promoted_tuple_keeps_its_pre_existing_SHAPE():
+    """The backward-compatibility guarantee is the TUPLE, not a difference
+    between two forms.
+
+    Asserted on `_canonical_witnesses` directly, because the behavioural
+    version could not see it: a mutation giving the textless form a
+    `digest('')` third element still differs from a form carrying real text,
+    so the comparison test stayed green while every fingerprint recorded
+    before witnesses carried their text silently stopped matching. Caught by
+    the mutation run, not by reading.
+    """
+    from web.export_state import _canonical_witnesses
+    from shared.passage_fusion import text_digest
+
+    sid = '9912345678901234'
+    textless = {'kind': 'manuscript', 'sys_id': sid, 'label': 'x'}
+    assert _canonical_witnesses([textless]) == [('promoted', sid)], (
+        'a textless promoted witness no longer hashes as it did, so every '
+        'fingerprint recorded before witnesses carried their text stops '
+        'matching its own results'
+    )
+    with_text = dict(textless, text='page one')
+    assert _canonical_witnesses([with_text]) == [
+        ('promoted', sid, text_digest('page one'))]
+    # Whitespace-only is textless: it identifies nothing.
+    blank = ' \t\n '
+    assert _canonical_witnesses([dict(textless, text=blank)]) == [
+        ('promoted', sid)]
+
+
+def test_a_pasted_and_a_promoted_witness_never_collide():
+    collide = {'kind': 'pasted', 'text': '9912345678901234'}
+    assert fp(**BASE, witnesses=[collide]) != fp(**BASE, witnesses=[W_PROMOTED])
+
+
+def test_the_witness_payload_carries_a_digest_not_the_text():
+    """A 25 x 20,000-character payload would be hashed on every search; the
+    digest keeps it bounded. Asserted by behaviour: two texts sharing a long
+    prefix must still differ."""
+    a = {'kind': 'pasted', 'text': 'x' * 5000 + 'A'}
+    b = {'kind': 'pasted', 'text': 'x' * 5000 + 'B'}
+    assert fp(**BASE, witnesses=[a]) != fp(**BASE, witnesses=[b])

@@ -1973,6 +1973,26 @@ gained a method selector beside the pre-existing Lab Mode toggle
 indexed here (too large; grep it directly, per this file's existing
 convention for `web/pages/search.py` / `web/pages/browse.py`).
 
+## shared/passage_fusion.py
+
+Rank fusion for multi-witness passage search. Pure -- no engine, no NiceGUI,
+no I/O -- because it has two callers with different shapes that must not
+drift: `POST /api/parallels` fans N witnesses out inside ONE request and
+fuses at the end, while `web/pages/parallels.py` is a session that searches
+each newly added witness alone and re-fuses against what is already on
+screen. Same maths, one definition. The measurements behind it (and why
+concatenation starves here but not on the chunk engine) are in
+docs/specs/passage-matching-algorithm.md SS10.2b.
+
+- **Function** `witness_id_for` — canonical short id for the Nth witness
+- **Function** `text_digest` — stable short digest of a witness text, for the search fingerprint
+- **Function** `split_pasted` — split a bulk paste on blank lines; returns `(texts, skipped_too_short)`, never a silent drop
+- **Function** `tag_rows` — stamp `witness_id` / `witness_label` / `witness_rank`; THE one place a rank is assigned
+- **Function** `fuse` — one row per record, RRF-scored (k=60); the winning witness supplies every rendered field
+- **Function** `split_ids` — parse a fused row's flat `witness_ids` scalar
+- **Function** `group_stats` — per-manuscript `{witness_count, fusion_score, witness_ids}`; the count is a UNION across the group's rows, never a sum
+- **Function** `sort_key_for` — group ordering under a user-chosen sort
+
 ## shared/passage_parallels.py
 
 - **Function** `_derive_uid` (Line 145)
@@ -1993,4 +2013,5 @@ convention for `web/pages/search.py` / `web/pages/browse.py`).
 - **Class** `_PassageState` (Line 71)
 - **Function** `load_passage_state` (Line 80) — Open + validate the passage index ONCE at startup.
 - **Function** `passage_available` (Line 116) — The ONE predicate any future passage-matching surface must gate on.
+- **Function** `passage_multi_witness_available` — The ONE predicate for multi-witness passage search (its own flag ANDed with `passage_available()`).
 - **Function** `get_passage_searcher` (Line 127) — A fresh ``PassageSearcher``, or ``None`` when unavailable.

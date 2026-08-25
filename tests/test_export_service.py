@@ -822,3 +822,125 @@ class TestEdgeCases:
         assert ":" not in filename
         assert "/" not in filename
         assert "*" not in filename
+
+
+class TestParallelsWitnessExport:
+    """Witness provenance in a downloaded workbook.
+
+    Carries its OWN fixtures: `export_service` / `sample_parallels_results`
+    are defined inside TestExportService and are not visible from a sibling
+    class. Duplicating the two-line construction is cheaper and clearer than
+    hoisting shared fixtures out of a class that has used them for years.
+
+    Both additions are CONDITIONAL on a multi-witness search. An ordinary
+    export must stay byte-identical in shape -- a "Witness" column empty on
+    every row is noise, and every workbook this project has produced has the
+    eight-column shape.
+    """
+
+    WITNESSES = [
+        {'label': 'T-S H6.37', 'kind': 'manuscript', 'sys_id': '9912345678901234'},
+        {'label': 'Or. 1080 first words', 'kind': 'pasted', 'sys_id': None},
+    ]
+
+    @pytest.fixture
+    def export_service(self):
+        from unittest.mock import MagicMock
+        mgr = MagicMock()
+        mgr.get_meta_for_id.return_value = ("T-S 12.345", "Sample Title")
+        mgr.get_library_for_id.return_value = "CUL"
+        mgr.parse_full_id_components.return_value = {}
+        return ExportService(meta_mgr=mgr)
+
+    @pytest.fixture
+    def sample_parallels_results(self):
+        return [{
+            'raw_header': 'header_9912345678901234_page1',
+            'score': 85,
+            'source_ctx': 'Source *context* text',
+            'text': 'Manuscript match text',
+        }]
+
+    @staticmethod
+    def _headers(content):
+        from io import BytesIO
+        import openpyxl
+        wb = openpyxl.load_workbook(BytesIO(content))
+        ws = wb.active
+        return wb, ws, [c.value for c in ws[1]]
+
+    def test_an_ordinary_export_keeps_its_eight_columns(
+            self, export_service, sample_parallels_results):
+        content, _ = export_service.export_parallels_excel(
+            sample_parallels_results, [])
+        wb, _ws, headers = self._headers(content)
+        assert headers == ["#", "Shelfmark", "Library", "Title", "Score",
+                           "Source Context", "Manuscript Match", "Filtered"]
+        assert 'Witnesses' not in wb.sheetnames
+
+    def test_a_multi_witness_export_names_the_winning_witness(
+            self, export_service):
+        rows = [{
+            'raw_header': 'header_9912345678901234_page1',
+            'score': 85, 'source_ctx': 'plain source', 'text': 'a match',
+            'witness_label': 'T-S H6.37', 'witness_count': 2,
+        }]
+        content, _ = export_service.export_parallels_excel(
+            rows, [], witnesses=self.WITNESSES)
+        wb, ws, headers = self._headers(content)
+        assert headers[-2:] == ["Witness", "Witnesses"]
+        assert ws.cell(2, 9).value == 'T-S H6.37'
+        assert ws.cell(2, 10).value == 2
+
+    def test_a_multi_witness_export_says_what_it_was_searched_with(
+            self, export_service):
+        """A workbook outlives the session that produced it. Without this
+        sheet it could not say where its rows came from."""
+        rows = [{'raw_header': 'header_9912345678901234_page1', 'score': 85,
+                 'source_ctx': 's', 'text': 't'}]
+        content, _ = export_service.export_parallels_excel(
+            rows, [], witnesses=self.WITNESSES)
+        wb, _ws, _headers = self._headers(content)
+        assert 'Witnesses' in wb.sheetnames
+        ws_w = wb['Witnesses']
+        assert [c.value for c in ws_w[1]] == ["#", "Witness", "Kind",
+                                              "Shelfmark ID"]
+        labels = [ws_w.cell(r, 2).value for r in range(2, 4)]
+        assert labels == ['T-S H6.37', 'Or. 1080 first words']
+
+    def test_witness_texts_never_reach_the_workbook(self, export_service):
+        """Labels and shelfmarks only -- a witness text can be 20,000
+        characters and twenty-five of them would be most of the file."""
+        secret = 'DISTINCTIVEWITNESSBODY'
+        witnesses = [dict(self.WITNESSES[1], text=secret)]
+        rows = [{'raw_header': 'header_9912345678901234_page1', 'score': 85,
+                 'source_ctx': 's', 'text': 't'}]
+        content, _ = export_service.export_parallels_excel(
+            rows, [], witnesses=witnesses)
+        from io import BytesIO
+        import openpyxl
+        wb = openpyxl.load_workbook(BytesIO(content))
+        seen = [str(c.value) for sheet in wb.worksheets
+                for row in sheet.iter_rows() for c in row if c.value]
+        assert not any(secret in v for v in seen)
+
+    def test_the_word_export_lists_the_witnesses(self, export_service,
+                                                 sample_parallels_results):
+        from io import BytesIO
+        from docx import Document
+
+        content, _ = export_service.export_parallels_word(
+            sample_parallels_results, [], witnesses=self.WITNESSES)
+        text = '\n'.join(p.text for p in Document(BytesIO(content)).paragraphs)
+        assert 'T-S H6.37' in text
+        assert 'Or. 1080 first words' in text
+
+    def test_the_word_export_is_unchanged_without_witnesses(
+            self, export_service, sample_parallels_results):
+        from io import BytesIO
+        from docx import Document
+
+        content, _ = export_service.export_parallels_word(
+            sample_parallels_results, [])
+        text = '\n'.join(p.text for p in Document(BytesIO(content)).paragraphs)
+        assert 'Searched with' not in text

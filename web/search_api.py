@@ -64,6 +64,7 @@ from web.services import get_service
 from shared.search_serializer import serialize_browse_payload, serialize_parallels_payload
 # Phase 80 imports.
 from shared.parallels_service import fetch_parallels_results, ParallelsResultBundle
+from shared.passage_fusion import MAX_WITNESS_CHARS
 
 logger = logging.getLogger(__name__)
 
@@ -694,6 +695,10 @@ MAX_BROWSE_TEXT_CAP = 10000
 # 20000 chars (~3000 Hebrew words) after .strip(). Above cap → 400
 # 'composition_too_long'. Empty after .strip() → 400 'composition_required'.
 COMPOSITION_LENGTH_CAP = 20000
+# The per-WITNESS ceiling is the same number, but it has ONE definition, in
+# shared/passage_fusion.py (imported at the top of this module), so the page
+# enforces exactly what the API does -- the page had no cap at all until a
+# review found it.
 
 # The chunk-only knobs' defaults, named ONCE.
 #
@@ -703,6 +708,42 @@ COMPOSITION_LENGTH_CAP = 20000
 # were therefore free to drift: changing a default would have started
 # rejecting every passage caller who simply omitted the field, with an error
 # message telling them to omit it. Both sides now read the same name.
+def _resolve_max_witnesses() -> int:
+    """Ceiling on witnesses per request (SEARCH_API_PASSAGE_MAX_WITNESSES).
+
+    25, not twelve. The flagship case is a seventeen-witness Birkat Hamazon
+    set pasted from a file, and a cap of twelve would reject the very
+    workflow the feature was built for.
+
+    The witness cap -- NOT a raised timeout -- is the control on cost, and
+    that is deliberate. `run_through_passage_budget`'s own docstring records
+    why: on timeout "the slot/executor worker keep running the search to
+    completion regardless -- run_in_executor cannot cancel a thread". A
+    longer ceiling therefore holds permits until the work really finishes, so
+    four long requests occupy all four slots long after their clients got
+    504s, and a retrying client compounds it. Keeping each unit of work short
+    is the fix. The API's depth is fixed at 'normal' (~0.7 s/witness), so 25
+    witnesses is ~18 s -- already inside the existing 30 s ceiling. If
+    measurement ever shows that estimate optimistic, LOWER THE CAP; never
+    raise the ceiling.
+    """
+    raw = os.environ.get('SEARCH_API_PASSAGE_MAX_WITNESSES', '').strip()
+    if raw:
+        try:
+            value = int(raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    return 25
+
+
+# Measured wall-clock for ONE witness at the API's fixed depth ('normal',
+# ~0.7s). Used only to refuse a witness list that could not finish inside the
+# passage ceiling -- so the cap and the ceiling stay provably consistent
+# rather than consistent by comment.
+PASSAGE_SECONDS_PER_WITNESS = 0.75
+
 PARALLELS_CHUNK_SIZE_DEFAULT = 5
 PARALLELS_MODE_DEFAULT = 'exact'
 PARALLELS_BOUNDARY_MODE_DEFAULT = 'full'
@@ -748,6 +789,55 @@ class BrowseRequest(BaseModel):
         default=None,
         description="Override transcription text cap in chars. Bounded [100, 10000]. Default: env SEARCH_API_BROWSE_TEXT_CAP (4000).",
     )
+
+
+class WitnessInput(BaseModel):
+    """One witness of the work being searched for.
+
+    Exactly one of `text` / `raw_header` must be supplied.
+
+    `raw_header` is the value carried on EVERY result row -- the page header
+    Tantivy stores verbatim, e.g. `990001234560205171_IE12345_P00001_FL678`.
+    It is named for what it resolves, deliberately: a field advertised as
+    "a manuscript" would take a sys_id, and a sys_id spans many pages, so
+    callers would get unexplained unresolved witnesses. Promoting a whole
+    MANUSCRIPT is a page-level affordance that fetches every page's text and
+    sends it as `text`.
+
+    A `raw_header` that does not resolve is SKIPPED and reported in
+    `warnings` as `witness_ref_unresolved`, never fatal -- rejecting a
+    seventeen-witness request over one stale reference wastes the sixteen the
+    caller can still have. The request fails (400 `witnesses_required`) only
+    when NOT ONE entry resolves.
+    """
+    model_config = ConfigDict(extra='forbid')
+
+    text: Optional[str] = Field(
+        default=None,
+        description="The witness text, pasted verbatim. Max 20000 chars.",
+    )
+    raw_header: Optional[str] = Field(
+        default=None,
+        description="A page header as carried on every result row, resolved "
+                    "server-side to that page's text. Keeps recursive "
+                    "requests small.",
+    )
+    label: Optional[str] = Field(
+        default=None,
+        max_length=200,
+        description="Display label. Echoed back; never used for matching.",
+    )
+
+    @model_validator(mode='after')
+    def _exactly_one_source(self):
+        has_text = bool((self.text or '').strip())
+        has_ref = bool((self.raw_header or '').strip())
+        if has_text == has_ref:
+            raise ValueError(
+                'each witness needs exactly one of text / raw_header'
+                + (' (both were supplied)' if has_text else ' (neither was)')
+            )
+        return self
 
 
 class ParallelsRequest(BaseModel):
@@ -801,9 +891,10 @@ class ParallelsRequest(BaseModel):
     """
     model_config = ConfigDict(extra='forbid')
 
-    text: str = Field(
-        ...,
-        description="Composition text to search for parallels. Max 20000 chars after stripping.",
+    text: Optional[str] = Field(
+        default=None,
+        description="Composition text to search for parallels. Max 20000 chars after "
+                    "stripping. Omit it only when supplying `witnesses` instead.",
     )
     chunk_size: int = Field(
         default=PARALLELS_CHUNK_SIZE_DEFAULT,
@@ -833,6 +924,40 @@ class ParallelsRequest(BaseModel):
         description="Matching engine: 'chunk' (default, sliding-window token/Tantivy) or "
                     "'passage' (character-level passage matching, Genizah-only, beta).",
     )
+    witnesses: Optional[List[WitnessInput]] = Field(
+        default=None,
+        description="Multi-witness passage search (method='passage' only): several "
+                    "witnesses of ONE work, each searched SEPARATELY and merged by "
+                    "Reciprocal Rank Fusion. Mutually exclusive with `text`. Never "
+                    "concatenate witnesses into `text` yourself -- the passage engine "
+                    "spends a per-query posting budget, so one long joined query "
+                    "starves (measured 59% of a reachable census against 85% fused).",
+    )
+    sort: Optional[Literal['fused', 'best_match', 'witness_count']] = Field(
+        default=None,
+        description="Group ordering for a multi-witness search: 'fused' (default, "
+                    "combined rank-fusion score), 'best_match' (the single strongest "
+                    "match in each manuscript), or 'witness_count' (how many distinct "
+                    "witnesses point at it). Requires `witnesses`.",
+    )
+
+    @model_validator(mode='after')
+    def _text_or_witnesses(self):
+        """`text` stopped being an unconditionally required field when
+        `witnesses` arrived, but a request carrying NEITHER is still
+        malformed rather than empty.
+
+        Enforced here, at the model, so that a body with no `text` and no
+        `witnesses` keeps returning exactly what it always did -- 400
+        `invalid_request` from the ValidationError mapper, pinned by
+        tests/test_parallels_api.py::test_parallels_missing_text. The
+        OPPOSITE case (both supplied) is deliberately NOT handled here: it
+        gets its own specific `witnesses_and_text_conflict` code in the
+        handler, which a generic ValidationError could not express.
+        """
+        if self.text is None and not self.witnesses:
+            raise ValueError('one of text / witnesses is required')
+        return self
 
 
 @dataclass(frozen=True)
@@ -1821,19 +1946,113 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
         client_ip = _resolve_rate_limit_key(request)
         _parallels_rate_limiter.check(client_ip)
 
-        # 3. Composition text validation (D-06).
+        # 3. Composition text validation (D-06), or the witness list that
+        #    replaces it.
         text = (req.text or '').strip()
-        if not text:
+        witnesses_in = list(req.witnesses or [])
+
+        if witnesses_in and text:
+            # Never silently pick one: the query the caller believes ran
+            # would differ from the one that did. (This is the case the
+            # model-level validator deliberately leaves alone, so it can
+            # carry its own code instead of a generic invalid_request.)
             raise APIError(
-                'composition_required',
-                'text is required and cannot be empty after stripping whitespace',
+                'witnesses_and_text_conflict',
+                'send EITHER text OR witnesses, not both. To search a work '
+                'with several of its witnesses, put every one of them in '
+                'witnesses[] -- including the text you would have sent as '
+                '`text`.',
                 http_status=400,
             )
-        if len(text) > COMPOSITION_LENGTH_CAP:
+
+        if not witnesses_in:
+            if not text:
+                raise APIError(
+                    'composition_required',
+                    'text is required and cannot be empty after stripping whitespace',
+                    http_status=400,
+                )
+            if len(text) > COMPOSITION_LENGTH_CAP:
+                raise APIError(
+                    'composition_too_long',
+                    f'text exceeds cap (max {COMPOSITION_LENGTH_CAP} chars; '
+                    f'submitted {len(text)})',
+                    http_status=400,
+                )
+        else:
+            # The chunk engine needs no fusion: it decomposes a query into
+            # independent per-chunk lookups with no shared budget, so
+            # concatenating witnesses there returns the IDENTICAL manuscript
+            # set as searching them separately (measured -- 392 both ways,
+            # empty difference in both directions) at LOWER cost. Rejecting
+            # rather than quietly accepting keeps that finding legible.
+            if req.method != 'passage':
+                raise APIError(
+                    'witnesses_require_passage_method',
+                    "witnesses[] requires method='passage'. The chunk engine "
+                    "has no per-query budget to starve, so joining witnesses "
+                    "into `text` there is equivalent to searching them "
+                    "separately and costs less.",
+                    http_status=400,
+                )
+            from web.passage_assets import (
+                passage_multi_witness_available as _multi_available)
+            if not _multi_available():
+                raise APIError(
+                    'passage_multi_witness_unavailable',
+                    'multi-witness passage search is not available on this '
+                    'deployment',
+                    http_status=503,
+                )
+            _max_witnesses = _resolve_max_witnesses()
+            if len(witnesses_in) > _max_witnesses:
+                raise APIError(
+                    'too_many_witnesses',
+                    f'at most {_max_witnesses} witnesses per request '
+                    f'(submitted {len(witnesses_in)})',
+                    http_status=400,
+                )
+            # Projected cost, checked BEFORE any budget slot is acquired.
+            # The cap, not the ceiling, is the control here: on timeout the
+            # permit is held until the executor thread really finishes
+            # (run_in_executor cannot cancel a thread -- see
+            # run_through_passage_budget), so raising the ceiling would let
+            # timed-out requests occupy every slot. This assertion keeps the
+            # two numbers provably consistent instead of consistent by
+            # comment: if a deployment raises the witness cap past what the
+            # ceiling can serve, requests are refused up front rather than
+            # 504-ing with their permits still held.
+            _ceiling = _resolve_passage_timeout()
+            _projected = len(witnesses_in) * PASSAGE_SECONDS_PER_WITNESS
+            if _ceiling and _projected > _ceiling:
+                raise APIError(
+                    'too_many_witnesses',
+                    f'{len(witnesses_in)} witnesses would need about '
+                    f'{_projected:.0f}s, past the '
+                    f'{_ceiling:.0f}s passage ceiling. Send fewer witnesses.',
+                    http_status=400,
+                )
+            for _i, _w in enumerate(witnesses_in):
+                _wt = (_w.text or '').strip()
+                if _wt and len(_wt) > MAX_WITNESS_CHARS:
+                    raise APIError(
+                        'witness_too_long',
+                        f'witness {_i + 1} exceeds cap (max '
+                        f'{MAX_WITNESS_CHARS} chars; submitted '
+                        f'{len(_wt)})',
+                        http_status=400,
+                    )
+                # A witness given as `raw_header` is NOT length-checked here:
+                # its text does not exist yet. The cap is re-applied after
+                # resolution, inside the searcher, where an over-cap page is
+                # skipped and reported rather than truncated.
+
+        if req.sort and not witnesses_in:
             raise APIError(
-                'composition_too_long',
-                f'text exceeds cap (max {COMPOSITION_LENGTH_CAP} chars; '
-                f'submitted {len(text)})',
+                'sort_requires_multi_witness',
+                f"sort={req.sort!r} orders groups by facts only a "
+                f"multi-witness search produces. Omit it, or send "
+                f"witnesses[].",
                 http_status=400,
             )
 
@@ -1998,6 +2217,11 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             # web/pages/parallels.py's direct call path uses (Codex review
             # finding #15) -- exactly one execution budget for passage-
             # matching, not one per surface.
+            # Local imports, like every other passage import in this
+            # module: shared.passage_parallels pulls in numpy and the index
+            # reader, and a flag-OFF deployment must pay nothing for a
+            # feature it does not serve (Codex review finding #14).
+            from shared.passage_parallels import NoWitnessesResolved
             from web.passage_assets import get_passage_searcher
             _pg_searcher = get_passage_searcher(state.searcher)
             if _pg_searcher is None:
@@ -2016,6 +2240,18 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             # doubles as a stable identifier of exactly which policy
             # produced the result, for anyone reproducing a query later.
             passage_policy_echo = _pg_searcher.policy.as_dict()
+            # Ids are assigned HERE, positionally, and are what every
+            # witness_ids on a row and in the envelope refers to. The caller
+            # never supplies one: a client-chosen id would have to be
+            # validated and de-duplicated, and buys nothing the position does
+            # not already give.
+            witness_payload = [
+                {'id': 'w{0}'.format(_i + 1),
+                 'label': (_w.label or '').strip(),
+                 'text': _w.text,
+                 'raw_header': _w.raw_header}
+                for _i, _w in enumerate(witnesses_in)
+            ] or None
             try:
                 # A factory, not a coroutine: the work is built only after a
                 # budget slot is held. Passing the coroutine directly also
@@ -2031,8 +2267,24 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                         boundary_mode=req.boundary_mode,
                         restrict_sys_ids=restrict_sys_ids,
                         executor=_passage_executor(),
+                        witnesses=witness_payload,
+                        witness_text_cap=MAX_WITNESS_CHARS,
                     )
                 )
+            except NoWitnessesResolved as exc:
+                # Caught BEFORE the ValueError branch below -- it is a
+                # ValueError subclass, and mapping it to
+                # passage_option_unsupported would tell the caller their
+                # OPTIONS were wrong when their REFERENCES were.
+                _unresolved = (exc.report or {}).get('unresolved') or []
+                _detail = ', '.join(
+                    '{0}: {1}'.format(w.get('id'), w.get('reason'))
+                    for w in _unresolved[:10])
+                raise APIError(
+                    'witnesses_required',
+                    'no witness resolved to searchable text (' + _detail + ')',
+                    http_status=400,
+                ) from exc
             except ValueError as exc:
                 # Defense in depth: step 4b already rejects boundary_mode !=
                 # 'full' before a slot is acquired, so PassageSearcher's own
@@ -2134,6 +2386,50 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 'code': 'duplicate_photography_demoted',
                 'count': bundle.duplicate_photography_demoted,
             })
+        # A witness that could not be resolved was SKIPPED, and skipping
+        # without saying so is the silent-content-loss failure this repo
+        # treats as a defect -- the caller asked for seventeen searches and
+        # got sixteen.
+        if witnesses_in and not bundle.multi_witness:
+            # The echo below still reports what was ASKED for -- that is what
+            # an echo is -- so without this the response claims an ordering it
+            # does not have. One witness resolving short-circuits before any
+            # fusion, and `fused` / `witness_count` are facts fusion produces.
+            #
+            # Keyed on the EFFECTIVE sort, not on `req.sort`. Omitting the
+            # field does not mean "no ordering was claimed": the echo fills it
+            # in as `fused` either way, so a caller who never sent `sort` was
+            # told the response was fusion-ordered, with no warning, while the
+            # array was ordered by score. The default is the commonest case,
+            # which made it the commonest way to receive that claim.
+            warnings_list.append({
+                'code': 'sort_not_applied',
+                'sort': req.sort or 'fused',
+                'requested': req.sort,
+                'reason': 'fewer than two witnesses resolved',
+            })
+        _unresolved_w = (bundle.witness_report or {}).get('unresolved') or []
+        if _unresolved_w:
+            warnings_list.append({
+                'code': 'witness_ref_unresolved',
+                'count': len(_unresolved_w),
+                'witnesses': [{'id': w.get('id'), 'label': w.get('label'),
+                               'reason': w.get('reason')}
+                              for w in _unresolved_w],
+            })
+        # Reported separately from the above: a duplicate RESOLVED, it was
+        # simply the same text twice, and filing it under
+        # `witness_ref_unresolved` would send the caller looking for a stale
+        # shelfmark that does not exist.
+        _dupe_w = (bundle.witness_report or {}).get('duplicates') or []
+        if _dupe_w:
+            warnings_list.append({
+                'code': 'witness_duplicate_skipped',
+                'count': len(_dupe_w),
+                'witnesses': [{'id': w.get('id'), 'label': w.get('label'),
+                               'duplicate_of': w.get('duplicate_of')}
+                              for w in _dupe_w],
+            })
 
         # 81A D-07 — request echo for /api/parallels. Field name `mode` is
         # PRESERVED here (NOT renamed to search_mode); the rename is deferred
@@ -2174,6 +2470,22 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             # evaluation consumers who need postings/candidates/verify
             # accounting rather than just the truncated-or-not warning.
             parallels_echo['passage_report'] = bundle.passage_report
+        # Present ONLY when witnesses were sent, so both the 8-key passage
+        # shape and the 7-key chunk shape stay untouched for every request
+        # that does not use the feature. Counts and LABELS only -- a witness's
+        # text is never echoed: it can be 20,000 characters, the caller
+        # already has it, and 25 of them would dominate the response.
+        if witnesses_in:
+            _wrep = bundle.witness_report or {}
+            parallels_echo['witnesses'] = {
+                'requested': _wrep.get('requested', len(witnesses_in)),
+                'searched': _wrep.get('searched', 0),
+                'labels': [{'id': w.get('id'), 'label': w.get('label'),
+                            'kind': w.get('kind'),
+                            'resolved': w.get('resolved')}
+                           for w in (_wrep.get('witnesses') or [])],
+            }
+            parallels_echo['sort'] = req.sort or 'fused'
 
         # 8. Serialize — Phase 77 D-14 SOLE producer of envelope shape.
         envelope = serialize_parallels_payload(
@@ -2187,6 +2499,14 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             boundary_options=echo_boundary_options,
             warnings=warnings_list,
             request_echo=parallels_echo,
+            # ORDER the groups by the key the rows were selected by -- but
+            # never let it reach aggregate_score/sort_score/score, which
+            # stay matched letters on every path. Conflating the two turned
+            # the public `score` into ~0.03 on multi-witness responses
+            # (review finding).
+            order_key='fusion_score' if bundle.multi_witness else None,
+            sort=(req.sort or 'fused') if bundle.multi_witness else None,
+            with_witness_fusion=bundle.multi_witness,
         )
 
         # 9. Tell the decorator's finally block what to log to PostHog.

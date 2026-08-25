@@ -547,6 +547,84 @@ effectively exhausted what the corpus text allows. Returned manuscripts outside 
 not all noise: the census is comprehensive for its edition, and the searches are expected to
 surface additional genuine witnesses beyond it (per the owner, 2026-08-24).
 
+### 10.2b Several witnesses of one work — rank fusion, never concatenation (2026-08-24)
+
+Section 10.2a raises the budget for one query. This is the other half of the same problem: one
+text per work is not enough, and no budget fixes that.
+
+All Birkat Hamazon figures below were measured **through the shipped code**
+(`PassageSearcher` + `shared/passage_fusion.py`) at policy `max-40+short`,
+normal depth, floor30_v1, on 2026-08-24.
+
+**Read the denominator before comparing these to SS10.2a.** That table counts
+"of 442 reachable"; this one counts index membership over a 673-entry census,
+giving **614** (59 census entries have no indexed text at all, and a search
+cannot be held to those). The two fractions are not comparable. In absolute
+terms the shipped path finds **455** census manuscripts against SS10.2a's
+85% of 442 = 376, so it retrieves more, not less — it simply reports a
+smaller fraction of a larger denominator. Quote counts with their
+denominators; a bare percentage from either table means nothing on its own.
+
+| finding | evidence |
+|---|---|
+| One witness under-reaches | Birkat Hamazon: the best single witness reaches **348/614 = 56.7%** of the reachable census; the same 17 searched separately and merged reach **455/614 = 74.1%**. Page path and API path return the same 455 |
+| Concatenation is actively harmful **here** | The 17 joined into one 33,180-char query admit **499,662 of 21,093,233 postings (2.4%)**, hit the 3,000 verify cap against 27,106 candidates, and reach **296/614 = 48.2%** — *worse than the best single witness*. On Antiochus recursion **every** concatenated round scored below the seed alone (43–46 positives vs 50; design harness) |
+| Fusion must be by RANK | `score` is matched **query** letters, so a long witness mechanically outscores a short one. RRF (k=60) ties sum-of-scores at similar lengths (BH) and beats it decisively at mixed ones (Antiochus, 1,153–5,979 letters: 18/26 positives in the top 50/100 against 10/19) |
+| Length normalisation is dead | Worse than raw score at every cut-off on both instruments |
+| Recursion works, and promotion is safe | Seed → top-5 → repeat: frontier coverage **2 → 4 → 7 → 9 of 20**, positives 50 → 57 of 68, monotone over three rounds. All 15 promoted witnesses were graded positives |
+| The cost is the first page | Rows 191 → 2,795; positives in the top 100 fall 48 → 32. Reach up, precision down |
+| Witness quality varies enormously | Of 10 manuscript transcriptions used as witnesses, six found **zero** positives and added ~3,200 junk rows; the best found 19 |
+
+**Why concatenation starves here and not everywhere.** The budget of section 10.2 is spent
+*per query*, so joining witnesses makes one long query that admits a smaller fraction of its own
+postings. This does **not** generalise. The chunk engine
+(`SearchEngine.search_composition_logic`) decomposes a query into independent per-chunk Tantivy
+lookups with no shared budget, and there concatenation and union were measured to return the
+**identical** manuscript set — 392 both ways, empty difference in both directions — at *lower*
+cost (944 s vs 1,234 s). Desktop's `run_recursive_composition`, which concatenates, is therefore
+correct for its own engine; the rule below is scoped to `method='passage'` and must stay scoped.
+
+Multi-witness on the chunk engine buys almost nothing regardless: **+2 positives of 74, zero
+frontier**, at 4–6× the time, while *degrading* the first hundred (27 → 22–23). Hence the web
+surface offers it for letter-level search only.
+
+**The rule.** Search each witness separately; fuse by `Σ 1/(60 + rank_within_that_witness)`.
+`shared/passage_fusion.py` is the single definition, with two callers (`witnesses[]` on
+`POST /api/parallels` fans out inside one request; `web/pages/parallels.py` accumulates across
+one request per witness, which is what makes an R-round expansion cost `1 + rounds × K`
+searches rather than re-running everything on every addition).
+
+**`score` stays matched letters, from the witness the row renders.** The RRF sum lives in a
+separate `fusion_score`. Overwriting `score` would make the group cap fusion-aware for free but
+would silently turn ~214 into ~0.03 in every badge and export column that reads it.
+
+Two corrections to earlier drafts of this paragraph, both found by review:
+
+* It said the fused row reports *the best single witness's* score — `max()` across every
+  contributor. That contradicted the winner rule one paragraph above: the row shows the winning
+  witness's label and highlighted span, so a score from a louder witness described text nobody
+  could see. `score` now comes from the same row as the evidence, and the maximum is reported
+  as `witness_fusion.best_witness_score`, where its meaning is stated.
+* It said `aggregate_score` / `sort_score` follow the fusion key wherever groups are ranked by
+  fusion. They deliberately do **not**. Summing fusion into `aggregate_score` turned the public
+  `score` into ~0.03 on multi-witness responses — the exact defect the paragraph above warns
+  about, reintroduced at the serializer. Group ORDER follows the fusion key; `aggregate_score`,
+  `sort_score` and `score` are always matched letters. A consumer re-sorting a multi-witness
+  response by `score` therefore gets a different order than the array's, which is documented in
+  `docs/SEARCH_API.md` rather than papered over.
+
+**`chunk_index` is per witness.** It is the ordinal of a span's query-side start offset among
+all distinct start offsets for that query — a position in the pasted composition, comparable
+across records. With several witnesses it is comparable only *within* one: offset 200 of witness
+A and offset 200 of witness B are different places in different texts. Every fused row records
+the witness that produced it (`witness_id`), and the winning witness supplies every rendered
+field, because projecting one witness's spans through another's offset map yields a highlight
+that points at the wrong letters and still looks entirely plausible.
+
+**A record is filtered only when every witness that matched it filtered it.** Otherwise the
+"known source text" filter would get stricter the more witnesses are added — the opposite of
+what the control says it does.
+
 ### 10.3 Position stride
 
 Indexing every position is the default. Indexing every second or third position reduces the

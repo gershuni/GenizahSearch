@@ -141,6 +141,18 @@ class ParallelsResultBundle:
     # Rows the passage engine's post-verify Stage-0 demoted to filtered as
     # duplicate photography of a better-scored row. 0 for the chunk path.
     duplicate_photography_demoted: int = 0
+    # Multi-witness passage search. `witness_report` is what the searcher
+    # said about EACH requested witness -- resolved or not, and why not --
+    # and is present whenever `witnesses` was passed, including when only one
+    # survived: seventeen requested and sixteen searched must not look
+    # identical to a sixteen-witness request. `per_witness_query_reports`
+    # carries each witness's own budget/truncation accounting; the bundle's
+    # single `passage_report` above is SYNTHESISED across them (booleans
+    # OR-ed, counters summed) so a truncation on witness 7 still reaches the
+    # envelope. None/empty for the chunk path and for single-text passage.
+    witness_report: Optional[dict] = None
+    per_witness_query_reports: Optional[list] = None
+    multi_witness: bool = False
 
 
 async def _run_sync(func, *args, _executor=None, **kwargs):
@@ -170,13 +182,31 @@ def _cap_main_results_by_group(
     main_results: list[dict],
     meta_mgr: UidComponentParser,
     cap: int = PARALLELS_GROUP_CAP,
+    order_key: str = None,
 ) -> tuple[list[dict], bool]:
     """Apply D-07 group cap.
 
     Groups main_results by sys_id (using the same helper the serializer uses
-    so cap and envelope group identically), sorts groups desc by aggregate_score
-    (sum of per-row final_score within the group, falling back to score), takes
-    top `cap` groups, flattens back to a row list.
+    so cap and envelope group identically), sorts groups desc by
+    aggregate_score, takes top `cap` groups, flattens back to a row list.
+
+    aggregate_score is the SUM of each row's `score` within the group.
+    (An earlier version of this docstring said "final_score, falling back to
+    score"; the code has always summed `score`. The behaviour is unchanged --
+    only the description was wrong.)
+
+    `order_key` decides WHICH groups survive the cap, WITHOUT changing what
+    `aggregate_score` reports. It defaults to None -- byte-for-byte today's
+    behaviour for every existing caller, chunk path included. The
+    multi-witness passage path passes `'fusion_score'` so the cap keeps the
+    groups RANK FUSION ranks highly rather than the ones with the most raw
+    matched letters -- without it, the 200-group cap would discard exactly
+    the groups the fusion promoted.
+
+    The two were ONE parameter until a review found the consequence:
+    aggregate_score becomes the envelope's sort_score, which becomes the
+    public `score`, so summing fusion there silently redefined a documented
+    field from ~200 matched letters to ~0.03.
 
     Returns (capped_rows, truncated_flag). truncated_flag=True iff raw group
     count exceeded `cap`.
@@ -193,7 +223,8 @@ def _cap_main_results_by_group(
     # Late import to keep service import-time fast and avoid circular imports.
     from shared.search_serializer import _group_parallels_by_sys_id
 
-    groups = _group_parallels_by_sys_id(main_results, meta_mgr=meta_mgr)
+    groups = _group_parallels_by_sys_id(main_results, meta_mgr=meta_mgr,
+                                        order_key=order_key)
 
     if len(groups) <= cap:
         return main_results, False
@@ -202,14 +233,15 @@ def _cap_main_results_by_group(
     # _group_parallels_by_sys_id already sets aggregate_score per group
     # (sum of final_score / score values). Defensively recompute if missing.
     def _agg(g: dict) -> float:
+        items = g.get('items') or []
+        if order_key:
+            # Must match the order _group_parallels_by_sys_id returned, or
+            # the cap keeps a different set than the ranking chose.
+            return float(sum((it.get(order_key) or 0) for it in items))
         v = g.get('aggregate_score')
         if isinstance(v, (int, float)):
             return float(v)
-        items = g.get('items') or []
-        return float(sum(
-            (it.get('final_score') if it.get('final_score') is not None else it.get('score', 0)) or 0
-            for it in items
-        ))
+        return float(sum((it.get('score') or 0) for it in items))
 
     groups_sorted = sorted(groups, key=_agg, reverse=True)
     kept_groups = groups_sorted[:cap]
@@ -233,6 +265,8 @@ async def fetch_parallels_results(
     restrict_sys_ids: Optional[set] = None,
     executor=None,
     hide_canonical: bool = False,
+    witnesses: Optional[list] = None,
+    witness_text_cap: Optional[int] = None,
 ) -> ParallelsResultBundle:
     """Run search_composition_logic via run_in_executor + apply group cap.
 
@@ -270,6 +304,20 @@ async def fetch_parallels_results(
                           to nothing (handler short-circuits before calling
                           this function -- service should never receive an
                           explicit empty set in practice).
+        witnesses: Optional[list] of `{'id', 'label', 'text' | 'raw_header'}`
+                   dicts, for multi-witness passage search. Omitted (the
+                   default) the call is byte-for-byte what it was before the
+                   parameter existed -- which is what keeps the chunk path,
+                   and every existing caller, untouched. Passed through to
+                   the searcher as a keyword: the chunk engine's
+                   `search_composition_logic` has a fixed parameter list with
+                   no `**kwargs`, so aiming witnesses at the wrong searcher
+                   raises TypeError instead of being silently swallowed.
+        witness_text_cap: Optional[int] per-witness length ceiling, applied
+                   by the searcher AFTER a `raw_header` reference is resolved
+                   -- twenty-five tiny references can resolve to twenty-five
+                   20,000-character pages, so a payload-only cap bounds the
+                   request rather than the work.
         executor: Optional[concurrent.futures.Executor] (Phase 145). Passed
                   straight through to `_run_sync`'s `_executor` kwarg and
                   ALONE decides dispatch -- there is no separate `method`
@@ -315,6 +363,10 @@ async def fetch_parallels_results(
             # explicitly with the same values would be a no-op; rely on the
             # function's default arguments instead.
             restrict_sys_ids=restrict_sys_ids,
+            # Only ever passed when the caller asked for it: the chunk
+            # engine would raise TypeError, which is the guard, not a bug.
+            **({'witnesses': witnesses,
+                'witness_text_cap': witness_text_cap} if witnesses else {}),
         )
 
     # `executor` alone decides dispatch (None -> the default executor, the
@@ -338,6 +390,15 @@ async def fetch_parallels_results(
     passage_report = (result or {}).get('query_report') or None
     duplicate_photography_demoted = int(
         (result or {}).get('duplicate_photography_demoted') or 0)
+    witness_report = (result or {}).get('witness_report') or None
+    per_witness_query_reports = (result or {}).get(
+        'per_witness_query_reports') or None
+    # "Two or more witnesses actually ran", NOT "witnesses were requested":
+    # a request whose extra witnesses all failed to resolve took the
+    # single-witness path inside the searcher, so its rows carry no
+    # fusion_score and must not be ranked by one.
+    multi_witness = bool(witness_report
+                         and (witness_report.get('searched') or 0) > 1)
 
     # Optional: hide manuscripts the catalogue identifies as canonical works
     # ("hide canonical works by the catalogue"). Applied HERE, after the
@@ -365,7 +426,9 @@ async def fetch_parallels_results(
     # the local flag is False -- the searcher's flag is the only witness that
     # a >render_cap query was truncated at all. Absent for the chunk path.
     searcher_truncated = bool((result or {}).get('truncated_to_200'))
-    capped_main, truncated = _cap_main_results_by_group(main_results, meta_mgr)
+    capped_main, truncated = _cap_main_results_by_group(
+        main_results, meta_mgr,
+        order_key='fusion_score' if multi_witness else None)
     truncated = truncated or searcher_truncated
 
     # Boundary options for envelope echo (D-06 inherited from Phase 77).
@@ -388,4 +451,7 @@ async def fetch_parallels_results(
         canonical_hidden=canonical_hidden,
         passage_report=passage_report,
         duplicate_photography_demoted=duplicate_photography_demoted,
+        witness_report=witness_report,
+        per_witness_query_reports=per_witness_query_reports,
+        multi_witness=multi_witness,
     )

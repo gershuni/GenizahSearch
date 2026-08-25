@@ -2956,6 +2956,15 @@ TRANSLATIONS = {
     # Codex MEDIUM (2026-06-29): catalog→parallels handoff drops library (parallels can't scope by it)
     "Library filter is not applied to parallel search": "מסנן הספרייה אינו חל על חיפוש מקבילות",
     "Library filter": "מסנן ספרייה",
+    # Both capitalisations, deliberately. The dialog's "show the rest of the
+    # libraries" expander calls tr('All libraries') (sentence case) in
+    # web/pages/{parallels,search,catalog_browse}.py, but only the title-case
+    # key existed -- so the summary line rendered in English on an otherwise
+    # Hebrew page, in all three. Nothing calls tr('All Libraries') today;
+    # it is kept because a lookup miss is silent (tr falls back to the key),
+    # so dropping it would risk re-opening the same class of bug for the
+    # cost of one line.
+    "All libraries": "כל הספריות",
     "All Libraries": "כל הספריות",
     "Libraries": "ספריות",
     # SEED-026 GAP-C dialog (title-case dialog header + FINDING-1 hint)
@@ -4985,12 +4994,26 @@ TRANSLATIONS.update({
 
 # === Web parallels — letter-level search rename + controls (owner, 2026-08-23) ===
 TRANSLATIONS.update({
+    # The sidebar badge on the /parallels nav entry. Kept SHORT: it sits
+    # in a narrow drawer beside an icon and a label, so the English
+    # sentence is condensed rather than translated word for word.
+    "New! Fast search feature":
+        "חדש! פונקציית חיפוש מהיר",
     "New! Letter-level search":
         "חדש! חיפוש ברמת האות",
     "Chunk search (slower)":
         "חיפוש מקטעים (איטי יותר)",
     "Letter-level search: fast, yields fewer irrelevant results, and tolerates transcription errors, nikkud and line breaks.":
         "חיפוש ברמת האות: מהיר, מחזיר פחות תוצאות לא רלוונטיות, ועמיד לשיבושי פענוח, לניקוד ולשבירות שורה.",
+    # Replaced that single group tooltip on 2026-08-25. It claimed
+    # tolerance of nikkud and line breaks as though they distinguished the
+    # two engines; they do not. The chunk engine strips nikkud per token at
+    # tokenization, and both treat a newline as an ordinary separator. The
+    # old key stays so an already-open page keeps rendering Hebrew.
+    "Faster, with fewer irrelevant results. Tolerates spelling and transcription differences.":
+        "מהיר יותר, עם פחות תוצאות לא רלוונטיות. עמיד להבדלי כתיב ולשיבושי פענוח.",
+    "The older method. Slower, but offers Exact / Variants / Fuzzy modes and cross-paragraph filtering.":
+        "השיטה הוותיקה. איטית יותר, אך מציעה מצבי מדויק / וריאנטים / מקורב, וסינון חוצה-פסקאות.",
     "Match width":
         "רוחב התאמה",
     "Narrow (near-exact)":
@@ -5038,4 +5061,67 @@ TRANSLATIONS.update({
         "שוחזרו {shown} מתוך {total} תוצאות מהחיפוש האחרון — לרשימה המלאה יש להריץ את החיפוש שוב עם ההגדרות המקוריות.",
     "Letter-level search matched more than {cap} manuscripts — showing the strongest {cap}.":
         "החיפוש ברמת האות מצא יותר מ־{cap} כתבי יד — מוצגים ה־{cap} החזקים ביותר.",
+    # --- Multi-witness letter-level search ---------------------------------
+    # One work survives in many manuscripts and no single witness of it
+    # retrieves every other. "עדים" is the standard textual-criticism
+    # term the owner uses for manuscript witnesses of a work.
+    "Witnesses": "עדים",
+    "Add other copies of this work to search with. Each is searched on its own and the results are merged.":
+        "הוסיפו עותקים נוספים של החיבור לחפש איתם. כל אחד נבדק בנפרד והתוצאות ממוזגות.",
+    "Add witness text": "הוספת נוסח עד",
+    "This paste contains several witnesses separated by blank lines":
+        "הטקסט מכיל כמה עדים המופרדים בשורות ריקות",
+    "Preview split": "תצוגה מקדימה של הפיצול",
+    "{n} witnesses detected": "זוהו {n} עדים",
+    "({n} skipped: already added)": "({n} דולגו: כבר נוספו)",
+    "({n} skipped: too short)": "({n} דולגו: קצרים מדי)",
+    "Pasted text": "טקסט שהודבק",
+    "Pending": "ממתין",
+    "Failed": "נכשל",
+    "{n} matches found": "נמצאו {n} התאמות",
+    "Search now ({n} pending)": "חפשו עכשיו ({n} ממתינים)",
+    "Search with these too": "חפשו גם עם אלו",
+    "Search with this manuscript too": "חפשו גם עם כתב יד זה",
+    "Clear selection": "נקו את הבחירה",
+    "{n} manuscripts selected": "נבחרו {n} כתבי יד",
+    "Added {n} witnesses — found {m} new matches.":
+        "נוספו {n} עדים — נמצאו {m} התאמות חדשות.",
+    "Could not load text for this manuscript.":
+        "לא ניתן לטעון את הטקסט של כתב יד זה.",
+    "Could not load text for {n} manuscripts: {names}":
+        "לא ניתן לטעון את הטקסט של {n} כתבי יד: {names}",
+    "Auto-expand (optional)": "הרחבה אוטומטית (לא חובה)",
+    "Repeatedly search with the best results as new witnesses. Reach goes up and top-of-list precision goes down.":
+        "חיפוש חוזר ונשנה עם התוצאות הטובות ביותר כעדים חדשים. ההיקף גדל והדיוק בראש הרשימה יורד.",
+    "Rounds": "סבבים",
+    "Top-K per round": "כמה לקחת בכל סבב",
+    "Run auto-expand now": "הפעילו הרחבה אוטומטית",
+    "Round {r}/{n}": "סבב {r}/{n}",
+    "Witness {i}/{k}: {label}": "עד {i}/{k}: {label}",
+    "Auto-expand stopped: witness cap reached.":
+        "ההרחבה האוטומטית נעצרה: הושג המקסימום של עדים.",
+    "{n} witnesses could not be searched — use Retry.":
+        "לא ניתן היה לחפש ב־{n} עדים — נסו שוב.",
+    "Run a letter-level search first.": "יש להריץ תחילה חיפוש ברמת האות.",
+    "Sort by combined score": "מיון לפי ציון משולב",
+    "Sort by number of witnesses": "מיון לפי מספר העדים",
+    "{n} of {m} witnesses": "{n} מתוך {m} עדים",
+    "{n} witnesses are waiting, but only {cap} can be searched at this depth — remove some, or choose a shallower depth.":
+        "{n} עדים ממתינים, אך בעומק זה ניתן לחפש רק {cap} — הסירו חלק מהם או בחרו עומק רדוד יותר.",
+    "Witness removed. The results on screen were found with the previous witness list — run the search again to update them.":
+        "העד הוסר. התוצאות המוצגות נמצאו עם רשימת העדים הקודמת — הריצו את החיפוש שוב כדי לעדכן אותן.",
+    "Witness list is full (max {n})": "רשימת העדים מלאה (עד {n})",
+    "Search now": "חפשו עכשיו",
+    "Other source text": "טקסט מקור אחר",
+    "{n} witnesses": "{n} עדים",
+    "{n} from another text": "{n} מטקסט אחר",
+    "{n} pending": "{n} ממתינים",
+    "{n} failed": "{n} נכשלו",
+    "This witness was added for a different source text, so it was not searched.":
+        "עד זה נוסף עבור טקסט מקור אחר, ולכן לא נבדק.",
+    "{n} witnesses were added for a different source text.":
+        "{n} עדים נוספו עבור טקסט מקור אחר.",
+    "Use them anyway": "השתמשו בהם בכל זאת",
+    "Remove them": "הסירו אותם",
+    "Label (optional)": "תוית (לא חובה)",
 })

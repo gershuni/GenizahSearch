@@ -1540,3 +1540,577 @@ def test_an_untruncated_passage_search_warns_nothing_extra(
              for w in r.json().get('warnings', [])]
     assert 'passage_results_truncated' not in codes, codes
     assert 'duplicate_photography_demoted' not in codes, codes
+
+
+# ---------------------------------------------------------------------------
+# Multi-witness passage search (witnesses[] + sort).
+#
+# One work survives in many manuscripts and no single witness of it retrieves
+# every other: 17 Birkat Hamazon witnesses searched separately and merged
+# reach 85% of the reachable census, against 50-69% for any one of them.
+# ---------------------------------------------------------------------------
+
+W1 = {'text': 'the first witness text'}
+W2 = {'text': 'the second witness text'}
+
+
+def _make_fused_row(uid, sys_id, score, fusion, witness_ids):
+    row = _make_main_row(uid=uid, sys_id=sys_id, score=score)
+    ids = witness_ids.split(',')
+    row.update({
+        'fusion_score': fusion,
+        'witness_count': len(ids),
+        'witness_ids': witness_ids,
+        'witness_id': ids[0],
+        'witness_label': 'Witness ' + ids[0],
+        # Deliberately HIGHER than `score`: the fused row renders one
+        # witness's evidence and reports that witness's matched letters, so
+        # the strongest match any witness made is a separate number.
+        'best_witness_score': score * 2,
+    })
+    return row
+
+
+def _witness_report(requested=2, searched=2, unresolved=()):
+    resolved = [
+        {'id': 'w%d' % (i + 1), 'label': 'Witness w%d' % (i + 1),
+         'kind': 'pasted', 'resolved': True, 'reason': None, 'letters': 100}
+        for i in range(searched)
+    ]
+    return {
+        'requested': requested,
+        'searched': searched,
+        'witnesses': resolved + list(unresolved),
+        'unresolved': list(unresolved),
+    }
+
+
+@pytest.fixture
+def multi_witness(monkeypatch, mock_searcher):
+    """Passage available, multi-witness enabled, and the searcher returning a
+    two-witness fused result."""
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    monkeypatch.setattr(
+        'web.passage_assets.passage_multi_witness_available', lambda: True)
+    monkeypatch.setattr(
+        'web.passage_assets.get_passage_searcher',
+        lambda text_fetcher: mock_searcher,
+    )
+    mock_searcher.policy.as_dict.return_value = _fake_passage_policy()
+    mock_searcher.search_composition_logic.return_value = {
+        'main': [
+            _make_fused_row('IE1_P1_FL1', '99001', 100.0, 2 / 61, 'w1,w2'),
+            _make_fused_row('IE2_P1_FL2', '99002', 900.0, 1 / 61, 'w1'),
+        ],
+        'filtered': [],
+        'truncated_to_200': False,
+        'dropped_text_lookup_failures': 0,
+        'duplicate_photography_demoted': 0,
+        'query_report': {'candidates': 10, 'verify_truncated': False},
+        'witness_report': _witness_report(),
+        'per_witness_query_reports': [
+            {'witness_id': 'w1', 'witness_label': 'Witness w1', 'report': {}},
+            {'witness_id': 'w2', 'witness_label': 'Witness w2', 'report': {}},
+        ],
+    }
+    return mock_searcher
+
+
+def test_witnesses_with_chunk_method_is_rejected(client, mock_searcher,
+                                                 clean_env):
+    """The chunk engine decomposes a query into independent per-chunk lookups
+    with no shared budget, so joining witnesses into `text` there returns the
+    IDENTICAL manuscript set (measured: 392 both ways, empty difference in
+    both directions) and costs less. Rejecting keeps that finding legible."""
+    r = client.post('/api/parallels', json={'witnesses': [W1, W2]})
+    assert r.status_code == 400, r.text
+    assert r.json()['error']['code'] == 'witnesses_require_passage_method'
+    mock_searcher.search_composition_logic.assert_not_called()
+
+
+def test_text_and_witnesses_together_is_rejected(client, mock_searcher,
+                                                 clean_env):
+    """Never silently pick one: the query the caller believes ran would
+    differ from the one that did."""
+    r = client.post('/api/parallels', json={
+        'text': 'hello world', 'method': 'passage', 'witnesses': [W1]})
+    assert r.status_code == 400, r.text
+    assert r.json()['error']['code'] == 'witnesses_and_text_conflict'
+    mock_searcher.search_composition_logic.assert_not_called()
+
+
+def test_witnesses_without_the_flag_is_503(client, mock_searcher, clean_env,
+                                           monkeypatch):
+    """Gated separately from PASSAGE_PARALLELS_ENABLED so single-witness
+    passage can stay broadly on while the costlier fan-out is validated."""
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    monkeypatch.setattr(
+        'web.passage_assets.passage_multi_witness_available', lambda: False)
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [W1, W2]})
+    assert r.status_code == 503, r.text
+    assert r.json()['error']['code'] == 'passage_multi_witness_unavailable'
+
+
+def test_too_many_witnesses_is_rejected(client, multi_witness, clean_env,
+                                        monkeypatch):
+    monkeypatch.setenv('SEARCH_API_PASSAGE_MAX_WITNESSES', '3')
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [W1, W2, W1, W2]})
+    assert r.status_code == 400, r.text
+    assert r.json()['error']['code'] == 'too_many_witnesses'
+    multi_witness.search_composition_logic.assert_not_called()
+
+
+def test_seventeen_witnesses_fit_the_default_cap(client, multi_witness,
+                                                 clean_env):
+    """The flagship case is a 17-witness Birkat Hamazon set pasted from a
+    file. A cap of twelve would have rejected the very workflow the feature
+    was built for; the default is 25."""
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [dict(W1) for _ in range(17)]})
+    assert r.status_code == 200, r.text
+
+
+def test_a_witness_list_that_cannot_fit_the_ceiling_is_refused_before_the_slot(
+    client, multi_witness, clean_env, monkeypatch,
+):
+    """The witness CAP, not the timeout ceiling, is the control on cost --
+    because on timeout the permit is held until the executor thread really
+    finishes (run_in_executor cannot cancel a thread), so a raised ceiling
+    would let timed-out requests occupy every slot while their clients retry.
+    This keeps the two numbers provably consistent: raise the cap past what
+    the ceiling can serve and requests are refused UP FRONT."""
+    monkeypatch.setenv('SEARCH_API_PASSAGE_MAX_WITNESSES', '100')
+    monkeypatch.setenv('SEARCH_API_PASSAGE_TIMEOUT', '5')
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [dict(W1) for _ in range(20)]})
+    assert r.status_code == 400, r.text
+    assert r.json()['error']['code'] == 'too_many_witnesses'
+    # Refused BEFORE the work was ever dispatched.
+    multi_witness.search_composition_logic.assert_not_called()
+
+
+@pytest.mark.parametrize('witness', [
+    {'text': 'a witness', 'raw_header': '99001_IE1_P1_FL1'},   # both
+    {'label': 'no source at all'},                             # neither
+    {'text': '   '},                                           # blank text
+])
+def test_a_witness_needs_exactly_one_source(client, mock_searcher, clean_env,
+                                            monkeypatch, witness):
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    monkeypatch.setattr(
+        'web.passage_assets.passage_multi_witness_available', lambda: True)
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [witness]})
+    assert r.status_code == 400, r.text
+    assert r.json()['error']['code'] == 'invalid_request'
+
+
+def test_an_oversize_pasted_witness_is_rejected(client, multi_witness,
+                                                clean_env):
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [W1, {'text': 'x' * 20001}]})
+    assert r.status_code == 400, r.text
+    assert r.json()['error']['code'] == 'witness_too_long'
+
+
+def test_sort_without_witnesses_is_rejected(client, mock_searcher, clean_env):
+    """sort orders groups by facts only a multi-witness search produces."""
+    r = client.post('/api/parallels', json={
+        'text': 'hello world', 'sort': 'witness_count'})
+    assert r.status_code == 400, r.text
+    assert r.json()['error']['code'] == 'sort_requires_multi_witness'
+
+
+def test_no_witness_resolving_is_a_400_naming_the_reason(client, multi_witness,
+                                                         clean_env):
+    """An empty result set would be indistinguishable from an honest
+    "no matches" -- the one thing a search must never be ambiguous about."""
+    from shared.passage_parallels import NoWitnessesResolved
+    multi_witness.search_composition_logic.side_effect = NoWitnessesResolved({
+        'requested': 2, 'searched': 0, 'witnesses': [],
+        'unresolved': [{'id': 'w1', 'reason': 'not_found'},
+                       {'id': 'w2', 'reason': 'bad_ref'}],
+    })
+    r = client.post('/api/parallels', json={
+        'method': 'passage',
+        'witnesses': [{'raw_header': 'NOPE_A'}, {'raw_header': 'NOPE_B'}]})
+    assert r.status_code == 400, r.text
+    body = r.json()
+    assert body['error']['code'] == 'witnesses_required'
+    # It must say WHICH failed and why, not merely that something did.
+    assert 'not_found' in body['error']['message']
+    assert 'bad_ref' in body['error']['message']
+
+
+def test_an_unresolved_witness_warns_and_the_rest_still_run(client,
+                                                            multi_witness,
+                                                            clean_env):
+    """Skip-and-report, never fatal: rejecting a 17-witness request over one
+    stale reference wastes the sixteen the caller can still have -- and
+    skipping WITHOUT saying so is silent content loss."""
+    result = dict(multi_witness.search_composition_logic.return_value)
+    result['witness_report'] = _witness_report(
+        requested=3, searched=2,
+        unresolved=[{'id': 'w3', 'label': 'Stale', 'kind': 'manuscript',
+                     'resolved': False, 'reason': 'not_found', 'letters': 0}])
+    multi_witness.search_composition_logic.return_value = result
+
+    r = client.post('/api/parallels', json={
+        'method': 'passage',
+        'witnesses': [W1, W2, {'raw_header': 'GONE_1'}]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    warn = [w for w in body['warnings']
+            if isinstance(w, dict)
+            and w.get('code') == 'witness_ref_unresolved']
+    assert len(warn) == 1
+    assert warn[0]['count'] == 1
+    assert warn[0]['witnesses'][0]['reason'] == 'not_found'
+    assert body['request']['witnesses']['requested'] == 3
+    assert body['request']['witnesses']['searched'] == 2
+
+
+def test_multi_witness_happy_path_echo_and_envelope(client, multi_witness,
+                                                    clean_env):
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [W1, W2]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    echo = body['request']
+    assert echo['witnesses']['requested'] == 2
+    assert echo['witnesses']['searched'] == 2
+    assert [w['id'] for w in echo['witnesses']['labels']] == ['w1', 'w2']
+    assert echo['sort'] == 'fused'
+
+    # Fusion facts are NESTED under one conditional key, never bare item
+    # keys: _serialize_item emits a fixed key set shared with /api/search,
+    # and test_search_and_parallels_share_item_shape pins the difference
+    # between the two shapes at exactly {'matches'}.
+    top = body['results'][0]
+    assert top['witness_fusion']['witness_count'] == 2
+    assert top['witness_fusion']['witness_ids'] == ['w1', 'w2']
+    # The row found by BOTH witnesses outranks the one with 9x the raw
+    # matched letters. That IS rank fusion -- and if either the group cap or
+    # the serializer had ranked by `score`, this order would be reversed.
+    other = body['results'][1].get('witness_fusion') or {}
+    assert top['witness_fusion']['fusion_score'] > (other.get('fusion_score') or 0)
+
+
+def test_witness_texts_are_never_echoed_back(client, multi_witness, clean_env):
+    """A witness can be 20,000 characters, the caller already has it, and 25
+    of them would dominate the response."""
+    secret = 'DISTINCTIVE-WITNESS-BODY-TEXT'
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [{'text': secret + ' more words'}]})
+    assert r.status_code == 200, r.text
+    assert secret not in json.dumps(r.json()['request'])
+
+
+def test_all_witnesses_run_inside_one_request_and_one_slot(client,
+                                                           multi_witness,
+                                                           clean_env):
+    """One HTTP request is one budget slot, with the witnesses sequential
+    inside it. Releasing and re-acquiring mid-request would let a request 503
+    halfway through; fanning witnesses across the executor would add a second
+    concurrency dimension on top of SEARCH_API_PASSAGE_CONCURRENCY -- the
+    two-budgets lesson."""
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [W1, W2, W1, W2, W1]})
+    assert r.status_code == 200, r.text
+    assert multi_witness.search_composition_logic.call_count == 1
+    kwargs = multi_witness.search_composition_logic.call_args.kwargs
+    assert len(kwargs['witnesses']) == 5
+    # The engine, not the API, does the fan-out -- and it receives the
+    # witnesses as a LIST, never as one joined string.
+    assert kwargs['full_text'] == ''
+
+
+@pytest.mark.parametrize('sort', ['fused', 'best_match', 'witness_count'])
+def test_every_sort_value_is_accepted_with_witnesses(client, multi_witness,
+                                                     clean_env, sort):
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [W1, W2], 'sort': sort})
+    assert r.status_code == 200, r.text
+    assert r.json()['request']['sort'] == sort
+
+
+def test_a_request_without_witnesses_is_untouched_by_the_feature(
+    client, mock_searcher, clean_env, monkeypatch,
+):
+    """The 8-key passage echo and the 7-key chunk echo must both be unchanged
+    for any request that does not use witnesses."""
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    monkeypatch.setattr(
+        'web.passage_assets.get_passage_searcher',
+        lambda text_fetcher: mock_searcher)
+    mock_searcher.policy.as_dict.return_value = _fake_passage_policy()
+    r = client.post('/api/parallels', json={
+        'text': 'hello world', 'method': 'passage'})
+    assert r.status_code == 200, r.text
+    echo = r.json()['request']
+    assert 'witnesses' not in echo and 'sort' not in echo
+
+    r2 = client.post('/api/parallels', json={'text': 'hello world'})
+    assert r2.status_code == 200, r2.text
+    echo2 = r2.json()['request']
+    assert 'witnesses' not in echo2 and 'sort' not in echo2
+    assert 'witness_fusion' not in r2.json()['results'][0]
+
+
+def test_multi_witness_score_is_still_matched_letters(client, multi_witness,
+                                                      clean_env):
+    """THE contract: `score` means matched letters on every method and every
+    response. It was ~0.03 on a multi-witness response, because the group's
+    fusion sum became `aggregate_score` -> `sort_score` -> the item's
+    top-level `score` (`_serialize_item` prefers `sort_score`). A documented
+    field silently changed meaning, and the UI badges and export columns read
+    it. Found by review, not by any test here.
+    """
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [W1, W2]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    for item in body['results']:
+        # The fixture rows carry scores of 100 and 900 matched letters. An RRF
+        # sum is ~0.016-0.05, so any value below 1 means fusion leaked into
+        # the field.
+        assert item['score'] >= 1, (
+            f"score={item['score']} is an RRF sum, not matched letters"
+        )
+    # The two fixture groups sum to exactly their rows' letters.
+    assert sorted(i['score'] for i in body['results']) == [100.0, 900.0]
+
+
+def test_multi_witness_groups_are_ordered_by_fusion_not_by_score(
+    client, multi_witness, clean_env,
+):
+    """The order must still be the ranking that produced the rows. The fixture
+    is built so the two disagree: the shared row has 100 matched letters and
+    twice the RRF, the singleton has 900 letters and half."""
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [W1, W2]})
+    assert r.status_code == 200, r.text
+    results = r.json()['results']
+
+    assert results[0]['witness_fusion']['witness_count'] == 2
+    assert results[0]['score'] == 100.0, (
+        'the fusion-ranked group must come first even though it has fewer '
+        'matched letters'
+    )
+    assert results[1]['score'] == 900.0
+    # ... so a consumer sorting by `score` gets a DIFFERENT order than the
+    # array's. That is the documented consequence of keeping one scale.
+    assert [i['score'] for i in results] != sorted(
+        (i['score'] for i in results), reverse=True)
+
+
+def test_a_single_witness_response_score_is_unchanged(client, mock_searcher,
+                                                      clean_env, monkeypatch):
+    """The other half of the same contract: nothing about the ordinary
+    response moved."""
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    monkeypatch.setattr(
+        'web.passage_assets.get_passage_searcher',
+        lambda text_fetcher: mock_searcher)
+    mock_searcher.policy.as_dict.return_value = _fake_passage_policy()
+    r = client.post('/api/parallels', json={
+        'text': 'hello world', 'method': 'passage'})
+    assert r.status_code == 200, r.text
+    assert r.json()['results'][0]['score'] == 5.0
+
+
+def test_the_service_orders_the_group_cap_by_fusion(client, multi_witness,
+                                                    clean_env, monkeypatch):
+    """The cap must SELECT by the fusion key on a multi-witness run.
+
+    Asserted at the call, because the cap is a no-op below 200 groups and no
+    fixture here reaches that -- a mutation removing `order_key` from this
+    call stayed green against every other test in the suite.
+    """
+    import shared.parallels_service as svc
+
+    seen = {}
+    real = svc._cap_main_results_by_group
+
+    def spy(rows, meta_mgr, cap=None, order_key=None):
+        seen['order_key'] = order_key
+        kw = {} if cap is None else {'cap': cap}
+        return real(rows, meta_mgr, order_key=order_key, **kw)
+
+    monkeypatch.setattr(svc, '_cap_main_results_by_group', spy)
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [W1, W2]})
+    assert r.status_code == 200, r.text
+    assert seen.get('order_key') == 'fusion_score'
+
+
+def test_the_service_leaves_the_chunk_cap_alone(client, mock_searcher,
+                                                clean_env, monkeypatch):
+    """...and the chunk path must still pass nothing, or its 200-group cap
+    starts selecting on a field it does not have."""
+    import shared.parallels_service as svc
+
+    seen = {}
+    real = svc._cap_main_results_by_group
+
+    def spy(rows, meta_mgr, cap=None, order_key=None):
+        seen['order_key'] = order_key
+        kw = {} if cap is None else {'cap': cap}
+        return real(rows, meta_mgr, order_key=order_key, **kw)
+
+    monkeypatch.setattr(svc, '_cap_main_results_by_group', spy)
+    r = client.post('/api/parallels', json={'text': 'hello world'})
+    assert r.status_code == 200, r.text
+    assert seen.get('order_key') is None
+
+
+def test_the_best_witness_score_reaches_the_envelope(client, multi_witness,
+                                                     clean_env):
+    """The fused row keeps `score` on the witness it actually renders, so the
+    strongest single match any witness made would be lost unless the envelope
+    reports it. It goes in `witness_fusion`, beside the other facts about the
+    fusion, where it cannot be mistaken for the row's own score."""
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [W1, W2]})
+    assert r.status_code == 200, r.text
+    results = r.json()['results']
+
+    for item in results:
+        wf = item['witness_fusion']
+        assert 'best_witness_score' in wf, (
+            'the strongest match on this manuscript is not reported anywhere'
+        )
+        assert wf['best_witness_score'] == item['score'] * 2, (
+            'it must be the fusion figure, not a copy of the score'
+        )
+
+
+def test_a_single_witness_response_has_no_best_witness_score(
+    client, mock_searcher, clean_env, monkeypatch,
+):
+    """`witness_fusion` is emitted only for genuinely fused groups -- the
+    single-witness path short-circuits before fusing, and a bare key here
+    would break the shape shared with /api/search."""
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    monkeypatch.setattr(
+        'web.passage_assets.get_passage_searcher',
+        lambda text_fetcher: mock_searcher)
+    mock_searcher.policy.as_dict.return_value = _fake_passage_policy()
+    r = client.post('/api/parallels', json={
+        'text': 'hello world', 'method': 'passage'})
+    assert r.status_code == 200, r.text
+    assert 'witness_fusion' not in r.json()['results'][0]
+
+
+def test_a_sort_that_could_not_be_applied_is_reported(client, mock_searcher,
+                                                      clean_env, monkeypatch):
+    """Send witnesses, have fewer than two resolve, and the response echoes
+    the requested sort over an array ordered by score: the single-witness path
+    short-circuits before fusing, so `fused` and `witness_count` are facts
+    nothing produced. The echo stays -- that is what an echo is -- and a
+    warning says the sort was dropped."""
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    monkeypatch.setattr(
+        'web.passage_assets.passage_multi_witness_available', lambda: True)
+    monkeypatch.setattr(
+        'web.passage_assets.get_passage_searcher',
+        lambda text_fetcher: mock_searcher)
+    mock_searcher.policy.as_dict.return_value = _fake_passage_policy()
+    # One witness resolved out of two requested -> no fusion happened.
+    mock_searcher.search_composition_logic.return_value = {
+        'main': [_make_main_row(uid='IE1_P1_FL1', sys_id='99001', score=5.0)],
+        'filtered': [],
+        'truncated_to_200': False,
+        'dropped_text_lookup_failures': 0,
+        'duplicate_photography_demoted': 0,
+        'query_report': {'candidates': 10, 'verify_truncated': False},
+        'witness_report': _witness_report(requested=2, searched=1),
+        'per_witness_query_reports': [],
+    }
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [W1, W2],
+        'sort': 'witness_count'})
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    codes = {w['code'] for w in body.get('warnings') or []}
+    assert 'sort_not_applied' in codes, (
+        'the response claims an ordering it does not have'
+    )
+    # The echo still reports what was asked for.
+    assert body['request']['sort'] == 'witness_count'
+
+
+def test_the_default_fused_order_is_warned_about_when_it_is_not_applied(
+    client, mock_searcher, clean_env, monkeypatch,
+):
+    """Omitting `sort` does not mean no ordering was claimed.
+
+    The echo fills the field in as `fused` either way, so a caller who never
+    sent `sort` was told the response was fusion-ordered -- with no warning --
+    while the array was ordered by score. The warning was keyed on `req.sort`
+    being truthy, so the DEFAULT, which is the commonest case, was the
+    commonest way to receive that claim silently.
+
+    RED if the condition goes back to requiring an explicit `sort`.
+    """
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    monkeypatch.setattr(
+        'web.passage_assets.passage_multi_witness_available', lambda: True)
+    monkeypatch.setattr(
+        'web.passage_assets.get_passage_searcher',
+        lambda text_fetcher: mock_searcher)
+    mock_searcher.policy.as_dict.return_value = _fake_passage_policy()
+    # One witness resolved out of two requested -> no fusion happened.
+    mock_searcher.search_composition_logic.return_value = {
+        'main': [_make_main_row(uid='IE1_P1_FL1', sys_id='99001', score=5.0)],
+        'filtered': [],
+        'truncated_to_200': False,
+        'dropped_text_lookup_failures': 0,
+        'duplicate_photography_demoted': 0,
+        'query_report': {'candidates': 10, 'verify_truncated': False},
+        'witness_report': _witness_report(requested=2, searched=1),
+        'per_witness_query_reports': [],
+    }
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [W1, W2]})   # no `sort`
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    # The echo claims the fused ordering...
+    assert body['request']['sort'] == 'fused'
+    # ...so the response must say it was not applied.
+    warned = [w for w in (body.get('warnings') or [])
+              if w['code'] == 'sort_not_applied']
+    assert warned, (
+        'the response claims the default fused ordering with nothing to say '
+        'it was never applied'
+    )
+    assert warned[0]['sort'] == 'fused', 'the warning must name the EFFECTIVE sort'
+    assert warned[0].get('requested') is None, (
+        'the warning must also record that the caller asked for nothing, or '
+        'it is indistinguishable from an explicit sort=fused'
+    )
+
+
+def test_an_applied_default_sort_is_not_warned_about(
+    client, multi_witness, clean_env,
+):
+    """The guard against warning on every successful default request."""
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [W1, W2]})
+    assert r.status_code == 200, r.text
+    codes = {w['code'] for w in r.json().get('warnings') or []}
+    assert 'sort_not_applied' not in codes
+
+
+def test_an_applied_sort_is_not_warned_about(client, multi_witness, clean_env):
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [W1, W2], 'sort': 'witness_count'})
+    assert r.status_code == 200, r.text
+    codes = {w['code'] for w in r.json().get('warnings') or []}
+    assert 'sort_not_applied' not in codes

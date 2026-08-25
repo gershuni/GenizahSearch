@@ -845,11 +845,32 @@ def serialize_browse_payload(
 # Public: serialize_parallels_payload
 # -----------------------------------------------------------------------------
 
-def _group_parallels_by_sys_id(items: list[dict], *, meta_mgr: Any) -> list[dict]:
+def _group_parallels_by_sys_id(items: list[dict], *, meta_mgr: Any,
+                               order_key: str = None) -> list[dict]:
     """Group raw parallels items by sys_id derived from raw_header. D-13 grouping core.
 
     Returns sorted-descending list of group dicts:
         {sys_id, representative, items: [...], aggregate_score: float}
+
+    `aggregate_score` is ALWAYS the sum of each row's `score` -- matched
+    letters -- because it becomes the envelope's `sort_score`, which
+    `_serialize_item` in turn emits as the item's top-level `score`. One scale,
+    every method, every response.
+
+    `order_key` decides ONLY the order of the returned groups, and defaults to
+    the same aggregate. The multi-witness passage path passes `'fusion_score'`:
+    the rows were selected by rank fusion, so ordering them by raw matched
+    letters would present a ranking nothing produced. The fusion value is
+    reported per group under `witness_fusion.fusion_score`.
+
+    These were ONE parameter until a review found the consequence: summing
+    fusion into `aggregate_score` turned the public `score` field into ~0.03
+    on multi-witness responses, silently redefining a documented field that
+    the UI badges and the export columns read.
+
+    A consumer sorting a multi-witness response by `score` therefore gets a
+    different order than the array's. That is deliberate and documented; the
+    alternative was a `score` that means two different things.
     """
     groups: dict[str, dict] = {}
     for item in items:
@@ -873,7 +894,59 @@ def _group_parallels_by_sys_id(items: list[dict], *, meta_mgr: Any) -> list[dict
             grp['aggregate_score'] += float(item.get('score', 0.0) or 0.0)
         except (ValueError, TypeError):
             pass
-    return sorted(groups.values(), key=lambda g: g['aggregate_score'], reverse=True)
+        if order_key:
+            try:
+                grp['_order'] = grp.get('_order', 0.0) + float(
+                    item.get(order_key, 0.0) or 0.0)
+            except (ValueError, TypeError):
+                pass
+
+    def _rank(g: dict) -> float:
+        return float(g.get('_order', g['aggregate_score']) if order_key
+                     else g['aggregate_score'])
+
+    ordered = sorted(groups.values(), key=_rank, reverse=True)
+    for g in ordered:
+        g.pop('_order', None)   # internal; never reaches the envelope
+    return ordered
+
+
+def _sort_parallels_groups(groups: list[dict], sort: str) -> list[dict]:
+    """Re-order sys_id groups under a caller-chosen `sort`.
+
+    Applied AFTER grouping because `witness_count` is a UNION across the
+    group's rows, not a sum: a manuscript found on three pages by one witness
+    is one witness, and `aggregate_score`-style summing would report three.
+
+    `'fused'` is a no-op -- `_group_parallels_by_sys_id` already ordered the
+    groups by the score key it was given, which the multi-witness path sets
+    to `fusion_score`.
+    """
+    from shared.passage_fusion import group_stats
+
+    if sort == 'witness_count':
+        return sorted(groups, key=lambda g: (
+            group_stats(g.get('items') or [])['witness_count'],
+            float(g.get('aggregate_score') or 0.0),
+        ), reverse=True)
+    if sort == 'best_match':
+        # "Which manuscript contains the strongest single match", as against
+        # "which is pointed at by the most witnesses".
+        #
+        # From `best_witness_score`, NOT from `score`. `fuse()` deliberately
+        # leaves the RANK WINNER's score in `score`, so that the number
+        # beside a row describes the span the row actually highlights: a
+        # record found at rank 1 by a 400-letter witness and at rank 31 by a
+        # 900-letter one renders the short witness. Ordering by `score`
+        # therefore ranked by whichever contributor won on RANK -- which is
+        # what `fused` already does -- and contradicted both the field's
+        # documented meaning and the `best_witness_score` this same
+        # serializer emits two functions below under `witness_fusion`.
+        return sorted(groups, key=lambda g: (
+            group_stats(g.get('items') or [])['best_witness_score'],
+            float(g.get('aggregate_score') or 0.0),
+        ), reverse=True)
+    return groups
 
 
 def _to_parallels_envelope_item(
@@ -882,6 +955,7 @@ def _to_parallels_envelope_item(
     meta_mgr: Any,
     domain_batch: dict,
     catalog_batch: dict,
+    with_witness_fusion: bool = False,
 ) -> dict:
     """Convert a sys_id group to a parallels envelope item with matches[]. D-13.
 
@@ -1000,6 +1074,33 @@ def _to_parallels_envelope_item(
     # Sort by chunk_index (ascending; None goes first) for stable, readable output.
     matches.sort(key=lambda m: (m.get('chunk_index') is not None, m.get('chunk_index') or 0))
     item['matches'] = matches
+
+    # Multi-witness facts, NESTED under one key and emitted only when this
+    # group actually carries them.
+    #
+    # Do NOT be tempted to add `witness_count` / `fusion_score` as bare
+    # top-level item keys. `_serialize_item` emits a FIXED key set shared with
+    # /api/search, and tests/test_search_serializer.py::
+    # test_search_and_parallels_share_item_shape pins the difference between
+    # the two shapes at exactly {'matches'}. Bare keys here would break the
+    # CHUNK path's contract as well, for a field the chunk path never
+    # produces. One nested, conditional key leaves every existing fixture
+    # untouched.
+    if with_witness_fusion:
+        from shared.passage_fusion import group_stats
+        stats = group_stats(group.get('items') or [])
+        if stats['witness_count']:
+            item['witness_fusion'] = {
+                'witness_count': stats['witness_count'],
+                'witness_ids': stats['witness_ids'],
+                'fusion_score': round(stats['fusion_score'], 6),
+                # The strongest single match any witness made on this
+                # manuscript. NOT the same as `score`, which sums the
+                # matched letters of the witness each row actually renders --
+                # a row shows one witness's highlighted span, so a score from
+                # another would describe text the reader cannot see.
+                'best_witness_score': round(stats['best_witness_score'], 2),
+            }
     return item
 
 
@@ -1017,6 +1118,13 @@ def serialize_parallels_payload(
     # Phase 81A — when present, embedded verbatim under top-level `request`.
     # Phase 77 download path leaves this None to preserve back-compat.
     request_echo: Optional[dict] = None,
+    # Multi-witness passage search. Both default to today's behaviour, so
+    # every existing caller -- the whole chunk path included -- is unchanged.
+    # `order_key` reorders the groups WITHOUT touching aggregate_score /
+    # sort_score / score, which stay matched letters on every path.
+    order_key: Optional[str] = None,
+    sort: Optional[str] = None,
+    with_witness_fusion: bool = False,
 ) -> dict:
     """Phase 77 EXPORT-02/03. Same shape Phase 80 /api/parallels will inherit.
 
@@ -1035,8 +1143,13 @@ def serialize_parallels_payload(
     """
     filtered_results = filtered_results or []
 
-    main_groups = _group_parallels_by_sys_id(main_results, meta_mgr=meta_mgr)
-    filt_groups = _group_parallels_by_sys_id(filtered_results, meta_mgr=meta_mgr)
+    main_groups = _group_parallels_by_sys_id(main_results, meta_mgr=meta_mgr,
+                                             order_key=order_key)
+    filt_groups = _group_parallels_by_sys_id(filtered_results, meta_mgr=meta_mgr,
+                                             order_key=order_key)
+    if sort:
+        main_groups = _sort_parallels_groups(main_groups, sort)
+        filt_groups = _sort_parallels_groups(filt_groups, sort)
 
     # Batch lookups across both groups
     all_sys_ids = list({
@@ -1049,6 +1162,7 @@ def serialize_parallels_payload(
         _to_parallels_envelope_item(
             g, meta_mgr=meta_mgr,
             domain_batch=domain_batch, catalog_batch=catalog_batch,
+            with_witness_fusion=with_witness_fusion,
         )
         for g in main_groups
     ]
@@ -1056,6 +1170,7 @@ def serialize_parallels_payload(
         _to_parallels_envelope_item(
             g, meta_mgr=meta_mgr,
             domain_batch=domain_batch, catalog_batch=catalog_batch,
+            with_witness_fusion=with_witness_fusion,
         )
         for g in filt_groups
     ]

@@ -379,11 +379,46 @@ def test_the_tooltip_does_not_scope_to_the_genizah_corpus():
 # ---------------------------------------------------------------------------
 
 def _fingerprint_call_slice() -> str:
-    """The fresh-search call to the identity helper, arguments included."""
+    """The dispatch-time keyword CAPTURE that feeds the identity helper.
+
+    Was the call site itself until the multi-witness work, which builds the
+    keywords once into `_fingerprint_kwargs` and reuses them: the fresh
+    search calls the helper with them immediately, and the additive witness
+    path re-calls it with the same capture plus the witnesses that produced
+    rows. Reusing one construction is what stops the two describing
+    different searches -- but it also means the call site now reads
+    `**_fingerprint_kwargs` and would assert nothing.
+
+    Inspecting the capture instead makes this guard cover BOTH call sites,
+    which is strictly more than it covered before. A guard that silently
+    stops guarding is worse than no guard, so this is asserted, not assumed:
+    the call site must actually be fed by this capture.
+    """
     src = _read_source()
-    idx = src.index('_search_fingerprint = compute_parallels_search_fingerprint(')
-    end = src.index('\n                    )', idx)
-    return src[idx:end]
+    # Anchored on the AST, not on leading spaces: matching the literal
+    # source made this guard depend on how deeply the block was nested, so
+    # hoisting it one level out of a result guard turned five tests red
+    # without changing a character of what they check.
+    assigns = [
+        n for n in ast.walk(ast.parse(src))
+        if isinstance(n, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == '_fingerprint_kwargs'
+                for t in n.targets)
+    ]
+    assert len(assigns) == 1, (
+        f'expected exactly one _fingerprint_kwargs capture, found '
+        f'{len(assigns)} -- two would be two definitions of "what a search '
+        f'is", which is the drift this guard exists to catch'
+    )
+    captured = ast.get_source_segment(src, assigns[0]) or ''
+    assert captured, 'could not recover the capture source'
+    assert re.search(
+        r'compute_parallels_search_fingerprint\(\s*\*\*_fingerprint_kwargs\s*\)',
+        src), (
+        'the keyword capture is no longer what reaches the identity helper '
+        '-- this guard would be inspecting a dict nothing uses'
+    )
+    return captured
 
 
 def test_fingerprint_call_passes_every_result_affecting_input():
@@ -1011,6 +1046,306 @@ def test_hiding_never_replaces_the_force_and_disable_guarantee():
                    'boundary_mode', 'min_chunks_input'):
         assert f'{widget}.disable()' in true_branch
 
+
+# ---------------------------------------------------------------------------
+# The method selector describes the option you are pointing at, accurately.
+# ---------------------------------------------------------------------------
+
+def _method_help_values() -> dict:
+    """The `_METHOD_HELP` mapping, read from the AST.
+
+    Read rather than grepped because the point is which STRING belongs to
+    which option -- a substring test would pass with the two swapped, which is
+    a version of the very bug this replaced (the chunk option describing
+    letter-level search).
+    """
+    src = _read_source()
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id == '_METHOD_HELP'):
+            continue
+        out = {}
+        for key, value in zip(node.value.keys, node.value.values):
+            # tr('...') -> the literal inside
+            text = value
+            if isinstance(text, ast.Call) and text.args:
+                text = text.args[0]
+            parts = []
+            def _walk(n):
+                if isinstance(n, ast.Constant):
+                    parts.append(n.value)
+                elif isinstance(n, ast.JoinedStr):
+                    for v in n.values:
+                        _walk(v)
+                elif isinstance(n, ast.BinOp):
+                    _walk(n.left)
+                    _walk(n.right)
+            _walk(text)
+            out[key.value] = ''.join(parts)
+        return out
+    raise AssertionError('_METHOD_HELP not found in web/pages/parallels.py')
+
+
+def test_each_method_has_its_own_description():
+    """`ui.radio` renders ONE QOptionGroup, so a tooltip attached to it fires
+    for both options -- hovering "Chunk search" described letter-level search
+    (owner-reported 2026-08-25)."""
+    helps = _method_help_values()
+    assert set(helps) == {'passage', 'chunk'}
+    assert helps['passage'] != helps['chunk']
+    # Each names what IT is, not what the other is.
+    assert 'older method' in helps['chunk']
+    assert 'Faster' in helps['passage']
+
+
+def test_the_method_descriptions_claim_nothing_false():
+    """Two of the old tooltip's three claims were not true of the difference
+    between the engines. The CHUNK engine strips nikkud too -- per token, at
+    tokenization -- and both treat a newline as an ordinary separator, so
+    neither ever distinguished the two.
+    """
+    helps = _method_help_values()
+    for key, text in helps.items():
+        assert 'nikkud' not in text.lower(), (
+            f'{key}: both engines strip nikkud; it is not a difference'
+        )
+        assert 'line break' not in text.lower(), (
+            f'{key}: both engines treat a newline as a space'
+        )
+
+
+def test_the_method_radio_carries_no_group_tooltip():
+    """The whole point: a group tooltip cannot be per-option."""
+    src = _read_source()
+    for node in ast.walk(ast.parse(src)):
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == 'tooltip'
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == 'method_radio'):
+            raise AssertionError(
+                'method_radio.tooltip() is back -- it fires for BOTH options'
+            )
+
+
+def test_the_description_updates_when_the_method_changes():
+    """A help line that never changes is worse than the tooltip it replaced."""
+    src = _read_source()
+    assert '_update_method_help' in src
+    assert 'method_radio.on_value_change(' in src, (
+        'nothing re-renders the help line when the method changes'
+    )
+
+
+# ---------------------------------------------------------------------------
+# One expand chevron per result row.
+# ---------------------------------------------------------------------------
+
+def test_a_result_row_draws_exactly_one_expand_chevron():
+    """QExpansionItem renders its own chevron and rotates it on open. The
+    header slot added a SECOND one that nothing ever rotated, so expanding a
+    row turned one arrow and left the other pointing down (owner-reported
+    2026-08-25: "why do the results have two down arrow 'open' symbols?").
+    """
+    src = _read_source()
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.FunctionDef)
+                and node.name == 'create_parallel_item'):
+            continue
+        for sub in ast.walk(node):
+            if not (isinstance(sub, ast.Call)
+                    and isinstance(sub.func, ast.Attribute)
+                    and sub.func.attr == 'icon'
+                    and sub.args
+                    and isinstance(sub.args[0], ast.Constant)):
+                continue
+            assert sub.args[0].value != 'expand_more', (
+                'a second, non-rotating chevron is back in the header slot'
+            )
+        return
+    raise AssertionError('create_parallel_item not found')
+
+
+# ---------------------------------------------------------------------------
+# The options pane must sit BESIDE the text, not below it.
+# ---------------------------------------------------------------------------
+
+def _left_column_classes() -> str:
+    """The class string of the flex column that holds the text input."""
+    src = _read_source()
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == 'classes'
+                and node.args
+                and isinstance(node.args[0], ast.Constant)):
+            continue
+        value = node.args[0].value
+        if isinstance(value, str) and 'flex-grow' in value and 'gap-4' in value:
+            return value
+    raise AssertionError('the text-input column was not found')
+
+
+def test_the_text_column_cannot_push_the_options_pane_off_its_side():
+    """A flex item's default `min-width: auto` lets a wide child set the
+    column's minimum width. An 88-character help sentence in the method row
+    did exactly that, and the row holding both columns wrapped -- the options
+    pane landed under the text instead of beside it (owner-reported
+    2026-08-25)."""
+    assert 'min-w-0' in _left_column_classes(), (
+        'without min-w-0 any long child can push the options pane below'
+    )
+
+
+def test_the_method_help_is_not_inside_the_method_row():
+    """It is a full sentence; inside the non-wrapping row it inflated the
+    column's min-content width. It belongs under the row, where
+    `boundary_mode_help` sits relative to ITS row."""
+    src = _read_source()
+    assignment = src.index('method_help = ui.label(')
+    radio = src.index('method_radio = ui.radio(')
+    assert assignment > radio, 'sanity: the help line follows the radio'
+    # Same indentation as the row itself (20 spaces), not the row's contents
+    # (24). Measured from the line start rather than guessed.
+    line_start = src.rindex('\n', 0, assignment) + 1
+    indent = assignment - line_start
+    assert indent == 20, (
+        f'method_help is indented {indent} spaces -- inside the row again'
+    )
+
+
+# ---------------------------------------------------------------------------
+# Lab Mode belongs with the chunk options.
+# ---------------------------------------------------------------------------
+
+def test_lab_mode_is_defined_in_the_options_pane_not_the_method_row():
+    """It is a third BACKEND, not a third search method; beside the two radio
+    options it read as a peer of them."""
+    src = _read_source()
+    lab = src.index('lab_mode = ui.checkbox(')
+    options_heading = src.index("h2(tr('Options')")
+    assert lab > options_heading, (
+        'lab_mode is still defined above the options pane'
+    )
+
+
+def test_lab_mode_follows_the_chunk_visibility_rule():
+    """A control hidden by hand in one branch and forgotten in the other is
+    how a hidden checkbox stays ON."""
+    src = _read_source()
+    assert src.count('lab_mode_row') >= 3, (
+        'lab_mode_row must be created AND switched in both branches'
+    )
+
+
+def test_the_lab_mode_handler_is_registered_after_the_widget_exists():
+    """The `.on()` call is the ONLY build-time reference to the widget. Above
+    its definition it is a NameError, which takes the whole page down with a
+    500 -- this page has that exact history."""
+    src = _read_source()
+    definition = src.index('lab_mode = ui.checkbox(')
+    registration = src.index("lab_mode.on('update:model-value'")
+    assert registration > definition, (
+        'lab_mode.on(...) runs before lab_mode exists'
+    )
+
+
+# ---------------------------------------------------------------------------
+# The boundary stats cannot creep back on a blur.
+# ---------------------------------------------------------------------------
+
+def test_the_boundary_stats_are_guarded_at_their_source():
+    """`text_input.on('blur', update_boundary_stats)` calls this directly, so
+    hiding the label from the method handler alone would have "N boundaries
+    detected" reappear the moment a letter-level user clicked out of the
+    textarea."""
+    src = _read_source()
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.FunctionDef)
+                and node.name == 'update_boundary_stats'):
+            continue
+        body = ast.get_source_segment(src, node) or ''
+        guard = body.index('_letter_level_selected()')
+        first_try = body.index('try:')
+        assert guard < first_try, (
+            'the method guard must come before the stats are computed'
+        )
+        return
+    raise AssertionError('update_boundary_stats not found')
+
+
+def _method_branch_calls(target: str, attr: str) -> dict:
+    """For `on_passage_mode_change`, the literal argument each branch passes
+    to `<target>.<attr>(...)`, keyed by branch ('if' / 'else').
+
+    An AST test rather than a render one: NiceGUI's User harness does not
+    deliver a Quasar option group's `update:model-value`, so a simulated
+    method switch changes nothing and any render test of it passes
+    vacuously. What CAN be checked decisively is that both branches act, and
+    in opposite directions -- which is exactly the mutation that survived
+    (deleting the un-hide left the row visible by default, so the pinned-to-
+    chunk render could not tell).
+    """
+    src = _read_source()
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.FunctionDef)
+                and node.name == 'on_passage_mode_change'):
+            continue
+        out = {}
+        # The FIRST `if` in this function is the lab-mode exclusivity check,
+        # which has no else. The method branch is the one with both halves.
+        for sub in node.body:
+            if not (isinstance(sub, ast.If) and sub.orelse):
+                continue
+            for branch, body in (('if', sub.body), ('else', sub.orelse)):
+                for inner in ast.walk(ast.Module(body=body, type_ignores=[])):
+                    if (isinstance(inner, ast.Call)
+                            and isinstance(inner.func, ast.Attribute)
+                            and inner.func.attr == attr
+                            and isinstance(inner.func.value, ast.Name)
+                            and inner.func.value.id == target
+                            and inner.args
+                            and isinstance(inner.args[0], ast.Constant)):
+                        out[branch] = inner.args[0].value
+        return out
+    raise AssertionError('on_passage_mode_change not found')
+
+
+def test_the_paragraph_settings_are_hidden_AND_restored():
+    """One-way hiding is the easy half. Without the restore, a user who
+    glances at letter-level search loses the paragraph controls for the rest
+    of the session."""
+    calls = _method_branch_calls('boundary_row', 'set_visibility')
+    assert calls.get('if') is False, 'letter-level must hide them'
+    assert calls.get('else') is True, (
+        'nothing restores the paragraph settings when chunk is re-selected'
+    )
+
+
+def test_the_paragraph_help_labels_are_recomputed_not_just_unhidden():
+    """They are inline-styled by `update_boundary_ui`, and which of them
+    belongs on screen depends on the boundary mode and on whether the text
+    has any breaks -- so the chunk branch recomputes rather than un-hides."""
+    src = _read_source()
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.FunctionDef)
+                and node.name == 'on_passage_mode_change'):
+            continue
+        for sub in node.body:
+            if not (isinstance(sub, ast.If) and sub.orelse):
+                continue
+            names = {
+                inner.func.id for inner in ast.walk(
+                    ast.Module(body=sub.orelse, type_ignores=[]))
+                if isinstance(inner, ast.Call)
+                and isinstance(inner.func, ast.Name)
+            }
+            assert 'update_boundary_ui' in names, (
+                'the chunk branch must recompute the boundary labels'
+            )
+            return
+    raise AssertionError('on_passage_mode_change not found')
 
 # ---------------------------------------------------------------------------
 # Max frequency counts PAGE HITS, and the label has to say so.

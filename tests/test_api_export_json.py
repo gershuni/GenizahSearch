@@ -228,3 +228,112 @@ def test_init_api_routes_does_not_mutate_nicegui_singleton():
         f"NiceGUI singleton was mutated: routes {before} -> {after}. HIGH-08 regression."
     # And the bare app got the routes
     assert len(bare.routes) > 0, "Bare app got no routes -- app_override dispatch broken."
+
+
+# ---------------------------------------------------------------------------
+# A multi-witness JSON export must present the fused ranking.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def multi_witness_parallels_state(mock_meta_mgr, monkeypatch):
+    """A FUSED two-row payload where fusion and raw score disagree on order.
+
+    The high-score row has the LOWER fusion score, so an export that re-ranks
+    by summed matched letters returns them in the opposite order to the page.
+    """
+    from web.api import state
+    from web import export_state
+    saved_meta = state.meta_mgr
+    state.meta_mgr = mock_meta_mgr
+    # The shared mock returns ONE fixed sys_id for every header, which would
+    # group both rows into a single manuscript and leave no order to test.
+    mock_meta_mgr.parse_full_id_components.side_effect = lambda h: {
+        'sys_id': (h or '').split('_')[1], 'ie_id': 'IE1', 'p_num': '3',
+        'fl_id': None,
+    }
+
+    def _row(uid, sys_id, score, fusion, ids):
+        return {
+            'uid': uid,
+            'raw_header': f'header_{sys_id}_IE1_P3',
+            'score': score,
+            'final_score': score,
+            'source_ctx': 'chunk',
+            'text': 'manuscript text',
+            'chunk_hits': [(0, 'chunk', 30, 'snippet')],
+            'fusion_score': fusion,
+            'witness_count': len(ids.split(',')),
+            'witness_ids': ids,
+            'witness_id': ids.split(',')[0],
+            'witness_label': 'Witness ' + ids.split(',')[0],
+            'best_witness_score': score * 2,
+        }
+
+    results = [
+        _row('uid_a', '9911111111111111', 50, 0.01, 'w1'),
+        _row('uid_b', '9922222222222222', 10, 0.09, 'w1,w2'),
+    ]
+    meta = {
+        'source_text': 'hello world', 'chunk_size': 5, 'mode': 'exact',
+        'max_freq': 50.0, 'filters': None, 'boundary_options': None,
+        'warnings': [],
+        'witnesses': [{'label': 'W2', 'kind': 'pasted', 'sys_id': None}],
+        'multi_witness': True,
+    }
+    storage: dict = {}
+    monkeypatch.setattr('web.safe_storage.app', _make_stub(storage))
+    export_state.set_parallels_export(results=results, filtered=[], meta=meta)
+    yield state
+    state.meta_mgr = saved_meta
+
+
+def test_the_parallels_json_export_keeps_the_fused_order(
+    client, multi_witness_parallels_state,
+):
+    """The export called `serialize_parallels_payload` with no `order_key`, so
+    a downloaded file listed the same manuscripts in a different order than
+    the page that produced it, with nothing to explain the difference."""
+    r = client.get('/api/export/parallels/json')
+    assert r.status_code == 200, r.content
+    results = r.json()['results']
+    assert len(results) == 2
+    # The 10-letter, high-fusion group must come first.
+    assert results[0]['score'] == 10.0, (
+        'the export re-ranked by matched letters instead of by fusion'
+    )
+    assert results[1]['score'] == 50.0
+
+
+def test_the_parallels_json_export_carries_the_witness_facts(
+    client, multi_witness_parallels_state,
+):
+    """Every exported row already carried them; the serializer was simply
+    never told to emit them, so a downloaded file could not say which
+    witnesses found what."""
+    r = client.get('/api/export/parallels/json')
+    assert r.status_code == 200, r.content
+    fused = [g for g in r.json()['results'] if g['score'] == 10.0][0]
+    assert fused['witness_fusion']['witness_count'] == 2
+    assert fused['witness_fusion']['witness_ids'] == ['w1', 'w2']
+
+
+def test_the_exported_best_witness_score_is_the_real_one(
+    client, multi_witness_parallels_state,
+):
+    """`set_parallels_export` runs every page row through
+    `_PARALLELS_ROW_ALLOWLIST`, which omitted `best_witness_score` -- so
+    `group_stats` saw nothing and every downloaded group reported 0.0, while
+    the live rows on screen held the right number.
+
+    The fixture sets `best_witness_score = score * 2`, so the three possible
+    answers are all distinguishable: 20.0 (correct), 0.0 (the shipped bug),
+    and 10.0 (the field stripped but rescued by the unfused fallback). The
+    older test in this file set the fixture value and asserted only
+    `witness_count` and `witness_ids`, which is why the strip went unnoticed.
+    """
+    r = client.get('/api/export/parallels/json')
+    assert r.status_code == 200, r.content
+    fused = [g for g in r.json()['results'] if g['score'] == 10.0][0]
+    assert fused['witness_fusion']['best_witness_score'] == 20.0, (
+        'the allowlist dropped best_witness_score on the way to the export'
+    )
