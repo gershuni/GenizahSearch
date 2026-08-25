@@ -28,8 +28,12 @@ def checkpoint_one(path: str) -> bool:
     PRAGMA wal_checkpoint(TRUNCATE) can report `busy` in its own result row
     without ever raising -- a caller that only watches for sqlite3.Error would
     call that success. So failure is judged from the row's busy flag AND the
-    post-checkpoint WAL size, not from exceptions alone. A sidecar with no WAL
-    (or an already-empty one) has nothing to lose and always passes.
+    post-checkpoint WAL size, not from exceptions alone. The WAL is measured
+    again AFTER the checkpoint attempt and that post-state is what decides
+    the verdict -- a WAL that was absent at entry but has real, non-empty
+    content by exit (another process started writing while this ran) must
+    still fail, not be waved through on the strength of how things looked
+    before the checkpoint began.
     """
     wal_before = _wal_size(path)
     busy = False
@@ -53,13 +57,15 @@ def checkpoint_one(path: str) -> bool:
             pass
         conn.close()
 
-    if wal_before == 0:
-        # Nothing was at risk; a connect/pragma error here is harmless.
+    wal_after = _wal_size(path)
+
+    if wal_before == 0 and wal_after == 0:
+        # Nothing was at risk before or after; a connect/pragma error here
+        # is harmless.
         print(f"  {path}: ok" if exc is None else
               f"  {path}: ok (WAL already empty; {exc})")
         return True
 
-    wal_after = _wal_size(path)
     if exc is not None or busy or wal_after > 0:
         reason = f"error: {exc}" if exc is not None else (
             f"busy={busy}, {wal_after} bytes remain in WAL")

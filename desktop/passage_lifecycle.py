@@ -262,10 +262,15 @@ _state: Optional[PassageState] = None
 def load_passage_state(root: Optional[str] = None) -> Optional[PassageState]:
     """Computes and RETURNS a state -- never assigns. `open_index` scans the
     full CSR (~109.5 MB on the shipped corpus), so this must run off the UI
-    thread; the caller hands the result to `install_passage_state` there."""
+    thread; the caller hands the result to `install_passage_state` there.
+
+    Goes through the same bounded retry as every other reload check in this
+    module -- `open_index` swallows a transient access error into None just
+    like a real missing index, so a single flake here must not report a
+    valid `current/` as absent and send the user toward a 3.5 GB rebuild."""
     root = root if root is not None else passage_root()
     live_dir = os.path.join(root, LIVE_DIRNAME)
-    idx = open_index(live_dir)
+    idx = _open_with_retry(live_dir)
     if idx is None:
         return None
     return PassageState(index=idx, live_dir=live_dir)
@@ -650,14 +655,27 @@ def _swap_rebuild(root: str, live: str, staging_dir: str,
         return SwapResult(status='rename_blocked')
 
     if cancelled():
-        _retry_rename(prev, live)
+        try:
+            _retry_rename(prev, live)
+        except PermissionError:
+            # `prev` cannot go back to `live` either -- `current/` stays
+            # absent here, exactly the state the terminal recovery walk
+            # exists to fix, so this must return a status routed there
+            # rather than let the exception skip that walk entirely.
+            _cleanup_staging(staging_dir)
+            return SwapResult(status='rollback_failed')
         _cleanup_staging(staging_dir)
         return SwapResult(status='cancelled')
 
     try:
         _retry_rename(staging_dir, live)
     except PermissionError:
-        _retry_rename(prev, live)  # restore the working generation
+        try:
+            _retry_rename(prev, live)  # restore the working generation
+        except PermissionError:
+            # Same reasoning as the cancel path above: report a status the
+            # terminal recovery walk handles instead of raising past it.
+            return SwapResult(status='rollback_failed')
         return SwapResult(status='rename_blocked')
 
     idx = _open_with_retry(live)

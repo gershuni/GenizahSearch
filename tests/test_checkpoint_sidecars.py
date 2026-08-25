@@ -94,6 +94,59 @@ def test_busy_non_empty_wal_reports_failure_without_raising(tmp_path):
         writer.close()
 
 
+def test_wal_appearing_during_checkpoint_is_not_reported_ok(tmp_path, monkeypatch):
+    """A sidecar with NO WAL at entry that gains a real, non-empty WAL while
+    the checkpoint call is in flight (another process starts writing) must
+    not be waved through on the strength of the pre-checkpoint state -- the
+    exact scenario this amendment exists to catch."""
+    p = tmp_path / 'race.db'
+    conn = sqlite3.connect(str(p))
+    conn.execute('CREATE TABLE t (x)')
+    conn.commit()
+    conn.close()
+    assert not os.path.exists(_wal_path(p))
+
+    real_connect = sqlite3.connect
+    side_writer = {}
+
+    class _ProxyConn:
+        def __init__(self, real):
+            self._real = real
+
+        def execute(self, sql, *args):
+            cur = self._real.execute(sql, *args)
+            if 'wal_checkpoint' in sql:
+                # A second process begins writing WHILE the checkpoint call
+                # is still executing -- kept open so sqlite's own
+                # auto-checkpoint-on-close never drains it.
+                w = real_connect(str(p), isolation_level=None)
+                w.execute('PRAGMA journal_mode=WAL')
+                w.execute('INSERT INTO t VALUES (99)')
+                w.commit()
+                side_writer['conn'] = w
+            return cur
+
+        def close(self):
+            self._real.close()
+
+    def patched_connect(path, timeout=5.0):
+        real = real_connect(path, timeout=timeout)
+        if str(path) == str(p):
+            return _ProxyConn(real)
+        return real
+
+    monkeypatch.setattr(ckpt.sqlite3, 'connect', patched_connect)
+    try:
+        assert ckpt.checkpoint_one(str(p)) is False
+        assert os.path.getsize(_wal_path(p)) > 0, (
+            'the WAL that appeared mid-checkpoint must still be non-empty '
+            'at exit -- this is what makes the failure real')
+    finally:
+        w = side_writer.get('conn')
+        if w is not None:
+            w.close()
+
+
 def test_main_exits_zero_when_every_sidecar_is_clean(tmp_path):
     a = tmp_path / 'a.db'
     b = tmp_path / 'b.db'

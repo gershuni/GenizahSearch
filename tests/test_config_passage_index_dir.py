@@ -5,9 +5,10 @@ its own environment variable, registry lookup, or eager directory creation.
 """
 from __future__ import annotations
 
-import inspect
+import importlib
 import os
 
+import shared.config as config_mod
 from shared.config import Config
 
 
@@ -23,17 +24,46 @@ def test_passage_index_dir_sits_beside_lab_index_dir():
             == os.path.dirname(Config.LAB_INDEX_DIR))
 
 
-def test_no_env_var_override_and_no_eager_mkdir():
-    """Source-text check, not a filesystem probe: INDEX_DIR itself IS created
-    eagerly by config.py, so a live-machine existence check of PASSAGE_INDEX_DIR
-    can't distinguish "eagerly created" from "a real prior build made it" --
-    only the source can. Neither os.getenv nor os.makedirs may ever mention the
-    new constant.
+def test_no_env_var_override_and_no_eager_mkdir(tmp_path, monkeypatch):
+    """Behavioural, not textual: a helper or alias that eagerly creates
+    PASSAGE_INDEX_DIR would sail past a source-text grep for `makedirs`
+    on the same line, so this points Config's whole resolution root (no
+    portable index next to BASE_DIR, no legacy `~/Genizah_Tantivy_Index`,
+    a fresh empty LOCALAPPDATA) at a temp tree, reloads the module fresh,
+    and checks the directory is simply absent from disk afterward.
     """
-    src = inspect.getsource(Config)
-    line = next(ln for ln in src.splitlines() if "PASSAGE_INDEX_DIR = " in ln)
-    assert "os.getenv" not in line and "os.environ" not in line, (
-        f"PASSAGE_INDEX_DIR must have no env-var override, got: {line!r}")
-    for ln in src.splitlines():
-        assert not ("makedirs" in ln and "PASSAGE_INDEX_DIR" in ln), (
-            f"PASSAGE_INDEX_DIR must not be eagerly created: {ln!r}")
+    fake_home = tmp_path / "home"
+    fake_appdata = tmp_path / "appdata"
+    fake_home.mkdir()
+    monkeypatch.delenv("HOME", raising=False)
+    monkeypatch.setenv("USERPROFILE", str(fake_home))
+    monkeypatch.setenv("LOCALAPPDATA", str(fake_appdata))
+
+    # `importlib.reload` mints a brand-new Config class object -- modules
+    # that already did `from shared.config import Config` (genizah_core.py's
+    # re-export shim included) keep pointing at THIS original object no
+    # matter what `shared.config.Config` gets reassigned to next, so that
+    # object identity is what has to come back, not merely equal values.
+    original_config = config_mod.Config
+
+    try:
+        importlib.reload(config_mod)
+        reloaded = config_mod.Config
+
+        # Proves the reload actually resolved against the fake root instead
+        # of silently reusing a cached real Config: INDEX_DIR itself IS
+        # created eagerly (by design), so its presence under tmp_path is
+        # the isolation check, not the thing under test.
+        assert reloaded.INDEX_DIR.startswith(str(tmp_path))
+        assert os.path.isdir(reloaded.INDEX_DIR)
+
+        assert not os.path.exists(reloaded.PASSAGE_INDEX_DIR), (
+            "PASSAGE_INDEX_DIR must not be created on disk merely by "
+            "importing/resolving Config")
+    finally:
+        # A second reload (even against the real env) would still mint yet
+        # another new class object -- restore the exact pre-test object
+        # directly so `shared.config.Config is genizah_core.Config` (and
+        # every other module's already-bound reference) holds again.
+        config_mod.Config = original_config
+        monkeypatch.undo()

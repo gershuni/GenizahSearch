@@ -169,6 +169,35 @@ def test_install_passage_state_from_none_releases_nothing():
 
 
 # ---------------------------------------------------------------------------
+# 0b. load_passage_state must not downgrade a valid `current/` on one flake.
+# ---------------------------------------------------------------------------
+
+def test_load_passage_state_retries_a_transient_open_failure(
+        tmp_path, monkeypatch):
+    """`open_index` swallows a transient access error into None exactly like
+    a genuinely missing index -- `load_passage_state` calling it directly,
+    instead of going through `_open_with_retry` like every other reload
+    check in this module, means one flake at startup reports "no index" for
+    a `current/` that is perfectly valid, and the caller offers to rebuild a
+    multi-GB artifact that never needed rebuilding."""
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+    pl.close_passage_state()  # undo the helper's own install; start clean
+
+    stub, calls = _flaky_open_index(c.live_dir, fail_times=1)
+    monkeypatch.setattr(pl, 'open_index', stub)
+
+    state = pl.load_passage_state(c.root)
+
+    assert state is not None, (
+        'a single transient open failure must not be reported as a missing '
+        'index')
+    assert state.index.n_records == len(c.records)
+    assert calls['n'] >= 2
+    pl.install_passage_state(state)  # let the autouse fixture release it
+
+
+# ---------------------------------------------------------------------------
 # 1. Cancel propagation: pass 1 / spooling / scatter / partition / hash.
 # ---------------------------------------------------------------------------
 
@@ -680,6 +709,127 @@ def test_reload_failed_no_recovery_terminal_recovery_still_finds_live(
     assert prevs == [], (
         'the previous generation was RENAMED into live, not left behind '
         'under its own name')
+
+
+# ---------------------------------------------------------------------------
+# 6c. A blocked RESTORE (prev -> live) must never raise past the swap --
+#     both call sites that lacked a guard around that specific rename.
+# ---------------------------------------------------------------------------
+
+def test_cancel_restore_failure_still_routes_through_terminal_recovery(
+        tmp_path, monkeypatch):
+    """Cancel lands right after `current -> _prev`, so `_swap_rebuild` tries
+    to restore `_prev -> current` -- and that restore is blocked long enough
+    to exhaust the swap's own bounded retry. Unlike every other destructive
+    rename in this module, this one call site had NO `except PermissionError`
+    at all, so the FINAL attempt's raise used to propagate straight out of
+    `perform_swap`, past the terminal recovery walk that exists to promote
+    the surviving `_prev-*` generation -- leaving `current/` absent, a valid
+    `_prev-*` still on disk, and the caller told there is no index. Blocked
+    only long enough to exhaust `_swap_rebuild`'s own retry, then clears --
+    modelling a lagging antivirus scan, not a path that can never be renamed
+    -- so the terminal walk's SEPARATE retry at the same rename succeeds
+    where the swap's narrower one gave up."""
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+    live = c.live_dir
+
+    monkeypatch.setattr(pl, 'RENAME_RETRY_ATTEMPTS', 2)
+    monkeypatch.setattr(pl, 'RENAME_RETRY_DELAY_SECONDS', 0)
+
+    real_rename = os.rename
+    state = {'prev_created': False}
+    blocked_calls = {'n': 0}
+
+    def _rename_hook(src, dst):
+        norm_src = os.path.normpath(src)
+        norm_dst = os.path.normpath(dst)
+        if norm_src == os.path.normpath(live) \
+                and os.path.basename(norm_dst).startswith(pl.PREV_PREFIX):
+            real_rename(src, dst)
+            state['prev_created'] = True  # only NOW may cancel_check fire
+            return
+        if os.path.basename(norm_src).startswith(pl.PREV_PREFIX) \
+                and norm_dst == os.path.normpath(live):
+            blocked_calls['n'] += 1
+            if blocked_calls['n'] <= 2:
+                raise PermissionError('synthetic: prev->live restore blocked')
+        real_rename(src, dst)
+
+    monkeypatch.setattr(pl.os, 'rename', _rename_hook)
+
+    def cancel():
+        # False throughout the build and the hash re-check -- only becomes
+        # True once `current -> _prev` has actually happened, matching the
+        # exact race this test targets.
+        return state['prev_created']
+
+    res = c.build(cancel_check=cancel)
+
+    assert res.status == 'rollback_failed'
+    # Assert on the function's OWN returned index, not a side-channel
+    # open_index(live) -- a blocked restore that raises past the terminal
+    # walk would leave res.index None here.
+    assert res.index is not None, (
+        'a blocked restore must not raise past the terminal recovery walk '
+        '-- the caller must still end up with a working index')
+    assert res.index.n_records == len(c.records)
+    assert res.live_dir == live
+    prevs = [n for n in os.listdir(c.root) if n.startswith(pl.PREV_PREFIX)]
+    assert prevs == [], (
+        'the surviving generation was promoted into current/ by the '
+        'recovery walk, not left behind under its own name and not deleted')
+
+
+def test_failed_promotion_restore_failure_still_routes_through_terminal_recovery(
+        tmp_path, monkeypatch):
+    """The NEW build can never be promoted (`staging -> current` is blocked
+    for good), so `_swap_rebuild` tries to restore the OLD generation --
+    and that restore is also blocked long enough to exhaust the swap's own
+    bounded retry. This call site had no guard around the restore's FINAL
+    attempt either, so it used to raise past `perform_swap` exactly like the
+    cancel-path sibling above, instead of reporting a status the terminal
+    recovery walk can act on."""
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+    live = c.live_dir
+    staging_dir = os.path.join(c.root, pl.STAGING_DIRNAME)
+
+    monkeypatch.setattr(pl, 'RENAME_RETRY_ATTEMPTS', 2)
+    monkeypatch.setattr(pl, 'RENAME_RETRY_DELAY_SECONDS', 0)
+
+    real_rename = os.rename
+    blocked_calls = {'n': 0}
+
+    def _rename_hook(src, dst):
+        norm_src = os.path.normpath(src)
+        norm_dst = os.path.normpath(dst)
+        if norm_src == os.path.normpath(staging_dir) \
+                and norm_dst == os.path.normpath(live):
+            # The promotion itself never clears -- a genuinely cursed path,
+            # not a transient flake.
+            raise PermissionError('synthetic: staging->live permanently blocked')
+        if os.path.basename(norm_src).startswith(pl.PREV_PREFIX) \
+                and norm_dst == os.path.normpath(live):
+            blocked_calls['n'] += 1
+            if blocked_calls['n'] <= 2:
+                raise PermissionError('synthetic: prev->live restore blocked')
+        real_rename(src, dst)
+
+    monkeypatch.setattr(pl.os, 'rename', _rename_hook)
+
+    res = c.build()
+
+    assert res.status == 'rollback_failed'
+    assert res.index is not None, (
+        'a blocked restore must not raise past the terminal recovery walk '
+        '-- the caller must still end up with a working index')
+    assert res.index.n_records == len(c.records)
+    assert res.live_dir == live
+    prevs = [n for n in os.listdir(c.root) if n.startswith(pl.PREV_PREFIX)]
+    assert prevs == [], (
+        'the surviving generation was promoted into current/ by the '
+        'recovery walk, not left behind under its own name and not deleted')
 
 
 # ---------------------------------------------------------------------------
