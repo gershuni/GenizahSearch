@@ -9,6 +9,7 @@ a GUI event loop.
 """
 from __future__ import annotations
 
+import gc
 import itertools
 import os
 import shutil
@@ -328,6 +329,284 @@ def test_install_passage_state_refuses_to_replace_a_leased_outgoing_state(
         pl._release_index_handles(idx2)  # never installed -- release by hand
 
     assert pl.close_passage_state() is True
+
+
+# ---------------------------------------------------------------------------
+# 0d. G1: the handle a lease's `with` block hands out must go inert the
+#     moment the lease ends -- escaping it must be harmless, never a live
+#     pointer into a mapping that may already be closed.
+# ---------------------------------------------------------------------------
+
+def test_escaped_searcher_handle_raises_after_release_instead_of_working(
+        tmp_path):
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+
+    lease = pl.get_passage_searcher(_NullTextFetcher())
+    with lease as searcher:
+        assert searcher.index.n_records == len(c.records)  # works while live
+        escaped = searcher  # a caller that keeps the handle past `with`
+
+    # The `with` block released the lease on exit -- the ESCAPED handle
+    # (not the lease itself) must now refuse rather than reach the index.
+    with pytest.raises(pl.LeaseExpiredError):
+        escaped.index
+    with pytest.raises(pl.LeaseExpiredError):
+        escaped.search_composition_logic
+
+    assert pl.close_passage_state() is True
+
+
+def test_escaped_searcher_handle_stays_inert_after_a_manual_release_too(
+        tmp_path):
+    """The non-`with` `release()` path must retire the handle exactly like
+    `__exit__` does -- there is only one way a lease actually ends."""
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+
+    lease = pl.get_passage_searcher(_NullTextFetcher())
+    handle = lease.__enter__()
+    assert handle.index.n_records == len(c.records)
+    lease.release()
+
+    with pytest.raises(pl.LeaseExpiredError):
+        handle.index
+
+    assert pl.close_passage_state() is True
+
+
+# ---------------------------------------------------------------------------
+# 0e. G2: acquisition and teardown share ONE mutual-exclusion point -- a
+#     lease requested while a close/swap is mid-teardown must be refused,
+#     never handed a soon-to-be-closed index. Proven with REAL threads, not
+#     by inspecting the lock.
+# ---------------------------------------------------------------------------
+
+def test_close_refuses_a_lease_requested_mid_teardown_real_threads(
+        tmp_path, monkeypatch):
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+
+    real_release_handles = pl._release_index_handles
+    entered_teardown = threading.Event()
+    let_teardown_finish = threading.Event()
+
+    def slow_release_handles(idx):
+        # Mid-teardown: leases have already drained to zero and
+        # `close_passage_state` has committed to tearing this index down,
+        # but the mappings are not closed yet -- exactly the window a new
+        # acquisition must never be able to slip into.
+        entered_teardown.set()
+        assert let_teardown_finish.wait(timeout=5), 'test setup stalled'
+        real_release_handles(idx)
+
+    monkeypatch.setattr(pl, '_release_index_handles', slow_release_handles)
+
+    outcome = {}
+
+    def closer():
+        outcome['close'] = pl.close_passage_state()
+
+    def acquirer():
+        assert entered_teardown.wait(timeout=5), 'close never reached teardown'
+        outcome['acquire'] = pl.get_passage_searcher(_NullTextFetcher())
+        let_teardown_finish.set()
+
+    t_close = threading.Thread(target=closer)
+    t_acquire = threading.Thread(target=acquirer)
+    t_close.start()
+    t_acquire.start()
+    t_close.join(timeout=10)
+    t_acquire.join(timeout=10)
+
+    assert outcome['close'] is True
+    assert outcome['acquire'] is None, (
+        'a lease requested while a close is mid-teardown must be refused '
+        'outright, never handed an index whose mappings are being closed '
+        'concurrently on another thread')
+
+
+def test_a_refused_close_leaves_no_new_leases_flag_cleared_for_next_attempt(
+        tmp_path, monkeypatch):
+    _shrink_lease_window(monkeypatch)
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+
+    lease = pl.get_passage_searcher(_NullTextFetcher())
+    with lease:
+        assert pl.close_passage_state() is False, (
+            'refused: the lease above is still outstanding')
+
+    # The refused close must have restored the no-new-leases flag exactly
+    # as it found it -- a fresh acquisition right after must behave
+    # normally, not be refused by a flag the failed close forgot to clear.
+    lease2 = pl.get_passage_searcher(_NullTextFetcher())
+    assert lease2 is not None, (
+        'a refused close must not leave the drain flag stuck on, refusing '
+        'every later acquisition')
+    lease2.release()
+    assert pl.close_passage_state() is True
+
+
+class _PausingLock:
+    """Wraps a real `threading.Lock` and, on the FIRST release only, blocks
+    the releasing thread (after the real lock has already been let go, so
+    other threads may freely take it) until `resume` is set. This is what
+    lets the test park an acquiring thread at the exact instant it exits
+    `_try_acquire_lease`'s critical section -- after whatever that section
+    does, before the function returns -- regardless of how much or how
+    little work that section actually contains. It never blocks
+    `acquire()`, so it cannot itself deadlock anything: the underlying
+    mutual exclusion is untouched, only the return from ONE release is
+    delayed."""
+
+    def __init__(self, real_lock, released_event, resume_event):
+        self._real = real_lock
+        self._released_event = released_event
+        self._resume_event = resume_event
+        self._fired = False
+
+    def acquire(self, *args, **kwargs):
+        return self._real.acquire(*args, **kwargs)
+
+    def release(self, *args, **kwargs):
+        self._real.release(*args, **kwargs)
+        if not self._fired:
+            self._fired = True
+            self._released_event.set()
+            if not self._resume_event.wait(timeout=5):
+                raise AssertionError(
+                    'test harness never resumed the paused acquirer thread '
+                    'within the bounded wait -- synchronisation failure, '
+                    'not the invariant under test')
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.release()
+        return False
+
+
+def test_lease_state_check_and_reader_increment_are_atomic_real_threads(
+        tmp_path, monkeypatch):
+    """Forces the exact interleaving that a mutation surviving code review
+    could open: the reader-count increment happening OUTSIDE the same
+    critical section as the `_state`/`_draining` check inside
+    `_try_acquire_lease`. `_PausingLock` parks an acquiring thread at the
+    instant it releases `_lease_lock` -- after everything the critical
+    section actually did, whatever that turns out to be -- so a concurrent
+    close's drain check runs exactly then, deterministically, no scheduler
+    luck required.
+
+    With the increment INSIDE the critical section (current code), the
+    count already reflects the in-flight acquisition when the close checks
+    it, so the close must find leases outstanding and refuse. With the
+    increment moved OUTSIDE (the mutation this test exists to kill), the
+    close's check lands in the gap where the count is still zero, so the
+    close wrongly declares the index drained, tears its mappings down, and
+    THEN the acquirer resumes and hands out a lease over the now-closed
+    index. The single assertion below (`close must have been refused`)
+    fails cleanly on that outcome instead of silently returning a lease a
+    caller could go on to dereference.
+    """
+    # A short, EXPLICIT drain timeout on the real function object -- not the
+    # `LEASE_DRAIN_TIMEOUT_SECONDS` module global, which `_wait_for_leases_
+    # to_drain`'s default argument already captured at import time and a
+    # module-attribute monkeypatch cannot reach after the fact.
+    monkeypatch.setattr(pl._wait_for_leases_to_drain, '__defaults__', (0.3,))
+    monkeypatch.setattr(pl, 'LEASE_DRAIN_POLL_SECONDS', 0.02)
+
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+
+    original_lock = pl._lease_lock
+    released = threading.Event()
+    resume = threading.Event()
+    pl._lease_lock = _PausingLock(original_lock, released, resume)
+
+    outcome = {}
+    acquirer = threading.Thread(
+        target=lambda: outcome.__setitem__(
+            'lease', pl.get_passage_searcher(_NullTextFetcher())))
+    closer = None
+
+    try:
+        acquirer.start()
+        assert released.wait(timeout=5), (
+            'the acquiring thread never reached the lock-release point -- '
+            'test synchronisation failure, not the invariant under test')
+
+        # The acquirer is now parked immediately after its critical section
+        # exited `_lease_lock` -- exactly the boundary the increment's
+        # placement decides the meaning of. Race a real close against it.
+        closer = threading.Thread(
+            target=lambda: outcome.__setitem__(
+                'close', pl.close_passage_state()))
+        closer.start()
+        closer.join(timeout=5)
+        assert not closer.is_alive(), (
+            'close_passage_state() did not return within the bounded '
+            'drain window -- possible deadlock, not the invariant under '
+            'test')
+
+        resume.set()
+        acquirer.join(timeout=5)
+        assert not acquirer.is_alive(), (
+            'the paused acquirer thread never resumed within the bounded '
+            'wait -- test synchronisation failure')
+
+        assert outcome.get('lease') is not None, (
+            'sanity check on the test itself: the acquisition\'s state '
+            'check passed (state was installed, not draining) before the '
+            'pause, so resuming it must produce a lease either way -- if '
+            'this is None the harness above is not exercising the '
+            'intended interleaving at all')
+        assert outcome.get('close') is False, (
+            'close_passage_state() succeeded while a concurrent '
+            'get_passage_searcher() call had already passed its state '
+            'check and was paused before its reader-count increment -- '
+            'the state check and the increment are no longer atomic '
+            '(the increment likely moved outside `_lease_lock`), so the '
+            'close observed zero outstanding readers and tore the index '
+            'down while a lease for it was still being issued')
+    finally:
+        resume.set()
+        for t in (acquirer, closer):
+            if t is not None and t.is_alive():
+                t.join(timeout=5)
+        pl._lease_lock = original_lock
+        lease = outcome.get('lease')
+        if lease is not None:
+            lease.release()  # release() never dereferences the index -- safe
+        pl._outstanding_leases = 0
+        pl._draining = False
+        pl.close_passage_state()  # no-op if already closed; else real cleanup
+
+
+# ---------------------------------------------------------------------------
+# 0f. G3: the outstanding-lease count is tied to the lease OBJECT's
+#     lifetime, not to a caller remembering to call release() -- a dropped
+#     or abandoned lease must not wedge every later close/swap.
+# ---------------------------------------------------------------------------
+
+def test_dropping_a_lease_without_releasing_still_lets_a_later_close_succeed(
+        tmp_path, monkeypatch):
+    _shrink_lease_window(monkeypatch, timeout=2.0, poll=0.02)
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+
+    def _acquire_and_abandon():
+        pl.get_passage_searcher(_NullTextFetcher())  # never bound, never released
+
+    _acquire_and_abandon()
+    gc.collect()  # CPython refcounting already dropped it; this catches any straggler
+
+    assert pl.close_passage_state() is True, (
+        "a lease dropped without an explicit release() must not permanently "
+        "inflate the count -- its finalizer must bring it back down on its "
+        "own")
 
 
 # ---------------------------------------------------------------------------
@@ -1313,6 +1592,40 @@ def test_recovery_transient_open_failure_does_not_downgrade_valid_live(
     assert result.status == 'live_ok'
     assert result.index is not None
     assert calls['n'] >= 2
+
+
+def test_recovery_reconsiders_a_promoted_candidate_after_a_transient_reopen_failure(
+        tmp_path, monkeypatch):
+    """A `_prev-*` candidate that validates in place and gets promoted into
+    `current/` must not be abandoned just because its immediate post
+    -promotion reopen hits a transient error -- recovery must retry THAT
+    directory before ever reporting nothing_recoverable, since the content
+    sitting there is already proven to work."""
+    monkeypatch.setattr(pl, '_delete_generation_background', lambda p: None)
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+    assert c.build().status == 'installed'  # creates the one _prev-* generation
+    pl.close_passage_state()  # release live's handles before removing it
+    shutil.rmtree(c.live_dir)  # no 'live' candidate -- forces the _prev-* path
+
+    # Fails the first two calls against `live` (both attempts inside the
+    # post-promotion `_open_with_retry`), then defers to the real opener --
+    # models a flake that has cleared by the time recovery checks again.
+    stub, calls = _flaky_open_index(c.live_dir, fail_times=2)
+    monkeypatch.setattr(pl, 'open_index', stub)
+
+    result = pl.recover_at_startup(c.root)
+
+    assert result.status == 'recovered_from_prev', (
+        'the promoted candidate must be reconsidered, not abandoned, once '
+        'its transient reopen failure clears')
+    assert result.index is not None
+    assert calls['n'] >= 3, (
+        'the retry must actually have happened -- otherwise this test '
+        'proves nothing')
+    # Independent of the mock: current/ genuinely opens now -- the exact
+    # fact the reviewer's repro showed recovery denying.
+    assert open_index(c.live_dir) is not None
 
 
 def test_recovery_nothing_recoverable_reports_cleanly(tmp_path):

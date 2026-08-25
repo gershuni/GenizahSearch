@@ -34,6 +34,7 @@ import sys
 import threading
 import time
 import uuid
+import weakref
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -295,9 +296,14 @@ def install_passage_state(state: Optional[PassageState]) -> bool:
     global _state
     outgoing = _state
     if outgoing is not None and outgoing is not state:
-        if not _release_live_index(outgoing.index):
+        def _swap_in():
+            global _state
+            _state = state
+        if not _release_live_index(outgoing.index, _swap_in):
             return False
         gc.collect()
+        _reset_freshness()
+        return True
     _state = state
     _reset_freshness()
     return True
@@ -327,10 +333,14 @@ def close_passage_state() -> bool:
     the UI thread even though the request to do it originates off it."""
     global _state
     if _state is not None:
-        if not _release_live_index(_state.index):
+        current = _state
+
+        def _clear():
+            global _state
+            _state = None
+        if not _release_live_index(current.index, _clear):
             return False
-    _state = None
-    gc.collect()
+        gc.collect()
     _reset_freshness()
     return True
 
@@ -340,15 +350,25 @@ def passage_available() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Reader leases. `get_passage_searcher()` hands the caller a raw
-# `PassageIndex` reference (wrapped in a `PassageSearcher`) that a worker
-# thread may still be reading -- a numpy memmap access with no natural end
-# this module can observe -- long after the call that produced it returns.
+# Reader leases. `get_passage_searcher()` hands the caller a `PassageIndex`
+# reference (wrapped in a `PassageSearcher`) that a worker thread may still
+# be reading -- a numpy memmap access with no natural end this module can
+# observe -- long after the call that produced it returns.
 # `close_passage_state()`/`install_passage_state()` must know such a read is
 # in flight before they force-close that SAME index's memmaps: a concurrent
 # read off a mapping closed out from under it is an access violation, not a
 # catchable exception. This lease is the single owner-side mechanism that
 # makes that provable rather than merely hoped for.
+#
+# ONE lock (`_lease_lock`) is the mutual-exclusion point for everything
+# below: the outstanding-reader count, the "draining" flag, AND every read
+# of `_state` a lease acquisition performs. That last part is what makes
+# acquisition atomic with the state check -- `_try_acquire_lease` observes
+# `_state` and increments the count under the SAME critical section, so a
+# lease is either fully issued (both happened) or not issued at all. Once
+# `_begin_drain()` has run, the same lock refuses every new acquisition
+# until `_end_drain()` runs, so nothing can slip in between "count observed
+# zero" and "mappings torn down" -- see `_release_live_index`.
 # ---------------------------------------------------------------------------
 
 LEASE_DRAIN_TIMEOUT_SECONDS = 5.0
@@ -356,22 +376,34 @@ LEASE_DRAIN_POLL_SECONDS = 0.05
 
 _lease_lock = threading.Lock()
 _outstanding_leases = 0
+_draining = False
 
 
-def _acquire_lease() -> None:
+def _try_acquire_lease():
+    """The one atomic acquisition step: `_state` is read and the count is
+    incremented under the SAME lock, so no other thread ever observes a
+    count that was bumped for a state nobody checked, or a state that was
+    checked but never counted. Returns the live `PassageIndex` on success,
+    or None -- exactly like "no index installed" -- when either no state is
+    installed or a close/swap has already called `_begin_drain()`; a
+    request arriving during a drain is refused outright rather than being
+    allowed to slip through before the teardown it's racing against."""
     global _outstanding_leases
     with _lease_lock:
+        if _state is None or _draining:
+            return None
         _outstanding_leases += 1
+        return _state.index
 
 
 def _release_lease() -> None:
     global _outstanding_leases
     with _lease_lock:
         # Floored at 0 rather than trusting callers to release exactly
-        # once -- `PassageSearcherLease.release()` already enforces that
-        # itself (see its docstring), but the floor is what keeps a defect
-        # THERE from ever wedging this count below zero and refusing every
-        # close forever.
+        # once -- `PassageSearcherLease.release()` is idempotent itself
+        # (see its docstring), but the floor is what keeps a defect THERE
+        # from ever wedging this count below zero and refusing every close
+        # forever.
         if _outstanding_leases > 0:
             _outstanding_leases -= 1
 
@@ -381,12 +413,36 @@ def _leases_outstanding() -> bool:
         return _outstanding_leases > 0
 
 
-def _wait_for_leases_to_drain(
-        timeout: float = LEASE_DRAIN_TIMEOUT_SECONDS) -> bool:
+def _begin_drain() -> None:
+    global _draining
+    with _lease_lock:
+        _draining = True
+
+
+def _end_drain() -> None:
+    """Always the matching call to `_begin_drain()`, success or failure --
+    a refused close/swap must leave the no-new-leases flag exactly as it
+    found it (cleared), or the NEXT attempt would refuse every acquisition
+    for no reason."""
+    global _draining
+    with _lease_lock:
+        _draining = False
+
+
+def _wait_for_leases_to_drain(timeout: Optional[float] = None) -> bool:
     """Polls rather than blocking on a condition variable: a lease is
     released from whichever worker thread's query happens to finish, an
     arbitrary and unpredictable thread from this function's point of view,
-    so there is no single event object it could wait on instead."""
+    so there is no single event object it could wait on instead. Must only
+    be called with draining already begun -- see `_release_live_index` --
+    or a lease could be acquired between one poll and the next forever.
+
+    The window is read at CALL time and never bound as a default: a default
+    is evaluated at import, which would leave the module-level tunable
+    unpatchable and let a caller that shrank it silently keep waiting the
+    production window."""
+    if timeout is None:
+        timeout = LEASE_DRAIN_TIMEOUT_SECONDS
     deadline = time.monotonic() + timeout
     while _leases_outstanding():
         if time.monotonic() >= deadline:
@@ -395,51 +451,97 @@ def _wait_for_leases_to_drain(
     return True
 
 
-def _release_live_index(idx: PassageIndex) -> bool:
+def _release_live_index(idx: PassageIndex, on_drained: Callable[[], None]) -> bool:
     """The one seam `close_passage_state` and `install_passage_state` both
-    route their outgoing-index release through. Waits out
-    `_wait_for_leases_to_drain`'s bounded window, then either force-closes
-    `idx` (leases gone) or refuses entirely (leases survived) -- there is no
-    partial outcome: an index this function did not report closed is still
-    exactly as open as it was before the call."""
-    if not _wait_for_leases_to_drain():
-        return False
-    _release_index_handles(idx)
-    return True
+    route their outgoing-index release through. Draining starts BEFORE the
+    wait so no new lease can be issued against `idx` while this function is
+    deciding its fate, and stays in effect through `on_drained` -- the
+    caller's `_state` mutation -- so a reader can never observe `_state`
+    still pointing at `idx` after its mappings are already closed: teardown
+    and the pointer swap happen inside the SAME no-new-leases window, not
+    as two separately-racy steps. Returns True (mappings closed, `_state`
+    mutated) or False (leases survived the wait, nothing touched) -- there
+    is no partial outcome either way."""
+    _begin_drain()
+    try:
+        if not _wait_for_leases_to_drain():
+            return False
+        _release_index_handles(idx)
+        on_drained()
+        return True
+    finally:
+        _end_drain()
+
+
+class LeaseExpiredError(RuntimeError):
+    """Raised by the object a `PassageSearcherLease`'s `with` block hands
+    out when it is used after the lease has been released. Catchable --
+    unlike the access violation touching a closed memmap would raise --
+    which is what makes it safe for that object to escape the `with` block:
+    nothing reachable from it can dereference a mapping `close_passage_state`
+    already tore down."""
+
+
+class _LeasedSearcherHandle:
+    """What `PassageSearcherLease.__enter__` actually returns -- never the
+    bare `PassageSearcher`. Forwards attribute access to the real searcher
+    only while `finalizer.alive` is still true; once the lease has been
+    released (explicitly, or by the lease object itself being dropped --
+    see `PassageSearcherLease`), every access raises `LeaseExpiredError`
+    instead of ever reaching a `PassageIndex` whose memmaps may already be
+    closed. A caller that squirrels this object away past the `with` block
+    gets a catchable error on the next use, not an access violation."""
+
+    __slots__ = ('_searcher', '_finalizer')
+
+    def __init__(self, searcher, finalizer) -> None:
+        object.__setattr__(self, '_searcher', searcher)
+        object.__setattr__(self, '_finalizer', finalizer)
+
+    def __getattr__(self, name):
+        if not self._finalizer.alive:
+            raise LeaseExpiredError(
+                'passage searcher used after its lease was released -- the '
+                'index may already be closed')
+        return getattr(self._searcher, name)
 
 
 class PassageSearcherLease:
-    """What `get_passage_searcher()` returns instead of a bare
-    `PassageSearcher`. The searcher is reachable ONLY through the `with`
-    block -- there is no public accessor for it otherwise -- so a caller
-    cannot end up holding a reference to the index without the lease that
-    reference requires being counted.
+    """What `get_passage_searcher()` returns. The searcher is reachable
+    only through the `with` block's `_LeasedSearcherHandle` -- there is no
+    public accessor for the bare searcher -- and that handle goes inert the
+    moment this lease is released, so a caller cannot end up dereferencing
+    the index without the lease that reference requires still being held.
+
+    The outstanding-reader count is tied to THIS OBJECT's lifetime via
+    `weakref.finalize`, not merely to an explicit `release()` call: if this
+    lease is dropped, garbage-collected, or abandoned by a thread that dies
+    before calling `release()`, the finalizer still fires and the count
+    still comes back down. That is what keeps a forgotten lease from
+    wedging every future close/swap behind the full drain timeout forever.
 
     `release()` is the non-context escape hatch, for a caller that truly
-    cannot use `with`; it is what `__exit__` itself calls, and it is
-    idempotent -- safe to call again, from a retry or a stray `finally` --
-    because a second call is a no-op rather than a double decrement, which
-    is what makes "release exactly once" true regardless of how many times
-    release is actually requested.
+    cannot use `with`; it is what `__exit__` calls, and -- like the
+    finalizer it delegates to -- it is idempotent: a second call, from a
+    retry or a stray `finally`, is a no-op rather than a double decrement.
     """
 
     def __init__(self, searcher) -> None:
+        # The count itself was already taken by `_try_acquire_lease` --
+        # this constructor's ONE job is to make sure something now owns
+        # bringing it back down, however this lease meets its end.
         self._searcher = searcher
-        self._released = False
-        _acquire_lease()
+        self._finalizer = weakref.finalize(self, _release_lease)
 
     def __enter__(self):
-        return self._searcher
+        return _LeasedSearcherHandle(self._searcher, self._finalizer)
 
     def __exit__(self, exc_type, exc, tb) -> bool:
         self.release()
         return False
 
     def release(self) -> None:
-        if self._released:
-            return
-        self._released = True
-        _release_lease()
+        self._finalizer()  # no-op if already run -- see class docstring
 
 
 def get_passage_searcher(text_fetcher, width: str = _DEFAULT_WIDTH,
@@ -465,18 +567,26 @@ def get_passage_searcher(text_fetcher, width: str = _DEFAULT_WIDTH,
     defaults to PARALLELS_GROUP_CAP (200), which is already the right desktop
     cap.
     """
-    if _state is None:
+    index = _try_acquire_lease()
+    if index is None:
         return None
-    if width not in PRESETS:
-        width = _DEFAULT_WIDTH
-    if length != DEFAULT_LENGTH and length not in LENGTH_PROFILES:
-        length = DEFAULT_LENGTH
-    if depth != DEFAULT_DEPTH and depth not in DEPTH_PROFILES:
-        depth = DEFAULT_DEPTH
-    from shared.passage_parallels import PassageSearcher  # local: keep this module import-light
-    searcher = PassageSearcher(index=_state.index, text_fetcher=text_fetcher,
-                               policy=compose(width, length, depth))
-    return PassageSearcherLease(searcher)
+    try:
+        if width not in PRESETS:
+            width = _DEFAULT_WIDTH
+        if length != DEFAULT_LENGTH and length not in LENGTH_PROFILES:
+            length = DEFAULT_LENGTH
+        if depth != DEFAULT_DEPTH and depth not in DEPTH_PROFILES:
+            depth = DEFAULT_DEPTH
+        from shared.passage_parallels import PassageSearcher  # local: keep this module import-light
+        searcher = PassageSearcher(index=index, text_fetcher=text_fetcher,
+                                   policy=compose(width, length, depth))
+        return PassageSearcherLease(searcher)
+    except Exception:
+        # The lease slot was already counted by `_try_acquire_lease` above;
+        # nothing below this point failing may leave that count stranded
+        # with no lease object ever created to eventually release it.
+        _release_lease()
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -1041,8 +1151,34 @@ def _delete_prev_generations(root: str) -> None:
             shutil.rmtree(os.path.join(root, n), ignore_errors=True)
 
 
+def _confirm_promotion(root: str, live: str,
+                        status: str) -> Optional[RecoveryResult]:
+    """One more REAL open of a candidate this function already validated
+    in place and renamed into `current/` -- used both when a later
+    candidate is about to move `live` aside (working content earns another
+    look before it is discarded for a merely-ALSO-valid alternative) and,
+    if nothing older pans out either, as recovery's last resort before it
+    would otherwise report nothing_recoverable. `open_index` swallows a
+    transient access error into None exactly like a genuinely bad artifact
+    (see `_open_with_retry`'s docstring); this call happens strictly later
+    than the immediate post-rename check, giving a lagging antivirus scan
+    or Explorer handle more real time to let go. None means still no."""
+    idx = _open_with_retry(live)
+    if idx is None:
+        return None
+    if status == 'recovered_from_prev':
+        _delete_prev_generations(root)
+    return RecoveryResult(status=status, index=idx, live_dir=live)
+
+
 def _recover_at_startup(root: str) -> RecoveryResult:
     live = os.path.join(root, LIVE_DIRNAME)
+    # Set once a `_prev-*`/`.failed-*` candidate has been validated in place
+    # and renamed into `current/` but its immediate reopen failed -- the
+    # promoted content is now the only thing sitting at `live`, and it must
+    # be RE-CONSIDERED (via `_confirm_promotion`) rather than silently
+    # abandoned the moment this function looks anywhere else.
+    pending_status = None
     for kind, path in _candidates(root):
         idx = _open_with_retry(path)
         if idx is None:
@@ -1060,7 +1196,12 @@ def _recover_at_startup(root: str) -> RecoveryResult:
         gc.collect()
 
         if os.path.isdir(live):
-            # `live` exists but nothing above proved it -- move it aside
+            if pending_status is not None:
+                confirmed = _confirm_promotion(root, live, pending_status)
+                if confirmed is not None:
+                    return confirmed
+            # `live` exists and nothing above proved it (a still-pending
+            # promotion just failed its recheck too) -- move it aside
             # first; a generation cannot be renamed onto an existing
             # directory.
             dead = os.path.join(root, f'.dead-{_gen_token()}')
@@ -1069,6 +1210,7 @@ def _recover_at_startup(root: str) -> RecoveryResult:
             except PermissionError:
                 continue  # try the next older candidate instead
             shutil.rmtree(dead, ignore_errors=True)
+            pending_status = None
 
         try:
             _retry_rename(path, live)
@@ -1077,7 +1219,13 @@ def _recover_at_startup(root: str) -> RecoveryResult:
 
         idx2 = _open_with_retry(live)
         if idx2 is None:
-            continue  # unlikely after in-place validation; try the next one
+            # Transient or real -- either way `path`'s content is NOW
+            # sitting at `live`, already validated in place moments ago.
+            # Keep walking older candidates as a fallback, but remember
+            # this promotion so it gets reconsidered instead of discarded.
+            pending_status = 'recovered_from_prev' if kind == 'prev' \
+                else 'recovered_from_quarantine'
+            continue
 
         if kind == 'prev':
             _delete_prev_generations(root)
@@ -1086,6 +1234,14 @@ def _recover_at_startup(root: str) -> RecoveryResult:
         status = 'recovered_from_prev' if kind == 'prev' \
             else 'recovered_from_quarantine'
         return RecoveryResult(status=status, index=idx2, live_dir=live)
+
+    if pending_status is not None:
+        # Every candidate ran out, but the LAST promotion is still sitting
+        # in `current/` -- reporting nothing_recoverable here would send
+        # the UI toward rebuilding gigabytes that, in fact, already work.
+        confirmed = _confirm_promotion(root, live, pending_status)
+        if confirmed is not None:
+            return confirmed
 
     return RecoveryResult(status='nothing_recoverable')
 
