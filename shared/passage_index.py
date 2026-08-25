@@ -39,6 +39,7 @@ wrong answers rather than an error.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 from dataclasses import dataclass
@@ -49,6 +50,8 @@ import numpy as np
 from shared.passage_normalize import (
     GRAM_CODE_SPACE, HEB_MIN, K, NORMALIZER_VERSION,
 )
+
+logger = logging.getLogger(__name__)
 
 # Bump when the on-disk layout changes in any way a reader would misread.
 LAYOUT_VERSION = 1
@@ -84,6 +87,54 @@ class IndexFormatError(Exception):
 class BuildCancelled(Exception):
     """Raised by build_index (and the corpus hasher it depends on) when a
     caller-supplied cancel_check() returns True mid-build."""
+
+
+class PassageIndexClosed(Exception):
+    """Raised by any access to a `PassageIndex` section after `close()`.
+    An ordinary `Exception` subclass -- catchable by an unqualified `except
+    Exception` -- standing in for what dereferencing a closed memory
+    mapping would otherwise do: fault the process (Windows 0xC0000005 /
+    SIGSEGV). See `PassageIndex.close()`."""
+
+
+class _ClosedSection:
+    """Poison stand-in `PassageIndex.close()` swaps each of the five
+    memmapped section attributes for. One shared, stateless instance covers
+    every closed `PassageIndex` -- there is nothing here `close()` would
+    need to initialize per-instance.
+
+    Covers every route `PassageIndex`'s own accessors (`stream`,
+    `record_id`, `postings_for`, `df`, `dfs`, `n_records`, `n_postings`)
+    use to touch a section: indexing (`arr[i]`), slicing (`arr[lo:hi]`),
+    attribute access (`.shape`, `.astype`, ...), `len()`, iteration, and
+    numpy's own array coercion (`np.asarray(arr)`), which would otherwise
+    silently succeed in copying a real array out of this stand-in. Dunders
+    are looked up on the TYPE, not through `__getattr__`, so each is
+    defined explicitly here rather than left for a bare `__getattr__` to
+    (never) catch.
+    """
+
+    _MESSAGE = ('passage index section accessed after close() -- the '
+                'underlying memory mapping is gone')
+
+    def __getattr__(self, name):
+        raise PassageIndexClosed(self._MESSAGE)
+
+    def __getitem__(self, key):
+        raise PassageIndexClosed(self._MESSAGE)
+
+    def __len__(self):
+        raise PassageIndexClosed(self._MESSAGE)
+
+    def __iter__(self):
+        raise PassageIndexClosed(self._MESSAGE)
+
+    def __array__(self, dtype=None):
+        raise PassageIndexClosed(self._MESSAGE)
+
+
+# One instance, shared by every closed PassageIndex -- see _ClosedSection.
+_CLOSED_SECTION = _ClosedSection()
 
 
 def require_little_endian() -> None:
@@ -208,6 +259,66 @@ class PassageIndex:
     streams: np.ndarray           # uint8 letter indices
     records: np.ndarray           # RECORD_DTYPE
     record_ids: np.ndarray        # uint8 utf-8 blob
+
+    def __post_init__(self) -> None:
+        self._closed = False
+
+    def close(self) -> None:
+        """Close every section's underlying mapping, then REPLACE the
+        section attribute itself with `_CLOSED_SECTION` -- not merely close
+        `._mmap` and leave `self.records` etc. pointing at the now-dangling
+        array. This is the whole fix: a reference that escapes this
+        object's owner (a returned searcher, a captured bound method, a
+        traceback frame, a `logging` LogRecord's `exc_info` tuple -- five
+        review rounds have each found a distinct one) used to dereference a
+        closed memory mapping, which is an access violation, not a
+        catchable error. Now the SAME dereference raises
+        `PassageIndexClosed` instead, no matter which escape route
+        produced it or which one nobody has thought of yet.
+
+        Deliberately NOT guarded by an `if self._closed` branch on the read
+        accessors below -- `stream`/`record_id`/`postings_for`/`dfs` are on
+        the hot path of every query, and this design costs them nothing
+        while open. `close()` itself IS guarded, so a second call (the swap
+        path and a finalizer can both reach this) is a no-op rather than a
+        double `mmap.close()` or a redundant attribute swap.
+
+        `np.memmap()` closes the file descriptor it used to build the
+        mapping by the time it returns -- the OS handle Windows actually
+        cares about is the mapping itself, held by `._mmap`. A zero-length
+        section is a plain `np.empty` array with no `._mmap` (see `_map`
+        below), so `getattr(arr, '_mmap', None)` skips those safely; they
+        are still poisoned like every other section.
+        """
+        if self._closed:
+            return
+        self._closed = True
+        failures = []
+        for name in ('gram_offsets', 'postings', 'streams', 'records',
+                     'record_ids'):
+            arr = getattr(self, name, None)
+            mm = getattr(arr, '_mmap', None)
+            # Poison BEFORE unmapping, and never let one section's failure
+            # abort the loop: `_closed` is already set, so a raise partway
+            # through would leave this section and every later one still
+            # LIVE and returning correct data -- the exact dangling state
+            # this method exists to remove -- with the idempotence guard
+            # permanently blocking a retry.
+            setattr(self, name, _CLOSED_SECTION)
+            if mm is not None:
+                try:
+                    mm.close()
+                except Exception as exc:
+                    failures.append('%s: %r' % (name, exc))
+        if failures:
+            # Logged, not raised: every section is unreachable either way, so
+            # the safety property holds. What survives is a leaked mapping,
+            # and on Windows that surfaces where it matters -- as the swap's
+            # rename retry and its "close the other window" message -- while
+            # raising here would instead break `close_passage_state()`'s
+            # documented True/False contract.
+            logger.warning('passage_index: section unmap failed on close '
+                           '(mapping leaked): %s', '; '.join(failures))
 
     @property
     def n_records(self) -> int:

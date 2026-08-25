@@ -9,8 +9,8 @@ a GUI event loop.
 """
 from __future__ import annotations
 
-import gc
 import itertools
+import logging
 import os
 import shutil
 import subprocess
@@ -200,8 +200,10 @@ def test_load_passage_state_retries_a_transient_open_failure(
 
 
 # ---------------------------------------------------------------------------
-# 0c. Reader leases: a search still touching the index must block a
-#     force-close, not lose the race to one.
+# 0c. Reader leases are now CALL-SCOPED: a search still touching the index
+#     must block a force-close, not lose the race to one, but what proves
+#     "still touching" is a search actually IN FLIGHT inside
+#     `search_composition_logic`, not an object a caller is holding onto.
 # ---------------------------------------------------------------------------
 
 class _NullTextFetcher:
@@ -219,72 +221,129 @@ def _shrink_lease_window(monkeypatch, timeout=0.2, poll=0.02):
     monkeypatch.setattr(pl, 'LEASE_DRAIN_POLL_SECONDS', poll)
 
 
-def test_close_refuses_while_a_lease_is_outstanding_then_succeeds_after_release(
+def _patch_blocking_search(monkeypatch, entered_event, release_event):
+    """Patches `PassageSearcher.search_composition_logic` (the REAL search,
+    not the adapter) to signal `entered_event` the moment it starts -- proof
+    the lease is now held -- then block until `release_event` is set. Models
+    a query genuinely still touching the index, the exact window the lease
+    exists to protect; the adapter's own acquire/release wrapping is left
+    completely real."""
+    import shared.passage_parallels as passage_parallels
+
+    def _blocked(self, *a, **k):
+        entered_event.set()
+        assert release_event.wait(timeout=5), 'test setup stalled'
+        return {'main': [], 'filtered': []}
+
+    monkeypatch.setattr(passage_parallels.PassageSearcher,
+                        'search_composition_logic', _blocked)
+
+
+def test_close_refuses_while_a_search_is_in_flight_then_succeeds_after_it_returns(
         tmp_path, monkeypatch):
     _shrink_lease_window(monkeypatch)
     c = _Corpus(tmp_path)
     assert c.build().status == 'installed'
 
-    lease = pl.get_passage_searcher(_NullTextFetcher())
-    assert lease is not None
-    with lease as searcher:
-        # "mid-query": still holding a reference to the live index.
-        assert searcher.index.n_records == len(c.records)
-        assert pl.close_passage_state() is False, (
-            'a live reader must block a force-close, not lose the race to it')
-        assert pl.passage_available(), (
-            'a refused close must leave the state installed and usable')
+    entered = threading.Event()
+    release = threading.Event()
+    _patch_blocking_search(monkeypatch, entered, release)
 
-    # The `with` block released the lease on exit -- a close now succeeds.
+    adapter = pl.get_passage_searcher(_NullTextFetcher())
+    outcome = {}
+    t = threading.Thread(
+        target=lambda: outcome.__setitem__(
+            'result', adapter.search_composition_logic(c.records[0][1][:10])))
+    t.start()
+    assert entered.wait(timeout=5), 'search never reached the blocking point'
+
+    # "mid-query": the call above is still inside search_composition_logic,
+    # holding the lease it acquired at the top of that call.
+    assert pl.close_passage_state() is False, (
+        'a search still touching the index must block a force-close, not '
+        'lose the race to it')
+    assert pl.passage_available(), (
+        'a refused close must leave the state installed and usable')
+
+    # Let the search return -- its `finally` releases the lease.
+    release.set()
+    t.join(timeout=5)
+    assert outcome['result'] == {'main': [], 'filtered': []}
+
+    # A close AFTER the search has genuinely finished must succeed -- the
+    # lease was released inside that call, not left dangling on some object
+    # nobody closed.
     assert pl.close_passage_state() is True
     assert not pl.passage_available()
 
 
-def test_a_released_lease_is_harmless_to_release_twice(tmp_path):
+def test_close_succeeds_after_a_search_completes_normally(tmp_path):
+    """The un-blocked, happy-path twin of the test above: no threads, no
+    monkeypatching -- just proof that an ordinary completed search leaves
+    nothing outstanding for close to trip over."""
     c = _Corpus(tmp_path)
     assert c.build().status == 'installed'
 
-    lease = pl.get_passage_searcher(_NullTextFetcher())
-    lease.release()
-    lease.release()  # must not raise, must not under/over-count
+    result = pl.get_passage_searcher(_NullTextFetcher()).search_composition_logic(
+        c.records[0][1][:10])
+    assert isinstance(result, dict)
 
     assert pl.close_passage_state() is True
+    assert not pl.passage_available()
 
 
-def test_lease_drained_inside_the_wait_window_lets_the_same_close_through(
+def test_search_finishing_inside_the_wait_window_lets_the_same_close_through(
         tmp_path, monkeypatch):
-    """A lease released WHILE `close_passage_state` is still polling must let
-    THAT SAME call succeed -- proving the window is a real wait, not an
-    instant refusal dressed up as one."""
+    """A search that finishes WHILE `close_passage_state` is still polling
+    must let THAT SAME call succeed -- proving the window is a real wait,
+    not an instant refusal dressed up as one."""
     _shrink_lease_window(monkeypatch, timeout=2.0, poll=0.02)
     c = _Corpus(tmp_path)
     assert c.build().status == 'installed'
 
-    lease = pl.get_passage_searcher(_NullTextFetcher())
+    entered = threading.Event()
+    release = threading.Event()
+    _patch_blocking_search(monkeypatch, entered, release)
+
+    adapter = pl.get_passage_searcher(_NullTextFetcher())
+    t = threading.Thread(
+        target=lambda: adapter.search_composition_logic(c.records[0][1][:10]))
+    t.start()
+    assert entered.wait(timeout=5), 'search never reached the blocking point'
 
     def _release_soon():
         time.sleep(0.15)
-        lease.release()
+        release.set()
 
-    t = threading.Thread(target=_release_soon)
-    t.start()
+    releaser = threading.Thread(target=_release_soon)
+    releaser.start()
     try:
         assert pl.close_passage_state() is True, (
-            'a lease released inside the wait window must let the close '
-            'through on the same call, not force the caller to retry')
+            'a search that finishes inside the wait window must let the '
+            'close through on the same call, not force the caller to retry')
     finally:
-        t.join()
+        releaser.join()
+        t.join(timeout=5)
 
 
-def test_run_build_and_swap_refuses_while_a_lease_is_outstanding_and_cleans_staging(
+def test_run_build_and_swap_refuses_while_a_search_is_in_flight_and_cleans_staging(
         tmp_path, monkeypatch):
     _shrink_lease_window(monkeypatch)
     c = _Corpus(tmp_path)
     assert c.build().status == 'installed'
     staging = os.path.join(c.root, pl.STAGING_DIRNAME)
 
-    lease = pl.get_passage_searcher(_NullTextFetcher())
-    with lease:
+    entered = threading.Event()
+    release = threading.Event()
+    _patch_blocking_search(monkeypatch, entered, release)
+
+    adapter = pl.get_passage_searcher(_NullTextFetcher())
+    t = threading.Thread(
+        target=lambda: adapter.search_composition_logic(c.records[0][1][:10]))
+    t.start()
+    assert entered.wait(timeout=5), 'search never reached the blocking point'
+
+    try:
         res = pl.run_build_and_swap(
             c.root, c.records, c.source_paths, c.corpus_path, partitions=2,
             release_live_state=pl.close_passage_state)
@@ -295,8 +354,11 @@ def test_run_build_and_swap_refuses_while_a_lease_is_outstanding_and_cleans_stag
         assert not os.path.isdir(staging), (
             'a swap abandoned before promotion must still clean its staging '
             '-- an unswapped build is a build this run will never use')
+    finally:
+        release.set()
+        t.join(timeout=5)
 
-    # Lease released -- a fresh build+swap now proceeds normally.
+    # Search released -- a fresh build+swap now proceeds normally.
     res2 = pl.run_build_and_swap(
         c.root, c.records, c.source_paths, c.corpus_path, partitions=2,
         release_live_state=pl.close_passage_state)
@@ -305,7 +367,7 @@ def test_run_build_and_swap_refuses_while_a_lease_is_outstanding_and_cleans_stag
         pl.PassageState(index=res2.index, live_dir=res2.live_dir))
 
 
-def test_install_passage_state_refuses_to_replace_a_leased_outgoing_state(
+def test_install_passage_state_refuses_to_replace_a_state_with_a_search_in_flight(
         tmp_path, monkeypatch):
     _shrink_lease_window(monkeypatch)
     c = _Corpus(tmp_path)
@@ -317,7 +379,16 @@ def test_install_passage_state_refuses_to_replace_a_leased_outgoing_state(
     idx2 = open_index(other)
     assert idx2 is not None
 
-    lease = pl.get_passage_searcher(_NullTextFetcher())
+    entered = threading.Event()
+    release = threading.Event()
+    _patch_blocking_search(monkeypatch, entered, release)
+
+    adapter = pl.get_passage_searcher(_NullTextFetcher())
+    t = threading.Thread(
+        target=lambda: adapter.search_composition_logic(c.records[0][1][:10]))
+    t.start()
+    assert entered.wait(timeout=5), 'search never reached the blocking point'
+
     try:
         assert pl.install_passage_state(
             pl.PassageState(index=idx2, live_dir=other)) is False
@@ -325,64 +396,135 @@ def test_install_passage_state_refuses_to_replace_a_leased_outgoing_state(
             'a refused install must leave the ORIGINAL state installed, '
             'not the new one half-swapped in')
     finally:
-        lease.release()
+        release.set()
+        t.join(timeout=5)
         pl._release_index_handles(idx2)  # never installed -- release by hand
 
     assert pl.close_passage_state() is True
 
 
 # ---------------------------------------------------------------------------
-# 0d. G1: the handle a lease's `with` block hands out must go inert the
-#     moment the lease ends -- escaping it must be harmless, never a live
-#     pointer into a mapping that may already be closed.
+# 0d. G1: what `get_passage_searcher()` hands out holds no index and no
+#     searcher, so there is nothing to escape with. Capturing the bound
+#     method and calling it long after the call that produced it is exactly
+#     as safe as calling it immediately -- each call is its own lease.
 # ---------------------------------------------------------------------------
 
-def test_escaped_searcher_handle_raises_after_release_instead_of_working(
+def test_captured_bound_method_is_safe_to_call_after_the_search_completes(
         tmp_path):
     c = _Corpus(tmp_path)
     assert c.build().status == 'installed'
+    text = c.records[0][1][:30]
 
-    lease = pl.get_passage_searcher(_NullTextFetcher())
-    with lease as searcher:
-        assert searcher.index.n_records == len(c.records)  # works while live
-        escaped = searcher  # a caller that keeps the handle past `with`
+    # Captured OUTSIDE any `with` block -- there is no block to be inside of.
+    bound = pl.get_passage_searcher(_NullTextFetcher()).search_composition_logic
+    first = bound(text)
+    assert isinstance(first, dict)
 
-    # The `with` block released the lease on exit -- the ESCAPED handle
-    # (not the lease itself) must now refuse rather than reach the index.
-    with pytest.raises(pl.LeaseExpiredError):
-        escaped.index
-    with pytest.raises(pl.LeaseExpiredError):
-        escaped.search_composition_logic
+    # The call that produced `bound` is long finished. Calling the SAME
+    # captured method again must take a FRESH lease, not dereference
+    # anything left over from the first call.
+    second = bound(text)
+    # `query_report['seconds']` is a real wall-clock measurement, so two
+    # independently timed calls differ at the rounding under load; every
+    # other field must match exactly.
+    first['query_report'].pop('seconds', None)
+    second['query_report'].pop('seconds', None)
+    assert second == first
 
     assert pl.close_passage_state() is True
 
 
-def test_escaped_searcher_handle_stays_inert_after_a_manual_release_too(
+def test_captured_bound_method_raises_cleanly_once_the_index_is_gone(
         tmp_path):
-    """The non-`with` `release()` path must retire the handle exactly like
-    `__exit__` does -- there is only one way a lease actually ends."""
     c = _Corpus(tmp_path)
     assert c.build().status == 'installed'
 
-    lease = pl.get_passage_searcher(_NullTextFetcher())
-    handle = lease.__enter__()
-    assert handle.index.n_records == len(c.records)
-    lease.release()
+    bound = pl.get_passage_searcher(_NullTextFetcher()).search_composition_logic
+    pl.close_passage_state()
 
-    with pytest.raises(pl.LeaseExpiredError):
-        handle.index
+    with pytest.raises(pl.PassageSearchUnavailableError):
+        bound(c.records[0][1][:30])
 
-    assert pl.close_passage_state() is True
+
+def test_captured_bound_method_picks_up_a_replaced_index_later(tmp_path):
+    """The bound method resolves the CURRENT state at call time -- a rebuild
+    that swaps in an entirely different `PassageIndex` object between two
+    calls must not leave the second call reaching for the first one."""
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+    first_index = pl._state.index
+    text = c.records[0][1][:30]
+
+    bound = pl.get_passage_searcher(_NullTextFetcher()).search_composition_logic
+    bound(text)
+
+    res2 = c.build()  # rebuild + swap -- installs a DIFFERENT index object
+    assert res2.status == 'installed'
+    assert pl._state.index is not first_index
+
+    result = bound(text)  # same captured method, called again
+    assert isinstance(result, dict)
+
+
+def test_no_adapter_attribute_reaches_the_index_or_searcher(tmp_path):
+    from shared.passage_index import PassageIndex
+    from shared.passage_parallels import PassageSearcher
+
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+
+    adapter = pl.get_passage_searcher(_NullTextFetcher())
+
+    with pytest.raises(AttributeError):
+        adapter.__dict__  # __slots__: no instance dict to smuggle a reference into
+
+    for name in dir(adapter):
+        if name.startswith('__'):
+            continue
+        value = getattr(adapter, name)
+        assert not isinstance(value, PassageIndex), (
+            f'adapter.{name} reaches a PassageIndex')
+        assert not isinstance(value, PassageSearcher), (
+            f'adapter.{name} reaches a PassageSearcher')
+
+
+def test_adapter_search_result_matches_calling_the_searcher_directly(
+        tmp_path):
+    """The adapter must not change WHAT is searched or HOW -- only who owns
+    the index reference while it happens."""
+    from shared.passage_parallels import PassageSearcher
+
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+    text = c.records[0][1][:40]
+
+    via_adapter = pl.get_passage_searcher(
+        _NullTextFetcher()).search_composition_logic(text)
+
+    direct_searcher = PassageSearcher(
+        index=pl._state.index, text_fetcher=_NullTextFetcher(),
+        policy=pl.compose(pl._DEFAULT_WIDTH, pl.DEFAULT_LENGTH, pl.DEFAULT_DEPTH))
+    direct = direct_searcher.search_composition_logic(text)
+
+    # `query_report['seconds']` is a real wall-clock measurement taken
+    # independently by each call -- it will never match bit-for-bit between
+    # two separate runs and asserting on it would be timing noise, not a
+    # behavioural difference. Every other field, including every OTHER key
+    # in `query_report` itself, must match exactly.
+    via_adapter['query_report'].pop('seconds', None)
+    direct['query_report'].pop('seconds', None)
+    assert via_adapter == direct
 
 
 # ---------------------------------------------------------------------------
 # 0e. G2: acquisition and teardown share ONE mutual-exclusion point -- a
-#     lease requested while a close/swap is mid-teardown must be refused,
+#     search requested while a close/swap is mid-teardown must be refused,
 #     never handed a soon-to-be-closed index. Proven with REAL threads, not
 #     by inspecting the lock.
 # ---------------------------------------------------------------------------
 
-def test_close_refuses_a_lease_requested_mid_teardown_real_threads(
+def test_close_refuses_a_search_requested_mid_teardown_real_threads(
         tmp_path, monkeypatch):
     c = _Corpus(tmp_path)
     assert c.build().status == 'installed'
@@ -409,7 +551,12 @@ def test_close_refuses_a_lease_requested_mid_teardown_real_threads(
 
     def acquirer():
         assert entered_teardown.wait(timeout=5), 'close never reached teardown'
-        outcome['acquire'] = pl.get_passage_searcher(_NullTextFetcher())
+        try:
+            pl.get_passage_searcher(_NullTextFetcher()).search_composition_logic(
+                c.records[0][1][:10])
+            outcome['acquire'] = 'succeeded'
+        except pl.PassageSearchUnavailableError:
+            outcome['acquire'] = 'refused'
         let_teardown_finish.set()
 
     t_close = threading.Thread(target=closer)
@@ -420,8 +567,8 @@ def test_close_refuses_a_lease_requested_mid_teardown_real_threads(
     t_acquire.join(timeout=10)
 
     assert outcome['close'] is True
-    assert outcome['acquire'] is None, (
-        'a lease requested while a close is mid-teardown must be refused '
+    assert outcome['acquire'] == 'refused', (
+        'a search requested while a close is mid-teardown must be refused '
         'outright, never handed an index whose mappings are being closed '
         'concurrently on another thread')
 
@@ -432,19 +579,30 @@ def test_a_refused_close_leaves_no_new_leases_flag_cleared_for_next_attempt(
     c = _Corpus(tmp_path)
     assert c.build().status == 'installed'
 
-    lease = pl.get_passage_searcher(_NullTextFetcher())
-    with lease:
-        assert pl.close_passage_state() is False, (
-            'refused: the lease above is still outstanding')
+    entered = threading.Event()
+    release = threading.Event()
+    _patch_blocking_search(monkeypatch, entered, release)
+
+    adapter = pl.get_passage_searcher(_NullTextFetcher())
+    t = threading.Thread(
+        target=lambda: adapter.search_composition_logic(c.records[0][1][:10]))
+    t.start()
+    assert entered.wait(timeout=5), 'search never reached the blocking point'
+
+    assert pl.close_passage_state() is False, (
+        'refused: a search is still in flight')
+
+    release.set()
+    t.join(timeout=5)
 
     # The refused close must have restored the no-new-leases flag exactly
-    # as it found it -- a fresh acquisition right after must behave
-    # normally, not be refused by a flag the failed close forgot to clear.
-    lease2 = pl.get_passage_searcher(_NullTextFetcher())
-    assert lease2 is not None, (
+    # as it found it -- a fresh search right after must behave normally,
+    # not be refused by a flag the failed close forgot to clear.
+    result = pl.get_passage_searcher(
+        _NullTextFetcher()).search_composition_logic(c.records[0][1][:10])
+    assert isinstance(result, dict), (
         'a refused close must not leave the drain flag stuck on, refusing '
-        'every later acquisition')
-    lease2.release()
+        'every later search')
     assert pl.close_passage_state() is True
 
 
@@ -489,16 +647,17 @@ class _PausingLock:
         return False
 
 
-def test_lease_state_check_and_reader_increment_are_atomic_real_threads(
+def test_search_state_check_and_reader_increment_are_atomic_real_threads(
         tmp_path, monkeypatch):
     """Forces the exact interleaving that a mutation surviving code review
     could open: the reader-count increment happening OUTSIDE the same
     critical section as the `_state`/`_draining` check inside
-    `_try_acquire_lease`. `_PausingLock` parks an acquiring thread at the
-    instant it releases `_lease_lock` -- after everything the critical
-    section actually did, whatever that turns out to be -- so a concurrent
-    close's drain check runs exactly then, deterministically, no scheduler
-    luck required.
+    `_try_acquire_lease`. `_try_acquire_lease` is the acquisition point in
+    BOTH the old and the new design -- unchanged by the call-scoping
+    redesign -- so `_PausingLock` still parks an acquiring thread at the
+    instant it releases `_lease_lock`, exactly as before; only the CALLER of
+    `_try_acquire_lease` is now `PassageSearchAdapter.search_composition_
+    logic` instead of `get_passage_searcher` itself.
 
     With the increment INSIDE the critical section (current code), the
     count already reflects the in-flight acquisition when the close checks
@@ -506,10 +665,10 @@ def test_lease_state_check_and_reader_increment_are_atomic_real_threads(
     increment moved OUTSIDE (the mutation this test exists to kill), the
     close's check lands in the gap where the count is still zero, so the
     close wrongly declares the index drained, tears its mappings down, and
-    THEN the acquirer resumes and hands out a lease over the now-closed
+    THEN the acquirer resumes and runs its search over the now-closed
     index. The single assertion below (`close must have been refused`)
-    fails cleanly on that outcome instead of silently returning a lease a
-    caller could go on to dereference.
+    fails cleanly on that outcome instead of silently letting the search
+    proceed over a closed mapping.
     """
     # A short, EXPLICIT drain timeout on the real function object -- not the
     # `LEASE_DRAIN_TIMEOUT_SECONDS` module global, which `_wait_for_leases_
@@ -520,6 +679,7 @@ def test_lease_state_check_and_reader_increment_are_atomic_real_threads(
 
     c = _Corpus(tmp_path)
     assert c.build().status == 'installed'
+    text = c.records[0][1][:10]
 
     original_lock = pl._lease_lock
     released = threading.Event()
@@ -527,9 +687,15 @@ def test_lease_state_check_and_reader_increment_are_atomic_real_threads(
     pl._lease_lock = _PausingLock(original_lock, released, resume)
 
     outcome = {}
-    acquirer = threading.Thread(
-        target=lambda: outcome.__setitem__(
-            'lease', pl.get_passage_searcher(_NullTextFetcher())))
+    adapter = pl.get_passage_searcher(_NullTextFetcher())
+
+    def _acquire():
+        try:
+            outcome['search'] = adapter.search_composition_logic(text)
+        except pl.PassageSearchUnavailableError:
+            outcome['search'] = None
+
+    acquirer = threading.Thread(target=_acquire)
     closer = None
 
     try:
@@ -557,56 +723,668 @@ def test_lease_state_check_and_reader_increment_are_atomic_real_threads(
             'the paused acquirer thread never resumed within the bounded '
             'wait -- test synchronisation failure')
 
-        assert outcome.get('lease') is not None, (
+        assert outcome.get('search') is not None, (
             'sanity check on the test itself: the acquisition\'s state '
             'check passed (state was installed, not draining) before the '
-            'pause, so resuming it must produce a lease either way -- if '
-            'this is None the harness above is not exercising the '
+            'pause, so resuming it must produce a real result either way '
+            '-- if this is None the harness above is not exercising the '
             'intended interleaving at all')
         assert outcome.get('close') is False, (
-            'close_passage_state() succeeded while a concurrent '
-            'get_passage_searcher() call had already passed its state '
-            'check and was paused before its reader-count increment -- '
-            'the state check and the increment are no longer atomic '
-            '(the increment likely moved outside `_lease_lock`), so the '
-            'close observed zero outstanding readers and tore the index '
-            'down while a lease for it was still being issued')
+            'close_passage_state() succeeded while a concurrent search '
+            'had already passed its state check and was paused before its '
+            'reader-count increment -- the state check and the increment '
+            'are no longer atomic (the increment likely moved outside '
+            '`_lease_lock`), so the close observed zero outstanding '
+            'readers and tore the index down while a lease for it was '
+            'still being issued')
     finally:
         resume.set()
         for t in (acquirer, closer):
             if t is not None and t.is_alive():
                 t.join(timeout=5)
         pl._lease_lock = original_lock
-        lease = outcome.get('lease')
-        if lease is not None:
-            lease.release()  # release() never dereferences the index -- safe
         pl._outstanding_leases = 0
         pl._draining = False
         pl.close_passage_state()  # no-op if already closed; else real cleanup
 
 
 # ---------------------------------------------------------------------------
-# 0f. G3: the outstanding-lease count is tied to the lease OBJECT's
-#     lifetime, not to a caller remembering to call release() -- a dropped
-#     or abandoned lease must not wedge every later close/swap.
+# 0f. Exception boundary: `search_composition_logic` must not let an
+#     exception object carrying a frame from inside the lease cross its own
+#     boundary -- see the module's PassageSearchAdapter docstring
+#     ("EXCEPTION BOUNDARY"). Every test here proves this with a REAL built
+#     index, never a mock, because the failure mode under test is a Windows
+#     access violation on a real memmap, not a Python-level assertion.
 # ---------------------------------------------------------------------------
 
-def test_dropping_a_lease_without_releasing_still_lets_a_later_close_succeed(
-        tmp_path, monkeypatch):
-    _shrink_lease_window(monkeypatch, timeout=2.0, poll=0.02)
+def _collect_chain_locals(exc, seen_exc=None):
+    """Every `f_locals` value reachable from `exc`'s own traceback
+    (`tb_next` chain), PLUS the same walk repeated for `__context__` and
+    `__cause__`, recursively. That is the full definition of "the exception
+    chain" -- a caller doing `logging.exception(...)`, storing the object,
+    or walking `__context__` by hand all reach exactly this set of frames
+    and nothing more. Returns every local VALUE seen (not pre-filtered) so
+    a caller can isinstance-check them itself."""
+    if seen_exc is None:
+        seen_exc = set()
+    if exc is None or id(exc) in seen_exc:
+        return []
+    seen_exc.add(id(exc))
+    values = []
+    tb = exc.__traceback__
+    while tb is not None:
+        values.extend(tb.tb_frame.f_locals.values())
+        tb = tb.tb_next
+    values.extend(_collect_chain_locals(exc.__context__, seen_exc))
+    values.extend(_collect_chain_locals(exc.__cause__, seen_exc))
+    return values
+
+
+def _assert_chain_holds_no_index_or_searcher(exc):
+    from shared.passage_index import PassageIndex
+    from shared.passage_parallels import PassageSearcher
+
+    for value in _collect_chain_locals(exc):
+        assert not isinstance(value, PassageIndex), (
+            f'exception chain still reaches a PassageIndex via {value!r}')
+        assert not isinstance(value, PassageSearcher), (
+            f'exception chain still reaches a PassageSearcher via {value!r}')
+
+
+def test_boundary_mode_partial_raises_passage_search_error_and_severs_the_chain(
+        tmp_path):
+    """The natural, already-documented path: `boundary_mode='partial'` makes
+    the real unmodified engine raise `ValueError` from deep inside the
+    lease. Must surface as `PassageSearchError` (never the bare `ValueError`,
+    and never `PassageSearchUnavailableError` -- an index IS installed
+    here), and nothing in its ENTIRE chain may reach the index or searcher."""
     c = _Corpus(tmp_path)
     assert c.build().status == 'installed'
+    text = c.records[0][1][:30]
 
-    def _acquire_and_abandon():
-        pl.get_passage_searcher(_NullTextFetcher())  # never bound, never released
+    with pytest.raises(pl.PassageSearchError) as excinfo:
+        pl.get_passage_searcher(_NullTextFetcher()).search_composition_logic(
+            text, boundary_mode='partial')
 
-    _acquire_and_abandon()
-    gc.collect()  # CPython refcounting already dropped it; this catches any straggler
+    assert not isinstance(excinfo.value, pl.PassageSearchUnavailableError)
+    assert 'ValueError' in str(excinfo.value)
+    _assert_chain_holds_no_index_or_searcher(excinfo.value)
 
-    assert pl.close_passage_state() is True, (
-        "a lease dropped without an explicit release() must not permanently "
-        "inflate the count -- its finalizer must bring it back down on its "
-        "own")
+    # close_passage_state() must succeed cleanly right here -- proof the
+    # index really is unreachable, not merely unexamined.
+    assert pl.close_passage_state() is True
+    assert not pl.passage_available()
+
+
+def test_boundary_holds_for_a_deep_engine_exception_not_just_the_known_valueerror(
+        tmp_path, monkeypatch):
+    """Same guarantee, forced from far deeper in the call graph than the
+    boundary_mode check at the top of PassageSearcher.search_composition_
+    logic -- proves this is a general boundary, not a special case carved
+    out for the one ValueError the module already documents."""
+    import shared.passage_parallels as passage_parallels
+
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+    text = c.records[0][1][:30]
+
+    def _boom(*a, **k):
+        raise RuntimeError('synthetic deep engine failure')
+
+    # `search_passage` is imported BY NAME into passage_parallels's own
+    # namespace (`from shared.passage_search import search_passage`) --
+    # patching shared.passage_search.search_passage instead would leave
+    # this already-bound reference untouched and the stub silently unused.
+    monkeypatch.setattr(passage_parallels, 'search_passage', _boom)
+
+    with pytest.raises(pl.PassageSearchError) as excinfo:
+        pl.get_passage_searcher(_NullTextFetcher()).search_composition_logic(text)
+
+    assert 'RuntimeError' in str(excinfo.value)
+    assert 'synthetic deep engine failure' in str(excinfo.value)
+    _assert_chain_holds_no_index_or_searcher(excinfo.value)
+
+    assert pl.close_passage_state() is True
+
+
+def test_boundary_raised_error_has_no_context_or_cause(tmp_path):
+    """Raising INSIDE the `except` block would set `__context__` to the
+    original exception (and `raise ... from None` only sets
+    `__suppress_context__` -- it does NOT clear `__context__`), dragging the
+    whole severed traceback back in through the back door. The fix raises
+    only after the try/except/finally has fully completed; this asserts
+    that empirically rather than trusting the sketch's description of it."""
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+    text = c.records[0][1][:30]
+
+    with pytest.raises(pl.PassageSearchError) as excinfo:
+        pl.get_passage_searcher(_NullTextFetcher()).search_composition_logic(
+            text, boundary_mode='partial')
+
+    assert excinfo.value.__context__ is None
+    assert excinfo.value.__cause__ is None
+
+    assert pl.close_passage_state() is True
+
+
+def test_retained_excinfo_value_across_close_is_harmless(tmp_path):
+    """`pytest.raises(...) as excinfo` then touching `excinfo.value` is
+    named explicitly as an escape route this boundary must close: `excinfo`
+    keeps the raised `PassageSearchError` (and, transitively, whatever it
+    can reach) alive for the rest of this test function -- including across
+    the `close_passage_state()` call below. That close must SUCCEED, not
+    defer or hang, and touching the retained exception afterward must not
+    fault."""
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+    text = c.records[0][1][:30]
+
+    with pytest.raises(pl.PassageSearchError) as excinfo:
+        pl.get_passage_searcher(_NullTextFetcher()).search_composition_logic(
+            text, boundary_mode='partial')
+
+    assert pl.close_passage_state() is True
+    assert not pl.passage_available()
+
+    # excinfo/excinfo.value is STILL held by this frame's locals, well past
+    # the close above -- exactly the shape of the access violation this
+    # boundary exists to prevent. Touching it now must be inert.
+    _ = str(excinfo.value)
+    _ = repr(excinfo.value)
+    assert isinstance(excinfo.value, pl.PassageSearchError)
+
+
+def test_non_exception_baseexception_keeps_its_class_and_is_not_caught_by_except_exception(
+        tmp_path, monkeypatch):
+    """A propagating KeyboardInterrupt carries the same frames an ordinary
+    exception would, so it must be caught by the boundary too -- but NOT
+    converted to `PassageSearchError`, which would make it catchable by a
+    plain `except Exception` and swallow shutdown semantics. A FRESH
+    instance of the SAME class must cross instead: same type, no frames."""
+    import shared.passage_parallels as passage_parallels
+
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+    text = c.records[0][1][:30]
+
+    def _interrupt(self, *a, **k):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(passage_parallels.PassageSearcher,
+                        'search_composition_logic', _interrupt)
+
+    adapter = pl.get_passage_searcher(_NullTextFetcher())
+
+    caught_as_exception = False
+    try:
+        adapter.search_composition_logic(text)
+    except Exception:
+        caught_as_exception = True
+    except KeyboardInterrupt as exc:
+        assert type(exc) is KeyboardInterrupt
+        _assert_chain_holds_no_index_or_searcher(exc)
+    assert not caught_as_exception, (
+        'a non-Exception BaseException must NOT be catchable by an '
+        'ordinary except Exception -- converting it to PassageSearchError '
+        'would swallow shutdown semantics')
+
+    # The lease's `finally` must have released regardless of which
+    # exception class crossed the boundary.
+    assert pl.close_passage_state() is True
+
+
+def test_success_path_result_survives_close_no_memmap_backed_values(tmp_path):
+    """Task 2: nobody had checked whether the RETURNED dict holds anything
+    whose lifetime depends on the index's memmaps -- a numpy VIEW over a
+    memmap keeps the mapping alive and faults on access after
+    `close_passage_state()`. Runs a REAL search against a REAL built index
+    that returns REAL rows (a real text fetcher, not `_NullTextFetcher`,
+    which drops every row via `_render_highlights`'s failed-lookup path),
+    closes the index, then deep-walks the returned structure -- touching
+    every value and separately sweeping for `numpy.ndarray`/`np.memmap`
+    instances or any `.base` chain that reaches one."""
+    import numpy as np
+
+    from shared.passage_index import PassageIndex
+    from shared.passage_parallels import PassageSearcher
+
+    class _EchoTextFetcher:
+        """Returns the record's OWN corpus text keyed by its exact record
+        id (`iter_records`' header, e.g. 'rec0000') -- a real, working
+        text-fetch path with no dependency on the passage index itself."""
+
+        def __init__(self, records):
+            self._by_id = dict(records)
+
+        def get_full_text_by_header(self, full_header):
+            return self._by_id.get(full_header)
+
+    def _walk_and_touch(obj, seen=None):
+        """Visits every value reachable from `obj` and 'touches' it --
+        `str()` forces materialization, so a numpy view over an already-
+        closed memmap would fault right here, not silently later."""
+        if seen is None:
+            seen = set()
+        oid = id(obj)
+        if oid in seen:
+            return
+        seen.add(oid)
+        if isinstance(obj, dict):
+            for v in obj.values():
+                _walk_and_touch(v, seen)
+        elif isinstance(obj, (list, tuple, set)):
+            for v in obj:
+                _walk_and_touch(v, seen)
+        else:
+            str(obj)
+
+    def _find_memmap_backed(obj, seen=None):
+        if seen is None:
+            seen = set()
+        oid = id(obj)
+        if oid in seen:
+            return []
+        seen.add(oid)
+        found = []
+        if isinstance(obj, np.ndarray):
+            found.append(obj)
+            base = obj.base
+            while base is not None:
+                if isinstance(base, np.memmap):
+                    found.append(base)
+                base = getattr(base, 'base', None)
+        elif isinstance(obj, dict):
+            for v in obj.values():
+                found.extend(_find_memmap_backed(v, seen))
+        elif isinstance(obj, (list, tuple, set)):
+            for v in obj:
+                found.extend(_find_memmap_backed(v, seen))
+        return found
+
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+    text = c.records[0][1][:60]
+
+    fetcher = _EchoTextFetcher(c.records)
+    result = pl.get_passage_searcher(fetcher).search_composition_logic(text)
+
+    assert result['main'], (
+        'test setup: need at least one REAL rendered hit to prove '
+        'anything -- an empty result proves nothing about memmap safety')
+    assert result['main'][0]['chunk_hits'], (
+        'test setup: need real span data (chunk_hits), not an empty row')
+    assert not isinstance(result['main'][0]['raw_header'], PassageIndex)
+    assert not isinstance(result['main'][0]['raw_header'], PassageSearcher)
+
+    assert pl.close_passage_state() is True
+    assert not pl.passage_available()
+
+    _walk_and_touch(result)  # would fault right here if anything leaked
+    offenders = _find_memmap_backed(result)
+    assert offenders == [], (
+        f'result holds {len(offenders)} memmap-backed numpy object(s) '
+        'after close -- these must be materialised (e.g. .copy()) inside '
+        'the exception boundary before the adapter returns them')
+
+
+# ---------------------------------------------------------------------------
+# 0g. PassageIndex.close() (shared/passage_index.py) is the structural fix
+#     the boundary above is defense-in-depth FOR: every one of the five
+#     section attributes is REPLACED with a poison stand-in that raises
+#     PassageIndexClosed on every access route, not merely left pointing at
+#     a dangling memmap for the next reader to fault on. These tests drive
+#     PassageIndex.close() directly -- a real built index, never a mock --
+#     independent of the desktop lifecycle module that now delegates to it
+#     (_release_index_handles).
+# ---------------------------------------------------------------------------
+
+def _open_a_free_index(tmp_path):
+    """A standalone, real PassageIndex nothing else owns: built and opened
+    via `execute_build`, which -- unlike `_Corpus.build()` -- never installs
+    into `pl._state` (see its own docstring: "does NOT call
+    install_passage_state on success"). These tests want a PassageIndex the
+    autouse `_reset_module_globals` fixture's own close_passage_state()
+    calls never touch, so PassageIndex.close() itself is what each
+    assertion is exercising."""
+    c = _Corpus(tmp_path)
+    built = pl.execute_build(c.root, c.records, c.source_paths, partitions=2)
+    assert built.status == 'built', built.status
+    idx = open_index(built.staging_dir)
+    assert idx is not None
+    return idx, c
+
+
+def test_close_makes_every_read_accessor_raise_passage_index_closed(
+        tmp_path):
+    from shared.passage_index import PassageIndexClosed
+
+    idx, c = _open_a_free_index(tmp_path)
+
+    # Sanity, BEFORE close: every accessor must actually work -- otherwise
+    # the raises below could be catching a pre-existing failure, not
+    # close()'s effect.
+    import numpy as np
+    assert isinstance(idx.stream(0), str)
+    assert isinstance(idx.record_id(0), str)
+    assert idx.n_records == len(c.records)
+    assert idx.n_postings >= 0
+    idx.df(0)
+    idx.dfs(np.array([0, 1], dtype=np.int64))
+    idx.postings_for(0)
+
+    idx.close()
+
+    with pytest.raises(PassageIndexClosed):
+        idx.stream(0)
+    with pytest.raises(PassageIndexClosed):
+        idx.record_id(0)
+    with pytest.raises(PassageIndexClosed):
+        idx.postings_for(0)
+    with pytest.raises(PassageIndexClosed):
+        idx.df(0)
+    with pytest.raises(PassageIndexClosed):
+        idx.dfs(np.array([0, 1], dtype=np.int64))
+    with pytest.raises(PassageIndexClosed):
+        _ = idx.n_records
+    with pytest.raises(PassageIndexClosed):
+        _ = idx.n_postings
+
+
+def test_every_poison_dunder_raises_on_its_own(tmp_path):
+    """Each dunder must raise BY ITSELF, exercised directly on a closed
+    section rather than through an accessor.
+
+    Going through `idx.stream(0)` and friends proves only that SOME guard
+    fired: `__getitem__` runs first on every real call site, so it alone
+    satisfies every accessor test above while `__array__`, `__len__` and
+    `__iter__` could be silently broken. A section reached by a future
+    caller doing `np.asarray(idx.records)` after close would then coerce to
+    a plausible empty array instead of raising -- silent wrong data, which
+    is worse than the crash the poison replaced.
+    """
+    import numpy as np
+    from shared.passage_index import PassageIndexClosed
+
+    idx, _ = _open_a_free_index(tmp_path)
+    idx.close()
+    section = idx.records
+
+    with pytest.raises(PassageIndexClosed):
+        section.__array__()
+    with pytest.raises(PassageIndexClosed):
+        section[0]
+    with pytest.raises(PassageIndexClosed):
+        section[0:2]
+    with pytest.raises(PassageIndexClosed):
+        len(section)
+    with pytest.raises(PassageIndexClosed):
+        iter(section)
+    with pytest.raises(PassageIndexClosed):
+        _ = section.shape
+    # numpy's own coercion must not find a way through either.
+    with pytest.raises(PassageIndexClosed):
+        np.asarray(section)
+
+
+def test_close_survives_a_section_that_fails_to_unmap(tmp_path):
+    """A section whose `mm.close()` raises must still be poisoned, and must
+    not strand the sections after it.
+
+    `_closed` is set before the loop, so an exception escaping mid-loop
+    would leave the remaining sections LIVE and still returning correct
+    data, with the idempotence guard blocking any retry -- the precise
+    dangling state close() exists to remove. The leaked mapping is logged
+    rather than raised: `close_passage_state()` documents a True/False
+    contract, and on Windows a leak already surfaces where it is actionable,
+    as the swap's rename retry.
+    """
+    from shared.passage_index import PassageIndexClosed
+
+    idx, _ = _open_a_free_index(tmp_path)
+
+    class _Unclosable:
+        def close(self):
+            raise OSError('mapping busy')
+
+    # gram_offsets is FIRST in close()'s fixed order, so a naive loop would
+    # strand all four sections after it.
+    object.__setattr__(idx.gram_offsets, '_mmap', _Unclosable())
+
+    idx.close()  # must not raise
+
+    for name in ('gram_offsets', 'postings', 'streams', 'records',
+                 'record_ids'):
+        with pytest.raises(PassageIndexClosed):
+            getattr(idx, name)[0]
+
+
+def test_close_twice_is_a_noop(tmp_path):
+    """The swap path and a finalizer can both reach close() on the same
+    object -- a second call must not raise (a double mmap.close(), or a
+    redundant attribute swap that itself somehow failed)."""
+    idx, _ = _open_a_free_index(tmp_path)
+    idx.close()
+    idx.close()  # must not raise
+
+    from shared.passage_index import PassageIndexClosed
+    with pytest.raises(PassageIndexClosed):
+        idx.stream(0)
+
+
+# ---------------------------------------------------------------------------
+# 0h. The LogRecord route (Change 2): _render_highlights used to log a
+#     swallowed text-fetch failure with exc_info=True, which stores the raw
+#     (type, value, traceback) tuple on the LogRecord -- and that
+#     traceback's outermost frame holds `self` (the searcher, hence its
+#     index). Any handler that RETAINS LogRecords (logging.handlers.
+#     MemoryHandler, a Qt recent-errors panel, pytest's own caplog -- every
+#     test in this suite runs under caplog) would keep the index reachable
+#     past close(). Fixed by logging traceback.format_exc() -- a STRING,
+#     holding no frames -- instead.
+# ---------------------------------------------------------------------------
+
+class _RaisingTextFetcher:
+    """Always raises -- the ONLY way to drive _render_highlights's
+    exc_info-logging branch; _NullTextFetcher (returning None) instead
+    takes the separate, always-exc_info-free "text lookup failed" branch."""
+
+    def get_full_text_by_header(self, full_header):
+        raise RuntimeError('synthetic text-fetch failure')
+
+
+class _RetainingHandler(logging.Handler):
+    """Models exactly what the docstring above warns about: a handler that
+    keeps every LogRecord it sees for later inspection, the way
+    MemoryHandler and a desktop "recent errors" panel both do."""
+
+    def __init__(self):
+        super().__init__()
+        self.records = []
+
+    def emit(self, record):
+        self.records.append(record)
+
+
+def _collect_record_reachable_values(record):
+    """Everything reachable from one retained LogRecord: its own
+    __dict__ (covers .args, .msg, and any extra=... fields), plus -- only
+    if exc_info was ever attached -- the full frame-local walk
+    _collect_chain_locals already does for a raised exception. That
+    combination is exactly what a handler retaining LogRecords keeps
+    reachable long after the call that logged them returns."""
+    values = list(record.__dict__.values())
+    exc_info = record.exc_info
+    if exc_info:
+        _, exc_value, _ = exc_info
+        values.extend(_collect_chain_locals(exc_value))
+    return values
+
+
+def _assert_no_record_reaches_index_or_searcher(records):
+    from shared.passage_index import PassageIndex
+    from shared.passage_parallels import PassageSearcher
+
+    for record in records:
+        for value in _collect_record_reachable_values(record):
+            assert not isinstance(value, PassageIndex), (
+                f'retained LogRecord {record.getMessage()!r} still reaches '
+                f'a PassageIndex via {value!r}')
+            assert not isinstance(value, PassageSearcher), (
+                f'retained LogRecord {record.getMessage()!r} still reaches '
+                f'a PassageSearcher via {value!r}')
+
+
+def test_retaining_log_handler_never_reaches_the_index_after_close(
+        tmp_path):
+    """Attaches a REAL handler that retains LogRecords directly to
+    shared.passage_parallels's logger, runs a search whose text fetcher
+    ALWAYS raises (so _render_highlights's exc_info branch actually fires),
+    closes the state, then walks every retained record for a reachable
+    PassageIndex/PassageSearcher -- asserting none. Then, belt and braces,
+    smuggles out the raw index reference deliberately (bypassing the fix
+    entirely) and asserts even THAT raises PassageIndexClosed rather than
+    faulting -- proof this is defended in depth, not merely that this one
+    route happens to carry no reference today.
+    """
+    import shared.passage_parallels as passage_parallels
+    from shared.passage_index import PassageIndexClosed
+
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+    # A 60-letter self-match, same length proven to produce a real rendered
+    # hit in test_success_path_result_survives_close_no_memmap_backed_values
+    # -- _render_highlights's exc_info branch only fires for an ACTUAL hit.
+    text = c.records[0][1][:60]
+    smuggled_idx = pl._state.index  # deliberately smuggled, BEFORE close
+
+    handler = _RetainingHandler()
+    passage_parallels.logger.addHandler(handler)
+    passage_parallels.logger.setLevel(logging.WARNING)
+    try:
+        pl.get_passage_searcher(
+            _RaisingTextFetcher()).search_composition_logic(text)
+    finally:
+        passage_parallels.logger.removeHandler(handler)
+
+    assert handler.records, (
+        'test setup: the raising text fetcher must have produced at least '
+        'one warning -- an empty capture proves nothing about the '
+        'exc_info fix')
+    assert not any(r.exc_info for r in handler.records), (
+        'a retained LogRecord still carries exc_info -- exc_info=True is '
+        'back on some call site, or a new one was added')
+
+    assert pl.close_passage_state() is True
+    _assert_no_record_reaches_index_or_searcher(handler.records)
+
+    with pytest.raises(PassageIndexClosed):
+        smuggled_idx.stream(0)
+
+
+# ---------------------------------------------------------------------------
+# 0i. End-to-end proof, in an ISOLATED subprocess: dereferencing a smuggled
+#     PassageIndex reference after close() raises a catchable
+#     PassageIndexClosed instead of faulting the process. Never run
+#     in-process -- the whole point is that the UNPOISONED version of this
+#     scenario really does crash (Windows 0xC0000005 / SIGSEGV), and doing
+#     that in the pytest process itself would take the whole run down
+#     rather than prove anything about it.
+# ---------------------------------------------------------------------------
+
+# Exit codes observed for a genuine access violation. Windows reports
+# 0xC0000005 (STATUS_ACCESS_VIOLATION) as the unsigned 32-bit returncode
+# 3221225477 from a native `subprocess.run` (confirmed empirically on this
+# machine); some Python/OS combinations instead surface it sign-extended as
+# -1073741819. POSIX SIGSEGV shows up as -11 (Python's own signal
+# convention) or 139 (128 + SIGSEGV, a shell's convention) depending on how
+# the code is read back. All four are the SAME fault, not four different
+# ones -- checked as a set so this test is not machine-specific.
+_ACCESS_VIOLATION_RETURN_CODES = {3221225477, -1073741819, -11, 139}
+
+
+def _crash_conversion_script() -> str:
+    """argv: [index_dir, mode]. mode='poison' closes via the real fix
+    (PassageIndex.close()); mode='raw' reproduces the PRE-FIX teardown
+    _release_index_handles used to do -- close each section's `._mmap`
+    directly, leaving the attribute itself still pointing at the now-
+    dangling array -- so the 'raw' run is the control this test needs: if
+    IT does not crash, this test proves nothing about what close() fixes.
+
+    SetErrorMode suppresses the Windows "python.exe has stopped working"
+    crash dialog for the 'raw' branch -- without it, an access violation
+    here would pop a UI dialog and hang the subprocess (and this test)
+    waiting for a user who is not present to dismiss it.
+    """
+    return (
+        "import sys, os\n"
+        f"sys.path.insert(0, {REPO_ROOT!r})\n"
+        "if os.name == 'nt':\n"
+        "    import ctypes\n"
+        "    ctypes.windll.kernel32.SetErrorMode(0x0003)\n"
+        "from shared.passage_index import open_index, PassageIndexClosed\n"
+        "idx = open_index(sys.argv[1])\n"
+        "assert idx is not None, 'FAILED_TO_OPEN'\n"
+        "smuggled = idx\n"
+        "mode = sys.argv[2]\n"
+        "if mode == 'poison':\n"
+        "    idx.close()\n"
+        "else:\n"
+        "    for name in ('gram_offsets', 'postings', 'streams', 'records',"
+        " 'record_ids'):\n"
+        "        arr = getattr(idx, name, None)\n"
+        "        mm = getattr(arr, '_mmap', None)\n"
+        "        if mm is not None:\n"
+        "            mm.close()\n"
+        "try:\n"
+        "    smuggled.stream(0)\n"
+        "except PassageIndexClosed:\n"
+        "    print('CAUGHT_CLOSED', flush=True)\n"
+        "    sys.exit(0)\n"
+        "except Exception as e:\n"
+        "    print('OTHER_EXCEPTION:' + type(e).__name__, flush=True)\n"
+        "    sys.exit(2)\n"
+        "print('NO_EXCEPTION', flush=True)\n"
+        "sys.exit(3)\n"
+    )
+
+
+def test_crash_converts_to_passage_index_closed_in_a_real_subprocess(
+        tmp_path):
+    # Built ONCE and shared, read-only, between both subprocess runs below
+    # -- only the in-CHILD teardown mode ('poison' vs 'raw') differs.
+    c = _Corpus(tmp_path)
+    built = pl.execute_build(c.root, c.records, c.source_paths,
+                             partitions=2)
+    assert built.status == 'built', built.status
+    index_dir = built.staging_dir
+    script = _crash_conversion_script()
+
+    poisoned = subprocess.run(
+        [sys.executable, '-c', script, index_dir, 'poison'],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        timeout=60)
+    assert poisoned.returncode == 0, (
+        f'poisoned dereference did not exit 0 -- returncode='
+        f'{poisoned.returncode!r} stdout={poisoned.stdout!r} '
+        f'stderr={poisoned.stderr[-2000:]!r}')
+    assert 'CAUGHT_CLOSED' in poisoned.stdout, (
+        f'poisoned dereference exited 0 but never caught PassageIndexClosed'
+        f' -- stdout={poisoned.stdout!r}')
+
+    raw = subprocess.run(
+        [sys.executable, '-c', script, index_dir, 'raw'],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        timeout=60)
+    assert raw.returncode in _ACCESS_VIOLATION_RETURN_CODES, (
+        'control run: the PRE-FIX teardown (close the mmap, leave the '
+        'attribute dangling) must genuinely fault this process -- '
+        f'returncode={raw.returncode!r} stdout={raw.stdout!r} -- '
+        'otherwise this test proves nothing about what PassageIndex.close()'
+        ' fixes')
+    assert 'CAUGHT_CLOSED' not in raw.stdout, (
+        'the control run caught PassageIndexClosed -- it should not even '
+        'define that path, only reproduce the pre-fix crash')
 
 
 # ---------------------------------------------------------------------------
@@ -2153,7 +2931,16 @@ def test_passage_disabled_reason_full_truth_table_is_deterministic():
 
 def test_passage_disabled_reason_reads_no_module_state(monkeypatch):
     """Every input is explicit -- poisoning the module's OWN globals must not
-    change the answer."""
+    change the answer.
+
+    `monkeypatch.undo()` is called explicitly, right after `_state` is no
+    longer needed, rather than left to the fixture's teardown ordering:
+    `_reset_module_globals`'s post-yield `close_passage_state()` runs
+    BEFORE monkeypatch's own restore on this pytest version, so leaving
+    `_state` poisoned would hand `close_passage_state()` a bare string --
+    `PassageIndex.close()` delegation (`_release_index_handles`) expects a
+    real `PassageIndex` or None, not whatever a test left behind."""
     monkeypatch.setattr(pl, '_state', 'poisoned', raising=False)
     got = pl.passage_disabled_reason(True, 'genizah', False, False, True)
+    monkeypatch.undo()
     assert got is None

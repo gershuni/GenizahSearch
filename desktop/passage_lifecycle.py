@@ -28,13 +28,14 @@ risk at Windows' clock resolution, not a theoretical one.
 from __future__ import annotations
 
 import gc
+import logging
 import os
 import shutil
 import sys
 import threading
 import time
+import traceback
 import uuid
-import weakref
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -53,6 +54,8 @@ from shared.passage_policy import (
 # ---------------------------------------------------------------------------
 # Layout constants.
 # ---------------------------------------------------------------------------
+
+logger = logging.getLogger(__name__)
 
 LIVE_DIRNAME = 'current'
 STAGING_DIRNAME = 'passage_index.building'
@@ -81,22 +84,21 @@ def _cleanup_staging(staging_dir: str) -> None:
 
 
 def _release_index_handles(idx: Optional[PassageIndex]) -> None:
-    """Close the underlying mmap.mmap of every memmapped section.
-
-    `np.memmap()` closes the file descriptor it used to build the mapping by
-    the time it returns -- the OS handle Windows actually cares about is the
-    mapping itself, held by `._mmap`. A zero-length section is a plain
-    `np.empty` array with no `._mmap` attribute (see passage_index.py's
-    `_map`), so `getattr(..., '_mmap', None)` skips those safely.
+    """Delegates to `PassageIndex.close()` -- the object that owns the
+    hazard owns the teardown, not this module reaching into `._mmap` on its
+    behalf. `close()` both closes each section's underlying mapping AND
+    replaces the section attribute with a poison stand-in that raises
+    `PassageIndexClosed` on every access route, so a reference to `idx`
+    that escapes this module entirely (a returned searcher, a captured
+    bound method, a traceback frame, a logging LogRecord's `exc_info`
+    tuple) degrades to a catchable exception on its next use instead of an
+    access violation. See that method's docstring; `close()` is idempotent,
+    so a second call from a different one of this module's three call
+    sites racing the same `idx` is safe.
     """
     if idx is None:
         return
-    for name in ('gram_offsets', 'postings', 'streams', 'records',
-                 'record_ids'):
-        arr = getattr(idx, name, None)
-        mm = getattr(arr, '_mmap', None)
-        if mm is not None:
-            mm.close()
+    idx.close()
 
 
 def _open_with_retry(path: str, attempts: int = 2) -> Optional[PassageIndex]:
@@ -350,15 +352,19 @@ def passage_available() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Reader leases. `get_passage_searcher()` hands the caller a `PassageIndex`
-# reference (wrapped in a `PassageSearcher`) that a worker thread may still
-# be reading -- a numpy memmap access with no natural end this module can
-# observe -- long after the call that produced it returns.
-# `close_passage_state()`/`install_passage_state()` must know such a read is
-# in flight before they force-close that SAME index's memmaps: a concurrent
-# read off a mapping closed out from under it is an access violation, not a
-# catchable exception. This lease is the single owner-side mechanism that
-# makes that provable rather than merely hoped for.
+# Reader leases: CALL-SCOPED, not object-scoped. `get_passage_searcher()`
+# hands the caller a `PassageSearchAdapter` that holds neither a
+# `PassageIndex` nor a `PassageSearcher` -- only the (text_fetcher, width,
+# length, depth) needed to build one. A lease is acquired, resolved, used,
+# and released entirely INSIDE one `search_composition_logic()` call; no
+# reference to the index survives that call's return, so there is nothing
+# for a caller to hold onto, capture in a closure, or leak past a `with`
+# block that no longer exists. `close_passage_state()`/`install_passage_
+# state()` must still know such a call is in flight before they force-close
+# that SAME index's memmaps -- a concurrent read off a mapping closed out
+# from under it is an access violation, not a catchable exception -- so the
+# lease bookkeeping below is unchanged; only WHO holds the lease (a call
+# frame, not a returned object) is different.
 #
 # ONE lock (`_lease_lock`) is the mutual-exclusion point for everything
 # below: the outstanding-reader count, the "draining" flag, AND every read
@@ -400,10 +406,10 @@ def _release_lease() -> None:
     global _outstanding_leases
     with _lease_lock:
         # Floored at 0 rather than trusting callers to release exactly
-        # once -- `PassageSearcherLease.release()` is idempotent itself
-        # (see its docstring), but the floor is what keeps a defect THERE
-        # from ever wedging this count below zero and refusing every close
-        # forever.
+        # once -- `PassageSearchAdapter.search_composition_logic`'s
+        # `finally` calls this exactly once per acquired call, but the
+        # floor is what keeps a defect there from ever wedging this count
+        # below zero and refusing every close forever.
         if _outstanding_leases > 0:
             _outstanding_leases -= 1
 
@@ -473,90 +479,216 @@ def _release_live_index(idx: PassageIndex, on_drained: Callable[[], None]) -> bo
         _end_drain()
 
 
-class LeaseExpiredError(RuntimeError):
-    """Raised by the object a `PassageSearcherLease`'s `with` block hands
-    out when it is used after the lease has been released. Catchable --
-    unlike the access violation touching a closed memmap would raise --
-    which is what makes it safe for that object to escape the `with` block:
-    nothing reachable from it can dereference a mapping `close_passage_state`
-    already tore down."""
+class PassageSearchError(RuntimeError):
+    """Raised by `PassageSearchAdapter.search_composition_logic()` in place
+    of WHATEVER exception actually failed inside the lease -- see that
+    method's docstring for why the original is never allowed to cross the
+    boundary as an object. The message carries the original type name and
+    `str()`, so nothing diagnostic is lost to the user-facing string; the
+    full traceback goes to `logger` instead, at the point of conversion.
+    `RuntimeError` subclass, so `CompositionThread.run()`'s (gui_threads.py)
+    existing bare `except Exception as e: self.error_signal.emit(str(e))`
+    catches this exactly like it caught the original."""
 
 
-class _LeasedSearcherHandle:
-    """What `PassageSearcherLease.__enter__` actually returns -- never the
-    bare `PassageSearcher`. Forwards attribute access to the real searcher
-    only while `finalizer.alive` is still true; once the lease has been
-    released (explicitly, or by the lease object itself being dropped --
-    see `PassageSearcherLease`), every access raises `LeaseExpiredError`
-    instead of ever reaching a `PassageIndex` whose memmaps may already be
-    closed. A caller that squirrels this object away past the `with` block
-    gets a catchable error on the next use, not an access violation."""
-
-    __slots__ = ('_searcher', '_finalizer')
-
-    def __init__(self, searcher, finalizer) -> None:
-        object.__setattr__(self, '_searcher', searcher)
-        object.__setattr__(self, '_finalizer', finalizer)
-
-    def __getattr__(self, name):
-        if not self._finalizer.alive:
-            raise LeaseExpiredError(
-                'passage searcher used after its lease was released -- the '
-                'index may already be closed')
-        return getattr(self._searcher, name)
+class PassageSearchUnavailableError(PassageSearchError):
+    """Raised by `PassageSearchAdapter.search_composition_logic()` when no
+    passage index is installed at CALL time -- before any lease is taken, so
+    it never goes through the boundary conversion above (there is no inner
+    traceback to sever). Catchable -- unlike the access violation a stale
+    index reference would raise, which is exactly what this whole
+    call-scoped design exists to make structurally impossible."""
 
 
-class PassageSearcherLease:
-    """What `get_passage_searcher()` returns. The searcher is reachable
-    only through the `with` block's `_LeasedSearcherHandle` -- there is no
-    public accessor for the bare searcher -- and that handle goes inert the
-    moment this lease is released, so a caller cannot end up dereferencing
-    the index without the lease that reference requires still being held.
+class PassageSearchAdapter:
+    """What `get_passage_searcher()` returns -- ALWAYS, never None. Holds
+    only the per-call configuration (`text_fetcher`, `width`, `length`,
+    `depth`); no index, no `PassageSearcher`, nothing that pins a memmap.
+    `__slots__` rules out a stray instance attribute -- set by this class or
+    smuggled in from outside -- ever holding one instead.
 
-    The outstanding-reader count is tied to THIS OBJECT's lifetime via
-    `weakref.finalize`, not merely to an explicit `release()` call: if this
-    lease is dropped, garbage-collected, or abandoned by a thread that dies
-    before calling `release()`, the finalizer still fires and the count
-    still comes back down. That is what keeps a forgotten lease from
-    wedging every future close/swap behind the full drain timeout forever.
+    Every `search_composition_logic()` call is a complete, self-contained
+    lease: acquire (`_try_acquire_lease`), resolve the CURRENT index, build
+    a fresh `PassageSearcher` around it, run the query, release
+    (`_release_lease`) in a `finally` -- all within that one call, never
+    spanning two. Nothing produced by one call (the index, the searcher, a
+    result) is retained afterward, so there is no lifetime here for a
+    caller to respect and nothing to capture that would still work, or
+    still be dangerous, later.
 
-    `release()` is the non-context escape hatch, for a caller that truly
-    cannot use `with`; it is what `__exit__` calls, and -- like the
-    finalizer it delegates to -- it is idempotent: a second call, from a
-    retry or a stray `finally`, is a no-op rather than a double decrement.
+    That is what makes capturing the BOUND METHOD safe: `thread.searcher =
+    get_passage_searcher(text_fetcher)` followed, an hour later, by
+    `thread.searcher.search_composition_logic(...)` takes a fresh lease
+    against whatever state is current AT THAT CALL -- the same index, a
+    replaced one, or none at all (`PassageSearchUnavailableError`, not a
+    stale pointer). Contrast the previous handle-based design, where
+    `m = handle.search_composition_logic` captured a BOUND METHOD OF THE
+    UNDERLYING SEARCHER, escaping the handle's own `__getattr__` guard
+    entirely and staying callable after the lease that produced it ended --
+    this design has no bound method to escape with, because the searcher
+    that would own it is never exposed.
+
+    EXCEPTION BOUNDARY: `search_composition_logic` is also a hard boundary
+    on the way OUT. A lease is acquired and the index it hands out is
+    reachable from local variables in THIS frame and in every frame of the
+    call it makes into `PassageSearcher.search_composition_logic` -- and
+    Python keeps every one of those frames alive for as long as anything
+    holds the exception's traceback (`tb_next` chains the callee frames onto
+    the raising frame). A caller that only lets the exception fall out of
+    scope is fine; one that RETAINS it -- `logging.exception(...)`, a stored
+    variable, `pytest.raises(...) as excinfo` then touching `excinfo.value`,
+    a post-mortem debugger -- keeps the index reachable past
+    `close_passage_state()`, and dereferencing it after that is an access
+    violation, not a catchable error. So nothing that failed inside the
+    lease is allowed to leave as the object it failed as: it is caught,
+    formatted to a STRING (`traceback.format_exc()`, which holds no frames),
+    logged, and re-raised as a fresh `PassageSearchError` only after the
+    whole try/except/finally has completed -- never from inside the
+    `except`, which would set `__context__` to the original and drag its
+    traceback back in anyway. A `KeyboardInterrupt`/`SystemExit` is the one
+    exception NOT converted: converting it to `PassageSearchError` would
+    make it catchable by an ordinary `except Exception` and swallow shutdown
+    semantics, so a fresh instance of the SAME class is raised instead --
+    same type, no frames.
+
+    Consequence worth stating plainly: a `progress_callback` that raises to
+    signal cancellation would also be caught and converted here, same as any
+    other failure inside the lease -- `PassageSearcher` never actually calls
+    `progress_callback` today, so nothing relies on that idiom, but a future
+    caller must not assume otherwise.
     """
 
-    def __init__(self, searcher) -> None:
-        # The count itself was already taken by `_try_acquire_lease` --
-        # this constructor's ONE job is to make sure something now owns
-        # bringing it back down, however this lease meets its end.
-        self._searcher = searcher
-        self._finalizer = weakref.finalize(self, _release_lease)
+    __slots__ = ('_text_fetcher', '_width', '_length', '_depth')
 
-    def __enter__(self):
-        return _LeasedSearcherHandle(self._searcher, self._finalizer)
+    def __init__(self, text_fetcher, width: str, length: str,
+                 depth: str) -> None:
+        self._text_fetcher = text_fetcher
+        self._width = width
+        self._length = length
+        self._depth = depth
 
-    def __exit__(self, exc_type, exc, tb) -> bool:
-        self.release()
-        return False
+    def search_composition_logic(
+        self,
+        full_text: str,
+        chunk_size: int = 5,
+        max_freq: float = 100.0,
+        mode: str = 'exact',
+        *,
+        filter_text: Optional[str] = None,
+        progress_callback=None,
+        boundary_mode: str = 'full',
+        boundary_delimiter: str = '\n',
+        boundary_boost: float = 1.5,
+        min_boundary_matches: int = 0,
+        min_delimiter_distance: int = 3,
+        restrict_sys_ids=None,
+        corpus_scope: str = 'genizah',
+    ) -> dict:
+        """Same parameter list as `gui_threads.CompositionThread.run()`'s
+        call to `self.searcher.search_composition_logic(...)` -- the
+        contract this adapter exists to preserve unchanged. Deliberately
+        does NOT accept `witnesses`/`witness_text_cap`:
+        `PassageSearcher.search_composition_logic` treats those as
+        keyword-only and additive, but `CompositionThread` never passes
+        them, and a signature that omitted them would silently swallow a
+        typo'd caller into `**_ignored` on the far side instead of failing
+        loudly here with a `TypeError`.
+        """
+        index = _try_acquire_lease()
+        if index is None:
+            raise PassageSearchUnavailableError(
+                'no passage index is installed -- passage search is not '
+                'available right now')
+        searcher = None
+        # Set only when something failed inside the lease -- a STRING
+        # (formatted traceback + original type name + original str()), never
+        # the exception object itself, so nothing below can hold a frame
+        # from inside the call. Read and acted on only AFTER the
+        # try/except/finally below has fully unwound -- see the class
+        # docstring's "EXCEPTION BOUNDARY" section for why raising from
+        # inside `except` would defeat the whole point via `__context__`.
+        boundary_failure = None
+        boundary_reraise = None
+        try:
+            try:
+                from shared.passage_parallels import PassageSearcher  # local: keep this module import-light
+                searcher = PassageSearcher(
+                    index=index, text_fetcher=self._text_fetcher,
+                    policy=compose(self._width, self._length, self._depth))
+                return searcher.search_composition_logic(
+                    full_text, chunk_size, max_freq, mode,
+                    filter_text=filter_text, progress_callback=progress_callback,
+                    boundary_mode=boundary_mode,
+                    boundary_delimiter=boundary_delimiter,
+                    boundary_boost=boundary_boost,
+                    min_boundary_matches=min_boundary_matches,
+                    min_delimiter_distance=min_delimiter_distance,
+                    restrict_sys_ids=restrict_sys_ids,
+                    corpus_scope=corpus_scope)
+            except Exception as exc:
+                boundary_failure = (
+                    traceback.format_exc(), type(exc).__name__, str(exc))
+            except BaseException as exc:
+                # KeyboardInterrupt / SystemExit / GeneratorExit: must NOT
+                # become a `PassageSearchError` -- that would make it
+                # catchable by an ordinary `except Exception` and swallow
+                # shutdown semantics. A FRESH instance of the SAME class
+                # carries the type across the boundary without carrying any
+                # frame: `type(exc)(*exc.args)` reconstructs it from plain
+                # data, never from `exc` itself.
+                logger.error(
+                    'passage search interrupted by %s inside the lease '
+                    'boundary:\n%s', type(exc).__name__, traceback.format_exc())
+                boundary_reraise = type(exc)(*exc.args)
+        finally:
+            # Scrub BOTH names this frame holds a live PassageIndex through
+            # -- `index` (this frame's own local) and `searcher` (whose
+            # `.index` attribute is the same object) -- before the lease is
+            # released. Necessary but not sufficient on its own: the
+            # original exception's OWN frames (inside
+            # `PassageSearcher.search_composition_logic` and deeper) are
+            # never retained in the first place, because `boundary_failure`
+            # above captured only strings, not the exception object those
+            # frames hung off of.
+            searcher = None
+            index = None
+            _release_lease()
 
-    def release(self) -> None:
-        self._finalizer()  # no-op if already run -- see class docstring
+        if boundary_reraise is not None:
+            raise boundary_reraise
+        if boundary_failure is not None:
+            tb_text, exc_type_name, exc_str = boundary_failure
+            logger.error(
+                'passage search failed inside the lease boundary '
+                '(%s: %s) -- original traceback:\n%s',
+                exc_type_name, exc_str, tb_text)
+            message = f'{exc_type_name}: {exc_str}' if exc_str else exc_type_name
+            raise PassageSearchError(
+                f'passage search failed -- {message}')
+        # Unreachable: the inner try either returns, or one of the two
+        # except clauses above sets exactly one of the two markers checked
+        # above. Left unguarded (no `else`/final raise) rather than papered
+        # over with an `assert False`, so a future edit that breaks this
+        # invariant fails loudly as "function did not return" instead of
+        # silently returning None as a passage result.
 
 
 def get_passage_searcher(text_fetcher, width: str = _DEFAULT_WIDTH,
                           length: str = DEFAULT_LENGTH,
-                          depth: str = DEFAULT_DEPTH):
-    """A `PassageSearcherLease` wrapping a fresh PassageSearcher, or None
-    when no index is installed. Use it as a `with` block:
+                          depth: str = DEFAULT_DEPTH) -> PassageSearchAdapter:
+    """The one obvious way to get something searchable. Returns a
+    `PassageSearchAdapter` unconditionally -- whether or not an index is
+    installed right now -- because the adapter holds no index itself; use
+    it as:
 
-        with get_passage_searcher(text_fetcher) as searcher:
-            ... run the search ...
+        pl.get_passage_searcher(text_fetcher).search_composition_logic(...)
 
-    The lease is what keeps `close_passage_state()`/`install_passage_state()`
-    from force-closing the mmap this searcher reads while the `with` block
-    -- typically the composition thread's terminal -- is still inside it;
-    see `PassageSearcherLease`.
+    A call made while no index is installed (or one made later, against an
+    index that has since been closed and never replaced) raises
+    `PassageSearchUnavailableError` from inside `search_composition_logic`
+    itself -- a clear, catchable error at the point that actually needed the
+    index, not a None this function would have returned for a caller to
+    forget to check.
 
     Each axis is validated INDEPENDENTLY against the finite set `compose()`
     actually knows, falling back to the default on anything unrecognised --
@@ -567,26 +699,13 @@ def get_passage_searcher(text_fetcher, width: str = _DEFAULT_WIDTH,
     defaults to PARALLELS_GROUP_CAP (200), which is already the right desktop
     cap.
     """
-    index = _try_acquire_lease()
-    if index is None:
-        return None
-    try:
-        if width not in PRESETS:
-            width = _DEFAULT_WIDTH
-        if length != DEFAULT_LENGTH and length not in LENGTH_PROFILES:
-            length = DEFAULT_LENGTH
-        if depth != DEFAULT_DEPTH and depth not in DEPTH_PROFILES:
-            depth = DEFAULT_DEPTH
-        from shared.passage_parallels import PassageSearcher  # local: keep this module import-light
-        searcher = PassageSearcher(index=index, text_fetcher=text_fetcher,
-                                   policy=compose(width, length, depth))
-        return PassageSearcherLease(searcher)
-    except Exception:
-        # The lease slot was already counted by `_try_acquire_lease` above;
-        # nothing below this point failing may leave that count stranded
-        # with no lease object ever created to eventually release it.
-        _release_lease()
-        raise
+    if width not in PRESETS:
+        width = _DEFAULT_WIDTH
+    if length != DEFAULT_LENGTH and length not in LENGTH_PROFILES:
+        length = DEFAULT_LENGTH
+    if depth != DEFAULT_DEPTH and depth not in DEPTH_PROFILES:
+        depth = DEFAULT_DEPTH
+    return PassageSearchAdapter(text_fetcher, width, length, depth)
 
 
 # ---------------------------------------------------------------------------
