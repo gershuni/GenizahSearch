@@ -286,9 +286,18 @@ def main() -> int:
     if args.csv:
         with open(args.csv, 'w', encoding='utf-8-sig', newline='') as fh:
             w = csv.writer(fh)
+            # The COMPOSED names and their content-hash ids, not the raw
+            # --baseline/--candidate width arguments. Those were unambiguous
+            # until width, length and depth became three axes: two runs at
+            # different depths, or with different probe overrides, otherwise
+            # write identical provenance and their archives cannot be told
+            # apart. policy_id is a content hash, so it pins the settings even
+            # for a composition nobody has named.
             w.writerow(['sys_id', 'shelfmark', 'shelfmark_key', 'library',
                         'title', 'presence', 'score', 'score_unit',
-                        'record_id', 'baseline_policy', 'candidate_policy'])
+                        'record_id',
+                        'baseline_policy', 'baseline_policy_id',
+                        'candidate_policy', 'candidate_policy_id'])
             for sid in sorted(set(base) | set(cand)):
                 h = cand.get(sid) or base[sid]
                 presence = ('both' if sid in base and sid in cand
@@ -296,8 +305,9 @@ def main() -> int:
                                   else 'baseline_only'))
                 sm, lib, title = label(sid)
                 w.writerow([sid, sm, shelfmark_key(sm), lib, title, presence,
-                            int(h.score), 'matched_letters',
-                            h.record_id, args.baseline, args.candidate])
+                            int(h.score), 'matched_letters', h.record_id,
+                            base_p.name, base_p.policy_id,
+                            cand_p.name, cand_p.policy_id])
         print(f'\nwrote {args.csv}')
     return 0
 

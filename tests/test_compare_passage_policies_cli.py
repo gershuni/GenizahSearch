@@ -161,3 +161,58 @@ def test_an_unknown_profile_is_refused_by_name():
         compose('widest-40', DEFAULT_LENGTH, 'deepset')
     with pytest.raises(ValueError, match='known:'):
         compose('widest-40', 'shrt', DEFAULT_DEPTH)
+
+
+# ---------------------------------------------------------------------------
+# The archived CSV must say which policies produced it.
+# ---------------------------------------------------------------------------
+
+def _csv_row_source() -> str:
+    """Just the `w.writerow([sid, ...])` call that writes a data row.
+
+    Scoped deliberately. Asked of the whole file, `'base_p.name' in src` stays
+    true because a console `print` also mentions it -- so a mutation that put
+    the raw width argument back into the CSV left the test green. That is the
+    fourth time on this branch that asserting a NAME appears somewhere in a
+    file has produced a test which could not fail.
+    """
+    src = _cli_source()
+    start = src.index('w.writerow([sid, sm')
+    return src[start:src.index('])', start)]
+
+
+def test_the_csv_records_the_composed_policy_not_the_width_argument():
+    """It wrote `args.baseline` / `args.candidate`, the raw WIDTH names. That
+    was unambiguous until width, length and depth became three axes: two runs
+    at different depths now write identical provenance and their archives
+    cannot be told apart (Codex review of PR #328)."""
+    row = _csv_row_source()
+    assert 'base_p.name' in row and 'cand_p.name' in row
+    assert 'args.baseline' not in row and 'args.candidate' not in row, (
+        'the CSV row is back to recording the width argument only'
+    )
+
+
+def test_the_csv_records_the_content_hash_of_each_policy():
+    """`policy_id` is a content hash, so it pins the settings even for a
+    composition nobody has named -- including probe overrides, which were
+    only ever printed to a transient console."""
+    assert 'base_p.policy_id' in _csv_row_source()
+    assert 'cand_p.policy_id' in _csv_row_source()
+    src = _cli_source()
+    assert "'baseline_policy_id'" in src and "'candidate_policy_id'" in src
+
+
+def test_the_csv_header_and_row_stay_the_same_width():
+    """A header and a row that disagree silently shift every column -- and a
+    CSV nobody reads until months later is the worst place to find out."""
+    src = _cli_source()
+    start = src.index("w.writerow(['sys_id'")
+    header = src[start:src.index('])', start)]
+    n_header = header.count("'") // 2
+    row_start = src.index('w.writerow([sid, sm', start)
+    row = src[row_start:src.index('])', row_start)]
+    n_row = row.count(',') + 1
+    assert n_header == n_row, (
+        f'header has {n_header} columns, the row writes {n_row}'
+    )
