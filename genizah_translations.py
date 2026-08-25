@@ -2343,6 +2343,16 @@ TRANSLATIONS = {
     "No results": "אין תוצאות",
     "Max frequency": "תדירות מקסימלית",
     "Filter common phrases (lower = stricter)": "סנן ביטויים נפוצים (נמוך = מחמיר יותר)",
+    # Replaced 2026-08-25: the old wording said "manuscripts", but the engine
+    # counts PAGE HITS inside a top-50 retrieval, and 50 or above never fires.
+    # Kept as a key so an already-open page still renders Hebrew.
+    "Skip phrases matching more than this many pages (lower = stricter; 50 or above turns it off)":
+        "\u05d3\u05dc\u05d2 \u05e2\u05dc \u05e6\u05d9\u05e8\u05d5\u05e4\u05d9\u05dd "
+        "\u05d4\u05de\u05ea\u05d0\u05d9\u05de\u05d9\u05dd \u05dc\u05d9\u05d5\u05ea\u05e8 "
+        "\u05de\u05db\u05de\u05d5\u05ea \u05d6\u05d5 \u05e9\u05dc \u05e2\u05de\u05d5\u05d3\u05d9\u05dd "
+        "(\u05e0\u05de\u05d5\u05da \u05d9\u05d5\u05ea\u05e8 = \u05de\u05d7\u05de\u05d9\u05e8 "
+        "\u05d9\u05d5\u05ea\u05e8; 50 \u05d5\u05de\u05e2\u05dc\u05d4 \u05de\u05db\u05d1\u05d4 "
+        "\u05d0\u05ea \u05d4\u05e1\u05d9\u05e0\u05d5\u05df)",
     "Skip phrases found in more than this many manuscripts (lower = stricter)":
         "דלג על ביטויים המופיעים ביותר כתבי יד ממספר זה (נמוך = מחמיר יותר)",
     "Lab Mode (experimental)": "מצב מעבדה (ניסיוני)",

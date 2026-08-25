@@ -1010,3 +1010,60 @@ def test_hiding_never_replaces_the_force_and_disable_guarantee():
     for widget in ('chunk_size', 'mode_select', 'freq_threshold',
                    'boundary_mode', 'min_chunks_input'):
         assert f'{widget}.disable()' in true_branch
+
+
+# ---------------------------------------------------------------------------
+# Max frequency counts PAGE HITS, and the label has to say so.
+# ---------------------------------------------------------------------------
+
+def _freq_help_label() -> str:
+    """The literal inside the `ui.label(tr(...))` under the freq slider."""
+    src = _read_source()
+    start = src.index('as freq_threshold_row:')
+    block = src[start:src.index('min_chunks_row', start)]
+    m = re.search(r"ui\.label\(tr\('([^']+)'\)\)", block)
+    assert m, 'no help label under the frequency slider'
+    return m.group(1)
+
+
+def test_the_frequency_label_does_not_promise_manuscripts():
+    """`shared/search_engine.py` tests `len(hits) > max_freq` against
+    `searcher.search(query, 50).hits` -- a truncated top-50 of Tantivy
+    DOCUMENTS, and a document is a page. Eleven pages of one manuscript trip a
+    threshold of ten, and hits outside the selected filters count too, because
+    manuscript restrictions and regex verification happen afterwards.
+
+    5cd2bb7e retired the "manuscripts" wording in docs/SEARCH_API.md and even
+    edited this string's Hebrew, but left the English label behind (Codex
+    review, PR #328).
+    """
+    label = _freq_help_label()
+    assert 'manuscript' not in label.lower(), (
+        f'the frequency label promises manuscripts again: {label!r}'
+    )
+    assert 'page' in label.lower(), 'it must say what it actually counts'
+
+
+def test_the_frequency_label_says_the_upper_half_is_inert():
+    """The retrieval is hard-capped at 50, so no value at or above 50 can ever
+    fire -- and 50 is the slider's DEFAULT, so the control does nothing until
+    it is dragged left. Measured in 5cd2bb7e: identical results at
+    50 / 100 / 1000 / 100000."""
+    assert '50' in _freq_help_label(), (
+        'nothing tells the user the default setting disables the filter'
+    )
+
+
+def test_the_frequency_label_is_translated():
+    """`tr()` falls back to the English string when a key is missing, so an
+    untranslated label renders perfectly in the wrong language."""
+    from web.translations import tr, set_language, get_language
+    label = _freq_help_label()
+    saved = get_language()
+    try:
+        set_language('he')
+        rendered = tr(label)
+    finally:
+        set_language(saved)
+    assert rendered != label, f'{label!r} has no Hebrew entry'
+    assert any('\u0590' <= ch <= '\u05ea' for ch in rendered)

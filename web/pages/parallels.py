@@ -1242,11 +1242,30 @@ def create_parallels_page(initial_text: str = None):
                         chunk_size = ui.slider(min=2, max=12, value=5).props('label-always')
                         ui.label(tr('Words per search chunk (recommended: 4-7)')).classes('text-xs').style('color: var(--text-muted);')
 
-                    # Frequency threshold (for standard mode - filters results appearing in too many documents)
+                    # Frequency threshold (chunk search only -- hidden for
+                    # letter-level, which has no per-chunk frequency signal).
+                    #
+                    # It counts PAGE HITS, not manuscripts: the engine tests
+                    # `len(hits) > max_freq` against `searcher.search(query,
+                    # 50).hits`, a truncated top-50 of Tantivy documents, and a
+                    # document is a page. Eleven pages of one manuscript trip a
+                    # threshold of ten. The label said "manuscripts" until
+                    # 2026-08-25; 5cd2bb7e had already retired that wording in
+                    # docs/SEARCH_API.md and even touched this string's Hebrew,
+                    # but left the English behind.
+                    #
+                    # The 50-hit retrieval cap also means no value at or above
+                    # 50 can ever fire -- and 50 is the DEFAULT, so the control
+                    # does nothing until it is dragged left. Measured in
+                    # 5cd2bb7e (identical results at 50/100/1000/100000). The
+                    # range and default are deliberately unchanged here:
+                    # narrowing to [10, 49] forces a new default, and that
+                    # changes the results of every chunk search -- a product
+                    # decision, not a labelling fix.
                     with ui.column().classes('gap-1') as freq_threshold_row:
                         h3(tr('Max frequency'), classes='text-sm font-medium', style='color: var(--text-secondary);')
                         freq_threshold = ui.slider(min=10, max=100, value=50).props('label-always')
-                        ui.label(tr('Skip phrases found in more than this many manuscripts (lower = stricter)')).classes('text-xs').style('color: var(--text-muted);')
+                        ui.label(tr('Skip phrases matching more than this many pages (lower = stricter; 50 or above turns it off)')).classes('text-xs').style('color: var(--text-muted);')
 
                     # Min chunk matches (for regular full-text chunk search)
                     with ui.column().classes('gap-1') as min_chunks_row:
