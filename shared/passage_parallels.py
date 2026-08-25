@@ -136,10 +136,12 @@ site:
   -- a 16x larger bound argued as safe on the smaller one (Codex review,
   PR #328).
 
-  Measured rather than projected, on the real index (759,224 records) with
-  a real 7,562-char query at `max-40+short`:
+  Measured on the real index (759,224 records) with a real 7,562-char query
+  at `max-40+short`. `hits` and `search` are observed; `render` is the hit
+  count times the ~1.3 ms/row constant above, so it is arithmetic rather
+  than a fourth measurement:
 
-      depth     verify_cap    hits   search   render    total
+      depth     verify_cap    hits   search   render*   total
       normal         3,000     272     1.2s     0.4s     1.5s
       deep          50,000     725     6.3s     0.9s     7.3s
       deepest       50,000   2,431    15.5s     3.2s    18.6s
@@ -147,10 +149,29 @@ site:
   Acceptance runs at roughly 5% of `verify_cap`, not 100%, so the ~65s
   render a full cap would imply does not occur. What HAS gone is the
   margin: `deepest` spends about two thirds of the 30s budget where this
-  paragraph once described a tenth of it. The breach condition is roughly
-  **8,000 accepted rows** at `deepest` (or half that with a `filter_text`
-  set, since both buckets render) -- three times anything measured, but no
-  longer the comfortable distance the word "comfortably" claimed.
+  paragraph once described a tenth of it.
+
+  The breach arrives at roughly **11,150 rendered rows** -- (30s - 15.5s
+  search) / 1.3 ms -- about 4.6x anything measured.
+
+  Three corrections to an earlier version of this note, all of which made
+  the margin look different than it is (Codex review, PR #328):
+
+  * It said ~8,000 rows. That was (30 - 18.6) / 1.3 ms, the rows that fit
+    ON TOP of the 2,431 already rendered, written as though it were the
+    total. Subtract the search cost, not the whole measured run.
+  * It said a `filter_text` halves the threshold "since both buckets
+    render". They do both render, but each hit lands in
+    `filtered_candidate_rows` OR `eligible_rows` -- one `if/else`, one loop
+    -- so the buckets PARTITION the hits and each row renders exactly once.
+    A filter redistributes the cost; it adds none. The pre-existing
+    "worst-case full cap on BOTH buckets" phrasing had the same error in
+    the opposite direction: the partition makes 2x `verify_cap`
+    unreachable.
+  * 11,150 assumes `search` stays at 15.5s while accepting 4.6x more rows,
+    and verification is what PRODUCES rows -- so a query returning 11,000
+    hits spends longer searching too, and the real breach comes earlier.
+    Treat it as an upper bound, not an estimate.
 
   A render sub-cap was considered and NOT added: it would partially undo
   the owner's 2026-08-23 ruling that `render_cap=0` exists so found

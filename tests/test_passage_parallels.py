@@ -1083,3 +1083,42 @@ def test_page_requests_the_uncapped_searcher(synthetic_corpus, monkeypatch):
         "the page's get_passage_searcher CALL no longer passes render_cap=0 "
         "-- found manuscripts are hidden from display AND export again"
     )
+
+
+def test_the_two_buckets_partition_the_hits(grouped_corpus):
+    """`main` and `filtered` never overlap, and together they account for
+    every hit -- each row renders exactly once.
+
+    This is not housekeeping: the module docstring's render-cost bound is
+    derived from it. Two versions of that note got it wrong in opposite
+    directions -- "a worst-case full cap on BOTH buckets" treated the two as
+    independently reaching `verify_cap` (2x too pessimistic), and a later
+    correction claimed a `filter_text` HALVES the row threshold "since both
+    buckets render" (Codex review, PR #328). Both readings die if the
+    partition is pinned rather than assumed.
+    """
+    # Its own searcher: the module `searcher` fixture is bound to
+    # synthetic_corpus, which carries the motif on ONE record -- too thin to
+    # tell a partition from a coincidence. grouped_corpus has 12.
+    idx, originals, motif = grouped_corpus
+    searcher = PassageSearcher(index=idx,
+                               text_fetcher=_FakeTextFetcher(originals))
+
+    unfiltered = searcher.search_composition_logic(full_text=motif)
+    total = len(unfiltered['main']) + len(unfiltered['filtered'])
+    assert total, 'fixture precondition: at least one hit'
+
+    # A filter REDISTRIBUTES the same rows; it does not create any.
+    split = searcher.search_composition_logic(full_text=motif,
+                                              filter_text=motif)
+    assert len(split['main']) + len(split['filtered']) == total, (
+        'the buckets do not partition -- the render cost is not the hit count'
+    )
+
+    for result in (unfiltered, split):
+        main_ids = {r['raw_header'] for r in result['main']}
+        filt_ids = {r['raw_header'] for r in result['filtered']}
+        assert not (main_ids & filt_ids), (
+            f'{len(main_ids & filt_ids)} records are in BOTH buckets, so they '
+            f'render twice'
+        )
