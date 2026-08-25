@@ -1824,3 +1824,110 @@ def test_a_skipped_duplicate_is_reported_not_dropped():
         'tr() falls back to English, so an untranslated notice renders '
         'perfectly in the wrong language'
     )
+
+
+# ---------------------------------------------------------------------------
+# PR #329 review round 5.
+# ---------------------------------------------------------------------------
+
+def test_witness_headers_for_selects_only_the_matched_pages():
+    """A promoted witness is NOT a function of its sys_id: it is the
+    concatenation of the pages that MATCHED, which is a property of the result
+    set on screen at that moment."""
+    from web.pages.parallels import witness_headers_for
+    rows = [
+        {'raw_header': '990000000000001_IE1_P1'},
+        {'raw_header': '990000000000001_IE1_P2'},
+        {'raw_header': '990000000000002_IE1_P1'},
+        {'raw_header': ''},
+    ]
+    got = witness_headers_for(['990000000000001'], rows)
+    assert got == {'990000000000001': ['990000000000001_IE1_P1',
+                                       '990000000000001_IE1_P2']}
+
+
+def test_collect_witness_texts_prefers_the_headers_it_is_given():
+    """On a rehydrate the caller supplies the headers the PROMOTION used.
+    Re-deriving them from whatever rows are on screen now would rebuild a
+    different witness under the same label -- which is the whole defect.
+    """
+    from web.pages.parallels import collect_witness_texts
+    pages = {'H_A': 'aleph', 'H_B': 'bet', 'H_C': 'gimel'}
+    rows = [{'raw_header': 'H_C'}]          # what is on screen NOW
+    texts, failed = collect_witness_texts(
+        ['990000000000001'], rows,
+        fetch_header=pages.get,
+        headers_by_sid={'990000000000001': ['H_A', 'H_B']},
+    )
+    assert not failed
+    assert texts['990000000000001'] == 'aleph\nbet', (
+        'the supplied headers were ignored and the text was rebuilt from the '
+        'rows currently on screen'
+    )
+
+
+def test_a_promoted_witness_records_the_pages_it_was_built_from():
+    """RED if the promotion stops recording its header choice, which is what
+    makes the witness reproducible after a reload."""
+    import ast
+    src = _func_source('_promote_checked')
+    tree = ast.parse(src.lstrip())
+    calls = [n for n in ast.walk(tree)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+             and n.func.id == 'witness_headers_for']
+    assert calls, 'the promotion no longer records which pages it used'
+    assert 'headers=promoted_headers' in src, (
+        'the recorded headers are not attached to the witness'
+    )
+
+
+def test_the_rehydrate_replays_the_recorded_headers():
+    """After `execute_parallels` resets the fused rows, the rows on screen are
+    the SEED-ONLY set -- so a rebuild derived from them uses fewer pages, or
+    none and hence the whole manuscript, and the re-run silently searches a
+    different witness under the same label.
+
+    RED if the rehydrate stops passing the stored headers.
+    """
+    import ast
+    src = _func_source('_rehydrate_manuscript_witnesses')
+    tree = ast.parse(src.lstrip())
+    kwargs = [k.arg for n in ast.walk(tree) if isinstance(n, ast.Call)
+              for k in n.keywords if k.arg]
+    assert 'headers_by_sid' in kwargs, (
+        'the rehydrate rebuilds the witness from the current rows instead of '
+        'the pages the promotion actually used'
+    )
+    assert "w.get('headers')" in src, (
+        'the stored headers are never read'
+    )
+
+
+def test_the_snapshot_keeps_a_promoted_witness_headers():
+    """Kept INSTEAD of its text -- the cheaper half of the same guarantee, a
+    header being ~45 characters against a page of manuscript. RED if the
+    snapshot drops them."""
+    page = _source()
+    assert "'headers': (list(w.get('headers') or [])" in page, (
+        'the snapshot no longer preserves which pages a promoted witness was '
+        'built from, so a reload rebuilds a different witness'
+    )
+
+
+def test_restore_carries_the_headers_back():
+    from web.pages.parallels import restore_witness_entries
+    got = restore_witness_entries(
+        [{'id': 'w1', 'kind': 'manuscript', 'sys_id': '990000000000001',
+          'headers': ['H_A', 'H_B'], 'label': 'Ms A'}],
+        'Pasted text')
+    assert got and got[0]['headers'] == ['H_A', 'H_B']
+
+
+def test_restore_tolerates_a_snapshot_without_headers():
+    """Snapshots written before this change carry no `headers` key, and a
+    restore that raised on them would cost the whole tab."""
+    from web.pages.parallels import restore_witness_entries
+    got = restore_witness_entries(
+        [{'id': 'w1', 'kind': 'manuscript', 'sys_id': '990000000000001',
+          'label': 'Ms A'}], 'Pasted text')
+    assert got and got[0]['headers'] == []

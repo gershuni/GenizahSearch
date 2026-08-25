@@ -2045,6 +2045,69 @@ def test_a_sort_that_could_not_be_applied_is_reported(client, mock_searcher,
     assert body['request']['sort'] == 'witness_count'
 
 
+def test_the_default_fused_order_is_warned_about_when_it_is_not_applied(
+    client, mock_searcher, clean_env, monkeypatch,
+):
+    """Omitting `sort` does not mean no ordering was claimed.
+
+    The echo fills the field in as `fused` either way, so a caller who never
+    sent `sort` was told the response was fusion-ordered -- with no warning --
+    while the array was ordered by score. The warning was keyed on `req.sort`
+    being truthy, so the DEFAULT, which is the commonest case, was the
+    commonest way to receive that claim silently.
+
+    RED if the condition goes back to requiring an explicit `sort`.
+    """
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    monkeypatch.setattr(
+        'web.passage_assets.passage_multi_witness_available', lambda: True)
+    monkeypatch.setattr(
+        'web.passage_assets.get_passage_searcher',
+        lambda text_fetcher: mock_searcher)
+    mock_searcher.policy.as_dict.return_value = _fake_passage_policy()
+    # One witness resolved out of two requested -> no fusion happened.
+    mock_searcher.search_composition_logic.return_value = {
+        'main': [_make_main_row(uid='IE1_P1_FL1', sys_id='99001', score=5.0)],
+        'filtered': [],
+        'truncated_to_200': False,
+        'dropped_text_lookup_failures': 0,
+        'duplicate_photography_demoted': 0,
+        'query_report': {'candidates': 10, 'verify_truncated': False},
+        'witness_report': _witness_report(requested=2, searched=1),
+        'per_witness_query_reports': [],
+    }
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [W1, W2]})   # no `sort`
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    # The echo claims the fused ordering...
+    assert body['request']['sort'] == 'fused'
+    # ...so the response must say it was not applied.
+    warned = [w for w in (body.get('warnings') or [])
+              if w['code'] == 'sort_not_applied']
+    assert warned, (
+        'the response claims the default fused ordering with nothing to say '
+        'it was never applied'
+    )
+    assert warned[0]['sort'] == 'fused', 'the warning must name the EFFECTIVE sort'
+    assert warned[0].get('requested') is None, (
+        'the warning must also record that the caller asked for nothing, or '
+        'it is indistinguishable from an explicit sort=fused'
+    )
+
+
+def test_an_applied_default_sort_is_not_warned_about(
+    client, multi_witness, clean_env,
+):
+    """The guard against warning on every successful default request."""
+    r = client.post('/api/parallels', json={
+        'method': 'passage', 'witnesses': [W1, W2]})
+    assert r.status_code == 200, r.text
+    codes = {w['code'] for w in r.json().get('warnings') or []}
+    assert 'sort_not_applied' not in codes
+
+
 def test_an_applied_sort_is_not_warned_about(client, multi_witness, clean_env):
     r = client.post('/api/parallels', json={
         'method': 'passage', 'witnesses': [W1, W2], 'sort': 'witness_count'})

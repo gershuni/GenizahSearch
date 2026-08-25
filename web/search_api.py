@@ -2390,14 +2390,22 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
         # without saying so is the silent-content-loss failure this repo
         # treats as a defect -- the caller asked for seventeen searches and
         # got sixteen.
-        if req.sort and witnesses_in and not bundle.multi_witness:
+        if witnesses_in and not bundle.multi_witness:
             # The echo below still reports what was ASKED for -- that is what
             # an echo is -- so without this the response claims an ordering it
             # does not have. One witness resolving short-circuits before any
             # fusion, and `fused` / `witness_count` are facts fusion produces.
+            #
+            # Keyed on the EFFECTIVE sort, not on `req.sort`. Omitting the
+            # field does not mean "no ordering was claimed": the echo fills it
+            # in as `fused` either way, so a caller who never sent `sort` was
+            # told the response was fusion-ordered, with no warning, while the
+            # array was ordered by score. The default is the commonest case,
+            # which made it the commonest way to receive that claim.
             warnings_list.append({
                 'code': 'sort_not_applied',
-                'sort': req.sort,
+                'sort': req.sort or 'fused',
+                'requested': req.sort,
                 'reason': 'fewer than two witnesses resolved',
             })
         _unresolved_w = (bundle.witness_report or {}).get('unresolved') or []

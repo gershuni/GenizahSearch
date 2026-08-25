@@ -165,6 +165,7 @@ def restore_witness_entries(raw, default_label: str, cap: int = None) -> list:
             'kind': kind,
             'sys_id': sys_id,
             'seed_digest': str(entry.get('seed_digest') or ''),
+            'headers': [str(h) for h in (entry.get('headers') or []) if h],
             'text': text,
             'status': 'pending',
             'hits': 0,
@@ -194,8 +195,27 @@ def witnesses_needing_text(pending) -> list:
             and not (w.get('text') or '').strip()]
 
 
+def witness_headers_for(sys_ids, rows) -> dict:
+    """Which page headers make up each promoted manuscript's witness text.
+
+    Extracted from `collect_witness_texts` so the promotion can RECORD its
+    choice. A promoted witness is not a deterministic function of its
+    `sys_id`: it is the concatenation of the pages that MATCHED, which is a
+    property of the result set on screen at that moment. Re-deriving it later
+    from a different result set yields a different witness under the same
+    label.
+    """
+    wanted = set(sys_ids)
+    headers_by_sid: dict = {}
+    for row in rows or []:
+        sid = witness_sys_id(row)
+        if sid in wanted and row.get('raw_header'):
+            headers_by_sid.setdefault(sid, []).append(row['raw_header'])
+    return headers_by_sid
+
+
 def collect_witness_texts(sys_ids, rows, fetch_header,
-                          fetch_manuscript=None):
+                          fetch_manuscript=None, headers_by_sid=None):
     """Gather the text to search a promoted manuscript WITH.
 
     Module level and dependency-injected so it can be tested without building
@@ -221,16 +241,11 @@ def collect_witness_texts(sys_ids, rows, fetch_header,
     logged and dropped, so the caller can name them once instead of emitting
     one anonymous toast per manuscript.
     """
-    # `wanted` bounds MEMORY, not the result: the fetch loop below iterates
-    # sys_ids, so an unwanted manuscript's headers would never be read. On a
-    # 3,000-row result set with five promotions it is the difference between
-    # keeping five lists and keeping two thousand.
-    wanted = set(sys_ids)
-    headers_by_sid = {}
-    for row in rows or []:
-        sid = witness_sys_id(row)
-        if sid in wanted and row.get('raw_header'):
-            headers_by_sid.setdefault(sid, []).append(row['raw_header'])
+    # Caller-supplied headers win: on a REHYDRATE those are the headers the
+    # promotion actually used, and re-deriving them from whatever rows are on
+    # screen now would rebuild a different witness under the same label.
+    if headers_by_sid is None:
+        headers_by_sid = witness_headers_for(sys_ids, rows)
 
     out, failed = {}, []
     for sid in sys_ids:
@@ -598,6 +613,13 @@ def create_parallels_page(initial_text: str = None):
                     {'id': w.get('id'), 'label': w.get('label'),
                      'kind': w.get('kind'), 'sys_id': w.get('sys_id'),
                      'seed_digest': w.get('seed_digest') or '',
+                     # The pages a PROMOTED witness was built from. Kept
+                     # instead of its text, which is the cheaper half of the
+                     # same guarantee -- a header is ~45 characters against a
+                     # page of manuscript -- and the only thing that makes the
+                     # rebuilt witness the same witness.
+                     'headers': (list(w.get('headers') or [])
+                                 if w.get('kind') == 'manuscript' else []),
                      'text': ('' if w.get('kind') == 'manuscript'
                               else (w.get('text') or ''))}
                     for w in (p_state.witnesses or [])
@@ -2626,7 +2648,8 @@ def create_parallels_page(initial_text: str = None):
         return _text_digest_of(text_input.value)
 
     def _add_witness(text: str, label: str = '', kind: str = 'pasted',
-                     sys_id: str = None, seed_digest: str = None) -> dict:
+                     sys_id: str = None, seed_digest: str = None,
+                     headers: list = None) -> dict:
         entry = {
             'id': _witness_new_id(),
             # The seed this witness was gathered FOR. A witness of one work is
@@ -2642,6 +2665,11 @@ def create_parallels_page(initial_text: str = None):
             'label': (label or '').strip() or _witness_default_label(text),
             'kind': kind,
             'sys_id': sys_id,
+            # The pages this witness was BUILT FROM. A promoted witness is not
+            # a function of its sys_id -- it is the concatenation of the pages
+            # that matched -- so without this a reload rebuilds a different
+            # witness under the same label. See `_rehydrate_manuscript_witnesses`.
+            'headers': list(headers or []),
             'text': text or '',
             'status': 'pending',
             'hits': 0,
@@ -3017,12 +3045,24 @@ def create_parallels_page(initial_text: str = None):
         # Captured HERE, on the event loop: the fetch runs off-loop and must
         # not read page state.
         rows_snapshot = list(p_state.results or [])
+        # The headers the PROMOTION used, where the snapshot preserved them.
+        # Without this the rebuild derives headers from whatever rows are on
+        # screen NOW -- and after `execute_parallels` has reset the fused rows
+        # that is the SEED-ONLY set, so a promoted witness came back built
+        # from fewer pages, or from none and hence the whole manuscript. The
+        # re-run then searched a different witness under the same label, and
+        # nothing on screen said so.
+        _derived = witness_headers_for(sys_ids, rows_snapshot)
+        _headers = {w['sys_id']: (list(w.get('headers') or [])
+                                  or _derived.get(w['sys_id']) or [])
+                    for w in stale if w.get('sys_id')}
 
         def _fetch():
             return collect_witness_texts(
                 sys_ids, rows_snapshot,
                 fetch_header=state.searcher.get_full_text_by_header,
                 fetch_manuscript=state.searcher.get_full_manuscript,
+                headers_by_sid=_headers,
             )
 
         try:
@@ -3245,6 +3285,10 @@ def create_parallels_page(initial_text: str = None):
         # Captured HERE, on the event loop: the fetch below runs off-loop
         # and must not read page state.
         rows_snapshot = list(p_state.results or [])
+        # WHICH pages this promotion is built from, decided once and recorded
+        # on the witness. Pure and cheap (a scan of rows already in memory),
+        # so it stays on the loop with the rest of the capture.
+        promoted_headers = witness_headers_for(sys_ids, rows_snapshot)
 
         # The seed the promoted rows belong to -- the search that produced
         # them, not whatever the box holds now. Captured before the await with
@@ -3259,6 +3303,7 @@ def create_parallels_page(initial_text: str = None):
                 sys_ids, rows_snapshot,
                 fetch_header=state.searcher.get_full_text_by_header,
                 fetch_manuscript=state.searcher.get_full_manuscript,
+                headers_by_sid=promoted_headers,
             )
 
         p_state.promoting = True
@@ -3299,7 +3344,8 @@ def create_parallels_page(initial_text: str = None):
             except Exception:
                 pass
             _add_witness(text, label=label, kind='manuscript', sys_id=sid,
-                         seed_digest=promoted_digest)
+                         seed_digest=promoted_digest,
+                         headers=promoted_headers.get(sid) or [])
             added += 1
         if dupes:
             ui.notify(tr('({n} skipped: already added)').format(n=dupes),
