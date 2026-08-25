@@ -144,6 +144,27 @@ def _select_side(rows, side):
             'Pass --side candidate | baseline | union.')
     keep = SIDE_KEEP[side]
     picked = [r for r in rows if str(r.get('presence') or '') in keep]
+    if (side == 'baseline' and picked
+            and 'baseline_score' not in picked[0]
+            and any(str(r.get('presence') or '') == 'both' for r in picked)):
+        # This file predates the two-score columns: its single `score` holds
+        # the CANDIDATE's hit for every shared manuscript, so the baseline's
+        # score for those rows is not in the file at all. Returning `score`
+        # anyway would report the candidate's numbers under the baseline's
+        # name -- the substitution this whole guard exists to stop.
+        #
+        # Only when a `both` row is present. A file of purely `baseline_only`
+        # rows does carry the baseline's own scores (the old writer had no
+        # candidate hit to prefer), and refusing that would be over-strict.
+        sys.exit(
+            'this delta CSV has no `baseline_score` column, so it predates '
+            'the two-score writer and does not contain the baseline\'s score '
+            'for its shared manuscripts.\n'
+            'Re-run compare_passage_policies.py --csv to get one that does, '
+            'or score it with --side candidate | union.\n'
+            'NOTE: the figures this tool REPORTS (manuscripts, precision, '
+            'recall, frontier) never read the score column, so an old file is '
+            'still correct for those on any side.')
     if side == 'baseline' and picked and 'baseline_score' in picked[0]:
         # `score` and `record_id` are the CANDIDATE's by contract (see the
         # writer in compare_passage_policies.py). Reading them for the

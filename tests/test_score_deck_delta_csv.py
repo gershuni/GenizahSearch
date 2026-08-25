@@ -43,16 +43,26 @@ def _delta_csv(tmp_path):
     path = tmp_path / 'delta.csv'
     with open(path, 'w', encoding='utf-8-sig', newline='') as fh:
         w = csv.writer(fh)
+        # The CURRENT writer's shape, with both sides' scores. An older
+        # header here would make `--side baseline` refuse (correctly -- see
+        # test_an_older_csv_cannot_answer_side_baseline_and_says_so) and this
+        # fixture would be testing that guard instead of the side filter.
         w.writerow(['sys_id', 'shelfmark', 'shelfmark_key', 'library',
                     'title', 'presence', 'score', 'score_unit', 'record_id',
+                    'baseline_score', 'baseline_record_id',
                     'baseline_policy', 'baseline_policy_id',
                     'candidate_policy', 'candidate_policy_id'])
         rows = ([(sm, 'candidate_only') for sm in CANDIDATE_POSITIVES]
                 + [(sm, 'baseline_only') for sm in BASELINE_POSITIVES]
                 + [(SHARED_POSITIVE, 'both')])
         for i, (sm, presence) in enumerate(rows):
+            in_cand = presence in ('both', 'candidate_only')
+            in_base = presence in ('both', 'baseline_only')
             w.writerow([f'99000000000{i}', sm, sm, 'lib', 'title', presence,
-                        100, 'matched_letters', f'rec{i}',
+                        100 if in_cand else '', 'matched_letters',
+                        f'recC{i}' if in_cand else '',
+                        90 if in_base else '',
+                        f'recB{i}' if in_base else '',
                         'widest-40', 'aaaa', 'widest-40+deepest', 'bbbb'])
     return str(path)
 
@@ -183,14 +193,50 @@ def test_the_baseline_side_reads_the_baselines_own_score():
     assert cand[0]['record_id'] == 'recC'
 
 
-def test_a_delta_csv_without_baseline_columns_still_works():
-    """An older CSV written before the two-score columns existed carries only
-    `score`. The remap must not invent a column or blank the row."""
+def test_an_older_csv_cannot_answer_side_baseline_and_says_so():
+    """A CSV written before `baseline_score` existed carries ONE score column,
+    filled by the old writer with `cand.get(sid) or base[sid]` -- the
+    candidate's hit whenever a manuscript is in both runs. So the baseline's
+    score for a shared row is not in the file at all.
+
+    The first version of this test asserted the candidate's 900 came back for
+    a baseline request, i.e. it PINNED the silent substitution `--side` exists
+    to prevent. Refusing is the same answer given to the union case, for the
+    same reason: a file that does not contain the answer must say so rather
+    than return a plausible wrong one.
+
+    Not hypothetical -- the owner's own m12s28.csv and names10.csv are in this
+    format, with 55 shared rows between them.
+    """
     from score_antiochus_deck import _select_side
     rows = [{'shelfmark': SHARED_POSITIVE, 'presence': 'both', 'score': '900'}]
+    with pytest.raises(SystemExit) as exc:
+        _select_side(rows, 'baseline')
+    msg = str(exc.value)
+    assert 'baseline_score' in msg, 'the refusal must name what is missing'
+    assert 'Re-run' in msg, 'and how to get a file that answers it'
+
+
+def test_an_older_csv_with_no_shared_rows_answers_baseline_fine():
+    """Over-strictness would be its own defect. A file of purely
+    `baseline_only` rows DOES carry the baseline's own scores -- the old
+    writer had no candidate hit to prefer -- so it must not be refused."""
+    from score_antiochus_deck import _select_side
+    rows = [{'shelfmark': SHARED_POSITIVE, 'presence': 'baseline_only',
+             'score': '100'}]
     out = _select_side(rows, 'baseline')
     assert len(out) == 1
-    assert out[0]['score'] == '900'
+    assert out[0]['score'] == '100'
+
+
+@pytest.mark.parametrize('side', ['candidate', 'union'])
+def test_an_older_csv_still_answers_the_other_sides(side):
+    """Only the baseline reading is unsupported. Refusing the whole file would
+    strand every existing artifact for no reason -- and the figures this tool
+    REPORTS never read the score column anyway."""
+    from score_antiochus_deck import _select_side
+    rows = [{'shelfmark': SHARED_POSITIVE, 'presence': 'both', 'score': '900'}]
+    assert len(_select_side(rows, side)) == 1
 
 
 def test_the_two_sides_are_distinguishable_at_all(tmp_path):
