@@ -64,8 +64,8 @@ from shared.passage_index import (
     GRAM_OFFSETS_NAME, MANIFEST_NAME, MAX_RECORDS, MAX_RECORD_LETTERS,
     POSTINGS_NAME,
     POSTING_BYTES, RECORDS_NAME, RECORD_DTYPE, RECORD_IDS_NAME, STREAMS_NAME,
-    IndexFormatError, encode_stream, pack_postings, require_little_endian,
-    verify_csr_monotone, write_manifest,
+    BuildCancelled, IndexFormatError, encode_stream, pack_postings,
+    require_little_endian, verify_csr_monotone, write_manifest,
 )
 from shared.passage_normalize import (
     GRAM_CODE_SPACE, K, NORMALIZER_VERSION, gram_codes, norm_stream_fast,
@@ -83,6 +83,12 @@ DEFAULT_PARTITIONS = 8
 # 60K-record slice (smaller arrays stay in cache), and peak RSS fell
 # from 1.8 GB to 630 MB. spool is flat in this knob at ~50s.
 DEFAULT_BATCH_GRAMS = 1_000_000
+
+# Pass 1's own progress print is every 100k records; measured pass 1 is ~347s
+# for 948,549 records, so 100k granularity is ~37s of cancel lag -- too long
+# for the desktop close path to wait on. This is a separate, finer cadence
+# checked purely for cancellation, not print traffic.
+CANCEL_CHECK_RECORDS = 10_000
 
 
 @dataclass
@@ -114,6 +120,11 @@ def _noop(*_a, **_k) -> None:
     pass
 
 
+def _check_cancel(cancel_check: Optional[Callable[[], bool]]) -> None:
+    if cancel_check is not None and cancel_check():
+        raise BuildCancelled('passage index build cancelled')
+
+
 def check_free_space(index_dir: str, needed_bytes: int) -> None:
     """Refuse to start a build that cannot finish. Cheap, and the failure it
     prevents is a half-written multi-GB artifact."""
@@ -135,7 +146,8 @@ def estimate_artifact_bytes(n_letters: int, stride: int = 1) -> int:
 
 
 def _pass1(records: Iterable, index_dir: str, *, stride: int,
-           apply_hygiene: bool, progress: Callable) -> tuple:
+           apply_hygiene: bool, progress: Callable,
+           cancel_check: Optional[Callable[[], bool]] = None) -> tuple:
     """Write streams/records/ids plus the EXACT gram histogram.
 
     `hist` is uint32: the whole corpus yields ~599M postings, far under a
@@ -215,6 +227,8 @@ def _pass1(records: Iterable, index_dir: str, *, stride: int,
             if stats.n_records_seen % 100_000 == 0:
                 progress('pass1', stats.n_records_seen,
                          stats.n_records_indexed, time.time() - t0)
+            if stats.n_records_seen % CANCEL_CHECK_RECORDS == 0:
+                _check_cancel(cancel_check)
         _flush_hist()
 
     recs = np.zeros(len(rec_rows), dtype=RECORD_DTYPE)
@@ -325,8 +339,20 @@ def _iter_record_grams(recs: np.ndarray, streams: np.ndarray, *,
     held = 0
 
     def _flush():
-        return (np.concatenate(codes_l), np.concatenate(pages_l),
-                np.concatenate(pos_l))
+        codes = np.concatenate(codes_l)
+        pages = np.concatenate(pages_l)
+        poss = np.concatenate(pos_l)
+        # Stride is applied per record above; a bug that strides codes but
+        # not positions (or vice versa) desyncs the three arrays by however
+        # many records were in this batch, not by one -- checked HERE, at
+        # batch size, so it is a small clean assertion. Left unchecked it
+        # surfaces a frame deeper as a raw numpy shape error, with the
+        # multi-million-element CSR/offset arrays of the caller dragged into
+        # the traceback.
+        assert codes.shape == pages.shape == poss.shape, (
+            f'gram batch desynced: codes{codes.shape} pages{pages.shape} '
+            f'positions{poss.shape}')
+        return codes, pages, poss
 
     for ri in range(len(recs)):
         off = int(recs[ri]['stream_off'])
@@ -353,7 +379,8 @@ def _iter_record_grams(recs: np.ndarray, streams: np.ndarray, *,
 def _pass2_scatter(index_dir: str, offsets: np.ndarray, recs: np.ndarray,
                    streams: np.ndarray, parts: list, *, stride: int,
                    batch_grams: int, progress: Callable,
-                   stats: BuildStats) -> None:
+                   stats: BuildStats,
+                   cancel_check: Optional[Callable[[], bool]] = None) -> None:
     """Scatter every posting to its final CSR address, one slice at a time."""
     total = int(offsets[-1])
     postings_path = os.path.join(index_dir, POSTINGS_NAME)
@@ -363,12 +390,14 @@ def _pass2_scatter(index_dir: str, offsets: np.ndarray, recs: np.ndarray,
     cursor = np.zeros(GRAM_CODE_SPACE, dtype=np.uint64)
     t0 = time.time()
     for pi, (c0, c1, o0, o1) in enumerate(parts):
+        _check_cancel(cancel_check)
         n_slice = o1 - o0
         out = np.zeros((max(n_slice, 1), POSTING_BYTES), dtype=np.uint8)
         stats.peak_slice_bytes = max(stats.peak_slice_bytes, out.nbytes)
         cursor[c0:c1] = 0
         for codes, pages, poss in _iter_record_grams(
                 recs, streams, batch_grams=batch_grams, stride=stride):
+            _check_cancel(cancel_check)
             sel = (codes >= c0) & (codes < c1)
             if not sel.any():
                 continue
@@ -417,7 +446,8 @@ def _pass2_scatter(index_dir: str, offsets: np.ndarray, recs: np.ndarray,
 def _pass2_spool(index_dir: str, offsets: np.ndarray, recs: np.ndarray,
                  streams: np.ndarray, parts: list, *, stride: int,
                  batch_grams: int, progress: Callable,
-                 stats: BuildStats) -> None:
+                 stats: BuildStats,
+                 cancel_check: Optional[Callable[[], bool]] = None) -> None:
     """Baseline: spool packed keys per partition, sort, write CSR in order.
 
     Kept so the scatter path is compared against the conventional shape rather
@@ -435,6 +465,7 @@ def _pass2_spool(index_dir: str, offsets: np.ndarray, recs: np.ndarray,
     try:
         for codes, pages, poss in _iter_record_grams(
                 recs, streams, batch_grams=batch_grams, stride=stride):
+            _check_cancel(cancel_check)
             width = offsets[codes + 1] - offsets[codes]
             keep = width > 0
             if not keep.all():
@@ -468,6 +499,7 @@ def _pass2_spool(index_dir: str, offsets: np.ndarray, recs: np.ndarray,
     written = 0
     with open(postings_path, 'wb') as out_fh:
         for i, (_c0, _c1, o0, o1) in enumerate(parts):
+            _check_cancel(cancel_check)
             path = os.path.join(scratch, f'p{i}.bin')
             keys = np.fromfile(path, dtype=np.uint64)
             keys.sort()
@@ -519,7 +551,8 @@ def build_index(records: Iterable, index_dir: str, *,
                 source_manifest: Optional[list] = None,
                 corpus_label: str = '',
                 progress: Optional[Callable] = None,
-                free_space_bytes: int = 0) -> BuildStats:
+                free_space_bytes: int = 0,
+                cancel_check: Optional[Callable[[], bool]] = None) -> BuildStats:
     """Build a passage index into `index_dir`. Returns measured BuildStats.
 
     manifest.json is written LAST, so an interrupted build leaves a directory
@@ -561,7 +594,8 @@ def build_index(records: Iterable, index_dir: str, *,
     t_start = time.time()
 
     hist, stats = _pass1(records, index_dir, stride=stride,
-                         apply_hygiene=apply_hygiene, progress=progress)
+                         apply_hygiene=apply_hygiene, progress=progress,
+                         cancel_check=cancel_check)
     stats.construction = construction
     stats.df_cap = df_cap
     raw_postings = stats.n_postings
@@ -583,17 +617,33 @@ def build_index(records: Iterable, index_dir: str, *,
                         dtype=np.uint8, mode='r',
                         shape=(stats.n_letters,)) if stats.n_letters else \
         np.empty(0, dtype=np.uint8)
-
-    parts = _mass_partitions(offsets, partitions)
-    stats.partitions = len(parts)
-    runner = _pass2_scatter if construction == 'scatter' else _pass2_spool
-    runner(index_dir, offsets, recs, streams, parts, stride=stride,
-           batch_grams=batch_grams, progress=progress, stats=stats)
+    try:
+        parts = _mass_partitions(offsets, partitions)
+        stats.partitions = len(parts)
+        runner = _pass2_scatter if construction == 'scatter' else _pass2_spool
+        runner(index_dir, offsets, recs, streams, parts, stride=stride,
+               batch_grams=batch_grams, progress=progress, stats=stats,
+               cancel_check=cancel_check)
+    finally:
+        # Released on EVERY exit, not only success, and closed EXPLICITLY:
+        # `del` alone drops only this frame's reference, while the pass-2
+        # frame still in the propagating traceback holds `streams` as its own
+        # argument. A caller that keeps the exception -- logging it, or
+        # re-raising it after cleanup -- therefore keeps the mapping open, and
+        # on Windows an open mapping blocks os.rename/rmtree of the staging
+        # directory, which is exactly what the cancel path must do next.
+        for _mapped in (streams, recs):
+            _mm = getattr(_mapped, '_mmap', None)
+            if _mm is not None:
+                _mm.close()
+        del streams
+        del recs
 
     offsets.tofile(os.path.join(index_dir, GRAM_OFFSETS_NAME))
-    del offsets, streams, recs
+    del offsets
 
     stats.seconds_total = round(time.time() - t_start, 2)
+    _check_cancel(cancel_check)
     write_manifest(index_dir, {
         'corpus': {
             'label': corpus_label,

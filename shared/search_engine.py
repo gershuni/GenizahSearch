@@ -1242,11 +1242,21 @@ class SearchEngine:
 
             cleaned_map, changed = dedupe_browse_map(raw_map)
             if changed:
+                # Atomic write: this runs off the FL-ID background thread, which
+                # no app-close drain waits on, so a process killed mid-write must
+                # never leave a truncated/corrupt browse_map.pkl behind -- only
+                # ever the old file or the new one, via os.replace.
+                tmp_path = Config.BROWSE_MAP + '.tmp'
                 try:
-                    with open(Config.BROWSE_MAP, 'wb') as f:
+                    with open(tmp_path, 'wb') as f:
                         pickle.dump(cleaned_map, f)
+                    os.replace(tmp_path, Config.BROWSE_MAP)
                 except Exception as e:
                     LOGGER.warning("Failed to write deduplicated browse map to %s: %s", Config.BROWSE_MAP, e)
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
 
             SearchEngine._shared_browse_map = cleaned_map
             self._browse_map_cache = cleaned_map

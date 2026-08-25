@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import sys
 
 import numpy as np
@@ -29,13 +30,14 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import shared.passage_builder as passage_builder  # noqa: E402
 from shared.passage_builder import (  # noqa: E402
     build_index, codes_from_letter_indices,
 )
 from shared.passage_index import (  # noqa: E402
     GRAM_OFFSETS_NAME, MANIFEST_NAME, MAX_RECORD_LETTERS, POSTINGS_NAME,
-    RECORDS_NAME, STREAMS_NAME, IndexFormatError, diagnose_index,
-    encode_stream, open_index,
+    RECORDS_NAME, STREAMS_NAME, BuildCancelled, IndexFormatError,
+    diagnose_index, encode_stream, open_index,
 )
 from shared.passage_normalize import (  # noqa: E402
     gram_codes, norm_stream_fast,
@@ -100,6 +102,17 @@ def assert_matches_brute_force(idx, records, *, stride: int = 1):
     total = 0
     for code, want in expected.items():
         pages, positions = idx.postings_for(code)
+        # Checked BEFORE any content comparison, and as plain ints/tuples --
+        # a desynced pair (e.g. stride applied to one of codes/positions but
+        # not the other, upstream in _iter_record_grams) must fail on a cheap
+        # shape mismatch here, not fall through into zip()/list equality
+        # where pytest's failure report would repr the full arrays (and, one
+        # frame up, the memmapped `idx` itself) -- that repr is what has
+        # produced a Windows access violation instead of a clean assertion.
+        assert pages.shape == positions.shape, (
+            f'code {code}: pages{pages.shape} != positions{positions.shape}')
+        assert pages.shape[0] == len(want), (
+            f'code {code}: {pages.shape[0]} postings, expected {len(want)}')
         got = list(zip(pages.tolist(), positions.tolist()))
         assert got == want, f'code {code}: {got[:6]} != {want[:6]}'
         total += len(want)
@@ -611,3 +624,204 @@ def test_a_truncated_file_is_still_caught(tmp_path):
         fh.truncate(os.path.getsize(victim) - 16)
     assert open_index(d) is None
     assert 'truncated' in diagnose_index(d)
+
+
+# ---------------------------------------------------------------------------
+# Phase 146 Task 2a: cancel_check plumbing.
+#
+# Every case below drives build_index() through its PUBLIC signature only --
+# no private pass1/pass2 function is imported directly. Determinism about
+# WHICH checkpoint fires comes from shaping the input rather than instrumenting
+# the internals: `batch_grams` set far above the corpus's total gram count
+# forces exactly ONE batch per _iter_record_grams() call, which makes every
+# cancel_check() call in a build countable and orderable by hand. A record
+# count under CANCEL_CHECK_RECORDS additionally guarantees pass 1 makes ZERO
+# calls of its own, so the first observed call is always pass 2's.
+# ---------------------------------------------------------------------------
+
+_HUGE_BATCH = 1 << 40  # forces a single batch per partition; never spools twice
+
+
+def _cancel_after(n):
+    """False for the first n-1 calls, True from the n-th call on."""
+    calls = {'i': 0}
+
+    def cancel():
+        calls['i'] += 1
+        return calls['i'] >= n
+
+    cancel.calls = calls
+    return cancel
+
+
+def _actual_partitions(tmp_path, records, construction, requested,
+                       batch_grams):
+    """_mass_partitions can emit a different count than requested (measured:
+    3 requested, 10-record fixture, actually produced 4 -- collapsed or split
+    ranges are legitimate, see test_partition_count_does_not_change_the_artifact).
+    Tests that count cancel_check() calls per partition need the REAL number,
+    not the request, so they probe it with an uncancelled build first."""
+    d = str(tmp_path / f'probe-{construction}')
+    stats = build_index(records, d, construction=construction,
+                        partitions=requested, apply_hygiene=False,
+                        batch_grams=batch_grams)
+    shutil.rmtree(d)
+    return stats.partitions
+
+
+def test_cancel_check_none_is_a_noop_for_every_existing_caller(tmp_path):
+    """The parameter is additive: an explicit cancel_check=None must build the
+    byte-identical artifact a caller that never passes the argument at all
+    gets -- for both constructions."""
+    records = synthetic_records()
+    for construction in ('scatter', 'spool'):
+        implicit = str(tmp_path / f'{construction}-implicit')
+        explicit = str(tmp_path / f'{construction}-explicit')
+        build_index(records, implicit, construction=construction,
+                    partitions=3, apply_hygiene=False)
+        build_index(records, explicit, construction=construction,
+                    partitions=3, apply_hygiene=False, cancel_check=None)
+        assert digests(implicit) == digests(explicit), construction
+
+
+def test_cancel_check_stops_pass1(tmp_path, monkeypatch):
+    """Pass 1's cancel cadence is its OWN constant, finer than the 100k
+    progress print -- proven here by shrinking it far below the fixture."""
+    monkeypatch.setattr(passage_builder, 'CANCEL_CHECK_RECORDS', 3)
+    records = synthetic_records(n_records=20)
+    d = str(tmp_path / 'cancel-pass1')
+    cancel = _cancel_after(1)
+    with pytest.raises(BuildCancelled):
+        passage_builder.build_index(records, d, partitions=2,
+                                    apply_hygiene=False, cancel_check=cancel)
+    assert cancel.calls['i'] == 1
+    assert not os.path.exists(os.path.join(d, MANIFEST_NAME))
+    # RECORDS_NAME is written only after pass 1's record loop runs to
+    # completion (build_index.py, after the streams.bin `with` block closes).
+    # Its absence is proof the cancellation landed INSIDE pass 1 -- pass 2
+    # cannot even start without it, so a cancel firing on a later checkpoint
+    # (e.g. the 100k progress cadence, or a pass-2 batch) would have let pass
+    # 1 finish and this file would exist.
+    assert not os.path.exists(os.path.join(d, RECORDS_NAME))
+    # No memmap was ever opened this early -- pass 1 alone must not need the
+    # try/finally release, but the directory still has to be clean to delete.
+    shutil.rmtree(d)
+
+
+@pytest.mark.parametrize('construction', ['scatter', 'spool'])
+def test_cancel_mid_build_releases_the_memmap_for_immediate_deletion(
+        tmp_path, construction):
+    """The critical Windows case: a BuildCancelled raised from INSIDE pass 2
+    (after streams.bin is memmapped) must not pin the staging directory.
+    The caught exception is held across the delete on purpose. A caller that
+    logs the cancellation keeps the traceback, the traceback keeps
+    build_index's frame, and the frame keeps `streams` mapped -- which is the
+    only condition under which the builder's own `del streams` is
+    load-bearing. A bare `pytest.raises` would drop the traceback the instant
+    the block exits and the mapping would close regardless, proving nothing."""
+    records = synthetic_records(n_records=10)
+    d = str(tmp_path / f'cancel-mid-{construction}')
+    cancel = _cancel_after(1)  # first pass-2 call, whichever loop makes it
+    with pytest.raises(BuildCancelled) as excinfo:
+        build_index(records, d, construction=construction, partitions=3,
+                    apply_hygiene=False, batch_grams=_HUGE_BATCH,
+                    cancel_check=cancel)
+    assert not os.path.exists(os.path.join(d, MANIFEST_NAME))
+    assert excinfo.traceback, 'the frame chain must still be referenced here'
+    shutil.rmtree(d)  # must not raise on Windows
+    assert not os.path.exists(d)
+    assert excinfo.value is not None  # excinfo outlives the delete
+
+
+def test_cancel_in_spool_spooling_loop(tmp_path):
+    """cancel_after(1) with a single-batch corpus fires on the SPOOLING loop's
+    one and only iteration, before any partition file is sorted/written."""
+    records = synthetic_records(n_records=10)
+    d = str(tmp_path / 'cancel-spool-spooling')
+    cancel = _cancel_after(1)
+    with pytest.raises(BuildCancelled):
+        build_index(records, d, construction='spool', partitions=3,
+                    apply_hygiene=False, batch_grams=_HUGE_BATCH,
+                    cancel_check=cancel)
+    scratch = os.path.join(d, '_spool')
+    # The spooling loop never got past its first (and only) batch, so no
+    # partition's spool file was ever opened for read in the sort/write loop.
+    assert os.path.isdir(scratch)
+    shutil.rmtree(d)
+
+
+def test_cancel_in_spool_partition_sort_write_loop(tmp_path):
+    """cancel_after(2): call 1 is the spooling loop's single batch (passes),
+    call 2 is the FIRST partition of the sort/write loop -- proven distinct
+    from the spooling-loop case by cancelling one call later."""
+    records = synthetic_records(n_records=10)
+    n_parts = _actual_partitions(tmp_path, records, 'spool', 3, _HUGE_BATCH)
+    d = str(tmp_path / 'cancel-spool-partition')
+    cancel = _cancel_after(2)
+    with pytest.raises(BuildCancelled):
+        build_index(records, d, construction='spool', partitions=3,
+                    apply_hygiene=False, batch_grams=_HUGE_BATCH,
+                    cancel_check=cancel)
+    assert cancel.calls['i'] == 2
+    # Spooling completed in full (it was call 1, and passed): every
+    # partition's spool file was written before the sort/write loop started.
+    scratch = os.path.join(d, '_spool')
+    spool_files = [f for f in os.listdir(scratch) if f.startswith('p')]
+    assert len(spool_files) == n_parts, spool_files
+    shutil.rmtree(d)
+
+
+def test_cancel_in_scatter_partition_loop(tmp_path):
+    """cancel_after(1): the OUTER per-partition loop's check fires before that
+    partition's inner batch loop is entered at all."""
+    records = synthetic_records(n_records=10)
+    d = str(tmp_path / 'cancel-scatter-partition')
+    cancel = _cancel_after(1)
+    with pytest.raises(BuildCancelled):
+        build_index(records, d, construction='scatter', partitions=3,
+                    apply_hygiene=False, batch_grams=_HUGE_BATCH,
+                    cancel_check=cancel)
+    assert cancel.calls['i'] == 1
+    shutil.rmtree(d)
+
+
+def test_cancel_in_scatter_batch_loop(tmp_path):
+    """cancel_after(2): call 1 is partition 0's outer check (passes), call 2
+    is that same partition's INNER batch loop -- scatter's equivalent of
+    spool's spooling loop, one call later than the outer checkpoint above."""
+    records = synthetic_records(n_records=10)
+    d = str(tmp_path / 'cancel-scatter-batch')
+    cancel = _cancel_after(2)
+    with pytest.raises(BuildCancelled):
+        build_index(records, d, construction='scatter', partitions=3,
+                    apply_hygiene=False, batch_grams=_HUGE_BATCH,
+                    cancel_check=cancel)
+    assert cancel.calls['i'] == 2
+    shutil.rmtree(d)
+
+
+@pytest.mark.parametrize('construction', ['spool', 'scatter'])
+def test_cancel_fires_once_more_before_write_manifest(tmp_path, construction):
+    """Every mid-build checkpoint has to pass for this one to be reachable at
+    all -- proof that the "once more before write_manifest" checkpoint is a
+    SEPARATE call, not a side effect of the last partition's own check."""
+    records = synthetic_records(n_records=10)
+    n_parts = _actual_partitions(tmp_path, records, construction, 3,
+                                 _HUGE_BATCH)
+    # spool: 1 spooling-loop batch + n_parts sort/write checks.
+    # scatter: n_parts x (outer per-partition check + 1 inner batch check).
+    n_calls_before_manifest = (1 + n_parts if construction == 'spool'
+                               else 2 * n_parts)
+    d = str(tmp_path / f'cancel-final-{construction}')
+    cancel = _cancel_after(n_calls_before_manifest + 1)
+    with pytest.raises(BuildCancelled):
+        build_index(records, d, construction=construction, partitions=3,
+                    apply_hygiene=False, batch_grams=_HUGE_BATCH,
+                    cancel_check=cancel)
+    assert cancel.calls['i'] == n_calls_before_manifest + 1
+    # Every data file pass 2 writes is already on disk; only the manifest,
+    # written last, is missing.
+    assert os.path.exists(os.path.join(d, POSTINGS_NAME))
+    assert os.path.exists(os.path.join(d, GRAM_OFFSETS_NAME))
+    assert not os.path.exists(os.path.join(d, MANIFEST_NAME))
+    shutil.rmtree(d)

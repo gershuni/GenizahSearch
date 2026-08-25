@@ -81,6 +81,11 @@ class IndexFormatError(Exception):
     """Raised by build-side helpers; the reader never propagates it."""
 
 
+class BuildCancelled(Exception):
+    """Raised by build_index (and the corpus hasher it depends on) when a
+    caller-supplied cancel_check() returns True mid-build."""
+
+
 def require_little_endian() -> None:
     """The packed layouts are little-endian by definition, not by accident."""
     if sys.byteorder != 'little':

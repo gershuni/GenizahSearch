@@ -115,6 +115,7 @@ class Config:
     # Lab Mode Paths
     LAB_DIR = os.path.join(INDEX_DIR, "lab")
     LAB_INDEX_DIR = os.path.join(INDEX_DIR, "lab_index")
+    PASSAGE_INDEX_DIR = os.path.join(INDEX_DIR, "passage_index")
     LAB_CONFIG_FILE = os.path.join(LAB_DIR, "lab_config.json")
     LAB_WEIGHTS_FILE = os.path.join(LAB_DIR, "lab_weights.json")
     LAB_LOG_FILE = os.path.join(LAB_DIR, "lab_genizah.log")
