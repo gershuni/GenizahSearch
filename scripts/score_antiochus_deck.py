@@ -12,8 +12,13 @@ Usage:
 
   # score a new run (GUI xlsx export, delta CSV, or JSON rows)
   python scripts/score_antiochus_deck.py --run my_run.xlsx
-  python scripts/score_antiochus_deck.py --run delta.csv --column shelfmark
+  python scripts/score_antiochus_deck.py --run delta.csv --side candidate
   python scripts/score_antiochus_deck.py --run rows.json --show-missed
+
+A delta CSV from compare_passage_policies.py holds TWO runs, tagged by its
+`presence` column. `--side` says which one to score; without it the file is
+refused rather than silently scored as their union, which would credit the
+candidate with manuscripts only the baseline found.
 
 Three numbers matter, and the third is the one that gets forgotten:
 
@@ -98,9 +103,78 @@ def _rows_from_json(path):
     return [r for r in data if isinstance(r, dict)]
 
 
+SIDE_KEEP = {
+    # `presence` values each side is entitled to claim as its own result.
+    'candidate': {'both', 'candidate_only'},
+    'baseline': {'both', 'baseline_only'},
+    'union': {'both', 'candidate_only', 'baseline_only'},
+}
+
+
 def _rows_from_csv(path):
     with open(path, encoding='utf-8-sig', newline='') as fh:
         return list(csv.DictReader(fh))
+
+
+def _select_side(rows, side):
+    """Narrow a two-run delta CSV to the side actually being scored.
+
+    A file from `compare_passage_policies.py --csv` holds BOTH policies'
+    results in one table, distinguished only by `presence`. Scoring it whole
+    counts every manuscript the baseline found as though the candidate had
+    found it -- so a candidate that lost ground still reports the baseline's
+    recall, and the loss reads as an improvement.
+
+    Refuses rather than defaulting: picking `candidate` silently would change
+    what an already-saved `--run delta.csv` command means, and a quiet wrong
+    answer from a measuring instrument is worse than a loud one.
+    """
+    if not rows or 'presence' not in rows[0]:
+        return rows        # an ordinary single-run export; nothing to choose
+    if side is None:
+        counts = {}
+        for r in rows:
+            key = str(r.get('presence') or '?')
+            counts[key] = counts.get(key, 0) + 1
+        sys.exit(
+            'this file has a `presence` column, so it holds TWO runs '
+            f'({", ".join(f"{k}={v}" for k, v in sorted(counts.items()))}).\n'
+            'Scoring it whole would credit the candidate with manuscripts '
+            'only the baseline found.\n'
+            'Pass --side candidate | baseline | union.')
+    keep = SIDE_KEEP[side]
+    picked = [r for r in rows if str(r.get('presence') or '') in keep]
+    if (side == 'baseline' and picked
+            and 'baseline_score' not in picked[0]
+            and any(str(r.get('presence') or '') == 'both' for r in picked)):
+        # This file predates the two-score columns: its single `score` holds
+        # the CANDIDATE's hit for every shared manuscript, so the baseline's
+        # score for those rows is not in the file at all. Returning `score`
+        # anyway would report the candidate's numbers under the baseline's
+        # name -- the substitution this whole guard exists to stop.
+        #
+        # Only when a `both` row is present. A file of purely `baseline_only`
+        # rows does carry the baseline's own scores (the old writer had no
+        # candidate hit to prefer), and refusing that would be over-strict.
+        sys.exit(
+            'this delta CSV has no `baseline_score` column, so it predates '
+            'the two-score writer and does not contain the baseline\'s score '
+            'for its shared manuscripts.\n'
+            'Re-run compare_passage_policies.py --csv to get one that does, '
+            'or score it with --side candidate | union.\n'
+            'NOTE: the figures this tool REPORTS (manuscripts, precision, '
+            'recall, frontier) never read the score column, so an old file is '
+            'still correct for those on any side.')
+    if side == 'baseline' and picked and 'baseline_score' in picked[0]:
+        # `score` and `record_id` are the CANDIDATE's by contract (see the
+        # writer in compare_passage_policies.py). Reading them for the
+        # baseline would report the candidate's numbers under the baseline's
+        # name -- the same substitution this whole guard exists to stop, one
+        # column over. Repoint rather than teach `load_run` a second column
+        # vocabulary.
+        picked = [dict(r, score=r.get('baseline_score'),
+                       record_id=r.get('baseline_record_id')) for r in picked]
+    return picked
 
 
 def _rows_from_xlsx(path):
@@ -116,12 +190,15 @@ def _rows_from_xlsx(path):
     return [dict(zip(header, r)) for r in rows]
 
 
-def load_run(path, column=None):
+def load_run(path, column=None, side=None):
     ext = os.path.splitext(path)[1].lower()
     rows = ({'.json': _rows_from_json, '.csv': _rows_from_csv,
              '.xlsx': _rows_from_xlsx}.get(ext) or _rows_from_json)(path)
     if not rows:
         sys.exit(f'no rows found in {path}')
+    rows = _select_side(rows, side)
+    if not rows:
+        sys.exit(f'no rows left in {path} after --side {side}')
     if column is None:
         for cand in ('shelfmark', 'Shelfmark', 'call_number', 'Call Number',
                      'shelfmarks', 'סימן', 'Shelf Mark'):
@@ -209,6 +286,11 @@ def main():
     ap.add_argument('--all', action='store_true',
                     help='score every archived run and print the table')
     ap.add_argument('--column', help='shelfmark column name (autodetected)')
+    ap.add_argument('--side', choices=sorted(SIDE_KEEP),
+                    help='for a delta CSV from compare_passage_policies.py, '
+                         'which run to score. Required for such a file: '
+                         'scoring it whole credits the candidate with '
+                         'manuscripts only the baseline found')
     ap.add_argument('--deck', default=DECK_PATH)
     ap.add_argument('--show-missed', action='store_true')
     ap.add_argument('--show-ungraded', action='store_true')
@@ -239,7 +321,7 @@ def main():
                 report(name, res, args.show_missed, args.show_ungraded)
 
     if args.run:
-        res = score(load_run(args.run, args.column), deck, aliases)
+        res = score(load_run(args.run, args.column, args.side), deck, aliases)
         report(os.path.basename(args.run), res,
                args.show_missed or True, args.show_ungraded or True)
 

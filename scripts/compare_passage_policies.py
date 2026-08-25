@@ -38,7 +38,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from shared.passage_index import (  # noqa: E402
     MANIFEST_NAME, diagnose_index, open_index,
 )
-from shared.passage_policy import PRESETS, get_preset  # noqa: E402
+from shared.passage_policy import (  # noqa: E402
+    DEFAULT_DEPTH, DEFAULT_LENGTH, DEPTH_PROFILES, LENGTH_PROFILES, PRESETS,
+    compose,
+)
 from shelfmark_join import shelfmark_key  # noqa: E402,F401
 from shared.passage_search import search_passage  # noqa: E402
 
@@ -143,6 +146,23 @@ def main() -> int:
     ap.add_argument('--baseline', default='widest-40', choices=sorted(PRESETS))
     ap.add_argument('--candidate', default='short-28',
                     choices=sorted(PRESETS))
+    # The other two policy axes, per side. `--baseline`/`--candidate` name a
+    # WIDTH preset only, so before these existed the committed instrument
+    # could not express -- let alone reproduce -- the depth measurements this
+    # milestone rests on: `--candidate deep` was simply rejected by argparse,
+    # because `deep` lives in DEPTH_PROFILES and reaches a policy only through
+    # `compose()`. Per side, because the depth table compares depths against
+    # each other at a fixed width, which is a baseline-vs-candidate run.
+    for _side, _dflt in (('baseline', 'widest-40'), ('candidate', 'short-28')):
+        ap.add_argument(f'--{_side}-length', default=DEFAULT_LENGTH,
+                        choices=sorted(LENGTH_PROFILES),
+                        help=f'passage-length profile for the {_side} '
+                             f'(default: {DEFAULT_LENGTH})')
+        ap.add_argument(f'--{_side}-depth', default=DEFAULT_DEPTH,
+                        choices=sorted(DEPTH_PROFILES),
+                        help=f'search-depth profile for the {_side} '
+                             f'(default: {DEFAULT_DEPTH}). Deeper costs '
+                             f'proportionally more time')
     ap.add_argument('--libraries-csv', default='',
                     help='libraries.csv for shelfmarks (optional; '
                          'default: <index>/../libraries.csv then ./libraries.csv)')
@@ -155,7 +175,10 @@ def main() -> int:
     ap.add_argument('--min-span', type=int, default=0,
                     help='override the candidate policy min_span (0=keep). '
                          'Sweep together with --verify-margin: below 40 the '
-                         'margin, not the span floor, decides the result')
+                         'margin, not the span floor, decides the result. '
+                         'Applied ON TOP of --candidate-length, for sweeping '
+                         'BETWEEN the named points rather than instead of '
+                         'them')
     ap.add_argument('--verify-margin', type=int, default=-1,
                     help='override the candidate policy verify_margin '
                          '(-1=keep, 0 is legal and means no extension)')
@@ -190,7 +213,13 @@ def main() -> int:
                 break
     shelf = load_shelfmarks(csv_path)
 
-    base_p, cand_p = get_preset(args.baseline), get_preset(args.candidate)
+    # Through compose(), never a hand-rolled replace(): it is the shared
+    # entry point for all three axes, it derives the composed name, and
+    # policy_id is a content hash -- so a probe run stays traceable to
+    # exactly the settings that produced it.
+    base_p = compose(args.baseline, args.baseline_length, args.baseline_depth)
+    cand_p = compose(args.candidate, args.candidate_length,
+                     args.candidate_depth)
     overrides = {}
     if args.min_span:
         overrides['min_span'] = args.min_span
@@ -199,6 +228,8 @@ def main() -> int:
     if overrides:
         cand_p = replace(cand_p, name=f'{cand_p.name}+probe', **overrides)
         print(f'probe overrides: {overrides}')
+    if base_p.name != args.baseline or cand_p.name != args.candidate:
+        print(f'policies: baseline={base_p.name}  candidate={cand_p.name}')
     print(f'query: {len(text)} chars from {args.query_file}')
     print(f'index: {args.index}  ({idx.n_records:,} records)')
     if shelf:
@@ -255,18 +286,48 @@ def main() -> int:
     if args.csv:
         with open(args.csv, 'w', encoding='utf-8-sig', newline='') as fh:
             w = csv.writer(fh)
+            # The COMPOSED names and their content-hash ids, not the raw
+            # --baseline/--candidate width arguments. Those were unambiguous
+            # until width, length and depth became three axes: two runs at
+            # different depths, or with different probe overrides, otherwise
+            # write identical provenance and their archives cannot be told
+            # apart. policy_id is a content hash, so it pins the settings even
+            # for a composition nobody has named.
+            # `score`/`record_id` are the CANDIDATE's, and the baseline's
+            # get their own columns. They used to be whichever hit
+            # `cand.get(sid) or base[sid]` returned -- always the candidate
+            # for a `both` row -- so the baseline's score for a shared
+            # manuscript was simply discarded, and `--side baseline` in
+            # score_antiochus_deck.py would have read the candidate's number
+            # as the baseline's. Two policies that accept different spans, or
+            # pick a different best page for one manuscript, are exactly what
+            # the length and depth axes produce, so this is the common case
+            # rather than a corner.
+            #
+            # The old names keep their old meaning (the candidate's) so an
+            # existing reader is not silently repointed -- a column that
+            # changes meaning under a stable name is the defect this file has
+            # now hit twice.
             w.writerow(['sys_id', 'shelfmark', 'shelfmark_key', 'library',
                         'title', 'presence', 'score', 'score_unit',
-                        'record_id', 'baseline_policy', 'candidate_policy'])
+                        'record_id',
+                        'baseline_score', 'baseline_record_id',
+                        'baseline_policy', 'baseline_policy_id',
+                        'candidate_policy', 'candidate_policy_id'])
             for sid in sorted(set(base) | set(cand)):
-                h = cand.get(sid) or base[sid]
-                presence = ('both' if sid in base and sid in cand
-                            else ('candidate_only' if sid in cand
+                b_hit, c_hit = base.get(sid), cand.get(sid)
+                presence = ('both' if b_hit and c_hit
+                            else ('candidate_only' if c_hit
                                   else 'baseline_only'))
                 sm, lib, title = label(sid)
                 w.writerow([sid, sm, shelfmark_key(sm), lib, title, presence,
-                            int(h.score), 'matched_letters',
-                            h.record_id, args.baseline, args.candidate])
+                            int(c_hit.score) if c_hit else '',
+                            'matched_letters',
+                            c_hit.record_id if c_hit else '',
+                            int(b_hit.score) if b_hit else '',
+                            b_hit.record_id if b_hit else '',
+                            base_p.name, base_p.policy_id,
+                            cand_p.name, cand_p.policy_id])
         print(f'\nwrote {args.csv}')
     return 0
 

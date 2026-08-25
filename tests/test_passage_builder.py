@@ -543,3 +543,71 @@ def test_diagnose_never_raises_on_garbage(tmp_path):
     assert 'unparseable' in diagnose_index(d)
     # Non-paths must not blow up either -- this is a diagnostic, not a gate.
     assert isinstance(diagnose_index(''), str)
+
+
+# ---------------------------------------------------------------------------
+# A zero-postings index is valid, not corrupt.
+# ---------------------------------------------------------------------------
+
+def _all_capped_index(tmp_path, name='allcapped'):
+    """Build a REAL index whose every gram is removed by df_cap.
+
+    Two records that are a repeating five-letter cycle, so the corpus holds
+    only five distinct 5-grams, each far above `df_cap=1`. `_apply_df_cap`
+    zeroes every histogram bucket and pass 2 writes a legitimately empty
+    postings.bin. Nothing here is corrupted by hand -- this is what an
+    ordinary df_cap on a low-diversity corpus produces.
+    """
+    d = str(tmp_path / name)
+    text = _letters([i % 5 for i in range(300)])
+    build_index([('rec0000', text), ('rec0001', text)], d,
+                partitions=1, apply_hygiene=False, df_cap=1)
+    assert os.path.getsize(os.path.join(d, POSTINGS_NAME)) == 0, (
+        'fixture is wrong: df_cap did not empty the postings'
+    )
+    return d
+
+
+def test_a_zero_postings_index_opens(tmp_path):
+    """`np.memmap` raises on a zero-byte file, and `open_index` guarded only
+    ONE of its four mapped sections. A build whose every gram was capped away
+    is a valid index that matches nothing -- it must open, not fail closed."""
+    idx = open_index(_all_capped_index(tmp_path))
+    assert idx is not None, 'a legitimately empty index failed to open'
+    assert idx.n_records == 2
+    assert len(idx.postings) == 0
+
+
+def test_the_diagnosis_and_the_loader_agree_on_a_zero_postings_index(tmp_path):
+    """The defect this pins: `diagnose_index` returned 'opens cleanly' while
+    `open_index` returned None -- exactly the contradiction diagnose_index's
+    own docstring promises never to produce, and the reason it exists."""
+    d = _all_capped_index(tmp_path, 'agree')
+    opens = open_index(d) is not None
+    says_opens = diagnose_index(d) == 'opens cleanly'
+    assert opens == says_opens, (
+        f'diagnose_index says opens={says_opens} but open_index says '
+        f'opens={opens}'
+    )
+
+
+def test_a_zero_postings_index_answers_a_query_with_no_matches(tmp_path):
+    """Opening is only half of it. An index that matches nothing must SAY so,
+    not raise on the first search."""
+    from shared.passage_search import search_passage
+    from shared.passage_policy import get_preset
+    idx = open_index(_all_capped_index(tmp_path, 'query'))
+    hits, _report = search_passage(idx, _letters(range(60)),
+                                   get_preset('widest-40'))
+    assert hits == []
+
+
+def test_a_truncated_file_is_still_caught(tmp_path):
+    """The zero-length guard must not swallow real truncation: a file that is
+    short but NOT empty is corruption, and still has to fail closed."""
+    d = _healthy_index(tmp_path, 'shortened')
+    victim = os.path.join(d, POSTINGS_NAME)
+    with open(victim, 'r+b') as fh:
+        fh.truncate(os.path.getsize(victim) - 16)
+    assert open_index(d) is None
+    assert 'truncated' in diagnose_index(d)

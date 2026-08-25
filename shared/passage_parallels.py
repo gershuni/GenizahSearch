@@ -123,13 +123,75 @@ site:
   `manuscript_snippet`) is built for exactly the rows this method RETURNS
   (both `main` and `filtered`, each capped independently to `render_cap`
   groups) -- a BOUNDED re-normalization per the plan's display-span
-  contract. Row count per bucket is itself bounded upstream by
-  `policy.verify_cap` (default 3,000 -- shared/passage_policy.py: at most
-  one hit per verified candidate); at a measured ~1.3 ms/row render cost, a
-  worst-case full cap on BOTH buckets is a handful of seconds, comfortably
-  inside `SEARCH_API_PASSAGE_TIMEOUT` (30s default). This is an ACCEPTED
-  cost, not further sub-capped, specifically so "rendered == kept" holds
-  even in that worst case.
+  contract. Row count per bucket is bounded upstream by `policy.verify_cap`
+  (shared/passage_policy.py: at most one hit per verified candidate), at a
+  measured ~1.3 ms/row render cost. This is an ACCEPTED cost, not further
+  sub-capped, specifically so "rendered == kept" holds even in the worst
+  case.
+
+  **That bound is 3,000 only at `normal` depth.** This paragraph used to
+  say "default 3,000 ... comfortably inside SEARCH_API_PASSAGE_TIMEOUT
+  (30s)", which was true when written and stopped being true when the
+  search-depth axis raised `verify_cap` to 50,000 for `deep` and `deepest`
+  -- a 16x larger bound argued as safe on the smaller one (Codex review,
+  PR #328).
+
+  Measured on the real index (759,224 records) with a real 7,562-char query
+  at `max-40+short`. `hits` and `search` are observed; `render` is the hit
+  count times the ~1.3 ms/row constant above, so it is arithmetic rather
+  than a fourth measurement:
+
+      depth     verify_cap    hits   search   render*   total
+      normal         3,000     272     1.2s     0.4s     1.5s
+      deep          50,000     725     6.3s     0.9s     7.3s
+      deepest       50,000   2,431    15.5s     3.2s    18.6s
+
+  Acceptance runs at roughly 5% of `verify_cap`, not 100%, so the ~65s
+  render a full cap would imply does not occur. What HAS gone is the
+  margin: `deepest` spends about two thirds of the 30s budget where this
+  paragraph once described a tenth of it.
+
+  The breach arrives at roughly **11,150 rendered rows** -- (30s - 15.5s
+  search) / 1.3 ms -- about 4.6x anything measured.
+
+  Three corrections to an earlier version of this note, all of which made
+  the margin look different than it is (Codex review, PR #328):
+
+  * It said ~8,000 rows. That was (30 - 18.6) / 1.3 ms, the rows that fit
+    ON TOP of the 2,431 already rendered, written as though it were the
+    total. Subtract the search cost, not the whole measured run.
+  * It said a `filter_text` halves the threshold "since both buckets
+    render", and then that the pre-existing "worst-case full cap on BOTH
+    buckets" was 2x too pessimistic. Both statements are wrong, because
+    the answer depends on `render_cap` and neither said which regime it
+    meant (Codex, again, on the test written to pin the first correction):
+
+      - `render_cap == 0` -- the PAGE path, and the one this threshold is
+        about. No cap, so each hit lands in `filtered_candidate_rows` OR
+        `eligible_rows` (one `if/else`, one loop), the buckets PARTITION
+        the hits, and every row renders exactly once. A `filter_text`
+        redistributes the cost and adds none.
+      - `render_cap > 0` -- the API path. The two buckets are capped
+        INDEPENDENTLY, so a filter splitting hits across both raises the
+        rendered total from one cap to as many as two. Measured on a
+        4-group fixture at `render_cap=2`: 6 rows unfiltered, 12 with a
+        mixed filter. The pre-existing "full cap on BOTH buckets" was
+        RIGHT for this path.
+
+    `tests/test_passage_parallels.py::test_the_two_buckets_partition_the_hits`
+    now pins both regimes, because this paragraph has been corrected three
+    times and been wrong in a different direction each time.
+  * 11,150 assumes `search` stays at 15.5s while accepting 4.6x more rows,
+    and verification is what PRODUCES rows -- so a query returning 11,000
+    hits spends longer searching too, and the real breach comes earlier.
+    Treat it as an upper bound, not an estimate.
+
+  A render sub-cap was considered and NOT added: it would partially undo
+  the owner's 2026-08-23 ruling that `render_cap=0` exists so found
+  manuscripts stop being hidden (198 shown of 497 found on Birkat Hamazon),
+  and the measurement does not justify that price. Anyone widening
+  `verify_cap` further should redo the table above rather than trust this
+  one -- which is exactly the mistake this note records.
 * Two costs are deliberately NOT optimized away (adversarial review,
   "deliberately skipped" items): (1) `nfc()` runs twice per rendered row's
   manuscript text -- once explicitly here, once again inside
