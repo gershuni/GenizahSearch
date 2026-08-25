@@ -412,9 +412,10 @@ def test_a_lagging_background_delete_cannot_hit_the_next_generation(
     res2 = c.build()
     assert res2.status == 'installed'
     first_prev = started[0][0]
-    assert os.path.basename(first_prev) != os.path.basename(
-        [n for n in os.listdir(c.root) if n.startswith(pl.PREV_PREFIX)][0]
-    ) or True  # names differ by construction; the real assertion is below
+    # The held delete has not run yet, so res2's own prev generation must
+    # still be sitting on disk under the EXACT name it was queued with.
+    current_prevs = [n for n in os.listdir(c.root) if n.startswith(pl.PREV_PREFIX)]
+    assert current_prevs == [os.path.basename(first_prev)], current_prevs
 
     res3 = c.build()
     assert res3.status == 'installed'
@@ -523,92 +524,158 @@ def test_a_transient_open_failure_does_not_downgrade_a_valid_reload(
 #     fails AND the rollback itself cannot be completed cleanly.
 # ---------------------------------------------------------------------------
 
-def test_rollback_failed_when_the_restore_rename_is_persistently_blocked(
+# A marker file travels with a directory through every os.rename (rename is
+# metadata-only -- it never touches contents), so tying "this build is
+# broken" to the marker's presence, rather than to whatever path the content
+# currently sits under, lets the SAME simulated-broken build follow staging
+# -> live -> quarantine while a never-marked previous generation opens fine
+# wherever IT ends up, including after the terminal recovery walk promotes
+# it back into `current/`. A stub keyed on the "live" path instead would
+# also block the recovery walk's own post-promotion reopen of that exact
+# path, which cannot be told apart from a genuinely unrecoverable machine.
+_BROKEN_BUILD_MARKER = '.simulated_broken'
+
+
+def test_rollback_failed_terminal_recovery_still_finds_the_previous_generation(
         tmp_path, monkeypatch):
     """New live renamed in, fails to open, gets quarantined -- then the
-    restore of the known-good previous generation is itself blocked by a
-    persistent PermissionError. Nothing may be deleted: not the quarantine
-    (the only copy of the broken build) and not the previous generation (the
-    only copy of the last known-good artifact)."""
+    restore of the known-good previous generation is blocked long enough to
+    exhaust `_swap_rebuild`'s own bounded retry (`rollback_failed`). Nothing
+    may be deleted: not the quarantine (the only copy of the broken build)
+    and not the previous generation. And -- the point of this test --
+    `run_build_and_swap`'s terminal path must not stop at a bare open of
+    `current/`: it must route through the same recovery walk startup uses,
+    which gets its OWN separate bounded retry at the very same restore
+    rename and (here, modelling a transient block that clears a moment
+    later, not a permanently cursed path) succeeds where the swap's narrower
+    retry gave up -- promoting the previous generation into `current/` and
+    returning it as a working index, not leaving the caller with nothing."""
     c = _Corpus(tmp_path)
     assert c.build().status == 'installed'
     live = c.live_dir
 
-    built = pl.execute_build(c.root, c.records, c.source_paths, partitions=2)
-    validation = pl.begin_swap(built.staging_dir, c.source_paths,
-                               built.pre_build_manifest)
-    assert validation.ok
-
     real_open = pl.open_index
 
-    def _fail_only_live(path):
-        if os.path.normpath(path) == os.path.normpath(live):
+    def _wont_open_if_marked_broken(path):
+        if os.path.isfile(os.path.join(path, _BROKEN_BUILD_MARKER)):
             return None
         return real_open(path)
 
-    monkeypatch.setattr(pl, 'open_index', _fail_only_live)
+    monkeypatch.setattr(pl, 'open_index', _wont_open_if_marked_broken)
+
+    # Mark the NEW build broken only once `begin_swap`'s own validation of
+    # staging has already passed -- otherwise the marker would fail that
+    # earlier, unrelated check instead of the swap's post-promotion reload.
+    real_begin_swap = pl.begin_swap
+
+    def _mark_new_build_broken(staging_dir, source_paths, pre_build_manifest,
+                               cancel_check=None):
+        result = real_begin_swap(staging_dir, source_paths, pre_build_manifest,
+                                 cancel_check=cancel_check)
+        if result.ok:
+            open(os.path.join(staging_dir, _BROKEN_BUILD_MARKER), 'w').close()
+        return result
+
+    monkeypatch.setattr(pl, 'begin_swap', _mark_new_build_broken)
     monkeypatch.setattr(pl, 'RENAME_RETRY_ATTEMPTS', 2)
     monkeypatch.setattr(pl, 'RENAME_RETRY_DELAY_SECONDS', 0)
 
     real_rename = os.rename
+    blocked_calls = {'n': 0}
 
-    def _block_rollback_restore(src, dst):
+    def _restore_blocked_then_clears(src, dst):
         # Only the prev->live restore rename is blocked -- live->prev and
         # staging->live (both earlier in the same swap) must still succeed.
+        # Blocked for exactly RENAME_RETRY_ATTEMPTS calls -- enough to
+        # exhaust the swap's own retry loop -- then it clears, exactly like
+        # a lagging antivirus scan rather than a rename that can never land.
         if os.path.basename(src).startswith(pl.PREV_PREFIX) \
                 and os.path.normpath(dst) == os.path.normpath(live):
-            raise PermissionError('synthetic: prev->live restore blocked')
+            blocked_calls['n'] += 1
+            if blocked_calls['n'] <= 2:
+                raise PermissionError('synthetic: prev->live restore blocked')
         return real_rename(src, dst)
 
-    monkeypatch.setattr(pl.os, 'rename', _block_rollback_restore)
-    pl.close_passage_state()
-    swap = pl.perform_swap(c.root, built.staging_dir)
+    monkeypatch.setattr(pl.os, 'rename', _restore_blocked_then_clears)
 
-    assert swap.status == 'rollback_failed'
-    assert swap.quarantine_dir
-    assert os.path.isdir(swap.quarantine_dir), (
+    res = c.build()
+
+    assert res.status == 'rollback_failed'
+    assert res.quarantine_dir
+    assert os.path.isdir(res.quarantine_dir), (
         'the unopenable build must be preserved, not deleted')
+    assert res.index is not None, (
+        'the terminal recovery walk must still return the previous '
+        'generation as a working index, not leave the caller with nothing')
+    assert res.index.n_records == len(c.records)
+    assert res.live_dir == c.live_dir
     prevs = [n for n in os.listdir(c.root) if n.startswith(pl.PREV_PREFIX)]
-    assert len(prevs) == 1, (
-        'the previous known-good generation must survive its own failed '
-        'restore, not be deleted', prevs)
-    assert not os.path.isdir(live), (
-        'live cannot be silently left holding the unopenable build')
+    assert prevs == [], (
+        'the recovered generation was promoted into current/ by the '
+        'recovery walk, not deleted and not left behind under its own name')
+    assert open_index(c.live_dir) is not None
 
 
-def test_reload_failed_no_recovery_when_the_rolled_back_live_still_wont_open(
+def test_reload_failed_no_recovery_terminal_recovery_still_finds_live(
         tmp_path, monkeypatch):
     """The rollback rename itself succeeds, but re-opening the restored
-    directory ALSO fails -- the worst case with no automatic recovery left.
-    Both copies (the quarantined broken build and the restored-but-unopenable
-    live) must survive; nothing is deleted."""
+    directory ALSO fails within `_swap_rebuild`'s own bounded retry
+    (`reload_failed_no_recovery`) -- modelling a transient inability to open
+    that specific location that clears a moment later, not a directory that
+    is genuinely, permanently unopenable. Both copies (the quarantined
+    broken build and the restored live) must survive; nothing is deleted.
+    And -- the point of this test -- `run_build_and_swap`'s terminal path
+    must route through the SAME recovery walk startup uses, whose own
+    separate bounded retry succeeds where the swap's narrower one gave up,
+    returning the restored generation as a working index rather than
+    leaving the caller with nothing despite `current/` holding a perfectly
+    good artifact."""
     c = _Corpus(tmp_path)
     assert c.build().status == 'installed'
     live = c.live_dir
 
-    built = pl.execute_build(c.root, c.records, c.source_paths, partitions=2)
-    validation = pl.begin_swap(built.staging_dir, c.source_paths,
-                               built.pre_build_manifest)
-    assert validation.ok
-
     real_open = pl.open_index
 
-    def _live_never_opens(path):
+    real_begin_swap = pl.begin_swap
+
+    def _mark_new_build_broken(staging_dir, source_paths, pre_build_manifest,
+                               cancel_check=None):
+        result = real_begin_swap(staging_dir, source_paths, pre_build_manifest,
+                                 cancel_check=cancel_check)
+        if result.ok:
+            open(os.path.join(staging_dir, _BROKEN_BUILD_MARKER), 'w').close()
+        return result
+
+    monkeypatch.setattr(pl, 'begin_swap', _mark_new_build_broken)
+
+    live_open_calls = {'n': 0}
+
+    def _stub_open(path):
+        if os.path.isfile(os.path.join(path, _BROKEN_BUILD_MARKER)):
+            return None  # the new build's own data, wherever it currently sits
         if os.path.normpath(path) == os.path.normpath(live):
-            return None  # both the new build AND the restored prev, alike
+            live_open_calls['n'] += 1
+            if live_open_calls['n'] <= 2:
+                # Transient: fails exactly as many times as `_swap_rebuild`'s
+                # own reload check attempts, then clears before the terminal
+                # recovery walk's SEPARATE retry gets to it.
+                return None
         return real_open(path)
 
-    monkeypatch.setattr(pl, 'open_index', _live_never_opens)
-    pl.close_passage_state()
-    swap = pl.perform_swap(c.root, built.staging_dir)
+    monkeypatch.setattr(pl, 'open_index', _stub_open)
 
-    assert swap.status == 'reload_failed_no_recovery'
-    assert swap.quarantine_dir
-    assert os.path.isdir(swap.quarantine_dir), (
+    res = c.build()
+
+    assert res.status == 'reload_failed_no_recovery'
+    assert res.quarantine_dir
+    assert os.path.isdir(res.quarantine_dir), (
         'the unopenable new build must be preserved, not deleted')
-    assert os.path.isdir(live), (
-        'the restored previous generation is still on disk -- unopenable '
-        'per this stub, but not deleted')
+    assert res.index is not None, (
+        'the terminal recovery walk must still return the restored '
+        'generation as a working index')
+    assert res.index.n_records == len(c.records)
+    assert res.live_dir == c.live_dir
+    assert open_index(c.live_dir) is not None
     prevs = [n for n in os.listdir(c.root) if n.startswith(pl.PREV_PREFIX)]
     assert prevs == [], (
         'the previous generation was RENAMED into live, not left behind '
@@ -631,6 +698,27 @@ def test_invalid_staging_leaves_old_live_reopenable(tmp_path):
     assert validation.reason == pl.VALIDATION_INVALID_STAGING
     assert not os.path.isdir(fake_staging)
     assert open_index(c.live_dir) is not None, 'old live must still open'
+
+
+def test_a_transient_staging_open_failure_does_not_discard_a_finished_build(
+        tmp_path, monkeypatch):
+    """A single flaky open of a genuinely valid staging artifact must not be
+    judged invalid -- and must not be deleted -- before the same bounded
+    retry every other reload check in this module gets."""
+    c = _Corpus(tmp_path)
+    built = pl.execute_build(c.root, c.records, c.source_paths, partitions=2)
+    assert built.status == 'built'
+
+    stub, calls = _flaky_open_index(built.staging_dir, fail_times=1)
+    monkeypatch.setattr(pl, 'open_index', stub)
+
+    validation = pl.begin_swap(built.staging_dir, c.source_paths,
+                               built.pre_build_manifest)
+
+    assert validation.ok, validation.reason
+    assert calls['n'] >= 2
+    assert os.path.isdir(built.staging_dir), (
+        'a candidate must not be deleted before the retry gives up on it')
 
 
 def test_corpus_changed_mismatch_discards_staging_leaves_live_untouched(
@@ -705,12 +793,9 @@ def test_cancelled_latch_before_any_rename_leaves_live_untouched(tmp_path):
 
 def test_cancelled_latch_on_a_first_build_leaves_no_live_promoted(tmp_path):
     """FIRST build: no `live/` exists, so `perform_swap` routes to
-    `_swap_first_build`, which -- unlike `_swap_rebuild` -- has NO internal
-    cancelled re-check of its own. That makes `perform_swap`'s own ENTRY
-    check the ONLY thing standing between a cancel and a promoted staging
-    dir here; the rebuild variant above cannot prove that on its own, since
-    `_swap_rebuild`'s internal re-check would still catch a disabled entry
-    check."""
+    `_swap_first_build`. A latch already set before `perform_swap` is even
+    entered is caught by `perform_swap`'s own entry check, before
+    `_swap_first_build` is reached at all."""
     c = _Corpus(tmp_path)
     assert not os.path.isdir(c.live_dir)
 
@@ -726,6 +811,30 @@ def test_cancelled_latch_on_a_first_build_leaves_no_live_promoted(tmp_path):
     assert not os.path.isdir(built.staging_dir), 'staging must be discarded'
     assert not os.path.isdir(c.live_dir), (
         'a cancelled FIRST build must never promote staging to live')
+
+
+def test_cancel_race_before_first_build_promotion_rename_is_still_caught(
+        tmp_path):
+    """The latch is NOT set when `perform_swap`'s entry check runs, but IS
+    set by the time `_swap_first_build` reaches its own destructive rename --
+    proving the re-check immediately before THAT rename, not merely the entry
+    check, is what stands between a race and a promoted first build."""
+    c = _Corpus(tmp_path)
+    assert not os.path.isdir(c.live_dir)
+
+    built = pl.execute_build(c.root, c.records, c.source_paths, partitions=2)
+    assert built.status == 'built'
+    validation = pl.begin_swap(built.staging_dir, c.source_paths,
+                               built.pre_build_manifest)
+    assert validation.ok
+
+    cancel = _cancel_after(2)  # False on perform_swap's entry check, True after
+    swap = pl.perform_swap(c.root, built.staging_dir, cancel_check=cancel)
+
+    assert swap.status == 'cancelled'
+    assert not os.path.isdir(built.staging_dir), 'staging must be discarded'
+    assert not os.path.isdir(c.live_dir), (
+        'a cancel racing the promotion rename must never let it land')
 
 
 # ---------------------------------------------------------------------------
@@ -1038,6 +1147,13 @@ def _mmap_holder_script() -> str:
     )
 
 
+@pytest.mark.skipif(
+    sys.platform != 'win32',
+    reason='os.rename over a directory another process has memory-mapped '
+           'only raises PermissionError on Windows -- POSIX rename() is a '
+           'metadata-only operation unaffected by open file handles inside '
+           'the directory, so this is a Windows filesystem property, not a '
+           'code property, and the sibling test below pins the POSIX side')
 def test_a_second_process_mapped_reader_causes_a_persistent_rename_block(
         tmp_path, monkeypatch):
     c = _Corpus(tmp_path)
@@ -1069,6 +1185,41 @@ def test_a_second_process_mapped_reader_causes_a_persistent_rename_block(
 
     # Once the reader is gone, the SAME live directory must still open fine
     # -- the block cost nothing permanent.
+    assert open_index(live) is not None
+
+
+@pytest.mark.skipif(
+    sys.platform == 'win32',
+    reason='pins the POSIX side of the scenario above: renaming a directory '
+           "out from under another process's open mmap is NOT blocked on "
+           'POSIX, so the rebuild must complete rather than roll back')
+def test_a_second_process_mapped_reader_does_not_block_rename_on_posix(
+        tmp_path):
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+    live = c.live_dir
+
+    proc = subprocess.Popen(
+        [sys.executable, '-c', _mmap_holder_script(), live],
+        stdout=subprocess.PIPE, text=True)
+    try:
+        line = proc.stdout.readline().strip()
+        assert line == 'MAPPED', line
+        time.sleep(0.3)
+
+        built = pl.execute_build(c.root, c.records, c.source_paths, partitions=2)
+        assert built.status == 'built'
+        validation = pl.begin_swap(built.staging_dir, c.source_paths,
+                                   built.pre_build_manifest)
+        assert validation.ok
+
+        pl.close_passage_state()
+        swap = pl.perform_swap(c.root, built.staging_dir)
+        assert swap.status == 'installed', swap.status
+    finally:
+        proc.kill()
+        proc.wait(timeout=10)
+
     assert open_index(live) is not None
 
 
@@ -1153,6 +1304,13 @@ def test_run_build_and_swap_uses_the_injected_seam_not_close_passage_state(
         '-- only the injected seam may release _state')
 
 
+@pytest.mark.skipif(
+    sys.platform != 'win32',
+    reason='the seam-skipped rename is only caught by the OS on Windows -- '
+           'POSIX rename() does not care that this process still holds an '
+           'open mmap on the directory being renamed, so a broken seam is '
+           'NOT stopped there (a filesystem property, not a code property); '
+           'the sibling test below pins the POSIX side')
 def test_run_build_and_swap_relies_on_the_seam_actually_releasing(tmp_path):
     """A seam that does nothing must leave the OLD live's handles open --
     proving the rename that follows depends on the seam's own effect, not on
@@ -1167,6 +1325,24 @@ def test_run_build_and_swap_relies_on_the_seam_actually_releasing(tmp_path):
     assert res2.status == 'rename_blocked', res2.status
     assert pl.passage_available(), (
         'a no-op seam must leave the old state exactly as installed')
+    pl.close_passage_state()
+
+
+@pytest.mark.skipif(
+    sys.platform == 'win32',
+    reason='pins the POSIX side of the scenario above: a broken seam is NOT '
+           'caught by the OS here, so the rebuild goes through regardless '
+           'of the still-open old mmap')
+def test_run_build_and_swap_seam_not_running_is_not_caught_by_the_os_on_posix(
+        tmp_path):
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+    assert pl.passage_available()
+
+    res2 = pl.run_build_and_swap(c.root, c.records, c.source_paths,
+                                 c.corpus_path, partitions=2,
+                                 release_live_state=lambda: None)
+    assert res2.status == 'installed', res2.status
     pl.close_passage_state()
 
 

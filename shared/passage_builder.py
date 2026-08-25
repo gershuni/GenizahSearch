@@ -185,6 +185,13 @@ def _pass1(records: Iterable, index_dir: str, *, stride: int,
         xfh.write('record_id\treason\n')
         for record_id, text in records:
             stats.n_records_seen += 1
+            # Checked on every record SEEN, before either `continue` below --
+            # a corpus that is mostly or entirely filtered by hygiene or
+            # below_gram_width must still be cancellable; gating this on
+            # n_records_indexed instead would let such a corpus run pass 1 to
+            # completion ignoring Cancel.
+            if stats.n_records_seen % CANCEL_CHECK_RECORDS == 0:
+                _check_cancel(cancel_check)
             if apply_hygiene:
                 reason = page_filter(text)
                 if reason is not None:
@@ -227,8 +234,6 @@ def _pass1(records: Iterable, index_dir: str, *, stride: int,
             if stats.n_records_seen % 100_000 == 0:
                 progress('pass1', stats.n_records_seen,
                          stats.n_records_indexed, time.time() - t0)
-            if stats.n_records_seen % CANCEL_CHECK_RECORDS == 0:
-                _check_cancel(cancel_check)
         _flush_hist()
 
     recs = np.zeros(len(rec_rows), dtype=RECORD_DTYPE)

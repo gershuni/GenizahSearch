@@ -708,6 +708,29 @@ def test_cancel_check_stops_pass1(tmp_path, monkeypatch):
     shutil.rmtree(d)
 
 
+def test_cancel_check_stops_pass1_when_every_record_is_filtered(
+        tmp_path, monkeypatch):
+    """Records dropped by hygiene or below_gram_width `continue` past the
+    indexing work -- if the cancel check were gated on n_records_indexed
+    instead of n_records_seen, a corpus that filters every record would run
+    pass 1 to completion ignoring Cancel."""
+    monkeypatch.setattr(passage_builder, 'CANCEL_CHECK_RECORDS', 3)
+    records = [(f'short{i:04d}', 'א') for i in range(20)]  # all below_gram_width
+    d = str(tmp_path / 'cancel-pass1-all-filtered')
+    cancel = _cancel_after(1)
+    with pytest.raises(BuildCancelled):
+        passage_builder.build_index(records, d, partitions=2,
+                                    apply_hygiene=False, cancel_check=cancel)
+    assert cancel.calls['i'] == 1
+    # records.bin is written only once pass 1's loop has run to completion, so
+    # its absence is what proves the cancellation fired DURING pass 1 rather
+    # than at a later checkpoint -- which is the whole claim here, since an
+    # all-filtered corpus reaches every later checkpoint regardless.
+    assert not os.path.exists(os.path.join(d, RECORDS_NAME))
+    assert not os.path.exists(os.path.join(d, MANIFEST_NAME))
+    shutil.rmtree(d)
+
+
 @pytest.mark.parametrize('construction', ['scatter', 'spool'])
 def test_cancel_mid_build_releases_the_memmap_for_immediate_deletion(
         tmp_path, construction):

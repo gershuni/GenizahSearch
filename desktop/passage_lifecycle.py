@@ -534,17 +534,20 @@ def begin_swap(staging_dir: str, source_paths: list,
                pre_build_manifest: list,
                cancel_check: Optional[Callable[[], bool]] = None
                ) -> SwapValidation:
-    """Phase one. Opens `staging_dir` with `open_index` and releases those
-    handles immediately -- the only purpose is proving the artifact is real
-    -- then re-fingerprints the corpus. If the corpus changed DURING the
-    build, staging is discarded rather than swapped in: the artifact and the
-    files on disk would silently disagree.
+    """Phase one. Opens `staging_dir` with the same bounded retry as every
+    other reload check in this module and releases those handles immediately
+    -- the only purpose is proving the artifact is real -- then re-fingerprints
+    the corpus. A ten-minute build must not be discarded over one transient
+    Windows access error; only a candidate that fails EVERY attempt is
+    invalid, and nothing is deleted before it has been given that chance. If
+    the corpus changed DURING the build, staging is discarded rather than
+    swapped in: the artifact and the files on disk would silently disagree.
 
     A hash cancel raises `BuildCancelled` (propagated, not swallowed) after
     cleaning staging -- consistent with every other cancel point in this
     subsystem.
     """
-    idx = open_index(staging_dir)
+    idx = _open_with_retry(staging_dir)
     if idx is None:
         _cleanup_staging(staging_dir)
         return SwapValidation(ok=False, reason=VALIDATION_INVALID_STAGING)
@@ -599,11 +602,20 @@ def perform_swap(root: str, staging_dir: str,
         return SwapResult(status='cancelled')
 
     if not os.path.isdir(live):
-        return _swap_first_build(live, staging_dir)
+        return _swap_first_build(live, staging_dir, cancelled)
     return _swap_rebuild(root, live, staging_dir, cancelled)
 
 
-def _swap_first_build(live: str, staging_dir: str) -> SwapResult:
+def _swap_first_build(live: str, staging_dir: str,
+                      cancelled: Callable[[], bool]) -> SwapResult:
+    # Re-checked immediately before the destructive rename, not only at
+    # `perform_swap`'s entry -- a cancel racing in between those two points
+    # must not promote staging, exactly like `_swap_rebuild`'s own re-check
+    # before ITS destructive rename.
+    if cancelled():
+        _cleanup_staging(staging_dir)
+        return SwapResult(status='cancelled')
+
     try:
         _retry_rename(staging_dir, live)
     except PermissionError:
@@ -785,9 +797,15 @@ def run_build_and_swap(root: str, records, source_paths: list,
                                       quarantine_dir=swap.quarantine_dir)
 
         # rename_blocked / cancelled / reload_failed_no_recovery /
-        # rollback_failed -- reopen whatever survives so passage stays
-        # available if anything did.
-        recovered = _reopen_live(root)
+        # rollback_failed -- `current/` may be ABSENT here (rollback_failed
+        # leaves it missing while a perfectly good `_prev-*` still sits on
+        # disk), so a bare open of `current/` is not enough. Route through
+        # the same validate-newest-to-oldest walk startup recovery uses --
+        # one recovery implementation, not two that can disagree -- so the
+        # caller still ends up with the best index actually recoverable.
+        # `_recover_at_startup` deletes nothing until a candidate proves
+        # openable, and never touches the lock (already held here).
+        recovered = _recover_at_startup(root)
         return BuildAndSwapResult(status=swap.status, index=recovered.index,
                                   live_dir=recovered.live_dir,
                                   quarantine_dir=swap.quarantine_dir)
