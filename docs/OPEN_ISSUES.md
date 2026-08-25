@@ -1,6 +1,10 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-08-23 — one P2 added while the owner graded the first passage-search GUI runs (PR #324): parallels xlsx exports carry no match highlighting in either method, plus two owner rulings recorded in that entry (uncapped exports; paging for >200 display, into Phase 146A). Previous header (2026-08-20):
+> **Last Updated:** 2026-08-25 — the codebase-wide `sys_id` parser divergence reported from the
+> multi-witness parallels review is CLOSED (entry in the archive). `97` is the LOCAL "My Library"
+> namespace, not an NLI corpus prefix, and the divergence was not latent: the 99-only pattern
+> mis-matched INSIDE a LOCAL id 6.36% of the time, live on the desktop LAB path. One definition now
+> lives in `shared/sys_id_patterns.py` with a repo-grep lint. Previous header (2026-08-23) — one P2 added while the owner graded the first passage-search GUI runs (PR #324): parallels xlsx exports carry no match highlighting in either method, plus two owner rulings recorded in that entry (uncapped exports; paging for >200 display, into Phase 146A). Previous header (2026-08-20):
 > v8.6.0 (desktop Pause/Resume) shipped; two P2 entries added for
 > what it did NOT close: the search toolbar is only partly de-crowded, and a paused search does not
 > survive closing the program. The P1 is CLOSED. The discovery citation-range

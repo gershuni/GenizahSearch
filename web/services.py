@@ -20,6 +20,7 @@ from genizah_core import (
 )
 from shared.synthetic_sys_id import is_synthetic_sys_id  # noqa: F401  Phase 85 D-06/D-08/D-14: imported as defensive marker for Phase 86 AUDIT-03. Synthetic-aware page-count plumbing flows through web/pages/browse_enrichment.py:250 (Phase B cambridge_images population) — NOT through this file. The plan's pseudo-code expected a dict-with-canvases shape from get_cambridge_manifest_with_bridge, but that function returns a single manifest URL string. See .planning/phases/85-synthetic-fjms-inventory-rows/85-04-AUDIT.md "web/services.py" section for details.
 from web.state import state
+from shared.sys_id_patterns import CORPUS_SYS_ID_PATTERN
 
 # Library-specific attribution: (english, hebrew) tuples.
 # None = attribution comes from IIIF manifest (don't override).
@@ -217,8 +218,12 @@ DISCOVERY_PAGE_ID_LIMIT = 500
 #: All four components are REQUIRED: a LOCAL ("My Library") header carries an
 #: `F####` component instead of an `IE` one and is not a Genizah page at all,
 #: so it must never resolve here.
+#: NARROWED to the CORPUS namespace (2026-08-25): the sys_id group used to
+#: accept 97 as well, which contradicted the note above -- a LOCAL record is
+#: not a Genizah page and must never resolve here. Do not re-widen; see
+#: shared/sys_id_patterns.py.
 _DISCOVERY_PAGE_ID_RE = re.compile(
-    r'((?:99|97)\d{8,})_(IE\d+)_P(\d+)_(FL\d+)'
+    CORPUS_SYS_ID_PATTERN + r'_(IE\d+)_P(\d+)_(FL\d+)'
 )
 
 

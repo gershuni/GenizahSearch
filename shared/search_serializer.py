@@ -52,6 +52,7 @@ from typing import Any, Optional
 from shared.synthetic_sys_id import is_synthetic_sys_id
 # Phase 95 REQ-9 defense-in-depth: filter LOCAL items from /api/* payloads.
 from shared.local_sys_id import is_local_sys_id
+from shared.sys_id_patterns import CORPUS_SYS_ID_RE
 
 logger = logging.getLogger(__name__)
 
@@ -97,10 +98,12 @@ _filename_counter = itertools.count()
 # Private helpers
 # -----------------------------------------------------------------------------
 
-# MUST-FIX 94-02-A -- Shared sys_id regex for batch resolution. Matches the
-# production sys_id pattern (99 followed by 8+ digits, e.g. 99001234567890 or
-# Phase-85 synthetic 18-digit shape).
-_SYS_ID_REGEX = re.compile(r'(99\d{8,})')
+# MUST-FIX 94-02-A -- Shared sys_id regex for batch resolution. CORPUS
+# namespace only: LOCAL rows are dropped by ``_is_local_item`` and must never
+# resolve here. See shared/sys_id_patterns.py for why this must not be
+# widened to 97 -- an unanchored 99-only pattern MIS-MATCHES inside a LOCAL
+# id (6.36% of them), which is why the anchored shared constant is used.
+_SYS_ID_REGEX = CORPUS_SYS_ID_RE
 
 
 def _is_local_item(result: dict) -> bool:
@@ -352,7 +355,7 @@ def _serialize_item(
             _sid = explicit_sys
         if not _sid and raw_header:
             try:
-                m = re.search(r'(99\d{8,})', raw_header)
+                m = CORPUS_SYS_ID_RE.search(raw_header)
                 if m:
                     _sid = m.group(1)
             except Exception:

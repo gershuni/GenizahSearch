@@ -23,6 +23,7 @@ except ImportError:
 from shared.config import Config
 from shared.lab_settings import LabSettings
 from shared.text_normalize import strip_nikud, strip_search_diacritics
+from shared.sys_id_patterns import CORPUS_SYS_ID_RE
 
 LOGGER = logging.getLogger("genizah." + __name__)
 
@@ -1499,9 +1500,13 @@ class LabEngine:
             if str(item['uid']) in excluded_set:
                 is_excluded = True
 
-            # 2. Check by System ID (99...) found in header
+            # 2. Check by System ID (99...) found in header.
+            # CORPUS namespace only, and ANCHORED: this list can carry LOCAL
+            # ("My Library") LAB hits, and the old unanchored corpus pattern
+            # mis-matched inside a 97-prefixed LOCAL id -- excluding the wrong
+            # manuscript. See shared/sys_id_patterns.py.
             if not is_excluded:
-                m = re.search(r'(99\d+)', str(item['raw_header']))
+                m = CORPUS_SYS_ID_RE.search(str(item['raw_header']))
                 if m and m.group(1) in excluded_set:
                     is_excluded = True
 

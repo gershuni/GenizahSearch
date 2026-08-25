@@ -28,12 +28,12 @@ Read functions adopt (Phase 88 D-11 extension, Refinement 4 -- Codex review):
 """
 import json
 import os
-import re
 import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple, Callable
 
 from web.safe_storage import safe_user_get, safe_user_set, safe_user_pop
+from shared.sys_id_patterns import CORPUS_SYS_ID_RE
 
 _SEARCH_KEY = 'export_search_payload'
 _PARALLELS_KEY = 'export_parallels_payload'
@@ -137,10 +137,10 @@ _PARALLELS_ROW_ALLOWLIST = frozenset((
     'is_filtered',
 ))
 
-# Pre-compiled at module load for the per-row compaction hot path. Matches
-# the production sys_id pattern (99 followed by 8+ digits, e.g. 99001234567890
-# or the Phase-85 synthetic 18-digit shape).
-_SYS_ID_RE = re.compile(r'(99\d{8,})')
+# Pre-compiled at module load for the per-row compaction hot path. CORPUS
+# namespace only: an export row is always a Genizah record. See
+# shared/sys_id_patterns.py for why this must not be widened to 97.
+_SYS_ID_RE = CORPUS_SYS_ID_RE
 
 
 def _extract_sys_id_from_row(row: Dict[str, Any]) -> str:

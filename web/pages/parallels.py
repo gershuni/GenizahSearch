@@ -52,6 +52,7 @@ from web.passage_assets import passage_available, get_passage_searcher
 # one dedicated ThreadPoolExecutor, one timeout ceiling, for BOTH surfaces.
 from web.search_api import run_passage_search
 from shared.api_errors import APIError
+from shared.sys_id_patterns import CORPUS_SYS_ID_RE
 
 
 def get_source_display_name(ref: str) -> str:
@@ -269,7 +270,7 @@ def create_parallels_page(initial_text: str = None):
             if state.meta_mgr:
                 try:
                     raw_header = item.get('raw_header', '')
-                    sys_match = re.search(r'(99\d{8,})', raw_header)
+                    sys_match = CORPUS_SYS_ID_RE.search(raw_header)
                     if sys_match:
                         return state.meta_mgr.get_library_for_id(sys_match.group(1)) or ''
                 except Exception:
@@ -598,7 +599,7 @@ def create_parallels_page(initial_text: str = None):
     if initial_text and state.meta_mgr:
         try:
             # Try to find a sys_id reference in the URL text (e.g., "99NNN...")
-            sys_match = re.search(r'(99\d{8,})', initial_text)
+            sys_match = CORPUS_SYS_ID_RE.search(initial_text)
             if sys_match:
                 source_sys_id = sys_match.group(1)
                 p_state.auto_excluded_source_id = source_sys_id
@@ -1979,7 +1980,7 @@ def create_parallels_page(initial_text: str = None):
             if state.meta_mgr:
                 try:
                     raw_header = item.get('raw_header', '')
-                    sys_match = re.search(r'(99\d{8,})', raw_header)
+                    sys_match = CORPUS_SYS_ID_RE.search(raw_header)
                     if sys_match:
                         return state.meta_mgr.get_library_for_id(sys_match.group(1)) or ''
                 except Exception:
@@ -3543,7 +3544,7 @@ def create_parallels_page(initial_text: str = None):
                 all_sys_ids = []
                 for item in main_results:
                     raw_header = item.get('raw_header', '')
-                    sys_match = re.search(r'(99\d{8,})', raw_header)
+                    sys_match = CORPUS_SYS_ID_RE.search(raw_header)
                     if sys_match:
                         all_sys_ids.append(sys_match.group(1))
 
@@ -3688,7 +3689,7 @@ def create_parallels_page(initial_text: str = None):
     def _get_sys_id_from_parallels_item(item):
         """Extract sys_id from a parallels result item."""
         raw_header = item.get('raw_header', '')
-        sys_match = re.search(r'(99\d{8,})', raw_header)
+        sys_match = CORPUS_SYS_ID_RE.search(raw_header)
         return sys_match.group(1) if sys_match else None
 
     def _filter_parallels_by_domain(results):
@@ -3962,7 +3963,7 @@ def create_parallels_page(initial_text: str = None):
 
             if raw_header and state.meta_mgr:
                 try:
-                    sys_match = re.search(r'(99\d{8,})', raw_header)
+                    sys_match = CORPUS_SYS_ID_RE.search(raw_header)
                     if sys_match:
                         sys_id = sys_match.group(1)
                         shelf_temp, _ = state.meta_mgr.get_meta_for_id(sys_id)
@@ -4003,7 +4004,7 @@ def create_parallels_page(initial_text: str = None):
 
                 if raw_header and state.meta_mgr:
                     try:
-                        sys_match = re.search(r'(99\d{8,})', raw_header)
+                        sys_match = CORPUS_SYS_ID_RE.search(raw_header)
                         if sys_match:
                             sys_id = sys_match.group(1)
                             shelf_temp, _ = state.meta_mgr.get_meta_for_id(sys_id)
@@ -4518,7 +4519,7 @@ def create_parallels_page(initial_text: str = None):
         raw_header = item.get('raw_header', '')
         if raw_header and state.meta_mgr:
             try:
-                sys_match = re.search(r'(99\d{8,})', raw_header)
+                sys_match = CORPUS_SYS_ID_RE.search(raw_header)
                 if sys_match:
                     sys_id = sys_match.group(1)
                     shelf, _ = state.meta_mgr.get_meta_for_id(sys_id)
@@ -4539,7 +4540,7 @@ def create_parallels_page(initial_text: str = None):
 
         if raw_header and state.meta_mgr:
             try:
-                sys_match = re.search(r'(99\d{8,})', raw_header)
+                sys_match = CORPUS_SYS_ID_RE.search(raw_header)
                 if sys_match:
                     sys_id = sys_match.group(1)
                     shelf_temp, title_temp = state.meta_mgr.get_meta_for_id(sys_id)

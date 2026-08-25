@@ -1017,6 +1017,30 @@ A major overhaul of how LOCAL Hebrew PDFs are read into the My Library index, dr
 
 ## [Unreleased]
 
+### One definition of a sys_id, and 97 is not a corpus prefix (2026-08-25)
+
+A manuscript `sys_id` was parsed out of a `raw_header` by ~24 hand-rolled regexes in two
+incompatible dialects. They are now one shared definition in `shared/sys_id_patterns.py`,
+and a repo lint fails CI if a new site spells its own.
+
+- **The two dialects were answering different questions.** `99` is the Genizah corpus
+  namespace; `97` is the LOCAL "My Library" namespace (Phase 95) — a user's own files,
+  generated on the desktop, never a corpus record. Measured on `libraries.csv`: 255,723 of
+  255,723 records begin `99`, including all 473 NLI rows. So the corpus-facing sites were
+  right to be 99-only and the four wide ones were the drift; three were narrowed and the
+  two desktop LOCAL-aware parsers stay namespace-agnostic on purpose.
+- **The narrow pattern was not merely narrow — it corrupted.** `re.search` scans anywhere,
+  so `(99\d{8,})` applied to a LOCAL header could match a `99` inside the LOCAL id's random
+  digits and return a truncated, wrong sys_id: 6.36% of LOCAL ids, measured. That path is
+  live on desktop, where `shared/lab_engine.py` filters a result list that carries LOCAL
+  LAB hits. Both shared patterns are now anchored on a digit boundary, so a LOCAL header
+  misses cleanly instead.
+- **A drift guard, proven able to fail.** `tests/test_sys_id_patterns.py` pins the wiring,
+  the anti-corruption property and the Phase 95 regression; three mutations (re-widening a
+  site, un-anchoring the pattern, over-narrowing a desktop parser) each fail it distinctly.
+  `scripts/check_sys_id_prefixes.py` re-takes the measurement, since the corpus grows.
+
+
 ### Download the computed identifications as a spreadsheet (2026-08-21)
 
 `/computed-identifications` now has a download control. It returns **the reader's whole

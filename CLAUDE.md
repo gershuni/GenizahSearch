@@ -377,6 +377,10 @@ every session's context.
 - **LOCAL extractor is at `extraction_format_version` 3.** Libraries indexed before that need a
   manual **Re-index All**; there is no auto-flip (bulk re-extraction must never run from
   `__init__` or the UI thread).
+- **`97` is the LOCAL "My Library" namespace, never a corpus prefix.** Corpus sys_ids are
+  all `99` (255,723/255,723 in `libraries.csv`). Import from `shared/sys_id_patterns.py`:
+  `CORPUS_SYS_ID_RE`, or `ANY_SYS_ID_RE` only where a LOCAL header can arrive. A lint
+  fails CI on a hand-rolled one.
 - **Web is not continuous-deploy.** Deploy DBs/assets first (`scp`), then push code.
 - **Still open:** the `Set-Cookie`-on-every-response Cloudflare BYPASS for ordinary page requests —
   see `docs/OPEN_ISSUES.md`. Partially mitigated 2026-08-13 (`ab064ff9`): static/immutable assets now
