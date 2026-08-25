@@ -142,7 +142,7 @@ _PARALLELS_ROW_ALLOWLIST = frozenset((
     # bypass the snapshot's own size budget. A witness's TEXT is never a row
     # field -- it lives once in the witness list, not once per matched page.
     'witness_id', 'witness_label', 'witness_count', 'witness_ids',
-    'fusion_score',
+    'fusion_score', 'best_witness_score',
 ))
 
 # Pre-compiled at module load for the per-row compaction hot path. Matches

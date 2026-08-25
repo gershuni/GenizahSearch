@@ -5105,6 +5105,8 @@ TRANSLATIONS.update({
     "Sort by combined score": "מיון לפי ציון משולב",
     "Sort by number of witnesses": "מיון לפי מספר העדים",
     "{n} of {m} witnesses": "{n} מתוך {m} עדים",
+    "{n} witnesses are waiting, but only {cap} can be searched at this depth — remove some, or choose a shallower depth.":
+        "{n} עדים ממתינים, אך בעומק זה ניתן לחפש רק {cap} — הסירו חלק מהם או בחרו עומק רדוד יותר.",
     "Witness list is full (max {n})": "רשימת העדים מלאה (עד {n})",
     "Search now": "חפשו עכשיו",
     "Other source text": "טקסט מקור אחר",

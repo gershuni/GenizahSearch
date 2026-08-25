@@ -1261,3 +1261,79 @@ class TestSerializeItemEnrichmentFlags:
             f"FJMS batch -- the batch builder did not use the shared resolver. "
             f"Captured: {captured}"
         )
+
+
+# ---------------------------------------------------------------------------
+# PR #329 review round 1: `sort='best_match'`.
+# ---------------------------------------------------------------------------
+
+
+def _bm_group(sys_id, items):
+    return {
+        'sys_id': sys_id,
+        'items': items,
+        'aggregate_score': sum(float(i.get('score') or 0) for i in items),
+        'representative': items[0],
+    }
+
+
+def test_best_match_orders_by_the_strongest_contributor_not_the_winner():
+    """`fuse()` deliberately leaves the RANK winner's score in `score`, so the
+    number beside a row describes the span that row highlights. `best_match`
+    was reading that field, which made it a second name for `fused` rather
+    than "the strongest single match any witness made".
+
+    The fixture is built so the two orders DISAGREE: group B's rendered
+    winner scores less than A's, while a witness that did not win the rank
+    scored higher on B than anything did on A. RED against
+    `max(it['score'])`.
+    """
+    from shared.search_serializer import _sort_parallels_groups
+    a = _bm_group('9911111111111111', [
+        {'score': 500.0, 'best_witness_score': 500.0,
+         'witness_ids': 'w1', 'fusion_score': 0.02},
+    ])
+    b = _bm_group('9922222222222222', [
+        {'score': 300.0, 'best_witness_score': 900.0,
+         'witness_ids': 'w1,w2', 'fusion_score': 0.01},
+    ])
+    order = [g['sys_id'] for g in _sort_parallels_groups([a, b], 'best_match')]
+    assert order[0] == '9922222222222222', (
+        'best_match ranked by the rendered winner (500 > 300) instead of by '
+        'the strongest contributor (900 > 500)'
+    )
+
+
+def test_best_match_still_works_where_no_row_was_ever_fused():
+    """A row that never went through `fuse()` carries no `best_witness_score`,
+    and its own `score` IS the best any witness made on it -- there being one
+    witness. Without the fallback every such group tied at 0.0 and the sort
+    silently became a no-op.
+
+    RED if the fallback in `group_stats` is removed.
+    """
+    from shared.search_serializer import _sort_parallels_groups
+    a = _bm_group('9911111111111111', [{'score': 40.0}])
+    b = _bm_group('9922222222222222', [{'score': 90.0}])
+    order = [g['sys_id'] for g in _sort_parallels_groups([a, b], 'best_match')]
+    assert order == ['9922222222222222', '9911111111111111']
+
+
+def test_best_match_is_not_just_the_fused_order_renamed():
+    """The regression guard for the fix itself: if `best_match` ever falls
+    back to ordering by fusion score, this fixture -- where the two orders are
+    opposed -- catches it."""
+    from shared.search_serializer import _sort_parallels_groups
+    a = _bm_group('9911111111111111', [
+        {'score': 500.0, 'best_witness_score': 500.0, 'fusion_score': 0.9},
+    ])
+    b = _bm_group('9922222222222222', [
+        {'score': 300.0, 'best_witness_score': 900.0, 'fusion_score': 0.1},
+    ])
+    by_best = [g['sys_id'] for g in
+               _sort_parallels_groups([a, b], 'best_match')]
+    by_fused = [g['sys_id'] for g in _sort_parallels_groups([a, b], 'fused')]
+    assert by_best[0] == '9922222222222222'
+    # 'fused' is a documented no-op -- the grouping already ordered them.
+    assert by_fused == ['9911111111111111', '9922222222222222']
+    assert by_best != by_fused, 'best_match collapsed into the fused order'

@@ -315,3 +315,25 @@ def test_the_parallels_json_export_carries_the_witness_facts(
     fused = [g for g in r.json()['results'] if g['score'] == 10.0][0]
     assert fused['witness_fusion']['witness_count'] == 2
     assert fused['witness_fusion']['witness_ids'] == ['w1', 'w2']
+
+
+def test_the_exported_best_witness_score_is_the_real_one(
+    client, multi_witness_parallels_state,
+):
+    """`set_parallels_export` runs every page row through
+    `_PARALLELS_ROW_ALLOWLIST`, which omitted `best_witness_score` -- so
+    `group_stats` saw nothing and every downloaded group reported 0.0, while
+    the live rows on screen held the right number.
+
+    The fixture sets `best_witness_score = score * 2`, so the three possible
+    answers are all distinguishable: 20.0 (correct), 0.0 (the shipped bug),
+    and 10.0 (the field stripped but rescued by the unfused fallback). The
+    older test in this file set the fixture value and asserted only
+    `witness_count` and `witness_ids`, which is why the strip went unnoticed.
+    """
+    r = client.get('/api/export/parallels/json')
+    assert r.status_code == 200, r.content
+    fused = [g for g in r.json()['results'] if g['score'] == 10.0][0]
+    assert fused['witness_fusion']['best_witness_score'] == 20.0, (
+        'the allowlist dropped best_witness_score on the way to the export'
+    )

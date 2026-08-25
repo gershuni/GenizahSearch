@@ -62,6 +62,44 @@ WITNESS_DEPTH_CAP = {'normal': WITNESS_CAP, 'deep': 8, 'deepest': 4}
 WITNESS_SYS_ID_RE = re.compile(r'((?:99|97)\d{8,})')
 
 
+def witness_depth_cap(ctx, widget_depth: str = None) -> int:
+    """How many witnesses one click may search, at the depth they will
+    actually RUN at.
+
+    `ctx` wins over the dropdown, and that is the whole subtlety: a witness
+    search takes its depth from `last_passage_ctx`, the settings of the last
+    seed search (`_run_one_witness_search`), not from whatever the control
+    shows now. Reading the widget first would cap a batch against a depth
+    nothing was going to use -- refusing work that is cheap, and admitting
+    work that is not.
+
+    The dropdown is the fallback for the one case where there is no ctx yet:
+    adding witnesses before the first search.
+    """
+    depth = (ctx or {}).get('depth') or widget_depth or 'normal'
+    return WITNESS_DEPTH_CAP.get(depth, WITNESS_CAP)
+
+
+def witnesses_over_dispatch_cap(pending, ctx, widget_depth: str = None):
+    """`(pending_count, cap)` when a batch must be REFUSED, else `None`.
+
+    The cap was enforced only while adding and promoting witnesses, which
+    bounded the wrong quantity: `Find Parallels` resets every non-stale
+    witness to `pending` and dispatches the batch, so twenty-five witnesses
+    added at normal depth all re-run the moment the seed is re-run at
+    `deepest` -- roughly eight minutes of work from one click, taking a slot
+    of the shared passage budget twenty-five times over, against a documented
+    deepest cap of four.
+
+    Returns the pair rather than a bool so the refusal can name both numbers;
+    a message reading only "too many witnesses" leaves the user guessing how
+    many to remove.
+    """
+    count = len(pending or [])
+    cap = witness_depth_cap(ctx, widget_depth)
+    return (count, cap) if count > cap else None
+
+
 def witness_sys_id(row) -> str:
     r"""The sys_id a result row belongs to.
 
@@ -2456,9 +2494,9 @@ def create_parallels_page(initial_text: str = None):
     # results accumulated across N calls. Same maths, one definition.
 
     def _witness_depth_cap() -> int:
-        depth = (p_state.last_passage_ctx or {}).get('depth') \
-            or (passage_depth.value or 'normal')
-        return WITNESS_DEPTH_CAP.get(depth, WITNESS_CAP)
+        # Delegates: the rule is module level so it can be called by a test.
+        return witness_depth_cap(p_state.last_passage_ctx,
+                                 passage_depth.value)
 
     def _witness_new_id() -> str:
         # Monotonic, never reused after a removal: a recycled id would let a
@@ -2931,10 +2969,37 @@ def create_parallels_page(initial_text: str = None):
         pending = [w for w in p_state.witnesses if w['status'] == 'pending']
         if not pending:
             return 0
-        await _rehydrate_manuscript_witnesses(pending)
         if not p_state.last_passage_ctx:
             ui.notify(tr('Run a letter-level search first.'), type='warning')
             return 0
+        # The depth cap is a DISPATCH cap. Enforced only while adding and
+        # promoting, it bounded the wrong quantity: `Find Parallels` resets
+        # every non-stale witness to `pending` and dispatches the batch, so
+        # twenty-five witnesses added at normal depth all re-run the moment
+        # the seed is re-run at `deepest` -- roughly eight minutes of work
+        # from one click, taking a slot of the shared passage budget
+        # twenty-five times over, against a documented deepest cap of four.
+        #
+        # Checked AFTER the ctx guard because the cap READS that ctx. A
+        # witness search runs at the depth of the LAST SEED SEARCH
+        # (`_run_one_witness_search` takes its depth from the same dict), not
+        # at whatever the dropdown shows now -- so moving the dropdown alone
+        # changes nothing here, and re-running the seed changes everything.
+        _over = witnesses_over_dispatch_cap(
+            pending, p_state.last_passage_ctx, passage_depth.value)
+        if _over:
+            # Refuse the whole batch rather than searching a cap's worth:
+            # a run that quietly does less than the panel lists is the same
+            # lie the auto-expand round already refuses to tell. The
+            # witnesses stay `pending`, so removing some or dropping the
+            # depth and pressing again is all that is needed.
+            ui.notify(
+                tr('{n} witnesses are waiting, but only {cap} can be searched '
+                   'at this depth — remove some, or choose a shallower '
+                   'depth.').format(n=_over[0], cap=_over[1]),
+                type='warning')
+            return 0
+        await _rehydrate_manuscript_witnesses(pending)
 
         p_state.is_running = True
         found = 0
@@ -2982,6 +3047,17 @@ def create_parallels_page(initial_text: str = None):
         _fuse_and_store()
         _refresh_witness_panel()
         render_results(p_state.results, p_state.filtered_results)
+        # `render_results` rewrites the results header from the rows it is
+        # given; the summary line and the library-filter button are set once
+        # by the seed search and never again. After a witness run the summary
+        # described the SEED's count beneath a list showing the fused one --
+        # and on the empty-seed path it read "no results yet" above a full
+        # page of results. Cleared rather than rewritten: the header already
+        # carries the count, and a second count is a second thing to drift.
+        summary_label.text = ''
+        parallels_library_filter_btn.set_visibility(
+            bool(p_state.results or p_state.filtered_results))
+        _update_parallels_library_filter_btn()
         _refresh_export_payload()
         _persist_witness_state()
         failed = [w for w in p_state.witnesses if w['status'] == 'failed']
@@ -4909,6 +4985,185 @@ def create_parallels_page(initial_text: str = None):
                     type='info',
                 )
 
+            # Built from DISPATCH-TIME captures, so it describes the search
+            # that RAN -- which is why it sits outside the result guard below
+            # rather than inside it. Nested there, a seed that matched nothing
+            # left `last_export_meta` and `last_fingerprint_kwargs` unset (or,
+            # worse, holding the PREVIOUS search's), and a witness run that
+            # then found rows published them under the wrong identity or not
+            # at all. Every statement in here is empty-list-safe.
+            try:
+                # Phase 88: build per-session export payload for /api/export/parallels/*
+                # (singleton mirror removed). Variable provenance (verified live in
+                # web/pages/parallels.py):
+                #   captured_chunk_size      — int(chunk_size.value) or 5
+                #   captured_freq_threshold  — int(freq_threshold.value) or 50
+                #   captured_mode            — mode_select.value
+                #   text_input.value         — NiceGUI textarea, source text
+                # HIGH-02 fix (historical Phase 77): capture the active filter dict (same
+                # 10-key shape as the live snapshot at parallels.py:2202-2213) so envelope
+                # replay matches what history-restore reconstructs.
+                _parallels_filters = {
+                    'domains': list(getattr(p_state, 'filter_domains', None) or []),
+                    'authors': list(getattr(p_state, 'filter_authors', None) or []),
+                    'works': list(getattr(p_state, 'filter_works', None) or []),
+                    'include_mode': getattr(p_state, 'filter_include_mode', True),
+                    'date_from': getattr(p_state, 'filter_date_from', None),
+                    'date_to': getattr(p_state, 'filter_date_to', None),
+                    'material_exclude': list(getattr(p_state, 'filter_material_exclude', None) or []),
+                    'text_all': list(getattr(p_state, 'filter_text_all', None) or []),
+                    'text_any': list(getattr(p_state, 'filter_text_any', None) or []),
+                    'text_not': list(getattr(p_state, 'filter_text_not', None) or []),
+                } if _has_active_filters() else None
+                # Search identity: ONE definition, in export_state --
+                # executable by tests, canonicalizing its own set-like
+                # inputs (PR #325 rounds 2-5, plus the workflow review
+                # that found the same rule being rebuilt, differently, by
+                # the history-restore path). Every value passed here is a
+                # DISPATCH-TIME capture: a live read describes a
+                # configuration the search may not have used.
+                from web.export_state import (
+                    compute_parallels_search_fingerprint,
+                )
+                _fingerprint_kwargs = dict(
+                    text=text,
+                    engine=captured_engine,
+                    width=captured_passage_width,
+                    length=captured_passage_length,
+                    depth=captured_passage_depth,
+                    chunk_size=captured_chunk_size,
+                    mode=captured_mode,
+                    max_freq=captured_freq_threshold,
+                    filter_text=captured_filter_text or '',
+                    deep_scan=captured_deep_scan,
+                    boundary_mode=captured_boundary_mode,
+                    boundary_delimiter=captured_boundary_delimiter,
+                    boundary_boost=captured_boundary_boost,
+                    min_boundary_matches=captured_min_boundary_matches,
+                    min_delimiter_distance=captured_min_delimiter_distance,
+                    variant_level=captured_variant_level,
+                    variant_max_changes=captured_variant_max_changes,
+                    # The library 'hide' pass below reads these same
+                    # captures, so the identity and the filtering that
+                    # shaped the rows cannot disagree.
+                    library_mode=captured_library_mode,
+                    library_filter=captured_library_filter,
+                    # Pre-query scope: advanced filters + show_only
+                    # libraries + per-manuscript exclusions, merged into
+                    # one set at dispatch.
+                    restrict=captured_restrict_sys_ids,
+                    excluded=captured_excluded_ids,
+                    filters=_parallels_filters,
+                )
+                # The witness set is part of the identity, but at THIS
+                # instant none has been searched -- these rows really are
+                # seed-only. `_recompute_search_identity` re-runs this
+                # exact keyword capture with the witnesses that produced
+                # rows, as soon as any has. One construction, reused, so
+                # the two cannot describe different searches.
+                p_state.last_fingerprint_kwargs = _fingerprint_kwargs
+                _search_fingerprint = compute_parallels_search_fingerprint(
+                    **_fingerprint_kwargs)
+                p_state.search_fingerprint = _search_fingerprint
+                p_state.searched_source_text = text
+                # The CONFIGURATION that produced these rows, from the
+                # SAME dispatch-time captures the fingerprint hashes --
+                # one list of "what defines a search", so the restored
+                # controls and the stored identity cannot disagree.
+                # Persisted by _persist_active_snapshot and re-applied to
+                # the widgets by _apply_restored_search_config on reload
+                # (docs/OPEN_ISSUES.md: reload restored the rows but left
+                # the controls at build-time defaults, so the restore
+                # notice pointed at a DIFFERENT search).
+                p_state.searched_config = {
+                    'engine': captured_engine,
+                    'width': captured_passage_width,
+                    'length': captured_passage_length,
+                    'depth': captured_passage_depth,
+                    'chunk_size': captured_chunk_size,
+                    'mode': captured_mode,
+                    'max_freq': captured_freq_threshold,
+                    'deep_scan': captured_deep_scan,
+                    'boundary_mode': captured_boundary_mode,
+                    'boundary_delimiter': captured_boundary_delimiter,
+                    'boundary_boost': captured_boundary_boost,
+                    'min_boundary_matches': captured_min_boundary_matches,
+                    'min_delimiter_distance': captured_min_delimiter_distance,
+                    'variant_level': captured_variant_level,
+                    'variant_max_changes': captured_variant_max_changes,
+                    'filters': _parallels_filters,
+                    'library_mode': captured_library_mode,
+                    'library_filter': captured_library_filter,
+                    'sefaria_enabled': captured_sefaria_enabled,
+                }
+                _parallels_search_meta = {
+                    'source_text': text,
+                    'search_fingerprint': _search_fingerprint,
+                    # What the workbook was searched WITH. Labels, kinds
+                    # and shelfmarks only -- never the texts: a
+                    # downloaded file that carried twenty-five 20,000-
+                    # character witnesses would be mostly query.
+                    'witnesses': [
+                        {'label': w.get('label') or '',
+                         'kind': w.get('kind'),
+                         'sys_id': w.get('sys_id')}
+                        for w in captured_witnesses
+                    ] or None,
+                    'chunk_size': captured_chunk_size,
+                    'mode': captured_mode,
+                    'max_freq': float(captured_freq_threshold) if captured_freq_threshold is not None else None,
+                    'filters': _parallels_filters,
+                    'boundary_options': None,  # Phase 77: not yet exposed as user-settable; placeholder for parity with /api/parallels API-02
+                    'warnings': [],  # Phase 78 will populate
+                }
+                # DMF-09 HYBRID Hide post-fetch filter (Phase 131-05 / Codex MED #6).
+                # Applied BEFORE set_parallels_export / safe_user_set so exports + stored
+                # payloads are scoped.  Show-only is already scoped pre-query (restrict_sys_ids)
+                # so no post-fetch pass needed for Show-only.
+                if captured_library_mode == 'hide' and captured_library_filter:
+                    main_results = _apply_parallels_library_filter(
+                        main_results, captured_library_mode,
+                        captured_library_filter)
+                    if filtered_results:
+                        filtered_results = _apply_parallels_library_filter(
+                            filtered_results, captured_library_mode,
+                            captured_library_filter)
+                from web.export_state import (
+                    compact_parallels_result_rows,
+                    set_parallels_export,
+                )
+                p_state.last_export_meta = dict(_parallels_search_meta)
+                set_parallels_export(
+                    results=main_results,
+                    filtered=filtered_results,
+                    meta=_parallels_search_meta,
+                )
+                main_results = compact_parallels_result_rows(main_results)
+                filtered_results = compact_parallels_result_rows(filtered_results)
+                p_state.results = main_results
+                p_state.filtered_results = filtered_results
+                # Also store in user storage (for UI persistence across page reloads)
+                safe_user_set('parallels_results', _compact_result_rows(
+                    main_results[:_PARALLELS_ACTIVE_USER_FALLBACK_LIMIT]
+                ))
+                # Round 6: stamp the fallback's identity beside it. The
+                # legacy bootstrap folds it into its meta, so the
+                # mixed-pair rule in _same_parallels_search can VERIFY
+                # same-search instead of trusting source_text.
+                safe_user_set('parallels_results_fingerprint',
+                              _search_fingerprint)
+                # Workflow review W4: mirror the config beside the rows
+                # and identity, so the legacy bootstrap restores controls
+                # too, not only in the tab that searched.
+                safe_user_set('parallels_search_config',
+                              dict(p_state.searched_config))
+                safe_user_set('parallels_filtered', _compact_result_rows(
+                    (filtered_results or [])[:_PARALLELS_ACTIVE_USER_FALLBACK_LIMIT]
+                ))
+                _persist_active_snapshot()
+            except Exception:
+                pass  # Browser storage operation failed; preference not persisted
+
             if main_results or filtered_results:
                 p_state.results = main_results
                 p_state.filtered_results = filtered_results
@@ -4928,177 +5183,6 @@ def create_parallels_page(initial_text: str = None):
                     'engine': captured_engine,
                 })
 
-                try:
-                    # Phase 88: build per-session export payload for /api/export/parallels/*
-                    # (singleton mirror removed). Variable provenance (verified live in
-                    # web/pages/parallels.py):
-                    #   captured_chunk_size      — int(chunk_size.value) or 5
-                    #   captured_freq_threshold  — int(freq_threshold.value) or 50
-                    #   captured_mode            — mode_select.value
-                    #   text_input.value         — NiceGUI textarea, source text
-                    # HIGH-02 fix (historical Phase 77): capture the active filter dict (same
-                    # 10-key shape as the live snapshot at parallels.py:2202-2213) so envelope
-                    # replay matches what history-restore reconstructs.
-                    _parallels_filters = {
-                        'domains': list(getattr(p_state, 'filter_domains', None) or []),
-                        'authors': list(getattr(p_state, 'filter_authors', None) or []),
-                        'works': list(getattr(p_state, 'filter_works', None) or []),
-                        'include_mode': getattr(p_state, 'filter_include_mode', True),
-                        'date_from': getattr(p_state, 'filter_date_from', None),
-                        'date_to': getattr(p_state, 'filter_date_to', None),
-                        'material_exclude': list(getattr(p_state, 'filter_material_exclude', None) or []),
-                        'text_all': list(getattr(p_state, 'filter_text_all', None) or []),
-                        'text_any': list(getattr(p_state, 'filter_text_any', None) or []),
-                        'text_not': list(getattr(p_state, 'filter_text_not', None) or []),
-                    } if _has_active_filters() else None
-                    # Search identity: ONE definition, in export_state --
-                    # executable by tests, canonicalizing its own set-like
-                    # inputs (PR #325 rounds 2-5, plus the workflow review
-                    # that found the same rule being rebuilt, differently, by
-                    # the history-restore path). Every value passed here is a
-                    # DISPATCH-TIME capture: a live read describes a
-                    # configuration the search may not have used.
-                    from web.export_state import (
-                        compute_parallels_search_fingerprint,
-                    )
-                    _fingerprint_kwargs = dict(
-                        text=text,
-                        engine=captured_engine,
-                        width=captured_passage_width,
-                        length=captured_passage_length,
-                        depth=captured_passage_depth,
-                        chunk_size=captured_chunk_size,
-                        mode=captured_mode,
-                        max_freq=captured_freq_threshold,
-                        filter_text=captured_filter_text or '',
-                        deep_scan=captured_deep_scan,
-                        boundary_mode=captured_boundary_mode,
-                        boundary_delimiter=captured_boundary_delimiter,
-                        boundary_boost=captured_boundary_boost,
-                        min_boundary_matches=captured_min_boundary_matches,
-                        min_delimiter_distance=captured_min_delimiter_distance,
-                        variant_level=captured_variant_level,
-                        variant_max_changes=captured_variant_max_changes,
-                        # The library 'hide' pass below reads these same
-                        # captures, so the identity and the filtering that
-                        # shaped the rows cannot disagree.
-                        library_mode=captured_library_mode,
-                        library_filter=captured_library_filter,
-                        # Pre-query scope: advanced filters + show_only
-                        # libraries + per-manuscript exclusions, merged into
-                        # one set at dispatch.
-                        restrict=captured_restrict_sys_ids,
-                        excluded=captured_excluded_ids,
-                        filters=_parallels_filters,
-                    )
-                    # The witness set is part of the identity, but at THIS
-                    # instant none has been searched -- these rows really are
-                    # seed-only. `_recompute_search_identity` re-runs this
-                    # exact keyword capture with the witnesses that produced
-                    # rows, as soon as any has. One construction, reused, so
-                    # the two cannot describe different searches.
-                    p_state.last_fingerprint_kwargs = _fingerprint_kwargs
-                    _search_fingerprint = compute_parallels_search_fingerprint(
-                        **_fingerprint_kwargs)
-                    p_state.search_fingerprint = _search_fingerprint
-                    p_state.searched_source_text = text
-                    # The CONFIGURATION that produced these rows, from the
-                    # SAME dispatch-time captures the fingerprint hashes --
-                    # one list of "what defines a search", so the restored
-                    # controls and the stored identity cannot disagree.
-                    # Persisted by _persist_active_snapshot and re-applied to
-                    # the widgets by _apply_restored_search_config on reload
-                    # (docs/OPEN_ISSUES.md: reload restored the rows but left
-                    # the controls at build-time defaults, so the restore
-                    # notice pointed at a DIFFERENT search).
-                    p_state.searched_config = {
-                        'engine': captured_engine,
-                        'width': captured_passage_width,
-                        'length': captured_passage_length,
-                        'depth': captured_passage_depth,
-                        'chunk_size': captured_chunk_size,
-                        'mode': captured_mode,
-                        'max_freq': captured_freq_threshold,
-                        'deep_scan': captured_deep_scan,
-                        'boundary_mode': captured_boundary_mode,
-                        'boundary_delimiter': captured_boundary_delimiter,
-                        'boundary_boost': captured_boundary_boost,
-                        'min_boundary_matches': captured_min_boundary_matches,
-                        'min_delimiter_distance': captured_min_delimiter_distance,
-                        'variant_level': captured_variant_level,
-                        'variant_max_changes': captured_variant_max_changes,
-                        'filters': _parallels_filters,
-                        'library_mode': captured_library_mode,
-                        'library_filter': captured_library_filter,
-                        'sefaria_enabled': captured_sefaria_enabled,
-                    }
-                    _parallels_search_meta = {
-                        'source_text': text,
-                        'search_fingerprint': _search_fingerprint,
-                        # What the workbook was searched WITH. Labels, kinds
-                        # and shelfmarks only -- never the texts: a
-                        # downloaded file that carried twenty-five 20,000-
-                        # character witnesses would be mostly query.
-                        'witnesses': [
-                            {'label': w.get('label') or '',
-                             'kind': w.get('kind'),
-                             'sys_id': w.get('sys_id')}
-                            for w in captured_witnesses
-                        ] or None,
-                        'chunk_size': captured_chunk_size,
-                        'mode': captured_mode,
-                        'max_freq': float(captured_freq_threshold) if captured_freq_threshold is not None else None,
-                        'filters': _parallels_filters,
-                        'boundary_options': None,  # Phase 77: not yet exposed as user-settable; placeholder for parity with /api/parallels API-02
-                        'warnings': [],  # Phase 78 will populate
-                    }
-                    # DMF-09 HYBRID Hide post-fetch filter (Phase 131-05 / Codex MED #6).
-                    # Applied BEFORE set_parallels_export / safe_user_set so exports + stored
-                    # payloads are scoped.  Show-only is already scoped pre-query (restrict_sys_ids)
-                    # so no post-fetch pass needed for Show-only.
-                    if captured_library_mode == 'hide' and captured_library_filter:
-                        main_results = _apply_parallels_library_filter(
-                            main_results, captured_library_mode,
-                            captured_library_filter)
-                        if filtered_results:
-                            filtered_results = _apply_parallels_library_filter(
-                                filtered_results, captured_library_mode,
-                                captured_library_filter)
-                    from web.export_state import (
-                        compact_parallels_result_rows,
-                        set_parallels_export,
-                    )
-                    p_state.last_export_meta = dict(_parallels_search_meta)
-                    set_parallels_export(
-                        results=main_results,
-                        filtered=filtered_results,
-                        meta=_parallels_search_meta,
-                    )
-                    main_results = compact_parallels_result_rows(main_results)
-                    filtered_results = compact_parallels_result_rows(filtered_results)
-                    p_state.results = main_results
-                    p_state.filtered_results = filtered_results
-                    # Also store in user storage (for UI persistence across page reloads)
-                    safe_user_set('parallels_results', _compact_result_rows(
-                        main_results[:_PARALLELS_ACTIVE_USER_FALLBACK_LIMIT]
-                    ))
-                    # Round 6: stamp the fallback's identity beside it. The
-                    # legacy bootstrap folds it into its meta, so the
-                    # mixed-pair rule in _same_parallels_search can VERIFY
-                    # same-search instead of trusting source_text.
-                    safe_user_set('parallels_results_fingerprint',
-                                  _search_fingerprint)
-                    # Workflow review W4: mirror the config beside the rows
-                    # and identity, so the legacy bootstrap restores controls
-                    # too, not only in the tab that searched.
-                    safe_user_set('parallels_search_config',
-                                  dict(p_state.searched_config))
-                    safe_user_set('parallels_filtered', _compact_result_rows(
-                        (filtered_results or [])[:_PARALLELS_ACTIVE_USER_FALLBACK_LIMIT]
-                    ))
-                    _persist_active_snapshot()
-                except Exception:
-                    pass  # Browser storage operation failed; preference not persisted
 
                 # Add to composition history
                 try:
@@ -5264,26 +5348,41 @@ def create_parallels_page(initial_text: str = None):
                     filtered_results = _filter_parallels_by_domain(filtered_results) if filtered_results else filtered_results
 
                 render_results(main_results, filtered_results, is_partial=is_partial)
-
-                # The seed is a witness too -- modelled with its own id so
-                # "found by 3 of 5" needs no +1 special case anywhere. Only
-                # letter-level: the panel is hidden for chunk and Lab, and
-                # fusing rows from an engine whose score means something else
-                # would be meaningless.
-                if captured_passage_mode:
-                    p_state.witness_rows[WITNESS_SEED_ID] = list(main_results)
-                    p_state.witness_filtered[WITNESS_SEED_ID] = list(
-                        filtered_results or [])
-                    _refresh_witness_panel()
-                    if any(_w['status'] == 'pending'
-                           for _w in p_state.witnesses):
-                        await _search_pending_witnesses()
             else:
                 if is_partial:
                     summary_label.text = f"{tr('Search cancelled')} \u2014 {total_elapsed_str} \u2014 {tr('no results yet')}"
                 results_header.text = tr('No results')
                 with results_container:
                     show_empty_state()
+
+            # The seed is a witness too -- modelled with its own id so
+            # "found by 3 of 5" needs no +1 special case anywhere. Only
+            # letter-level: the panel is hidden for chunk and Lab, and
+            # fusing rows from an engine whose score means something else
+            # would be meaningless.
+            #
+            # OUTSIDE the result guard above, and that is the whole point.
+            # Nested inside it, a seed that matched nothing left every
+            # witness unsearched and the page said "No results" -- in a
+            # feature that exists precisely because no single witness of a
+            # work retrieves what the others do. The measured case is not
+            # exotic: one BH witness reaches 56.7% of the census where the
+            # fused seventeen reach 74.1%, so a seed landing on the empty
+            # side of that gap is ordinary, not pathological.
+            #
+            # An empty seed is stored as an empty SEARCHED witness, never
+            # skipped: a seed missing from `witness_rows` also drops out of
+            # `_searched_witness_count()`, which would hide the fusion sort
+            # options and, with exactly one other witness, turn the fusion
+            # into a single-witness passthrough.
+            if captured_passage_mode:
+                p_state.witness_rows[WITNESS_SEED_ID] = list(main_results)
+                p_state.witness_filtered[WITNESS_SEED_ID] = list(
+                    filtered_results or [])
+                _refresh_witness_panel()
+                if any(_w['status'] == 'pending'
+                       for _w in p_state.witnesses):
+                    await _search_pending_witnesses()
         else:
             results_header.text = tr('No results')
             with results_container:

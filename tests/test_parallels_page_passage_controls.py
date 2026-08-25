@@ -395,10 +395,26 @@ def _fingerprint_call_slice() -> str:
     the call site must actually be fed by this capture.
     """
     src = _read_source()
-    idx = src.index('_fingerprint_kwargs = dict(')
-    end = src.index('\n                    )', idx)
-    captured = src[idx:end]
-    assert 'compute_parallels_search_fingerprint(\n                        **_fingerprint_kwargs)' in src, (
+    # Anchored on the AST, not on leading spaces: matching the literal
+    # source made this guard depend on how deeply the block was nested, so
+    # hoisting it one level out of a result guard turned five tests red
+    # without changing a character of what they check.
+    assigns = [
+        n for n in ast.walk(ast.parse(src))
+        if isinstance(n, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == '_fingerprint_kwargs'
+                for t in n.targets)
+    ]
+    assert len(assigns) == 1, (
+        f'expected exactly one _fingerprint_kwargs capture, found '
+        f'{len(assigns)} -- two would be two definitions of "what a search '
+        f'is", which is the drift this guard exists to catch'
+    )
+    captured = ast.get_source_segment(src, assigns[0]) or ''
+    assert captured, 'could not recover the capture source'
+    assert re.search(
+        r'compute_parallels_search_fingerprint\(\s*\*\*_fingerprint_kwargs\s*\)',
+        src), (
         'the keyword capture is no longer what reaches the identity helper '
         '-- this guard would be inspecting a dict nothing uses'
     )

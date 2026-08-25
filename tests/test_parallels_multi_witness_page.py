@@ -1139,3 +1139,247 @@ def test_the_promotion_path_uses_the_same_length_rule():
 
 def test_the_bulk_paste_drop_is_reported_from_a_real_guard():
     assert _guard_reports('_open_add_witness_dialog', 'skipped')
+
+
+# ---------------------------------------------------------------------------
+# PR #329 review round 1.
+# ---------------------------------------------------------------------------
+
+
+def _parallels_ast():
+    import ast
+
+    src = _source()
+    return ast.parse(src), src
+
+
+def _enclosing_ifs(tree, needle_fn):
+    """Every `ast.If` on the path from the module root to the node
+    `needle_fn` selects, outermost first.
+
+    Written as a walk rather than a source-text search because the defect
+    being pinned IS a nesting relationship: `'_search_pending_witnesses' in
+    src` is true whether the call sits inside the result guard or outside it,
+    which is exactly how this one shipped.
+    """
+    import ast
+    found = []
+
+    def walk(node, chain):
+        if needle_fn(node):
+            found.append(list(chain))
+        for child in ast.iter_child_nodes(node):
+            walk(child, chain + [node] if isinstance(node, ast.If) else chain)
+
+    walk(tree, [])
+    return found
+
+
+def test_the_seed_witness_dispatch_is_not_nested_under_the_result_guard():
+    """A seed that matched nothing left every witness unsearched.
+
+    The dispatch sat inside `if main_results or filtered_results:`, so the one
+    case the whole feature exists for -- this witness finds what that one
+    missed -- reported "No results" and stopped. Measured: a single BH witness
+    reaches 56.7% of the census where the fused seventeen reach 74.1%, so a
+    seed on the empty side of that gap is ordinary.
+
+    RED when the `if captured_passage_mode:` block is moved back inside the
+    guard. A substring assertion cannot fail that mutation, since the call
+    survives it verbatim.
+    """
+    import ast
+    tree, _src = _parallels_ast()
+
+    def is_dispatch(node):
+        return (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == '_search_pending_witnesses')
+
+    chains = _enclosing_ifs(tree, is_dispatch)
+    assert chains, 'no call to _search_pending_witnesses found at all'
+
+    def guard_names(if_node):
+        return {n.id for n in ast.walk(if_node.test) if isinstance(n, ast.Name)}
+
+    # The dispatch reached from `update_ui` is the one under test: the others
+    # are the Retry and auto-expand paths, which are button handlers and were
+    # never inside the guard.
+    offenders = []
+    for chain in chains:
+        for if_node in chain:
+            names = guard_names(if_node)
+            if 'main_results' in names or 'filtered_results' in names:
+                offenders.append(ast.unparse(if_node.test))
+    assert not offenders, (
+        'the witness dispatch is nested under a seed-result guard '
+        f'({offenders}) -- an empty seed will leave every witness unsearched'
+    )
+
+
+def test_an_empty_seed_is_still_stored_as_a_searched_witness():
+    """`witness_rows[WITNESS_SEED_ID]` must be assigned on BOTH paths.
+
+    Skipping it for an empty seed would drop the seed out of
+    `_searched_witness_count()`, which hides the fusion sort options and, with
+    exactly one other witness, turns the fusion into a single-witness
+    passthrough -- the rows would render, unfused, with no sign anything was
+    wrong.
+
+    RED if the assignment is made conditional on the seed having hits.
+    """
+    import ast
+    tree, _src = _parallels_ast()
+    assigns = [
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.Assign)
+        and any(isinstance(t, ast.Subscript)
+                and isinstance(t.value, ast.Attribute)
+                and t.value.attr == 'witness_rows'
+                and isinstance(t.slice, ast.Name)
+                and t.slice.id == 'WITNESS_SEED_ID'
+                for t in n.targets)
+    ]
+    assert len(assigns) == 1, (
+        f'expected exactly one seed-row assignment, found {len(assigns)}'
+    )
+    chains = _enclosing_ifs(tree, lambda n: n is assigns[0])
+    guards = {name for chain in chains for if_node in chain
+              for name in {x.id for x in ast.walk(if_node.test)
+                           if isinstance(x, ast.Name)}}
+    assert 'main_results' not in guards and 'filtered_results' not in guards, (
+        'the seed row-set is stored only when the seed had hits'
+    )
+
+
+def test_the_dispatch_cap_follows_the_searched_depth_not_the_dropdown():
+    """A witness runs at the depth of the LAST SEARCH.
+
+    `_run_one_witness_search` takes its depth from `last_passage_ctx`, so
+    capping against the dropdown would bound a depth nothing was going to
+    use. RED if the two arguments are swapped.
+    """
+    from web.pages.parallels import witness_depth_cap
+    # ctx wins outright...
+    assert witness_depth_cap({'depth': 'normal'}, 'deepest') == 25
+    assert witness_depth_cap({'depth': 'deepest'}, 'normal') == 4
+    # ...and the dropdown is consulted only when there is no ctx yet.
+    assert witness_depth_cap({}, 'deep') == 8
+    assert witness_depth_cap(None, None) == 25
+    # An unknown depth falls back to the flat cap rather than to zero, which
+    # would refuse every batch.
+    assert witness_depth_cap({'depth': 'nonsense'}, None) == 25
+
+
+def test_a_pending_batch_over_the_depth_cap_is_refused():
+    """25 witnesses added at normal depth all reset to `pending` when the seed
+    is re-run, so re-running at `deepest` dispatched 25 x ~19 s from one
+    click, against a documented deepest cap of 4.
+
+    RED on `>` -> `>=` (which would refuse an exactly-full batch), on
+    `>` -> `<`, and on deleting the check.
+    """
+    from web.pages.parallels import witnesses_over_dispatch_cap
+    deepest = {'depth': 'deepest'}
+    assert witnesses_over_dispatch_cap([1] * 25, deepest, None) == (25, 4)
+    assert witnesses_over_dispatch_cap([1] * 5, deepest, None) == (5, 4)
+    # Exactly at the cap is allowed -- the cap is a maximum, not a limit
+    # below it.
+    assert witnesses_over_dispatch_cap([1] * 4, deepest, None) is None
+    assert witnesses_over_dispatch_cap([1] * 3, deepest, None) is None
+    # The same batch is fine at the depth it was gathered at.
+    assert witnesses_over_dispatch_cap([1] * 25, {'depth': 'normal'},
+                                       None) is None
+    assert witnesses_over_dispatch_cap([], deepest, None) is None
+    assert witnesses_over_dispatch_cap(None, deepest, None) is None
+
+
+def test_the_dispatch_actually_consults_the_cap():
+    """The rule above is only worth anything if `_search_pending_witnesses`
+    calls it. RED if the call is removed from the dispatch path.
+    """
+    import ast
+    tree, _src = _parallels_ast()
+    fn = next(
+        (n for n in ast.walk(tree)
+         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+         and n.name == '_search_pending_witnesses'), None)
+    assert fn is not None, '_search_pending_witnesses not found'
+    called = {n.func.id for n in ast.walk(fn)
+              if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+    assert 'witnesses_over_dispatch_cap' in called, (
+        'the dispatch path does not check the depth cap; enforcing it only '
+        'while ADDING witnesses bounds the wrong quantity'
+    )
+    # ...and it must refuse BEFORE dispatching any witness, not after.
+    body_src = ast.unparse(fn)
+    i_cap = body_src.find('witnesses_over_dispatch_cap')
+    i_run = body_src.find('_run_one_witness_search')
+    assert 0 <= i_cap < i_run, (
+        'the cap is checked after the first witness has already been searched'
+    )
+
+
+def test_the_export_identity_is_built_whether_or_not_the_seed_matched():
+    """`last_export_meta` / `last_fingerprint_kwargs` describe the search that
+    RAN, and they are built from dispatch-time captures alone -- so nesting
+    them under `if main_results or filtered_results:` made a search's identity
+    depend on its results.
+
+    Harmless while an empty seed ended the run. It stopped being harmless the
+    moment witnesses were dispatched past an empty seed: `_refresh_export_payload`
+    returns early on empty meta, so the fused rows rendered with the export
+    buttons enabled and no payload behind them (the download 400s) -- and where
+    a PREVIOUS search had left meta behind, the new rows were published under
+    that search's identity, which is precisely the mix-up the fingerprint
+    exists to prevent.
+
+    RED if the block is moved back inside the guard.
+    """
+    import ast
+    tree, _src = _parallels_ast()
+
+    def sets_export_meta(node):
+        return (isinstance(node, ast.Assign)
+                and any(isinstance(t, ast.Attribute)
+                        and t.attr == 'last_export_meta'
+                        for t in node.targets))
+
+    chains = _enclosing_ifs(tree, sets_export_meta)
+    assert chains, 'nothing assigns p_state.last_export_meta'
+    offenders = []
+    for chain in chains:
+        for if_node in chain:
+            names = {n.id for n in ast.walk(if_node.test)
+                     if isinstance(n, ast.Name)}
+            if 'main_results' in names or 'filtered_results' in names:
+                offenders.append(ast.unparse(if_node.test))
+    assert not offenders, (
+        'the export identity is built only when the seed matched '
+        f'({offenders}) -- a witness run past an empty seed then publishes '
+        'its rows under a stale identity, or under none'
+    )
+
+
+def test_the_search_fingerprint_is_stamped_whether_or_not_the_seed_matched():
+    """Same rule for the identity itself: `last_fingerprint_kwargs` is what
+    `_recompute_search_identity` re-runs with the witnesses that produced
+    rows. Left unset by an empty seed, that helper falls back to whatever
+    `search_fingerprint` already held -- another search's."""
+    import ast
+    tree, _src = _parallels_ast()
+
+    def sets_kwargs(node):
+        return (isinstance(node, ast.Assign)
+                and any(isinstance(t, ast.Attribute)
+                        and t.attr == 'last_fingerprint_kwargs'
+                        for t in node.targets))
+
+    chains = _enclosing_ifs(tree, sets_kwargs)
+    assert chains, 'nothing assigns p_state.last_fingerprint_kwargs'
+    guards = {name for chain in chains for if_node in chain
+              for name in {x.id for x in ast.walk(if_node.test)
+                           if isinstance(x, ast.Name)}}
+    assert 'main_results' not in guards and 'filtered_results' not in guards, (
+        'the search identity is stamped only when the seed matched'
+    )

@@ -70,7 +70,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from typing import Iterable, Mapping, Optional, Sequence
+from typing import Iterable, Mapping, Sequence
 
 # Mirrors shared/search_engine.py::RRF_K (60), the value that module's own
 # LOCAL/Genizah fusion uses. Deliberately NOT imported: shared/passage_* never
@@ -340,7 +340,16 @@ def group_stats(items: Sequence[dict]) -> dict:
         except (TypeError, ValueError):
             pass
         try:
-            best = max(best, float(it.get('best_witness_score') or 0.0))
+            # Falls back to the row's OWN score, which for a row that never
+            # went through `fuse()` -- a single-witness or a chunk result --
+            # is exactly "the best score any witness made on it", there
+            # being one witness. Without the fallback every such group
+            # reported 0.0, and `best_match` sorted the whole page into one
+            # tie.
+            _best_of_row = it.get('best_witness_score')
+            if _best_of_row is None:
+                _best_of_row = it.get('score')
+            best = max(best, float(_best_of_row or 0.0))
         except (TypeError, ValueError):
             pass
         for wid in split_ids(it.get('witness_ids')):
@@ -358,20 +367,3 @@ def group_stats(items: Sequence[dict]) -> dict:
         'best_witness_score': best,
     }
 
-
-def sort_key_for(sort: str, group: dict, stats: Optional[dict] = None):
-    """Sort key for ONE manuscript group under a user-chosen `sort`.
-
-    Centralised here so the page's group order and any other consumer agree.
-    Every key is returned for `reverse=True` sorting, so string keys are
-    negated by the caller's own branch rather than here -- see
-    `web/pages/parallels.py::_group_sort_key`.
-    """
-    stats = stats or {}
-    if sort == 'fused':
-        return (float(stats.get('fusion_score') or 0.0),
-                float(group.get('max_score') or 0.0))
-    if sort == 'witnesses':
-        return (int(stats.get('witness_count') or 0),
-                float(stats.get('fusion_score') or 0.0))
-    return (float(group.get('max_score') or 0.0),)

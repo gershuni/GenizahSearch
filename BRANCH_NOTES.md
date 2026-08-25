@@ -112,6 +112,31 @@ flagship case is a 17-witness set).
   `_refresh_witness_panel`.** The panel refresh runs once per witness during a search (it
   renders the progress line), so persisting there re-serialises the whole result set
   seventeen times in a 17-witness run.
+* **Never nest the witness dispatch under a seed-result guard.** It shipped inside
+  `if main_results or filtered_results:`, so a seed that matched nothing reported "No
+  results" and left every witness unsearched — in a feature whose whole premise is that
+  one witness finds what another misses (56.7% alone against 74.1% fused). An empty seed
+  is a *searched witness with zero hits*, and it is stored as one: dropping it from
+  `witness_rows` also drops it from `_searched_witness_count()`, which hides the fusion
+  sort options and silently turns a two-witness fusion into a passthrough.
+* **The witness depth cap is a DISPATCH cap, not an add-time one.** Enforced only while
+  adding and promoting, it bounded the wrong quantity: `Find Parallels` resets every
+  non-stale witness to `pending` and dispatches the batch, so 25 witnesses gathered at
+  normal depth all re-run the moment the seed is re-run at `deepest` — ~8 minutes from one
+  click, taking a slot of the shared budget 25 times. The rule now lives at module level
+  (`witness_depth_cap`, `witnesses_over_dispatch_cap`) so a test can call it; inline in the
+  closure, a `>` → `<` mutation left every available assertion green. Note which depth it
+  reads: the LAST SEARCH's, because that is what `_run_one_witness_search` will use — the
+  dropdown alone changes nothing.
+* **`_PARALLELS_ROW_ALLOWLIST` is a whitelist, and it fails silently.** `best_witness_score`
+  was missing from it, so every *downloaded* group reported `0.0` while the live rows on
+  screen held the right number. Any new fused row field must be added there, and the test
+  must assert its **value** — the existing export test set the field in its fixture and
+  asserted only `witness_count`, which is exactly why this went unnoticed.
+* **Anything that changes the row set must also refresh the chrome around it.**
+  `render_results` rewrites the results header from the rows it is handed; the summary line
+  and the library-filter button are set once by the seed search and never again. After a
+  witness run the summary described the seed's count beneath a list showing the fused one.
 * **The page and the API return different manuscript SETS** (3,682 vs 3,850 on a
   17-witness run) while finding the same 455 census manuscripts. Cause: the
   duplicate-photography pass runs per-witness on the page and once post-fusion in the API.

@@ -930,12 +930,21 @@ def _sort_parallels_groups(groups: list[dict], sort: str) -> list[dict]:
             float(g.get('aggregate_score') or 0.0),
         ), reverse=True)
     if sort == 'best_match':
-        # The single best row in the group, on the matched-letters scale --
-        # "which manuscript contains the strongest single match", as against
+        # "Which manuscript contains the strongest single match", as against
         # "which is pointed at by the most witnesses".
-        return sorted(groups, key=lambda g: max(
-            (float(it.get('score') or 0.0) for it in (g.get('items') or [])),
-            default=0.0,
+        #
+        # From `best_witness_score`, NOT from `score`. `fuse()` deliberately
+        # leaves the RANK WINNER's score in `score`, so that the number
+        # beside a row describes the span the row actually highlights: a
+        # record found at rank 1 by a 400-letter witness and at rank 31 by a
+        # 900-letter one renders the short witness. Ordering by `score`
+        # therefore ranked by whichever contributor won on RANK -- which is
+        # what `fused` already does -- and contradicted both the field's
+        # documented meaning and the `best_witness_score` this same
+        # serializer emits two functions below under `witness_fusion`.
+        return sorted(groups, key=lambda g: (
+            group_stats(g.get('items') or [])['best_witness_score'],
+            float(g.get('aggregate_score') or 0.0),
         ), reverse=True)
     return groups
 

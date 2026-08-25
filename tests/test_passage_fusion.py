@@ -363,3 +363,30 @@ def test_split_by_length_takes_an_explicit_cap():
 def test_split_by_length_survives_none_and_empty():
     assert pf.split_by_length(None) == ([], [])
     assert pf.split_by_length([None, '']) == ([None, ''], [])
+
+
+# ---------------------------------------------------------------------------
+# PR #329 review round 1: the `best_witness_score` fallback.
+# ---------------------------------------------------------------------------
+
+
+def test_group_stats_falls_back_to_the_row_score_when_unfused():
+    """A single-witness or chunk row carries no `best_witness_score`, and its
+    own score is exactly "the best any witness made" -- there being one.
+    Reporting 0.0 tied every such group together under `best_match`.
+    """
+    from shared.passage_fusion import group_stats
+    stats = group_stats([{'score': 214.0}, {'score': 88.0}])
+    assert stats['best_witness_score'] == 214.0
+
+
+def test_the_fallback_never_overrides_a_real_fused_value():
+    """The fallback must not become a second definition: where `fuse()` set
+    the field, that value stands even though it is LOWER than a sibling row's
+    raw score."""
+    from shared.passage_fusion import group_stats
+    stats = group_stats([
+        {'score': 300.0, 'best_witness_score': 900.0},
+        {'score': 500.0, 'best_witness_score': 500.0},
+    ])
+    assert stats['best_witness_score'] == 900.0

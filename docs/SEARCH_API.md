@@ -544,6 +544,20 @@ no returned row renders: each row carries the label, highlighted span and `score
 witness that ranked it best, and a score borrowed from another witness would describe text the
 response does not contain.
 
+Each `sort` value orders the groups by a **named field of that same response**, so a consumer
+can reproduce any of them locally:
+
+| `sort` | orders groups by | ties broken by |
+|---|---|---|
+| `fused` (default) | `witness_fusion.fusion_score` | the grouping order — this is a no-op, the array already arrives in it |
+| `best_match` | `witness_fusion.best_witness_score` — the strongest single match any witness made | summed `score` |
+| `witness_count` | `witness_fusion.witness_count` | summed `score` |
+
+`best_match` deliberately does **not** read the rows' `score`. That field carries the *rank
+winner's* matched letters, so ordering by it reproduces `fused` under a second name rather than
+answering "which manuscript holds the strongest match" — a manuscript ranked first by a short
+witness and thirty-first by a long one renders the short witness's score.
+
 **`score` and `sort_score` stay matched letters on a multi-witness response**, exactly as on
 every other method — one scale everywhere. The array is ordered by
 `witness_fusion.fusion_score` instead, because that is the ranking that actually selected the
