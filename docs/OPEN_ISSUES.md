@@ -1,6 +1,14 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-08-23 — one P2 added while the owner graded the first passage-search GUI runs (PR #324): parallels xlsx exports carry no match highlighting in either method, plus two owner rulings recorded in that entry (uncapped exports; paging for >200 display, into Phase 146A). Previous header (2026-08-20):
+> **Last Updated:** 2026-08-25 — the PostHog weekly error digest triaged: 32 of 33 exceptions were
+> foreign to this codebase, because exception capture is a project-level `window.onerror` hook with no
+> deny-list, so "crash free sessions" was tracking visitors' browser extensions. Two issues closed in
+> code (the cssRules `SecurityError` filtered as third-party; `Script error.` was our own missing
+> `crossorigin` on the fabric.js tag); **one P3 added** for the two unattributed `Failed to fetch`
+> issues, which need the stack frames from PostHog. Previous header (2026-08-23): one P2 added while
+> the owner graded the first passage-search GUI runs (PR #324): parallels xlsx exports carry no match
+> highlighting in either method, plus two owner rulings recorded in that entry (uncapped exports;
+> paging for >200 display, into Phase 146A). Previous header (2026-08-20):
 > v8.6.0 (desktop Pause/Resume) shipped; two P2 entries added for
 > what it did NOT close: the search toolbar is only partly de-crowded, and a paused search does not
 > survive closing the program. The P1 is CLOSED. The discovery citation-range
@@ -69,14 +77,14 @@ Move to "Completed Issues" section at bottom with date
 |----------|------|
 | P1 Critical Bugs | 0 |
 | P2 Medium Bugs | 25 |
-| P3 Low Priority | 11 |
+| P3 Low Priority | 12 |
 | Documentation Issues | 2 |
 | Code Quality Debt | 1 |
 | Untested Areas | 4 |
 | Deferred to v7.15+ | 9 |
 | 2026-05-29 audit follow-up | 4 |
 | FGP integration (§4.5) | 3 |
-| **Total open** | **59** |
+| **Total open** | **60** |
 
 > Counts recomputed from the tables on 2026-08-14 by counting rows carrying ❌ / ⏸ / ⏳
 > (template rows in the maintenance protocol excluded). The old "Fixed/Implemented" column
@@ -252,6 +260,7 @@ The verbose pre-2026-05-29 "Last Updated" header log is archived at
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
+| **Two unattributed `TypeError: Failed to fetch` issues in PostHog error tracking** | unknown — needs the stack frames from PostHog | ❌ Open (found 2026-08-25, triaging the weekly error digest) | 11 + 3 occurrences in the week to 2026-08-25 (two distinct fingerprints; the 3-occurrence one was new that week). NOT from our fetch call sites: every first-party `fetch` — `web/pages/browse.py`, `web/components/text_editor.py`, `web/static/manuscript_viewer.js`, `web/static/js/atlas_decode.js`, seven sites in `web/pages/puzzle.py` — is inside a `try/catch` or has a `.catch()`, and PostHog captures only UNHANDLED rejections. Suspects, unverified: posthog's own transport blocked by an ad-blocker (`eu.i.posthog.com` is on EasyPrivacy lists), gtag, or a browser extension. Next step is cheap: open each issue in PostHog and read the stack frames' filename plus `$current_url`. Related, and worth knowing before reading any of these numbers: `posthog.init` is deferred to `requestIdleCallback`, so the global handlers do not exist during initial page load and load-time exceptions are invisible. The digest's other two issues are closed — the cssRules `SecurityError` is filtered as third-party, and `Script error.` was our missing `crossorigin` on the fabric.js tag. |
 | **Full-suite native crash: `Windows fatal exception: access violation` in `genizah_core._build_fl_id_index` daemon threads** | `genizah_core.py:7270-7300` (`start_fl_id_index_build` / `_build_fl_id_index_thread` / `_build_fl_id_index`) | ❌ Open | Surfaced 2026-05-29 during the Phase 102 full-suite regression gate. `python -m pytest tests/` reliably segfaults at ~31-37% with a faulthandler dump showing dozens of daemon threads all in `_build_fl_id_index` → `unittest.mock.__getattr__`. Root cause: a SearchEngine/browse test calls `start_fl_id_index_build()` against a **mocked** `meta_mgr`; the daemon `_build_fl_id_index_thread` keeps calling `meta_mgr.parse_full_id_components(...)` on the `MagicMock` after the owning test tears down, and the orphaned threads access-violate later in the run. **Pre-existing and unrelated to Phase 102** (`genizah_core.py` untouched by the phase; no Phase-102 file in the stack). Blocks a single clean full-suite run on Windows; targeted batches pass. Fix path: have tests that mock `meta_mgr` either avoid triggering `start_fl_id_index_build`, join/cancel the daemon thread in teardown, or gate the thread on a real (non-mock) `meta_mgr`. |
 | **Test-isolation flake: `test_discard_run_short_circuits_sqlite_on_tantivy_failure` fails in batch, passes in isolation** | `tests/test_phase_97_2_sqlite_vs_tantivy_consistency.py`, `shared/local_indexer.py::discard_run` | ❌ Open | Surfaced 2026-05-29 (Phase 102 regression gate). Passes when run alone; fails when run in a large batch (shared Tantivy writer/temp-index state leaking across tests). `discard_run` untouched by Phase 102 — pre-existing isolation fragility. Fix path: ensure each test gets an isolated index dir + closes writer handles in teardown. |
 | **NLI FL-ID cache atomic rename intermittently fails on Windows with `[WinError 5] Access is denied`** | likely `shared/nli_crossref_service.py` or `genizah_core.py` (FL ID cache persistence path — needs grep to confirm) | ❌ Open | Surfaced 2026-05-17 during interactive UAT for Phase 92.1 (Test 2 console output during the add-to-list reproduction): `Failed to persist NLI FL-ID cache to C:\Users\gersh\Genizah_Tantivy_Index\nli_fl_ids_cache.json: [WinError 5] Access is denied: '...nli_fl_ids_cache.json.tmp.102360.103932' -> '...nli_fl_ids_cache.json'`. Pattern: `os.replace()` / `os.rename()` of a temp file onto the final file fails on Windows when another process or file handle holds the target open. **Unrelated to Phase 92.1 reader-client refactor** — pre-existing pattern, just surfaced during this test. Likely root causes: (a) multiple worker threads / NiceGUI request handlers attempting to persist the cache concurrently; (b) Tantivy index loader holding the file open while a second writer attempts the rename; (c) antivirus / backup software briefly holding the target. **Severity P3 (Low):** intermittent, falls back gracefully (cache retries on next save attempt), no user-visible functionality impact — only a console warning. Fix path: add a small retry loop around the `os.replace()` call (3 attempts with exponential backoff), OR introduce a `threading.Lock` for the cache writer, OR use a file lock (`portalocker`) if cross-process safety is needed. |

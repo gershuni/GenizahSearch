@@ -29,7 +29,23 @@ from shared.nli_circuit_breaker import (
 logger = logging.getLogger(__name__)
 
 # Fabric.js CDN (v6.4.3 stable)
-FABRIC_JS_CDN = '<script src="https://cdn.jsdelivr.net/npm/fabric@6.4.3/dist/index.min.js"></script>'
+#
+# crossorigin="anonymous" is load-bearing for observability, not decoration. Without
+# it, an exception thrown inside fabric reaches window.onerror stripped of message,
+# file and line, and lands in PostHog as the opaque "Error: Script error." -- an event
+# that says only "something broke on a page that loads a third-party script".
+#
+# The attribute is only safe on a host that sends Access-Control-Allow-Origin: without
+# that header the browser refuses to execute the script at all. jsDelivr serves every
+# response CORS-enabled by design (its own SRI documentation pairs `integrity` with
+# `crossorigin="anonymous"`), which is why this tag may carry it and the gtag.js tag in
+# web/main.py may not -- see _CORS_ATTRIBUTE_EXEMPT_HOSTS in
+# tests/test_client_error_reporting.py. (It also makes an SRI `integrity` hash possible
+# here, which is a separate change: SRI without CORS cannot be enforced at all.)
+FABRIC_JS_CDN = (
+    '<script src="https://cdn.jsdelivr.net/npm/fabric@6.4.3/dist/index.min.js"'
+    ' crossorigin="anonymous"></script>'
+)
 
 # ── JavaScript: window.puzzleCanvas global object ─────────────────
 

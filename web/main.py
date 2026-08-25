@@ -1011,13 +1011,69 @@ ANALYTICS_SCRIPT = '''
 
 # PostHog Analytics (real-user monitoring + session recordings)
 _posthog_key = os.environ.get('POSTHOG_API_KEY', '')
-POSTHOG_SCRIPT = f'''
+
+# Drop ONE known-foreign exception fingerprint before it leaves the browser: reading
+# `cssRules` off a cross-origin stylesheet.
+#
+# Exception capture is enabled at the PostHog PROJECT level, not here, which means it is
+# a global window.onerror/unhandledrejection hook with no deny-list -- it reports
+# whatever runs in the tab, ours or not. This codebase contains zero references to
+# cssRules/styleSheets/insertRule and loads no cross-origin stylesheet (only
+# /static/common.css; no web fonts), so BOTH halves of this error are foreign: the sheet
+# is injected at runtime (the browser's built-in translate, an extension) and the reader
+# is the session recorder walking the document's stylesheet list to mirror styles for
+# replay.
+# Nothing a visitor sees breaks. Left in, it was 18 of 33 exceptions in the week to
+# 2026-08-25 -- i.e. "crash free sessions" was mostly measuring visitors' browser
+# environments rather than this app.
+#
+# Deliberately NOT extended to "Script error.": that one is opaque precisely BECAUSE a
+# cross-origin script tag lacked crossorigin="anonymous", so it can be hiding our own
+# failure. The fix there is the attribute (see FABRIC_JS_CDN in web/pages/puzzle.py),
+# never a filter.
+#
+# `before_send` is honoured by the array.js the loader below pulls from PostHog's CDN.
+# An older build that predates the option would simply ignore an unknown config key --
+# the filter goes inert and every event is reported as before, which is the right way
+# round for a filter to fail.
+#
+# A plain (non-f) string so the JS needs no brace doubling, and so tests can read it
+# without POSTHOG_API_KEY being set.
+_PH_BEFORE_SEND_JS = '''
+    function _phBeforeSend(event) {
+        if (!event || event.event !== '$exception') return event;
+        try {
+            var list = (event.properties && event.properties['$exception_list']) || [];
+            for (var i = 0; i < list.length; i++) {
+                var value = String((list[i] && list[i].value) || '');
+                if (value.indexOf('cssRules') !== -1) return null;
+            }
+        } catch (e) {
+            // A filter that throws must never swallow a real event.
+            return event;
+        }
+        return event;
+    }
+'''
+
+
+def _build_posthog_script(api_key: str) -> str:
+    """Render the PostHog loader + init snippet, or '' when no key is configured.
+
+    A function rather than a bare module constant so tests can exercise the rendered
+    JS directly; POSTHOG_API_KEY is unset in CI, which would otherwise make the whole
+    snippet an empty string and every assertion about it vacuous.
+    """
+    if not api_key:
+        return ''
+    return f'''
 <!-- PostHog Analytics -->
 <script>
     !function(t,e){{var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){{function g(t,e){{var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){{t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){{var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e}},u.people.toString=function(){{return u.toString(1)+".people (stub)"}},o="init capture register register_once register_for_session unregister unregister_for_session getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey getNextSurveyStep identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url lib get_property getSessionProperty sessionRecording startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_config __request_queue".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])}},e.__SV=1)}}(document,window.posthog||[]);
+{_PH_BEFORE_SEND_JS}
     // Defer PostHog init past first paint (events are queued by the stub loader above)
     function _phInit() {{
-        posthog.init('{_posthog_key}', {{
+        posthog.init('{api_key}', {{
             api_host: 'https://eu.i.posthog.com',
             person_profiles: 'identified_only',
             autocapture: true,
@@ -1027,6 +1083,7 @@ POSTHOG_SCRIPT = f'''
                 maskAllInputs: true,
                 maskTextSelector: 'input, textarea'
             }},
+            before_send: _phBeforeSend,
             // Filter out localhost / dev traffic
             opt_out_capturing_by_default: ['localhost', '127.0.0.1'].includes(location.hostname),
         }});
@@ -1039,7 +1096,10 @@ POSTHOG_SCRIPT = f'''
     if (window.requestIdleCallback) {{ requestIdleCallback(_phInit); }}
     else {{ setTimeout(_phInit, 2000); }}
 </script>
-''' if _posthog_key else ''
+'''
+
+
+POSTHOG_SCRIPT = _build_posthog_script(_posthog_key)
 
 
 # posthog_capture moved to web/analytics.py to avoid circular imports

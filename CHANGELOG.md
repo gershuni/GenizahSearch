@@ -1017,6 +1017,40 @@ A major overhaul of how LOCAL Hebrew PDFs are read into the My Library index, dr
 
 ## [Unreleased]
 
+### The weekly error digest was mostly measuring visitors' browsers (2026-08-25)
+
+Triage of the PostHog error digest for the week to 2026-08-25: 33 exceptions in four issues,
+32 of them foreign to this codebase. Exception capture is enabled at the PostHog *project*
+level, not in `posthog.init`, so it is a global `window.onerror` / `unhandledrejection` hook
+with no deny-list — it reports whatever runs in the tab, and "crash free sessions" was moving
+with visitors' extensions rather than with this app.
+
+- **`SecurityError: Failed to read the 'cssRules' property`** — 18 of the 33, and provably not
+  ours: nothing in `web/` or `extension/` reads stylesheet rules, and we load no cross-origin
+  stylesheet at all (only `/static/common.css`; no web fonts). Both halves are foreign — the
+  sheet is injected at runtime (the browser's built-in translate, an extension) and the reader
+  is the session recorder mirroring styles for replay. Now dropped in the browser by a
+  `before_send` filter, so the digest tracks our code. A test asserts the premise still holds:
+  add a real stylesheet-rules reader and it fails, before the new code's own errors can be
+  swallowed.
+- **`Error: Script error.`** — the one first-party cause, and only because we made it
+  unreadable. `FABRIC_JS_CDN` loaded fabric.js from jsDelivr without `crossorigin="anonymous"`,
+  so any exception inside it reached `window.onerror` stripped of message, file and line. The
+  attribute is now set, and a guard test holds the line for future third-party script tags.
+  Deliberately *not* filtered like the cssRules one: that fingerprint is opaque precisely
+  because it can be hiding our own failure.
+- **`TypeError: Failed to fetch`** (11 + 3) — left alone. Every first-party `fetch` call site
+  is inside a `try/catch` or has a `.catch()`, and PostHog only captures *unhandled* rejections,
+  so these are not falling out of our code; attribution needs the stack frames from PostHog.
+- The gtag.js tag is a second cross-origin script without the attribute and is **exempt on
+  purpose**: its CORS headers are unverified, and if `Access-Control-Allow-Origin` is absent the
+  attribute stops the script executing at all. Losing site-wide analytics is worse than one
+  unreadable exception a week. The exemption is recorded in the test with what would retire it.
+
+Unchanged, and worth knowing when reading these numbers: `posthog.init` is deferred to
+`requestIdleCallback`, so the handlers do not exist during initial page load and load-time
+exceptions are invisible. The digest is a sample of post-idle errors only.
+
 ### Letter-level search: a second control axis — passage length (2026-08-24)
 
 The Match-width control assumed one dimension. Chasing the Antiochus recall gap turned up a
