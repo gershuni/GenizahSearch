@@ -553,6 +553,12 @@ can reproduce any of them locally:
 | `best_match` | `witness_fusion.best_witness_score` — the strongest single match any witness made | summed `score` |
 | `witness_count` | `witness_fusion.witness_count` | summed `score` |
 
+`sort` reorders the groups the response already contains — it does not re-select them. The
+200-group cap is applied on `fusion_score` first, so `best_match` and `witness_count` rank the
+fused top 200 and cannot surface a manuscript the fusion had already cut. The cap has to rank by
+something, and fusion is the ranking that chose the rows; widen the result set with more or
+better witnesses, not with `sort`.
+
 `best_match` deliberately does **not** read the rows' `score`. That field carries the *rank
 winner's* matched letters, so ordering by it reproduces `fused` under a second name rather than
 answering "which manuscript holds the strongest match" — a manuscript ranked first by a short

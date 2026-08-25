@@ -2945,8 +2945,34 @@ def create_parallels_page(initial_text: str = None):
         except Exception as exc:
             logger.exception(f"Witness rehydrate failed: {exc}")
             return
+        # The length cap has to be re-applied HERE, not only where a witness
+        # is added. What comes back is not what was promoted: the refetch
+        # reads whatever headers the RESTORED row set holds, and falls back
+        # to `get_full_manuscript`, which returns the whole manuscript. A
+        # reload could therefore turn a capped witness into an uncapped one --
+        # and the cap exists because an over-long witness spends its entire
+        # 30s ceiling and fails, once per witness.
+        from shared.passage_fusion import MAX_WITNESS_CHARS, split_by_length
+        _over_cap = 0
         for w in stale:
-            w['text'] = texts.get(w['sys_id']) or ''
+            _text = texts.get(w['sys_id']) or ''
+            _fits, _too_long = split_by_length([_text]) if _text else ([], [])
+            if _too_long:
+                # Emptied, not truncated -- half a manuscript searched as if
+                # it were the whole one is a worse answer than none, and an
+                # invisible one. The dispatch loop fails it; the error is set
+                # here because only here is the REASON known.
+                w['text'] = ''
+                w['error'] = tr(
+                    'Witness text is too long (max {cap} characters)'
+                ).format(cap=MAX_WITNESS_CHARS)
+                _over_cap += 1
+                continue
+            w['text'] = _text
+        if _over_cap:
+            ui.notify(
+                tr('Witness text is too long (max {cap} characters)').format(
+                    cap=MAX_WITNESS_CHARS), type='warning')
 
     async def _search_pending_witnesses(_e=None) -> int:
         """Search every `pending` witness and merge its rows into what is
@@ -3018,8 +3044,13 @@ def create_parallels_page(initial_text: str = None):
                     # perfectly honest-looking "0 matches" for a search that
                     # never ran -- a false negative no user could detect.
                     entry['status'] = 'failed'
-                    entry['error'] = tr(
-                        'Could not load text for this manuscript.')
+                    # Only when nothing more specific is known. Rehydration
+                    # empties an over-long witness and records WHY; saying
+                    # "could not load" over that replaces the true reason
+                    # with a false one, and the user retries forever.
+                    if not entry.get('error'):
+                        entry['error'] = tr(
+                            'Could not load text for this manuscript.')
                     continue
                 entry['status'] = 'running'
                 p_state.witness_progress = tr(
@@ -3108,6 +3139,13 @@ def create_parallels_page(initial_text: str = None):
             ui.notify(tr('Witness list is full (max {n})').format(
                 n=_witness_depth_cap()), type='warning')
             return
+        if len(sys_ids) > room:
+            # The add-witness dialog already reports its own truncation; this
+            # path dropped the excess in silence, so ten checked manuscripts
+            # with room for three became three with no sign of the seven.
+            # Same message, so the two doors say the same thing.
+            ui.notify(tr('Witness list is full (max {n})').format(
+                n=_witness_depth_cap()), type='warning')
         sys_ids = sys_ids[:room]
 
         # Captured HERE, on the event loop: the fetch below runs off-loop

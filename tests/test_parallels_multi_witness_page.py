@@ -1383,3 +1383,128 @@ def test_the_search_fingerprint_is_stamped_whether_or_not_the_seed_matched():
     assert 'main_results' not in guards and 'filtered_results' not in guards, (
         'the search identity is stamped only when the seed matched'
     )
+
+
+def test_rehydrated_witness_text_is_capped_like_every_other_witness():
+    """`MAX_WITNESS_CHARS` was enforced in the add dialog and at promotion,
+    but a manuscript witness is stored WITHOUT its text and re-fetched on
+    restore -- and that path applied no cap at all.
+
+    What comes back is not what was promoted: the refetch reads whatever
+    headers the RESTORED row set holds, and falls back to
+    `get_full_manuscript`, which returns the whole manuscript. So a reload
+    could turn a capped witness into an uncapped one, and the cap exists
+    because an over-long witness spends its entire 30 s ceiling and fails.
+
+    Same shape as the depth-cap finding: enforced at the doors, absent at
+    dispatch. RED if the rehydrate stops consulting the rule.
+    """
+    import ast
+    src = _func_source('_rehydrate_manuscript_witnesses')
+    tree = ast.parse(src.lstrip())
+    # A CALL, not the name: `'split_by_length' in src` stayed true when the
+    # call was replaced, because the import line above still carries the
+    # name -- the mutation run caught this test passing on the defect.
+    calls = [n for n in ast.walk(tree)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+             and n.func.id == 'split_by_length']
+    assert calls, (
+        'the rehydrate path does not CALL the witness length cap (the name '
+        'may still be imported, which is what made an earlier version of '
+        'this assertion vacuous)'
+    )
+    # ...and it must be applied to what was FETCHED, not to a leftover.
+    args = ' '.join(ast.unparse(a) for c in calls for a in c.args)
+    assert '_text' in args, (
+        f'the cap is applied to something other than the fetched text: {args!r}'
+    )
+
+
+def test_an_over_long_rehydrated_witness_is_emptied_not_truncated():
+    """Half a manuscript searched as if it were the whole one is a worse
+    answer than none, and an invisible one -- the rule `split_by_length`'s
+    own docstring states. RED if the branch starts assigning a slice."""
+    import ast
+    src = _func_source('_rehydrate_manuscript_witnesses')
+    tree = ast.parse(src.lstrip())
+    slices = [n for n in ast.walk(tree)
+              if isinstance(n, ast.Subscript) and isinstance(n.slice, ast.Slice)]
+    assert not slices, (
+        'the rehydrate path truncates a witness instead of refusing it: '
+        + repr([ast.unparse(n) for n in slices])
+    )
+
+
+def test_the_generic_load_failure_never_overwrites_a_specific_one():
+    """Rehydration empties an over-long witness and records WHY. The dispatch
+    loop then fails it -- and used to stamp "Could not load text for this
+    manuscript" over the true reason, so the panel offered Retry for a
+    condition retrying cannot fix.
+
+    RED if the guard around the generic message is removed.
+    """
+    import ast
+    src = _func_source('_search_pending_witnesses')
+    tree = ast.parse(src.lstrip())
+    generic = [
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        and n.func.id == 'tr'
+        and n.args and isinstance(n.args[0], ast.Constant)
+        and 'Could not load text' in str(n.args[0].value)
+    ]
+    assert len(generic) == 1, f'expected one generic message, got {len(generic)}'
+
+    # It must sit under a test that checks for an existing error.
+    guarded = False
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        test_src = ast.unparse(node.test)
+        if 'error' not in test_src:
+            continue
+        if any(g is n for n in ast.walk(node) for g in generic):
+            guarded = True
+    assert guarded, (
+        'the generic load-failure message is unconditional, so it replaces '
+        'the specific reason rehydration recorded'
+    )
+
+
+def test_promotion_says_when_it_drops_manuscripts_over_the_cap():
+    """The add-witness dialog truncates a bulk paste and SAYS SO; promotion
+    did `sys_ids = sys_ids[:room]` with a message only when room was already
+    zero. Check ten manuscripts with room for three and seven vanished --
+    the silent shrinking the auto-expand round refuses to do on the grounds
+    that a control quietly doing less than it says is a lie.
+
+    RED if the notify is removed or moved after the truncation.
+    """
+    import ast
+    src = _func_source('_promote_checked')
+    tree = ast.parse(src.lstrip())
+
+    trunc = [n for n in ast.walk(tree)
+             if isinstance(n, ast.Assign)
+             and any(isinstance(t, ast.Name) and t.id == 'sys_ids'
+                     for t in n.targets)
+             and isinstance(n.value, ast.Subscript)
+             and isinstance(n.value.slice, ast.Slice)]
+    assert len(trunc) == 1, f'expected one cap truncation, got {len(trunc)}'
+
+    # Some `if` guarding a notify must compare the request against the room.
+    reported = False
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        test_src = ast.unparse(node.test)
+        if 'room' not in test_src or 'sys_ids' not in test_src:
+            continue
+        calls = [ast.unparse(c.func) for c in ast.walk(node)
+                 if isinstance(c, ast.Call)]
+        if any('notify' in c for c in calls):
+            reported = True
+    assert reported, (
+        'promotion truncates to the cap without telling the user how many '
+        'of their checked manuscripts were dropped'
+    )
