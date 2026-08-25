@@ -1149,3 +1149,184 @@ def test_a_result_row_draws_exactly_one_expand_chevron():
             )
         return
     raise AssertionError('create_parallel_item not found')
+
+
+# ---------------------------------------------------------------------------
+# The options pane must sit BESIDE the text, not below it.
+# ---------------------------------------------------------------------------
+
+def _left_column_classes() -> str:
+    """The class string of the flex column that holds the text input."""
+    src = _read_source()
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == 'classes'
+                and node.args
+                and isinstance(node.args[0], ast.Constant)):
+            continue
+        value = node.args[0].value
+        if isinstance(value, str) and 'flex-grow' in value and 'gap-4' in value:
+            return value
+    raise AssertionError('the text-input column was not found')
+
+
+def test_the_text_column_cannot_push_the_options_pane_off_its_side():
+    """A flex item's default `min-width: auto` lets a wide child set the
+    column's minimum width. An 88-character help sentence in the method row
+    did exactly that, and the row holding both columns wrapped -- the options
+    pane landed under the text instead of beside it (owner-reported
+    2026-08-25)."""
+    assert 'min-w-0' in _left_column_classes(), (
+        'without min-w-0 any long child can push the options pane below'
+    )
+
+
+def test_the_method_help_is_not_inside_the_method_row():
+    """It is a full sentence; inside the non-wrapping row it inflated the
+    column's min-content width. It belongs under the row, where
+    `boundary_mode_help` sits relative to ITS row."""
+    src = _read_source()
+    assignment = src.index('method_help = ui.label(')
+    radio = src.index('method_radio = ui.radio(')
+    assert assignment > radio, 'sanity: the help line follows the radio'
+    # Same indentation as the row itself (20 spaces), not the row's contents
+    # (24). Measured from the line start rather than guessed.
+    line_start = src.rindex('\n', 0, assignment) + 1
+    indent = assignment - line_start
+    assert indent == 20, (
+        f'method_help is indented {indent} spaces -- inside the row again'
+    )
+
+
+# ---------------------------------------------------------------------------
+# Lab Mode belongs with the chunk options.
+# ---------------------------------------------------------------------------
+
+def test_lab_mode_is_defined_in_the_options_pane_not_the_method_row():
+    """It is a third BACKEND, not a third search method; beside the two radio
+    options it read as a peer of them."""
+    src = _read_source()
+    lab = src.index('lab_mode = ui.checkbox(')
+    options_heading = src.index("h2(tr('Options')")
+    assert lab > options_heading, (
+        'lab_mode is still defined above the options pane'
+    )
+
+
+def test_lab_mode_follows_the_chunk_visibility_rule():
+    """A control hidden by hand in one branch and forgotten in the other is
+    how a hidden checkbox stays ON."""
+    src = _read_source()
+    assert src.count('lab_mode_row') >= 3, (
+        'lab_mode_row must be created AND switched in both branches'
+    )
+
+
+def test_the_lab_mode_handler_is_registered_after_the_widget_exists():
+    """The `.on()` call is the ONLY build-time reference to the widget. Above
+    its definition it is a NameError, which takes the whole page down with a
+    500 -- this page has that exact history."""
+    src = _read_source()
+    definition = src.index('lab_mode = ui.checkbox(')
+    registration = src.index("lab_mode.on('update:model-value'")
+    assert registration > definition, (
+        'lab_mode.on(...) runs before lab_mode exists'
+    )
+
+
+# ---------------------------------------------------------------------------
+# The boundary stats cannot creep back on a blur.
+# ---------------------------------------------------------------------------
+
+def test_the_boundary_stats_are_guarded_at_their_source():
+    """`text_input.on('blur', update_boundary_stats)` calls this directly, so
+    hiding the label from the method handler alone would have "N boundaries
+    detected" reappear the moment a letter-level user clicked out of the
+    textarea."""
+    src = _read_source()
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.FunctionDef)
+                and node.name == 'update_boundary_stats'):
+            continue
+        body = ast.get_source_segment(src, node) or ''
+        guard = body.index('_letter_level_selected()')
+        first_try = body.index('try:')
+        assert guard < first_try, (
+            'the method guard must come before the stats are computed'
+        )
+        return
+    raise AssertionError('update_boundary_stats not found')
+
+
+def _method_branch_calls(target: str, attr: str) -> dict:
+    """For `on_passage_mode_change`, the literal argument each branch passes
+    to `<target>.<attr>(...)`, keyed by branch ('if' / 'else').
+
+    An AST test rather than a render one: NiceGUI's User harness does not
+    deliver a Quasar option group's `update:model-value`, so a simulated
+    method switch changes nothing and any render test of it passes
+    vacuously. What CAN be checked decisively is that both branches act, and
+    in opposite directions -- which is exactly the mutation that survived
+    (deleting the un-hide left the row visible by default, so the pinned-to-
+    chunk render could not tell).
+    """
+    src = _read_source()
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.FunctionDef)
+                and node.name == 'on_passage_mode_change'):
+            continue
+        out = {}
+        # The FIRST `if` in this function is the lab-mode exclusivity check,
+        # which has no else. The method branch is the one with both halves.
+        for sub in node.body:
+            if not (isinstance(sub, ast.If) and sub.orelse):
+                continue
+            for branch, body in (('if', sub.body), ('else', sub.orelse)):
+                for inner in ast.walk(ast.Module(body=body, type_ignores=[])):
+                    if (isinstance(inner, ast.Call)
+                            and isinstance(inner.func, ast.Attribute)
+                            and inner.func.attr == attr
+                            and isinstance(inner.func.value, ast.Name)
+                            and inner.func.value.id == target
+                            and inner.args
+                            and isinstance(inner.args[0], ast.Constant)):
+                        out[branch] = inner.args[0].value
+        return out
+    raise AssertionError('on_passage_mode_change not found')
+
+
+def test_the_paragraph_settings_are_hidden_AND_restored():
+    """One-way hiding is the easy half. Without the restore, a user who
+    glances at letter-level search loses the paragraph controls for the rest
+    of the session."""
+    calls = _method_branch_calls('boundary_row', 'set_visibility')
+    assert calls.get('if') is False, 'letter-level must hide them'
+    assert calls.get('else') is True, (
+        'nothing restores the paragraph settings when chunk is re-selected'
+    )
+
+
+def test_the_paragraph_help_labels_are_recomputed_not_just_unhidden():
+    """They are inline-styled by `update_boundary_ui`, and which of them
+    belongs on screen depends on the boundary mode and on whether the text
+    has any breaks -- so the chunk branch recomputes rather than un-hides."""
+    src = _read_source()
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.FunctionDef)
+                and node.name == 'on_passage_mode_change'):
+            continue
+        for sub in node.body:
+            if not (isinstance(sub, ast.If) and sub.orelse):
+                continue
+            names = {
+                inner.func.id for inner in ast.walk(
+                    ast.Module(body=sub.orelse, type_ignores=[]))
+                if isinstance(inner, ast.Call)
+                and isinstance(inner.func, ast.Name)
+            }
+            assert 'update_boundary_ui' in names, (
+                'the chunk branch must recompute the boundary labels'
+            )
+            return
+    raise AssertionError('on_passage_mode_change not found')

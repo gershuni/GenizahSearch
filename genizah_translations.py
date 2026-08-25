@@ -4984,6 +4984,11 @@ TRANSLATIONS.update({
 
 # === Web parallels — letter-level search rename + controls (owner, 2026-08-23) ===
 TRANSLATIONS.update({
+    # The sidebar badge on the /parallels nav entry. Kept SHORT: it sits
+    # in a narrow drawer beside an icon and a label, so the English
+    # sentence is condensed rather than translated word for word.
+    "New fast search feature!":
+        "חדש! חיפוש מהיר",
     "New! Letter-level search":
         "חדש! חיפוש ברמת האות",
     "Chunk search (slower)":

@@ -63,7 +63,7 @@ WITNESS_SYS_ID_RE = re.compile(r'((?:99|97)\d{8,})')
 
 
 def witness_sys_id(row) -> str:
-    """The sys_id a result row belongs to.
+    r"""The sys_id a result row belongs to.
 
     Mirrors `shared/passage_parallels.py::_SYS_ID_RE` and the authoritative
     `shared/metadata_manager.py`, both of which accept a 97 prefix as well as
@@ -1014,8 +1014,13 @@ def create_parallels_page(initial_text: str = None):
         with ui.card().classes('w-full p-6'):
             with ui.row().classes('w-full gap-6'):
 
-                # Left: Text Input
-                with ui.column().classes('flex-grow gap-4'):
+                # Left: Text Input.
+                #
+                # `min-w-0` is load-bearing, not decoration: a flex item's
+                # default `min-width: auto` lets a wide child set the column's
+                # minimum width, which pushed the `w-80` options pane below
+                # the text instead of beside it (owner-reported 2026-08-25).
+                with ui.column().classes('flex-grow min-w-0 gap-4'):
                     # Changed to H2
                     h2(tr('Source text'), classes='text-xl font-bold', style='color: var(--text-primary);')
 
@@ -1139,15 +1144,12 @@ def create_parallels_page(initial_text: str = None):
                     # === Lab Mode and Boundary Search Settings (below text input) ===
                     ui.separator().classes('my-3')
 
-                    # Lab Mode Toggle Row
+                    # Search-method row. Lab Mode used to sit here, beside
+                    # the two radio options, which read as though it were a
+                    # third one; it is a different BACKEND, mutually exclusive
+                    # with both, and it now lives in the options pane with the
+                    # chunk settings it belongs to (owner, 2026-08-25).
                     with ui.row().classes('w-full items-center gap-4'):
-                        lab_mode = ui.checkbox(tr('Lab Mode (experimental)'))
-                        lab_mode.tooltip(tr('Advanced search using fingerprint algorithm. Slower but more features.'))
-
-                        # Deep Scan (Lab Mode only - initially hidden)
-                        deep_scan = ui.checkbox(tr('Deep Scan')).style('display: none;')
-                        deep_scan.tooltip(tr('Exhaustive search - slower but finds more results'))
-
                         # Method selector (owner ruling 2026-08-23): letter-level
                         # search is the DEFAULT when available, chunk is the explicit
                         # alternative -- a radio, no longer an opt-in checkbox. The flip
@@ -1166,39 +1168,6 @@ def create_parallels_page(initial_text: str = None):
                             },
                             value='passage',
                         ).props('inline dense')
-                        # A live help line, NOT a tooltip: `ui.radio` renders
-                        # one QOptionGroup, so a tooltip attached to it fires
-                        # for BOTH options -- hovering "Chunk search" described
-                        # letter-level search (owner-reported 2026-08-25). Same
-                        # shape as `boundary_mode_help` below, and visible
-                        # without hovering.
-                        method_help = ui.label('').classes(
-                            'text-xs mt-1').style('color: var(--text-muted);')
-
-                        _METHOD_HELP = {
-                            # Neither claim mentions nikkud or line breaks any
-                            # more. Both engines strip nikkud (the chunk one
-                            # per token, at tokenization) and both treat a
-                            # newline as an ordinary separator, so neither was
-                            # ever a difference between them.
-                            'passage': tr(
-                                'Faster, with fewer irrelevant results. '
-                                'Tolerates spelling and transcription '
-                                'differences.'),
-                            'chunk': tr(
-                                'The older method. Slower, but offers Exact / '
-                                'Variants / Fuzzy modes and cross-paragraph '
-                                'filtering.'),
-                        }
-
-                        def _update_method_help() -> None:
-                            method_help.text = _METHOD_HELP.get(
-                                method_radio.value, '')
-
-                        method_radio.on_value_change(
-                            lambda _e: _update_method_help())
-                        _update_method_help()
-
                         def _letter_level_selected() -> bool:
                             return method_radio.value == 'passage'
 
@@ -1206,8 +1175,46 @@ def create_parallels_page(initial_text: str = None):
                             method_radio.value = 'chunk'
                             method_radio.style('display: none;')
 
-                    # === Boundary Search Settings ===
-                    with ui.row().classes('w-full items-center gap-4 flex-wrap mt-2'):
+                    # A live help line, NOT a tooltip: `ui.radio` renders one
+                    # QOptionGroup, so a tooltip attached to it fires for BOTH
+                    # options -- hovering "Chunk search" described letter-level
+                    # search (owner-reported 2026-08-25).
+                    #
+                    # OUTSIDE the row above, mirroring `boundary_mode_help`:
+                    # inside it, this sentence's min-content width propagated
+                    # out through the flex column and pushed the options pane
+                    # off its side of the card.
+                    method_help = ui.label('').classes(
+                        'text-xs mt-1').style('color: var(--text-muted);')
+
+                    _METHOD_HELP = {
+                        # Neither claim mentions nikkud or line breaks any
+                        # more. Both engines strip nikkud (the chunk one per
+                        # token, at tokenization) and both treat a newline as
+                        # an ordinary separator, so neither was ever a
+                        # difference between them.
+                        'passage': tr(
+                            'Faster, with fewer irrelevant results. '
+                            'Tolerates spelling and transcription '
+                            'differences.'),
+                        'chunk': tr(
+                            'The older method. Slower, but offers Exact / '
+                            'Variants / Fuzzy modes and cross-paragraph '
+                            'filtering.'),
+                    }
+
+                    def _update_method_help() -> None:
+                        method_help.text = _METHOD_HELP.get(
+                            method_radio.value, '')
+
+                    method_radio.on_value_change(
+                        lambda _e: _update_method_help())
+                    _update_method_help()
+
+                    # === Boundary Search Settings (CHUNK ONLY) ===
+                    with ui.row().classes(
+                            'w-full items-center gap-4 flex-wrap mt-2'
+                    ).mark('boundary-settings') as boundary_row:
                         # Paragraph delimiter (always editable - affects display even in full mode)
                         with ui.column().classes('gap-1') as delimiter_col:
                             delimiter_label = ui.label(tr('Paragraph separator')).classes('text-xs font-medium').style('color: var(--text-muted);')
@@ -1301,7 +1308,18 @@ def create_parallels_page(initial_text: str = None):
                         update_boundary_stats()
 
                     def update_boundary_stats():
-                        """Update pre-search boundary statistics."""
+                        """Update pre-search boundary statistics.
+
+                        Guarded HERE rather than in the method handler because
+                        `text_input.on('blur', ...)` calls this directly: a
+                        letter-level user who clicked out of the textarea would
+                        otherwise see "N boundaries detected" reappear under a
+                        method that has no paragraph boundaries at all.
+                        """
+                        if _letter_level_selected():
+                            boundary_stats_label.style('display: none;')
+                            boundary_warning_label.style('display: none;')
+                            return
                         try:
                             from genizah_core import get_boundary_stats
                             text = text_input.value or ""
@@ -1364,8 +1382,6 @@ def create_parallels_page(initial_text: str = None):
                             # Lower default for regular mode
                             min_chunks_input.value = 1
 
-                    lab_mode.on('update:model-value', on_lab_mode_change)
-
                     # Phase 145: passage-matching toggle handler -- reciprocal
                     # mutual exclusivity with Lab Mode.
                     def on_passage_mode_change():
@@ -1383,7 +1399,8 @@ def create_parallels_page(initial_text: str = None):
                             # return the identical manuscript set.
                             witness_panel.set_visibility(True)
                             for _row in (mode_select, chunk_size_row,
-                                         freq_threshold_row, min_chunks_row):
+                                         freq_threshold_row, min_chunks_row,
+                                         lab_mode_row):
                                 _row.set_visibility(False)
                             # Finding #2 (adversarial review): passage-matching
                             # has no cross-paragraph/token-boundary concept --
@@ -1393,6 +1410,15 @@ def create_parallels_page(initial_text: str = None):
                             # here means the UI can never even SEND the
                             # unsupported value, rather than relying only on
                             # that rejection.
+                            # HIDDEN as well as disabled. The force-set and
+                            # disable below stay exactly as they were -- they
+                            # are what guarantees the UI can never SEND an
+                            # unsupported value -- but a greyed-out control
+                            # still reads as an option you might have, and
+                            # letter-level search has no paragraph boundaries
+                            # to offer (owner, 2026-08-25).
+                            boundary_row.set_visibility(False)
+                            boundary_mode_help.style('display: none;')
                             boundary_mode.value = 'full'
                             # NiceGUI fires no event for a programmatic
                             # .value write, so boundary_mode's own handler
@@ -1437,13 +1463,20 @@ def create_parallels_page(initial_text: str = None):
                             # find their seventeen pasted witnesses gone.
                             witness_panel.set_visibility(False)
                             for _row in (mode_select, chunk_size_row,
-                                         freq_threshold_row, min_chunks_row):
+                                         freq_threshold_row, min_chunks_row,
+                                         lab_mode_row):
                                 _row.set_visibility(True)
+                            boundary_row.set_visibility(True)
                             boundary_mode.enable()
                             chunk_size.enable()
                             mode_select.enable()
                             freq_threshold.enable()
                             min_chunks_input.enable()
+                            # Recompute the three inline-styled labels rather
+                            # than un-hiding them: which of them belongs on
+                            # screen depends on the boundary mode and on
+                            # whether the text has any breaks.
+                            update_boundary_ui()
 
                     method_radio.on('update:model-value', on_passage_mode_change)
 
@@ -1641,6 +1674,25 @@ def create_parallels_page(initial_text: str = None):
                             format='%d'
                         ).classes('w-24').props('outlined dense')
                         ui.label(tr('Minimum matching chunks per manuscript')).classes('text-xs').style('color: var(--text-muted);')
+
+                    # Lab Mode: a third BACKEND, not a third search method.
+                    # It lives with the chunk settings because it is only
+                    # reachable from chunk search -- selecting letter-level
+                    # turns it off (`on_passage_mode_change`), so it can never
+                    # be left ON behind a hidden control.
+                    with ui.column().classes('gap-1').mark(
+                            'lab-mode-row') as lab_mode_row:
+                        lab_mode = ui.checkbox(tr('Lab Mode (experimental)'))
+                        lab_mode.tooltip(tr('Advanced search using fingerprint algorithm. Slower but more features.'))
+
+                        # Deep Scan (Lab Mode only - initially hidden)
+                        deep_scan = ui.checkbox(tr('Deep Scan')).style('display: none;')
+                        deep_scan.tooltip(tr('Exhaustive search - slower but finds more results'))
+
+                    # Registered HERE, not beside `on_lab_mode_change`: this is
+                    # the only BUILD-TIME reference to the widget, so it has to
+                    # follow the definition above or the page 500s.
+                    lab_mode.on('update:model-value', on_lab_mode_change)
 
                     def _apply_restored_search_config():
                         """Re-apply the snapshot's search configuration to

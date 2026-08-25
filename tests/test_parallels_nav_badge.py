@@ -99,3 +99,34 @@ def test_the_other_gated_entries_are_untouched(other):
     """This change must not have widened or narrowed anyone else's gate."""
     entry = _nav_tuple(other)
     assert len(entry.elts) == 4
+
+
+def test_the_badge_says_what_is_new():
+    """"New" alone does not tell a returning reader what changed. Owner,
+    2026-08-25: "we should write 'New fast search feature!'"."""
+    badge = _nav_tuple('/parallels').elts[3]
+    text = badge.body.args[0]
+    assert isinstance(text, ast.Constant)
+    assert text.value == 'New fast search feature!'
+
+
+def test_the_badge_actually_has_a_hebrew_translation():
+    """`tr()` falls back to the ENGLISH string when a key is missing, so an
+    untranslated badge is invisible to every other test here -- it renders,
+    it just renders in the wrong language beside a Hebrew nav label.
+    Owner-reported once already (2026-08-25)."""
+    from web.translations import tr, set_language, get_language
+    badge = _nav_tuple('/parallels').elts[3]
+    english = badge.body.args[0].value
+
+    saved = get_language()
+    try:
+        set_language('he')
+        rendered = tr(english)
+    finally:
+        set_language(saved)
+
+    assert rendered != english, f'{english!r} has no Hebrew entry'
+    assert any('֐' <= ch <= 'ת' for ch in rendered), (
+        f'{english!r} translates to {rendered!r}, which has no Hebrew letters'
+    )

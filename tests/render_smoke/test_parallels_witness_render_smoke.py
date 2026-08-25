@@ -150,3 +150,68 @@ def test_the_sort_control_offers_no_fusion_orders_before_a_search():
             f'unexpected sort options before any search: {sorted(keys)}')
 
     _run(driver)
+
+
+def _marked(user: User, marker: str):
+    """The single element carrying `marker`, or an assertion failure."""
+    hits = [el for el in user.client.elements.values()
+            if marker in (getattr(el, '_markers', None) or [])]
+    assert len(hits) == 1, f'expected one element marked {marker!r}, got {len(hits)}'
+    return hits[0]
+
+
+def test_letter_level_hides_the_paragraph_settings_and_lab_mode():
+    """Both are chunk-only, and both were on screen under letter-level search
+    (owner-reported 2026-08-25). The paragraph controls were already
+    force-set and DISABLED -- that is what stops the UI ever sending a value
+    `web/search_api.py` would reject with 400 `passage_option_unsupported` --
+    but a greyed-out control still reads as an option you might have.
+
+    Visibility is a runtime call inside a handler; only a real build executes
+    it, so no AST test can see this.
+    """
+    async def driver(user: User) -> None:
+        await user.open('/parallels')
+        assert not _marked(user, 'boundary-settings').visible, (
+            'paragraph-separator settings are showing under letter-level '
+            'search, which has no paragraph boundaries'
+        )
+        assert not _marked(user, 'lab-mode-row').visible, (
+            'Lab Mode is showing under letter-level search, which it is '
+            'mutually exclusive with'
+        )
+
+    _run(driver)
+
+
+def test_chunk_search_shows_the_paragraph_settings_and_lab_mode():
+    """The other half. With no passage index the method pins to chunk, which
+    is exactly the state those controls belong to -- hiding them there would
+    remove real functionality rather than tidy an irrelevant one."""
+    async def driver(user: User) -> None:
+        await user.open('/parallels')
+        assert _marked(user, 'boundary-settings').visible
+        assert _marked(user, 'lab-mode-row').visible
+
+    _run(driver, passage_ready=False)
+
+
+def test_the_paragraph_controls_are_still_disabled_not_merely_hidden():
+    """Hiding is presentation ON TOP of the guarantee, never instead of it: a
+    restored snapshot or a stray programmatic write must still be unable to
+    put an unsupported value on the wire."""
+    from nicegui import ui
+
+    async def driver(user: User) -> None:
+        await user.open('/parallels')
+        radios = [el for el in user.client.elements.values()
+                  if isinstance(el, ui.radio)
+                  and isinstance(el.options, dict)
+                  and 'full' in el.options]
+        assert radios, 'boundary_mode radio not found'
+        assert radios[0].enabled is False, (
+            'boundary_mode was hidden but left ENABLED -- the 400 guard is '
+            'the contract, hiding is only presentation'
+        )
+
+    _run(driver)
