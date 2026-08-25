@@ -152,6 +152,30 @@ flagship case is a 17-witness set).
   worse one — the snapshot was persisted under the OLD witness set's fingerprint, so a reload
   matched it, judged the stored payload to be the same search, and restored the removed
   witness's contributions. The removal silently undid itself.
+* **`fuse()` counts contributors by POSITION**, deliberately, so an untagged `''` cannot
+  collapse a real count. Anything that turns one substantive witness into two positional
+  entries therefore inflates `witness_count` and `fusion_score` and reorders results. Both
+  surfaces dedupe on the RESOLVED TEXT via `passage_fusion.witness_text_key` — which covers
+  the same `raw_header` twice, two refs resolving to one page, the same text pasted twice,
+  a paste identical to a resolved ref, and a paste identical to the SEED (itself a witness).
+  Whitespace-stripped only, never the passage normalizer: that folds orthography on purpose,
+  and two genuinely different witnesses of one work normalize much closer than they are.
+* **A promoted witness is NOT a function of its `sys_id`.** It is the concatenation of the
+  pages that MATCHED — a property of the result set on screen at that moment. So the pages
+  it was built from are RECORDED (`witness_headers_for`), stored in the snapshot, replayed
+  on rehydrate, and hashed into the search fingerprint. Re-deriving any of them later
+  rebuilds a *different* witness under the same label: after `execute_parallels` resets the
+  fused rows, the rows on screen are the seed-only set. This premise was wrong in three
+  separate places and each was found on its own round.
+* **Routing a row is not describing a record.** `filter_text` decides which BUCKET a
+  witness's row lands in; `fusion_score` / `witness_count` / `witness_ids` /
+  `best_witness_score` describe the record. `fuse_routed` owns both rules — evidence from an
+  eligible contributor, arithmetic over all of them.
+* **After a reload the per-witness caches are empty by design**, so nothing can be re-fused.
+  Two consequences that must not be confused: `_fuse_and_store` must not treat "nothing to
+  fuse from" as "the result set is empty" (that wiped every restored row), and
+  `_remove_witness` cannot strip the removed witness's rows and must SAY so rather than
+  present the removal as complete.
 * **The page and the API return different manuscript SETS** (3,682 vs 3,850 on a
   17-witness run) while finding the same 455 census manuscripts. Cause: the
   duplicate-photography pass runs per-witness on the page and once post-fusion in the API.
@@ -166,9 +190,9 @@ Roughly 90 tests were added. Two things about them are worth carrying forward.
 **Every gate here was proven able to fail.** Each fix ships with a mutation sweep that
 reintroduces the defect and requires the suite to redden; the harness asserts its own edit
 landed (a `.replace()` with LF literals against CRLF sources once reported five mutations
-green while changing nothing). Roughly 70 mutations were run across the branch.
+green while changing nothing). Roughly 120 mutations were run across the branch, 49 of them across six Codex review rounds after the first push.
 
-**Seven of them came back green, and only one was a plain coverage gap.** The rest were
+**Nine of them came back green, and only one was a plain coverage gap.** The rest were
 tests that *could not fail* — asserting that a NAME appeared in the source, which every
 mutation preserved while deleting the behaviour (`_long = []` still mentions
 `MAX_WITNESS_CHARS` two lines up; `if False:` still contains the notify and its message
@@ -179,6 +203,17 @@ The fix each time was the same, and it is the pattern to reuse: move the decisio
 module-level pure function and test it by *calling* it. That is why `collect_witness_texts`,
 `witnesses_needing_text`, `restore_witness_entries` and `split_by_length` live at module
 level in a file whose page function is never imported.
+
+**A mutation harness must verify its BASELINE, not only its edit.** A test of mine reached
+the harness reporting RED without ever having run green — it never set its fixtures up, so
+the request 503'd and it failed with *and* without the defect, which is indistinguishable
+from a caught mutation. (`-k sort` had not selected it either; the name said "order".) Every
+harness here now runs the selector clean first and reports `BASELINE RED — proves nothing`
+rather than a false catch. Same class of false confidence as a mutation that never applied.
+
+**Filter review comments by `pull_request_review_id`, never by timestamp.** A finding
+created at 13:00:29Z landed after one round's fetch and before the next round's window
+opened at 13:05, and was reported as "no findings". The id is exact; a clock is not.
 
 **Render-smoke is not optional here.** `web/pages/parallels.py` is a 6,000-line closure;
 headless tests cannot see a build-time `NameError`, and this page has taken a 500 from
@@ -199,7 +234,17 @@ of which touches parallels, fusion or the API. Zero regressions.
 
 ## Open
 
-* **End-to-end hand test on a live server** — the owner's, not yet done.
+* **End-to-end hand test on a live server** — the owner's, NOT DONE. Merged without it by
+  owner decision (2026-08-25) after six review rounds. Start with
+  `PASSAGE_MULTI_WITNESS_ENABLED` **off** and confirm the witness panel and the per-result
+  promotion checkboxes are both absent under letter-level — that gate shipped late (round 2)
+  and the obvious test setup, both flags on, walks straight past it. Then: empty seed with
+  one good witness; reload and remove a witness (rows must stay, and a notice must say the
+  results predate the change); 5 witnesses at `deepest` must be refused by name and number.
+* **Should a filtered contributor count toward `fusion_score`?** It now does, so a match the
+  caller asked to discount can help a record rank. The alternative makes `witness_count`
+  contradict its documentation and makes rank depend on which witness happened to hit known
+  source text. Two-line revert in `fuse_routed` if the owner disagrees.
 * Whether `witness_id` / `witness_label` belong in the **public** export JSON envelope is
   an owner decision the plan explicitly did not make.
 * The **97-prefix sys_id divergence** — `shared/metadata_manager.py` (authoritative)
