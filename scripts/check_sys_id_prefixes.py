@@ -30,7 +30,15 @@ import sqlite3
 import sys
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Running this file directly puts `scripts/` on sys.path, not the repo root, so
+# `import shared...` below would fail with ModuleNotFoundError. Insert the root
+# here, at module level, so it is in place before ANY shared import -- including
+# the deferred one inside scan_tantivy, which is the only caller that needs it.
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 CORPUS_PREFIX = "99"
+#: Documents per offset page when walking a Tantivy index.
+TANTIVY_PAGE = 10000
 LOCAL_PREFIX = "97"
 
 
@@ -119,23 +127,41 @@ def scan_tantivy(index_dir):
     searcher = index.searcher()
     counter = collections.Counter()
     samples = collections.defaultdict(list)
+
+    # Enumerate through the Python binding's supported surface. There is no
+    # `Searcher.segment_readers()`; the binding exposes `num_docs`, `search`
+    # and `doc`, so walk a match-all query in offset pages. One searcher is
+    # held for the whole walk, so paging is over a fixed index snapshot.
+    total = searcher.num_docs
+    query = tantivy.Query.all_query()
     scanned = 0
-    for seg in searcher.segment_readers():
-        for doc_id in range(seg.num_docs()):
+    offset = 0
+    while offset < total:
+        hits = searcher.search(
+            query, limit=TANTIVY_PAGE, offset=offset, count=False).hits
+        if not hits:
+            break
+        for _score, address in hits:
+            scanned += 1
             try:
-                doc = searcher.doc(tantivy.DocAddress(seg.segment_id(), doc_id))
+                header = searcher.doc(address).get_first("full_header")
             except Exception:
                 continue
-            header = (doc.get_first("full_header") or "")
-            m = ANY_SYS_ID_RE.search(str(header))
-            scanned += 1
+            m = ANY_SYS_ID_RE.search(str(header or ""))
             if not m:
                 continue
             sid = m.group(1)
             counter[sid[:2]] += 1
             if len(samples[sid[:2]]) < 3:
                 samples[sid[:2]].append(sid)
-    print(f"\n(scanned {scanned:,} index documents)")
+        offset += len(hits)
+
+    print(f"\n(scanned {scanned:,} of {total:,} index documents)")
+    if scanned != total:
+        # Never report a clean result off a partial walk -- a short scan is
+        # indistinguishable from a corpus with no 97 in it.
+        print(f"    INCOMPLETE WALK: saw {scanned:,} of {total:,} documents.")
+        return {"__incomplete__": scanned}
     return _report("Tantivy index", counter, samples)
 
 
@@ -158,6 +184,10 @@ def main():
     off.update(scan_tantivy(os.path.expanduser(args.index) if args.index else None))
 
     print()
+    if off.pop("__incomplete__", None) is not None:
+        print("RESULT: FAIL -- the index walk was incomplete, so this run proves")
+        print("nothing either way. Fix the walk before trusting the measurement.")
+        return 1
     if off:
         print("RESULT: FAIL -- a non-99 prefix is present in corpus data.")
         print("Revisit the namespace split in shared/sys_id_patterns.py BEFORE")

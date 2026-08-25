@@ -14,14 +14,22 @@ definition and this module is the enforcement:
     safe, and the one that fails if anyone re-widens or un-anchors.
   * ``TestLocalParsersStillAgnostic`` -- Phase 95 D-13 regression: the desktop
     parsers must KEEP accepting 97.
+  * ``TestPrefixCheckScript`` -- runs scripts/check_sys_id_prefixes.py the way its
+    docstring documents it, over a REAL Tantivy index. Added after a review found
+    two defects on that branch (a missing repo root on ``sys.path``, and a
+    ``Searcher.segment_readers()`` call the Python binding does not expose): both
+    survived because nothing ever executed the index path.
 """
 from __future__ import annotations
 
+import importlib.util
 import io
 import random
 import re
 import subprocess
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -176,3 +184,114 @@ class TestLocalParsersStillAgnostic:
     def test_any_pattern_covers_both_namespaces(self):
         assert ANY_SYS_ID_RE.search("990025143260205171_IE1_P5_FL2").group(1) == "990025143260205171"
         assert ANY_SYS_ID_RE.search("970012345601234567_LOCAL_P3_F0042").group(1) == "970012345601234567"
+
+
+class TestPrefixCheckScript:
+    """The verification script must actually run, over a real index.
+
+    Both defects a review found here were invisible to every other test because
+    the Tantivy branch is skipped unless ``--index`` is passed and the directory
+    exists. These tests pass it a real index.
+    """
+
+    @staticmethod
+    def _build_index(path, headers):
+        tantivy = pytest.importorskip("tantivy")
+        path.mkdir(parents=True, exist_ok=True)
+        builder = tantivy.SchemaBuilder()
+        builder.add_text_field("full_header", stored=True)
+        index = tantivy.Index(builder.build(), path=str(path))
+        writer = index.writer()
+        for header in headers:
+            writer.add_document(tantivy.Document(full_header=[header]))
+        writer.commit()
+        writer.wait_merging_threads()
+        return path
+
+    def _run(self, index_dir, cwd):
+        return subprocess.run(
+            [sys.executable, str(REPO_ROOT / "scripts" / "check_sys_id_prefixes.py"),
+             "--index", str(index_dir)],
+            cwd=cwd, capture_output=True, text=True)
+
+    def test_documented_invocation_succeeds_on_a_corpus_index(self, tmp_path):
+        """Guards the sys.path defect: run exactly as the docstring documents."""
+        idx = self._build_index(tmp_path / "idx", [
+            "990051620920205171_IE167198813_P000003_FL167198817",
+            "990000000000000944_IE1_P000002_FL3",
+            "990030907670205171_IE1_P000001_FL2",
+        ])
+        proc = self._run(idx, REPO_ROOT)
+        assert proc.returncode == 0, f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        assert "ModuleNotFoundError" not in proc.stderr
+        assert "AttributeError" not in proc.stderr
+        # Guards the enumeration defect: every document must actually be walked.
+        assert "(scanned 3 of 3 index documents)" in proc.stdout
+        assert "RESULT: OK" in proc.stdout
+
+    def test_runs_from_an_unrelated_cwd(self, tmp_path):
+        """The repo root must be found regardless of where the script is invoked."""
+        idx = self._build_index(tmp_path / "idx2", ["990051620920205171_IE1_P1_FL2"])
+        proc = self._run(idx, tmp_path)
+        assert proc.returncode == 0, f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        assert "RESULT: OK" in proc.stdout
+
+    def test_CONTROL_a_97_in_the_index_fails_the_run(self, tmp_path):
+        """The check must be able to FAIL, or it proves nothing when it passes."""
+        idx = self._build_index(tmp_path / "idx3", [
+            "990051620920205171_IE1_P000003_FL2",
+            "970012345601234567_LOCAL_P3_F0042",
+        ])
+        proc = self._run(idx, REPO_ROOT)
+        assert proc.returncode == 1, f"stdout:\n{proc.stdout}"
+        assert "RESULT: FAIL" in proc.stdout
+        assert "970012345601234567" in proc.stdout
+
+    def test_walk_pages_and_reports_completeness(self, tmp_path):
+        """Multi-page walk: every document is seen when paging more than once."""
+        pytest.importorskip("tantivy")
+        headers = [f"9900000000000{i:05d}_IE1_P1_FL2" for i in range(25)]
+        idx = self._build_index(tmp_path / "idx4", headers)
+        spec = importlib.util.spec_from_file_location(
+            "_chk", REPO_ROOT / "scripts" / "check_sys_id_prefixes.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mod.TANTIVY_PAGE = 4  # 25 docs -> 7 pages
+        assert mod.scan_tantivy(str(idx)) == {}, "a clean corpus index must report clean"
+
+    def test_an_incomplete_walk_never_reports_clean(self, tmp_path, monkeypatch):
+        """A short walk must fail loudly, not look like 'no 97 found'."""
+        pytest.importorskip("tantivy")
+        idx = self._build_index(tmp_path / "idx5",
+                                [f"9900000000000{i:05d}_IE1_P1_FL2" for i in range(10)])
+        spec = importlib.util.spec_from_file_location(
+            "_chk2", REPO_ROOT / "scripts" / "check_sys_id_prefixes.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        import tantivy as _t
+        real_open = _t.Index.open
+
+        class _Truncating:
+            """A searcher that silently returns only the first page."""
+            def __init__(self, inner):
+                self._inner = inner
+                self.num_docs = inner.num_docs
+            def search(self, query, limit=10, offset=0, count=True):
+                if offset:
+                    return SimpleNamespace(hits=[], count=0)
+                return self._inner.search(query, limit=2, offset=0, count=False)
+            def doc(self, address):
+                return self._inner.doc(address)
+
+        class _Idx:
+            def __init__(self, inner):
+                self._inner = inner
+            def searcher(self):
+                return _Truncating(self._inner.searcher())
+
+        monkeypatch.setattr(_t.Index, "open",
+                            staticmethod(lambda d: _Idx(real_open(d))))
+        result = mod.scan_tantivy(str(idx))
+        assert "__incomplete__" in result, (
+            "a truncated walk reported a clean result -- that is indistinguishable "
+            "from a corpus with no 97 in it")
