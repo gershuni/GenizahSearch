@@ -5210,6 +5210,10 @@ TRANSLATIONS.update({
         'אל תשאל שוב',
     'the letter-level index is being opened':
         'האינדקס לחיפוש ברמת האות נפתח כעת',
+    'Letter-level search':
+        'חיפוש ברמת האות',
+    'Chunk search':
+        'חיפוש מקטעים',
     'Search method':
         'שיטת חיפוש',
     'Letter-level options':

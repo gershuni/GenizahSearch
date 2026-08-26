@@ -16199,6 +16199,67 @@ class GenizahGUI(QMainWindow):
         valid = {combo.itemData(i) for i in range(combo.count())}
         return value if value in valid else defaults[axis]
 
+    def _comp_axis_label(self, axis, value):
+        """The label the control itself shows for one policy value, so a
+        report names a setting the way the app does rather than growing a
+        second vocabulary for the same thing. Falls back to the raw key,
+        which is still true, when the value is not one of the control's."""
+        if value is None:
+            value = self._comp_passage_axis(axis)
+        combo = getattr(self, 'comp_passage_%s_combo' % axis, None)
+        if combo is not None:
+            for i in range(combo.count()):
+                if combo.itemData(i) == value:
+                    return combo.itemText(i)
+        return str(value)
+
+    def _comp_export_settings_lines(self):
+        """The "Search Settings" block of an exported report.
+
+        Built from the dispatch-time PROVENANCE stamp rather than from the
+        live widgets, for two separate reasons:
+
+        * A letter-level run has no chunk size, no maximum frequency and no
+          search mode. Printing them is not a harmless extra -- it attributes
+          the rows to a search that never happened.
+        * Letter-level mode FORCES the chunk knobs, so reading them live
+          means that merely switching method after a chunk search rewrites
+          the settings of a report the user already produced.
+
+        With no stamp -- a session restored from disk, which has no run
+        behind it -- the chunk half falls back to the live widgets. That is
+        not a degradation: the restore populated those widgets from the same
+        saved file as the rows.
+        """
+        if getattr(self, '_comp_last_result_method', 'chunk') == 'passage':
+            return [
+                tr("Search method") + ": " + tr("Letter-level search"),
+                tr("Match width") + ": " + self._comp_axis_label(
+                    'width', getattr(self, '_comp_last_result_width', None)),
+                tr("Passage length") + ": " + self._comp_axis_label(
+                    'length', getattr(self, '_comp_last_result_length', None)),
+                tr("Search depth") + ": " + self._comp_axis_label(
+                    'depth', getattr(self, '_comp_last_result_depth', None)),
+            ]
+
+        stamp = getattr(self, '_comp_last_result_chunk', None) or {}
+        mode_index = stamp.get('mode_index',
+                               self.comp_mode_combo.currentIndex())
+        lab = stamp.get('lab', self.btn_lab_mode_toggle_comp.isChecked())
+        lines = [
+            tr("Search method") + ": " + tr("Chunk search"),
+            tr("Chunk: ") + f"{stamp.get('chunk', self.spin_chunk.value())}",
+            tr("Max Freq: ") + f"{stamp.get('freq', self.spin_freq.value())}",
+            tr("Search Mode") + f": {self.comp_mode_combo.itemText(mode_index)}",
+            tr("Filter > ")
+            + f"{stamp.get('appendix', self.spin_filter.value())}",
+            tr("Lab Mode") + f": {'On' if lab else 'Off'}",
+        ]
+        if lab:
+            deep = stamp.get('deep', self.chk_lab_deep_comp.isChecked())
+            lines.append(tr("Deep Scan") + f": {'On' if deep else 'Off'}")
+        return lines
+
     def _passage_scan_in_flight(self):
         """True only while a PASSAGE scan is running. Grouping is
         method-agnostic and keeps today's Stop behaviour, so this is
@@ -21581,15 +21642,9 @@ class GenizahGUI(QMainWindow):
         # data-source credits (meaningless for the user's own documents).
         credit_text = self._get_credit_header(local_only=_local_only_comp_export)
         query_text = self.comp_text_area.toPlainText().strip()
-        comp_settings_lines = [
-            tr("Chunk: ") + f"{self.spin_chunk.value()}",
-            tr("Max Freq: ") + f"{self.spin_freq.value()}",
-            tr("Search Mode") + f": {self.comp_mode_combo.currentText()}",
-            tr("Filter > ") + f"{self.spin_filter.value()}",
-            tr("Lab Mode") + f": {'On' if self.btn_lab_mode_toggle_comp.isChecked() else 'Off'}",
-        ]
-        if self.btn_lab_mode_toggle_comp.isChecked():
-            comp_settings_lines.append(tr("Deep Scan") + f": {'On' if self.chk_lab_deep_comp.isChecked() else 'Off'}")
+        # Phase 146: describes the RUN behind these rows, not the
+        # controls as they stand now -- see `_comp_export_settings_lines`.
+        comp_settings_lines = self._comp_export_settings_lines()
 
         # Use shared sanitization utility for consistency with Web app
         sanitize_for_excel = shared_sanitize_excel
@@ -23242,6 +23297,20 @@ class GenizahGUI(QMainWindow):
         self._comp_last_result_width = _comp_passage_width
         self._comp_last_result_length = _comp_passage_length
         self._comp_last_result_depth = _comp_passage_depth
+        # The chunk knobs are stamped for the same reason, not for
+        # symmetry: letter-level mode FORCES them, so without a stamp
+        # a later switch of method would rewrite the settings block of
+        # a chunk report that had already been produced.
+        self._comp_last_result_chunk = {
+            'chunk': self.spin_chunk.value(),
+            'freq': self.spin_freq.value(),
+            'mode_index': idx,
+            'appendix': self.spin_filter.value(),
+            'lab': _comp_is_lab,
+            'deep': bool(getattr(self, 'chk_lab_deep_comp', None)
+                         is not None
+                         and self.chk_lab_deep_comp.isChecked()),
+        }
         self._clear_passage_dropped_warning()
         self._refresh_comp_method_enabled()
 
@@ -27099,6 +27168,20 @@ class GenizahGUI(QMainWindow):
             if comp.get('results') or comp.get('filtered_results'):
                 self.comp_raw_items = comp.get('results', [])
                 self.comp_raw_filtered = comp.get('filtered_results', [])
+                # Re-establish the provenance of the rows being
+                # re-displayed; `_restored_provenance_is_valid` has
+                # already vouched for it. The chunk stamp is cleared
+                # rather than reconstructed: the export's live-widget
+                # fallback reads the very widgets this restore just
+                # populated from the same saved file.
+                self._comp_last_result_method = (
+                    comp.get('last_result_method') or 'chunk')
+                self._comp_last_result_scope = (
+                    comp.get('last_result_scope') or 'genizah')
+                self._comp_last_result_width = comp.get('last_result_width')
+                self._comp_last_result_length = comp.get('last_result_length')
+                self._comp_last_result_depth = comp.get('last_result_depth')
+                self._comp_last_result_chunk = None
                 # Display flat — grouping state is not persisted, user can
                 # toggle the flat checkbox or re-run to get grouped view
                 self.comp_has_grouped_results = False

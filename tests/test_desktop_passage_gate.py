@@ -46,6 +46,9 @@ class _Combo:
     def itemData(self, i):
         return self._pairs[i][0]
 
+    def itemText(self, i):
+        return self._pairs[i][1]
+
     def currentData(self):
         if 0 <= self._index < len(self._pairs):
             return self._pairs[self._index][0]
@@ -123,6 +126,8 @@ class _Win:
     _restored_provenance_is_valid = APP._restored_provenance_is_valid
     _passage_reason_text = APP._passage_reason_text
     _comp_passage_axis = APP._comp_passage_axis
+    _comp_axis_label = APP._comp_axis_label
+    _comp_export_settings_lines = APP._comp_export_settings_lines
     _comp_method = APP._comp_method
     _restore_comp_passage_preferences = APP._restore_comp_passage_preferences
     _method_help_text = APP._method_help_text
@@ -1221,3 +1226,204 @@ def test_the_mode_switch_hides_the_row():
     assert '_set_boundary_row_visible(not on)' in seg, (
         'letter-level mode only greys the paragraph controls instead of '
         'removing them')
+
+
+# ---------------------------------------------------------------------------
+# The exported "Search Settings" block. A report that names settings which
+# took no part in producing its rows is not merely untidy -- it is a false
+# statement about provenance, and it outlives the session that made it.
+# ---------------------------------------------------------------------------
+
+class _Spin:
+    def __init__(self, value):
+        self._v = value
+
+    def value(self):
+        return self._v
+
+
+# ASCII sentinels, not the real labels: the subject of these tests is which
+# item the stamped key resolves to, and asserting on wording would only pin
+# the current translation table.
+_WIDTHS = [('standard-40', 'W-STD'), ('wide-40', 'W-WIDE'),
+           ('wider-40', 'W-WIDER'), ('widest-40', 'W-WIDEST'),
+           ('max-40', 'W-MAX')]
+_LENGTHS = [('normal', 'L-NORMAL'), ('short', 'L-SHORT')]
+_DEPTHS = [('normal', 'D-NORMAL'), ('deep', 'D-DEEP'),
+           ('deepest', 'D-DEEPEST')]
+_MODES = [('exact', 'M-EXACT'), ('variants', 'M-VARIANTS'),
+          ('fuzzy', 'M-FUZZY')]
+
+
+def _export_window(method='chunk', chunk_stamp=None, width=None, length=None,
+                   depth=None, live_axes=(3, 0, 0), live_mode=0, lab=False,
+                   deep=False):
+    """A window whose LIVE controls are deliberately set to values other than
+    the stamp's, so any test that passes could only have read the stamp."""
+    w = _Win()
+    w.comp_passage_width_combo = _Combo(_WIDTHS, index=live_axes[0])
+    w.comp_passage_length_combo = _Combo(_LENGTHS, index=live_axes[1])
+    w.comp_passage_depth_combo = _Combo(_DEPTHS, index=live_axes[2])
+    w.comp_mode_combo = _Combo(_MODES, index=live_mode)
+    w.spin_chunk = _Spin(7)
+    w.spin_freq = _Spin(11)
+    w.spin_filter = _Spin(9)
+    w.btn_lab_mode_toggle_comp = _Toggle(lab)
+    w.chk_lab_deep_comp = _Toggle(deep)
+    w._comp_last_result_method = method
+    w._comp_last_result_width = width
+    w._comp_last_result_length = length
+    w._comp_last_result_depth = depth
+    w._comp_last_result_chunk = chunk_stamp
+    return w
+
+
+def _tr(s):
+    return genizah_app.tr(s)
+
+
+def test_a_letter_level_report_names_no_chunk_setting():
+    """The owner's report: a letter-level export carried "Chunk: 5 / Max
+    Freq: 10 / Search Mode: Exact / Filter > 5 / Lab Mode: Off". None of
+    those five numbers took part in the search."""
+    lines = _export_window(method='passage', width='widest-40',
+                           length='normal', depth='normal'
+                           )._comp_export_settings_lines()
+    blob = ' | '.join(lines)
+    for gone in ('Chunk: ', 'Max Freq: ', 'Search Mode', 'Filter > ',
+                 'Lab Mode', 'Deep Scan'):
+        assert _tr(gone) not in blob, (
+            '%r is chunk-search vocabulary and has no meaning for a '
+            'letter-level run: %r' % (gone, blob))
+
+
+def test_a_letter_level_report_names_the_method_and_all_three_axes():
+    lines = _export_window(method='passage', width='widest-40',
+                           length='normal', depth='normal'
+                           )._comp_export_settings_lines()
+    blob = ' | '.join(lines)
+    for present in ('Search method', 'Match width', 'Passage length',
+                    'Search depth'):
+        assert _tr(present) in blob, (
+            '%r is part of what a letter-level run WAS and is missing from '
+            'the report: %r' % (present, blob))
+    assert _tr('Letter-level search') in blob
+    # The combo's own item says "New!", which is an affordance for a control,
+    # not the name of a search in a document the user keeps.
+    assert 'New!' not in blob and _tr('New! Letter-level search') not in blob
+
+
+def test_the_axis_labels_come_from_the_stamp_not_the_live_controls():
+    """The controls are left on their defaults and the stamp says something
+    else; a report describes the run, and the user may well have changed a
+    control since."""
+    w = _export_window(method='passage', width='standard-40', length='short',
+                       depth='deepest', live_axes=(3, 0, 0))
+    blob = ' | '.join(w._comp_export_settings_lines())
+    for sentinel in ('W-STD', 'L-SHORT', 'D-DEEPEST'):
+        assert sentinel in blob, (sentinel, blob)
+    for live in ('W-WIDEST', 'L-NORMAL', 'D-NORMAL'):
+        assert live not in blob, (
+            'the report read the live control instead of the stamp: %r' % blob)
+
+
+def test_a_pre_axis_stamp_falls_back_to_the_control():
+    """A passage stamp with no axes cannot happen from a dispatch, but a
+    hand-edited or future-shaped session could carry one. It must still name
+    something true rather than print None."""
+    blob = ' | '.join(_export_window(method='passage')
+                      ._comp_export_settings_lines())
+    assert 'W-WIDEST' in blob and 'None' not in blob, blob
+
+
+def test_an_unknown_axis_value_is_reported_verbatim():
+    """Better a raw key -- which is at least what ran -- than a blank line or
+    a made-up label."""
+    blob = ' | '.join(_export_window(method='passage', width='wider-99')
+                      ._comp_export_settings_lines())
+    assert 'wider-99' in blob, blob
+
+
+def test_a_chunk_report_still_says_everything_it_used_to():
+    stamp = {'chunk': 5, 'freq': 10, 'mode_index': 0, 'appendix': 5,
+             'lab': False, 'deep': False}
+    lines = _export_window(method='chunk',
+                           chunk_stamp=stamp)._comp_export_settings_lines()
+    blob = ' | '.join(lines)
+    for kept in ('Chunk: ', 'Max Freq: ', 'Search Mode', 'Filter > ',
+                 'Lab Mode'):
+        assert _tr(kept) in blob, (kept, blob)
+    assert _tr('Chunk search') in blob, (
+        'once there are two methods, a report that does not name its own is '
+        'ambiguous')
+    assert 'M-EXACT' in blob and '5' in blob and '10' in blob
+
+
+def test_a_chunk_report_is_not_rewritten_by_a_later_method_switch():
+    """THE second defect this fix closes. Letter-level mode FORCES the chunk
+    knobs, so a settings block read from live widgets would change the
+    reported settings of a chunk search that had already finished, merely
+    because the user then looked at the other method."""
+    stamp = {'chunk': 5, 'freq': 10, 'mode_index': 0, 'appendix': 5,
+             'lab': False, 'deep': False}
+    w = _export_window(method='chunk', chunk_stamp=stamp, live_mode=2)
+    w.spin_chunk = _Spin(5000)          # what forcing would leave behind
+    w.spin_freq = _Spin(50)
+    blob = ' | '.join(w._comp_export_settings_lines())
+    assert '5000' not in blob and '50' not in blob, (
+        'the report was rewritten from the widgets as they stand now: %r'
+        % blob)
+    assert 'M-EXACT' in blob and 'M-FUZZY' not in blob, blob
+
+
+def test_with_no_stamp_the_chunk_half_reads_the_restored_widgets():
+    """A session restored from disk has no run behind it. Falling back to the
+    widgets is right there and not a degradation: the restore populated them
+    from the same saved file as the rows."""
+    blob = ' | '.join(_export_window(method='chunk', chunk_stamp=None,
+                                     live_mode=1)
+                      ._comp_export_settings_lines())
+    assert '7' in blob and '11' in blob and '9' in blob, blob
+    assert 'M-VARIANTS' in blob, blob
+
+
+def test_deep_scan_is_reported_only_for_a_lab_run():
+    off = ' | '.join(_export_window(
+        method='chunk', chunk_stamp={'lab': False, 'deep': True})
+        ._comp_export_settings_lines())
+    assert _tr('Deep Scan') not in off, off
+    on = ' | '.join(_export_window(
+        method='chunk', chunk_stamp={'lab': True, 'deep': True})
+        ._comp_export_settings_lines())
+    assert _tr('Deep Scan') in on, on
+
+
+def test_the_export_reads_the_run_record_and_no_widget():
+    """Source-anchored: the whole point is that the settings block is not
+    assembled from live controls. A future edit that reaches for one again
+    reddens here."""
+    seg = _function_source('export_comp_report')
+    assert '_comp_export_settings_lines()' in seg, (
+        'the export stopped going through the run record')
+    for widget in ('spin_chunk', 'spin_freq', 'spin_filter',
+                   'comp_mode_combo', 'chk_lab_deep_comp'):
+        assert widget not in seg, (
+            'the export reads %s directly again -- that is what made a '
+            'letter-level report describe a chunk search' % widget)
+
+
+def test_a_restored_snapshot_carries_its_own_provenance():
+    """Without this the export of restored letter-level rows describes a
+    chunk search: `_comp_last_result_method` defaults to 'chunk', and in a
+    report a default is indistinguishable from a fact."""
+    seg = _function_source('_restore_session')
+    idx = seg.index("comp.get('results') or comp.get('filtered_results')")
+    tail = seg[idx:]
+    for field in ('last_result_method', 'last_result_width',
+                  'last_result_length', 'last_result_depth'):
+        assert "comp.get('%s')" % field in tail, (
+            'the restore re-displays rows without re-establishing %s'
+            % field)
+    assert '_comp_last_result_chunk = None' in tail, (
+        'a stale chunk stamp from an earlier run would outrank the widgets '
+        'the restore just populated')
