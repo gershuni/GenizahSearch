@@ -664,3 +664,66 @@ def test_the_close_check_tracks_the_load_worker():
     under it leaves exactly the half-swapped state recovery exists to fix."""
     seg = _function_source('_passage_workers_busy')
     assert 'passage_load_thread' in seg
+
+
+# ---------------------------------------------------------------------------
+# Use-before-create in the tab builders.
+#
+# This file is deliberately Qt-free, which means nothing here ever RUNS
+# `create_composition_tab` -- and a widget added to a layout ~70 lines before
+# the line that creates it crashed the app on launch while all 60 tests
+# stayed green. A full GUI construction test would catch it, at the cost of a
+# QApplication and real segfault risk in this lane. Reading the build order
+# statically costs neither and catches the same class of defect across every
+# tab builder in the file, not just the one that broke.
+# ---------------------------------------------------------------------------
+
+def _use_before_create(fn):
+    """First read of `self.X` earlier in the function than its first
+    assignment, for attributes the function itself assigns.
+
+    Bodies of nested defs and lambdas are skipped: those run later (they are
+    signal handlers), so a read there is not a build-order error."""
+    nested = set()
+    for n in ast.walk(fn):
+        if n is not fn and isinstance(
+                n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            for c in ast.walk(n):
+                nested.add(id(c))
+    stores, loads = {}, {}
+    for n in ast.walk(fn):
+        if id(n) in nested:
+            continue
+        if (isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)
+                and n.value.id == 'self'):
+            pos = (n.lineno, n.col_offset)
+            if isinstance(n.ctx, ast.Store):
+                if n.attr not in stores or pos < stores[n.attr]:
+                    stores[n.attr] = pos
+            elif isinstance(n.ctx, ast.Load):
+                if n.attr not in loads or pos < loads[n.attr]:
+                    loads[n.attr] = pos
+    return [(a, loads[a][0], p[0]) for a, p in stores.items()
+            if loads.get(a) and loads[a] < p]
+
+
+def _tab_builders():
+    tree = ast.parse(_app_source())
+    return [n for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef)
+            and n.name.startswith('create_') and n.name.endswith('_tab')]
+
+
+def test_the_tab_builders_create_every_widget_before_using_it():
+    builders = _tab_builders()
+    assert len(builders) >= 5, 'the tab builders moved or were renamed'
+    problems = []
+    for fn in builders:
+        for attr, read_line, made_line in _use_before_create(fn):
+            problems.append(
+                '%s: self.%s read at line %d but created at line %d'
+                % (fn.name, attr, read_line, made_line))
+    assert not problems, (
+        'a widget is used before it exists, which is an AttributeError on '
+        'launch and not something a Qt-free test can otherwise see:\n  '
+        + '\n  '.join(problems))

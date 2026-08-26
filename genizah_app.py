@@ -5619,6 +5619,21 @@ class GenizahGUI(QMainWindow):
                        "started."))
         self.comp_passage_depth_combo.setAccessibleName(tr("Search depth"))
 
+        # Mirrors the web's `method_help`: a live line describing the
+        # SELECTED method only. A single tooltip on a two-option control
+        # necessarily describes both, which is how the web ended up
+        # explaining letter-level search to someone hovering "Chunk search"
+        # (owner-reported 2026-08-25).
+        #
+        # Created HERE, in the block that adds it to the layout -- not beside
+        # the combo further down. `create_composition_tab` builds the
+        # boundary row before the button row, so a widget created at the
+        # combo and added here is used ~70 lines before it exists.
+        self.lbl_comp_method_help = QLabel("")
+        self.lbl_comp_method_help.setWordWrap(True)
+        self.lbl_comp_method_help.setStyleSheet(
+            "color: #7f8c8d; font-size: 11px;")
+
         self.lbl_comp_passage_reason = QLabel("")
         self.lbl_comp_passage_reason.setWordWrap(True)
         self.lbl_comp_passage_reason.setStyleSheet(
@@ -5645,7 +5660,6 @@ class GenizahGUI(QMainWindow):
 
         # Chunk is the default, so the letter-level row starts hidden.
         self._set_passage_options_visible(False)
-        self._update_comp_method_help()
 
         # Initialize boundary settings from LabSettings if available
         if hasattr(self, 'lab_engine') and self.lab_engine:
@@ -5723,16 +5737,7 @@ class GenizahGUI(QMainWindow):
         self.comp_method_combo.setCurrentIndex(0)
         self.comp_method_combo.currentIndexChanged.connect(
             self._on_comp_method_changed)
-
-        # Mirrors the web's `method_help`: a live line under the
-        # selector that describes the SELECTED method only. A single tooltip
-        # on a two-option control necessarily describes both, which is how
-        # the web ended up explaining letter-level search to someone
-        # hovering "Chunk search" (owner-reported 2026-08-25).
-        self.lbl_comp_method_help = QLabel("")
-        self.lbl_comp_method_help.setWordWrap(True)
-        self.lbl_comp_method_help.setStyleSheet(
-            "color: #7f8c8d; font-size: 11px;")
+        self._update_comp_method_help()
 
         cr.addWidget(self.comp_method_combo)
         cr.addWidget(self.comp_corpus_scope_combo)
