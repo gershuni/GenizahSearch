@@ -77,6 +77,7 @@ from desktop.pdf_page_renderer import PdfRenderWorker  # Phase 100 D-07
 from desktop.pdf_image_controller import PdfImageController  # Phase 100 D-07b
 from desktop.ui_widgets import ShelfmarkTableWidgetItem, CheckBoxHeader, HiddenScrollArea, ListsTreeWidget
 from desktop.settings_dialogs import SettingsDialog, SearchSettingsDialog, HelpDialog, TabularQueryBuilderDialog, LabScoringDialog
+from desktop import passage_lifecycle  # Phase 146: letter-level (passage) search
 from desktop.update_ui import UpdateNotificationBar, WhatsNewBar, WhatsNewDialog, UpdateProgressDialog, TelemetryConsentBar  # Phase 127 update_ui; SEED-031 re-ask bar
 from filter_text_dialog import FilterTextDialog
 from column_filter_dialog import ColumnFilterDialog
@@ -1339,6 +1340,12 @@ def _telemetry_result_bucket(count: int) -> str:
 class GenizahGUI(QMainWindow):
     """Main application window orchestrating search, browsing, and indexing."""
     browse_thumb_resolved = pyqtSignal(str, object)
+    # Phase 146: a passage build runs off the UI thread but the release of
+    # the live index must happen ON it (`close_passage_state`'s ownership
+    # rule). This signal is how the worker asks; the seam below blocks on
+    # the answer, so the worker never renames anything until the UI thread
+    # has actually let go.
+    _passage_release_requested = pyqtSignal(int)
     
     def __init__(self):
         super().__init__()
@@ -1577,6 +1584,12 @@ class GenizahGUI(QMainWindow):
             self.btn_comp_run.setEnabled(True)
             self.btn_browse_go.setEnabled(True)
             self.btn_build_index.setEnabled(True)
+            if hasattr(self, 'btn_build_passage_index'):
+                self.btn_build_passage_index.setEnabled(True)
+            # The gate can only now say "not built" instead of "still
+            # starting up", so re-run it once startup is genuinely done.
+            if hasattr(self, 'comp_method_combo'):
+                self._revalidate_comp_method()
             
             self.status_label.setText(tr("Components loaded. Ready."))
             self.set_results_loading(False)
@@ -5551,6 +5564,77 @@ class GenizahGUI(QMainWindow):
 
         in_l.addLayout(boundary_row)
 
+        # Phase 146: the three policy axes, ported from the web surface with
+        # the same keys, order, defaults and tooltip wording. Shown only in
+        # letter-level mode -- they say nothing about a chunk search.
+        passage_row = QHBoxLayout()
+        self.comp_passage_width_combo = QComboBox()
+        for _val, _lbl in (('standard-40', tr("Narrow (near-exact)")),
+                           ('wide-40', tr("Medium width")),
+                           ('wider-40', tr("Wide width")),
+                           ('widest-40', tr("Very wide (default)")),
+                           ('max-40', tr("Maximal (may add noise)"))):
+            self.comp_passage_width_combo.addItem(_lbl, _val)
+        self.comp_passage_width_combo.setCurrentIndex(3)  # widest-40
+        self.comp_passage_width_combo.setToolTip(tr(
+            "How far a manuscript may drift from your text and still match. "
+            "Wider finds more noisy witnesses; the strongest matches always "
+            "rank first."))
+        self.comp_passage_width_combo.setAccessibleName(tr("Match width"))
+
+        self.comp_passage_length_combo = QComboBox()
+        for _val, _lbl in (('normal', tr("Normal passages (default)")),
+                           ('short', tr("Also short passages"))):
+            self.comp_passage_length_combo.addItem(_lbl, _val)
+        self.comp_passage_length_combo.setToolTip(tr(
+            "Whether a short shared passage counts as a match. \"Also short\" "
+            "finds piyyutim, quotations and badly damaged copies that share "
+            "only a phrase \u2014 measured at roughly double the results for a "
+            "third fewer correct ones, so expect to skim more."))
+        self.comp_passage_length_combo.setAccessibleName(tr("Passage length"))
+
+        self.comp_passage_depth_combo = QComboBox()
+        for _val, _lbl in (('normal', tr("Normal (fast, default)")),
+                           ('deep', tr("Deep (slower, more witnesses)")),
+                           ('deepest', tr("Deepest (slowest, most)"))):
+            self.comp_passage_depth_combo.addItem(_lbl, _val)
+        # The desktop tooltip carries ONE sentence the web's does not: this
+        # is the user's only warning that Stop will not answer during a deep
+        # scan (owner ruling 2026-08-25 -- ship the depth axis and accept the
+        # wait rather than withhold it pending a mid-search cancel hook).
+        self.comp_passage_depth_combo.setToolTip(tr(
+            "How much of the corpus the search may examine. Deeper searches "
+            "take seconds longer and return more manuscripts \u2014 including "
+            "badly damaged and reworked copies a fast pass misses. Long texts "
+            "benefit the most. A deep search cannot be interrupted once it "
+            "has started."))
+        self.comp_passage_depth_combo.setAccessibleName(tr("Search depth"))
+
+        self.lbl_comp_passage_reason = QLabel("")
+        self.lbl_comp_passage_reason.setWordWrap(True)
+        self.lbl_comp_passage_reason.setStyleSheet(
+            "color: #e67e22; font-size: 11px;")
+        self.lbl_comp_passage_reason.setVisible(False)
+
+        self.lbl_comp_passage_dropped_warning = QLabel("")
+        self.lbl_comp_passage_dropped_warning.setWordWrap(True)
+        self.lbl_comp_passage_dropped_warning.setStyleSheet(
+            "color: #e74c3c; font-size: 11px;")
+        self.lbl_comp_passage_dropped_warning.setVisible(False)
+
+        self.comp_passage_label = QLabel(tr("Letter-level options") + ":")
+        passage_row.addWidget(self.comp_passage_label)
+        passage_row.addWidget(self.comp_passage_width_combo)
+        passage_row.addWidget(self.comp_passage_length_combo)
+        passage_row.addWidget(self.comp_passage_depth_combo)
+        passage_row.addStretch()
+        in_l.addLayout(passage_row)
+        in_l.addWidget(self.lbl_comp_passage_reason)
+        in_l.addWidget(self.lbl_comp_passage_dropped_warning)
+
+        # Chunk is the default, so the letter-level row starts hidden.
+        self._set_passage_options_visible(False)
+
         # Initialize boundary settings from LabSettings if available
         if hasattr(self, 'lab_engine') and self.lab_engine:
             settings = self.lab_engine.settings
@@ -5611,6 +5695,25 @@ class GenizahGUI(QMainWindow):
             self.comp_corpus_scope_combo.setCurrentIndex(_comp_scope_idx)
         self.comp_corpus_scope_combo.currentIndexChanged.connect(self._on_comp_corpus_scope_changed)
 
+        # Phase 146: search METHOD. Default is chunk regardless of whether
+        # a passage index exists -- availability never changes what a fresh
+        # install starts on. The two methods are complementary, not ranked.
+        self.comp_method_combo = QComboBox()
+        self.comp_method_combo.addItem(tr("Chunk search"), "chunk")
+        self.comp_method_combo.addItem(tr("Letter-level search"), "passage")
+        self.comp_method_combo.setToolTip(tr(
+            "Two different ways to find parallels. Chunk search splits your "
+            "text into overlapping pieces and looks each up; letter-level "
+            "search compares the letter stream directly and tolerates "
+            "damaged or reworked copies. They find overlapping but different "
+            "things \u2014 neither replaces the other."))
+        self.comp_method_combo.setAccessibleName(tr("Search method"))
+        self.comp_method_combo.setFixedWidth(150)
+        self.comp_method_combo.setCurrentIndex(0)
+        self.comp_method_combo.currentIndexChanged.connect(
+            self._on_comp_method_changed)
+
+        cr.addWidget(self.comp_method_combo)
         cr.addWidget(self.comp_corpus_scope_combo)
         cr.addWidget(self.btn_lab_mode_toggle_comp)
         cr.addWidget(self.chk_lab_deep_comp)
@@ -15561,6 +15664,487 @@ class GenizahGUI(QMainWindow):
         except Exception:
             self.variant_count_label.setText("")  # Variant count display failed; clear label
 
+    # ------------------------------------------------------------------
+    # Phase 146: letter-level (passage) search -- readiness gate and mode UI.
+    # ------------------------------------------------------------------
+
+    # Every control passage mode force-sets, with the value it forces and
+    # whether anything ELSE in this window also owns its enabled state.
+    # Verified 2026-08-26: only `comp_mode_combo` and `spin_freq` are ever
+    # passed to setEnabled anywhere in this file (both by
+    # `update_lab_ui_state`), so passage mode is the FIRST owner of the other
+    # four and may re-enable them unconditionally -- while those two must be
+    # handed back to Lab's predicate instead, or turning passage mode off
+    # would re-enable a control Lab is legitimately holding disabled.
+    _PASSAGE_FORCED_CONTROLS = (
+        ('comp_mode_combo', 'index', 0),        # Exact
+        ('spin_chunk', 'value', 5),
+        ('spin_freq', 'value', 50),
+        ('spin_min_chunks', 'value', 1),
+        ('boundary_mode_combo', 'index', 0),    # Full search
+    )
+    _PASSAGE_CONTROLS_LAB_ALSO_OWNS = ('comp_mode_combo', 'spin_freq')
+
+    def _passage_release_seam(self, expect_generation):
+        """Called ON THE WORKER THREAD. Hops to the UI thread, releases
+        there, and blocks until that has actually happened -- returning the
+        real result of `close_passage_state`, because the caller reads
+        `False` as "a reader never drained" and must not be told True by a
+        seam that merely delivered a message.
+
+        `expect_generation` is forwarded rather than dropped: that is the
+        whole mechanism that stops a seam abandoned on timeout from later
+        closing an index a SECOND build installed in the meantime. A seam
+        that accepted the argument and ignored it would compile, run, and
+        silently reinstate that bug."""
+        import threading as _threading
+        done = _threading.Event()
+        holder = {}
+
+        def _record(value):
+            holder['value'] = value
+            done.set()
+
+        self._passage_release_result = _record
+        self._passage_release_requested.emit(int(expect_generation))
+        # The lifecycle module bounds this call itself
+        # (UI_RELEASE_SEAM_TIMEOUT_SECONDS) and abandons the thread on
+        # timeout, so waiting without a bound here is safe and keeps the
+        # timeout policy in ONE place instead of two that can disagree.
+        done.wait()
+        return holder.get('value')
+
+    def _on_passage_release_requested(self, expect_generation):
+        """UI thread. The one place `_state` is mutated for a build."""
+        result = None
+        try:
+            result = passage_lifecycle.close_passage_state(
+                int(expect_generation))
+        except Exception:                                    # noqa: BLE001
+            logger.exception('passage release seam failed')
+            result = False
+        finally:
+            recorder = getattr(self, '_passage_release_result', None)
+            if recorder is not None:
+                recorder(result)
+
+    def _start_passage_build_worker(self, corpus_path):
+        from desktop.passage_workers import PassageBuildThread
+
+        self._passage_progress = QProgressDialog(
+            tr("Building the letter-level index..."), tr("Cancel"), 0, 0, self)
+        self._passage_progress.setWindowTitle(tr("Letter-level index"))
+        self._passage_progress.setWindowModality(
+            Qt.WindowModality.NonModal)   # the app stays usable during a build
+        self._passage_progress.setMinimumDuration(0)
+        self._passage_progress.setAutoClose(False)
+        self._passage_progress.setAutoReset(False)
+
+        self.passage_build_thread = PassageBuildThread(
+            passage_lifecycle.passage_root(), corpus_path,
+            self._passage_release_seam, parent=None)
+
+        try:
+            self._passage_release_requested.disconnect()
+        except TypeError:
+            pass
+        self._passage_release_requested.connect(
+            self._on_passage_release_requested)
+
+        self._passage_progress.canceled.connect(
+            self.passage_build_thread.request_cancel)
+        self.passage_build_thread.progress_signal.connect(
+            self._on_passage_build_progress)
+        self.passage_build_thread.finished_signal.connect(
+            self._on_passage_build_finished)
+        self.passage_build_thread.cancelled_signal.connect(
+            self._on_passage_build_cancelled)
+        self.passage_build_thread.error_signal.connect(
+            self._on_passage_build_error)
+        self.passage_build_thread.start()
+        self._passage_progress.show()
+
+    def _on_passage_build_progress(self, phase, done, total):
+        dlg = getattr(self, '_passage_progress', None)
+        if dlg is None:
+            return
+        if phase == 'pass1':
+            # Pass 1 has no total -- it walks a corpus of unknown length --
+            # so a percentage here would be invented. Indeterminate bar plus
+            # a real count is the honest presentation.
+            dlg.setRange(0, 0)
+            dlg.setLabelText(tr("Reading transcriptions... {} records")
+                             .format(done))
+        elif total:
+            dlg.setRange(0, total)
+            dlg.setValue(done)
+            dlg.setLabelText(tr("Building index... part {} of {}")
+                             .format(done, total))
+
+    def _finish_passage_build(self):
+        self._passage_build_in_flight = False
+        dlg = getattr(self, '_passage_progress', None)
+        if dlg is not None:
+            dlg.close()
+            self._passage_progress = None
+        try:
+            self._passage_release_requested.disconnect(
+                self._on_passage_release_requested)
+        except TypeError:
+            pass
+        self._revalidate_comp_method()
+
+    def _on_passage_build_finished(self, result):
+        index = getattr(result, 'index', None)
+        live_dir = getattr(result, 'live_dir', '')
+        status = getattr(result, 'status', '')
+        self._finish_passage_build()
+        if index is not None:
+            passage_lifecycle.install_passage_state(
+                passage_lifecycle.PassageState(index=index,
+                                               live_dir=live_dir))
+        self._revalidate_comp_method()
+        if status == 'installed':
+            self.status_label.setText(
+                tr("The letter-level index is ready."))
+        else:
+            # Every non-installed status still left a WORKING index behind
+            # (that is the swap protocol's guarantee), so this is a report,
+            # not an alarm.
+            logger.warning('passage build ended as %r', status)
+            self.status_label.setText(tr(
+                "The letter-level index could not be replaced. The previous "
+                "index is still in use."))
+
+    def _on_passage_build_cancelled(self):
+        self._finish_passage_build()
+        self.status_label.setText(tr(
+            "Letter-level index build cancelled. Your existing index was "
+            "not changed."))
+
+    def _on_passage_build_error(self, message):
+        logger.error('passage index build failed: %s', message)
+        self._finish_passage_build()
+        QMessageBox.warning(
+            self, tr("Build failed"),
+            tr("The letter-level index could not be built. Details have "
+               "been written to the log. Your existing index was not "
+               "changed."))
+
+    def run_passage_index_build(self):
+        """Build the letter-level index from the transcriptions already on
+        this computer. Ordering matters: no corpus at all is a different
+        problem with a different answer (fetch it), so that is checked before
+        anything is promised about disk or time."""
+        if not getattr(self, 'startup_complete', False):
+            QMessageBox.information(
+                self, tr("Please wait"),
+                tr("The application is still starting up. Try again in a "
+                   "moment."))
+            return
+        if getattr(self, '_passage_build_in_flight', False):
+            QMessageBox.information(
+                self, tr("Already running"),
+                tr("The letter-level index is already being built."))
+            return
+
+        corpus_path = getattr(Config, 'FILE_V8', '')
+        if not corpus_path or not os.path.exists(corpus_path):
+            # Same problem the main index has, so the same answer: send the
+            # user to the flow that already knows how to locate or fetch it.
+            QMessageBox.information(
+                self, tr("Transcriptions needed"),
+                tr("The letter-level index is built from the transcriptions "
+                   "on this computer, and they were not found. Download or "
+                   "locate them first."))
+            self.run_indexing()
+            return
+
+        # One promise, stated the same way everywhere: the figure quoted here
+        # must never be smaller than the figure the preflight will refuse on.
+        confirm = QMessageBox.question(
+            self, tr("Build letter-level index"),
+            tr("This builds the index used by letter-level search.\n\n"
+               "\u2022 About 11 GB of free disk space is needed while it "
+               "runs\n"
+               "\u2022 The finished index is about 3.5 GB\n"
+               "\u2022 It took about 10 minutes on a fast machine, and may "
+               "take longer here\n\n"
+               "You can keep using the program, and you can cancel at any "
+               "time. Your existing index is not touched until the new one "
+               "is complete."),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+
+        self._passage_build_in_flight = True
+        self._revalidate_comp_method()
+        self._start_passage_build_worker(corpus_path)
+
+    def _comp_passage_axis(self, axis):
+        """The selected value of one policy axis, falling back to its own
+        default. Each axis is validated INDEPENDENTLY -- `compose` raises on
+        an unknown value, so a hand-edited or stale persisted axis must
+        degrade to its default rather than take the whole search down."""
+        combo = getattr(self, 'comp_passage_%s_combo' % axis, None)
+        defaults = {'width': 'widest-40', 'length': 'normal',
+                    'depth': 'normal'}
+        if combo is None:
+            return defaults[axis]
+        value = combo.currentData()
+        valid = {combo.itemData(i) for i in range(combo.count())}
+        return value if value in valid else defaults[axis]
+
+    def _passage_scan_in_flight(self):
+        """True only while a PASSAGE scan is running. Grouping is
+        method-agnostic and keeps today's Stop behaviour, so this is
+        deliberately narrower than `is_comp_running`."""
+        return bool(getattr(self, 'is_comp_running', False)
+                    and getattr(self, '_comp_last_result_method', 'chunk')
+                    == 'passage'
+                    and not getattr(self, '_comp_grouping_active', False))
+
+    def _refuse_stop_during_passage_scan(self):
+        """The one guarded stop helper. `PassageSearcher` has no mid-search
+        cancel hook -- the owner ruling (2026-08-25) is to ship the depth
+        axis and accept the wait rather than withhold it -- so Stop, Escape,
+        Pause and Reset all route through here and are told the truth
+        instead of setting a flag nothing reads. Returns True when the
+        caller must NOT proceed."""
+        if not self._passage_scan_in_flight():
+            return False
+        if hasattr(self, 'lbl_comp_status'):
+            self.lbl_comp_status.setText(tr(
+                "This letter-level search cannot be stopped once it has "
+                "started. It is nearly done \u2014 please wait a moment."))
+            self.lbl_comp_status.setStyleSheet(
+                "color: #e67e22; font-weight: bold;")
+        return True
+
+    def _clear_passage_dropped_warning(self):
+        lbl = getattr(self, 'lbl_comp_passage_dropped_warning', None)
+        if lbl is not None:
+            lbl.setText("")
+            lbl.setVisible(False)
+
+    def _show_passage_dropped_warning(self, dropped):
+        """`dropped_text_lookup_failures` counts rows the searcher matched
+        but could not load text for -- a main-index/corpus mismatch, not a
+        passage bug, and the user's only clue that results are missing."""
+        lbl = getattr(self, 'lbl_comp_passage_dropped_warning', None)
+        if lbl is None or not dropped:
+            return
+        lbl.setText(tr(
+            "{} results could not load their text and were left out. "
+            "Re-index from Settings if this persists.").format(int(dropped)))
+        lbl.setVisible(True)
+
+    def _comp_method(self):
+        """The selected method, defaulting to chunk. Reads the widget so a
+        restore that moved it is reflected without a second source of truth."""
+        combo = getattr(self, 'comp_method_combo', None)
+        if combo is None:
+            return 'chunk'
+        return combo.currentData() or 'chunk'
+
+    def _passage_disabled_reason_now(self, scope=None):
+        """The ONE choke point (Task 4). Gathers the live state the pure
+        reason function needs and returns its reason key, or None when
+        letter-level search may be offered. Every caller -- the widget
+        handler, the scope handler, dispatch, and all three restore paths --
+        goes through this; none re-implements the predicate."""
+        engine = getattr(self, 'searcher', None)
+        # NOT `engine is not None`: `SearchEngine.close_index` sets
+        # `self.index = None; self.searcher = None` ON the engine while the
+        # window keeps holding the engine object, so an object-existence
+        # check reads READY across an entire re-index. Without the main
+        # index every passage row's text fetch returns None and every
+        # candidate drops, so dispatch must refuse up front.
+        main_index_ready = (
+            engine is not None
+            and getattr(engine, 'index', None) is not None
+            and getattr(engine, 'searcher', None) is not None)
+        if scope is None:
+            combo = getattr(self, 'comp_corpus_scope_combo', None)
+            scope = (combo.currentData() if combo is not None else None)
+            if not scope:
+                scope = getattr(self, '_comp_corpus_scope', 'genizah')
+        lab_btn = getattr(self, 'btn_lab_mode_toggle_comp', None)
+        return passage_lifecycle.passage_disabled_reason(
+            passage_ready=passage_lifecycle.passage_available(),
+            corpus_scope=scope,
+            lab_mode_on=bool(lab_btn is not None and lab_btn.isChecked()),
+            build_in_flight=bool(
+                getattr(self, '_passage_build_in_flight', False)),
+            main_index_ready=main_index_ready)
+
+    def _passage_reason_text(self, key):
+        """Reason KEY -> translated sentence. The pure function returns keys
+        precisely so it can be tested without a translation table."""
+        texts = {
+            passage_lifecycle.REASON_SCOPE: tr(
+                "Letter-level search covers the Genizah corpus only. My "
+                "Library and All-corpora searches use chunk search; "
+                "letter-level search for My Library is planned for a later "
+                "version."),
+            passage_lifecycle.REASON_NOT_BUILT: tr(
+                "The letter-level index has not been built on this computer "
+                "yet. You can build it from Settings."),
+            passage_lifecycle.REASON_LAB_ACTIVE: tr(
+                "Lab Mode is on. Turn Lab Mode off to use letter-level "
+                "search."),
+            passage_lifecycle.REASON_BUILD_IN_FLIGHT: tr(
+                "The letter-level index is being built right now. It will be "
+                "available when the build finishes."),
+            passage_lifecycle.REASON_MAIN_INDEX_MISSING: tr(
+                "The main index is not ready yet. Letter-level search needs "
+                "it to load the text of its results."),
+        }
+        return texts.get(key, "")
+
+    def _show_passage_reason(self, key):
+        """Persistent inline label, never a modal: this fires on silent
+        restore paths too, where a dialog would be an ambush."""
+        lbl = getattr(self, 'lbl_comp_passage_reason', None)
+        if lbl is None:
+            return
+        text = self._passage_reason_text(key) if key else ""
+        if key == passage_lifecycle.REASON_NOT_BUILT:
+            text += "  " + tr("(Settings \u2192 Build letter-level index)")
+        lbl.setText(text)
+        lbl.setVisible(bool(text))
+
+    def _set_passage_options_visible(self, visible):
+        for name in ('comp_passage_label', 'comp_passage_width_combo',
+                     'comp_passage_length_combo', 'comp_passage_depth_combo'):
+            w = getattr(self, name, None)
+            if w is not None:
+                w.setVisible(bool(visible))
+
+    def _apply_passage_mode_ui(self, on):
+        """Force-set and disable the chunk knobs a letter-level search does
+        not use, or hand them back. Reverting restores the cached value AND
+        the enabled state -- except for the two controls Lab also owns,
+        which go back through Lab's own predicate."""
+        if on and not hasattr(self, '_passage_cached_chunk_state'):
+            cache = {}
+            for name, kind, _forced in self._PASSAGE_FORCED_CONTROLS:
+                w = getattr(self, name, None)
+                if w is None:
+                    continue
+                cache[name] = (w.currentIndex() if kind == 'index'
+                               else w.value())
+            self._passage_cached_chunk_state = cache
+
+        for name, kind, forced in self._PASSAGE_FORCED_CONTROLS:
+            w = getattr(self, name, None)
+            if w is None:
+                continue
+            w.blockSignals(True)
+            try:
+                if on:
+                    if kind == 'index':
+                        w.setCurrentIndex(forced)
+                    else:
+                        w.setValue(forced)
+                else:
+                    cached = getattr(
+                        self, '_passage_cached_chunk_state', {}).get(name)
+                    if cached is not None:
+                        if kind == 'index':
+                            w.setCurrentIndex(cached)
+                        else:
+                            w.setValue(cached)
+            finally:
+                w.blockSignals(False)
+            if on:
+                w.setEnabled(False)
+            elif name not in self._PASSAGE_CONTROLS_LAB_ALSO_OWNS:
+                w.setEnabled(True)
+
+        # Enabled-but-inert otherwise: the full-mode handler only hides the
+        # Advanced button, it never disables the separator combo.
+        delim = getattr(self, 'boundary_delimiter_combo', None)
+        if delim is not None:
+            delim.setEnabled(not on)
+
+        # The boundary stats line is chunk-speak ("N chunks, M paragraphs").
+        stats = getattr(self, 'boundary_stats_label', None)
+        if stats is not None:
+            if on:
+                stats.setText("")
+            stats.setVisible(not on)
+
+        # Recursive search concatenates result texts into ONE query, which
+        # starves the passage engine's per-query posting budget (measured
+        # 48.2% vs 74.1% fused). Owner ruling 2026-08-25: disable it in
+        # passage mode. `run_recursive_composition` carries its own guard for
+        # the programmatic paths this button cannot cover.
+        rec = getattr(self, 'btn_comp_recursive', None)
+        if rec is not None:
+            rec.setEnabled(not on)
+            rec.setToolTip(tr(
+                "Recursive search uses chunk search for now. Switch the "
+                "method back to chunk search to use it.") if on else "")
+
+        if not on:
+            self.__dict__.pop('_passage_cached_chunk_state', None)
+
+        self._set_passage_options_visible(on)
+
+    def _refresh_comp_method_enabled(self):
+        """Never a blind setEnabled(True): the combo is frozen for the whole
+        run (scan AND grouping), and Lab owns it independently."""
+        combo = getattr(self, 'comp_method_combo', None)
+        if combo is None:
+            return
+        lab_btn = getattr(self, 'btn_lab_mode_toggle_comp', None)
+        busy = bool(getattr(self, 'is_comp_running', False)
+                    or getattr(self, '_comp_grouping_active', False)
+                    or getattr(self, '_passage_build_in_flight', False))
+        lab_on = bool(lab_btn is not None and lab_btn.isChecked())
+        combo.setEnabled(not busy and not lab_on)
+
+    def _revert_comp_method_to_chunk(self, reason_key):
+        """Snap the selection back without re-entering this handler."""
+        combo = getattr(self, 'comp_method_combo', None)
+        if combo is not None:
+            idx = combo.findData('chunk')
+            if idx >= 0 and combo.currentIndex() != idx:
+                combo.blockSignals(True)
+                combo.setCurrentIndex(idx)
+                combo.blockSignals(False)
+        self._apply_passage_mode_ui(False)
+        self._show_passage_reason(reason_key)
+
+    def _on_comp_method_changed(self, _index):
+        method = self._comp_method()
+        if method != 'passage':
+            self._apply_passage_mode_ui(False)
+            self._show_passage_reason(None)
+            self._save_session()
+            return
+        reason = self._passage_disabled_reason_now()
+        if reason is not None:
+            self._revert_comp_method_to_chunk(reason)
+            return
+        self._apply_passage_mode_ui(True)
+        self._show_passage_reason(None)
+        self._save_session()
+
+    def _revalidate_comp_method(self):
+        """Re-run the gate after something else changed (scope, Lab, build
+        state, index readiness) and demote to chunk if passage is no longer
+        allowed. Safe to call from any of those handlers."""
+        if self._comp_method() != 'passage':
+            self._refresh_comp_method_enabled()
+            return
+        reason = self._passage_disabled_reason_now()
+        if reason is not None:
+            self._revert_comp_method_to_chunk(reason)
+        self._refresh_comp_method_enabled()
+
     def update_lab_ui_state(self, checked):
         """Disable standard controls when Lab Mode is active."""
         # Search Tab
@@ -15572,6 +16156,14 @@ class GenizahGUI(QMainWindow):
         if hasattr(self, 'comp_mode_combo'): self.comp_mode_combo.setEnabled(not checked)
         if hasattr(self, 'spin_freq'): self.spin_freq.setEnabled(not checked)
         if hasattr(self, 'chk_lab_deep_comp'): self.chk_lab_deep_comp.setEnabled(checked)
+
+        # Phase 146 -- Lab WINS: one precedence rule, applied in both
+        # directions. Turning Lab on demotes the method to chunk (and
+        # hands these same two controls back to the predicate above),
+        # and `_passage_disabled_reason_now` refuses to select passage
+        # while Lab is on.
+        if hasattr(self, 'comp_method_combo'):
+            self._revalidate_comp_method()
 
     def on_deep_scan_toggled_search(self, checked):
         if hasattr(self, 'chk_lab_deep_comp'):
@@ -16316,6 +16908,10 @@ class GenizahGUI(QMainWindow):
         if combo is None:
             return
         self._comp_corpus_scope = combo.currentData() or 'genizah'
+        # Phase 146: local/all have no letter-level index -- re-run the
+        # gate so a scope change demotes the method instead of leaving
+        # a selection that dispatch would silently override.
+        self._revalidate_comp_method()
         self._save_session()
 
     def _drain_previous_worker(self, attr, ctx):
@@ -21910,6 +22506,12 @@ class GenizahGUI(QMainWindow):
 
     def toggle_composition(self):
         if self.is_comp_running:
+            # GUARDED STOP (Phase 146): a passage scan has no cancel hook,
+            # so setting the flag would leave "Cancelling..." on screen for
+            # up to ~19s and then complete anyway. Scoped to the scan phase
+            # only -- grouping keeps today's Stop behaviour exactly.
+            if self._refuse_stop_during_passage_scan():
+                return
             self._apply_pause_state(self._pause_comp, 'hidden')
             self._pause_comp.state = 'idle'
             if getattr(self, 'group_thread', None) and self.group_thread.isRunning():
@@ -21939,6 +22541,8 @@ class GenizahGUI(QMainWindow):
 
     def cancel_composition(self):
         """Cancel composition search gracefully (called by Escape shortcut)."""
+        if self._refuse_stop_during_passage_scan():
+            return
         self._apply_pause_state(self._pause_comp, 'hidden')
         self._pause_comp.state = 'idle'
         if self.is_comp_running and getattr(self, 'comp_thread', None) and self.comp_thread.isRunning():
@@ -21955,6 +22559,12 @@ class GenizahGUI(QMainWindow):
 
     def _reset_composition(self):
         """Clear all composition search state and start fresh."""
+        # Reset's own path is request_cancel + wait(3000) + terminate(). A
+        # passage scan answers none of that: it would block the UI three
+        # seconds and then TERMINATE a thread mid-search, which is how a
+        # memory-mapped reader gets killed holding its mappings.
+        if self._refuse_stop_during_passage_scan():
+            return
         self._apply_pause_state(self._pause_comp, 'hidden')
         self._pause_comp.state = 'idle'
         # 1. Stop any running composition thread
@@ -22094,6 +22704,9 @@ class GenizahGUI(QMainWindow):
             props = {
                 'search_mode': run['mode'],
                 'corpus_scope': run['corpus'],
+                # Phase 146: stamped at dispatch, so a mid-run method change
+                # cannot re-label a run that has already started.
+                'method': run.get('method', 'chunk'),
                 'action': action,
                 'session_id': getattr(self, '_session_id', ''),
             }
@@ -22210,11 +22823,40 @@ class GenizahGUI(QMainWindow):
         )
         _comp_mode_enum = f'lab_{_comp_mode_key}' if _comp_is_lab else _comp_mode_key
         # D-04: corpus from currentData() (fixed code), NEVER currentText() (translated label)
+        # Phase 146: the method is re-validated HERE, not merely read from
+        # the widget. The widget handler already refuses an invalid choice,
+        # but a restore path, a scope flip mid-edit or a re-index that landed
+        # since can all leave `passage` selected when it is no longer
+        # allowed; dispatch is the last place that can still fall back to
+        # chunk silently rather than raise from inside a worker thread.
+        _comp_dispatch_method = self._comp_method()
+        if _comp_dispatch_method == 'passage':
+            _passage_reason = self._passage_disabled_reason_now(
+                scope=_comp_scope)
+            if _passage_reason is not None:
+                self._revert_comp_method_to_chunk(_passage_reason)
+                _comp_dispatch_method = 'chunk'
+        _comp_passage_width = self._comp_passage_axis('width')
+        _comp_passage_length = self._comp_passage_axis('length')
+        _comp_passage_depth = self._comp_passage_axis('depth')
+
         self._current_comp_search_run = {
             'mode': _comp_mode_enum,
             'corpus': _comp_scope,
+            'method': _comp_dispatch_method,
             'emitted': False,
         }
+        # PROVENANCE, stamped at dispatch: what this run's rows are traceable
+        # to. Distinct from the preference fields, which follow the live
+        # widgets -- a mid-run scope flip must not record a genizah run as
+        # `passage+local`.
+        self._comp_last_result_method = _comp_dispatch_method
+        self._comp_last_result_scope = _comp_scope
+        self._comp_last_result_width = _comp_passage_width
+        self._comp_last_result_length = _comp_passage_length
+        self._comp_last_result_depth = _comp_passage_depth
+        self._clear_passage_dropped_warning()
+        self._refresh_comp_method_enabled()
 
         # 1. נתיב מעבדה (LAB MODE)
         if self.btn_lab_mode_toggle_comp.isChecked():
@@ -22258,19 +22900,44 @@ class GenizahGUI(QMainWindow):
                 self.reset_comp_ui()
                 return
 
+            # Phase 146: letter-level search reuses this thread UNCHANGED.
+            # `PassageSearchAdapter.search_composition_logic` was built to
+            # the signature CompositionThread already calls, and the engine
+            # object it replaces is only ever used as the page-text fetcher
+            # -- so the whole difference is which searcher goes in, plus the
+            # arguments the passage engine ignores being pinned to their
+            # neutral values instead of whatever the (now disabled) chunk
+            # knobs happen to hold. `witnesses`/`witness_text_cap` are
+            # keyword-only and deliberately NOT passed: single-witness only
+            # in this phase.
+            if _comp_dispatch_method == 'passage':
+                _comp_searcher = passage_lifecycle.get_passage_searcher(
+                    self.searcher,
+                    _comp_passage_width,
+                    _comp_passage_length,
+                    _comp_passage_depth)
+                _comp_mode_arg = 'literal'
+                _comp_boundary_mode = 'full'
+                _comp_min_boundary = 1
+            else:
+                _comp_searcher = self.searcher
+                _comp_mode_arg = mode
+                _comp_boundary_mode = boundary_mode
+                _comp_min_boundary = min_boundary_matches
+
             # --- התיקון הקריטי כאן: הסרת progress_callback ---
             self.comp_thread = CompositionThread(
-                self.searcher,
+                _comp_searcher,
                 txt,
                 chunk=chunk_size,
                 freq=self.spin_freq.value(),
-                mode=mode,
+                mode=_comp_mode_arg,
                 filter_text=self._get_filter_text(),
                 threshold=self.spin_filter.value(),
-                boundary_mode=boundary_mode,
+                boundary_mode=_comp_boundary_mode,
                 boundary_delimiter=boundary_delimiter,
                 boundary_boost=boundary_boost,
-                min_boundary_matches=min_boundary_matches,
+                min_boundary_matches=_comp_min_boundary,
                 min_delimiter_distance=min_delimiter_distance,
                 restrict_sys_ids=getattr(self, 'pre_search_restrict_sys_ids', None),
                 corpus_scope=_comp_scope,
@@ -22323,6 +22990,19 @@ class GenizahGUI(QMainWindow):
 
     def run_recursive_composition(self):
         if self.is_comp_running:
+            return
+        # The button is disabled in passage mode, but a restored session, a
+        # keyboard path or a programmatic call can still land here. Recursive
+        # search concatenates result texts into ONE query, which starves the
+        # passage engine's per-query posting budget -- measured 48.2% against
+        # 74.1% for the same witnesses fused (owner ruling 2026-08-25).
+        if self._comp_method() == 'passage':
+            self._show_passage_reason(None)
+            if hasattr(self, 'lbl_comp_passage_reason'):
+                self.lbl_comp_passage_reason.setText(tr(
+                    "Recursive search uses chunk search for now. Switch the "
+                    "method back to chunk search to use it."))
+                self.lbl_comp_passage_reason.setVisible(True)
             return
         base_text = self.comp_text_area.toPlainText().strip()
         if not base_text:
@@ -22393,11 +23073,32 @@ class GenizahGUI(QMainWindow):
     def on_comp_error(self, err):
         """Handle errors during composition search."""
         self.reset_comp_ui()
+        self._refresh_comp_method_enabled()
+        if getattr(self, '_comp_last_result_method', 'chunk') == 'passage':
+            # The raw text is an index-internals message; log it and show
+            # something a user can act on.
+            logger.error("passage composition search failed: %s", err)
+            QMessageBox.critical(
+                self, tr("Error"),
+                tr("The letter-level search could not be completed. "
+                   "Details have been written to the log."))
+            return
         QMessageBox.critical(self, tr("Error"), str(err))
         
     def on_comp_scan_finished(self, result_obj):
         self.is_comp_running = False
         self.reset_comp_ui()
+
+        # Phase 146: rows the passage searcher matched but could not load
+        # text for. Only meaningful for a run STAMPED passage -- reading the
+        # live widget here would attribute a chunk run's outcome to whatever
+        # the user has since selected.
+        if getattr(self, '_comp_last_result_method', 'chunk') == 'passage':
+            _dropped = 0
+            if isinstance(result_obj, dict):
+                _dropped = result_obj.get('dropped_text_lookup_failures') or 0
+            self._show_passage_dropped_warning(_dropped)
+        self._refresh_comp_method_enabled()
 
         # Phase 110 DESIGN CORRECTION (2026-06-08): standard composition queries the
         # REGULAR My-Library index, which has no staleness concept — an empty LOCAL

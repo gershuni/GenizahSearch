@@ -1,0 +1,95 @@
+# -*- coding: utf-8 -*-
+"""Phase 146: the thin Qt shells around `desktop/passage_lifecycle.py`.
+
+The lifecycle module is deliberately Qt-free -- its whole test suite runs
+without a QApplication, which is what makes the build/swap/close state
+machine provable at all. So the QThread wrappers live here instead of there,
+and they stay THIN: no policy, no state, no decisions. Everything they do is
+call one lifecycle function and forward what it returned.
+"""
+from __future__ import annotations
+
+import logging
+
+from PyQt6.QtCore import QThread, pyqtSignal
+
+from desktop import passage_lifecycle
+from shared.passage_corpus import iter_records
+
+logger = logging.getLogger(__name__)
+
+# See `docs/specs/passage-index-build-measurements.md`: peak RSS 3.5 GB at
+# P=8; the doc's own instruction for a memory-constrained machine is to
+# double the partition count.
+DESKTOP_PARTITIONS = 16
+
+
+class PassageBuildThread(QThread):
+    """Builds a passage index into staging and swaps it over the live one.
+
+    `release_live_state` is supplied by the window, not by this thread: the
+    release must happen on the UI thread (see `close_passage_state`'s
+    ownership rule), so this thread can only ask for it and wait.
+    """
+
+    progress_signal = pyqtSignal(str, int, int)   # phase label, done, total
+    finished_signal = pyqtSignal(object)          # BuildAndSwapResult
+    cancelled_signal = pyqtSignal()
+    error_signal = pyqtSignal(str)
+
+    def __init__(self, root, corpus_path, release_live_state, parent=None):
+        super().__init__(parent)
+        self._root = root
+        self._corpus_path = corpus_path
+        self._release_live_state = release_live_state
+        self._cancelled = False
+
+    def request_cancel(self):
+        """Sets the latch this thread's `cancel_check` reads. There is no
+        forced stop: every cancel point in the builder is cooperative, and
+        that is the point -- a terminated build would leave a partial
+        multi-GB artifact and, on Windows, open mappings on it."""
+        self._cancelled = True
+
+    def _cancel_check(self):
+        return self._cancelled
+
+    def run(self):
+        try:
+            # Reading the corpus is itself minutes of I/O on a 1.5 GB file,
+            # so it belongs here and not on the UI thread. `iter_records` is
+            # a generator; the builder consumes it in one pass.
+            records = iter_records(self._corpus_path)
+            result = passage_lifecycle.run_build_and_swap(
+                self._root, records, [self._corpus_path], self._corpus_path,
+                # 16, not the shared default of 8: measured peak RSS at
+                # P=8 is 3.5 GB, and halving the partition size halves it.
+                # A desktop is not the dev box the default was tuned on.
+                partitions=DESKTOP_PARTITIONS,
+                progress=self._on_progress,
+                cancel_check=self._cancel_check,
+                release_live_state=self._release_live_state)
+        except passage_lifecycle.BuildCancelled:
+            self.cancelled_signal.emit()
+            return
+        except Exception as exc:                       # noqa: BLE001
+            # The raw text is index internals. It goes to the log; the window
+            # shows a translated generic.
+            logger.exception('passage index build failed')
+            self.error_signal.emit(str(exc))
+            return
+        if result.status == 'cancelled':
+            self.cancelled_signal.emit()
+            return
+        self.finished_signal.emit(result)
+
+    def _on_progress(self, phase, done=0, total=0, elapsed=0.0):
+        # The builder calls this as progress(phase, done, total, elapsed).
+        # Pass 1 has no total (it reports records seen/indexed against an
+        # unknown length), so the dialog shows it as indeterminate; pass 2
+        # reports partition i of n and can show a real bar.
+        try:
+            self.progress_signal.emit(str(phase), int(done or 0),
+                                      int(total or 0))
+        except Exception:                              # noqa: BLE001
+            pass       # a progress line must never take a build down
