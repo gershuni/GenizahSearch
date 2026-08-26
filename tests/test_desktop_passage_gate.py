@@ -979,3 +979,57 @@ def test_the_offer_says_what_the_owner_asked_it_to_say():
     for phrase in ('a new way to find parallels', 'Composition Search tab',
                    'much faster', 'far fewer unrelated results'):
         assert phrase in seg, ('the offer no longer says %r' % phrase)
+
+
+# ---------------------------------------------------------------------------
+# The affordance has to be REACHED, not merely correct.
+#
+# Every test above calls `_update_comp_method_affordance` directly, and it
+# passed while the badge never appeared in the running app: the only caller
+# that matters, `_revalidate_comp_method`, returned early when the method was
+# not passage -- and chunk is the default, which is the exact case the badge
+# exists for. Testing a unit is not testing its wiring.
+# ---------------------------------------------------------------------------
+
+def test_revalidate_updates_the_affordance_on_the_chunk_path(monkeypatch):
+    monkeypatch.setattr(pl, 'passage_available', lambda: True)
+    monkeypatch.setattr(genizah_app.Config, 'FILE_V8', __file__)
+    w = _window(scope='genizah')
+    w.comp_method_combo = _Combo([('chunk', ''), ('passage', '')], index=0)
+    w.lbl_comp_method_new = _Label()
+    w._refresh_comp_method_enabled = lambda: None
+
+    APP._revalidate_comp_method(w)
+
+    assert w.lbl_comp_method_new.visible, (
+        'the badge is only updated on the passage path, so with chunk '
+        'selected -- the default, and the whole point of the badge -- it '
+        'never appears')
+
+
+def test_the_method_row_leads_the_panel():
+    """It decides what every control below it means. It was previously buried
+    in the action row beside scope, Lab Mode, Deep Scan, Pause and Analyze,
+    with its own help line under the PARAGRAPH controls two rows away."""
+    seg = _function_source('create_composition_tab')
+    method = seg.index('in_l.addLayout(method_row)')
+    boundary = seg.index('in_l.addLayout(boundary_row)')
+    passage = seg.index('in_l.addLayout(passage_row)')
+    assert method < boundary, (
+        'the paragraph controls come before the method that selects them')
+    assert method < passage < boundary, (
+        'the letter-level options are separated from the method they belong '
+        'to')
+    help_line = seg.index('in_l.addWidget(self.lbl_comp_method_help)')
+    assert method < help_line < passage, (
+        'the help line does not sit directly under the control it describes')
+
+
+def test_the_method_controls_left_the_action_row():
+    """That row already holds the corpus scope, Lab Mode, Deep Scan, Pause,
+    Analyze, Full Recursive Search and New."""
+    seg = _function_source('create_composition_tab')
+    for widget in ('self.comp_method_combo', 'self.lbl_comp_method_caption',
+                   'self.lbl_comp_method_new'):
+        assert 'cr.addWidget(%s)' % widget not in seg, (
+            '%s is back in the crowded action row' % widget)

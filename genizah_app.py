@@ -5571,7 +5571,58 @@ class GenizahGUI(QMainWindow):
         boundary_row.addWidget(self.boundary_stats_label)
         boundary_row.addStretch()
 
-        in_l.addLayout(boundary_row)
+        # Phase 146: the method selector LEADS the panel. It decides what
+        # every control below it means, and it was previously buried in the
+        # action row between the corpus scope, Lab Mode, Deep Scan, Pause and
+        # Analyze -- while its own help line sat under the PARAGRAPH controls,
+        # describing something two rows away.
+        method_row = QHBoxLayout()
+        # Default is chunk regardless of whether a passage index exists --
+        # availability never changes what a fresh install starts on. The two
+        # methods are complementary, not ranked.
+        self.comp_method_combo = QComboBox()
+        # The web's exact item labels (web/pages/parallels.py method_radio).
+        # Same English -> same TRANSLATIONS entry -> one vocabulary for one
+        # feature, and a later retirement of the "New!" marker is a single
+        # edit that moves both surfaces together.
+        self.comp_method_combo.addItem(tr("Chunk search (slower)"), "chunk")
+        self.comp_method_combo.addItem(tr("New! Letter-level search"),
+                                       "passage")
+        self.comp_method_combo.setAccessibleName(tr("Search method"))
+        self.comp_method_combo.setMinimumWidth(190)
+        self.comp_method_combo.setCurrentIndex(0)
+        self.comp_method_combo.currentIndexChanged.connect(
+            self._on_comp_method_changed)
+
+        # "New!" lives inside the item text, and chunk is the default -- so
+        # the CLOSED control never showed it and the whole feature was
+        # invisible unless the user happened to open the list. The caption
+        # names the control; the badge and the accent border say there is
+        # something here worth trying. Both retire themselves the moment
+        # letter-level search is selected.
+        self.lbl_comp_method_caption = QLabel(tr("Search method") + ":")
+        self.lbl_comp_method_new = QLabel(tr("New"))
+        self.lbl_comp_method_new.setStyleSheet(
+            "color: #e67e22; font-weight: bold;")
+        self.lbl_comp_method_new.setVisible(False)
+
+        # Mirrors the web's `method_help`: a live line describing the
+        # SELECTED method only. A single tooltip on a two-option control
+        # necessarily describes both, which is how the web ended up
+        # explaining letter-level search to someone hovering "Chunk search"
+        # (owner-reported 2026-08-25). Created in the same block that adds
+        # it -- the use-before-create gate caught it the last time it was not.
+        self.lbl_comp_method_help = QLabel("")
+        self.lbl_comp_method_help.setWordWrap(True)
+        self.lbl_comp_method_help.setStyleSheet(
+            "color: #7f8c8d; font-size: 11px;")
+
+        method_row.addWidget(self.lbl_comp_method_caption)
+        method_row.addWidget(self.comp_method_combo)
+        method_row.addWidget(self.lbl_comp_method_new)
+        method_row.addStretch()
+        in_l.addLayout(method_row)
+        in_l.addWidget(self.lbl_comp_method_help)
 
         # Phase 146: the three policy axes, ported from the web surface with
         # the same keys, order, defaults and tooltip wording. Shown only in
@@ -5624,21 +5675,6 @@ class GenizahGUI(QMainWindow):
                        "started."))
         self.comp_passage_depth_combo.setAccessibleName(tr("Search depth"))
 
-        # Mirrors the web's `method_help`: a live line describing the
-        # SELECTED method only. A single tooltip on a two-option control
-        # necessarily describes both, which is how the web ended up
-        # explaining letter-level search to someone hovering "Chunk search"
-        # (owner-reported 2026-08-25).
-        #
-        # Created HERE, in the block that adds it to the layout -- not beside
-        # the combo further down. `create_composition_tab` builds the
-        # boundary row before the button row, so a widget created at the
-        # combo and added here is used ~70 lines before it exists.
-        self.lbl_comp_method_help = QLabel("")
-        self.lbl_comp_method_help.setWordWrap(True)
-        self.lbl_comp_method_help.setStyleSheet(
-            "color: #7f8c8d; font-size: 11px;")
-
         self.lbl_comp_passage_reason = QLabel("")
         self.lbl_comp_passage_reason.setWordWrap(True)
         self.lbl_comp_passage_reason.setStyleSheet(
@@ -5661,10 +5697,15 @@ class GenizahGUI(QMainWindow):
         in_l.addWidget(self.lbl_comp_passage_reason)
         in_l.addWidget(self.lbl_comp_passage_dropped_warning)
 
-        in_l.addWidget(self.lbl_comp_method_help)
+        # The paragraph controls belong to CHUNK search (letter-level has no
+        # paragraph boundaries), so they come after the method that selects
+        # them rather than above it.
+        in_l.addLayout(boundary_row)
 
         # Chunk is the default, so the letter-level row starts hidden.
         self._set_passage_options_visible(False)
+        self._update_comp_method_help()
+        self._update_comp_method_affordance()
 
         # Initialize boundary settings from LabSettings if available
         if hasattr(self, 'lab_engine') and self.lab_engine:
@@ -5726,39 +5767,6 @@ class GenizahGUI(QMainWindow):
             self.comp_corpus_scope_combo.setCurrentIndex(_comp_scope_idx)
         self.comp_corpus_scope_combo.currentIndexChanged.connect(self._on_comp_corpus_scope_changed)
 
-        # Phase 146: search METHOD. Default is chunk regardless of whether
-        # a passage index exists -- availability never changes what a fresh
-        # install starts on. The two methods are complementary, not ranked.
-        self.comp_method_combo = QComboBox()
-        # The web's exact item labels (web/pages/parallels.py method_radio).
-        # Same English -> same TRANSLATIONS entry -> one vocabulary for one
-        # feature, and a later retirement of the "New!" marker is a single
-        # edit that moves both surfaces together.
-        self.comp_method_combo.addItem(tr("Chunk search (slower)"), "chunk")
-        self.comp_method_combo.addItem(tr("New! Letter-level search"),
-                                       "passage")
-        self.comp_method_combo.setAccessibleName(tr("Search method"))
-        self.comp_method_combo.setFixedWidth(150)
-        self.comp_method_combo.setCurrentIndex(0)
-        self.comp_method_combo.currentIndexChanged.connect(
-            self._on_comp_method_changed)
-        self._update_comp_method_help()
-
-        # "New!" lives inside the item text, and chunk is the default --
-        # so the CLOSED control never showed it and the whole feature was
-        # invisible unless the user happened to open the list. A caption
-        # names the control, and the badge plus an accent border say there
-        # is something here worth trying. Both retire themselves the moment
-        # letter-level search is selected.
-        self.lbl_comp_method_caption = QLabel(tr("Search method") + ":")
-        self.lbl_comp_method_new = QLabel(tr("New"))
-        self.lbl_comp_method_new.setStyleSheet(
-            "color: #e67e22; font-weight: bold;")
-        self.lbl_comp_method_new.setVisible(False)
-
-        cr.addWidget(self.lbl_comp_method_caption)
-        cr.addWidget(self.comp_method_combo)
-        cr.addWidget(self.lbl_comp_method_new)
         cr.addWidget(self.comp_corpus_scope_combo)
         cr.addWidget(self.btn_lab_mode_toggle_comp)
         cr.addWidget(self.chk_lab_deep_comp)
@@ -16470,6 +16478,10 @@ class GenizahGUI(QMainWindow):
         """Re-run the gate after something else changed (scope, Lab, build
         state, index readiness) and demote to chunk if passage is no longer
         allowed. Safe to call from any of those handlers."""
+        # BEFORE the early return: the affordance exists FOR the
+        # chunk-selected case, so returning early on "not passage" is exactly
+        # the path that must still update it.
+        self._update_comp_method_affordance()
         if self._comp_method() != 'passage':
             self._refresh_comp_method_enabled()
             return
