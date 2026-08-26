@@ -580,9 +580,15 @@ def build_index(records: Iterable, index_dir: str, *,
     desktop build worker, which is where a rebuild-in-place actually happens.
 
     EXCEPTION BOUNDARY: this whole body runs inside one try/except, and
-    anything that escapes it is caught, reduced to (type, args) -- never
-    the exception object -- and re-raised as a FRESH instance of the SAME
-    type only after that try/except has fully unwound. The `streams`
+    anything that escapes it is caught, held as text only, and re-raised --
+    the SAME object, with `__traceback__`, `__context__` and `__cause__`
+    cleared -- only after that try/except has fully unwound. It does NOT
+    reconstruct a fresh `type(exc)(*exc.args)`: that was tried and reverted,
+    because rebuilding from `args` silently discards everything an exception
+    carries outside them, and for the `OSError` family that includes
+    `filename` -- so a build dying on a real file reported the errno and
+    never named the path. Clearing the traceback drops the frame chain just
+    as completely while keeping the detail. The `streams`
     memmap the `finally` below closes is a local of the pass-2 call's OWN
     frame, not of this one; `del streams` here drops only this frame's
     reference, so a caller that RETAINS the propagating exception (logs

@@ -2229,7 +2229,13 @@ def test_blocked_promotion_with_successful_restore_cleans_staging_end_to_end(
         pl.PassageState(index=res.index, live_dir=res.live_dir))
 
 
-def test_cancelled_latch_before_any_rename_leaves_live_untouched(tmp_path):
+def test_cancelled_latch_before_any_rename_leaves_live_untouched(
+        tmp_path, monkeypatch):
+    """The NAME of this test is a claim about RENAMES, so it has to watch
+    renames. It used to assert only that `live` was openable at the end --
+    which cannot tell "never renamed" apart from "renamed aside and rolled
+    back", because the rollback path leaves `live` openable too and passed
+    this test just as happily (Codex review round 7, finding 2)."""
     c = _Corpus(tmp_path)
     res1 = c.build()
     assert res1.status == 'installed'
@@ -2240,9 +2246,22 @@ def test_cancelled_latch_before_any_rename_leaves_live_untouched(tmp_path):
     assert validation.ok
 
     pl.close_passage_state()
+
+    renames = []
+    _real_rename = pl._retry_rename
+
+    def _spy(src, dst):
+        renames.append((src, dst))
+        return _real_rename(src, dst)
+
+    monkeypatch.setattr(pl, '_retry_rename', _spy)
+
     swap = pl.perform_swap(c.root, built.staging_dir, cancel_check=lambda: True)
 
     assert swap.status == 'cancelled'
+    assert renames == [], (
+        'a swap that was already cancelled renamed something anyway: %r'
+        % (renames,))
     assert not os.path.isdir(built.staging_dir)
     assert open_index(c.live_dir) is not None
 
@@ -2826,7 +2845,7 @@ def test_run_build_and_swap_uses_the_injected_seam_not_close_passage_state(
 
     seam_calls = []
 
-    def _seam():
+    def _seam(expect_generation=None):
         seam_calls.append(1)
         orig_close()  # the real release, driven by the seam -- not by the
                       # module reaching for close_passage_state on its own
@@ -2865,7 +2884,7 @@ def test_run_build_and_swap_seam_that_never_returns_times_out_and_frees_the_lock
 
     never = threading.Event()
 
-    def _wedged_seam():
+    def _wedged_seam(expect_generation=None):
         never.wait()  # never set within this test -- models a UI thread
         return True   # that never answers; unreachable here
 
@@ -2910,7 +2929,7 @@ def test_run_build_and_swap_relies_on_the_seam_actually_releasing(tmp_path):
 
     res2 = pl.run_build_and_swap(c.root, c.records, c.source_paths,
                                  c.corpus_path, partitions=2,
-                                 release_live_state=lambda: None)
+                                 release_live_state=lambda _gen=None: None)
     assert res2.status == 'rename_blocked', res2.status
     assert pl.passage_available(), (
         'a no-op seam must leave the old state exactly as installed')
@@ -2944,7 +2963,7 @@ def test_run_build_and_swap_posix_gap_broken_seam_is_not_caught_no_safety_gate(
 
     res2 = pl.run_build_and_swap(c.root, c.records, c.source_paths,
                                  c.corpus_path, partitions=2,
-                                 release_live_state=lambda: None)
+                                 release_live_state=lambda _gen=None: None)
     assert res2.status == 'installed', res2.status
     pl.close_passage_state()
 
@@ -3131,3 +3150,138 @@ def test_passage_disabled_reason_reads_no_module_state(monkeypatch):
     got = pl.passage_disabled_reason(True, 'genizah', False, False, True)
     monkeypatch.undo()
     assert got is None
+
+
+# =========================================================================
+# Codex review round 7. Three defects the wave-1 suite passed straight
+# over, each pinned by the state it actually produces rather than by the
+# state it happens to end up in.
+# =========================================================================
+
+
+def test_a_late_release_from_a_timed_out_seam_cannot_close_a_newer_index(
+        tmp_path, monkeypatch):
+    """Finding 1. `_call_release_seam` abandons a seam that does not answer
+    in time -- but abandoning a thread does not stop it. Build A's wedged
+    seam wakes up minutes later and runs its close against whatever `_state`
+    holds BY THEN, which can be the index a SECOND build installed in the
+    meantime. The feature then goes offline until restart, with nothing in
+    the logs tying it to a build that failed long ago.
+
+    The existing timeout test cannot see this: its wedged seam only returns
+    `True` and never performs a close at all, and it is released BEFORE the
+    second build rather than after it."""
+    monkeypatch.setattr(pl, 'UI_RELEASE_SEAM_TIMEOUT_SECONDS', 0.2)
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+
+    gate = threading.Event()
+    late = []
+
+    def _wedged_seam(expect_generation=None):
+        # Models a UI thread that is wedged past the timeout and then
+        # finally drains its queue and performs the release for real.
+        gate.wait(30)
+        late.append(pl.close_passage_state(expect_generation))
+        return True
+
+    res_a = pl.run_build_and_swap(
+        c.root, c.records, c.source_paths, c.corpus_path, partitions=2,
+        release_live_state=_wedged_seam)
+    assert res_a.status == 'release_timed_out', res_a.status
+    assert pl.passage_available()
+
+    # Build B succeeds while A's seam is still parked, and installs a
+    # DIFFERENT index object.
+    res_b = c.build()
+    assert res_b.status == 'installed', res_b.status
+    assert pl.passage_available()
+    installed = pl._state.index
+
+    # Only now does A's abandoned seam get to run its close.
+    gate.set()
+    deadline = time.time() + 30
+    while not late and time.time() < deadline:
+        time.sleep(0.02)
+    assert late, 'the abandoned seam never ran -- the test proved nothing'
+
+    assert late == [False], (
+        'the late close was PERFORMED; it must be refused, because the '
+        'generation it was authorised against is long gone')
+    assert pl.passage_available(), (
+        "build A's abandoned seam closed build B's index")
+    assert pl._state.index is installed, 'the installed index was replaced'
+
+
+def test_a_cancel_racing_the_rebuild_never_renames_the_live_index_aside(
+        tmp_path, monkeypatch):
+    """Finding 2. `perform_swap`'s entry check can pass and the latch be set
+    a moment later, before `_swap_rebuild`'s first destructive rename. The
+    rollback that used to be the only answer is not free: it is a SECOND
+    rename, and on Windows it can itself fail with PermissionError -- which
+    leaves `current/` missing entirely. Not renaming at all cannot fail.
+
+    `_swap_first_build` already re-checked before ITS rename; the rebuild
+    path did not, though `perform_swap`'s docstring claimed both did."""
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+
+    built = pl.execute_build(c.root, c.records, c.source_paths, partitions=2)
+    validation = pl.begin_swap(built.staging_dir, c.source_paths,
+                               built.pre_build_manifest)
+    assert validation.ok
+    pl.close_passage_state()
+
+    renames = []
+    _real_rename = pl._retry_rename
+
+    def _spy(src, dst):
+        renames.append((src, dst))
+        return _real_rename(src, dst)
+
+    monkeypatch.setattr(pl, '_retry_rename', _spy)
+
+    # False for `perform_swap`'s entry check, True by the time the rebuild
+    # path is about to rename -- exactly the race, made deterministic.
+    calls = []
+
+    def _cancel():
+        calls.append(1)
+        return len(calls) > 1
+
+    swap = pl.perform_swap(c.root, built.staging_dir, cancel_check=_cancel)
+
+    assert swap.status == 'cancelled', swap.status
+    assert not any(src == c.live_dir for src, _ in renames), (
+        'the live index was renamed aside by a swap that had already been '
+        'cancelled, and only put back by a rollback that can itself fail: '
+        '%r' % (renames,))
+    assert not os.path.isdir(built.staging_dir)
+    assert open_index(c.live_dir) is not None
+
+
+def test_a_failed_post_build_fingerprint_still_cleans_staging(
+        tmp_path, monkeypatch):
+    """Finding 3. Only `BuildCancelled` cleaned staging on the way out of
+    `begin_swap`. Re-reading the corpus can fail for entirely ordinary
+    reasons -- a source file removed, a drive unmounted, a permission
+    change -- and every one of those escaped to the worker leaving a
+    multi-GB staging artifact on disk. Nothing downstream collects it: the
+    startup recovery walk never looks inside `passage_index.building`."""
+    c = _Corpus(tmp_path)
+    built = pl.execute_build(c.root, c.records, c.source_paths, partitions=2)
+    assert built.status == 'built', built.status
+    assert os.path.isdir(built.staging_dir)
+
+    def _boom(paths, cancel_check=None):
+        raise OSError(5, 'the corpus went away mid-swap')
+
+    monkeypatch.setattr(pl, 'source_manifest', _boom)
+
+    with pytest.raises(OSError):
+        pl.begin_swap(built.staging_dir, c.source_paths,
+                      built.pre_build_manifest)
+
+    assert not os.path.isdir(built.staging_dir), (
+        'a validated multi-GB staging artifact was stranded on disk by an '
+        'ordinary failure of the post-build fingerprint')

@@ -274,6 +274,28 @@ class PassageState:
 
 _state: Optional[PassageState] = None
 
+# Bumped on EVERY mutation of `_state`. A release request is authorised
+# against the generation that was current when it was issued: `_call_release_
+# seam` abandons a seam that does not answer within
+# `UI_RELEASE_SEAM_TIMEOUT_SECONDS`, but abandoning a thread does not stop
+# it -- it cannot be killed from here -- so a wedged UI thread that finally
+# answers minutes later would otherwise run its close against whatever
+# `_state` holds BY THEN. That is a different index: a second build can
+# have succeeded and installed in the meantime, and the late close would
+# silently take the feature offline until restart. Bounding what the late
+# call is permitted to do is the same move `close()`'s poisoning makes --
+# the escaped caller cannot be recalled, so it is denied its effect
+# instead (Codex review round 7, finding 1).
+_state_generation: int = 0
+
+
+def current_state_generation() -> int:
+    """The generation `_state` is on right now. A caller that is about to
+    hand a release request across a thread boundary captures this and sends
+    it along; `close_passage_state` refuses any request whose captured
+    generation is no longer current."""
+    return _state_generation
+
 
 def load_passage_state(root: Optional[str] = None) -> Optional[PassageState]:
     """Computes and RETURNS a state -- never assigns. `open_index` scans the
@@ -308,23 +330,25 @@ def install_passage_state(state: Optional[PassageState]) -> bool:
     index has an outstanding `get_passage_searcher()` lease that never
     drained (see `_release_live_index`); True otherwise, including the
     same-object and None-outgoing no-ops above."""
-    global _state
+    global _state, _state_generation
     outgoing = _state
     if outgoing is not None and outgoing is not state:
         def _swap_in():
-            global _state
+            global _state, _state_generation
             _state = state
+            _state_generation += 1
         if not _release_live_index(outgoing.index, _swap_in):
             return False
         gc.collect()
         _reset_freshness()
         return True
     _state = state
+    _state_generation += 1
     _reset_freshness()
     return True
 
 
-def close_passage_state() -> bool:
+def close_passage_state(expect_generation: Optional[int] = None) -> bool:
     """Release the live memmaps, then drop the reference. An open memmap
     blocks os.rename/rmtree on Windows for as long as it -- or a traceback
     holding it -- survives, so this is the mandatory step between "the UI
@@ -345,14 +369,29 @@ def close_passage_state() -> bool:
     background worker never calls this directly; it requests the release
     through a caller-supplied seam instead (see `run_build_and_swap`'s
     `release_live_state` parameter) so the actual mutation still happens on
-    the UI thread even though the request to do it originates off it."""
-    global _state
+    the UI thread even though the request to do it originates off it.
+
+    `expect_generation` is the generation this call is AUTHORISED to close
+    (see `current_state_generation`). When it no longer matches, the state
+    this request was issued against is already gone and something else is
+    installed -- closing that would take a live feature offline on behalf
+    of a request that is no longer about it -- so the call is refused and
+    nothing is touched. Omitting it (the 47 direct UI-thread calls, and app
+    shutdown) means "close whatever is current", which is race-free
+    precisely because `_state` is UI-thread-only. The seam path never omits
+    it: `run_build_and_swap` passes it positionally, so a seam that has not
+    been taught to accept it raises TypeError on the first build rather
+    than silently reverting to the unguarded behaviour."""
+    global _state, _state_generation
+    if expect_generation is not None and expect_generation != _state_generation:
+        return False
     if _state is not None:
         current = _state
 
         def _clear():
-            global _state
+            global _state, _state_generation
             _state = None
+            _state_generation += 1
         if not _release_live_index(current.index, _clear):
             return False
         gc.collect()
@@ -922,9 +961,10 @@ def begin_swap(staging_dir: str, source_paths: list,
     the corpus changed DURING the build, staging is discarded rather than
     swapped in: the artifact and the files on disk would silently disagree.
 
-    A hash cancel raises `BuildCancelled` (propagated, not swallowed) after
-    cleaning staging -- consistent with every other cancel point in this
-    subsystem.
+    ANY failure of that re-fingerprint -- a hash cancel raising
+    `BuildCancelled`, or an ordinary `OSError` from a source file that
+    disappeared mid-build -- cleans staging before propagating, consistent
+    with every other unswapped terminal in this subsystem.
     """
     idx = _open_with_retry(staging_dir)
     if idx is None:
@@ -936,7 +976,16 @@ def begin_swap(staging_dir: str, source_paths: list,
 
     try:
         post_manifest = source_manifest(source_paths, cancel_check=cancel_check)
-    except BuildCancelled:
+    except BaseException:
+        # NOT just BuildCancelled: re-reading the corpus can fail for
+        # ordinary reasons (a source file removed, a drive unmounted, a
+        # permission change) and every one of those escapes to the worker
+        # as an error. Staging is a multi-GB artifact this function owns
+        # until it either promotes or discards it, and nothing downstream
+        # looks inside `passage_index.building` -- the startup recovery
+        # walk explicitly does not -- so an escape without this cleanup
+        # strands it on disk until some later build happens to clear it
+        # (Codex review round 7, finding 3).
         _cleanup_staging(staging_dir)
         raise
 
@@ -1020,6 +1069,16 @@ def _swap_first_build(live: str, staging_dir: str,
 
 def _swap_rebuild(root: str, live: str, staging_dir: str,
                   cancelled: Callable[[], bool]) -> SwapResult:
+    # Re-checked immediately before the destructive rename, exactly like
+    # `_swap_first_build` -- `perform_swap`'s entry check can pass and the
+    # latch be set a moment later, and the rollback that used to be the
+    # only answer here is not free: it is a SECOND rename that can itself
+    # fail with PermissionError and leave `current/` missing. Not renaming
+    # at all cannot fail (Codex review round 7, finding 2).
+    if cancelled():
+        _cleanup_staging(staging_dir)
+        return SwapResult(status='cancelled')
+
     gen = _gen_token()
     prev = os.path.join(root, f'{PREV_PREFIX}{gen}')
     try:
@@ -1134,7 +1193,8 @@ UI_RELEASE_SEAM_TIMEOUT_SECONDS = 15.0
 _RELEASE_SEAM_TIMED_OUT = object()
 
 
-def _call_release_seam(release_live_state: Callable[[], Optional[bool]],
+def _call_release_seam(release_live_state: Callable[..., Optional[bool]],
+                       expect_generation: int,
                        timeout: Optional[float] = None):
     """Runs `release_live_state()` on its own daemon thread and waits at
     most `timeout` seconds for it to return, so a seam whose event loop
@@ -1147,7 +1207,10 @@ def _call_release_seam(release_live_state: Callable[[], Optional[bool]],
     On timeout the seam thread is simply abandoned (it cannot be killed
     from here); if it eventually does call back into `close_passage_state`
     for real, that happens unseen by this function and by whatever already
-    gave up waiting on it.
+    gave up waiting on it. It cannot, however, do any DAMAGE unseen: the
+    seam is handed `expect_generation` and must forward it, so a late close
+    lands on a generation check that refuses it (see
+    `current_state_generation`).
 
     Returns the seam's own return value on a normal return within
     `timeout`, or the sentinel `_RELEASE_SEAM_TIMED_OUT` on timeout.
@@ -1166,7 +1229,10 @@ def _call_release_seam(release_live_state: Callable[[], Optional[bool]],
 
     def _run() -> None:
         try:
-            outcome.append(('return', release_live_state()))
+            # Positional, and NOT optional: a seam that has not been taught
+            # the generation contract fails loudly here on the first build
+            # instead of quietly closing the wrong generation later.
+            outcome.append(('return', release_live_state(expect_generation)))
         except BaseException as exc:  # forwarded below, never swallowed
             outcome.append(('raise', exc))
 
@@ -1188,7 +1254,7 @@ def run_build_and_swap(root: str, records, source_paths: list,
                        df_cap: Optional[int] = None, corpus_label: str = '',
                        progress: Optional[Callable] = None,
                        cancel_check: Optional[Callable[[], bool]] = None,
-                       release_live_state: Callable[[], Optional[bool]]
+                       release_live_state: Callable[..., Optional[bool]]
                        ) -> BuildAndSwapResult:
     """Build -> validate -> swap, with the cross-process lock held for the
     whole run and released exactly once, in `finally`, regardless of which
@@ -1209,7 +1275,12 @@ def run_build_and_swap(root: str, records, source_paths: list,
     renames. The real Qt wiring supplies a callable that does that hop (e.g.
     a blocking queued signal/slot) and PROPAGATES `close_passage_state`'s own
     return value back across it; a test may pass `close_passage_state`
-    directly since nothing in a test is actually multi-threaded. Required,
+    directly since nothing in a test is actually multi-threaded. The seam
+    receives ONE argument -- the state generation it is authorised to close
+    -- and must forward it to `close_passage_state`, which is what stops an
+    abandoned seam from closing a later index (see `current_state_
+    generation`). Passing `close_passage_state` itself as the seam gets
+    this right by construction. Required,
     not defaulted to `close_passage_state`, so this module can never again
     grow a path that touches the global itself.
 
@@ -1273,7 +1344,8 @@ def run_build_and_swap(root: str, records, source_paths: list,
         # refusal. Bounded (`_call_release_seam`) because this thread holds
         # the cross-process lock through the whole `try` -- a seam that
         # never answers must not be allowed to hold it forever.
-        released = _call_release_seam(release_live_state)
+        released = _call_release_seam(release_live_state,
+                                      current_state_generation())
         if released is _RELEASE_SEAM_TIMED_OUT:
             _cleanup_staging(staging)
             return BuildAndSwapResult(status='release_timed_out')
