@@ -118,6 +118,24 @@ def write_atomic(path, obj):
     os.replace(tmp, path)
 
 
+def describe_live_map(path):
+    """One line about the map being replaced -- never a prerequisite for
+    replacing it. A truncated or unpicklable map is precisely the damage
+    this tool exists to repair, so failing to read one is a thing to REPORT
+    and carry on from, not a reason to refuse to rebuild."""
+    if not os.path.exists(path):
+        return 'live map: %s -- ABSENT' % path
+    try:
+        with open(path, 'rb') as f:
+            current = pickle.load(f)
+        return ('live map: %s -- %d manuscripts, %d bytes'
+                % (path, len(current), os.path.getsize(path)))
+    except Exception as exc:                                 # noqa: BLE001
+        return ('live map: %s -- UNREADABLE (%s: %s), %d bytes. Rebuilding '
+                'anyway; that is what this tool is for.'
+                % (path, type(exc).__name__, exc, os.path.getsize(path)))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--out', help='write the rebuilt map here')
@@ -126,13 +144,7 @@ def main():
     args = ap.parse_args()
 
     live = Config.BROWSE_MAP
-    if os.path.exists(live):
-        with open(live, 'rb') as f:
-            current = pickle.load(f)
-        print('live map: %s -- %d manuscripts, %d bytes'
-              % (live, len(current), os.path.getsize(live)))
-    else:
-        print('live map: %s -- ABSENT' % live)
+    print(describe_live_map(live))
 
     cleaned = build()
 

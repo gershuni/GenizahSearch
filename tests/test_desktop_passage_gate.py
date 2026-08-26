@@ -1723,3 +1723,98 @@ def test_history_applies_the_recorded_method_before_re_running():
     assert (seg.index('_restore_comp_passage_preferences(')
             < seg.index('self.run_composition()')), (
         'the method is applied AFTER the re-run has already been dispatched')
+
+
+# ---------------------------------------------------------------------------
+# Codex review round 3 (PR #331).
+# ---------------------------------------------------------------------------
+
+class _Signal:
+    def __init__(self):
+        self.emitted = []
+
+    def emit(self, *args):
+        self.emitted.append(args)
+
+
+class _BuildResult:
+    def __init__(self, status, error=None):
+        self.status = status
+        self.error = error
+        self.index = None
+        self.live_dir = ''
+
+
+class _BuildStub:
+    """Borrows the worker's `run` -- no QThread, no event loop."""
+    run = PassageBuildThread.run
+
+    def __init__(self):
+        self._root = 'root'
+        self._corpus_path = 'corpus'
+        self.finished_signal = _Signal()
+        self.cancelled_signal = _Signal()
+        self.error_signal = _Signal()
+
+    def _records_with_progress(self, path):
+        return iter(())
+
+    def _on_progress(self, *a, **k):
+        pass
+
+    def _cancel_check(self):
+        return False
+
+    def _release_live_state(self, generation):
+        return True
+
+
+def _run_worker(monkeypatch, result):
+    from desktop import passage_workers
+    monkeypatch.setattr(passage_workers.passage_lifecycle,
+                        'run_build_and_swap',
+                        lambda *a, **k: result)
+    w = _BuildStub()
+    w.run()
+    return w
+
+
+def test_a_returned_build_error_reaches_the_error_handler(monkeypatch):
+    """`run_build_and_swap` RETURNS a failed build instead of raising it, so
+    the worker's `except` never sees it. Emitted as a normal completion it
+    dropped the diagnostic and told the user the previous index was still in
+    use -- on a first build, an index that never existed."""
+    w = _run_worker(monkeypatch, _BuildResult('error', error='disk on fire'))
+    assert w.error_signal.emitted == [('disk on fire',)], (
+        'a returned failure was reported as a completed build')
+    assert not w.finished_signal.emitted
+
+
+def test_a_cancelled_build_still_reports_cancellation(monkeypatch):
+    w = _run_worker(monkeypatch, _BuildResult('cancelled'))
+    assert w.cancelled_signal.emitted and not w.error_signal.emitted
+
+
+def test_a_good_build_still_finishes_normally(monkeypatch):
+    w = _run_worker(monkeypatch, _BuildResult('installed'))
+    assert w.finished_signal.emitted and not w.error_signal.emitted
+
+
+def test_a_swap_failure_is_not_an_error_signal(monkeypatch):
+    """`readers_active` and friends leave a working index behind and are
+    reported through the normal completion path, which says so."""
+    w = _run_worker(monkeypatch, _BuildResult('readers_active'))
+    assert w.finished_signal.emitted and not w.error_signal.emitted
+
+
+def test_history_takes_the_scope_from_the_same_stamp_as_the_method():
+    """Nothing disables the scope selector during a run, so a live read here
+    could pair a letter-level method with a My Library scope -- impossible,
+    demoted to chunk on reopen, and a different search re-run under the
+    recorded one's name."""
+    seg = _function_source('_add_comp_search_to_history')
+    idx = seg.index("'comp_corpus_scope'")
+    tail = seg[idx:idx + 400]
+    assert '_comp_last_result_scope' in tail, (
+        'the history entry records the scope as it stands now, not the one '
+        'the run was dispatched under')

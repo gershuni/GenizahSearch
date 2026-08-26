@@ -114,6 +114,15 @@ class PassageBuildThread(QThread):
         if result.status == 'cancelled':
             self.cancelled_signal.emit()
             return
+        if result.status == 'error':
+            # `run_build_and_swap` RETURNS a failed build rather than raising
+            # it, so the `except` above never sees this one. Emitted as a
+            # normal completion it dropped the diagnostic and told the user
+            # the previous index was still in use -- which on a first build
+            # names an index that never existed. The slot logs the text and
+            # shows the translated generic.
+            self.error_signal.emit(str(getattr(result, 'error', '') or ''))
+            return
         self.finished_signal.emit(result)
 
     def _records_with_progress(self, path):

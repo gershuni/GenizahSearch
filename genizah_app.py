@@ -26857,7 +26857,14 @@ class GenizahGUI(QMainWindow):
                                if hasattr(self, 'comp_mode_combo') else 0),
                 # Phase 110 (COMP-LOC-01 / Round-2 #3): capture the comp corpus scope
                 # so a history re-run uses the ORIGINAL scope, not the current default.
-                'comp_corpus_scope': getattr(self, '_comp_corpus_scope', 'genizah'),
+                # Phase 146: from the dispatch STAMP, like the method below.
+                # Nothing disables the scope selector during a run, so the
+                # live value can have moved since -- and a scope changed
+                # mid-scan wrote `passage+local`, an impossible pair that is
+                # demoted to chunk on reopen and re-runs a different search.
+                'comp_corpus_scope': (
+                    getattr(self, '_comp_last_result_scope', None)
+                    or getattr(self, '_comp_corpus_scope', 'genizah')),
                 # Phase 146: and the METHOD, from the dispatch STAMP rather
                 # than the live widgets. A history entry re-runs the search
                 # it recorded; without this, clicking a letter-level entry
