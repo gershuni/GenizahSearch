@@ -212,6 +212,31 @@ class _NullTextFetcher:
         return None
 
 
+# How long a helper that is HOLDING SOMETHING OPEN waits to be released.
+#
+# Deliberately not 5 s, and deliberately not the same number as the waits
+# for something that should happen promptly (`entered.wait`, `t.join`),
+# which are fine at 5 s because they are deadlock guards on a fast event.
+#
+# These three waits are different in kind: each one holds a lease, a
+# teardown or an acquisition open WHILE THE TEST DOES SLOW WORK -- a real
+# build and swap. If the bound expires first, the helper stops holding,
+# and the invariant under test silently evaporates: the swap then finds no
+# readers and succeeds, so `readers_active` becomes `installed` and the
+# assertion fails for a reason that has nothing to do with the product.
+#
+# That is not hypothetical. It failed exactly that way on a Windows CI
+# runner (179e42e9) while passing on the same code elsewhere: the build
+# outran 5 s, the blocking search gave up, and the log carried both the
+# real symptom and its cause -- `assert 'installed' == 'readers_active'`
+# next to `AssertionError: test setup stalled`.
+#
+# Two minutes can only expire on a genuine hang, so it still fails rather
+# than blocking a CI job forever, but it can no longer be reached by a
+# machine simply being slow.
+_HOLD_OPEN_TIMEOUT = 120.0
+
+
 def _shrink_lease_window(monkeypatch, timeout=0.2, poll=0.02):
     """Every negative (never-drains) test needs a short window, or it pays
     the full production timeout; every positive (drains-in-time) test needs
@@ -233,7 +258,8 @@ def _patch_blocking_search(monkeypatch, entered_event, release_event):
 
     def _blocked(self, *a, **k):
         entered_event.set()
-        assert release_event.wait(timeout=5), 'test setup stalled'
+        assert release_event.wait(timeout=_HOLD_OPEN_TIMEOUT), (
+            'test setup stalled')
         return {'main': [], 'filtered': []}
 
     monkeypatch.setattr(passage_parallels.PassageSearcher,
@@ -540,7 +566,8 @@ def test_close_refuses_a_search_requested_mid_teardown_real_threads(
         # but the mappings are not closed yet -- exactly the window a new
         # acquisition must never be able to slip into.
         entered_teardown.set()
-        assert let_teardown_finish.wait(timeout=5), 'test setup stalled'
+        assert let_teardown_finish.wait(timeout=_HOLD_OPEN_TIMEOUT), (
+            'test setup stalled')
         real_release_handles(idx)
 
     monkeypatch.setattr(pl, '_release_index_handles', slow_release_handles)
@@ -633,7 +660,7 @@ class _PausingLock:
         if not self._fired:
             self._fired = True
             self._released_event.set()
-            if not self._resume_event.wait(timeout=5):
+            if not self._resume_event.wait(timeout=_HOLD_OPEN_TIMEOUT):
                 raise AssertionError(
                     'test harness never resumed the paused acquirer thread '
                     'within the bounded wait -- synchronisation failure, '
