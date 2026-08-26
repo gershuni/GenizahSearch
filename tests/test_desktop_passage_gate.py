@@ -134,6 +134,8 @@ class _Win:
     _refuse_stop_during_passage_scan = APP._refuse_stop_during_passage_scan
     _on_pause_clicked = APP._on_pause_clicked
     _on_passage_build_finished = APP._on_passage_build_finished
+    _passage_snapshot_must_wait = APP._passage_snapshot_must_wait
+    _display_restored_comp_snapshot = APP._display_restored_comp_snapshot
     _comp_method = APP._comp_method
     _restore_comp_passage_preferences = APP._restore_comp_passage_preferences
     _method_help_text = APP._method_help_text
@@ -1422,9 +1424,7 @@ def test_a_restored_snapshot_carries_its_own_provenance():
     """Without this the export of restored letter-level rows describes a
     chunk search: `_comp_last_result_method` defaults to 'chunk', and in a
     report a default is indistinguishable from a fact."""
-    seg = _function_source('_restore_session')
-    idx = seg.index("comp.get('results') or comp.get('filtered_results')")
-    tail = seg[idx:]
+    tail = _function_source('_display_restored_comp_snapshot')
     for field in ('last_result_method', 'last_result_width',
                   'last_result_length', 'last_result_depth'):
         assert "comp.get('%s')" % field in tail, (
@@ -1614,3 +1614,112 @@ def test_neither_persistence_surface_stores_a_forced_value(fn):
             '%s persists the LIVE %s, which letter-level mode forces'
             % (fn, widget))
     assert '_comp_chunk_preference(' in seg
+
+
+# ---------------------------------------------------------------------------
+# Codex review round 2 (PR #331).
+# ---------------------------------------------------------------------------
+
+_SNAPSHOT = {'results': [{'x': 1}], 'filtered_results': [],
+             'last_result_method': 'passage', 'last_result_scope': 'genizah',
+             'last_result_width': 'wider-40', 'last_result_length': 'short',
+             'last_result_depth': 'deep'}
+
+
+def _snapshot_window(monkeypatch, available=True, in_flight=False,
+                     scope='genizah'):
+    monkeypatch.setattr(pl, 'passage_available', lambda: available)
+    w = _window(scope=scope)
+    w._passage_load_in_flight = in_flight
+    w.displayed = []
+    w.display_comp_results = lambda *a: w.displayed.append(a)
+    return w
+
+
+@pytest.mark.parametrize('method,in_flight,rows,expected', [
+    # THE regression: a letter-level snapshot while the index is opening.
+    ('passage', True,  True,  True),
+    ('passage', False, True,  False),   # the answer is known: judge it
+    ('chunk',   True,  True,  False),   # a chunk snapshot never waits
+    ('passage', True,  False, False),   # nothing to hold back
+])
+def test_only_an_unanswerable_letter_level_snapshot_waits(
+        monkeypatch, method, in_flight, rows, expected):
+    w = _snapshot_window(monkeypatch, available=False, in_flight=in_flight)
+    comp = dict(_SNAPSHOT, last_result_method=method)
+    if not rows:
+        comp['results'] = []
+        comp['filtered_results'] = []
+    assert w._passage_snapshot_must_wait(comp) is expected
+
+
+def test_the_deferred_snapshot_is_displayed_once_the_index_is_there(
+        monkeypatch):
+    """The whole point of waiting: the rows survive."""
+    w = _snapshot_window(monkeypatch, available=True)
+    assert w._display_restored_comp_snapshot(dict(_SNAPSHOT)) is True
+    assert w.displayed, 'the snapshot was held back and then never shown'
+    assert w.comp_raw_items == [{'x': 1}]
+
+
+def test_a_displayed_snapshot_carries_its_provenance(monkeypatch):
+    w = _snapshot_window(monkeypatch, available=True)
+    w._display_restored_comp_snapshot(dict(_SNAPSHOT))
+    assert w._comp_last_result_method == 'passage'
+    assert w._comp_last_result_width == 'wider-40'
+    assert w._comp_last_result_depth == 'deep'
+    assert w._comp_last_result_chunk is None
+
+
+def test_a_snapshot_that_really_cannot_run_is_still_refused(monkeypatch):
+    """Deferring must not become never judging. Once the index has loaded
+    and letter-level is genuinely impossible for the stamped scope, the rows
+    go -- they describe a search the app would refuse to perform."""
+    w = _snapshot_window(monkeypatch, available=True, scope='genizah')
+    stranded = dict(_SNAPSHOT, last_result_scope='local')
+    assert w._display_restored_comp_snapshot(stranded) is False
+    assert not w.displayed
+
+
+def test_the_restore_defers_instead_of_guessing():
+    seg = _function_source('_restore_session')
+    assert '_passage_snapshot_must_wait(comp)' in seg, (
+        'the session restore judges a letter-level snapshot while the index '
+        'is still opening -- which discards it on every launch')
+    assert '_deferred_comp_snapshot' in seg
+
+
+def test_the_load_slot_judges_what_was_deferred():
+    seg = _function_source('_on_passage_loaded')
+    assert "_deferred_comp_snapshot" in seg and (
+        '_display_restored_comp_snapshot(deferred)' in seg), (
+        'a snapshot held back by the startup race is never looked at again')
+
+
+def test_the_flag_is_set_before_the_thread_starts():
+    """Set after start() it would be a race against the very thread it
+    describes; the restore timer reads it moments later."""
+    seg = _function_source('_start_passage_load')
+    assert seg.index('_passage_load_in_flight = True') < seg.index('.start()')
+
+
+# --- history records the method it ran ------------------------------------
+
+def test_history_records_the_method_and_policy_from_the_stamp():
+    seg = _function_source('_add_comp_search_to_history')
+    for key in ("'comp_method'", "'comp_passage_width'",
+                "'comp_passage_length'", "'comp_passage_depth'"):
+        assert key in seg, (
+            'a history entry without %s re-runs whichever method happens to '
+            'be selected later, under the name of the one recorded' % key)
+    assert '_comp_last_result_method' in seg, (
+        'the method must come from the dispatch stamp, not a live widget')
+
+
+def test_history_applies_the_recorded_method_before_re_running():
+    seg = _function_source('_restore_comp_search_from_state')
+    assert '_restore_comp_passage_preferences(' in seg, (
+        'the recorded method is never applied on the way back')
+    assert (seg.index('_restore_comp_passage_preferences(')
+            < seg.index('self.run_composition()')), (
+        'the method is applied AFTER the re-run has already been dispatched')

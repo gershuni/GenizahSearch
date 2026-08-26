@@ -15777,11 +15777,17 @@ class GenizahGUI(QMainWindow):
                 passage_lifecycle.passage_root())
             self.passage_load_thread.loaded_signal.connect(
                 self._on_passage_loaded)
+            # Set BEFORE start(): everything that runs between here and the
+            # slot -- the session restore among it -- must be able to tell
+            # "no index" from "no answer yet".
+            self._passage_load_in_flight = True
             self.passage_load_thread.start()
         except Exception:                                    # noqa: BLE001
+            self._passage_load_in_flight = False
             logger.exception('could not start the passage index load')
 
     def _on_passage_loaded(self, result):
+        self._passage_load_in_flight = False
         if getattr(self, '_close_pending', False):
             return          # on the way out; installing would only be undone
         index = getattr(result, 'index', None)
@@ -15811,6 +15817,11 @@ class GenizahGUI(QMainWindow):
                     self._show_passage_reason(None)
                     self._update_comp_method_help()
         self._revalidate_comp_method()
+        # A snapshot held back by the startup race is judged HERE, where
+        # "not built" finally means what it says.
+        deferred = self.__dict__.pop('_deferred_comp_snapshot', None)
+        if deferred is not None:
+            self._display_restored_comp_snapshot(deferred)
         # Only now is "there is no index" a fact rather than "not loaded
         # yet" -- offering before this point would fire on every launch,
         # including the ones where an index was about to appear.
@@ -16230,6 +16241,61 @@ class GenizahGUI(QMainWindow):
         # have changed it since, and that says nothing about these rows.
         scope = comp.get('last_result_scope') or 'genizah'
         return self._passage_disabled_reason_now(scope=scope) is None
+
+    def _passage_snapshot_must_wait(self, comp):
+        """True when a saved letter-level result set cannot be judged YET.
+
+        `_restored_provenance_is_valid` asks whether a letter-level search
+        could still run. During startup that question has no answer: the
+        index is opened on a worker thread and opening scans the whole CSR,
+        while the session restore fires on a fixed 200 ms timer -- so the
+        honest reading of `passage_available() == False` there is "not
+        loaded yet", not "impossible". Judging anyway discarded the user's
+        rows on every single launch.
+        """
+        return bool(
+            (comp.get('results') or comp.get('filtered_results'))
+            and comp.get('last_result_method') == 'passage'
+            and getattr(self, '_passage_load_in_flight', False))
+
+    def _display_restored_comp_snapshot(self, comp):
+        """Re-display a saved composition result set, re-establishing the
+        provenance of the rows. Called straight from the restore, or from
+        `_on_passage_loaded` for a snapshot that had to wait. Returns True
+        if anything was displayed."""
+        if not (comp.get('results') or comp.get('filtered_results')):
+            return False
+        if not self._restored_provenance_is_valid(comp):
+            return False
+        self.comp_raw_items = comp.get('results', [])
+        self.comp_raw_filtered = comp.get('filtered_results', [])
+        # The chunk stamp is cleared rather than reconstructed: the export's
+        # live-widget fallback reads the very widgets this restore populated
+        # from the same saved file.
+        self._comp_last_result_method = (
+            comp.get('last_result_method') or 'chunk')
+        self._comp_last_result_scope = (
+            comp.get('last_result_scope') or 'genizah')
+        self._comp_last_result_width = comp.get('last_result_width')
+        self._comp_last_result_length = comp.get('last_result_length')
+        self._comp_last_result_depth = comp.get('last_result_depth')
+        self._comp_last_result_chunk = None
+        # Display flat -- grouping state is not persisted; the user can
+        # toggle the flat checkbox or re-run to get the grouped view.
+        self.comp_has_grouped_results = False
+        self.comp_grouped_main = self.comp_raw_items
+        self.comp_grouped_appendix = {}
+        self.comp_grouped_summary = {}
+        self.comp_grouped_filtered_main = self.comp_raw_filtered
+        self.comp_grouped_filtered_appendix = {}
+        self.comp_grouped_filtered_summary = {}
+        if hasattr(self, 'chk_comp_flat'):
+            self.chk_comp_flat.blockSignals(True)
+            self.chk_comp_flat.setChecked(True)
+            self.chk_comp_flat.blockSignals(False)
+        self.display_comp_results(
+            self.comp_raw_items, {}, {}, self.comp_raw_filtered, {}, {})
+        return True
 
     def _comp_passage_axis(self, axis):
         """The selected value of one policy axis, falling back to its own
@@ -26666,6 +26732,12 @@ class GenizahGUI(QMainWindow):
                     self.comp_corpus_scope_combo.blockSignals(True)
                     self.comp_corpus_scope_combo.setCurrentIndex(_hist_idx)
                     self.comp_corpus_scope_combo.blockSignals(False)
+            # Phase 146: re-run the METHOD that was recorded, not
+            # whichever happens to be selected now. Same validated helper
+            # the session restore uses, so a recorded letter-level entry
+            # that can no longer run falls back to chunk with a visible
+            # reason instead of silently running something else.
+            self._restore_comp_passage_preferences(params or {})
             # Restore pre-search filters
             psf = entry.get('pre_search_filters', {})
             self.pre_search_filters = psf
@@ -26776,6 +26848,20 @@ class GenizahGUI(QMainWindow):
                 # Phase 110 (COMP-LOC-01 / Round-2 #3): capture the comp corpus scope
                 # so a history re-run uses the ORIGINAL scope, not the current default.
                 'comp_corpus_scope': getattr(self, '_comp_corpus_scope', 'genizah'),
+                # Phase 146: and the METHOD, from the dispatch STAMP rather
+                # than the live widgets. A history entry re-runs the search
+                # it recorded; without this, clicking a letter-level entry
+                # after switching to chunk ran a different search under the
+                # same name. Absent on a pre-v9 entry, which is chunk by
+                # definition.
+                'comp_method': getattr(self, '_comp_last_result_method',
+                                       'chunk'),
+                'comp_passage_width': getattr(
+                    self, '_comp_last_result_width', None),
+                'comp_passage_length': getattr(
+                    self, '_comp_last_result_length', None),
+                'comp_passage_depth': getattr(
+                    self, '_comp_last_result_depth', None),
             },
             'pre_search_filters': dict(getattr(self, 'pre_search_filters', {})),
             # NOTE: result snapshots intentionally NOT stored (see
@@ -27224,45 +27310,13 @@ class GenizahGUI(QMainWindow):
             # passage+local snapshot is not merely stale, it is impossible,
             # and re-displaying it would attribute rows to a search the app
             # would refuse to perform.
-            if not self._restored_provenance_is_valid(comp):
-                comp = dict(comp)
-                comp.pop('results', None)
-                comp.pop('filtered_results', None)
-            if comp.get('results') or comp.get('filtered_results'):
-                self.comp_raw_items = comp.get('results', [])
-                self.comp_raw_filtered = comp.get('filtered_results', [])
-                # Re-establish the provenance of the rows being
-                # re-displayed; `_restored_provenance_is_valid` has
-                # already vouched for it. The chunk stamp is cleared
-                # rather than reconstructed: the export's live-widget
-                # fallback reads the very widgets this restore just
-                # populated from the same saved file.
-                self._comp_last_result_method = (
-                    comp.get('last_result_method') or 'chunk')
-                self._comp_last_result_scope = (
-                    comp.get('last_result_scope') or 'genizah')
-                self._comp_last_result_width = comp.get('last_result_width')
-                self._comp_last_result_length = comp.get('last_result_length')
-                self._comp_last_result_depth = comp.get('last_result_depth')
-                self._comp_last_result_chunk = None
-                # Display flat — grouping state is not persisted, user can
-                # toggle the flat checkbox or re-run to get grouped view
-                self.comp_has_grouped_results = False
-                self.comp_grouped_main = self.comp_raw_items
-                self.comp_grouped_appendix = {}
-                self.comp_grouped_summary = {}
-                self.comp_grouped_filtered_main = self.comp_raw_filtered
-                self.comp_grouped_filtered_appendix = {}
-                self.comp_grouped_filtered_summary = {}
-                # Force flat mode checkbox during restore so display matches state
-                if hasattr(self, 'chk_comp_flat'):
-                    self.chk_comp_flat.blockSignals(True)
-                    self.chk_comp_flat.setChecked(True)
-                    self.chk_comp_flat.blockSignals(False)
-                self.display_comp_results(
-                    self.comp_raw_items, {}, {},
-                    self.comp_raw_filtered, {}, {}
-                )
+            # Phase 146: a letter-level snapshot cannot be judged while
+            # the index is still opening -- see
+            # `_passage_snapshot_must_wait`. Deferring costs a beat;
+            # guessing cost the rows on every launch.
+            if self._passage_snapshot_must_wait(comp):
+                self._deferred_comp_snapshot = comp
+            elif self._display_restored_comp_snapshot(comp):
                 self.search_progress.setValue(n_total)
                 QApplication.processEvents()
 
