@@ -177,7 +177,7 @@ would suffice; if zero for 5 minutes, alert.
 ### (5) Document the env knobs
 
 Add the new defaults to [docs/guides/DEVELOPER_GUIDE.md:60](docs/guides/DEVELOPER_GUIDE.md) and
-`CLAUDE.md` "Environment Variables" section. The relevant knobs:
+`docs/guides/ENV_VARS.md`. The relevant knobs:
 
 | Variable | Old default | New default | Purpose |
 |----------|-------------|-------------|---------|

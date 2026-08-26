@@ -287,23 +287,11 @@ results = engine.execute_search('שלום', mode='variants', gap=2, limit=100)
 
 ## Environment Variables Reference
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `SUPABASE_URL` | For user features | Supabase project URL |
-| `SUPABASE_ANON_KEY` | For user features | Supabase anonymous key |
-| `POSTHOG_API_KEY` | No | PostHog analytics (optional, enables session recordings) |
-| `GENIZAH_PORT` | No | Web app port (default: 8081) |
-| `NICEGUI_RELOAD` | No | Hot reload (default: true in dev) |
-| `WEB_PUZZLE_ENABLED` | No | Show the web Fragment Puzzle page (default: true) |
-| `ATLAS_PREVIEW_ENABLED` | No | Phase 133 Visual Atlas Preview beta `/atlas` (default: false). Necessary but not sufficient — `web/atlas_assets.py::atlas_preview_available()` ANDs it with baked-asset readiness (manifest + plain `.bin` loaded from repo-root `atlas_data/`, outside `web/static/`) |
-| `MASKING_SCAN_PATTERNS_FILE` | No (dev/CI) | Path to a gitignored, newline-delimited restricted-string pattern file for `scripts/check_atlas_masking.py`; unset/empty fails the scan safe (exit 1) |
-| `PASSAGE_PARALLELS_ENABLED` | No | Phase 145 passage-matching `method='passage'` on `POST /api/parallels` + the parallels-page method selector (default: false). Necessary but not sufficient — `web/passage_assets.py::passage_available()` ANDs it with the passage index's startup-loaded readiness |
-| `GENIZAH_PASSAGE_DATA_DIR` | No (dev/CI) | Overrides the directory `web/passage_assets.py` opens the passage index from (default: repo-root `passage_index/current/`, gitignored, multi-GB, machine-local) |
-| `SEARCH_API_PASSAGE_TIMEOUT` | No | `/api/parallels` `method='passage'` core timeout in seconds (default: 30) — its own ceiling, separate from `SEARCH_API_PARALLELS_TIMEOUT` |
-| `SEARCH_API_PASSAGE_CONCURRENCY` | No | Max concurrent `method='passage'` requests (default: 4) — its own bounded budget (semaphore + a dedicated `ThreadPoolExecutor`), never the chunk path's default executor; over → 503 `passage_search_busy` |
-| `NLI_DISK_CACHE_TTL` | No | Persistent NLI FL-ID cache TTL in seconds (default: 2592000 / 30 days) |
-| `NLI_MAX_CONCURRENT_FETCHES` | No | Concurrent NLI manifest fetch cap (default: 4) |
-| `NLI_SEMAPHORE_TIMEOUT` | No | Seconds to wait for an NLI semaphore slot before returning empty (default: 20) |
+See **[`ENV_VARS.md`](ENV_VARS.md)** — the single source of truth for every variable.
+
+The partial table that used to sit here was a second copy of the same information and had
+already drifted from it (it still gave `NLI_SEMAPHORE_TIMEOUT` a default of 20, changed to 1
+in Phase 98). One file, so there is nothing to keep in step.
 
 ---
 

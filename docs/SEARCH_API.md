@@ -917,7 +917,7 @@ Every server-side var that affects the three endpoints, plus the two skill-side 
 | `GENIZAH_API_BASE` | `https://genizahsearch.com` | skill | Base URL for all skill API calls. Per Phase 81B D-09, precedence is **env var > `--base-url` CLI flag > default** — an inversion of typical CLI convention; the env var ALWAYS wins. |
 | `GENIZAH_SKILL_REQ_PER_MIN` | `96` | skill | Per-bucket throttle ceiling for the skill's token-bucket. Default leaves 24 rpm headroom under the server's 120 rpm `SEARCH_API_RATE_LIMIT`. |
 
-The CLAUDE.md env-var block at [CLAUDE.md](../CLAUDE.md) documents every server-side var
+The env-var reference at [docs/guides/ENV_VARS.md](guides/ENV_VARS.md) documents every server-side var
 above; the two skill-side vars are documented in
 [skills/cairo-genizah-research/SKILL.md](../skills/cairo-genizah-research/SKILL.md).
 
@@ -997,7 +997,7 @@ The following improvements are documented here as future work but are NOT implem
 ## See Also
 
 - [skills/cairo-genizah-research/references/api_contract.md](../skills/cairo-genizah-research/references/api_contract.md) — locked consumer-facing envelope shapes used by the Claude skill.
-- [CLAUDE.md](../CLAUDE.md) — server-side env-var declarations (the seven `SEARCH_API_*` and `POSTHOG_IP_SALT` vars in the Environment Variables block).
+- [docs/guides/ENV_VARS.md](guides/ENV_VARS.md) — server-side env-var declarations (the seven `SEARCH_API_*` and `POSTHOG_IP_SALT` vars).
 - [web/search_api.py](../web/search_api.py) — the route handlers and Pydantic models in source.
 - [shared/api_errors.py](../shared/api_errors.py) — `ERROR_CODES` and `WARNING_CODES` frozensets and the `APIError` exception type.
 - [shared/search_serializer.py](../shared/search_serializer.py) — the sole producer of envelope shapes (Phase 77 D-14).

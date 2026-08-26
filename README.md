@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 8.6.0
+# Dicta Genizah Search Pro 9.0.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -34,8 +34,8 @@ had found.
 
 ### v9.0.0: Computed Identifications, the Visual Atlas & Start Here (public beta, web)
 
-Three new things on genizahsearch.com. All are **beta**, all are web-only, and the desktop
-application is unchanged in this release.
+Three new things on genizahsearch.com, all **beta** — and, since 2026-08-26, a new desktop
+search method alongside them.
 
 **Start Here** — a guided way in, at [`/start`](https://genizahsearch.com/start). Curated
 manuscripts, prepared searches, worked examples, and collapsible background on what the Cairo
@@ -67,6 +67,24 @@ These are **machine-generated matches, not reviewed identifications.** The
 and how far they can be trusted, every surface carries that caveat, and readers can submit their
 own verdict on any match. Where a match does not correspond to the catalogue, the row says so
 without taking a side.
+
+### v9.0.0 (desktop): Letter-Level Search
+
+A second way to find parallels, in the Composition Search tab. Where chunk search compares blocks
+of words, letter-level search compares sequences of letters — so it is far faster and returns far
+fewer unrelated results. It does not replace chunk search, which keeps Exact / Variants / Fuzzy
+modes and cross-paragraph filtering and stays the default.
+
+It is the matching engine behind Computed Identifications, run in reverse: instead of indexing the
+known works and asking which one a manuscript carries, it indexes the corpus and lets any text you
+paste become the query.
+
+- A new **Search method** selector, with **Match width**, **Passage length** and **Search depth**
+  controls beside it
+- Runs on an index built on your own machine from the transcriptions already there — about ten
+  minutes, about 11 GB free while it runs, about 3.5 GB finished
+- Offered once at startup, and available any time from Settings
+- A cancelled or failed build always leaves the index you already had intact and working
 
 ### v8.5.2: Composition Filter Fix & Web Responsiveness
 
@@ -580,7 +598,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Dicta Geniza
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V8.6.0_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V9.0.0_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 
