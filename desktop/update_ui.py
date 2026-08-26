@@ -135,9 +135,14 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        # Reuses the method selector's own marker rather than adding a
-        # near-duplicate of it: identical English is one entry.
-        self.lbl_msg.setText(tr("New! Letter-level search"))
+        # Its OWN string, not the method selector's marker. They shared
+        # one while both said the same three words; the owner gave the
+        # banner a full sentence on 2026-08-26, and a sentence that long
+        # inside a QComboBox item would be unreadable. Different text on
+        # different surfaces is two entries, not one.
+        self.lbl_msg.setText(tr(
+            "New! Letter-level composition search - much faster, with "
+            "fewer irrelevant results"))
         self.show()
 
     def on_learn_more(self):

@@ -5003,6 +5003,8 @@ TRANSLATIONS.update({
         "חיפוש מקבילות ברמת האות - חיפוש מהיר ומדויק יותר",
     "Get the most from the parallels search by entering several textual witnesses":
         "מצו את חיפוש המקבילות בעזרת הזנת כמה עדי נוסח לחיפוש",
+    "New! Letter-level composition search - much faster, with fewer irrelevant results":
+        "חדש! חיפוש חיבורים ברמת האות - מהיר בהרבה, עם פחות תוצאות לא רלוונטיות",
     "New! Letter-level search":
         "חדש! חיפוש ברמת האות",
     "Chunk search (slower)":
