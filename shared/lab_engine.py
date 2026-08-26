@@ -1501,10 +1501,23 @@ class LabEngine:
                 is_excluded = True
 
             # 2. Check by System ID (99...) found in header.
-            # CORPUS namespace only, and ANCHORED: this list can carry LOCAL
+            # CORPUS namespace only, and ANCHORED. This list can carry LOCAL
             # ("My Library") LAB hits, and the old unanchored corpus pattern
-            # mis-matched inside a 97-prefixed LOCAL id -- excluding the wrong
-            # manuscript. See shared/sys_id_patterns.py.
+            # mis-matched inside a 97-prefixed LOCAL id (6.36% of them).
+            #
+            # That mis-match was INERT here, and the correction is recorded so
+            # nobody re-derives a bug that never fired: `excluded_set` holds
+            # resolved CORPUS sys_ids, which are always 18 digits, while a
+            # mis-match inside an 18-char LOCAL id can be at most 16 (the `99`
+            # starts at index >= 2). So the `in excluded_set` test could never
+            # be true for a LOCAL row -- old and new both leave it unexcluded.
+            # On corpus headers the two patterns are identical (verified over
+            # 50,000 generated headers, zero differences).
+            #
+            # The anchored constant is kept because it removes the trap rather
+            # than the symptom: the moment anything compares against ids that
+            # are not 18 digits, the truncation would start to matter.
+            # See shared/sys_id_patterns.py.
             if not is_excluded:
                 m = CORPUS_SYS_ID_RE.search(str(item['raw_header']))
                 if m and m.group(1) in excluded_set:

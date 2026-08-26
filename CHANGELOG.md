@@ -1029,12 +1029,18 @@ and a repo lint fails CI if a new site spells its own.
   255,723 records begin `99`, including all 473 NLI rows. So the corpus-facing sites were
   right to be 99-only and the four wide ones were the drift; three were narrowed and the
   two desktop LOCAL-aware parsers stay namespace-agnostic on purpose.
-- **The narrow pattern was not merely narrow — it corrupted.** `re.search` scans anywhere,
+- **The narrow pattern was not merely narrow — it mis-matched.** `re.search` scans anywhere,
   so `(99\d{8,})` applied to a LOCAL header could match a `99` inside the LOCAL id's random
-  digits and return a truncated, wrong sys_id: 6.36% of LOCAL ids, measured. That path is
-  live on desktop, where `shared/lab_engine.py` filters a result list that carries LOCAL
-  LAB hits. Both shared patterns are now anchored on a digit boundary, so a LOCAL header
-  misses cleanly instead.
+  digits and return a truncated, wrong sys_id: 6.36% of LOCAL ids, measured. Both shared
+  patterns are now anchored on a digit boundary, so a LOCAL header misses cleanly instead.
+  **Correction to an earlier draft of this entry:** it claimed the mis-match was a live
+  defect on the desktop LAB path. It was not. `shared/lab_engine.py` does meet LOCAL headers,
+  but it tests the extracted id against `excluded_set`, which holds resolved CORPUS sys_ids —
+  always 18 digits — while a mis-match inside an 18-char LOCAL id is at most 16, so the test
+  could never be true. Old and new leave a LOCAL row unexcluded alike, and on corpus headers
+  the two patterns are identical (0 differences over 50,000 generated headers). No reachable
+  consequence was found at any migrated site. This is hardening that removes a trap, not a
+  bug fix.
 - **A drift guard, proven able to fail.** `tests/test_sys_id_patterns.py` pins the wiring,
   the anti-corruption property and the Phase 95 regression; three mutations (re-widening a
   site, un-anchoring the pattern, over-narrowing a desktop parser) each fail it distinctly.
