@@ -15909,7 +15909,8 @@ class GenizahGUI(QMainWindow):
         from desktop.passage_workers import PassageBuildThread
 
         self._passage_progress = QProgressDialog(
-            tr("Building the letter-level index..."), tr("Cancel"), 0, 0, self)
+            tr("Building the letter-level index..."), tr("Cancel"), 0, 100,
+            self)
         self._passage_progress.setWindowTitle(tr("Letter-level index"))
         self._passage_progress.setWindowModality(
             Qt.WindowModality.NonModal)   # the app stays usable during a build
@@ -15941,21 +15942,23 @@ class GenizahGUI(QMainWindow):
         self.passage_build_thread.start()
         self._passage_progress.show()
 
-    def _on_passage_build_progress(self, phase, done, total):
+    def _on_passage_build_progress(self, phase, done, total, records=0):
         dlg = getattr(self, '_passage_progress', None)
         if dlg is None:
             return
-        if phase == 'pass1':
-            # Pass 1 has no total -- it walks a corpus of unknown length --
-            # so a percentage here would be invented. Indeterminate bar plus
-            # a real count is the honest presentation.
-            dlg.setRange(0, 0)
-            dlg.setLabelText(tr("Reading transcriptions... {} records")
-                             .format(done))
+        if phase == 'read':
+            # A real fraction of a real quantity: how much of the
+            # transcriptions file has been read. The record count keeps
+            # climbing beside it so the number has a visible unit.
+            dlg.setRange(0, 100)
+            dlg.setValue(done)
+            dlg.setLabelText(
+                tr("Reading transcriptions: {}% ({} records so far)")
+                .format(done, records))
         elif total:
             dlg.setRange(0, total)
             dlg.setValue(done)
-            dlg.setLabelText(tr("Building index... part {} of {}")
+            dlg.setLabelText(tr("Building index: part {} of {}")
                              .format(done, total))
 
     def _finish_passage_build(self):
@@ -16342,9 +16345,14 @@ class GenizahGUI(QMainWindow):
         lbl = getattr(self, 'lbl_comp_passage_reason', None)
         if lbl is None:
             return
-        text = self._passage_reason_text(key) if key else ""
         if key == passage_lifecycle.REASON_NOT_BUILT:
-            text += "  " + tr("(Settings \u2192 Build letter-level index)")
+            # The build DIALOG owns this case now -- it appears at startup and
+            # on any click of the letter-level option, and it can actually
+            # start the build. A line repeating it under the control, which
+            # can only point at Settings, is noise beside a dialog that is
+            # either already on screen or one click away.
+            key = None
+        text = self._passage_reason_text(key) if key else ""
         lbl.setText(text)
         lbl.setVisible(bool(text))
 

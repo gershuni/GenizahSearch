@@ -5146,10 +5146,10 @@ TRANSLATIONS.update({
         'אינדקס לחיפוש ברמת האות',
     'Building the letter-level index...':
         'בונה את האינדקס לחיפוש ברמת האות...',
-    'Reading transcriptions... {} records':
-        'קורא תעתיקים... {} רשומות',
-    'Building index... part {} of {}':
-        'בונה אינדקס... חלק {} מתוך {}',
+    'Reading transcriptions: {}% ({} records so far)':
+        'קורא תעתיקים: {}% ({} רשומות עד כה)',
+    'Building index: part {} of {}':
+        'בונה אינדקס: חלק {} מתוך {}',
     'The letter-level index is ready.':
         'האינדקס לחיפוש ברמת האות מוכן.',
     'Letter-level index build cancelled. Your existing index was not changed.':
@@ -5160,8 +5160,6 @@ TRANSLATIONS.update({
         'חיפוש ברמת האות מכסה את קורפוס הגניזה בלבד. חיפושים בספרייה שלי ובכל הקורפוסים משתמשים בחיפוש מקטעים; חיפוש ברמת האות עבור הספרייה שלי מתוכנן לגרסה עתידית.',
     'The letter-level index has not been built on this computer yet. You can build it from Settings.':
         'האינדקס לחיפוש ברמת האות עדיין לא נבנה במחשב הזה. אפשר לבנות אותו מההגדרות.',
-    '(Settings → Build letter-level index)':
-        '(הגדרות ← בניית אינדקס לחיפוש ברמת האות)',
     'Lab Mode is on. Turn Lab Mode off to use letter-level search.':
         'מצב מעבדה פעיל. יש לכבות את מצב המעבדה כדי להשתמש בחיפוש ברמת האות.',
     'The letter-level index is being built right now. It will be available when the build finishes.':

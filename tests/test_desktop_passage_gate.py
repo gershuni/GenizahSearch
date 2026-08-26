@@ -1033,3 +1033,106 @@ def test_the_method_controls_left_the_action_row():
                    'self.lbl_comp_method_new'):
         assert 'cr.addWidget(%s)' % widget not in seg, (
             '%s is back in the crowded action row' % widget)
+
+
+# ---------------------------------------------------------------------------
+# Build progress. The builder reports
+# `progress('pass1', n_records_seen, n_records_indexed, elapsed)` -- so the
+# second value is the INDEXED count, not a total, and pass 1 has no record
+# total at all: nothing knows how many records a 1.47 GB file holds until it
+# has been read. The file SIZE is the real denominator.
+# ---------------------------------------------------------------------------
+
+from desktop.passage_workers import PassageBuildThread   # noqa: E402
+from shared.passage_corpus import iter_records           # noqa: E402
+
+
+class _FakeThread:
+    """Borrows the generator wrapper without a QThread or a QApplication."""
+    _records_with_progress = PassageBuildThread._records_with_progress
+
+    def __init__(self):
+        self.emitted = []
+
+    def _emit(self, phase, done, total, records=0):
+        self.emitted.append((phase, done, total, records))
+
+
+def _corpus(tmp_path, n_records=250, body_lines=40):
+    p = tmp_path / 'corpus.txt'
+    with io.open(str(p), 'w', encoding='utf-8', newline='\n') as fh:
+        for i in range(n_records):
+            fh.write('==> rec%04d <==\n' % i)
+            for j in range(body_lines):
+                fh.write('אבגדהוזחטי' * 6 + ' %d\n' % j)
+    return str(p)
+
+
+def test_the_progress_wrapper_yields_every_record_unchanged(tmp_path):
+    """The wrapper sits between the corpus and the builder. A record dropped
+    or altered here would silently produce a PARTIAL index that passes every
+    structural check the loader makes -- the worst failure available in this
+    subsystem, and invisible until a search quietly misses manuscripts."""
+    path = _corpus(tmp_path)
+    plain = list(iter_records(path))
+    wrapped = list(_FakeThread()._records_with_progress(path))
+    assert wrapped == plain, (
+        'the progress wrapper changed what the builder receives')
+    assert len(plain) == 250
+
+
+def test_the_read_progress_is_a_real_fraction(tmp_path):
+    path = _corpus(tmp_path)
+    th = _FakeThread()
+    list(th._records_with_progress(path))
+    reads = [e for e in th.emitted if e[0] == 'read']
+    assert reads, 'no read progress was reported at all'
+    pcts = [e[1] for e in reads]
+    assert pcts == sorted(pcts), 'progress went backwards: %r' % (pcts[:20],)
+    assert max(pcts) <= 100, 'progress exceeded 100%%: %d' % max(pcts)
+    assert reads[-1][1] == 100, 'the bar never reaches the end'
+    assert reads[-1][2] == 100, 'the denominator is not a percentage scale'
+    counts = [e[3] for e in reads]
+    assert counts == sorted(counts) and counts[-1] == 250, (
+        'the record count is not the number of records actually yielded')
+
+
+def test_the_read_progress_is_throttled(tmp_path):
+    """One signal per record would queue hundreds of thousands of events on
+    the UI thread and make the dialog slower than the build it reports."""
+    path = _corpus(tmp_path, n_records=250)
+    th = _FakeThread()
+    list(th._records_with_progress(path))
+    reads = [e for e in th.emitted if e[0] == 'read']
+    assert len(reads) <= 101 + 1, (
+        'emitted %d progress events for 250 records -- not throttled to '
+        'whole percents' % len(reads))
+
+
+def test_pass1_from_the_builder_is_not_used_as_a_total():
+    """Its second argument is n_records_indexed. Feeding that to a progress
+    bar as a maximum is what produced a number with no unit."""
+    src = io.open(os.path.join(REPO_ROOT, 'desktop', 'passage_workers.py'),
+                  encoding='utf-8').read()
+    assert "if phase == 'pass1':" in src and 'return' in src, (
+        "the builder's pass1 callback is still being forwarded as a total")
+
+
+def test_the_build_dialog_shows_a_determinate_bar():
+    seg = _function_source('_on_passage_build_progress')
+    assert "phase == 'read'" in seg
+    assert 'setRange(0, 100)' in seg, (
+        'the read phase still uses an indeterminate barber-pole bar')
+    assert 'records so far' in seg, (
+        'the record count has no unit beside it')
+
+
+def test_the_not_built_line_is_gone_now_that_a_dialog_says_it():
+    """The dialog appears at startup and on any click of the letter-level
+    option, and it can actually start the build. A line under the control
+    that can only point at Settings is noise beside it."""
+    seg = _function_source('_show_passage_reason')
+    assert 'REASON_NOT_BUILT' in seg and 'key = None' in seg, (
+        'the not-built reason still renders an inline label')
+    assert 'Settings \u2192' not in _app_source(), (
+        'the "(Settings -> Build...)" suffix is still being appended')
