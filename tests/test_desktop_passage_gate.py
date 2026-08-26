@@ -568,3 +568,99 @@ def test_the_disk_check_runs_before_the_confirmation():
     assert 'STAGING_DIRNAME' in seg, (
         'a crashed staging tree holds space the build reclaims; not counting '
         'it refuses every retry after a failure, forever')
+
+
+# ---------------------------------------------------------------------------
+# Startup wiring. Everything else was wired -- dispatch, the gate, the build --
+# and none of it was reachable across a restart, because nothing opened the
+# index at launch. `_state` was None on every start, so the gate said "not
+# built" and offered to rebuild a 3.5 GB artifact already sitting on disk.
+# ---------------------------------------------------------------------------
+
+def test_startup_actually_opens_the_index():
+    """The single call that makes the feature reachable at all."""
+    seg = _function_source('on_startup_finished')
+    assert '_start_passage_load()' in seg, (
+        'startup never loads the letter-level index, so it can only ever be '
+        'used in the session that built it')
+
+
+def test_the_load_worker_recovers_and_opens():
+    """`recover_at_startup` is both halves: it walks the candidates, promotes
+    whichever actually opens, and returns that opened index. Calling
+    `load_passage_state` instead would open the live directory without ever
+    repairing a run that died mid-swap."""
+    src = io.open(os.path.join(REPO_ROOT, 'desktop', 'passage_workers.py'),
+                  encoding='utf-8').read()
+    assert 'recover_at_startup' in src, (
+        'the startup worker does not run recovery')
+    tree = ast.parse(src)
+    names = [n.name for n in ast.walk(tree)
+             if isinstance(n, ast.ClassDef)]
+    assert 'PassageLoadThread' in names
+
+
+def test_the_loaded_index_is_installed(monkeypatch):
+    installed = []
+    monkeypatch.setattr(pl, 'install_passage_state',
+                        lambda st: installed.append(st) or True)
+    w = _Win()
+    w._revalidate_comp_method = lambda: None
+    idx = object()
+    result = type('R', (), {'index': idx, 'live_dir': 'd',
+                            'status': 'live_ok'})()
+    APP._on_passage_loaded(w, result)
+    assert installed and installed[0].index is idx, (
+        'the index the startup worker opened was never installed, so '
+        'passage_available() stays False and the feature stays hidden')
+
+
+def test_nothing_is_installed_when_there_is_no_index(monkeypatch):
+    installed = []
+    monkeypatch.setattr(pl, 'install_passage_state',
+                        lambda st: installed.append(st) or True)
+    w = _Win()
+    w._revalidate_comp_method = lambda: None
+    result = type('R', (), {'index': None, 'live_dir': '',
+                            'status': 'no_prior_state'})()
+    APP._on_passage_loaded(w, result)
+    assert installed == []
+
+
+def test_a_restored_passage_preference_survives_the_load_race(monkeypatch):
+    """The restore runs ~200ms after launch; the index finishes opening later.
+    So a session saved with letter-level search selected is demoted to chunk
+    before the index has had any chance to load, and the user's method is
+    silently lost on EVERY launch unless the intent is remembered."""
+    monkeypatch.setattr(pl, 'passage_available', lambda: True)
+    monkeypatch.setattr(pl, 'install_passage_state', lambda st: True)
+    w = _window(scope='genizah')
+    w.comp_method_combo = _Combo([('chunk', ''), ('passage', '')], index=0)
+    w._comp_method_deferred = 'passage'
+    w._revalidate_comp_method = lambda: None
+    w._apply_passage_mode_ui = lambda _on: None
+    w._show_passage_reason = lambda _k: None
+    w._update_comp_method_help = lambda: None
+
+    APP._on_passage_loaded(w, type('R', (), {
+        'index': object(), 'live_dir': 'd', 'status': 'live_ok'})())
+
+    assert w.comp_method_combo.currentData() == 'passage', (
+        "the user's restored method was dropped because the index had not "
+        'finished loading when the restore ran')
+    assert w._comp_method_deferred is None, 'the deferral must be one-shot'
+
+
+def test_only_a_not_built_demotion_is_deferred():
+    """A demotion for scope or Lab Mode reflects real current state and must
+    stand -- re-applying it later would override the user."""
+    seg = _function_source('_restore_comp_passage_preferences')
+    assert 'REASON_NOT_BUILT' in seg, (
+        'the deferral is not restricted to the transient reason')
+
+
+def test_the_close_check_tracks_the_load_worker():
+    """It holds an open index and may be mid-rename inside recovery; exiting
+    under it leaves exactly the half-swapped state recovery exists to fix."""
+    seg = _function_source('_passage_workers_busy')
+    assert 'passage_load_thread' in seg

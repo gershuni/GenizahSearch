@@ -24,6 +24,35 @@ logger = logging.getLogger(__name__)
 DESKTOP_PARTITIONS = 16
 
 
+class PassageLoadThread(QThread):
+    """Startup: recover if a previous run died mid-swap, then open the live
+    index. `recover_at_startup` does BOTH -- it walks the candidates,
+    promotes whichever one actually opens, and returns that opened index --
+    so this is the single call that makes the feature reachable at all.
+
+    Off the UI thread because opening scans the full CSR (~109.5 MB on the
+    shipped corpus). It returns the index rather than installing it: `_state`
+    is UI-thread-only, so assignment happens in the slot.
+    """
+
+    loaded_signal = pyqtSignal(object)   # RecoveryResult, or None on failure
+
+    def __init__(self, root, parent=None):
+        super().__init__(parent)
+        self._root = root
+
+    def run(self):
+        try:
+            result = passage_lifecycle.recover_at_startup(self._root)
+        except Exception:                                  # noqa: BLE001
+            # A startup path must never take the app down with it: the whole
+            # feature hiding is an acceptable outcome, a failed launch is not.
+            logger.exception('passage index recovery failed at startup')
+            self.loaded_signal.emit(None)
+            return
+        self.loaded_signal.emit(result)
+
+
 class PassageBuildThread(QThread):
     """Builds a passage index into staging and swaps it over the live one.
 

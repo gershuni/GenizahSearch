@@ -5200,6 +5200,8 @@ TRANSLATIONS.update({
         'האינדקס לחיפוש ברמת האות נבנה כעת',
     'a letter-level search is running':
         'חיפוש ברמת האות פועל כעת',
+    'the letter-level index is being opened':
+        'האינדקס לחיפוש ברמת האות נפתח כעת',
     'Search method':
         'שיטת חיפוש',
     'Letter-level options':

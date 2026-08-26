@@ -1586,6 +1586,10 @@ class GenizahGUI(QMainWindow):
             self.btn_build_index.setEnabled(True)
             if hasattr(self, 'btn_build_passage_index'):
                 self.btn_build_passage_index.setEnabled(True)
+            # THE call that makes letter-level search reachable across a
+            # restart. Started here rather than inside StartupThread so its
+            # finished_signal signature stays as every other slot expects.
+            self._start_passage_load()
             # The gate can only now say "not built" instead of "still
             # starting up", so re-run it once startup is genuinely done.
             if hasattr(self, 'comp_method_combo'):
@@ -15702,6 +15706,50 @@ class GenizahGUI(QMainWindow):
     )
     _PASSAGE_CONTROLS_LAB_ALSO_OWNS = ('comp_mode_combo', 'spin_freq')
 
+    def _start_passage_load(self):
+        """Open (and if necessary recover) the letter-level index, off the
+        UI thread. Failure here hides the feature; it never blocks startup."""
+        try:
+            from desktop.passage_workers import PassageLoadThread
+            self.passage_load_thread = PassageLoadThread(
+                passage_lifecycle.passage_root())
+            self.passage_load_thread.loaded_signal.connect(
+                self._on_passage_loaded)
+            self.passage_load_thread.start()
+        except Exception:                                    # noqa: BLE001
+            logger.exception('could not start the passage index load')
+
+    def _on_passage_loaded(self, result):
+        if getattr(self, '_close_pending', False):
+            return          # on the way out; installing would only be undone
+        index = getattr(result, 'index', None)
+        status = getattr(result, 'status', 'unavailable')
+        if index is not None:
+            passage_lifecycle.install_passage_state(
+                passage_lifecycle.PassageState(
+                    index=index, live_dir=getattr(result, 'live_dir', '')))
+        logger.info('passage index at startup: %s', status)
+
+        # The gate could only say "not built" until this moment, so a session
+        # that was restored with letter-level search selected was demoted to
+        # chunk before the index had any chance to load. Re-apply it now --
+        # but ONLY when the demotion was that transient reason. A demotion
+        # for scope or Lab Mode reflects real current state and must stand.
+        if getattr(self, '_comp_method_deferred', None) == 'passage':
+            self._comp_method_deferred = None
+            combo = getattr(self, 'comp_method_combo', None)
+            if (combo is not None
+                    and self._passage_disabled_reason_now() is None):
+                idx = combo.findData('passage')
+                if idx >= 0:
+                    combo.blockSignals(True)
+                    combo.setCurrentIndex(idx)
+                    combo.blockSignals(False)
+                    self._apply_passage_mode_ui(True)
+                    self._show_passage_reason(None)
+                    self._update_comp_method_help()
+        self._revalidate_comp_method()
+
     def _passage_release_seam(self, expect_generation):
         """Called ON THE WORKER THREAD. Hops to the UI thread, releases
         there, and blocks until that has actually happened -- returning the
@@ -15970,6 +16018,12 @@ class GenizahGUI(QMainWindow):
         if self._comp_method() == 'passage':
             reason = self._passage_disabled_reason_now()
             if reason is not None:
+                # "Not built" during startup usually means "not loaded YET".
+                # Remember the intent so `_on_passage_loaded` can honour it,
+                # rather than silently losing the user's method on every
+                # launch.
+                if reason == passage_lifecycle.REASON_NOT_BUILT:
+                    self._comp_method_deferred = 'passage'
                 self._revert_comp_method_to_chunk(reason)
             else:
                 self._apply_passage_mode_ui(True)
@@ -27086,6 +27140,12 @@ class GenizahGUI(QMainWindow):
         th = getattr(self, 'passage_build_thread', None)
         if th is not None and th.isRunning():
             reasons.append(tr("the letter-level index is being built"))
+        # The load thread holds an open index and may be mid-rename inside
+        # recovery; letting the process exit under it is exactly the
+        # half-swapped state the recovery walk exists to clean up.
+        th = getattr(self, 'passage_load_thread', None)
+        if th is not None and th.isRunning():
+            reasons.append(tr("the letter-level index is being opened"))
         if self._passage_scan_in_flight():
             reasons.append(tr("a letter-level search is running"))
         return reasons
