@@ -5200,6 +5200,16 @@ TRANSLATIONS.update({
         'האינדקס לחיפוש ברמת האות נבנה כעת',
     'a letter-level search is running':
         'חיפוש ברמת האות פועל כעת',
+    'Build letter-level index?':
+        'לבנות אינדקס לחיפוש ברמת האות?',
+    'Letter-level search is a second way to find parallels: it compares the letter stream directly and tolerates damaged or reworked copies. It needs an index that has not been built on this computer yet.\n\nBuilding it takes about 10 minutes and needs about 11 GB of free disk space while it runs; the finished index is about 3.5 GB. You can always build it later from Settings.':
+        'חיפוש ברמת האות הוא דרך נוספת למצוא מקבילות: הוא משווה את רצף האותיות ישירות ועומד בפני עותקים פגומים או מעובדים. הוא זקוק לאינדקס שעדיין לא נבנה במחשב הזה.\n\nהבנייה אורכת כ‑10 דקות ודורשת כ‑11 גיגהבייט פנויים בדיסק בזמן הריצה; האינדקס המוגמר תופס כ‑3.5 גיגהבייט. תמיד אפשר לבנות אותו מאוחר יותר מההגדרות.',
+    'Build now':
+        'בנה עכשיו',
+    'Ask me later':
+        'שאל אותי מאוחר יותר',
+    "Don't ask again":
+        'אל תשאל שוב',
     'the letter-level index is being opened':
         'האינדקס לחיפוש ברמת האות נפתח כעת',
     'Search method':

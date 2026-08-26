@@ -1584,6 +1584,11 @@ class GenizahGUI(QMainWindow):
             self.btn_comp_run.setEnabled(True)
             self.btn_browse_go.setEnabled(True)
             self.btn_build_index.setEnabled(True)
+            # Was read by `run_passage_index_build` and set by nobody, so
+            # that guard refused every build. `getattr(..., False)` turns an
+            # attribute that does not exist into a silent False rather than
+            # an AttributeError, which is exactly why it went unnoticed.
+            self.startup_complete = True
             if hasattr(self, 'btn_build_passage_index'):
                 self.btn_build_passage_index.setEnabled(True)
             # THE call that makes letter-level search reachable across a
@@ -15754,6 +15759,76 @@ class GenizahGUI(QMainWindow):
                     self._show_passage_reason(None)
                     self._update_comp_method_help()
         self._revalidate_comp_method()
+        # Only now is "there is no index" a fact rather than "not loaded
+        # yet" -- offering before this point would fire on every launch,
+        # including the ones where an index was about to appear.
+        self._maybe_offer_passage_build()
+
+    def _maybe_offer_passage_build(self):
+        """Offer to build the letter-level index when there is none, once per
+        launch. Modelled on the main index's own "Index not found" prompt in
+        `on_startup_finished`, with the three choices the owner asked for --
+        a plain Yes/No leaves a user who is not ready right now with no way
+        to stop being asked every single launch.
+
+        Deliberately silent in several cases: an offer the user cannot act
+        on is worse than no offer.
+        """
+        if getattr(self, '_passage_offer_shown', False):
+            return
+        if getattr(self, '_close_pending', False):
+            return
+        if passage_lifecycle.passage_available():
+            return                      # there is one; nothing to offer
+        if getattr(self, '_passage_build_in_flight', False):
+            return
+        engine = getattr(self, 'searcher', None)
+        if (engine is None or getattr(engine, 'index', None) is None):
+            # The MAIN index is missing too, and `on_startup_finished` has
+            # already asked about that. Stacking a second modal on a user
+            # who has no index at all is noise, and the letter-level one is
+            # the less urgent of the two.
+            return
+        corpus = getattr(Config, 'FILE_V8', '')
+        if not corpus or not os.path.exists(corpus):
+            return                      # nothing to build FROM
+        try:
+            if load_app_config().get('passage_build_prompt') == 'never':
+                return
+        except Exception:                                    # noqa: BLE001
+            logger.exception('could not read the passage build preference')
+
+        self._passage_offer_shown = True
+        box = QMessageBox(self)
+        box.setWindowTitle(tr("Build letter-level index?"))
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText(tr(
+            "Letter-level search is a second way to find parallels: it "
+            "compares the letter stream directly and tolerates damaged or "
+            "reworked copies. It needs an index that has not been built on "
+            "this computer yet.\n\n"
+            "Building it takes about 10 minutes and needs about 11 GB of "
+            "free disk space while it runs; the finished index is about "
+            "3.5 GB. You can always build it later from Settings."))
+        btn_build = box.addButton(tr("Build now"),
+                                  QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(tr("Ask me later"), QMessageBox.ButtonRole.RejectRole)
+        btn_never = box.addButton(tr("Don't ask again"),
+                                  QMessageBox.ButtonRole.DestructiveRole)
+        box.setDefaultButton(btn_build)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if clicked is btn_never:
+            try:
+                save_app_config({'passage_build_prompt': 'never'})
+            except Exception:                                # noqa: BLE001
+                logger.exception('could not save the passage build preference')
+            return
+        if clicked is btn_build:
+            # `confirm=False`: this dialog already carried the same figures
+            # and got an explicit yes.
+            self.run_passage_index_build(confirm=False)
 
     def _passage_release_seam(self, expect_generation):
         """Called ON THE WORKER THREAD. Hops to the UI thread, releases
@@ -15908,7 +15983,7 @@ class GenizahGUI(QMainWindow):
                "been written to the log. Your existing index was not "
                "changed."))
 
-    def run_passage_index_build(self):
+    def run_passage_index_build(self, confirm=True):
         """Build the letter-level index from the transcriptions already on
         this computer. Ordering matters: no corpus at all is a different
         problem with a different answer (fetch it), so that is checked before
@@ -15971,7 +16046,16 @@ class GenizahGUI(QMainWindow):
 
         # One promise, stated the same way everywhere: the figure quoted here
         # must never be smaller than the figure the preflight will refuse on.
-        confirm = QMessageBox.question(
+        if not confirm:
+            # Reached from the startup offer, which already stated the same
+            # figures and got an explicit "Build now". Asking again with
+            # identical numbers reads as a bug, not as caution.
+            self._passage_build_in_flight = True
+            self._revalidate_comp_method()
+            self._start_passage_build_worker(corpus_path)
+            return
+
+        answer = QMessageBox.question(
             self, tr("Build letter-level index"),
             tr("This builds the index used by letter-level search.\n\n"
                "\u2022 About 11 GB of free disk space is needed while it "
@@ -15984,7 +16068,7 @@ class GenizahGUI(QMainWindow):
                "is complete."),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No)
-        if confirm != QMessageBox.StandardButton.Yes:
+        if answer != QMessageBox.StandardButton.Yes:
             return
 
         self._passage_build_in_flight = True
@@ -22746,6 +22830,7 @@ class GenizahGUI(QMainWindow):
             self.comp_progress.setFormat(tr("Cancelling..."))
         
     def reset_comp_ui(self):
+        self._comp_grouping_active = False
         self.is_comp_running = False; self.btn_comp_run.setText(tr("Analyze Composition"))
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white;")
         self._apply_pause_state(self._pause_comp, 'hidden')
@@ -23398,6 +23483,13 @@ class GenizahGUI(QMainWindow):
         self._apply_pause_state(self._pause_comp, 'hidden')
         self._pause_comp.state = 'idle'
         self.is_comp_running = True
+        # Phase 146: read by `_refresh_comp_method_enabled` (the method combo
+        # stays frozen through grouping, not just the scan) and by
+        # `_passage_scan_in_flight` (the Stop guard is scoped to the SCAN --
+        # grouping keeps today's Stop behaviour). It was read in both places
+        # and set in none, so the combo un-froze early and Stop was refused
+        # during grouping.
+        self._comp_grouping_active = True
         self.comp_has_grouped_results = False
         self.btn_comp_run.setText(tr("Stop"))
         self.btn_comp_run.setStyleSheet("background-color: #c0392b; color: white;")
@@ -23417,6 +23509,7 @@ class GenizahGUI(QMainWindow):
         self.group_thread.start()
 
     def on_grouping_error(self, err):
+        self._comp_grouping_active = False
         QMessageBox.critical(self, tr("Grouping Error"), err)
         # Fallback to ungrouped display
         self.comp_has_grouped_results = False
@@ -23429,6 +23522,7 @@ class GenizahGUI(QMainWindow):
         self.display_comp_results(self.comp_raw_items or [], {}, {}, self.comp_raw_filtered or [], {}, {})
 
     def on_comp_finished(self, main_res, main_appx, main_summ, filt_res, filt_appx, filt_summ):
+        self._comp_grouping_active = False
         self.comp_has_grouped_results = True
         
         final_main, final_appx, manual_known = self._apply_manual_exclusions(main_res, main_appx)

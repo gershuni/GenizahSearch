@@ -606,6 +606,7 @@ def test_the_loaded_index_is_installed(monkeypatch):
                         lambda st: installed.append(st) or True)
     w = _Win()
     w._revalidate_comp_method = lambda: None
+    w._maybe_offer_passage_build = lambda: None
     idx = object()
     result = type('R', (), {'index': idx, 'live_dir': 'd',
                             'status': 'live_ok'})()
@@ -621,6 +622,7 @@ def test_nothing_is_installed_when_there_is_no_index(monkeypatch):
                         lambda st: installed.append(st) or True)
     w = _Win()
     w._revalidate_comp_method = lambda: None
+    w._maybe_offer_passage_build = lambda: None
     result = type('R', (), {'index': None, 'live_dir': '',
                             'status': 'no_prior_state'})()
     APP._on_passage_loaded(w, result)
@@ -638,6 +640,7 @@ def test_a_restored_passage_preference_survives_the_load_race(monkeypatch):
     w.comp_method_combo = _Combo([('chunk', ''), ('passage', '')], index=0)
     w._comp_method_deferred = 'passage'
     w._revalidate_comp_method = lambda: None
+    w._maybe_offer_passage_build = lambda: None
     w._apply_passage_mode_ui = lambda _on: None
     w._show_passage_reason = lambda _k: None
     w._update_comp_method_help = lambda: None
@@ -727,3 +730,159 @@ def test_the_tab_builders_create_every_widget_before_using_it():
         'a widget is used before it exists, which is an AttributeError on '
         'launch and not something a Qt-free test can otherwise see:\n  '
         + '\n  '.join(problems))
+
+
+# ---------------------------------------------------------------------------
+# Attributes read but never assigned.
+#
+# `getattr(self, 'X', default)` turns a name that exists nowhere into a silent
+# default instead of an AttributeError. Two real defects shipped this way:
+# `startup_complete` (never set, so every build was refused with "still
+# starting up") and `_comp_grouping_active` (read by the Stop guard and the
+# combo-freeze logic, set by nobody, so the combo un-froze early and Stop was
+# refused during grouping).
+# ---------------------------------------------------------------------------
+
+# Pre-existing and NOT introduced by this phase. Listed so the gate can go in
+# without dragging an unrelated fix along; it is a real latent bug in the
+# responsa path and deserves its own change.
+_KNOWN_UNASSIGNED = {'_last_responsa_options'}
+
+
+def _gui_class():
+    tree = ast.parse(_app_source())
+    return next(n for n in ast.walk(tree)
+                if isinstance(n, ast.ClassDef) and n.name == 'GenizahGUI')
+
+
+def test_no_attribute_is_read_via_getattr_but_never_assigned():
+    cls = _gui_class()
+    assigned = set()
+    for n in ast.walk(cls):
+        if (isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)
+                and n.value.id == 'self' and isinstance(n.ctx, ast.Store)):
+            assigned.add(n.attr)
+    for n in cls.body:                       # class-level: signals, constants
+        if isinstance(n, ast.Assign):
+            for tg in n.targets:
+                if isinstance(tg, ast.Name):
+                    assigned.add(tg.id)
+        if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name):
+            assigned.add(n.target.id)
+
+    unassigned = {}
+    for n in ast.walk(cls):
+        if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                and n.func.id == 'getattr' and len(n.args) >= 2
+                and isinstance(n.args[0], ast.Name) and n.args[0].id == 'self'
+                and isinstance(n.args[1], ast.Constant)
+                and isinstance(n.args[1].value, str)):
+            name = n.args[1].value
+            if name not in assigned and name not in _KNOWN_UNASSIGNED:
+                unassigned.setdefault(name, n.lineno)
+
+    assert not unassigned, (
+        'read via getattr with a default but never assigned anywhere in the '
+        'class, so the default is the ONLY value it can ever have: '
+        + ', '.join('self.%s (line %d)' % (k, v)
+                    for k, v in sorted(unassigned.items())))
+
+
+def test_the_grouping_flag_is_set_and_cleared():
+    """It gates two different behaviours, so a stuck value breaks both: the
+    method combo stays frozen through grouping, and the Stop guard is scoped
+    to the SCAN so grouping keeps today's Stop behaviour."""
+    src = _app_source()
+    assert 'self._comp_grouping_active = True' in src, 'never set'
+    assert src.count('self._comp_grouping_active = False') >= 2, (
+        'cleared on fewer paths than it is set on, so it can stick on')
+    for fn in ('on_comp_finished', 'on_grouping_error', 'reset_comp_ui'):
+        assert '_comp_grouping_active = False' in _function_source(fn), (
+            '%s leaves the grouping flag set' % fn)
+
+
+# ---------------------------------------------------------------------------
+# The startup offer.
+# ---------------------------------------------------------------------------
+
+class _NoDialog:
+    def __init__(self, *a, **k):
+        raise AssertionError(
+            'a dialog was shown in a case that must be silent')
+
+
+def _offer_window(monkeypatch, **kw):
+    w = _window(**{k: v for k, v in kw.items()
+                   if k in ('scope', 'lab', 'engine_ready', 'building')})
+    w._maybe_offer_passage_build = APP._maybe_offer_passage_build
+    monkeypatch.setattr(genizah_app, 'QMessageBox', _NoDialog)
+    return w
+
+
+@pytest.mark.parametrize('case', [
+    'already_available', 'build_in_flight', 'main_index_missing',
+    'already_shown', 'never_again',
+])
+def test_the_offer_stays_silent_when_it_would_be_useless(monkeypatch, case):
+    """An offer the user cannot act on, or has already answered, is worse
+    than no offer. The main-index case matters most: `on_startup_finished`
+    already asks about that, and stacking a second modal on someone with no
+    index at all is noise."""
+    monkeypatch.setattr(pl, 'passage_available',
+                        lambda: case == 'already_available')
+    monkeypatch.setattr(genizah_app, 'load_app_config',
+                        lambda: {'passage_build_prompt':
+                                 'never' if case == 'never_again' else ''})
+    w = _offer_window(monkeypatch,
+                      engine_ready=(case != 'main_index_missing'),
+                      building=(case == 'build_in_flight'))
+    w._passage_offer_shown = (case == 'already_shown')
+    APP._maybe_offer_passage_build(w)      # must not construct a dialog
+
+
+def test_the_offer_is_silent_with_no_corpus_to_build_from(monkeypatch, tmp_path):
+    monkeypatch.setattr(pl, 'passage_available', lambda: False)
+    monkeypatch.setattr(genizah_app, 'load_app_config', lambda: {})
+    monkeypatch.setattr(genizah_app.Config, 'FILE_V8',
+                        str(tmp_path / 'absent.txt'))
+    w = _offer_window(monkeypatch)
+    w._passage_offer_shown = False
+    APP._maybe_offer_passage_build(w)
+
+
+def test_the_offer_only_fires_once_the_load_has_reported():
+    """Before the load worker answers, "no index" means "not loaded yet", and
+    offering there would prompt on every single launch."""
+    seg = _function_source('_on_passage_loaded')
+    assert '_maybe_offer_passage_build()' in seg
+
+
+def test_build_now_does_not_ask_the_same_question_twice():
+    """The offer already stated the figures and got an explicit yes; a second
+    dialog with identical numbers reads as a bug.
+
+    Checking that `if not confirm:` merely EXISTS is not enough -- emptying
+    its body leaves that text in place and the branch falls through to the
+    dialog anyway. The branch has to start the build and return."""
+    assert 'def run_passage_index_build(self, confirm=True)' in _app_source()
+    assert 'confirm=False' in _function_source('_maybe_offer_passage_build')
+
+    src = _app_source()
+    fn = next(n for n in ast.walk(ast.parse(src))
+              if isinstance(n, ast.FunctionDef)
+              and n.name == 'run_passage_index_build')
+    branch = None
+    for node in ast.walk(fn):
+        if (isinstance(node, ast.If) and isinstance(node.test, ast.UnaryOp)
+                and isinstance(node.test.op, ast.Not)
+                and isinstance(node.test.operand, ast.Name)
+                and node.test.operand.id == 'confirm'):
+            branch = node
+            break
+    assert branch is not None, 'no `if not confirm:` branch'
+    body = ast.dump(ast.Module(body=branch.body, type_ignores=[]))
+    assert '_start_passage_build_worker' in body, (
+        'the skip-confirmation branch does not actually start the build')
+    assert any(isinstance(n, ast.Return) for n in ast.walk(branch)), (
+        'the branch falls through to the confirmation dialog it exists to '
+        'skip')
