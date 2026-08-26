@@ -128,6 +128,12 @@ class _Win:
     _comp_passage_axis = APP._comp_passage_axis
     _comp_axis_label = APP._comp_axis_label
     _comp_export_settings_lines = APP._comp_export_settings_lines
+    _comp_chunk_preference = APP._comp_chunk_preference
+    _PASSAGE_FORCED_CONTROLS = APP._PASSAGE_FORCED_CONTROLS
+    _passage_scan_in_flight = APP._passage_scan_in_flight
+    _refuse_stop_during_passage_scan = APP._refuse_stop_during_passage_scan
+    _on_pause_clicked = APP._on_pause_clicked
+    _on_passage_build_finished = APP._on_passage_build_finished
     _comp_method = APP._comp_method
     _restore_comp_passage_preferences = APP._restore_comp_passage_preferences
     _method_help_text = APP._method_help_text
@@ -1427,3 +1433,184 @@ def test_a_restored_snapshot_carries_its_own_provenance():
     assert '_comp_last_result_chunk = None' in tail, (
         'a stale chunk stamp from an earlier run would outrank the widgets '
         'the restore just populated')
+
+
+# ---------------------------------------------------------------------------
+# Codex review round 1 (PR #331). Three P2 findings, all real.
+# ---------------------------------------------------------------------------
+
+class _Worker:
+    def __init__(self, running=True):
+        self._running = running
+        self.paused = False
+        self.resumed = False
+
+    def isRunning(self):
+        return self._running
+
+    def pause(self):
+        self.paused = True
+
+    def resume(self):
+        self.resumed = True
+
+
+class _Ctx:
+    def __init__(self, state='running'):
+        self.state = state
+        self.epoch = 0
+        self.pause_started = 0.0
+        self.paused_total = 0.0
+
+
+class _Result:
+    def __init__(self, status):
+        self.status = status
+        self.index = None
+        self.live_dir = ''
+
+
+# --- 1. A timed-out release leaves nothing behind, and must say so ---------
+
+def _finish_window(monkeypatch, status):
+    """`_on_passage_build_finished` with no index to install, which is what
+    every failed swap looks like."""
+    w = _Win()
+    w._close_pending = False
+    w.status_label = _Label()
+    w.calls = []
+    w._finish_passage_build = lambda: w.calls.append('finish')
+    w._revalidate_comp_method = lambda: w.calls.append('revalidate')
+    w._start_passage_load = lambda: w.calls.append('reload')
+    APP._on_passage_build_finished(w, _Result(status))
+    return w
+
+
+def test_a_timed_out_release_reloads_the_index(monkeypatch):
+    """The generation guard stops an abandoned seam closing a NEWER index.
+    It does nothing when nothing newer was installed -- exactly the timeout
+    case -- so the late close lands on a matching generation, succeeds, and
+    clears the live state with nothing left to reinstall it."""
+    w = _finish_window(monkeypatch, 'release_timed_out')
+    assert 'reload' in w.calls, (
+        'a timed-out release left the state to be closed by a seam that was '
+        'abandoned, not cancelled, and nothing re-established it')
+
+
+@pytest.mark.parametrize('status', ['readers_active', 'rename_blocked',
+                                    'cancelled', 'reload_failed_rolled_back'])
+def test_every_other_failed_swap_keeps_its_index_and_does_not_reload(status):
+    """The reload is for the ONE status whose index may still be closed
+    behind us. Reloading after the others would be a pointless ~109 MB scan
+    of an index that is already installed and working."""
+    w = _finish_window(None, status)
+    assert 'reload' not in w.calls, (
+        '%s left a working index behind and does not need re-establishing'
+        % status)
+
+
+def test_the_timeout_branch_does_not_claim_the_swap_guarantee():
+    seg = _function_source('_on_passage_build_finished')
+    assert "'release_timed_out'" in seg, (
+        'the one status that does not leave a working index behind is back '
+        'in the branch that says one is still in use')
+    head, _, tail = seg.partition("elif status == 'release_timed_out':")
+    assert '_start_passage_load()' in tail
+
+
+# --- 2. Pause is the fourth way to ask a scan to stop ----------------------
+
+def _pause_window(passage_running):
+    w = _Win()
+    w._pause_comp = _Ctx()
+    w._pause_search = _Ctx()
+    w.worker = _Worker()
+    w._pause_worker_for = lambda ctx: w.worker
+    w.lbl_comp_status = _Label()
+    w.is_comp_running = passage_running
+    w._comp_last_result_method = 'passage' if passage_running else 'chunk'
+    w._comp_grouping_active = False
+    w._apply_pause_state = lambda ctx, s: None
+    w._paint_pause_status = lambda ctx, s: None
+    return w
+
+
+def test_pause_is_refused_during_a_passage_scan():
+    """`PassageSearcher` never calls the progress callback, and the worker's
+    only `_checkpoint()` lives inside it -- so pause() would park a disabled
+    button at "Pausing..." waiting for an acknowledgement that cannot come."""
+    w = _pause_window(True)
+    APP._on_pause_clicked(w, w._pause_comp)
+    assert not w.worker.paused, (
+        'the worker was asked to pause by a path that can never acknowledge')
+    assert w._pause_comp.state == 'running', (
+        'the UI went to "pausing" for a scan that will not pause')
+    assert w.lbl_comp_status.text, 'the refusal said nothing to the user'
+
+
+def test_pause_still_works_for_a_chunk_scan():
+    w = _pause_window(False)
+    APP._on_pause_clicked(w, w._pause_comp)
+    assert w.worker.paused and w._pause_comp.state == 'pausing'
+
+
+def test_a_passage_scan_does_not_freeze_the_search_tabs_pause():
+    """The guard is scoped to the composition context. A letter-level scan
+    says nothing about whether a search-tab run may be paused, and the two
+    can be running at once."""
+    w = _pause_window(True)
+    APP._on_pause_clicked(w, w._pause_search)
+    assert w.worker.paused and w._pause_search.state == 'pausing', (
+        'a passage scan on the composition tab refused an unrelated pause')
+
+
+# --- 3. Persist the user's settings, not the ones we forced on them --------
+
+def _pref_window(cached=None):
+    w = _Win()
+    w.comp_mode_combo = _Combo(_MODES, index=0)
+    w.spin_chunk = _Spin(5)
+    w.spin_freq = _Spin(50)
+    w.spin_min_chunks = _Spin(1)
+    w.boundary_mode_combo = _Combo([('full', 'F'), ('boundary', 'B')], 0)
+    if cached is not None:
+        w._passage_cached_chunk_state = cached
+    return w
+
+
+def test_with_no_cache_the_preference_is_the_live_widget():
+    """Every path outside letter-level mode, which must behave exactly as
+    it did before."""
+    w = _pref_window()
+    assert w._comp_chunk_preference('spin_chunk') == 5
+    assert w._comp_chunk_preference('spin_freq') == 50
+    assert w._comp_chunk_preference('comp_mode_combo') == 0
+
+
+def test_the_cached_value_outranks_the_forced_widget():
+    """The widgets here read exactly what letter-level mode forces them to
+    (chunk=5, freq=50, mode=Exact); the cache holds what the user chose."""
+    w = _pref_window({'spin_chunk': 9, 'spin_freq': 12,
+                      'comp_mode_combo': 2})
+    assert w._comp_chunk_preference('spin_chunk') == 9
+    assert w._comp_chunk_preference('spin_freq') == 12
+    assert w._comp_chunk_preference('comp_mode_combo') == 2
+
+
+def test_an_unknown_control_has_no_preference():
+    assert _pref_window()._comp_chunk_preference('spin_filter') is None
+
+
+@pytest.mark.parametrize('fn', ['_save_session', '_add_comp_search_to_history'])
+def test_neither_persistence_surface_stores_a_forced_value(fn):
+    """Both write chunk PREFERENCES. Codex named the session; the history
+    entry does the same thing two hundred lines away, and the in-memory
+    cache that would have restored either dies with the process."""
+    seg = _function_source(fn)
+    for widget, reader in (('spin_chunk', '.value()'),
+                           ('spin_freq', '.value()'),
+                           ('comp_mode_combo', '.currentIndex()')):
+        assert ('self.%s%s' % (widget, reader)) not in seg, (
+            '%s persists the LIVE %s, which letter-level mode forces'
+            % (fn, widget))
+    assert '_comp_chunk_preference(' in seg

@@ -15742,6 +15742,32 @@ class GenizahGUI(QMainWindow):
     )
     _PASSAGE_CONTROLS_LAB_ALSO_OWNS = ('comp_mode_combo', 'spin_freq')
 
+    def _comp_chunk_preference(self, name):
+        """The user's OWN value for a forced chunk control.
+
+        While letter-level mode is selected these widgets are held at
+        values the user did not choose, and the originals live only in
+        `_passage_cached_chunk_state` -- in memory, dying with the process.
+        Both persistence surfaces store PREFERENCES, so writing the live
+        widget there means closing the app in letter-level mode silently
+        overwrites the user's chunk settings, and the next launch restores
+        the forced ones as though they had been chosen.
+
+        With no cache -- every path outside letter-level mode -- this is the
+        live widget, exactly as before.
+        """
+        cache = getattr(self, '_passage_cached_chunk_state', None) or {}
+        if name in cache:
+            return cache[name]
+        widget = getattr(self, name, None)
+        if widget is None:
+            return None
+        for cname, kind, _forced in self._PASSAGE_FORCED_CONTROLS:
+            if cname == name:
+                return (widget.currentIndex() if kind == 'index'
+                        else widget.value())
+        return None
+
     def _start_passage_load(self):
         """Open (and if necessary recover) the letter-level index, off the
         UI thread. Failure here hides the feature; it never blocks startup."""
@@ -15998,10 +16024,30 @@ class GenizahGUI(QMainWindow):
         if status == 'installed':
             self.status_label.setText(
                 tr("The letter-level index is ready."))
+        elif status == 'release_timed_out':
+            # The ONE status that does not leave a working index behind.
+            # The seam never answered inside its bound, so the release was
+            # ABANDONED, not cancelled -- it may still land, and with
+            # nothing newer installed its generation check will PASS and
+            # close the very index this branch would otherwise call "still
+            # in use". Re-establish from disk rather than assert a
+            # guarantee: whichever order the two land in, the reload's
+            # install bumps the generation, so a late close is either
+            # harmless (it preceded the install) or refused (it followed
+            # it).
+            logger.warning(
+                'passage build ended as %r; reloading the live index '
+                'because the abandoned release may still close it', status)
+            self.status_label.setText(tr(
+                "The letter-level index could not be replaced. Reloading "
+                "the existing index."))
+            self._start_passage_load()
         else:
-            # Every non-installed status still left a WORKING index behind
-            # (that is the swap protocol's guarantee), so this is a report,
-            # not an alarm.
+            # Every REMAINING non-installed status left a working index
+            # behind -- that is the swap protocol's guarantee, and
+            # `release_timed_out` above is the one case it does not cover,
+            # which is why that case is handled separately rather than
+            # here. So this is a report, not an alarm.
             logger.warning('passage build ended as %r', status)
             self.status_label.setText(tr(
                 "The letter-level index could not be replaced. The previous "
@@ -17732,6 +17778,17 @@ class GenizahGUI(QMainWindow):
     def _on_pause_clicked(self, ctx):
         """Pause <-> Resume. The click owns 'pausing'/'running'; only an accepted
         acknowledgement from the worker may set 'paused'."""
+        if (ctx is getattr(self, '_pause_comp', None)
+                and self._refuse_stop_during_passage_scan()):
+            # Pause is the fourth way to ask a scan to stop, and it has to
+            # answer like the other three. `PassageSearcher` never calls the
+            # progress callback, and the worker's only `_checkpoint()` lives
+            # inside it -- so `worker.pause()` would park a disabled button
+            # at "Pausing..." waiting for an acknowledgement that cannot
+            # arrive, until the search finishes on its own. Scoped to the
+            # composition context: a passage scan says nothing about whether
+            # a search-tab run may be paused.
+            return
         worker = self._pause_worker_for(ctx)
         if worker is None or not worker.isRunning():
             return
@@ -26710,9 +26767,12 @@ class GenizahGUI(QMainWindow):
             'result_count': len(results),
             'timestamp': datetime.now().isoformat(),
             'search_params': {
-                'chunk_size': self.spin_chunk.value() if hasattr(self, 'spin_chunk') else 5,
-                'max_freq': self.spin_freq.value() if hasattr(self, 'spin_freq') else 10,
-                'mode_index': self.comp_mode_combo.currentIndex() if hasattr(self, 'comp_mode_combo') else 0,
+                'chunk_size': (self._comp_chunk_preference('spin_chunk')
+                               if hasattr(self, 'spin_chunk') else 5),
+                'max_freq': (self._comp_chunk_preference('spin_freq')
+                             if hasattr(self, 'spin_freq') else 10),
+                'mode_index': (self._comp_chunk_preference('comp_mode_combo')
+                               if hasattr(self, 'comp_mode_combo') else 0),
                 # Phase 110 (COMP-LOC-01 / Round-2 #3): capture the comp corpus scope
                 # so a history re-run uses the ORIGINAL scope, not the current default.
                 'comp_corpus_scope': getattr(self, '_comp_corpus_scope', 'genizah'),
@@ -26852,9 +26912,12 @@ class GenizahGUI(QMainWindow):
                 'composition_search': {
                     'source_text': self.comp_text_area.toPlainText() if hasattr(self, 'comp_text_area') else '',
                     'title': self.comp_title_input.text() if hasattr(self, 'comp_title_input') else '',
-                    'chunk_size': self.spin_chunk.value() if hasattr(self, 'spin_chunk') else 5,
-                    'max_freq': self.spin_freq.value() if hasattr(self, 'spin_freq') else 10,
-                    'mode_index': self.comp_mode_combo.currentIndex() if hasattr(self, 'comp_mode_combo') else 0,
+                    'chunk_size': (self._comp_chunk_preference('spin_chunk')
+                                   if hasattr(self, 'spin_chunk') else 5),
+                    'max_freq': (self._comp_chunk_preference('spin_freq')
+                                 if hasattr(self, 'spin_freq') else 10),
+                    'mode_index': (self._comp_chunk_preference('comp_mode_combo')
+                                   if hasattr(self, 'comp_mode_combo') else 0),
                     # Phase 110 (COMP-LOC-01) full-restore: persist the comp corpus scope.
                     'comp_corpus_scope': getattr(self, '_comp_corpus_scope', 'genizah'),
                     # Phase 146 PREFERENCE fields -- read the LIVE widgets, so

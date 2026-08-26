@@ -5214,6 +5214,8 @@ TRANSLATIONS.update({
         'חיפוש ברמת האות',
     'Chunk search':
         'חיפוש מקטעים',
+    'The letter-level index could not be replaced. Reloading the existing index.':
+        'לא היה ניתן להחליף את האינדקס לחיפוש ברמת האות. האינדקס הקיים נטען מחדש.',
     'Search method':
         'שיטת חיפוש',
     'Letter-level options':
