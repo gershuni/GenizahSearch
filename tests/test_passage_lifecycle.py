@@ -2972,6 +2972,7 @@ def test_run_build_and_swap_seam_that_never_returns_times_out_and_frees_the_lock
     from `readers_active`, which means something else (a lease was SEEN
     and refused to drain -- here, nothing about the outcome is known at
     all)."""
+    _seam_default = pl.UI_RELEASE_SEAM_TIMEOUT_SECONDS
     monkeypatch.setattr(pl, 'UI_RELEASE_SEAM_TIMEOUT_SECONDS', 0.2)
     c = _Corpus(tmp_path)
     assert c.build().status == 'installed'
@@ -2999,6 +3000,13 @@ def test_run_build_and_swap_seam_that_never_returns_times_out_and_frees_the_lock
     # does not strand it -- checked by actually running a second build+swap
     # through to completion, not by poking at lock internals.
     never.set()  # let the abandoned thread finish; it is a daemon either way
+    # The 0.2 s bound belongs to the WEDGED seam above. The seam below is
+    # a real one that must be allowed to answer, and starting a thread
+    # plus closing five memmapped sections does not reliably fit in
+    # 200 ms on a shared CI runner -- leaving it shrunk made this test
+    # measure the runner's speed rather than the lock.
+    monkeypatch.setattr(pl, 'UI_RELEASE_SEAM_TIMEOUT_SECONDS',
+                        _seam_default)
     res2 = pl.run_build_and_swap(
         c.root, c.records, c.source_paths, c.corpus_path, partitions=2,
         release_live_state=pl.close_passage_state)
@@ -3266,6 +3274,7 @@ def test_a_late_release_from_a_timed_out_seam_cannot_close_a_newer_index(
     The existing timeout test cannot see this: its wedged seam only returns
     `True` and never performs a close at all, and it is released BEFORE the
     second build rather than after it."""
+    _seam_default = pl.UI_RELEASE_SEAM_TIMEOUT_SECONDS
     monkeypatch.setattr(pl, 'UI_RELEASE_SEAM_TIMEOUT_SECONDS', 0.2)
     c = _Corpus(tmp_path)
     assert c.build().status == 'installed'
@@ -3288,6 +3297,13 @@ def test_a_late_release_from_a_timed_out_seam_cannot_close_a_newer_index(
 
     # Build B succeeds while A's seam is still parked, and installs a
     # DIFFERENT index object.
+    # The 0.2 s bound belongs to the WEDGED seam above. The seam below is
+    # a real one that must be allowed to answer, and starting a thread
+    # plus closing five memmapped sections does not reliably fit in
+    # 200 ms on a shared CI runner -- leaving it shrunk made this test
+    # measure the runner's speed rather than the lock.
+    monkeypatch.setattr(pl, 'UI_RELEASE_SEAM_TIMEOUT_SECONDS',
+                        _seam_default)
     res_b = c.build()
     assert res_b.status == 'installed', res_b.status
     assert pl.passage_available()

@@ -15742,6 +15742,16 @@ class GenizahGUI(QMainWindow):
     )
     _PASSAGE_CONTROLS_LAB_ALSO_OWNS = ('comp_mode_combo', 'spin_freq')
 
+    def _comp_passage_preference_fields(self):
+        """The method and its three policy axes, as the session stores them.
+        Only ever called once the composition tab exists."""
+        return {
+            'comp_method': self._comp_method(),
+            'comp_passage_width': self._comp_passage_axis('width'),
+            'comp_passage_length': self._comp_passage_axis('length'),
+            'comp_passage_depth': self._comp_passage_axis('depth'),
+        }
+
     def _comp_chunk_preference(self, name):
         """The user's OWN value for a forced chunk control.
 
@@ -27008,10 +27018,17 @@ class GenizahGUI(QMainWindow):
                     'comp_corpus_scope': getattr(self, '_comp_corpus_scope', 'genizah'),
                     # Phase 146 PREFERENCE fields -- read the LIVE widgets, so
                     # what restores is the choice the user currently has made.
-                    'comp_method': self._comp_method(),
-                    'comp_passage_width': self._comp_passage_axis('width'),
-                    'comp_passage_length': self._comp_passage_axis('length'),
-                    'comp_passage_depth': self._comp_passage_axis('depth'),
+                    # Omitted entirely before the composition tab
+                    # exists -- `_save_session` runs from a timer and from
+                    # closeEvent, and swallows its own exceptions, so an
+                    # unguarded read here loses the WHOLE session silently.
+                    # An absent key is already handled on the way back:
+                    # `_restore_comp_passage_preferences` validates each one
+                    # independently against its control's own options, so
+                    # repeating the defaults here would only be a second
+                    # source of truth for them.
+                    **(self._comp_passage_preference_fields()
+                       if hasattr(self, 'comp_method_combo') else {}),
                     # Phase 146 PROVENANCE fields -- stamped at dispatch, never
                     # read from a widget. These describe the rows in
                     # 'results' below, and they are what a restore validates
