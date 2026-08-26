@@ -35,18 +35,27 @@ def _source() -> str:
 
 
 def _nav_tuple(path: str) -> ast.Tuple:
-    """The nav_items entry whose first element is `path`, from create_layout."""
+    """The nav_items entry whose first element is `path`, from create_layout.
+
+    The LENGTH check is load-bearing, not decoration. A nav entry is the
+    4-tuple `(path, icon, label, badge)`. Matching on "first element is
+    `path`" alone was ambiguous, and on 2026-08-26 it silently became wrong:
+    `_WHATS_NEW_SUPPRESSED_ON = ('/parallels', '/help')` was added EARLIER in
+    the same function, so `ast.walk` reached it first and every assertion below
+    was made against the suppression list instead of the nav entry. Nothing
+    about the badge had changed; all five tests failed anyway.
+    """
     src = _source()
     for node in ast.walk(ast.parse(src)):
         if not (isinstance(node, ast.FunctionDef)
                 and node.name == 'create_layout'):
             continue
         for sub in ast.walk(node):
-            if (isinstance(sub, ast.Tuple) and sub.elts
+            if (isinstance(sub, ast.Tuple) and len(sub.elts) == 4
                     and isinstance(sub.elts[0], ast.Constant)
                     and sub.elts[0].value == path):
                 return sub
-        raise AssertionError(f'no nav entry for {path} in create_layout')
+        raise AssertionError(f'no 4-element nav entry for {path} in create_layout')
     raise AssertionError('create_layout not found in web/main.py')
 
 
