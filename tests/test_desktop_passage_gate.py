@@ -498,3 +498,73 @@ def test_the_depth_tooltip_keeps_the_shared_sentence_separate():
         assert s in web, (
             'the desktop grew its own variant of the depth tooltip instead '
             'of appending a separate string: %r' % (s[:80],))
+
+
+# ---------------------------------------------------------------------------
+# Task 10: the Hebrew gate. Both directions, because both fail silently --
+# an untranslated string shows English inside a Hebrew UI, and a dead entry
+# is a string someone renamed on one side only.
+# ---------------------------------------------------------------------------
+
+_PHASE146_BLOCK_MARKER = '# --- Phase 146: desktop letter-level (passage) search'
+_HEBREW = re.compile(r'[\u0590-\u05FF]')
+
+
+def _phase146_translation_keys():
+    """The keys of the Phase 146 block in genizah_translations.py, read from
+    the source rather than by diffing against a base commit -- this has to
+    keep working long after the branch is merged."""
+    src = io.open(os.path.join(REPO_ROOT, 'genizah_translations.py'),
+                  encoding='utf-8').read()
+    start = src.index(_PHASE146_BLOCK_MARKER)
+    block = src[start:]
+    tree = ast.parse(block[block.index('TRANSLATIONS.update('):])
+    call = tree.body[0].value
+    return [(k.value, v.value) for k, v in zip(call.args[0].keys,
+                                               call.args[0].values)]
+
+
+def test_every_phase146_string_has_real_hebrew():
+    pairs = _phase146_translation_keys()
+    assert len(pairs) >= 30, ('the Phase 146 block shrank unexpectedly: %d'
+                              % len(pairs))
+    for en, he in pairs:
+        assert _HEBREW.search(he), (
+            'no Hebrew characters in the translation of %r -- an untranslated '
+            'entry shows English inside a Hebrew UI, which is worse than a '
+            'missing key because nothing reports it' % en[:60])
+        assert he != en, ('translation is identical to the English', en[:60])
+
+
+def test_no_phase146_translation_is_dead():
+    """A key nothing calls is a string that was reworded on one side only."""
+    used = _tr_strings('genizah_app.py') | _tr_strings(
+        os.path.join('desktop', 'settings_dialogs.py'))
+    for en, _he in _phase146_translation_keys():
+        assert en in used, (
+            'nothing calls tr() with %r any more; if it was reworded, the '
+            'translation entry needs the same rewording' % en[:60])
+
+
+def test_the_placeholder_counts_match():
+    """`{}` counts must agree, or `.format()` raises at runtime in Hebrew
+    only -- a crash no English-locale test run would ever see."""
+    for en, he in _phase146_translation_keys():
+        assert en.count('{}') == he.count('{}'), (
+            'placeholder count differs for %r: %d vs %d'
+            % (en[:50], en.count('{}'), he.count('{}')))
+
+
+def test_the_disk_check_runs_before_the_confirmation():
+    """Owner directive 2026-08-26: check the drive first. The worker's own
+    preflight is authoritative but runs AFTER the user has approved an 11 GB
+    build, so being refused there means being asked to consent to something
+    that could never start."""
+    seg = _function_source('run_passage_index_build')
+    check = seg.index('disk_usage')
+    promise = seg.index('QMessageBox.question')
+    assert check < promise, (
+        'the free-space check must run before the confirmation dialog')
+    assert 'STAGING_DIRNAME' in seg, (
+        'a crashed staging tree holds space the build reclaims; not counting '
+        'it refuses every retry after a failure, forever')

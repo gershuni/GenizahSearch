@@ -15879,9 +15879,41 @@ class GenizahGUI(QMainWindow):
             QMessageBox.information(
                 self, tr("Transcriptions needed"),
                 tr("The letter-level index is built from the transcriptions "
-                   "on this computer, and they were not found. Download or "
-                   "locate them first."))
+                   "file on this computer, and it was not found. Download or "
+                   "locate it first."))
             self.run_indexing()
+            return
+
+        import shutil as _shutil   # module-local, like the file's other
+                                  # narrow-use imports
+        needed = passage_lifecycle.estimate_build_bytes(corpus_path)
+        root = passage_lifecycle.passage_root()
+        try:
+            os.makedirs(root, exist_ok=True)
+            available = _shutil.disk_usage(root).free
+            # A crashed staging tree from an earlier attempt holds space the
+            # build is about to reclaim, so counting it as free here matches
+            # what phase 0 will actually see -- otherwise every retry after
+            # a failure would be refused forever.
+            staging = os.path.join(root, passage_lifecycle.STAGING_DIRNAME)
+            if os.path.isdir(staging):
+                for dirpath, _dirs, files in os.walk(staging):
+                    for f in files:
+                        try:
+                            available += os.path.getsize(
+                                os.path.join(dirpath, f))
+                        except OSError:
+                            pass
+        except Exception:                                    # noqa: BLE001
+            logger.exception('passage build free-space check failed')
+            available = None    # unknown: let phase 0 be the judge
+        if available is not None and available < needed:
+            QMessageBox.warning(
+                self, tr("Not enough disk space"),
+                tr("Building the letter-level index needs about {} GB free "
+                   "on this drive, and there is about {} GB. Free some space "
+                   "and try again.").format(
+                       '%.0f' % (needed / 1e9), '%.1f' % (available / 1e9)))
             return
 
         # One promise, stated the same way everywhere: the figure quoted here
