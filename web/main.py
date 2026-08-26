@@ -714,6 +714,7 @@ from web.atlas_assets import (
 from web.discovery_assets import load_discovery_state, discovery_available  # noqa: F401 -- discovery_available is the Phase 135+ gating predicate; no surface calls it yet in Phase 134 (NO discovery UI ships this phase), imported now so downstream plans wire it without touching this import block
 from web.passage_assets import (load_passage_state, passage_available,  # Phase 145: passage-matching parallels search
                                 passage_multi_witness_available)
+from web.start_content import demo_url, load_start_content  # the /start page's own prepared parallels demo, reused by the What's New toast
 from web.discovery import (  # Phase 135 (BAND-05): /help methods-section wiring — noindex predicate + band-precision/claim-count readers (patched as web.main.* in the render-smoke test)
     discovery_methods_noindex,
     get_all_band_precision,
@@ -1789,23 +1790,48 @@ def create_layout():
     # already presents this", which named `/start` while `/start` was being
     # advertised; it now names the page the toast points at.
     _WHATS_NEW_SUPPRESSED_ON = ('/parallels', '/help')
+
+    # Both entries land on a PREFILLED search rather than an empty form
+    # (owner, 2026-08-26). A reader who has just been told a new search
+    # method exists and is then shown a blank textarea has to go and find
+    # something to paste into it before the announcement means anything.
+    #
+    # The text comes from `/start`'s own prepared demo -- the Deror Yikra
+    # stanzas -- rather than a copy of it. That file is schema-validated and
+    # the URL is rebuilt from typed fields by `demo_url` (deliberately, so
+    # the JSON can never become an open-redirect), and one source of truth
+    # means the toast cannot drift from the Start page.
+    #
+    # Failure here must not take the shell down with it: `load_start_content`
+    # raises on a malformed content file, and `/start` degrades to a fallback
+    # page when it does. The toast is on EVERY page, so it degrades to the
+    # bare form instead.
+    _parallels_demo_target = '/parallels'
+    try:
+        _demo = (load_start_content().get('demos') or {}).get('parallels') or {}
+        if _demo.get('enabled'):
+            _parallels_demo_target = demo_url('parallels', _demo)
+    except Exception:                                        # noqa: BLE001
+        pass
+
     _new_surfaces = []
     if passage_available():
         _new_surfaces.append(
             (tr("Letter-level parallels search — faster and more precise"),
-             '/parallels'))
+             _parallels_demo_target))
     if passage_multi_witness_available():
         _new_surfaces.append(
             (tr("Get the most from the parallels search by entering several "
-                "textual witnesses"), '/parallels'))
+                "textual witnesses"), _parallels_demo_target))
 
     if (_new_surfaces
             and current_page not in _WHATS_NEW_SUPPRESSED_ON
             and safe_user_get('whats_new_dismissed') != WHATS_NEW_VERSION):
         banner_dir = 'rtl' if rtl_mode else 'ltr'
         with content_col:
-            # Fixed-position toast (out of document flow): showing and the 10s
-            # auto-dismiss never reflow page content, so this no longer causes CLS.
+            # Fixed-position toast (out of document flow): showing it and the
+            # 30s auto-dismiss never reflow page content, so this stays off the
+            # CLS budget. (The comment said 10s; the timer has always been 30.)
             with ui.element('div').classes('px-5 py-4').style(
                 # TOP, not bottom (owner, 2026-08-26), and clearing the fixed
                 # 64px header rather than sitting on it. Still fixed-position
@@ -1813,16 +1839,15 @@ def create_layout():
                 # auto-dismiss must never reflow page content, which is what
                 # kept this off the CLS budget in the first place.
                 f'position: fixed; top: 80px; left: 50%; transform: translateX(-50%); '
-                # 26rem, not 34: on a 375px phone the old cap resolved to 94vw
-                # and the card ran edge to edge over the page behind it. And
-                # `width: fit-content` rather than `max-content` -- with
-                # entries this long max-content is always wider than the cap,
-                # so that branch never once decided anything.
-                # `fit-content` and NOT an explicit width. It measures 188px on a
-                # 375px viewport -- about half the screen -- which reads as a
-                # tidy card rather than a bar across the page, and is the
-                # rendering the owner reviewed and approved on 2026-08-26.
-                # Widening it to the cap was tried and reverted.
+                # 26rem rather than 34: on a 375px phone the wider cap
+                # resolved to 94vw and the card ran edge to edge over the page
+                # behind it. And `fit-content` rather than an explicit width --
+                # it measures 188px on that viewport, about half the screen,
+                # which reads as a tidy card rather than a bar across the page,
+                # and is the rendering the owner reviewed on 2026-08-26.
+                # Widening it to the cap was tried and reverted. `max-content`
+                # is not used because with entries this long it is always wider
+                # than the cap and so never decides anything.
                 f'z-index: 2000; width: fit-content; max-width: min(92vw, 26rem); '
                 f'background: var(--bg-tertiary); '
                 f'border: 1px solid var(--border-light); border-radius: 10px; '

@@ -413,6 +413,83 @@ The asset load is authoritative at startup (there is deliberately no per-request
 clean-hides `/atlas`, drops the nav link + homepage teaser, and 404s the `/atlas-data/*`
 routes — with the rest of the app untouched.
 
+### Deploy Letter-Level Parallels Search (code-first, index built on the box)
+
+Letter-level search (`/parallels`, and `method='passage'` on `POST /api/parallels`) is gated by
+`PASSAGE_PARALLELS_ENABLED`, and its Witnesses panel by `PASSAGE_MULTI_WITNESS_ENABLED` — both
+default **OFF**. As with the Atlas, each flag is necessary but not sufficient:
+`web/passage_assets.py::passage_available()` also requires the index to have opened cleanly at
+startup, and `shared/passage_index.py::open_index` is itself the fail-closed validator (manifest,
+layout and normalizer versions, bit budgets, byte order, CSR sanity, declared-vs-actual file
+sizes).
+
+**This deploy is the INVERSE of the Atlas one, and the ordering matters for the opposite reason.**
+The Atlas asset is baked offline and uploaded, so it goes asset-first to avoid a flag-ON /
+asset-missing window. The passage index is ~3.5 GB and is built **from the corpus the server
+already serves**, so the code must arrive first and the index is made in place. Building it
+elsewhere and uploading would also mean shipping an index of a *different* corpus than the one the
+site fetches text from.
+
+Deploying code without the index is safe and is the normal intermediate state: the loader is
+fail-closed, so the whole surface hides rather than half-working. **One visible consequence** —
+the What's New toast builds its list from `passage_available()`, so between the code deploy and
+the flag flip the toast shows nothing at all.
+
+```bash
+# 1. Code first. The flags are still off, so nothing new is user-visible yet.
+ssh ubuntu@<server> 'cd /home/ubuntu/GenizahSearch && ./deploy.sh master-main'
+
+# 2. Preflight. Reports the paths it will use and the free space it needs, and
+#    builds nothing. Run this before committing the box to a long job.
+ssh ubuntu@<server> 'cd /home/ubuntu/GenizahSearch && source venv/bin/activate && \
+    python scripts/build_passage_index.py --check'
+
+# 3. Build, detached and niced. ~10 GB free is needed while it runs; the finished index is
+#    ~3.5 GB. Peak RSS is ~1.75 GB at the default 16 partitions (it is 3.5 GB at 8 — the
+#    partition count is halved precisely because this box is also serving the site). The only
+#    dependency is numpy, already in requirements.txt.
+ssh ubuntu@<server> 'cd /home/ubuntu/GenizahSearch && source venv/bin/activate && \
+    setsid nice -n 10 nohup python scripts/build_passage_index.py \
+    </dev/null >/home/ubuntu/passage_build.log 2>&1 & echo $! > /home/ubuntu/passage_build.pid'
+
+# 4. Watch it. A non-zero exit is a real failure: the script reports a build that RETURNED
+#    an error status as a failure, not as a completed build.
+ssh ubuntu@<server> 'tail -f /home/ubuntu/passage_build.log'
+
+# 5. Only once the log says "installed", set the flags and restart, so
+#    load_passage_state() re-runs and the index is ready BEFORE the flags are observed
+#    live. Flags live in `.env` on this box — NOT in a systemd override, which is the
+#    Atlas section's mechanism and is not what this service reads:
+cp .env .env.bak-before-passage-golive
+printf 'PASSAGE_PARALLELS_ENABLED=1\nPASSAGE_MULTI_WITNESS_ENABLED=1\n' >> .env
+
+#    Set them BEFORE the code deploy and let its restart pick up both, so the go-live is
+#    ONE restart rather than two. Nothing changes in the window between — the flags are
+#    read once at startup.
+./deploy.sh master-main
+```
+
+**Running the build against a live site is safe.** On Linux a rename over an open mmap is legal:
+the server keeps serving its current index from the now-unlinked inode and notices nothing, and the
+new one is picked up on the next restart. (This is also why the desktop needs an elaborate
+handle-release protocol and the server does not — Windows refuses that rename, Linux does not
+care.) Nothing about the swap is visible to a reader until step 5.
+
+**Do NOT use `scripts/bench_passage_build.py` here.** It is a measurement harness that builds
+repeatedly to compare constructions, and its own docstring says "Dev-box / owner-machine only.
+Never run it on the web server." `scripts/build_passage_index.py` is the production entry point.
+
+**Rollback** is the flags: setting both OFF and restarting clean-hides the method selector, rejects
+`method='passage'` at the API, empties the What's New toast, and leaves the rest of the app
+untouched. The index on disk can stay; it costs nothing while the flag is off, because the flag is
+checked *before* the directory is opened (an earlier incident: unconditionally mmapping a large
+index while its flag was OFF evicted 1.4 GB of page cache on a 15.8 GB host).
+
+**Rebuilding later.** The index is a snapshot of the corpus at build time. After any corpus
+refresh, re-run step 3 — it stages, validates and swaps atomically, and on any failure it restores
+the previous index rather than leaving a broken one. `passage_index/` is gitignored, so
+`deploy.sh`'s `git reset --hard` never touches it.
+
 ### Rebuild Search Indexes
 
 ```bash

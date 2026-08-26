@@ -252,7 +252,7 @@ class WhatsNewDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(tr("New Features!"))
         self.setModal(True)
-        # Resizable + scrollable body (set below) so the four What's New bullets,
+        # Resizable + scrollable body (set below) so the What's New bullets,
         # some of them long, never clip on smaller displays.
         self.setMinimumSize(520, 480)
         self.resize(520, 600)
@@ -301,7 +301,7 @@ class WhatsNewDialog(QDialog):
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
             )
         features_label.setText(features_text)
-        # Wrap in a scroll area so the four (sometimes long) bullets never clip on
+        # Wrap in a scroll area so the (sometimes long) bullets never clip on
         # smaller displays; the dialog is resizable rather than fixed-size.
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
