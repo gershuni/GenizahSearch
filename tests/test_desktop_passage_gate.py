@@ -121,6 +121,8 @@ class _Win:
     _comp_passage_axis = APP._comp_passage_axis
     _comp_method = APP._comp_method
     _restore_comp_passage_preferences = APP._restore_comp_passage_preferences
+    _method_help_text = APP._method_help_text
+    _update_comp_method_help = APP._update_comp_method_help
 
 
 def _window(scope='genizah', lab=False, engine_ready=True, building=False):
@@ -400,3 +402,99 @@ def test_the_telemetry_method_prop_is_allowlisted_and_emitted():
     assert 'method' in telemetry._ALLOWED_PROPS
     seg = _function_source('_emit_comp_search_telemetry')
     assert "'method'" in seg
+
+
+# ---------------------------------------------------------------------------
+# Shared vocabulary. Owner directive 2026-08-26: the web already has strings
+# for this feature -- use them, and if we change one, change both. Both
+# surfaces read the SAME genizah_translations.TRANSLATIONS, so identical
+# English is what makes that true mechanically rather than by discipline.
+# ---------------------------------------------------------------------------
+
+def _tr_strings(rel_path):
+    src = io.open(os.path.join(REPO_ROOT, rel_path), encoding='utf-8').read()
+    out = set()
+    for node in ast.walk(ast.parse(src)):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'tr' and node.args):
+            a = node.args[0]
+            if isinstance(a, ast.Constant) and isinstance(a.value, str):
+                out.add(a.value)
+    return out
+
+
+# The strings BOTH surfaces show for the same thing. Not a third copy to
+# drift: the test asserts each one is present in both files, so editing
+# either surface alone fails here and names the other.
+_SHARED_WITH_WEB = (
+    # Method selector items
+    'Chunk search (slower)',
+    'New! Letter-level search',
+    # Per-method help lines
+    'Faster, with fewer irrelevant results. Tolerates spelling and '
+    'transcription differences.',
+    'The older method. Slower, but offers Exact / Variants / Fuzzy modes '
+    'and cross-paragraph filtering.',
+    # Policy axis labels and items
+    'Match width', 'Passage length', 'Search depth',
+    'Narrow (near-exact)', 'Medium width', 'Wide width',
+    'Very wide (default)', 'Maximal (may add noise)',
+    'Normal passages (default)', 'Also short passages',
+    'Normal (fast, default)', 'Deep (slower, more witnesses)',
+    'Deepest (slowest, most)',
+    # The width/length/depth tooltips, ported verbatim
+    'How far a manuscript may drift from your text and still match. Wider '
+    'finds more noisy witnesses; the strongest matches always rank first.',
+    'How much of the corpus the search may examine. Deeper searches take '
+    'seconds longer and return more manuscripts \u2014 including badly '
+    'damaged and reworked copies a fast pass misses. Long texts benefit '
+    'the most.',
+)
+
+
+@pytest.mark.parametrize('shared', _SHARED_WITH_WEB)
+def test_the_desktop_and_web_say_the_same_thing(shared):
+    """Identical English on both surfaces, so one TRANSLATIONS entry serves
+    both and a reworded string cannot land on one surface only.
+
+    If this fails, the fix is almost never to edit this list -- it is to make
+    the two surfaces agree again."""
+    web = _tr_strings(os.path.join('web', 'pages', 'parallels.py'))
+    app = _tr_strings('genizah_app.py')
+    assert shared in web, (
+        'the web no longer uses this string; if it was reworded there, the '
+        'desktop needs the same rewording')
+    assert shared in app, (
+        'the desktop no longer uses this string; the two surfaces have '
+        'drifted into separate vocabularies for one feature')
+
+
+def test_the_desktop_help_line_is_per_method_not_one_tooltip():
+    """A single tooltip on a two-option control describes BOTH options --
+    which is how the web ended up explaining letter-level search to someone
+    hovering "Chunk search" (owner-reported 2026-08-25). The desktop combo
+    has the same flaw, so it uses the same fix: a live line that shows the
+    selected method's own text."""
+    seg = _function_source('_method_help_text')
+    assert "'passage'" in seg, 'the help text does not branch on the method'
+    app_src = _app_source()
+    assert 'comp_method_combo.setToolTip' not in app_src, (
+        'a combined tooltip on the method combo describes both methods; use '
+        'the per-method help line instead')
+
+
+def test_the_depth_tooltip_keeps_the_shared_sentence_separate():
+    """The desktop adds one sentence the web does not have. Concatenating it
+    into the shared string would fork that sentence into a second version
+    that stops changing when the web's does."""
+    app_src = _app_source()
+    assert 'A deep search cannot be interrupted once it has ' in app_src, (
+        'the desktop-only non-interruptibility warning is missing')
+    web = _tr_strings(os.path.join('web', 'pages', 'parallels.py'))
+    combined = [s for s in _tr_strings('genizah_app.py')
+                if 'How much of the corpus' in s]
+    assert combined, 'the shared depth tooltip is gone'
+    for s in combined:
+        assert s in web, (
+            'the desktop grew its own variant of the depth tooltip instead '
+            'of appending a separate string: %r' % (s[:80],))

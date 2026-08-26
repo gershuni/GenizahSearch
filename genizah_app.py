@@ -5602,12 +5602,17 @@ class GenizahGUI(QMainWindow):
         # is the user's only warning that Stop will not answer during a deep
         # scan (owner ruling 2026-08-25 -- ship the depth axis and accept the
         # wait rather than withhold it pending a mid-search cancel hook).
-        self.comp_passage_depth_combo.setToolTip(tr(
-            "How much of the corpus the search may examine. Deeper searches "
-            "take seconds longer and return more manuscripts \u2014 including "
-            "badly damaged and reworked copies a fast pass misses. Long texts "
-            "benefit the most. A deep search cannot be interrupted once it "
-            "has started."))
+        # The web's tooltip VERBATIM (same key, same Hebrew), plus the
+        # desktop-only sentence as a SEPARATE string. Concatenating them into
+        # one key would have forked the shared sentence into a second version
+        # that no longer changes when the web's does.
+        self.comp_passage_depth_combo.setToolTip(
+            tr("How much of the corpus the search may examine. Deeper "
+               "searches take seconds longer and return more manuscripts "
+               "\u2014 including badly damaged and reworked copies a fast "
+               "pass misses. Long texts benefit the most.")
+            + " " + tr("A deep search cannot be interrupted once it has "
+                       "started."))
         self.comp_passage_depth_combo.setAccessibleName(tr("Search depth"))
 
         self.lbl_comp_passage_reason = QLabel("")
@@ -5632,8 +5637,11 @@ class GenizahGUI(QMainWindow):
         in_l.addWidget(self.lbl_comp_passage_reason)
         in_l.addWidget(self.lbl_comp_passage_dropped_warning)
 
+        in_l.addWidget(self.lbl_comp_method_help)
+
         # Chunk is the default, so the letter-level row starts hidden.
         self._set_passage_options_visible(False)
+        self._update_comp_method_help()
 
         # Initialize boundary settings from LabSettings if available
         if hasattr(self, 'lab_engine') and self.lab_engine:
@@ -5699,19 +5707,28 @@ class GenizahGUI(QMainWindow):
         # a passage index exists -- availability never changes what a fresh
         # install starts on. The two methods are complementary, not ranked.
         self.comp_method_combo = QComboBox()
-        self.comp_method_combo.addItem(tr("Chunk search"), "chunk")
-        self.comp_method_combo.addItem(tr("Letter-level search"), "passage")
-        self.comp_method_combo.setToolTip(tr(
-            "Two different ways to find parallels. Chunk search splits your "
-            "text into overlapping pieces and looks each up; letter-level "
-            "search compares the letter stream directly and tolerates "
-            "damaged or reworked copies. They find overlapping but different "
-            "things \u2014 neither replaces the other."))
+        # The web's exact item labels (web/pages/parallels.py method_radio).
+        # Same English -> same TRANSLATIONS entry -> one vocabulary for one
+        # feature, and a later retirement of the "New!" marker is a single
+        # edit that moves both surfaces together.
+        self.comp_method_combo.addItem(tr("Chunk search (slower)"), "chunk")
+        self.comp_method_combo.addItem(tr("New! Letter-level search"),
+                                       "passage")
         self.comp_method_combo.setAccessibleName(tr("Search method"))
         self.comp_method_combo.setFixedWidth(150)
         self.comp_method_combo.setCurrentIndex(0)
         self.comp_method_combo.currentIndexChanged.connect(
             self._on_comp_method_changed)
+
+        # Mirrors the web's `method_help`: a live line under the
+        # selector that describes the SELECTED method only. A single tooltip
+        # on a two-option control necessarily describes both, which is how
+        # the web ended up explaining letter-level search to someone
+        # hovering "Chunk search" (owner-reported 2026-08-25).
+        self.lbl_comp_method_help = QLabel("")
+        self.lbl_comp_method_help.setWordWrap(True)
+        self.lbl_comp_method_help.setStyleSheet(
+            "color: #7f8c8d; font-size: 11px;")
 
         cr.addWidget(self.comp_method_combo)
         cr.addWidget(self.comp_corpus_scope_combo)
@@ -15928,6 +15945,7 @@ class GenizahGUI(QMainWindow):
         else:
             self._apply_passage_mode_ui(False)
             self._show_passage_reason(None)
+        self._update_comp_method_help()
         self._refresh_comp_method_enabled()
 
     def _restored_provenance_is_valid(self, comp):
@@ -16009,6 +16027,21 @@ class GenizahGUI(QMainWindow):
             "{} results could not load their text and were left out. "
             "Re-index from Settings if this persists.").format(int(dropped)))
         lbl.setVisible(True)
+
+    # The web's own per-method help text, reused verbatim
+    # (`_METHOD_HELP` in web/pages/parallels.py). Kept as a method rather
+    # than a class constant so `tr()` runs at call time, not import time.
+    def _method_help_text(self, method):
+        if method == 'passage':
+            return tr("Faster, with fewer irrelevant results. Tolerates "
+                      "spelling and transcription differences.")
+        return tr("The older method. Slower, but offers Exact / Variants / "
+                  "Fuzzy modes and cross-paragraph filtering.")
+
+    def _update_comp_method_help(self):
+        lbl = getattr(self, 'lbl_comp_method_help', None)
+        if lbl is not None:
+            lbl.setText(self._method_help_text(self._comp_method()))
 
     def _comp_method(self):
         """The selected method, defaulting to chunk. Reads the widget so a
@@ -16186,10 +16219,12 @@ class GenizahGUI(QMainWindow):
                 combo.setCurrentIndex(idx)
                 combo.blockSignals(False)
         self._apply_passage_mode_ui(False)
+        self._update_comp_method_help()
         self._show_passage_reason(reason_key)
 
     def _on_comp_method_changed(self, _index):
         method = self._comp_method()
+        self._update_comp_method_help()
         if method != 'passage':
             self._apply_passage_mode_ui(False)
             self._show_passage_reason(None)
