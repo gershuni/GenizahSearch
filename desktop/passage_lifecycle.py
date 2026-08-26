@@ -101,12 +101,25 @@ def _release_index_handles(idx: Optional[PassageIndex]) -> None:
     idx.close()
 
 
-def _open_with_retry(path: str, attempts: int = 2) -> Optional[PassageIndex]:
+def _open_with_retry(path: str, attempts: int = 2,
+                     backoff: float = 0.0) -> Optional[PassageIndex]:
     """`open_index` converts EVERY exception, including a transient access
     error, into None -- so a single flaky read must not downgrade a genuinely
     valid artifact. Used by both the swap's reload check and startup
-    recovery."""
-    for _ in range(attempts):
+    recovery.
+
+    `backoff` sleeps BETWEEN attempts (never before the first, never after
+    the last) -- 0.0 by default, which is every existing call site's
+    immediate-retry behaviour, unchanged. Startup recovery's re-confirmation
+    of `current/` right before destroying it (`CURRENT_DESTROY_RECONFIRM_*`
+    below) is the one caller that widens both knobs: two immediate retries
+    can both land inside a virus scanner's transient hold on the files, but
+    real time between attempts is what a hold that clears on its own needs
+    to be told apart from a genuinely dead artifact.
+    """
+    for i in range(attempts):
+        if i and backoff:
+            time.sleep(backoff)
         idx = open_index(path)
         if idx is not None:
             return idx
@@ -1102,6 +1115,72 @@ class BuildAndSwapResult:
     quarantine_dir: str = ''
 
 
+# `release_live_state` is an ARBITRARY caller-supplied callable (in
+# production, a blocking queued Qt signal/slot hop to the UI thread) called
+# below with the cross-process lock already held -- unlike
+# `_wait_for_leases_to_drain` above, which polls a counter THIS module owns,
+# there is nothing here to poll: the seam's insides are opaque, so the only
+# way to bound it is to run it on its own thread and stop waiting on this
+# one if it does not return in time. Larger than `LEASE_DRAIN_TIMEOUT_SECONDS`
+# on purpose -- `close_passage_state()` (the real seam in production) has
+# its own bounded wait for readers to drain, and that inner wait must have
+# room to finish normally before this OUTER bound gives up on the seam
+# entirely.
+UI_RELEASE_SEAM_TIMEOUT_SECONDS = 15.0
+
+# Distinct from every value `release_live_state` itself is documented to
+# return (`True`, `False`, `None` -- see `run_build_and_swap`'s docstring)
+# so a caller can never mistake a real seam outcome for a timeout.
+_RELEASE_SEAM_TIMED_OUT = object()
+
+
+def _call_release_seam(release_live_state: Callable[[], Optional[bool]],
+                       timeout: Optional[float] = None):
+    """Runs `release_live_state()` on its own daemon thread and waits at
+    most `timeout` seconds for it to return, so a seam whose event loop
+    never answers -- the UI thread is wedged, or simply gone -- cannot hang
+    THIS thread forever. This thread is a worker holding the cross-process
+    lock inside `run_build_and_swap`'s try/finally, so a hang here would
+    strand that lock across every future build and startup recovery, in
+    every process, until this one is killed.
+
+    On timeout the seam thread is simply abandoned (it cannot be killed
+    from here); if it eventually does call back into `close_passage_state`
+    for real, that happens unseen by this function and by whatever already
+    gave up waiting on it.
+
+    Returns the seam's own return value on a normal return within
+    `timeout`, or the sentinel `_RELEASE_SEAM_TIMED_OUT` on timeout.
+    Whatever the seam itself raises is re-raised here once joined -- a
+    seam is expected to release cleanly, not fail, so a failure is a real
+    bug this must not swallow.
+
+    `timeout` is read from the module tunable `UI_RELEASE_SEAM_TIMEOUT_
+    SECONDS` at CALL time, exactly like `_wait_for_leases_to_drain` above
+    and for the same reason: a default bound at import time would leave
+    the tunable unpatchable by a test that shrinks it.
+    """
+    if timeout is None:
+        timeout = UI_RELEASE_SEAM_TIMEOUT_SECONDS
+    outcome: list = []
+
+    def _run() -> None:
+        try:
+            outcome.append(('return', release_live_state()))
+        except BaseException as exc:  # forwarded below, never swallowed
+            outcome.append(('raise', exc))
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    t.join(timeout)
+    if t.is_alive():
+        return _RELEASE_SEAM_TIMED_OUT
+    kind, value = outcome[0]
+    if kind == 'raise':
+        raise value
+    return value
+
+
 def run_build_and_swap(root: str, records, source_paths: list,
                        corpus_path: str, *, construction: str = 'spool',
                        partitions: int = DEFAULT_PARTITIONS,
@@ -1144,6 +1223,16 @@ def run_build_and_swap(root: str, records, source_paths: list,
     as a refusal -- it proceeds exactly as before, so whatever the OS/rename
     layer does about a still-open handle is what happens, unchanged.
 
+    The seam is called through `_call_release_seam`, which bounds it to
+    `UI_RELEASE_SEAM_TIMEOUT_SECONDS`: a THIRD outcome, on top of the
+    `True`/`False`/`None` triple above, is the seam simply never returning
+    (a UI thread that is wedged, or gone). That is reported as status
+    `'release_timed_out'` -- deliberately NOT `'readers_active'`, which
+    means something different (a lease was seen and refused to drain in
+    time; here, nothing about the release outcome is even known) -- and
+    handled exactly like a refusal: staging is cleaned and `perform_swap`
+    is never called, since nothing was proven released.
+
     A concurrent second run (another window, a leftover process) is refused
     up front rather than left to race the filesystem.
     """
@@ -1181,8 +1270,13 @@ def run_build_and_swap(root: str, records, source_paths: list,
         # Two-phase handoff: caller releases on the UI thread. `is False`,
         # never bare falsiness -- see the docstring above for why `None`
         # (a seam that does not yet return anything) must NOT be read as a
-        # refusal.
-        released = release_live_state()
+        # refusal. Bounded (`_call_release_seam`) because this thread holds
+        # the cross-process lock through the whole `try` -- a seam that
+        # never answers must not be allowed to hold it forever.
+        released = _call_release_seam(release_live_state)
+        if released is _RELEASE_SEAM_TIMED_OUT:
+            _cleanup_staging(staging)
+            return BuildAndSwapResult(status='release_timed_out')
         if released is False:
             _cleanup_staging(staging)
             return BuildAndSwapResult(status='readers_active')
@@ -1270,6 +1364,17 @@ def _delete_prev_generations(root: str) -> None:
             shutil.rmtree(os.path.join(root, n), ignore_errors=True)
 
 
+# MEDIUM-2: knobs for the ONE re-open `_recover_at_startup` gives `current/`
+# immediately before it would otherwise be destroyed as unopenable. Wider
+# than `_open_with_retry`'s plain default (2 immediate attempts) on purpose
+# -- two consecutive access-denied errors from a virus scanner is an
+# ordinary Windows event, not proof of corruption, and real time between
+# attempts (not just more of them back-to-back) is what tells the two
+# apart in practice.
+CURRENT_DESTROY_RECONFIRM_ATTEMPTS = 5
+CURRENT_DESTROY_RECONFIRM_BACKOFF_SECONDS = 0.3
+
+
 def _confirm_promotion(root: str, live: str,
                         status: str) -> Optional[RecoveryResult]:
     """One more REAL open of a candidate this function already validated
@@ -1319,8 +1424,29 @@ def _recover_at_startup(root: str) -> RecoveryResult:
                 confirmed = _confirm_promotion(root, live, pending_status)
                 if confirmed is not None:
                     return confirmed
+            else:
+                # `live` here is the ORIGINAL `current/`: it never went
+                # through a promotion (that case is `pending_status`
+                # above), it simply failed `_open_with_retry`'s two
+                # immediate attempts at the top of this loop. Validation
+                # -first recovery's own rule -- nothing is deleted until a
+                # candidate has passed a REAL open_index -- extends here to
+                # the thing about to be DESTROYED: it must be re-proven
+                # unopenable too, with more attempts and real backoff time
+                # between them, not just the two immediate ones already
+                # spent. Two consecutive access-denied errors from a virus
+                # scanner is an ordinary Windows event, not proof `current/`
+                # is actually corrupt.
+                reconfirmed = _open_with_retry(
+                    live, attempts=CURRENT_DESTROY_RECONFIRM_ATTEMPTS,
+                    backoff=CURRENT_DESTROY_RECONFIRM_BACKOFF_SECONDS)
+                if reconfirmed is not None:
+                    _delete_prev_generations(root)
+                    return RecoveryResult(status='live_ok',
+                                          index=reconfirmed, live_dir=live)
             # `live` exists and nothing above proved it (a still-pending
-            # promotion just failed its recheck too) -- move it aside
+            # promotion, or `current/` itself under the re-confirmation
+            # just above, both failed their recheck too) -- move it aside
             # first; a generation cannot be renamed onto an existing
             # directory.
             dead = os.path.join(root, f'.dead-{_gen_token()}')

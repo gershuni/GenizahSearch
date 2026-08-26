@@ -251,7 +251,28 @@ def _expected_sizes(counts: dict) -> dict:
 
 @dataclass
 class PassageIndex:
-    """Memory-mapped reader. Construct via `open_index`, never directly."""
+    """Memory-mapped reader. Construct via `open_index`, never directly.
+
+    CONTRACT: the five section attributes below belong to THIS object's
+    accessors (`stream`, `record_id`, `postings_for`, `df`, `dfs`, and the
+    `n_records`/`n_postings` properties) -- not to whatever a caller does
+    with a raw slice or `.view()` taken directly off one of them. `close()`
+    poisons the five ATTRIBUTES (see its own docstring), and every accessor
+    above returns a freshly materialised value (a decoded `str`, a `.copy()`
+    made while unpacking postings, a zeroed-then-filled array) rather than a
+    view into the mapping, so going through them is safe across a `close()`
+    by construction. A raw section reference obtained BEFORE `close()` --
+    `view = idx.records[:1]`, `arr = idx.streams` -- dangles the instant
+    `close()` runs, because unmapping is exactly what `close()` does to let
+    Windows rename or delete the directory underneath; nothing can defer
+    that unmap without reintroducing the hazard `close()` exists to remove.
+    Dereferencing such a view after `close()` faults the process (Windows
+    0xC0000005 / SIGSEGV) -- no guard, refcount, or poison can catch it,
+    because by the time `close()` runs the reference already lives outside
+    any object this module controls. Do not take one; if you must inspect
+    a section directly for a one-shot analysis script, never call `close()`
+    on that `PassageIndex` while the reference is still live.
+    """
     index_dir: str
     manifest: dict
     gram_offsets: np.ndarray

@@ -731,6 +731,66 @@ def test_cancel_check_stops_pass1_when_every_record_is_filtered(
     shutil.rmtree(d)
 
 
+def _ndarrays_in_traceback(tb):
+    """Walks a RAW traceback's frame chain (`tb_next`, not pytest's own
+    wrapper) collecting every ndarray reachable from ANY frame's locals --
+    (all_arrays, still_mapped). `getattr(arr, '_mmap', None)` is None for
+    an ordinary in-RAM array (e.g. `recs`, loaded via `np.fromfile`, or
+    `offsets`, built in RAM by `_csr_offsets`) and only non-None for
+    `streams`, the one array `build_index` actually memmaps. `streams`
+    reachable here at all is the exact shape of the HIGH-1 hazard: pass 2's
+    own frame binds it as an argument, and if the exception boundary ever
+    failed to keep that frame out of a RETAINED traceback, `still_mapped`
+    is where it would show up."""
+    all_arrays, still_mapped = [], []
+    while tb is not None:
+        for val in tb.tb_frame.f_locals.values():
+            if isinstance(val, np.ndarray):
+                all_arrays.append(val)
+                if getattr(val, '_mmap', None) is not None:
+                    still_mapped.append(val)
+        tb = tb.tb_next
+    return all_arrays, still_mapped
+
+
+def test_the_boundary_preserves_what_the_exception_carried(tmp_path):
+    """Severing the traceback must not cost the exception's own detail.
+
+    The frames can be dropped two ways, and only one is lossless. Rebuilding
+    via `type(exc)(*exc.args)` looks equivalent and is not: everything an
+    exception carries OUTSIDE args is silently discarded, and for the
+    OSError family that is `filename` -- so a build that died on a real file
+    would report "[Errno 2] No such file or directory" and never name the
+    path, which is the one thing the reader needs. Re-raising the same
+    object with `__traceback__` cleared drops the frames just as completely
+    and keeps the detail.
+    """
+    marker = os.path.join(str(tmp_path), 'the-file-that-was-missing.bin')
+
+    def explode():
+        raise FileNotFoundError(2, 'No such file or directory', marker)
+
+    d = os.path.join(str(tmp_path), 'idx')
+    with pytest.raises(FileNotFoundError) as excinfo:
+        build_index(synthetic_records(6), d, cancel_check=explode)
+
+    assert excinfo.value.filename == marker, 'filename was dropped'
+    # `str(OSError)` embeds `repr(filename)`, so on Windows the raw path is
+    # NOT a substring of it -- the backslashes come back doubled. The
+    # basename carries none, and its presence is what proves the filename
+    # reached the message rather than being dropped with the traceback.
+    assert os.path.basename(marker) in str(excinfo.value), (
+        'the path vanished from the message')
+    assert excinfo.value.errno == 2
+
+    # ...and the frames are still gone, which is the whole point of the
+    # boundary: the two properties have to hold together, not one at a time.
+    assert excinfo.value.__context__ is None
+    assert excinfo.value.__cause__ is None
+    _, still_mapped = _ndarrays_in_traceback(excinfo.value.__traceback__)
+    assert not still_mapped, 'a live mapping is reachable from the traceback'
+
+
 @pytest.mark.parametrize('construction', ['scatter', 'spool'])
 def test_cancel_mid_build_releases_the_memmap_for_immediate_deletion(
         tmp_path, construction):
@@ -741,7 +801,17 @@ def test_cancel_mid_build_releases_the_memmap_for_immediate_deletion(
     build_index's frame, and the frame keeps `streams` mapped -- which is the
     only condition under which the builder's own `del streams` is
     load-bearing. A bare `pytest.raises` would drop the traceback the instant
-    the block exits and the mapping would close regardless, proving nothing."""
+    the block exits and the mapping would close regardless, proving nothing.
+
+    The exception boundary (build_index's own docstring, "EXCEPTION
+    BOUNDARY") is what makes retaining `excinfo` here harmless at all: it
+    re-raises a FRESH `BuildCancelled` only after the whole try/except has
+    unwound, so the frame that bound `streams` as an argument -- pass 2's
+    own -- never makes it into what `excinfo` holds. Checking that the
+    traceback merely "exists" would pass just as well if that frame WERE
+    retained, so this also walks it for any still-mapped array and
+    DEREFERENCES whatever it finds -- proving the boundary made that safe,
+    not merely assuming it because nothing crashed."""
     records = synthetic_records(n_records=10)
     d = str(tmp_path / f'cancel-mid-{construction}')
     cancel = _cancel_after(1)  # first pass-2 call, whichever loop makes it
@@ -751,6 +821,43 @@ def test_cancel_mid_build_releases_the_memmap_for_immediate_deletion(
                     cancel_check=cancel)
     assert not os.path.exists(os.path.join(d, MANIFEST_NAME))
     assert excinfo.traceback, 'the frame chain must still be referenced here'
+
+    # Checked BEFORE touching anything, and the array list itself is never
+    # named inside an `assert` statement below -- pytest's assertion
+    # rewriter reprs every local it can reach FROM the assert expression's
+    # own syntax to build a "where X = ..." hint, even for an operand
+    # nested inside `len(...)`, so `assert len(still_mapped) == 0` still
+    # crashes the SAME way a bare `assert still_mapped == []` would:
+    # confirmed empirically, both fault inside pytest's own `_saferepr`
+    # when run against the pre-fix builder, not from any dereference this
+    # test writes itself. Counting OUTSIDE the assert and asserting only
+    # that plain int is what keeps the dangling array out of the assert
+    # statement's AST entirely.
+    all_arrays, still_mapped = _ndarrays_in_traceback(excinfo.value.__traceback__)
+    n_all, n_mapped = len(all_arrays), len(still_mapped)
+    del all_arrays, still_mapped
+    assert n_mapped == 0, (
+        f'{n_mapped} still-mapped array(s) reachable from the retained '
+        "traceback -- the exception boundary let pass 2's frame back into "
+        'what excinfo holds, exactly the HIGH-1 hazard it exists to close '
+        'off')
+
+    # Only once that is proven zero is it safe to actually DEREFERENCE what
+    # the walk did find (`recs`/`offsets`, ordinary in-RAM arrays included)
+    # -- proving this walk is not vacuously exploring zero frames, which
+    # `n_mapped == 0` alone could not distinguish from "found nothing at
+    # all". Re-walked rather than reusing the deleted `all_arrays`: nothing
+    # dangerous can be reachable given the count just proven, so redoing
+    # the walk costs nothing and keeps the array list scoped to code that
+    # only ever touches proven-safe arrays.
+    assert n_all > 0, (
+        'test setup: the walk found no ndarray anywhere in the retained '
+        'traceback -- it is exploring the wrong frames, and the assertion '
+        'above proves nothing')
+    all_arrays, _still_mapped = _ndarrays_in_traceback(excinfo.value.__traceback__)
+    for arr in all_arrays:
+        str(arr)
+
     shutil.rmtree(d)  # must not raise on Windows
     assert not os.path.exists(d)
     assert excinfo.value is not None  # excinfo outlives the delete

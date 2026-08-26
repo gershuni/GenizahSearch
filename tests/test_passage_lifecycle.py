@@ -862,6 +862,12 @@ def test_boundary_raised_error_has_no_context_or_cause(tmp_path):
         pl.get_passage_searcher(_NullTextFetcher()).search_composition_logic(
             text, boundary_mode='partial')
 
+    # Exact type, not `isinstance` via the `pytest.raises` catch above --
+    # `PassageSearchUnavailableError` is ALSO a `PassageSearchError` (see
+    # its own docstring), so a regression that always reports "unavailable"
+    # regardless of what actually failed would satisfy the catch above and
+    # still pass every assertion below it.
+    assert type(excinfo.value) is pl.PassageSearchError
     assert excinfo.value.__context__ is None
     assert excinfo.value.__cause__ is None
 
@@ -892,7 +898,10 @@ def test_retained_excinfo_value_across_close_is_harmless(tmp_path):
     # boundary exists to prevent. Touching it now must be inert.
     _ = str(excinfo.value)
     _ = repr(excinfo.value)
-    assert isinstance(excinfo.value, pl.PassageSearchError)
+    # Exact type: `isinstance` alone also accepts the `PassageSearchUnavailableError`
+    # subclass, which would let a regression that always reports
+    # "unavailable" pass this unchanged.
+    assert type(excinfo.value) is pl.PassageSearchError
 
 
 def test_non_exception_baseexception_keeps_its_class_and_is_not_caught_by_except_exception(
@@ -1385,6 +1394,71 @@ def test_crash_converts_to_passage_index_closed_in_a_real_subprocess(
     assert 'CAUGHT_CLOSED' not in raw.stdout, (
         'the control run caught PassageIndexClosed -- it should not even '
         'define that path, only reproduce the pre-fix crash')
+
+
+def _pre_close_view_crash_script() -> str:
+    """argv: [index_dir]. The DOCUMENTED contract violation from
+    `PassageIndex`'s own docstring, not a bug `close()` failed to catch: a
+    raw section VIEW taken BEFORE `close()` is a reference `close()` has no
+    way to reach -- it poisons the five section ATTRIBUTES, not whatever a
+    caller already extracted from one -- so the view keeps pointing at the
+    mapping after `close()` unmaps it, and dereferencing it faults the
+    process exactly like the 'raw' control above. There is no 'poison'
+    counterpart to run here: unlike the smuggled-`PassageIndex` case, no
+    fix is possible for this one (see the docstring), so this script only
+    ever reproduces the fault."""
+    return (
+        "import sys, os\n"
+        f"sys.path.insert(0, {REPO_ROOT!r})\n"
+        "if os.name == 'nt':\n"
+        "    import ctypes\n"
+        "    ctypes.windll.kernel32.SetErrorMode(0x0003)\n"
+        "import numpy as np\n"
+        "from shared.passage_index import open_index\n"
+        "idx = open_index(sys.argv[1])\n"
+        "assert idx is not None, 'FAILED_TO_OPEN'\n"
+        "view = idx.records[:1].view(np.ndarray)  # taken BEFORE close()\n"
+        "idx.close()\n"
+        # `view[0]` alone returns a numpy.void scalar that WRAPS the
+        # buffer without necessarily reading it -- str() is what forces
+        # the actual bytes to be materialised, which is where this faults.
+        "s = str(view[0])\n"
+        "print('NO_CRASH', s, flush=True)\n"
+        "sys.exit(3)\n"
+    )
+
+
+def test_view_taken_before_close_faults_the_process_documented_violation(
+        tmp_path):
+    """HIGH-2, pinned as the trap it is: a raw section view captured BEFORE
+    `close()` is NOT made safe by anything in this module, and cannot be --
+    `close()`'s poisoning replaces the five ATTRIBUTES, which is unreachable
+    from a reference a caller already holds off one of them, and deferring
+    the unmap to protect such a reference would just bring back the
+    Windows rename/rmtree hazard `close()` exists to fix. This test does
+    not prove the crash is caught (it is not, and must not be) -- it proves
+    the documented contract in `PassageIndex`'s docstring is the true
+    behaviour of this interpreter, not an untested claim. Run in a
+    subprocess, like the crash-conversion test above: the whole point is
+    that this really does fault the process, and doing that in the pytest
+    process itself would take the whole run down instead of proving
+    anything about it."""
+    c = _Corpus(tmp_path)
+    built = pl.execute_build(c.root, c.records, c.source_paths,
+                             partitions=2)
+    assert built.status == 'built', built.status
+    script = _pre_close_view_crash_script()
+
+    result = subprocess.run(
+        [sys.executable, '-c', script, built.staging_dir],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        timeout=60)
+    assert result.returncode in _ACCESS_VIOLATION_RETURN_CODES, (
+        'a raw section view taken BEFORE close() must fault the process '
+        'once the mapping is unmapped -- returncode='
+        f'{result.returncode!r} stdout={result.stdout!r} -- otherwise the '
+        "documented contract in PassageIndex's docstring is wrong")
+    assert 'NO_CRASH' not in result.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -2372,6 +2446,50 @@ def test_recovery_transient_open_failure_does_not_downgrade_valid_live(
     assert calls['n'] >= 2
 
 
+def test_recovery_two_transient_open_failures_does_not_downgrade_valid_current(
+        tmp_path, monkeypatch):
+    """MEDIUM-2: `fail_times=1` above clears within `_open_with_retry`'s
+    own two immediate attempts at the top of the loop, so it never reaches
+    the destroy branch at all -- it proves nothing about what happens once
+    `current/` has ALREADY failed both of those. This is the two-failure
+    case the reviewer's repro actually hit: a valid `_prev-*` generation
+    sits right behind a `current/` that is genuinely fine but hit two
+    consecutive access-denied errors (an ordinary virus-scanner event) --
+    old code treated that as proof of corruption, moved `current/` to
+    `.dead-*`, and promoted the STALE `_prev-*` over it. The fix re-opens
+    `current/` again -- more attempts, real backoff -- before ever
+    destroying it."""
+    monkeypatch.setattr(pl, '_delete_generation_background', lambda p: None)
+    monkeypatch.setattr(pl, 'CURRENT_DESTROY_RECONFIRM_BACKOFF_SECONDS', 0.01)
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+    assert c.build().status == 'installed'  # creates one _prev-* generation
+    stub, calls = _flaky_open_index(c.live_dir, fail_times=2)
+    monkeypatch.setattr(pl, 'open_index', stub)
+
+    result = pl.recover_at_startup(c.root)
+
+    assert result.status == 'live_ok', (
+        f'a valid current/ was downgraded to {result.status!r} after only '
+        'two transient open failures -- the re-confirmation before '
+        'destroying it either did not run or gave up too soon')
+    assert result.index is not None
+    assert calls['n'] >= 3, (
+        'the re-confirmation must actually have made a THIRD call against '
+        "current/ -- _open_with_retry's own two attempts already spent the "
+        'first two, so anything less proves nothing beyond the existing '
+        'one-failure test above')
+    # The still-genuinely-valid _prev-* generation must be swept away, same
+    # as the ordinary all-first-try-open live_ok path -- proving this is
+    # not merely surviving by accident (e.g. falling through to a
+    # different, un-cleaned branch).
+    remaining_prevs = [n for n in os.listdir(c.root) if n.startswith(pl.PREV_PREFIX)]
+    assert remaining_prevs == [], remaining_prevs
+    assert not any(n.startswith('.dead-') for n in os.listdir(c.root)), (
+        'current/ must never actually have been moved aside for this to '
+        'count as a fix, not a lucky recovery from one')
+
+
 def test_recovery_reconsiders_a_promoted_candidate_after_a_transient_reopen_failure(
         tmp_path, monkeypatch):
     """A `_prev-*` candidate that validates in place and gets promoted into
@@ -2684,6 +2802,12 @@ def test_end_to_end_cancel_between_build_and_swap_prevents_the_swap(
 # ---------------------------------------------------------------------------
 # 12b. Two-phase swap handoff: `run_build_and_swap` must not mutate `_state`
 #      itself -- it only ever requests the release through the injected seam.
+#      The Windows test below is the actual safety gate on that: the OS
+#      itself refuses the rename while the seam left old handles open. Its
+#      POSIX sibling is NOT a gate -- POSIX rename() has no such refusal to
+#      exercise, so that test only documents the accepted platform gap; see
+#      its own docstring before mistaking it for coverage of the same
+#      property.
 # ---------------------------------------------------------------------------
 
 def test_run_build_and_swap_uses_the_injected_seam_not_close_passage_state(
@@ -2720,6 +2844,55 @@ def test_run_build_and_swap_uses_the_injected_seam_not_close_passage_state(
         '-- only the injected seam may release _state')
 
 
+def test_run_build_and_swap_seam_that_never_returns_times_out_and_frees_the_lock(
+        tmp_path, monkeypatch):
+    """MEDIUM-1: `release_live_state` runs with the cross-process lock
+    already held (see `run_build_and_swap`'s docstring) -- a seam whose
+    event loop never answers (a wedged or gone UI thread) must not be
+    allowed to hold that lock forever, or every future build and startup
+    recovery in every process is locked out behind a worker thread that is
+    never coming back. Modelled with a seam that blocks on an `Event` this
+    test never sets -- the timeout must fire, staging must still be
+    cleaned, the OLD live index must stay installed (nothing was proven
+    released, so nothing may be renamed), and the status must be distinct
+    from `readers_active`, which means something else (a lease was SEEN
+    and refused to drain -- here, nothing about the outcome is known at
+    all)."""
+    monkeypatch.setattr(pl, 'UI_RELEASE_SEAM_TIMEOUT_SECONDS', 0.2)
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+    staging = os.path.join(c.root, pl.STAGING_DIRNAME)
+
+    never = threading.Event()
+
+    def _wedged_seam():
+        never.wait()  # never set within this test -- models a UI thread
+        return True   # that never answers; unreachable here
+
+    res = pl.run_build_and_swap(
+        c.root, c.records, c.source_paths, c.corpus_path, partitions=2,
+        release_live_state=_wedged_seam)
+
+    assert res.status == 'release_timed_out', res.status
+    assert not os.path.isdir(staging), (
+        'a swap abandoned on a seam timeout must still clean its staging')
+    assert pl.passage_available(), (
+        'a timed-out release must leave the OLD, still-live index '
+        'installed -- nothing was proven released, so nothing may be '
+        'renamed')
+
+    # The cross-process lock itself must be free again -- proof the timeout
+    # does not strand it -- checked by actually running a second build+swap
+    # through to completion, not by poking at lock internals.
+    never.set()  # let the abandoned thread finish; it is a daemon either way
+    res2 = pl.run_build_and_swap(
+        c.root, c.records, c.source_paths, c.corpus_path, partitions=2,
+        release_live_state=pl.close_passage_state)
+    assert res2.status == 'installed', res2.status
+    pl.install_passage_state(
+        pl.PassageState(index=res2.index, live_dir=res2.live_dir))
+
+
 @pytest.mark.skipif(
     sys.platform != 'win32',
     reason='the seam-skipped rename is only caught by the OS on Windows -- '
@@ -2749,8 +2922,22 @@ def test_run_build_and_swap_relies_on_the_seam_actually_releasing(tmp_path):
     reason='pins the POSIX side of the scenario above: a broken seam is NOT '
            'caught by the OS here, so the rebuild goes through regardless '
            'of the still-open old mmap')
-def test_run_build_and_swap_seam_not_running_is_not_caught_by_the_os_on_posix(
+def test_run_build_and_swap_posix_gap_broken_seam_is_not_caught_no_safety_gate(
         tmp_path):
+    """NOT a safety gate, and cannot be made into one -- read it as the
+    inverse of `test_run_build_and_swap_relies_on_the_seam_actually_
+    releasing` above, not as its POSIX equivalent. That test passes BECAUSE
+    Windows' own os.rename() refuses to rename a directory under an open
+    mmap, which is what makes a broken seam observable there at all. POSIX
+    rename() carries no such refusal -- it doesn't care what file handles
+    are open under the target -- so there is nothing in this codebase for
+    this test to catch a broken seam WITH on this platform: `res2.status
+    == 'installed'` below is the rebuild succeeding regardless of whether
+    the seam did anything, which is exactly the gap, not a property being
+    verified. Kept only so that gap is a documented, asserted fact instead
+    of a surprise discovered later -- if this assertion ever starts
+    failing, POSIX rename() has changed underneath this test, not this
+    module's code."""
     c = _Corpus(tmp_path)
     assert c.build().status == 'installed'
     assert pl.passage_available()

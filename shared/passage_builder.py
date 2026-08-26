@@ -578,110 +578,158 @@ def build_index(records: Iterable, index_dir: str, *,
     closed, but the index is still UNAVAILABLE until the rebuild finishes. A
     staging directory plus an atomic swap is the real fix and belongs with the
     desktop build worker, which is where a rebuild-in-place actually happens.
+
+    EXCEPTION BOUNDARY: this whole body runs inside one try/except, and
+    anything that escapes it is caught, reduced to (type, args) -- never
+    the exception object -- and re-raised as a FRESH instance of the SAME
+    type only after that try/except has fully unwound. The `streams`
+    memmap the `finally` below closes is a local of the pass-2 call's OWN
+    frame, not of this one; `del streams` here drops only this frame's
+    reference, so a caller that RETAINS the propagating exception (logs
+    it, stores it, `pytest.raises(...) as excinfo` then reads `.value`)
+    keeps that pass-2 frame alive through the traceback, and with it a
+    reference to a mapping `finally` has already unmapped -- dereferencing
+    it is an access violation, not a catchable error. Raising the fresh
+    exception from INSIDE the `except` clause would not fix this: even
+    `raise ... from None` only sets `__suppress_context__` (hides it from
+    printed output) and leaves `__context__` -- and the traceback hanging
+    off it -- pointing right back at the same frame. Only a raise that
+    happens after the `except` clause has been left starts with no current
+    exception being handled, so `__context__` comes back `None` for real.
+    `build_index` is this module's one public entry point, so this is the
+    only place such a boundary is needed.
     """
-    if construction not in ('scatter', 'spool'):
-        raise IndexFormatError(f'unknown construction {construction!r}')
-    require_little_endian()
-    os.makedirs(index_dir, exist_ok=True)
-    # Preflight FIRST, invalidate second (PR #324 round 3). The first version
-    # of this ordering removed the manifest and then ran the free-space check,
-    # so a failed preflight -- which touches nothing -- still left a perfectly
-    # good existing index unopenable. A refusal to start must leave the world
-    # exactly as it found it.
-    if free_space_bytes:
-        check_free_space(index_dir, free_space_bytes)
-    # Invalidate before touching data: a rebuild in place must not overwrite
-    # data files under a manifest that still describes the old ones.
-    _stale_manifest = os.path.join(index_dir, MANIFEST_NAME)
-    if os.path.exists(_stale_manifest):
-        os.remove(_stale_manifest)
-    progress = progress or _noop
-    t_start = time.time()
-
-    hist, stats = _pass1(records, index_dir, stride=stride,
-                         apply_hygiene=apply_hygiene, progress=progress,
-                         cancel_check=cancel_check)
-    stats.construction = construction
-    stats.df_cap = df_cap
-    raw_postings = stats.n_postings
-    hist = _apply_df_cap(hist, df_cap, stats)
-    stats.n_postings = raw_postings - stats.df_capped_postings
-    bands = df_band_edges(hist)
-
-    offsets = _csr_offsets(hist)
-    verify_csr_monotone(offsets)
-    if int(offsets[-1]) != stats.n_postings:
-        raise IndexFormatError(
-            f'CSR total {int(offsets[-1]):,} disagrees with the posting count '
-            f'{stats.n_postings:,}')
-    del hist
-
-    recs = np.fromfile(os.path.join(index_dir, RECORDS_NAME),
-                       dtype=RECORD_DTYPE)
-    streams = np.memmap(os.path.join(index_dir, STREAMS_NAME),
-                        dtype=np.uint8, mode='r',
-                        shape=(stats.n_letters,)) if stats.n_letters else \
-        np.empty(0, dtype=np.uint8)
+    # Set only when something below failed -- see the docstring's EXCEPTION
+    # BOUNDARY paragraph for why this is (type, args) and not the exception
+    # itself, and why it is acted on only after the try/except below, never
+    # from inside `except`.
+    boundary_failure = None
     try:
-        parts = _mass_partitions(offsets, partitions)
-        stats.partitions = len(parts)
-        runner = _pass2_scatter if construction == 'scatter' else _pass2_spool
-        runner(index_dir, offsets, recs, streams, parts, stride=stride,
-               batch_grams=batch_grams, progress=progress, stats=stats,
-               cancel_check=cancel_check)
-    finally:
-        # Released on EVERY exit, not only success, and closed EXPLICITLY:
-        # `del` alone drops only this frame's reference, while the pass-2
-        # frame still in the propagating traceback holds `streams` as its own
-        # argument. A caller that keeps the exception -- logging it, or
-        # re-raising it after cleanup -- therefore keeps the mapping open, and
-        # on Windows an open mapping blocks os.rename/rmtree of the staging
-        # directory, which is exactly what the cancel path must do next.
-        for _mapped in (streams, recs):
-            _mm = getattr(_mapped, '_mmap', None)
-            if _mm is not None:
-                _mm.close()
-        del streams
-        del recs
+        if construction not in ('scatter', 'spool'):
+            raise IndexFormatError(f'unknown construction {construction!r}')
+        require_little_endian()
+        os.makedirs(index_dir, exist_ok=True)
+        # Preflight FIRST, invalidate second (PR #324 round 3). The first version
+        # of this ordering removed the manifest and then ran the free-space check,
+        # so a failed preflight -- which touches nothing -- still left a perfectly
+        # good existing index unopenable. A refusal to start must leave the world
+        # exactly as it found it.
+        if free_space_bytes:
+            check_free_space(index_dir, free_space_bytes)
+        # Invalidate before touching data: a rebuild in place must not overwrite
+        # data files under a manifest that still describes the old ones.
+        _stale_manifest = os.path.join(index_dir, MANIFEST_NAME)
+        if os.path.exists(_stale_manifest):
+            os.remove(_stale_manifest)
+        progress = progress or _noop
+        t_start = time.time()
 
-    offsets.tofile(os.path.join(index_dir, GRAM_OFFSETS_NAME))
-    del offsets
+        hist, stats = _pass1(records, index_dir, stride=stride,
+                             apply_hygiene=apply_hygiene, progress=progress,
+                             cancel_check=cancel_check)
+        stats.construction = construction
+        stats.df_cap = df_cap
+        raw_postings = stats.n_postings
+        hist = _apply_df_cap(hist, df_cap, stats)
+        stats.n_postings = raw_postings - stats.df_capped_postings
+        bands = df_band_edges(hist)
 
-    stats.seconds_total = round(time.time() - t_start, 2)
-    _check_cancel(cancel_check)
-    write_manifest(index_dir, {
-        'corpus': {
-            'label': corpus_label,
-            'sources': source_manifest or [],
-        },
-        'counts': {
-            'n_records': stats.n_records_indexed,
-            'n_letters': stats.n_letters,
-            'n_postings': stats.n_postings,
-            'max_record_letters': stats.max_record_letters,
-            'distinct_codes': stats.distinct_codes,
-        },
-        'build': {
-            'construction': construction,
-            'partitions': stats.partitions,
-            'stride': stride,
-            'df_cap': df_cap,
-            'df_capped_codes': stats.df_capped_codes,
-            'df_capped_postings': stats.df_capped_postings,
-            'batch_grams': batch_grams,
-            'hygiene_applied': apply_hygiene,
-            'excluded': stats.excluded,
-            'normalizer_version': NORMALIZER_VERSION,
-        },
-        'query': {
-            'df_band_edges': bands,
-        },
-        'timings': {
-            'seconds_pass1': stats.seconds_pass1,
-            'seconds_pass2': stats.seconds_pass2,
-            'seconds_total': stats.seconds_total,
-            'peak_slice_bytes': stats.peak_slice_bytes,
-            'scratch_bytes': stats.scratch_bytes,
-        },
-    })
-    return stats
+        offsets = _csr_offsets(hist)
+        verify_csr_monotone(offsets)
+        if int(offsets[-1]) != stats.n_postings:
+            raise IndexFormatError(
+                f'CSR total {int(offsets[-1]):,} disagrees with the posting count '
+                f'{stats.n_postings:,}')
+        del hist
+
+        recs = np.fromfile(os.path.join(index_dir, RECORDS_NAME),
+                           dtype=RECORD_DTYPE)
+        streams = np.memmap(os.path.join(index_dir, STREAMS_NAME),
+                            dtype=np.uint8, mode='r',
+                            shape=(stats.n_letters,)) if stats.n_letters else \
+            np.empty(0, dtype=np.uint8)
+        try:
+            parts = _mass_partitions(offsets, partitions)
+            stats.partitions = len(parts)
+            runner = _pass2_scatter if construction == 'scatter' else _pass2_spool
+            runner(index_dir, offsets, recs, streams, parts, stride=stride,
+                   batch_grams=batch_grams, progress=progress, stats=stats,
+                   cancel_check=cancel_check)
+        finally:
+            # Released on EVERY exit, not only success, and closed EXPLICITLY:
+            # `del` alone drops only this frame's reference, while the pass-2
+            # frame still in the propagating traceback holds `streams` as its own
+            # argument -- that is what the EXCEPTION BOUNDARY above exists to
+            # stop a retaining caller from ever reaching. Closing here is still
+            # what makes the staging directory deletable immediately: on
+            # Windows an open mapping blocks os.rename/rmtree, which is
+            # exactly what the cancel path must do next.
+            for _mapped in (streams, recs):
+                _mm = getattr(_mapped, '_mmap', None)
+                if _mm is not None:
+                    _mm.close()
+            del streams
+            del recs
+
+        offsets.tofile(os.path.join(index_dir, GRAM_OFFSETS_NAME))
+        del offsets
+
+        stats.seconds_total = round(time.time() - t_start, 2)
+        _check_cancel(cancel_check)
+        write_manifest(index_dir, {
+            'corpus': {
+                'label': corpus_label,
+                'sources': source_manifest or [],
+            },
+            'counts': {
+                'n_records': stats.n_records_indexed,
+                'n_letters': stats.n_letters,
+                'n_postings': stats.n_postings,
+                'max_record_letters': stats.max_record_letters,
+                'distinct_codes': stats.distinct_codes,
+            },
+            'build': {
+                'construction': construction,
+                'partitions': stats.partitions,
+                'stride': stride,
+                'df_cap': df_cap,
+                'df_capped_codes': stats.df_capped_codes,
+                'df_capped_postings': stats.df_capped_postings,
+                'batch_grams': batch_grams,
+                'hygiene_applied': apply_hygiene,
+                'excluded': stats.excluded,
+                'normalizer_version': NORMALIZER_VERSION,
+            },
+            'query': {
+                'df_band_edges': bands,
+            },
+            'timings': {
+                'seconds_pass1': stats.seconds_pass1,
+                'seconds_pass2': stats.seconds_pass2,
+                'seconds_total': stats.seconds_total,
+                'peak_slice_bytes': stats.peak_slice_bytes,
+                'scratch_bytes': stats.scratch_bytes,
+            },
+        })
+        return stats
+    except Exception as exc:
+        boundary_failure = exc
+
+    # Reached only on the exceptional path -- the try block above either
+    # `return`s or falls into `except`, never both.
+    #
+    # The SAME exception object is re-raised with its traceback severed,
+    # rather than a fresh `type(exc)(*exc.args)`: reconstructing from args
+    # silently drops everything an exception carries outside them, and for
+    # the OSError family that is the `filename` -- so a build that died on a
+    # real file reported "[Errno 2] No such file or directory" without ever
+    # naming the path. Clearing `__traceback__` releases the frame chain
+    # (and with it pass 2's `streams` argument, whose mapping the `finally`
+    # above has already closed) just as completely, while `__context__` and
+    # `__cause__` are cleared so neither drags that chain back in by another
+    # route. Re-raising from OUTSIDE the `except` clause is what keeps
+    # `__context__` from being repopulated at the raise itself.
+    boundary_failure.__traceback__ = None
+    boundary_failure.__context__ = None
+    boundary_failure.__cause__ = None
+    raise boundary_failure
