@@ -5744,7 +5744,21 @@ class GenizahGUI(QMainWindow):
             self._on_comp_method_changed)
         self._update_comp_method_help()
 
+        # "New!" lives inside the item text, and chunk is the default --
+        # so the CLOSED control never showed it and the whole feature was
+        # invisible unless the user happened to open the list. A caption
+        # names the control, and the badge plus an accent border say there
+        # is something here worth trying. Both retire themselves the moment
+        # letter-level search is selected.
+        self.lbl_comp_method_caption = QLabel(tr("Search method") + ":")
+        self.lbl_comp_method_new = QLabel(tr("New"))
+        self.lbl_comp_method_new.setStyleSheet(
+            "color: #e67e22; font-weight: bold;")
+        self.lbl_comp_method_new.setVisible(False)
+
+        cr.addWidget(self.lbl_comp_method_caption)
         cr.addWidget(self.comp_method_combo)
+        cr.addWidget(self.lbl_comp_method_new)
         cr.addWidget(self.comp_corpus_scope_combo)
         cr.addWidget(self.btn_lab_mode_toggle_comp)
         cr.addWidget(self.chk_lab_deep_comp)
@@ -15764,7 +15778,7 @@ class GenizahGUI(QMainWindow):
         # including the ones where an index was about to appear.
         self._maybe_offer_passage_build()
 
-    def _maybe_offer_passage_build(self):
+    def _maybe_offer_passage_build(self, explicit=False):
         """Offer to build the letter-level index when there is none, once per
         launch. Modelled on the main index's own "Index not found" prompt in
         `on_startup_finished`, with the three choices the owner asked for --
@@ -15774,7 +15788,10 @@ class GenizahGUI(QMainWindow):
         Deliberately silent in several cases: an offer the user cannot act
         on is worse than no offer.
         """
-        if getattr(self, '_passage_offer_shown', False):
+        # An explicit click on the letter-level option overrides both the
+        # once-per-launch guard and "don't ask again": those exist to stop
+        # US nagging, and the user just asked for this on purpose.
+        if not explicit and getattr(self, '_passage_offer_shown', False):
             return
         if getattr(self, '_close_pending', False):
             return
@@ -15792,34 +15809,41 @@ class GenizahGUI(QMainWindow):
         corpus = getattr(Config, 'FILE_V8', '')
         if not corpus or not os.path.exists(corpus):
             return                      # nothing to build FROM
-        try:
-            if load_app_config().get('passage_build_prompt') == 'never':
-                return
-        except Exception:                                    # noqa: BLE001
-            logger.exception('could not read the passage build preference')
+        if not explicit:
+            try:
+                if load_app_config().get('passage_build_prompt') == 'never':
+                    return
+            except Exception:                                # noqa: BLE001
+                logger.exception(
+                    'could not read the passage build preference')
 
         self._passage_offer_shown = True
         box = QMessageBox(self)
         box.setWindowTitle(tr("Build letter-level index?"))
         box.setIcon(QMessageBox.Icon.Question)
         box.setText(tr(
-            "Letter-level search is a second way to find parallels: it "
-            "compares the letter stream directly and tolerates damaged or "
-            "reworked copies. It needs an index that has not been built on "
-            "this computer yet.\n\n"
-            "Building it takes about 10 minutes and needs about 11 GB of "
-            "free disk space while it runs; the finished index is about "
-            "3.5 GB. You can always build it later from Settings."))
+            "Letter-level search is a new way to find parallels in the "
+            "Composition Search tab. It is much faster than chunk search "
+            "and returns far fewer unrelated results, and it tolerates "
+            "spelling and transcription differences.\n\n"
+            "It needs an index that has not been built on this computer "
+            "yet. Building it takes about 10 minutes and needs about 11 "
+            "GB of free disk space while it runs; the finished index is "
+            "about 3.5 GB. You can always build it later from Settings."))
         btn_build = box.addButton(tr("Build now"),
                                   QMessageBox.ButtonRole.AcceptRole)
         box.addButton(tr("Ask me later"), QMessageBox.ButtonRole.RejectRole)
-        btn_never = box.addButton(tr("Don't ask again"),
-                                  QMessageBox.ButtonRole.DestructiveRole)
+        btn_never = None
+        if not explicit:
+            # Offering "don't ask again" to someone who just clicked the
+            # option would answer a question they did not ask.
+            btn_never = box.addButton(tr("Don't ask again"),
+                                      QMessageBox.ButtonRole.DestructiveRole)
         box.setDefaultButton(btn_build)
         box.exec()
 
         clicked = box.clickedButton()
-        if clicked is btn_never:
+        if btn_never is not None and clicked is btn_never:
             try:
                 save_app_config({'passage_build_prompt': 'never'})
             except Exception:                                # noqa: BLE001
@@ -16121,6 +16145,7 @@ class GenizahGUI(QMainWindow):
             self._apply_passage_mode_ui(False)
             self._show_passage_reason(None)
         self._update_comp_method_help()
+        self._update_comp_method_affordance()
         self._refresh_comp_method_enabled()
 
     def _restored_provenance_is_valid(self, comp):
@@ -16212,6 +16237,28 @@ class GenizahGUI(QMainWindow):
                       "spelling and transcription differences.")
         return tr("The older method. Slower, but offers Exact / Variants / "
                   "Fuzzy modes and cross-paragraph filtering.")
+
+    _METHOD_COMBO_ACCENT = (
+        "QComboBox { border: 2px solid #e67e22; border-radius: 3px; }")
+
+    def _update_comp_method_affordance(self):
+        """Point at the new option while it is worth pointing at: chunk is
+        selected and letter-level is either ready or one build away. Silent
+        when switching would lead nowhere (a My Library scope, Lab Mode, no
+        corpus), because an affordance for something that will only refuse
+        is worse than none."""
+        combo = getattr(self, 'comp_method_combo', None)
+        badge = getattr(self, 'lbl_comp_method_new', None)
+        if combo is None or badge is None:
+            return
+        reason = self._passage_disabled_reason_now()
+        worth_offering = reason is None or (
+            reason == passage_lifecycle.REASON_NOT_BUILT
+            and bool(getattr(Config, 'FILE_V8', ''))
+            and os.path.exists(getattr(Config, 'FILE_V8', '')))
+        highlight = bool(worth_offering and self._comp_method() == 'chunk')
+        badge.setVisible(highlight)
+        combo.setStyleSheet(self._METHOD_COMBO_ACCENT if highlight else "")
 
     def _update_comp_method_help(self):
         lbl = getattr(self, 'lbl_comp_method_help', None)
@@ -16400,6 +16447,7 @@ class GenizahGUI(QMainWindow):
     def _on_comp_method_changed(self, _index):
         method = self._comp_method()
         self._update_comp_method_help()
+        self._update_comp_method_affordance()
         if method != 'passage':
             self._apply_passage_mode_ui(False)
             self._show_passage_reason(None)
@@ -16408,6 +16456,11 @@ class GenizahGUI(QMainWindow):
         reason = self._passage_disabled_reason_now()
         if reason is not None:
             self._revert_comp_method_to_chunk(reason)
+            if reason == passage_lifecycle.REASON_NOT_BUILT:
+                # The one refusal the user can do something about right now.
+                # A label pointing at Settings is a worse answer than the
+                # dialog that can just build it.
+                self._maybe_offer_passage_build(explicit=True)
             return
         self._apply_passage_mode_ui(True)
         self._show_passage_reason(None)
@@ -16423,6 +16476,7 @@ class GenizahGUI(QMainWindow):
         reason = self._passage_disabled_reason_now()
         if reason is not None:
             self._revert_comp_method_to_chunk(reason)
+        self._update_comp_method_affordance()
         self._refresh_comp_method_enabled()
 
     def update_lab_ui_state(self, checked):

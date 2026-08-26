@@ -5202,8 +5202,8 @@ TRANSLATIONS.update({
         'חיפוש ברמת האות פועל כעת',
     'Build letter-level index?':
         'לבנות אינדקס לחיפוש ברמת האות?',
-    'Letter-level search is a second way to find parallels: it compares the letter stream directly and tolerates damaged or reworked copies. It needs an index that has not been built on this computer yet.\n\nBuilding it takes about 10 minutes and needs about 11 GB of free disk space while it runs; the finished index is about 3.5 GB. You can always build it later from Settings.':
-        'חיפוש ברמת האות הוא דרך נוספת למצוא מקבילות: הוא משווה את רצף האותיות ישירות ועומד בפני עותקים פגומים או מעובדים. הוא זקוק לאינדקס שעדיין לא נבנה במחשב הזה.\n\nהבנייה אורכת כ‑10 דקות ודורשת כ‑11 גיגהבייט פנויים בדיסק בזמן הריצה; האינדקס המוגמר תופס כ‑3.5 גיגהבייט. תמיד אפשר לבנות אותו מאוחר יותר מההגדרות.',
+    'Letter-level search is a new way to find parallels in the Composition Search tab. It is much faster than chunk search and returns far fewer unrelated results, and it tolerates spelling and transcription differences.\n\nIt needs an index that has not been built on this computer yet. Building it takes about 10 minutes and needs about 11 GB of free disk space while it runs; the finished index is about 3.5 GB. You can always build it later from Settings.':
+        'חיפוש ברמת האות הוא דרך חדשה למצוא מקבילות בלשונית חיפוש חיבורים. הוא מהיר בהרבה מחיפוש מקטעים ומחזיר הרבה פחות תוצאות לא רלוונטיות, והוא עמיד להבדלי כתיב ולשיבושי פענוח.\n\nהוא זקוק לאינדקס שעדיין לא נבנה במחשב הזה. הבנייה אורכת כ‑10 דקות ודורשת כ‑11 גיגהבייט פנויים בדיסק בזמן הריצה; האינדקס המוגמר תופס כ‑3.5 גיגהבייט. תמיד אפשר לבנות אותו מאוחר יותר מההגדרות.',
     'Build now':
         'בנה עכשיו',
     'Ask me later':

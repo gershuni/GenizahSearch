@@ -38,6 +38,7 @@ class _Combo:
         self.enabled = True
         self.visible = True
         self.tooltip = ''
+        self.style = ''
 
     def count(self):
         return len(self._pairs)
@@ -73,6 +74,9 @@ class _Combo:
 
     def setToolTip(self, s):
         self.tooltip = s
+
+    def setStyleSheet(self, s):
+        self.style = s
 
 
 class _Label:
@@ -123,6 +127,8 @@ class _Win:
     _restore_comp_passage_preferences = APP._restore_comp_passage_preferences
     _method_help_text = APP._method_help_text
     _update_comp_method_help = APP._update_comp_method_help
+    _update_comp_method_affordance = APP._update_comp_method_affordance
+    _METHOD_COMBO_ACCENT = APP._METHOD_COMBO_ACCENT
 
 
 def _window(scope='genizah', lab=False, engine_ready=True, building=False):
@@ -886,3 +892,90 @@ def test_build_now_does_not_ask_the_same_question_twice():
     assert any(isinstance(n, ast.Return) for n in ast.walk(branch)), (
         'the branch falls through to the confirmation dialog it exists to '
         'skip')
+
+
+# ---------------------------------------------------------------------------
+# Discoverability. "New!" lives inside the item text and chunk is the default,
+# so the CLOSED control never showed it -- the feature was invisible unless a
+# user happened to open the list.
+# ---------------------------------------------------------------------------
+
+def _affordance_window(monkeypatch, available, method='chunk', scope='genizah',
+                       corpus_exists=True, tmp_path=None):
+    monkeypatch.setattr(pl, 'passage_available', lambda: available)
+    monkeypatch.setattr(
+        genizah_app.Config, 'FILE_V8',
+        __file__ if corpus_exists else str(tmp_path / 'absent.txt'))
+    w = _window(scope=scope)
+    w.comp_method_combo = _Combo([('chunk', ''), ('passage', '')],
+                                 index=0 if method == 'chunk' else 1)
+    w.lbl_comp_method_new = _Label()
+    return w
+
+
+def test_the_new_badge_shows_when_the_option_is_ready_and_unused(monkeypatch):
+    w = _affordance_window(monkeypatch, available=True, method='chunk')
+    APP._update_comp_method_affordance(w)
+    assert w.lbl_comp_method_new.visible, (
+        'nothing points at letter-level search while chunk is selected, so '
+        'the closed dropdown never reveals it exists')
+    assert 'border' in w.comp_method_combo.style, (
+        'the combo carries no accent, so the badge is the only cue')
+
+
+def test_the_badge_retires_itself_once_the_option_is_in_use(monkeypatch):
+    w = _affordance_window(monkeypatch, available=True, method='passage')
+    APP._update_comp_method_affordance(w)
+    assert not w.lbl_comp_method_new.visible, (
+        'the badge keeps advertising a method the user already switched to')
+    assert 'border' not in w.comp_method_combo.style, (
+        'the accent border outlives the reason for it')
+
+
+def test_the_badge_shows_when_the_index_is_merely_unbuilt(monkeypatch):
+    """One build away still counts: clicking now opens the build offer, which
+    is exactly the path we want people to find."""
+    w = _affordance_window(monkeypatch, available=False, method='chunk')
+    APP._update_comp_method_affordance(w)
+    assert w.lbl_comp_method_new.visible
+
+
+def test_no_badge_when_switching_would_lead_nowhere(monkeypatch, tmp_path):
+    """A My Library scope refuses letter-level search outright, so pointing
+    at it would only produce a refusal."""
+    w = _affordance_window(monkeypatch, available=True, method='chunk',
+                           scope='local')
+    APP._update_comp_method_affordance(w)
+    assert not w.lbl_comp_method_new.visible
+
+    w2 = _affordance_window(monkeypatch, available=False, method='chunk',
+                            corpus_exists=False, tmp_path=tmp_path)
+    APP._update_comp_method_affordance(w2)
+    assert not w2.lbl_comp_method_new.visible, (
+        'no corpus means the build offer cannot help either')
+
+
+def test_clicking_the_unbuilt_option_offers_to_build_it():
+    """A label pointing at Settings is a worse answer than the dialog that
+    can just build it."""
+    seg = _function_source('_on_comp_method_changed')
+    assert 'REASON_NOT_BUILT' in seg and 'explicit=True' in seg, (
+        'clicking letter-level search while unbuilt only refuses; it must '
+        'offer the build')
+
+
+def test_an_explicit_click_overrides_dont_ask_again():
+    """Those guards exist to stop US nagging. The user just asked on purpose,
+    so suppressing the dialog would make the control look broken."""
+    seg = _function_source('_maybe_offer_passage_build')
+    assert 'not explicit and getattr(self' in seg, (
+        'the once-per-launch guard still suppresses an explicit click')
+    assert "if not explicit:" in seg, (
+        "'don't ask again' still suppresses an explicit click")
+
+
+def test_the_offer_says_what_the_owner_asked_it_to_say():
+    seg = _function_source('_maybe_offer_passage_build')
+    for phrase in ('a new way to find parallels', 'Composition Search tab',
+                   'much faster', 'far fewer unrelated results'):
+        assert phrase in seg, ('the offer no longer says %r' % phrase)
