@@ -5570,6 +5570,10 @@ class GenizahGUI(QMainWindow):
         boundary_row.addWidget(self.btn_boundary_advanced)
         boundary_row.addWidget(self.boundary_stats_label)
         boundary_row.addStretch()
+        # Held so the whole row can be hidden in letter-level mode. The two
+        # captions above are inline QLabels with no other reference, so the
+        # only way to reach them is through the layout itself.
+        self._comp_boundary_row = boundary_row
 
         # Phase 146: the method selector LEADS the panel. It decides what
         # every control below it means, and it was previously buried in the
@@ -16356,6 +16360,30 @@ class GenizahGUI(QMainWindow):
         lbl.setText(text)
         lbl.setVisible(bool(text))
 
+    def _set_boundary_row_visible(self, visible):
+        """Show or hide the whole paragraph row. Letter-level search has no
+        paragraph boundaries at all, so these controls are not merely
+        inapplicable -- they describe a concept the method does not have, and
+        leaving them greyed out asks the reader to work out which of the
+        disabled things matter.
+
+        `btn_boundary_advanced` is excluded from the show half: it owns its
+        own visibility (non-full modes only, see `_on_boundary_mode_changed`)
+        and forcing it visible here would reveal a button for a mode that is
+        not selected."""
+        row = getattr(self, '_comp_boundary_row', None)
+        if row is None:
+            return
+        advanced = getattr(self, 'btn_boundary_advanced', None)
+        for i in range(row.count()):
+            item = row.itemAt(i)
+            widget = item.widget() if item is not None else None
+            if widget is None:
+                continue
+            if widget is advanced and visible:
+                continue        # its own rule decides; do not override it
+            widget.setVisible(visible)
+
     def _set_passage_options_visible(self, visible):
         for name in ('comp_passage_label', 'comp_passage_width_combo',
                      'comp_passage_length_combo', 'comp_passage_depth_combo'):
@@ -16404,18 +16432,22 @@ class GenizahGUI(QMainWindow):
             elif name not in self._PASSAGE_CONTROLS_LAB_ALSO_OWNS:
                 w.setEnabled(True)
 
-        # Enabled-but-inert otherwise: the full-mode handler only hides the
-        # Advanced button, it never disables the separator combo.
+        # The whole paragraph row goes away in letter-level mode rather than
+        # greying out: these controls describe paragraph boundaries, which
+        # the letter-level engine does not have. The separator combo is also
+        # re-enabled explicitly on the way back, because the full-mode
+        # handler only ever hides the Advanced button and never touches it.
         delim = getattr(self, 'boundary_delimiter_combo', None)
         if delim is not None:
             delim.setEnabled(not on)
 
-        # The boundary stats line is chunk-speak ("N chunks, M paragraphs").
         stats = getattr(self, 'boundary_stats_label', None)
-        if stats is not None:
-            if on:
-                stats.setText("")
-            stats.setVisible(not on)
+        if stats is not None and on:
+            # Chunk-speak ("N chunks, M paragraphs"); clear it so a stale
+            # line cannot reappear when the row comes back.
+            stats.setText("")
+
+        self._set_boundary_row_visible(not on)
 
         # Recursive search concatenates result texts into ONE query, which
         # starves the passage engine's per-query posting budget (measured

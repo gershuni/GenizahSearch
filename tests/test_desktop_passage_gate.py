@@ -1136,3 +1136,88 @@ def test_the_not_built_line_is_gone_now_that_a_dialog_says_it():
         'the not-built reason still renders an inline label')
     assert 'Settings \u2192' not in _app_source(), (
         'the "(Settings -> Build...)" suffix is still being appended')
+
+
+# ---------------------------------------------------------------------------
+# The paragraph row is HIDDEN in letter-level mode, not greyed.
+# Letter-level search has no paragraph boundaries at all, so these controls
+# describe a concept the method does not have.
+# ---------------------------------------------------------------------------
+
+class _FakeLayoutItem:
+    def __init__(self, w):
+        self._w = w
+
+    def widget(self):
+        return self._w
+
+
+class _FakeRow:
+    def __init__(self, widgets):
+        self._items = [_FakeLayoutItem(w) for w in widgets]
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, i):
+        return self._items[i]
+
+
+def _boundary_window():
+    w = _Win()
+    w.boundary_caption = _Label()
+    w.boundary_mode_combo = _Label()
+    w.separator_caption = _Label()
+    w.boundary_delimiter_combo = _Label()
+    w.btn_boundary_advanced = _Label()
+    w.boundary_stats_label = _Label()
+    for lbl in (w.boundary_caption, w.boundary_mode_combo,
+                w.separator_caption, w.boundary_delimiter_combo,
+                w.boundary_stats_label):
+        lbl.visible = True
+    w._comp_boundary_row = _FakeRow([
+        w.boundary_caption, w.boundary_mode_combo, w.separator_caption,
+        w.boundary_delimiter_combo, w.btn_boundary_advanced,
+        w.boundary_stats_label])
+    return w
+
+
+def test_the_paragraph_row_hides_in_letter_level_mode():
+    w = _boundary_window()
+    APP._set_boundary_row_visible(w, False)
+    for name in ('boundary_caption', 'boundary_mode_combo',
+                 'separator_caption', 'boundary_delimiter_combo',
+                 'boundary_stats_label', 'btn_boundary_advanced'):
+        assert not getattr(w, name).visible, (
+            '%s is still on screen in letter-level mode' % name)
+
+
+def test_the_paragraph_row_comes_back_for_chunk_search():
+    w = _boundary_window()
+    APP._set_boundary_row_visible(w, False)
+    APP._set_boundary_row_visible(w, True)
+    for name in ('boundary_caption', 'boundary_mode_combo',
+                 'separator_caption', 'boundary_delimiter_combo',
+                 'boundary_stats_label'):
+        assert getattr(w, name).visible, (
+            '%s did not come back when the method returned to chunk' % name)
+
+
+def test_showing_the_row_does_not_override_the_advanced_button():
+    """It owns its own visibility -- non-full modes only, per
+    `_on_boundary_mode_changed`. Forcing it visible here would reveal a
+    button for a paragraph mode that is not selected."""
+    w = _boundary_window()
+    w.btn_boundary_advanced.visible = False      # full mode: correctly hidden
+    APP._set_boundary_row_visible(w, False)
+    APP._set_boundary_row_visible(w, True)
+    assert not w.btn_boundary_advanced.visible, (
+        'the Advanced button was forced back on for a mode that does not '
+        'use it')
+
+
+def test_the_mode_switch_hides_the_row():
+    seg = _function_source('_apply_passage_mode_ui')
+    assert '_set_boundary_row_visible(not on)' in seg, (
+        'letter-level mode only greys the paragraph controls instead of '
+        'removing them')
