@@ -343,7 +343,15 @@ def install_passage_state(state: Optional[PassageState]) -> bool:
         _reset_freshness()
         return True
     _state = state
-    _state_generation += 1
+    # NOT unconditional: this branch is reached both for a fresh install
+    # (outgoing None) and for re-installing the SAME object, which the
+    # docstring above already treats as a no-op. Moving the generation for a
+    # no-op invalidates a release that is still perfectly valid -- the
+    # identical mapping is still installed -- and `run_build_and_swap` reads
+    # that refusal as `readers_active`, cleans staging and skips the rename
+    # although nothing was blocking it (Codex review round 8, finding 1).
+    if outgoing is not state:
+        _state_generation += 1
     _reset_freshness()
     return True
 

@@ -2492,6 +2492,18 @@ def test_recovery_two_transient_open_failures_does_not_downgrade_valid_current(
     # Failing every attempt but the last one the shipped margin buys makes
     # the WHOLE margin load-bearing, and tracks the constants if either is
     # ever legitimately changed.
+    # The VALUE, asserted outright. `fail_times` below is derived from the
+    # constant so this test tracks a LEGITIMATE change to it -- but that
+    # same derivation means a MUTATION of the constant moves the test with
+    # it and leaves it green, which is exactly what a reviewer demonstrated
+    # (Codex review round 8, finding 2). A floor is what makes the shipped
+    # value a claim some test actually makes. Five attempts with real
+    # backoff between them is the margin a virus-scanner hold needs to
+    # clear; anything less is the downgrade bug this test is named for.
+    assert pl.CURRENT_DESTROY_RECONFIRM_ATTEMPTS >= 5, (
+        'the re-confirmation margin was cut to %d; a valid current/ that '
+        'hits a transient hold will be destroyed and replaced by a stale '
+        'generation' % pl.CURRENT_DESTROY_RECONFIRM_ATTEMPTS)
     stub, calls = _flaky_open_index(c.live_dir,
                                     fail_times=_RECONFIRM_TOTAL() - 1)
     monkeypatch.setattr(pl, 'open_index', stub)
@@ -3368,3 +3380,27 @@ def test_a_failed_post_build_fingerprint_still_cleans_staging(
     assert not os.path.isdir(built.staging_dir), (
         'a validated multi-GB staging artifact was stranded on disk by an '
         'ordinary failure of the post-build fingerprint')
+
+
+def test_reinstalling_the_same_state_leaves_a_pending_release_valid(tmp_path):
+    """A same-object install is documented as a no-op: it releases nothing,
+    because the identical mapping stays installed. Moving the generation for
+    it invalidates a release that is still perfectly valid, and
+    `run_build_and_swap` reads that refusal as `readers_active` -- it cleans
+    staging and skips the rename although no reader was ever blocking it, so
+    a ten-minute build is discarded and the user is told to retry (Codex
+    review round 8, finding 1)."""
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+    state = pl._state
+    assert state is not None
+    issued = pl.current_state_generation()
+
+    assert pl.install_passage_state(state) is True
+    assert pl.current_state_generation() == issued, (
+        'a same-object install moved the state generation, invalidating '
+        'every release already issued against the state it did not change')
+
+    assert pl.close_passage_state(issued) is True, (
+        'a release issued against the still-installed state was refused')
+    assert not pl.passage_available()

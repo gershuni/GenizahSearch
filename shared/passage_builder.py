@@ -606,9 +606,10 @@ def build_index(records: Iterable, index_dir: str, *,
     only place such a boundary is needed.
     """
     # Set only when something below failed -- see the docstring's EXCEPTION
-    # BOUNDARY paragraph for why this is (type, args) and not the exception
-    # itself, and why it is acted on only after the try/except below, never
-    # from inside `except`.
+    # BOUNDARY paragraph for why this holds the exception OBJECT (with its
+    # traceback severed) rather than a (type, args) pair to rebuild from,
+    # and why it is acted on only after the try/except below, never from
+    # inside `except`.
     boundary_failure = None
     try:
         if construction not in ('scatter', 'spool'):
