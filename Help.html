@@ -249,7 +249,23 @@
     <h2 id="composition">Composition Search</h2>
     <p>This tool is designed for researchers wishing to find parallels for a complete literary text (such as a Piyyut, medieval commentary, or other rare work) within the Genizah, thereby locating additional textual witnesses, both direct and indirect.</p>
 
-    <h3>How it Works (The Mechanism)</h3>
+    <h3>Two Search Methods</h3>
+    <p>Composition Search offers two ways to find parallels. They are complementary: neither replaces the other, and which one suits you depends on the text in front of you.</p>
+    <ul>
+        <li><b>Chunk search</b> is the original method and remains the default. It compares blocks of words, and it is the only method that offers the Exact / Variants / Fuzzy modes and cross-paragraph filtering described below.</li>
+        <li><b>Letter-level search</b> compares sequences of letters instead. It is much faster than chunk search and returns far fewer unrelated results, but it does not offer the chunk-mode parameters &mdash; when you select it, those controls are set aside and the letter-level controls appear in their place.</li>
+    </ul>
+    <p>Letter-level search runs on an index built on this computer from the transcriptions you already have. The program offers to build it once, and you can build or rebuild it at any time from Settings. The build takes about ten minutes, needs about 11 GB of free disk space while it runs, and produces an index of about 3.5 GB. Cancelling a build, or a build that fails, always leaves the index you already had intact and working.</p>
+    <p>Letter-level search covers the Genizah corpus. With My Library or the combined scope selected, the method stays on chunk search and the reason is shown on screen. Full Recursive Search likewise uses chunk search: joining several texts into one query works for chunk search but measurably harms letter-level search.</p>
+
+    <h4>Letter-Level Controls</h4>
+    <ul>
+        <li><b>Match width:</b> How far a manuscript may drift from your text and still count as a match. Wider settings find more damaged or variant witnesses; the strongest matches are always ranked first.</li>
+        <li><b>Passage length:</b> Whether a short shared passage counts as a match. "Also short passages" roughly doubles what you have to read through, and finds witnesses that the normal setting does not reach.</li>
+        <li><b>Search depth:</b> How much of the corpus the search may examine. Deeper searches take seconds longer and return more manuscripts, including badly damaged and reworked copies that a fast pass misses. Long texts benefit the most. <b>A deep search cannot be interrupted once it has started</b> &mdash; Stop, Escape and closing the window all wait for it to finish.</li>
+    </ul>
+
+    <h3>How Chunk Search Works (The Mechanism)</h3>
     <p>Unlike a regular search, the engine does not search for the entire text as a single unit. The process works as follows:</p>
     <ol>
         <li>The software splits the source text you entered into small segments ("Chunks").</li>
@@ -258,7 +274,8 @@
         <li>At the end of the process, the software <b>aggregates</b> the results: if a manuscript contains many found chunks, it receives a high score and appears at the top of the list.</li>
     </ol>
 
-    <h3>Important Parameters</h3>
+    <h3>Important Parameters (Chunk Search)</h3>
+    <p>These apply to chunk search. In letter-level search they are set aside and replaced by the three controls described above.</p>
     <ul>
         <li><b>Chunk:</b> The number of words in each search unit. A value too low will return many irrelevant results; a value too high might miss true results.</li>
         <li><b>Max Freq:</b> A tool to filter common expressions. If the engine detects that a sequence appears many times in the corpus (like idioms or verses), it will filter it to the Appendix.</li>

@@ -222,6 +222,7 @@ from __future__ import annotations
 
 import logging
 import re
+import traceback
 from dataclasses import dataclass
 from typing import Optional, Protocol
 
@@ -789,9 +790,18 @@ class PassageSearcher:
                     try:
                         text = self.text_fetcher.get_full_text_by_header(ref)
                     except Exception:
+                        # traceback.format_exc() -- a STRING -- not
+                        # exc_info=True. `exc_info=True` stores the raw
+                        # (type, value, traceback) tuple on the LogRecord,
+                        # and that traceback's outermost frame holds `self`
+                        # (this searcher, hence its index): any handler
+                        # that retains LogRecords (MemoryHandler, a Qt
+                        # recent-errors panel, pytest's own caplog) keeps
+                        # the index reachable past close(). A formatted
+                        # string holds no frames.
                         logger.warning(
                             'passage_parallels: witness ref lookup raised for '
-                            '%s', ref, exc_info=True,
+                            '%s:\n%s', ref, traceback.format_exc(),
                         )
                         text = None
                     if not text:
@@ -945,9 +955,17 @@ class PassageSearcher:
         try:
             orig_text = self.text_fetcher.get_full_text_by_header(hit.record_id)
         except Exception:
+            # traceback.format_exc(), never exc_info=True -- see the
+            # matching comment in _resolve_witnesses above. This is the
+            # site that actually motivated it: a handler that RETAINS
+            # LogRecords (MemoryHandler, a Qt recent-errors panel,
+            # pytest's caplog) would otherwise keep this searcher -- and
+            # therefore its PassageIndex -- reachable through the stored
+            # (type, value, traceback) tuple long after
+            # close_passage_state() tears the index's memmaps down.
             logger.warning(
-                'passage_parallels: text fetch raised for record %s',
-                hit.record_id, exc_info=True,
+                'passage_parallels: text fetch raised for record %s:\n%s',
+                hit.record_id, traceback.format_exc(),
             )
         if not orig_text:
             logger.warning(

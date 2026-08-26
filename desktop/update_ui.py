@@ -135,7 +135,14 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("New: pause and resume long searches"))
+        # Its OWN string, not the method selector's marker. They shared
+        # one while both said the same three words; the owner gave the
+        # banner a full sentence on 2026-08-26, and a sentence that long
+        # inside a QComboBox item would be unreadable. Different text on
+        # different surfaces is two entries, not one.
+        self.lbl_msg.setText(tr(
+            "New! Letter-level composition search - much faster, with "
+            "fewer irrelevant results"))
         self.show()
 
     def on_learn_more(self):
@@ -250,7 +257,7 @@ class WhatsNewDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(tr("New Features!"))
         self.setModal(True)
-        # Resizable + scrollable body (set below) so the four What's New bullets,
+        # Resizable + scrollable body (set below) so the What's New bullets,
         # some of them long, never clip on smaller displays.
         self.setMinimumSize(520, 480)
         self.resize(520, 600)
@@ -269,9 +276,16 @@ class WhatsNewDialog(QDialog):
 
         is_heb = CURRENT_LANG == 'he'
         items = [
-            tr("Pause and Resume: a long search can be paused at any point and continues from exactly where it stopped — nothing is re-scanned. The clock stops while paused, and a paused search lets the computer sleep. A paused search lives in memory only: closing the program ends it."),
-            tr("Stop now works in Lab Mode. It previously did nothing at all, and could show an error message instead of stopping."),
-            tr("Stopping a search keeps what it already found. Title, Shelfmark and My Library searches used to discard every result when stopped, even though the results header said “Partial results”."),
+            tr(
+                "Letter-level search: a new way to find parallels in the Composition Search "
+                "tab. It is much faster than chunk search and returns far fewer unrelated "
+                "results. Chunk search stays the default and keeps its Exact / Variants / "
+                "Fuzzy modes — the two methods complement each other."),
+            tr(
+                "It runs on an index built on your own computer, from the transcriptions "
+                "already here. Building takes about ten minutes and needs about 11 GB of free "
+                "space while it runs; the finished index is about 3.5 GB. The program offers "
+                "to build it once, and you can build or rebuild it at any time from Settings."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)
@@ -292,7 +306,7 @@ class WhatsNewDialog(QDialog):
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
             )
         features_label.setText(features_text)
-        # Wrap in a scroll area so the four (sometimes long) bullets never clip on
+        # Wrap in a scroll area so the (sometimes long) bullets never clip on
         # smaller displays; the dialog is resizable rather than fixed-size.
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)

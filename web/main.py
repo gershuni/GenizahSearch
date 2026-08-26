@@ -712,7 +712,9 @@ from web.atlas_assets import (
     atlas_manifest_etag,
 )
 from web.discovery_assets import load_discovery_state, discovery_available  # noqa: F401 -- discovery_available is the Phase 135+ gating predicate; no surface calls it yet in Phase 134 (NO discovery UI ships this phase), imported now so downstream plans wire it without touching this import block
-from web.passage_assets import load_passage_state, passage_available  # Phase 145: passage-matching parallels search
+from web.passage_assets import (load_passage_state, passage_available,  # Phase 145: passage-matching parallels search
+                                passage_multi_witness_available)
+from web.start_content import demo_url, load_start_content  # the /start page's own prepared parallels demo, reused by the What's New toast
 from web.discovery import (  # Phase 135 (BAND-05): /help methods-section wiring — noindex predicate + band-precision/claim-count readers (patched as web.main.* in the render-smoke test)
     discovery_methods_noindex,
     get_all_band_precision,
@@ -729,7 +731,10 @@ from version import APP_VERSION
 # value -- so following a desktop bump would re-pop the banner for every web
 # reader who had already dismissed it. Bump by hand when the web What's New
 # content itself changes.
-WHATS_NEW_VERSION = "9.0.0"
+# Names the CONTENT wave, not a release: dismissal is stored per browser
+# as this exact string, so it must change whenever the toast does, and
+# "9.0.0" was already spent on the 2026-08-16 web release.
+WHATS_NEW_VERSION = "9.0.0-letter-level"
 APP_PORT = int(os.environ.get('GENIZAH_PORT', 8081))
 
 # Initialize API routes (Image Proxy, Export)
@@ -1759,45 +1764,95 @@ def create_layout():
     #    is accepted deliberately. Verified safe: no test that opens `/` counts
     #    hrefs or elements — they all locate by explicit `.mark()`.
     #
-    # ORDER is the owner's: the introduction first (a reader who does not know what
-    # the Genizah is needs it before either research surface), then the atlas, then
-    # the identifications. `/start` is registered unconditionally and carries no
-    # feature flag, so it is always present and the toast always has something to
-    # say — the empty-list guard below is kept as a structural backstop, not
-    # because it is currently reachable.
-    _WHATS_NEW_SUPPRESSED_ON = ('/start', '/help')
-    _new_surfaces = [(tr("An introduction to the Genizah and this site"), '/start')]
-    if atlas_preview_available():
-        _new_surfaces.append((tr("The Visual Genizah Atlas"), '/atlas'))
-    if discovery_available():
-        _new_surfaces.append((tr("Computed Identifications"), '/computed-identifications'))
+    # REPLACED 2026-08-26 (owner). This listed the introduction, the atlas and
+    # the identifications; all three shipped on 2026-08-16, all three keep their
+    # own nav entry, and none of them is the news any more. The news is the
+    # parallels search, so the toast carries that and nothing else.
+    #
+    # Both entries lead to `/parallels`, unlike the old list where every name led
+    # somewhere different. They are two distinct features on one page, and naming
+    # them separately is what makes the second one discoverable at all.
+    #
+    # WATCH THE LENGTH HERE. These are owner-worded (2026-08-26) and they are
+    # sentences, not names — noticeably longer than the three they replaced. A
+    # lead-in sentence was removed from this same toast on 2026-08-16 because it
+    # pushed the actionable names past the fold on a phone, and this site skews
+    # mobile. If the toast has to shrink, shorten the text; do not reintroduce a
+    # third entry.
+    #
+    # The empty-list guard below is now REACHABLE and load-bearing. The old list
+    # opened with `/start`, which is registered unconditionally, so the toast
+    # always had something to say and the guard was a formality. Both entries
+    # here are gated, so a box whose index did not open shows no toast at all —
+    # which is right: there is nothing new to announce there.
+    #
+    # Suppression follows the content. The rule is "do not toast on a page that
+    # already presents this", which named `/start` while `/start` was being
+    # advertised; it now names the page the toast points at.
+    _WHATS_NEW_SUPPRESSED_ON = ('/parallels', '/help')
+
+    # Both entries land on a PREFILLED search rather than an empty form
+    # (owner, 2026-08-26). A reader who has just been told a new search
+    # method exists and is then shown a blank textarea has to go and find
+    # something to paste into it before the announcement means anything.
+    #
+    # The text comes from `/start`'s own prepared demo -- the Deror Yikra
+    # stanzas -- rather than a copy of it. That file is schema-validated and
+    # the URL is rebuilt from typed fields by `demo_url` (deliberately, so
+    # the JSON can never become an open-redirect), and one source of truth
+    # means the toast cannot drift from the Start page.
+    #
+    # Failure here must not take the shell down with it: `load_start_content`
+    # raises on a malformed content file, and `/start` degrades to a fallback
+    # page when it does. The toast is on EVERY page, so it degrades to the
+    # bare form instead.
+    _parallels_demo_target = '/parallels'
+    try:
+        _demo = (load_start_content().get('demos') or {}).get('parallels') or {}
+        if _demo.get('enabled'):
+            _parallels_demo_target = demo_url('parallels', _demo)
+    except Exception:                                        # noqa: BLE001
+        pass
+
+    _new_surfaces = []
+    if passage_available():
+        _new_surfaces.append(
+            (tr("Letter-level parallels search — faster and more precise"),
+             _parallels_demo_target))
+    if passage_multi_witness_available():
+        _new_surfaces.append(
+            (tr("Get the most from the parallels search by entering several "
+                "textual witnesses"), _parallels_demo_target))
 
     if (_new_surfaces
             and current_page not in _WHATS_NEW_SUPPRESSED_ON
             and safe_user_get('whats_new_dismissed') != WHATS_NEW_VERSION):
         banner_dir = 'rtl' if rtl_mode else 'ltr'
         with content_col:
-            # Fixed-position toast (out of document flow): showing and the 10s
-            # auto-dismiss never reflow page content, so this no longer causes CLS.
-            with ui.element('div').classes('px-4 py-2 flex items-center gap-3').style(
-                f'position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); '
-                f'z-index: 2000; max-width: 90vw; background: var(--bg-tertiary); '
-                f'border: 1px solid var(--border-light); border-radius: 8px; '
-                f'box-shadow: 0 4px 16px rgba(0,0,0,0.18); direction: {banner_dir};'
+            # Fixed-position toast (out of document flow): showing it and the
+            # 30s auto-dismiss never reflow page content, so this stays off the
+            # CLS budget. (The comment said 10s; the timer has always been 30.)
+            with ui.element('div').classes('px-5 py-4').style(
+                # TOP, not bottom (owner, 2026-08-26), and clearing the fixed
+                # 64px header rather than sitting on it. Still fixed-position
+                # and so still out of document flow -- showing it and the 30s
+                # auto-dismiss must never reflow page content, which is what
+                # kept this off the CLS budget in the first place.
+                f'position: fixed; top: 80px; left: 50%; transform: translateX(-50%); '
+                # 26rem rather than 34: on a 375px phone the wider cap
+                # resolved to 94vw and the card ran edge to edge over the page
+                # behind it. And `fit-content` rather than an explicit width --
+                # it measures 188px on that viewport, about half the screen,
+                # which reads as a tidy card rather than a bar across the page,
+                # and is the rendering the owner reviewed on 2026-08-26.
+                # Widening it to the cap was tried and reverted. `max-content`
+                # is not used because with entries this long it is always wider
+                # than the cap and so never decides anything.
+                f'z-index: 2000; width: fit-content; max-width: min(92vw, 26rem); '
+                f'background: var(--bg-tertiary); '
+                f'border: 1px solid var(--border-light); border-radius: 10px; '
+                f'box-shadow: 0 6px 20px rgba(0,0,0,0.22); direction: {banner_dir};'
             ).mark('whats-new-banner') as whats_new_banner:
-                ui.icon('new_releases').classes('text-base').style('color: #10b981;')
-                ui.label(tr("New Features!")).classes('text-xs font-bold').style('color: var(--text-primary);')
-                # Claim-free, as on the homepage cards: the NAMES only, no lead-in
-                # sentence. No precision figure, no interval, no count, no accuracy
-                # rate. A lead-in was tried and dropped (owner, 2026-08-16): on a
-                # one-line toast it pushed the names — the only part a reader acts
-                # on — past the fold on a phone, and it had to be re-worded
-                # whenever the number of live surfaces changed.
-                for _idx, (_surface_name, _surface_route) in enumerate(_new_surfaces):
-                    if _idx:
-                        ui.label('*').classes('text-xs').style('color: var(--text-secondary);')
-                    ui.link(_surface_name, _surface_route).classes(
-                        'text-xs font-semibold text-primary hover:underline')
                 def dismiss_whats_new():
                     # Explicit user dismiss (X button): persist the flag unconditionally.
                     safe_user_set('whats_new_dismissed', WHATS_NEW_VERSION)
@@ -1805,7 +1860,33 @@ def create_layout():
                         whats_new_banner.delete()
                     except Exception:
                         pass  # Already dismissed / parent slot gone
-                ui.button(icon='close', on_click=dismiss_whats_new).props(f'flat dense round size=xs aria-label="{tr("Dismiss")}"')
+
+                # A COLUMN, not a row (2026-08-26). The row was fine while every
+                # entry was a two-or-three-word surface NAME joined by a '*'.
+                # The entries are now owner-worded sentences, and in a row they
+                # wrapped: the separator stranded alone on the first line, the
+                # second entry dropped beneath it, and the close button floated
+                # into the middle of the text. One entry per line has no such
+                # failure mode and needs no separator at all.
+                # The close button is taken OUT of the flow rather than
+                # pushed to the edge by a spacer. While it was a flex sibling
+                # it decided where the title sat, so the title could not be
+                # centred without fighting it. `inset-inline-start` puts it in
+                # the corner correctly in both directions with no test on
+                # `banner_dir`.
+                ui.button(icon='close', on_click=dismiss_whats_new).props(
+                    f'flat dense round size=sm aria-label="{tr("Dismiss")}"'
+                ).style('position: absolute; top: 6px; inset-inline-start: 6px;')
+                with ui.element('div').classes('flex items-center justify-center gap-2'):
+                    ui.icon('new_releases').classes('text-xl').style('color: #10b981;')
+                    ui.label(tr("New Features!")).classes('text-base font-bold').style('color: var(--text-primary);')
+                # Claim-free, as on the homepage cards. No precision figure, no
+                # interval, no count, no accuracy rate.
+                for _surface_name, _surface_route in _new_surfaces:
+                    ui.link(_surface_name, _surface_route).classes(
+                        'text-sm font-semibold text-primary hover:underline'
+                    ).style('display: block; margin-top: 10px; line-height: 1.5; '
+                            'text-align: center; text-wrap: balance;')
                 # Use asyncio instead of ui.timer — ui.timer binds to the banner
                 # slot and raises 'parent_slot has been deleted' RuntimeError in
                 # journalctl when the user navigates away before the 30s fires.

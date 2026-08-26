@@ -6,9 +6,10 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ## [8.6.0] - 2026-08-20 — Pause/Resume, and Stop that actually stops (desktop)
 
-> **Desktop release.** It continues the desktop line from v8.5.2; 9.0.0 below it is a higher
-> number but a *web-only* release that never shipped a desktop build, which is why this section
-> sits above it by date and below it by number.
+> **Desktop release.** It continues the desktop line from v8.5.2. When it shipped, 9.0.0 below
+> it was a web-only release with no desktop build — which is why this section sits above it by
+> date and below it by number. 9.0.0 has since shipped a desktop build as well (2026-08-26), so
+> the desktop line now runs v8.5.2 → v8.6.0 → v9.0.0.
 
 ### New Features
 
@@ -46,7 +47,7 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
-## [9.0.0] - 2026-08-16 — Computed Identifications, the Visual Atlas & Start Here (public beta, web)
+## [9.0.0] - 2026-08-16 (web) · 2026-08-26 (desktop) — Computed Identifications & the Visual Atlas (web); Letter-Level Search (desktop)
 
 > **At a glance.** 55,250 computed identifications across 596 works on 39,341 manuscripts (of
 > ~255,000 records in total — this is the portion the matching has reached, not the collection);
@@ -55,9 +56,11 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 > 2.2 MB asset. Atlas figures are read from the baked asset whose content hash matches the one
 > production serves; identification figures are read from the deployed V4 build.
 
-> **Web-only release.** No GitHub Release object is created (the desktop polls
-> `/releases/latest` and would prompt every desktop user to update for a release with no
-> installer). The desktop application is unchanged in 9.0.0.
+> **Two releases under one number.** The web half shipped 2026-08-16 and deliberately created
+> no GitHub Release object — the desktop polls `/releases/latest`, and a release with no
+> installer would have prompted every desktop user to update to a page they cannot install
+> from. The desktop half shipped 2026-08-26, carries an installer, and does create one. The
+> desktop changes are in their own section at the end of this entry.
 >
 > **"Public beta" is meant literally.** The surfaces below are live to every visitor, but the
 > milestone's own release gate is not fully closed: of the six items recorded as gating public
@@ -492,6 +495,195 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
     — plus one pinning the nesting of the two remaining queries so a future "unify these"
     refactor cannot collapse them in either direction). The two existing CLS guards keep
     asserting the flat pixel reservation, which the final design leaves in place.
+
+### Web — Letter-Level Parallels Search (Phases 141–145)
+
+The method the desktop section describes arrived here first, over four pull requests. It is the
+same engine, reached from `/parallels` and from the public API.
+
+**Live on genizahsearch.com as of this release**, with `PASSAGE_PARALLELS_ENABLED` and
+`PASSAGE_MULTI_WITNESS_ENABLED` both switched on. Each flag stays necessary but not sufficient:
+`web/passage_assets.py::passage_available()` also requires the index to have opened cleanly at
+startup, so a flag-on/index-missing window hides the surface completely rather than half of it.
+The index is built on the server from the same corpus the site already serves — it is not shipped
+in the repository, and `scripts/build_passage_index.py` is how it gets made.
+
+#### The method, on the site and in the API
+
+- **A method selector on `/parallels`** — *Letter-level search* or *Chunk search*. Unlike the
+  desktop, the web **selects letter-level by default when its index is available**. The display
+  name is owner naming from 2026-08-23; `method='passage'` is the stable wire value, and API
+  clients should never parse the display name.
+- **`method='chunk'|'passage'` on `POST /api/parallels`**, defaulting to `chunk` so every existing
+  caller is unaffected. The passage path gets its **own** budget rather than a share of the chunk
+  path's — `SEARCH_API_PASSAGE_TIMEOUT` (30 s) and `SEARCH_API_PASSAGE_CONCURRENCY` (4), each
+  backed by a dedicated thread pool, because two semaphores over one pool are two names for one
+  budget. Over the cap the API returns 503 `passage_search_busy` with a `Retry-After`, never a
+  queue that quietly grows.
+- **Paging, and exports that are no longer capped** — one change, because once results page, the
+  cap had no job left to do.
+- **A reload restores the search configuration, not just its rows.** Method, policy and filters
+  come back with the results they produced, so a restored page cannot label one search's rows with
+  another's settings.
+- **Hide canonical works by the catalogue** — one option serving both methods, which demotes
+  rather than deletes.
+
+#### Search depth, the third control axis
+
+The per-query posting budget was starving long queries silently. At the shipped default a
+6,000-letter query admits roughly **5%** of its own postings — the engine was not searching most of
+what it had been given, and nothing said so.
+
+- **New "Search depth" control** — *Normal* / *Deep* / *Deepest*, raising posting budget, verify
+  cap and candidate cap together. Measured on a 5,979-letter query: **0.6 s / ~8 s / ~19 s**,
+  against **76% / 81% / 84%** of the witnesses the graded deck knows about.
+- Three coupled knobs behind one control, for the same reason passage length is: raising the budget
+  alone just leaves the verify cap as the new ceiling.
+- Two alternatives were measured and are **dead**: loosening the density threshold, and locus
+  tiers. Neither bought recall.
+
+#### Passage length, the second control axis (2026-08-24)
+
+The Match-width control assumed one dimension. Chasing the Antiochus recall gap turned up a
+second, and a parameter that had been deciding results invisibly.
+
+- **`verify_margin` is now policy.** Verification extends a match by 30 letters each side before
+  scoring edit density. At a span floor of 40 that is harmless overhead; below ~25 it *is* the
+  result — a true 9-letter shared run gets scored across ~70 letters of unrelated flanking text
+  and rejected at ~0.85 density. Consequence, measured: **lowering `min_span` alone does
+  nothing**, because the floor is checked against the margin-extended window. The two move
+  together or not at all.
+- **New "Passage length" control** — *Normal passages* (40, 30) or *Also short passages*
+  (28, 12) — beside the existing Match width. On the Antiochus query against an 83-positive
+  adjudicated deck, `short` takes widest-40 from 56 manuscripts at 100% precision / 67% recall to
+  104 at 61% / 72%: five more graded positives, plus one witness **no method had found before**,
+  word-chunk matching included (MS heb. e.45/36, catalogued מגילת אנטיוכוס). It does not reach
+  cross-language witnesses, and it roughly doubles what you skim.
+- **Two selects, not sliders.** `min_span` and `verify_margin` are one coupled decision; a slider
+  on the floor alone would visibly do nothing and read as broken. Each offered combination stays
+  a named, content-hashed policy, and passage length now forms part of the search identity used
+  by preserve/recover.
+- **The anchor-evidence tier is removed.** It was measured twice against the same deck and failed
+  both times — 4% then 1% precision inside the tier, recovering 4 then 1 of the 20 witnesses it
+  was built for. Counting shared grams ranks by record length, and rarity-gating merely resampled
+  the same noise. The negative result is kept in the spec (section 10.4) so it is not reinvented.
+- Pre-existing presets keep byte-identical behaviour and `policy_id`s.
+
+#### Several witnesses of one work (2026-08-24)
+
+One text per work is not enough, and no budget increase fixes that. Measured through the shipped
+code against the 614 Birkat Hamazon census manuscripts that have any indexed text: the best single
+witness finds **348 (56.7%)**, while the same 17 searched **separately and merged** find
+**455 (74.1%)**. On
+Megillat Antiochus, a seed plus three rounds of promoted witnesses took frontier coverage from 2 to
+9 of 20.
+
+- **A Witnesses panel on `/parallels`**, letter-level only. Add copies of the work by pasting
+  them (one at a time, or a whole file split on blank lines with a preview of what the split
+  found — and a count of anything dropped as too short), or promote manuscripts straight from
+  your own results. Each witness is searched on its own and the results are merged into one
+  re-sortable list that says which witnesses point at each manuscript.
+- **`witnesses[]` on `POST /api/parallels`** (`method='passage'`), with `sort` over the fused
+  groups and a `witness_fusion` block on each result. An entry is either a pasted `text` or a
+  `raw_header` the server resolves — so a recursive request stays small.
+- **Auto-expand (optional)**: seed → top-K → repeat. Measured frontier coverage 2 → 4 → 7 → 9 of
+  20 over three rounds, monotone, with all 15 promoted witnesses graded positive. It is an
+  explicit button with the trade-off written beside it, never folded into "Find Parallels": the
+  cost is the first page — rows go from 191 to 2,795 and positives in the top 100 fall from 48 to
+  32. Reach up, precision down.
+- **Never concatenated.** Joining witnesses into one query starves the engine's per-query posting
+  budget. The 17 witnesses joined into one 33,180-character query admit 2.4% of their own postings
+  and reach **48.2%** — *worse than the best single witness* — against 74.1% fused; every
+  concatenated Antiochus recursion round likewise scored below the seed alone. Fusion is by
+  **rank** (RRF, k=60), not score — a
+  passage score counts matched *query* letters, so a long witness mechanically outscores a short
+  one for reasons unrelated to match quality.
+- **Scoped to letter-level, as a measurement rather than an assumption.** On the chunk engine,
+  concatenation and union return the identical manuscript set (392 both ways, empty difference in
+  both directions), so there is no budget to starve — desktop's recursive composition search is
+  correct as it stands — and multi-witness there buys +2 positives of 74 with zero frontier gain
+  at 4–6× the time. The witness panel stays hidden for chunk, cross-paragraph and combined.
+- **Fixed while passing through**: the results list's group order was hard-coded to top score
+  regardless of the sort control, so two of its three options — *Sort by shelfmark* and *Sort by
+  matches* — had never had any visible effect.
+
+Behind `PASSAGE_MULTI_WITNESS_ENABLED` (ANDed with the existing passage readiness check), with
+`SEARCH_API_PASSAGE_MAX_WITNESSES` (default 25) as the cost control. Full contract in
+`docs/SEARCH_API.md`; the measurements and their scope in
+`docs/specs/passage-matching-algorithm.md` §10.2b.
+
+#### What the measurements do and do not say
+
+Letter-level search is dramatically faster: **391 ms against 14,565 ms** on the same 120 queries,
+about 37×.
+
+On **recall@50 there is no demonstrated difference** between the two methods at that sample size,
+once the incumbent's own chunk size is swept. At `chunk_size=5` chunk scores 0.575 and the
+intervals separate; at `chunk_size=3` it scores **0.708 [0.622, 0.782]** against passage's **0.750
+[0.666, 0.819]**, and they overlap heavily — passage's lower bound sits below chunk's point
+estimate. Reporting the `c5` result alone would have claimed a decisive win the evidence does not
+support, which is exactly why both methods were swept.
+
+Where letter-level does separate is in **ranking** rather than retrieval: recall@1 **0.592 against
+0.467**, MRR **0.639 against 0.533** — the right manuscript higher up the same list, on the same
+queries, at a fraction of the time.
+
+The two methods are complementary and neither supersedes the other. Per the owner ruling of
+2026-08-21 the wording on user-facing surfaces stays qualitative and hedged — no precision
+percentages, no certified claims. The figures above are recorded here; they are not asserted there.
+
+### Desktop — Letter-Level Search (2026-08-26)
+
+A second way to search for parallels, beside the existing chunk search. It matches on sequences of
+letters rather than blocks of words, which makes it fast and cheap to run against the whole corpus.
+The two methods are complementary and neither replaces the other; chunk search remains the default.
+
+**Where it comes from.** This is the matching engine built for Computed Identifications, turned
+around. That system indexes the known works and asks of each Genizah manuscript which work it
+carries. Here the same character-level matching runs the other way: the *corpus* is indexed, and
+any text you paste becomes the query. Same machinery, opposite direction — which is why a feature
+this size arrived as one phase rather than a milestone.
+
+#### New Features
+
+- **Letter-level search in the Composition Search tab**, chosen from a new *Search method* selector.
+  It is much faster than chunk search and returns far fewer unrelated results. Chunk search keeps
+  what letter-level search does not offer — Exact / Variants / Fuzzy modes and cross-paragraph
+  filtering — and stays selected by default.
+- **Three controls over how far the search reaches.** *Match width* — how far a manuscript may
+  drift from your text and still count. *Passage length* — whether a short shared passage counts as
+  a match. *Search depth* — how much of the corpus to examine. All three start at a fast setting.
+  Deep and Deepest take seconds longer and reach damaged or reworked copies that a fast pass misses;
+  once started they cannot be interrupted, and the control says so.
+- **An index built on your own computer**, from the transcriptions already on it — nothing to
+  download. About ten minutes, about 11 GB free while it runs, about 3.5 GB when finished. The
+  program offers to build it once, and it can be built or rebuilt at any time from Settings. Free
+  space is checked *before* you are asked to approve the build, not after — being refused inside the
+  worker would mean having consented to something that could never start.
+- **A build can be cancelled at any point and never damages what you already have.** The new index
+  is built alongside the old one, validated, and only then swapped in. Every failure path — a bad
+  build, a corpus that changed while building, a file still held open by another window — restores
+  the previous index and leaves it working. A crash mid-build cannot leave a broken index behind:
+  the next start validates before it promotes, and falls back to the last index that opens.
+- **Letter-level search covers the Genizah corpus.** My Library and combined scopes stay on chunk
+  search and say why; Full Recursive Search likewise stays on chunk search, because joining several
+  texts into one query works for chunk search and measurably harms letter-level search.
+- Sessions and history remember the method and its three settings. A saved result set is
+  re-displayed only when it matches the method and scope it was produced under, so a restored window
+  never labels one search's results with another's settings.
+
+#### Bug Fixes
+
+- **A composition report exported from a letter-level search described a chunk search.** The xlsx
+  and docx settings block listed a chunk size, max frequency, search mode and Lab state belonging to
+  a search that never ran. It now reports the method actually used and its own three settings.
+- **Closing the program during a build, a scan or a re-index now waits for that work** instead of
+  terminating the thread underneath it.
+- **New: `scripts/rebuild_browse_map.py`.** A damaged browse map shows up as manuscripts with no
+  text and an image counter stuck at 0 — in the reading view, in Browse, and in search results. The
+  tool rebuilds it from the corpus in under a minute without re-indexing, and is built to survive
+  the exact damage it repairs.
+
 
 ---
 
@@ -1070,76 +1262,6 @@ and a repo lint fails CI if a new site spells its own.
   classified/unreadable/unparsed and the three must sum to the index total, and the shared
   corpus pattern is additionally cross-checked against every real header it should match. A
   walk with any hole in it can no longer come back clean.
-
-### Letter-level search with several witnesses of one work (2026-08-24)
-
-One text per work is not enough, and no budget increase fixes that. Measured through the shipped
-code against the 614 Birkat Hamazon census manuscripts that have any indexed text: the best single
-witness finds **348 (56.7%)**, while the same 17 searched **separately and merged** find
-**455 (74.1%)**. On
-Megillat Antiochus, a seed plus three rounds of promoted witnesses took frontier coverage from 2 to
-9 of 20.
-
-- **A Witnesses panel on `/parallels`**, letter-level only. Add copies of the work by pasting
-  them (one at a time, or a whole file split on blank lines with a preview of what the split
-  found — and a count of anything dropped as too short), or promote manuscripts straight from
-  your own results. Each witness is searched on its own and the results are merged into one
-  re-sortable list that says which witnesses point at each manuscript.
-- **`witnesses[]` on `POST /api/parallels`** (`method='passage'`), with `sort` over the fused
-  groups and a `witness_fusion` block on each result. An entry is either a pasted `text` or a
-  `raw_header` the server resolves — so a recursive request stays small.
-- **Auto-expand (optional)**: seed → top-K → repeat. Measured frontier coverage 2 → 4 → 7 → 9 of
-  20 over three rounds, monotone, with all 15 promoted witnesses graded positive. It is an
-  explicit button with the trade-off written beside it, never folded into "Find Parallels": the
-  cost is the first page — rows go from 191 to 2,795 and positives in the top 100 fall from 48 to
-  32. Reach up, precision down.
-- **Never concatenated.** Joining witnesses into one query starves the engine's per-query posting
-  budget. The 17 witnesses joined into one 33,180-character query admit 2.4% of their own postings
-  and reach **48.2%** — *worse than the best single witness* — against 74.1% fused; every
-  concatenated Antiochus recursion round likewise scored below the seed alone. Fusion is by
-  **rank** (RRF, k=60), not score — a
-  passage score counts matched *query* letters, so a long witness mechanically outscores a short
-  one for reasons unrelated to match quality.
-- **Scoped to letter-level, as a measurement rather than an assumption.** On the chunk engine,
-  concatenation and union return the identical manuscript set (392 both ways, empty difference in
-  both directions), so there is no budget to starve — desktop's recursive composition search is
-  correct as it stands — and multi-witness there buys +2 positives of 74 with zero frontier gain
-  at 4–6× the time. The witness panel stays hidden for chunk, cross-paragraph and combined.
-- **Fixed while passing through**: the results list's group order was hard-coded to top score
-  regardless of the sort control, so two of its three options — *Sort by shelfmark* and *Sort by
-  matches* — had never had any visible effect.
-
-Behind `PASSAGE_MULTI_WITNESS_ENABLED` (ANDed with the existing passage readiness check), with
-`SEARCH_API_PASSAGE_MAX_WITNESSES` (default 25) as the cost control. Full contract in
-`docs/SEARCH_API.md`; the measurements and their scope in
-`docs/specs/passage-matching-algorithm.md` §10.2b.
-
-### Letter-level search: a second control axis — passage length (2026-08-24)
-
-The Match-width control assumed one dimension. Chasing the Antiochus recall gap turned up a
-second, and a parameter that had been deciding results invisibly.
-
-- **`verify_margin` is now policy.** Verification extends a match by 30 letters each side before
-  scoring edit density. At a span floor of 40 that is harmless overhead; below ~25 it *is* the
-  result — a true 9-letter shared run gets scored across ~70 letters of unrelated flanking text
-  and rejected at ~0.85 density. Consequence, measured: **lowering `min_span` alone does
-  nothing**, because the floor is checked against the margin-extended window. The two move
-  together or not at all.
-- **New "Passage length" control** — *Normal passages* (40, 30) or *Also short passages*
-  (28, 12) — beside the existing Match width. On the Antiochus query against an 83-positive
-  adjudicated deck, `short` takes widest-40 from 56 manuscripts at 100% precision / 67% recall to
-  104 at 61% / 72%: five more graded positives, plus one witness **no method had found before**,
-  word-chunk matching included (MS heb. e.45/36, catalogued מגילת אנטיוכוס). It does not reach
-  cross-language witnesses, and it roughly doubles what you skim.
-- **Two selects, not sliders.** `min_span` and `verify_margin` are one coupled decision; a slider
-  on the floor alone would visibly do nothing and read as broken. Each offered combination stays
-  a named, content-hashed policy, and passage length now forms part of the search identity used
-  by preserve/recover.
-- **The anchor-evidence tier is removed.** It was measured twice against the same deck and failed
-  both times — 4% then 1% precision inside the tier, recovering 4 then 1 of the 20 witnesses it
-  was built for. Counting shared grams ranks by record length, and rarity-gating merely resampled
-  the same noise. The negative result is kept in the spec (section 10.4) so it is not reinvented.
-- Pre-existing presets keep byte-identical behaviour and `policy_id`s.
 
 ### Download the computed identifications as a spreadsheet (2026-08-21)
 

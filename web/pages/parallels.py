@@ -1266,15 +1266,16 @@ def create_parallels_page(initial_text: str = None):
                         'text-xs mt-1').style('color: var(--text-muted);')
 
                     _METHOD_HELP = {
-                        # Neither claim mentions nikkud or line breaks any
-                        # more. Both engines strip nikkud (the chunk one per
-                        # token, at tokenization) and both treat a newline as
-                        # an ordinary separator, so neither was ever a
-                        # difference between them.
+                        # The passage claim names speed and precision and
+                        # stops. Everything trimmed from it described the two
+                        # engines as differing where they do not: nikkud and
+                        # line breaks (2026-08-25 -- both strip nikkud, both
+                        # treat a newline as an ordinary separator), then
+                        # tolerance of spelling and transcription differences
+                        # (2026-08-26, owner review -- chunk search's Variants
+                        # and Fuzzy modes do that job).
                         'passage': tr(
-                            'Faster, with fewer irrelevant results. '
-                            'Tolerates spelling and transcription '
-                            'differences.'),
+                            'Faster, with fewer irrelevant results.'),
                         'chunk': tr(
                             'The older method. Slower, but offers Exact / '
                             'Variants / Fuzzy modes and cross-paragraph '
