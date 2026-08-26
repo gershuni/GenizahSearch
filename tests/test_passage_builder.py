@@ -955,3 +955,124 @@ def test_cancel_fires_once_more_before_write_manifest(tmp_path, construction):
     assert os.path.exists(os.path.join(d, GRAM_OFFSETS_NAME))
     assert not os.path.exists(os.path.join(d, MANIFEST_NAME))
     shutil.rmtree(d)
+
+
+# =========================================================================
+# Adversarial audit 2026-08-26. The cancel tests above assert a call COUNT
+# ("cancel.calls['i'] == 2"), which cannot tell one checkpoint from the
+# next: delete the checkpoint a test is NAMED for and the following one
+# silently becomes the call it counted, leaving it green. Demonstrated for
+# the scatter outer/inner pair and for the spool spooling loop. What
+# distinguishes checkpoints is WHERE they are, so these record the call
+# site of every check and assert the structure directly.
+# =========================================================================
+
+
+def _recording_cancel():
+    """Never cancels -- it runs a build to completion and records the
+    (function, line) every cancel check was made from, which is what makes
+    "this checkpoint, not the next one" a checkable claim."""
+    sites = []
+
+    def cancel():
+        frame = sys._getframe(1)
+        # `_check_cancel` is the one-line helper every checkpoint goes
+        # through; step past it to the loop that owns the checkpoint.
+        if frame.f_code.co_name == '_check_cancel':
+            frame = frame.f_back
+        sites.append((frame.f_code.co_name, frame.f_lineno))
+        return False
+
+    cancel.sites = sites
+    return cancel
+
+
+def test_the_scatter_pass_has_two_distinct_alternating_checkpoints(tmp_path):
+    """`test_cancel_in_scatter_partition_loop` and
+    `test_cancel_in_scatter_batch_loop` are named for the OUTER per-partition
+    check and the INNER batch check respectively, but both assert only a call
+    count -- deleting the outer check lets the inner become call 1 and BOTH
+    stay green. This pins the structure they describe: two distinct sites,
+    strictly alternating, one pair per partition."""
+    records = synthetic_records(n_records=10)
+    d = str(tmp_path / 'scatter-checkpoint-sites')
+    cancel = _recording_cancel()
+    build_index(records, d, construction='scatter', partitions=3,
+                apply_hygiene=False, batch_grams=_HUGE_BATCH,
+                cancel_check=cancel)
+
+    lines = [ln for name, ln in cancel.sites if name == '_pass2_scatter']
+    distinct = sorted(set(lines))
+    assert len(distinct) == 2, (
+        'the scatter pass has collapsed to %d cancel checkpoint(s); the '
+        'outer per-partition check and the inner batch check are supposed '
+        'to be separate places: %r' % (len(distinct), lines))
+    outer, inner = distinct
+    assert lines == [outer, inner] * (len(lines) // 2), (
+        'the checkpoints are not one outer followed by one inner per '
+        'partition: %r' % (lines,))
+    shutil.rmtree(d)
+
+
+def test_the_spool_pass_has_a_spooling_checkpoint_before_its_partitions(
+        tmp_path):
+    """Same weakness on the spool side: `test_cancel_in_spool_spooling_loop`
+    asserts only that the scratch directory exists, which is true whether or
+    not the spooling loop has its own check. The spooling checkpoint must be
+    a distinct site, and must come BEFORE every sort/write checkpoint."""
+    records = synthetic_records(n_records=10)
+    d = str(tmp_path / 'spool-checkpoint-sites')
+    cancel = _recording_cancel()
+    build_index(records, d, construction='spool', partitions=3,
+                apply_hygiene=False, batch_grams=_HUGE_BATCH,
+                cancel_check=cancel)
+
+    lines = [ln for name, ln in cancel.sites if name == '_pass2_spool']
+    distinct = sorted(set(lines))
+    assert len(distinct) == 2, (
+        'the spool pass has collapsed to %d cancel checkpoint(s); the '
+        'spooling loop and the sort/write loop are supposed to be separate '
+        'places: %r' % (len(distinct), lines))
+    spooling, sort_write = lines[0], distinct[1] if distinct[0] == lines[0] \
+        else distinct[0]
+    assert lines[0] == min(distinct), (
+        'the FIRST cancel check of the spool pass must be the spooling '
+        "loop's, not a partition's: %r" % (lines,))
+    assert lines.count(spooling) == 1, (
+        'the single-batch corpus must produce exactly one spooling-loop '
+        'check: %r' % (lines,))
+    assert set(lines[1:]) == {sort_write}, (
+        'everything after the spooling check must be the sort/write '
+        'loop: %r' % (lines,))
+    shutil.rmtree(d)
+
+
+def test_the_pass1_cancel_cadence_is_gated_on_records_seen_not_indexed(
+        tmp_path, monkeypatch):
+    """`test_cancel_check_stops_pass1_when_every_record_is_filtered` names
+    exactly this swap in its docstring and does not catch it: with every
+    record filtered `n_records_indexed` stays 0, `0 % CANCEL_CHECK_RECORDS`
+    is trivially 0, so the mutated check still fires on the first record and
+    the call count is 1 either way (adversarial audit 2026-08-26).
+
+    Counting checkpoints across a FULL uncancelled pass separates them: a
+    seen-gated check fires once per cadence, an indexed-gated one fires on
+    every single record."""
+    monkeypatch.setattr(passage_builder, 'CANCEL_CHECK_RECORDS', 3)
+    records = [(f'short{i:04d}', 'א') for i in range(20)]  # all filtered
+    d = str(tmp_path / 'pass1-cancel-cadence')
+    cancel = _recording_cancel()
+    stats = passage_builder.build_index(records, d, partitions=2,
+                                        apply_hygiene=False,
+                                        cancel_check=cancel)
+
+    assert stats.n_records_indexed == 0, (
+        'the premise of this test is an all-filtered corpus')
+    pass1 = [ln for name, ln in cancel.sites if name == '_pass1']
+    assert len(pass1) == len(records) // 3, (
+        'pass 1 checked cancellation %d times for %d records at a cadence '
+        'of 3. %d is the per-RECORD cadence an n_records_indexed gate '
+        'produces on a corpus where that counter never leaves 0 -- which is '
+        'the defect the sibling test claims to catch and does not'
+        % (len(pass1), len(records), len(records)))
+    shutil.rmtree(d)

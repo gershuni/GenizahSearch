@@ -9,6 +9,7 @@ a GUI event loop.
 """
 from __future__ import annotations
 
+import inspect
 import itertools
 import logging
 import os
@@ -2483,30 +2484,112 @@ def test_recovery_two_transient_open_failures_does_not_downgrade_valid_current(
     c = _Corpus(tmp_path)
     assert c.build().status == 'installed'
     assert c.build().status == 'installed'  # creates one _prev-* generation
-    stub, calls = _flaky_open_index(c.live_dir, fail_times=2)
+    # `fail_times` is DERIVED, not the literal 2 it used to be. With 2,
+    # `_open_with_retry`'s own default attempts absorb both failures and
+    # the re-confirmation's very FIRST try succeeds -- so the test passed
+    # for any margin >= 1 and only caught the step being deleted outright.
+    # Weakening 5 -> 1 was invisible (adversarial audit 2026-08-26).
+    # Failing every attempt but the last one the shipped margin buys makes
+    # the WHOLE margin load-bearing, and tracks the constants if either is
+    # ever legitimately changed.
+    stub, calls = _flaky_open_index(c.live_dir,
+                                    fail_times=_RECONFIRM_TOTAL() - 1)
     monkeypatch.setattr(pl, 'open_index', stub)
+
+    # `current/` must never be moved aside -- the claim this test is named
+    # for. Watching for a leftover `.dead-*` directory could not check it:
+    # that directory is rmtree'd two lines after it is created, so the
+    # assertion was true whatever the code did.
+    renames = []
+    _real_rename = pl._retry_rename
+
+    def _spy(src, dst):
+        renames.append((src, dst))
+        return _real_rename(src, dst)
+
+    monkeypatch.setattr(pl, '_retry_rename', _spy)
 
     result = pl.recover_at_startup(c.root)
 
     assert result.status == 'live_ok', (
-        f'a valid current/ was downgraded to {result.status!r} after only '
-        'two transient open failures -- the re-confirmation before '
-        'destroying it either did not run or gave up too soon')
+        f'a valid current/ was downgraded to {result.status!r} after '
+        'transient open failures -- the re-confirmation before destroying '
+        'it either did not run or gave up too soon')
     assert result.index is not None
-    assert calls['n'] >= 3, (
-        'the re-confirmation must actually have made a THIRD call against '
-        "current/ -- _open_with_retry's own two attempts already spent the "
-        'first two, so anything less proves nothing beyond the existing '
-        'one-failure test above')
+    assert calls['n'] == _RECONFIRM_TOTAL(), (
+        'the re-confirmation must have spent its FULL margin and succeeded '
+        'on the last attempt it buys (%d calls); %d means the margin is '
+        'wider than anything this test actually requires, and could be cut '
+        'without failing it' % (_RECONFIRM_TOTAL(), calls['n']))
+    assert not any(os.path.normpath(src) == os.path.normpath(c.live_dir)
+                   for src, _ in renames), (
+        'current/ was moved aside; for this to count as a fix rather than a '
+        'lucky recovery from one, it must never have been renamed at all: '
+        '%r' % (renames,))
     # The still-genuinely-valid _prev-* generation must be swept away, same
     # as the ordinary all-first-try-open live_ok path -- proving this is
     # not merely surviving by accident (e.g. falling through to a
     # different, un-cleaned branch).
     remaining_prevs = [n for n in os.listdir(c.root) if n.startswith(pl.PREV_PREFIX)]
     assert remaining_prevs == [], remaining_prevs
-    assert not any(n.startswith('.dead-') for n in os.listdir(c.root)), (
-        'current/ must never actually have been moved aside for this to '
-        'count as a fix, not a lucky recovery from one')
+
+
+def _RECONFIRM_TOTAL():
+    """Every open_index call a genuinely-valid `current/` gets before the
+    recovery walk is allowed to destroy it: `_open_with_retry`'s own default
+    attempts at the top of the loop, plus the wider re-confirmation. Read
+    from the signature and the constant rather than hardcoded, so a test
+    built on it cannot silently drift away from the code it guards."""
+    default = inspect.signature(
+        pl._open_with_retry).parameters['attempts'].default
+    return default + pl.CURRENT_DESTROY_RECONFIRM_ATTEMPTS
+
+
+def test_a_weakened_reconfirm_margin_does_downgrade_a_valid_current(
+        tmp_path, monkeypatch):
+    """The companion that proves the margin is LOAD-BEARING rather than
+    merely present. `CURRENT_DESTROY_RECONFIRM_ATTEMPTS` is cut to 1 -- the
+    weakening that used to pass the whole suite -- against the same corpus
+    the test above recovers cleanly, and the valid `current/` is destroyed
+    and replaced by the stale generation behind it. Without this, "the
+    constant is 5" is an assertion no test makes."""
+    monkeypatch.setattr(pl, '_delete_generation_background', lambda p: None)
+    monkeypatch.setattr(pl, 'CURRENT_DESTROY_RECONFIRM_BACKOFF_SECONDS', 0.01)
+    c = _Corpus(tmp_path)
+    assert c.build().status == 'installed'
+    assert c.build().status == 'installed'  # creates one _prev-* generation
+
+    shipped_total = _RECONFIRM_TOTAL()
+    stub, calls = _flaky_open_index(c.live_dir, fail_times=shipped_total - 1)
+    monkeypatch.setattr(pl, 'open_index', stub)
+    monkeypatch.setattr(pl, 'CURRENT_DESTROY_RECONFIRM_ATTEMPTS', 1)
+
+    renames = []
+    _real_rename = pl._retry_rename
+
+    def _spy(src, dst):
+        renames.append((src, dst))
+        return _real_rename(src, dst)
+
+    monkeypatch.setattr(pl, '_retry_rename', _spy)
+
+    result = pl.recover_at_startup(c.root)
+
+    assert result.status != 'live_ok', (
+        'a re-confirmation margin of 1 still rode out %d consecutive '
+        'transient failures -- then the margin the shipped constant buys is '
+        'not what makes the sibling test pass, and cutting it would go '
+        'unnoticed' % (shipped_total - 1))
+    # The DIRECT claim, and the one that does not depend on what the walk
+    # manages afterwards: the still-valid `current/` was moved aside. (What
+    # it ends up as varies -- with the stub's remaining failures the
+    # promoted generation cannot be opened either, so the walk runs out of
+    # candidates entirely rather than settling on `recovered_from_prev`.
+    # Either way `current/` is gone, which is the regression.)
+    assert any(os.path.normpath(src) == os.path.normpath(c.live_dir)
+               for src, _ in renames), (
+        'the weakened margin did not actually destroy current/, so this '
+        'test is not exercising the downgrade it claims: %r' % (renames,))
 
 
 def test_recovery_reconsiders_a_promoted_candidate_after_a_transient_reopen_failure(
