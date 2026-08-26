@@ -15795,6 +15795,13 @@ class GenizahGUI(QMainWindow):
         self._revalidate_comp_method()
 
     def _on_passage_build_finished(self, result):
+        if getattr(self, '_close_pending', False):
+            # Install nothing during a pending close: the state would be
+            # assigned and then immediately torn down, and the window is on
+            # its way out. The artifact is already swapped in on disk, so
+            # the next start picks it up.
+            self._finish_passage_build()
+            return
         index = getattr(result, 'index', None)
         live_dir = getattr(result, 'live_dir', '')
         status = getattr(result, 'status', '')
@@ -15881,6 +15888,69 @@ class GenizahGUI(QMainWindow):
         self._passage_build_in_flight = True
         self._revalidate_comp_method()
         self._start_passage_build_worker(corpus_path)
+
+    def _restore_comp_passage_preferences(self, comp):
+        """Preference half of Task 8. Restores the method and the three
+        policy axes from a saved dict, validating each INDEPENDENTLY against
+        its widget's own options -- one bad axis must cost that axis its
+        value, not take the other two (or the whole restore) with it."""
+        for axis in ('width', 'length', 'depth'):
+            combo = getattr(self, 'comp_passage_%s_combo' % axis, None)
+            if combo is None:
+                continue
+            value = comp.get('comp_passage_%s' % axis)
+            idx = combo.findData(value) if value is not None else -1
+            if idx >= 0:
+                combo.blockSignals(True)
+                combo.setCurrentIndex(idx)
+                combo.blockSignals(False)
+
+        combo = getattr(self, 'comp_method_combo', None)
+        if combo is None:
+            return
+        method = comp.get('comp_method', 'chunk')
+        idx = combo.findData(method if method in ('chunk', 'passage')
+                             else 'chunk')
+        if idx >= 0:
+            combo.blockSignals(True)
+            combo.setCurrentIndex(idx)
+            combo.blockSignals(False)
+        # blockSignals above means the handler never ran, so the mode UI and
+        # the gate have to be applied explicitly -- NiceGUI's lesson holds in
+        # Qt too: a programmatic value change fires no event.
+        if self._comp_method() == 'passage':
+            reason = self._passage_disabled_reason_now()
+            if reason is not None:
+                self._revert_comp_method_to_chunk(reason)
+            else:
+                self._apply_passage_mode_ui(True)
+                self._show_passage_reason(None)
+        else:
+            self._apply_passage_mode_ui(False)
+            self._show_passage_reason(None)
+        self._refresh_comp_method_enabled()
+
+    def _restored_provenance_is_valid(self, comp):
+        """Provenance half of Task 8. True when a saved RESULT snapshot may
+        still be shown.
+
+        MIGRATION: a snapshot with no provenance at all is pre-v9, which is
+        chunk by definition -- it is always valid, and no legacy session is
+        ever discarded for lacking fields that did not exist when it was
+        written."""
+        method = comp.get('last_result_method')
+        if method is None:
+            return True
+        if method not in ('chunk', 'passage'):
+            return False
+        if method == 'chunk':
+            return True
+        # A passage snapshot is only displayable if a passage search could
+        # still be performed for the scope it was run against. The scope
+        # comes from the STAMP, not from the live combo: the user may well
+        # have changed it since, and that says nothing about these rows.
+        scope = comp.get('last_result_scope') or 'genizah'
+        return self._passage_disabled_reason_now(scope=scope) is None
 
     def _comp_passage_axis(self, axis):
         """The selected value of one policy axis, falling back to its own
@@ -23088,6 +23158,11 @@ class GenizahGUI(QMainWindow):
     def on_comp_scan_finished(self, result_obj):
         self.is_comp_running = False
         self.reset_comp_ui()
+        if getattr(self, '_close_pending', False):
+            # A close is waiting on exactly this worker. Rendering rows and
+            # then STARTING a grouping thread would hand the deferral a new
+            # worker to wait for, one the user never asked for.
+            return
 
         # Phase 146: rows the passage searcher matched but could not load
         # text for. Only meaningful for a run STAMPED passage -- reading the
@@ -26387,6 +26462,27 @@ class GenizahGUI(QMainWindow):
                     'mode_index': self.comp_mode_combo.currentIndex() if hasattr(self, 'comp_mode_combo') else 0,
                     # Phase 110 (COMP-LOC-01) full-restore: persist the comp corpus scope.
                     'comp_corpus_scope': getattr(self, '_comp_corpus_scope', 'genizah'),
+                    # Phase 146 PREFERENCE fields -- read the LIVE widgets, so
+                    # what restores is the choice the user currently has made.
+                    'comp_method': self._comp_method(),
+                    'comp_passage_width': self._comp_passage_axis('width'),
+                    'comp_passage_length': self._comp_passage_axis('length'),
+                    'comp_passage_depth': self._comp_passage_axis('depth'),
+                    # Phase 146 PROVENANCE fields -- stamped at dispatch, never
+                    # read from a widget. These describe the rows in
+                    # 'results' below, and they are what a restore validates
+                    # before re-displaying them. Absent means a pre-v9
+                    # snapshot, which is chunk by definition.
+                    'last_result_method': getattr(
+                        self, '_comp_last_result_method', None),
+                    'last_result_scope': getattr(
+                        self, '_comp_last_result_scope', None),
+                    'last_result_width': getattr(
+                        self, '_comp_last_result_width', None),
+                    'last_result_length': getattr(
+                        self, '_comp_last_result_length', None),
+                    'last_result_depth': getattr(
+                        self, '_comp_last_result_depth', None),
                     'results': getattr(self, 'comp_raw_items', [])[:5000],
                     'filtered_results': getattr(self, 'comp_raw_filtered', [])[:5000],
                     'domain_exclusions': sorted(getattr(self, '_comp_domain_exclusions', set())),
@@ -26641,6 +26737,13 @@ class GenizahGUI(QMainWindow):
                     self.comp_corpus_scope_combo.setCurrentIndex(_comp_idx)
                     self.comp_corpus_scope_combo.blockSignals(False)
 
+            # Phase 146: restore the method and the three axes as
+            # PREFERENCES, then re-run the gate. Everything is validated
+            # against the widget's own options, so a hand-edited or stale
+            # value degrades to its default instead of raising later inside
+            # `compose`.
+            self._restore_comp_passage_preferences(comp)
+
             self._comp_domain_exclusions = set(comp.get('domain_exclusions', []))
             self._comp_printed_filter_state = comp.get('printed_filter', 'all')
             # Phase 95 D-39 — restore LOCAL filter states for composition + parallels surfaces.
@@ -26658,6 +26761,15 @@ class GenizahGUI(QMainWindow):
                 self.spin_filter.blockSignals(False)
 
             # Restore composition results — flat display (grouping is lost on save)
+            # Phase 146: the snapshot is only re-displayed if its
+            # PROVENANCE still describes a search that could run now. A
+            # passage+local snapshot is not merely stale, it is impossible,
+            # and re-displaying it would attribute rows to a search the app
+            # would refuse to perform.
+            if not self._restored_provenance_is_valid(comp):
+                comp = dict(comp)
+                comp.pop('results', None)
+                comp.pop('filtered_results', None)
             if comp.get('results') or comp.get('filtered_results'):
                 self.comp_raw_items = comp.get('results', [])
                 self.comp_raw_filtered = comp.get('filtered_results', [])
@@ -26897,7 +27009,55 @@ class GenizahGUI(QMainWindow):
         except Exception as e:
             logger.error("Failed to check interrupted search: %s", e)
 
+    # Phase 146: workers that must be allowed to FINISH rather than be
+    # terminated. A passage build writes only into staging and is crash-safe,
+    # but terminating the SCAN kills a thread holding live memory mappings,
+    # and terminating a build leaves a multi-GB staging directory that only
+    # the next startup will collect.
+    def _passage_workers_busy(self):
+        reasons = []
+        th = getattr(self, 'passage_build_thread', None)
+        if th is not None and th.isRunning():
+            reasons.append(tr("the letter-level index is being built"))
+        if self._passage_scan_in_flight():
+            reasons.append(tr("a letter-level search is running"))
+        return reasons
+
+    def _defer_close_for_passage(self, event):
+        """Returns True when the close was deferred. Uses a QTimer to
+        re-issue, never a blocking wait() on the UI thread: a wait here
+        freezes the window for as long as the worker takes, which is exactly
+        the appearance of a hang the deferral exists to avoid."""
+        reasons = self._passage_workers_busy()
+        if not reasons:
+            return False
+        event.ignore()
+        if not getattr(self, '_close_pending', False):
+            self._close_pending = True
+            self.status_label.setText(tr(
+                "Closing once the current work finishes \u2014 {}. A "
+                "letter-level search cannot be interrupted once it has "
+                "started, and is usually done within a few seconds."
+            ).format(", ".join(reasons)))
+        QTimer.singleShot(400, self._retry_pending_close)
+        return True
+
+    def _retry_pending_close(self):
+        if not getattr(self, '_close_pending', False):
+            return
+        if self._passage_workers_busy():
+            QTimer.singleShot(400, self._retry_pending_close)
+            return
+        # No tracked worker remains -- re-issue the close for real.
+        self._close_pending = False
+        self.close()
+
     def closeEvent(self, event):
+        # Phase 146: BEFORE any shutdown state is set. Deferring after
+        # `_app_shutting_down = True` would leave a running app whose
+        # telemetry and session-save paths are already disarmed.
+        if self._defer_close_for_passage(event):
+            return
         # Phase 114 D-09/D-15: set shutdown flag first so Plan-02 search/comp emit
         # guards (REVIEWS HIGH-2) and session_end exactly-once guard both see it
         # before any subsequent teardown fires events.
