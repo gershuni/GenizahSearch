@@ -15,6 +15,7 @@ import weakref
 import html
 import json
 import pickle
+import uuid
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Optional
@@ -1242,11 +1243,25 @@ class SearchEngine:
 
             cleaned_map, changed = dedupe_browse_map(raw_map)
             if changed:
+                # Atomic write: this runs off the FL-ID background thread, which
+                # no app-close drain waits on, so a process killed mid-write must
+                # never leave a truncated/corrupt browse_map.pkl behind -- only
+                # ever the old file or the new one, via os.replace. The lock
+                # above is process-local, so a second desktop process racing
+                # this same write needs its OWN temp name -- a shared fixed
+                # name lets one process's tmp file get truncated, replaced,
+                # or removed out from under the other.
+                tmp_path = "{}.{}.tmp".format(Config.BROWSE_MAP, uuid.uuid4().hex)
                 try:
-                    with open(Config.BROWSE_MAP, 'wb') as f:
+                    with open(tmp_path, 'wb') as f:
                         pickle.dump(cleaned_map, f)
+                    os.replace(tmp_path, Config.BROWSE_MAP)
                 except Exception as e:
                     LOGGER.warning("Failed to write deduplicated browse map to %s: %s", Config.BROWSE_MAP, e)
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
 
             SearchEngine._shared_browse_map = cleaned_map
             self._browse_map_cache = cleaned_map

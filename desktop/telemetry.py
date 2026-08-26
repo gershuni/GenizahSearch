@@ -332,6 +332,9 @@ _ALLOWED_PROPS: frozenset[str] = frozenset({
     'perf_summary',       # top-level container key for nested per-mode stats dict (D-07/KQ-8)
     'operation_kind',     # indexing event: enum literal ('initial_scan' etc.) (D-02)
     'doc_count_bucket',   # indexing event: coarse doc count bucket (D-02/KQ-6)
+    # Phase 146: which parallels method ran ('chunk' | 'passage'). A fixed
+    # two-value enum stamped at dispatch, never free text.
+    'method',
 })
 
 

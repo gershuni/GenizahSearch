@@ -64,8 +64,8 @@ from shared.passage_index import (
     GRAM_OFFSETS_NAME, MANIFEST_NAME, MAX_RECORDS, MAX_RECORD_LETTERS,
     POSTINGS_NAME,
     POSTING_BYTES, RECORDS_NAME, RECORD_DTYPE, RECORD_IDS_NAME, STREAMS_NAME,
-    IndexFormatError, encode_stream, pack_postings, require_little_endian,
-    verify_csr_monotone, write_manifest,
+    BuildCancelled, IndexFormatError, encode_stream, pack_postings,
+    require_little_endian, verify_csr_monotone, write_manifest,
 )
 from shared.passage_normalize import (
     GRAM_CODE_SPACE, K, NORMALIZER_VERSION, gram_codes, norm_stream_fast,
@@ -83,6 +83,12 @@ DEFAULT_PARTITIONS = 8
 # 60K-record slice (smaller arrays stay in cache), and peak RSS fell
 # from 1.8 GB to 630 MB. spool is flat in this knob at ~50s.
 DEFAULT_BATCH_GRAMS = 1_000_000
+
+# Pass 1's own progress print is every 100k records; measured pass 1 is ~347s
+# for 948,549 records, so 100k granularity is ~37s of cancel lag -- too long
+# for the desktop close path to wait on. This is a separate, finer cadence
+# checked purely for cancellation, not print traffic.
+CANCEL_CHECK_RECORDS = 10_000
 
 
 @dataclass
@@ -114,6 +120,11 @@ def _noop(*_a, **_k) -> None:
     pass
 
 
+def _check_cancel(cancel_check: Optional[Callable[[], bool]]) -> None:
+    if cancel_check is not None and cancel_check():
+        raise BuildCancelled('passage index build cancelled')
+
+
 def check_free_space(index_dir: str, needed_bytes: int) -> None:
     """Refuse to start a build that cannot finish. Cheap, and the failure it
     prevents is a half-written multi-GB artifact."""
@@ -135,7 +146,8 @@ def estimate_artifact_bytes(n_letters: int, stride: int = 1) -> int:
 
 
 def _pass1(records: Iterable, index_dir: str, *, stride: int,
-           apply_hygiene: bool, progress: Callable) -> tuple:
+           apply_hygiene: bool, progress: Callable,
+           cancel_check: Optional[Callable[[], bool]] = None) -> tuple:
     """Write streams/records/ids plus the EXACT gram histogram.
 
     `hist` is uint32: the whole corpus yields ~599M postings, far under a
@@ -173,6 +185,13 @@ def _pass1(records: Iterable, index_dir: str, *, stride: int,
         xfh.write('record_id\treason\n')
         for record_id, text in records:
             stats.n_records_seen += 1
+            # Checked on every record SEEN, before either `continue` below --
+            # a corpus that is mostly or entirely filtered by hygiene or
+            # below_gram_width must still be cancellable; gating this on
+            # n_records_indexed instead would let such a corpus run pass 1 to
+            # completion ignoring Cancel.
+            if stats.n_records_seen % CANCEL_CHECK_RECORDS == 0:
+                _check_cancel(cancel_check)
             if apply_hygiene:
                 reason = page_filter(text)
                 if reason is not None:
@@ -325,8 +344,20 @@ def _iter_record_grams(recs: np.ndarray, streams: np.ndarray, *,
     held = 0
 
     def _flush():
-        return (np.concatenate(codes_l), np.concatenate(pages_l),
-                np.concatenate(pos_l))
+        codes = np.concatenate(codes_l)
+        pages = np.concatenate(pages_l)
+        poss = np.concatenate(pos_l)
+        # Stride is applied per record above; a bug that strides codes but
+        # not positions (or vice versa) desyncs the three arrays by however
+        # many records were in this batch, not by one -- checked HERE, at
+        # batch size, so it is a small clean assertion. Left unchecked it
+        # surfaces a frame deeper as a raw numpy shape error, with the
+        # multi-million-element CSR/offset arrays of the caller dragged into
+        # the traceback.
+        assert codes.shape == pages.shape == poss.shape, (
+            f'gram batch desynced: codes{codes.shape} pages{pages.shape} '
+            f'positions{poss.shape}')
+        return codes, pages, poss
 
     for ri in range(len(recs)):
         off = int(recs[ri]['stream_off'])
@@ -353,7 +384,8 @@ def _iter_record_grams(recs: np.ndarray, streams: np.ndarray, *,
 def _pass2_scatter(index_dir: str, offsets: np.ndarray, recs: np.ndarray,
                    streams: np.ndarray, parts: list, *, stride: int,
                    batch_grams: int, progress: Callable,
-                   stats: BuildStats) -> None:
+                   stats: BuildStats,
+                   cancel_check: Optional[Callable[[], bool]] = None) -> None:
     """Scatter every posting to its final CSR address, one slice at a time."""
     total = int(offsets[-1])
     postings_path = os.path.join(index_dir, POSTINGS_NAME)
@@ -363,12 +395,14 @@ def _pass2_scatter(index_dir: str, offsets: np.ndarray, recs: np.ndarray,
     cursor = np.zeros(GRAM_CODE_SPACE, dtype=np.uint64)
     t0 = time.time()
     for pi, (c0, c1, o0, o1) in enumerate(parts):
+        _check_cancel(cancel_check)
         n_slice = o1 - o0
         out = np.zeros((max(n_slice, 1), POSTING_BYTES), dtype=np.uint8)
         stats.peak_slice_bytes = max(stats.peak_slice_bytes, out.nbytes)
         cursor[c0:c1] = 0
         for codes, pages, poss in _iter_record_grams(
                 recs, streams, batch_grams=batch_grams, stride=stride):
+            _check_cancel(cancel_check)
             sel = (codes >= c0) & (codes < c1)
             if not sel.any():
                 continue
@@ -417,7 +451,8 @@ def _pass2_scatter(index_dir: str, offsets: np.ndarray, recs: np.ndarray,
 def _pass2_spool(index_dir: str, offsets: np.ndarray, recs: np.ndarray,
                  streams: np.ndarray, parts: list, *, stride: int,
                  batch_grams: int, progress: Callable,
-                 stats: BuildStats) -> None:
+                 stats: BuildStats,
+                 cancel_check: Optional[Callable[[], bool]] = None) -> None:
     """Baseline: spool packed keys per partition, sort, write CSR in order.
 
     Kept so the scatter path is compared against the conventional shape rather
@@ -435,6 +470,7 @@ def _pass2_spool(index_dir: str, offsets: np.ndarray, recs: np.ndarray,
     try:
         for codes, pages, poss in _iter_record_grams(
                 recs, streams, batch_grams=batch_grams, stride=stride):
+            _check_cancel(cancel_check)
             width = offsets[codes + 1] - offsets[codes]
             keep = width > 0
             if not keep.all():
@@ -468,6 +504,7 @@ def _pass2_spool(index_dir: str, offsets: np.ndarray, recs: np.ndarray,
     written = 0
     with open(postings_path, 'wb') as out_fh:
         for i, (_c0, _c1, o0, o1) in enumerate(parts):
+            _check_cancel(cancel_check)
             path = os.path.join(scratch, f'p{i}.bin')
             keys = np.fromfile(path, dtype=np.uint64)
             keys.sort()
@@ -519,7 +556,8 @@ def build_index(records: Iterable, index_dir: str, *,
                 source_manifest: Optional[list] = None,
                 corpus_label: str = '',
                 progress: Optional[Callable] = None,
-                free_space_bytes: int = 0) -> BuildStats:
+                free_space_bytes: int = 0,
+                cancel_check: Optional[Callable[[], bool]] = None) -> BuildStats:
     """Build a passage index into `index_dir`. Returns measured BuildStats.
 
     manifest.json is written LAST, so an interrupted build leaves a directory
@@ -540,93 +578,165 @@ def build_index(records: Iterable, index_dir: str, *,
     closed, but the index is still UNAVAILABLE until the rebuild finishes. A
     staging directory plus an atomic swap is the real fix and belongs with the
     desktop build worker, which is where a rebuild-in-place actually happens.
+
+    EXCEPTION BOUNDARY: this whole body runs inside one try/except, and
+    anything that escapes it is caught, held as text only, and re-raised --
+    the SAME object, with `__traceback__`, `__context__` and `__cause__`
+    cleared -- only after that try/except has fully unwound. It does NOT
+    reconstruct a fresh `type(exc)(*exc.args)`: that was tried and reverted,
+    because rebuilding from `args` silently discards everything an exception
+    carries outside them, and for the `OSError` family that includes
+    `filename` -- so a build dying on a real file reported the errno and
+    never named the path. Clearing the traceback drops the frame chain just
+    as completely while keeping the detail. The `streams`
+    memmap the `finally` below closes is a local of the pass-2 call's OWN
+    frame, not of this one; `del streams` here drops only this frame's
+    reference, so a caller that RETAINS the propagating exception (logs
+    it, stores it, `pytest.raises(...) as excinfo` then reads `.value`)
+    keeps that pass-2 frame alive through the traceback, and with it a
+    reference to a mapping `finally` has already unmapped -- dereferencing
+    it is an access violation, not a catchable error. Raising the fresh
+    exception from INSIDE the `except` clause would not fix this: even
+    `raise ... from None` only sets `__suppress_context__` (hides it from
+    printed output) and leaves `__context__` -- and the traceback hanging
+    off it -- pointing right back at the same frame. Only a raise that
+    happens after the `except` clause has been left starts with no current
+    exception being handled, so `__context__` comes back `None` for real.
+    `build_index` is this module's one public entry point, so this is the
+    only place such a boundary is needed.
     """
-    if construction not in ('scatter', 'spool'):
-        raise IndexFormatError(f'unknown construction {construction!r}')
-    require_little_endian()
-    os.makedirs(index_dir, exist_ok=True)
-    # Preflight FIRST, invalidate second (PR #324 round 3). The first version
-    # of this ordering removed the manifest and then ran the free-space check,
-    # so a failed preflight -- which touches nothing -- still left a perfectly
-    # good existing index unopenable. A refusal to start must leave the world
-    # exactly as it found it.
-    if free_space_bytes:
-        check_free_space(index_dir, free_space_bytes)
-    # Invalidate before touching data: a rebuild in place must not overwrite
-    # data files under a manifest that still describes the old ones.
-    _stale_manifest = os.path.join(index_dir, MANIFEST_NAME)
-    if os.path.exists(_stale_manifest):
-        os.remove(_stale_manifest)
-    progress = progress or _noop
-    t_start = time.time()
+    # Set only when something below failed -- see the docstring's EXCEPTION
+    # BOUNDARY paragraph for why this holds the exception OBJECT (with its
+    # traceback severed) rather than a (type, args) pair to rebuild from,
+    # and why it is acted on only after the try/except below, never from
+    # inside `except`.
+    boundary_failure = None
+    try:
+        if construction not in ('scatter', 'spool'):
+            raise IndexFormatError(f'unknown construction {construction!r}')
+        require_little_endian()
+        os.makedirs(index_dir, exist_ok=True)
+        # Preflight FIRST, invalidate second (PR #324 round 3). The first version
+        # of this ordering removed the manifest and then ran the free-space check,
+        # so a failed preflight -- which touches nothing -- still left a perfectly
+        # good existing index unopenable. A refusal to start must leave the world
+        # exactly as it found it.
+        if free_space_bytes:
+            check_free_space(index_dir, free_space_bytes)
+        # Invalidate before touching data: a rebuild in place must not overwrite
+        # data files under a manifest that still describes the old ones.
+        _stale_manifest = os.path.join(index_dir, MANIFEST_NAME)
+        if os.path.exists(_stale_manifest):
+            os.remove(_stale_manifest)
+        progress = progress or _noop
+        t_start = time.time()
 
-    hist, stats = _pass1(records, index_dir, stride=stride,
-                         apply_hygiene=apply_hygiene, progress=progress)
-    stats.construction = construction
-    stats.df_cap = df_cap
-    raw_postings = stats.n_postings
-    hist = _apply_df_cap(hist, df_cap, stats)
-    stats.n_postings = raw_postings - stats.df_capped_postings
-    bands = df_band_edges(hist)
+        hist, stats = _pass1(records, index_dir, stride=stride,
+                             apply_hygiene=apply_hygiene, progress=progress,
+                             cancel_check=cancel_check)
+        stats.construction = construction
+        stats.df_cap = df_cap
+        raw_postings = stats.n_postings
+        hist = _apply_df_cap(hist, df_cap, stats)
+        stats.n_postings = raw_postings - stats.df_capped_postings
+        bands = df_band_edges(hist)
 
-    offsets = _csr_offsets(hist)
-    verify_csr_monotone(offsets)
-    if int(offsets[-1]) != stats.n_postings:
-        raise IndexFormatError(
-            f'CSR total {int(offsets[-1]):,} disagrees with the posting count '
-            f'{stats.n_postings:,}')
-    del hist
+        offsets = _csr_offsets(hist)
+        verify_csr_monotone(offsets)
+        if int(offsets[-1]) != stats.n_postings:
+            raise IndexFormatError(
+                f'CSR total {int(offsets[-1]):,} disagrees with the posting count '
+                f'{stats.n_postings:,}')
+        del hist
 
-    recs = np.fromfile(os.path.join(index_dir, RECORDS_NAME),
-                       dtype=RECORD_DTYPE)
-    streams = np.memmap(os.path.join(index_dir, STREAMS_NAME),
-                        dtype=np.uint8, mode='r',
-                        shape=(stats.n_letters,)) if stats.n_letters else \
-        np.empty(0, dtype=np.uint8)
+        recs = np.fromfile(os.path.join(index_dir, RECORDS_NAME),
+                           dtype=RECORD_DTYPE)
+        streams = np.memmap(os.path.join(index_dir, STREAMS_NAME),
+                            dtype=np.uint8, mode='r',
+                            shape=(stats.n_letters,)) if stats.n_letters else \
+            np.empty(0, dtype=np.uint8)
+        try:
+            parts = _mass_partitions(offsets, partitions)
+            stats.partitions = len(parts)
+            runner = _pass2_scatter if construction == 'scatter' else _pass2_spool
+            runner(index_dir, offsets, recs, streams, parts, stride=stride,
+                   batch_grams=batch_grams, progress=progress, stats=stats,
+                   cancel_check=cancel_check)
+        finally:
+            # Released on EVERY exit, not only success, and closed EXPLICITLY:
+            # `del` alone drops only this frame's reference, while the pass-2
+            # frame still in the propagating traceback holds `streams` as its own
+            # argument -- that is what the EXCEPTION BOUNDARY above exists to
+            # stop a retaining caller from ever reaching. Closing here is still
+            # what makes the staging directory deletable immediately: on
+            # Windows an open mapping blocks os.rename/rmtree, which is
+            # exactly what the cancel path must do next.
+            for _mapped in (streams, recs):
+                _mm = getattr(_mapped, '_mmap', None)
+                if _mm is not None:
+                    _mm.close()
+            del streams
+            del recs
 
-    parts = _mass_partitions(offsets, partitions)
-    stats.partitions = len(parts)
-    runner = _pass2_scatter if construction == 'scatter' else _pass2_spool
-    runner(index_dir, offsets, recs, streams, parts, stride=stride,
-           batch_grams=batch_grams, progress=progress, stats=stats)
+        offsets.tofile(os.path.join(index_dir, GRAM_OFFSETS_NAME))
+        del offsets
 
-    offsets.tofile(os.path.join(index_dir, GRAM_OFFSETS_NAME))
-    del offsets, streams, recs
+        stats.seconds_total = round(time.time() - t_start, 2)
+        _check_cancel(cancel_check)
+        write_manifest(index_dir, {
+            'corpus': {
+                'label': corpus_label,
+                'sources': source_manifest or [],
+            },
+            'counts': {
+                'n_records': stats.n_records_indexed,
+                'n_letters': stats.n_letters,
+                'n_postings': stats.n_postings,
+                'max_record_letters': stats.max_record_letters,
+                'distinct_codes': stats.distinct_codes,
+            },
+            'build': {
+                'construction': construction,
+                'partitions': stats.partitions,
+                'stride': stride,
+                'df_cap': df_cap,
+                'df_capped_codes': stats.df_capped_codes,
+                'df_capped_postings': stats.df_capped_postings,
+                'batch_grams': batch_grams,
+                'hygiene_applied': apply_hygiene,
+                'excluded': stats.excluded,
+                'normalizer_version': NORMALIZER_VERSION,
+            },
+            'query': {
+                'df_band_edges': bands,
+            },
+            'timings': {
+                'seconds_pass1': stats.seconds_pass1,
+                'seconds_pass2': stats.seconds_pass2,
+                'seconds_total': stats.seconds_total,
+                'peak_slice_bytes': stats.peak_slice_bytes,
+                'scratch_bytes': stats.scratch_bytes,
+            },
+        })
+        return stats
+    except Exception as exc:
+        boundary_failure = exc
 
-    stats.seconds_total = round(time.time() - t_start, 2)
-    write_manifest(index_dir, {
-        'corpus': {
-            'label': corpus_label,
-            'sources': source_manifest or [],
-        },
-        'counts': {
-            'n_records': stats.n_records_indexed,
-            'n_letters': stats.n_letters,
-            'n_postings': stats.n_postings,
-            'max_record_letters': stats.max_record_letters,
-            'distinct_codes': stats.distinct_codes,
-        },
-        'build': {
-            'construction': construction,
-            'partitions': stats.partitions,
-            'stride': stride,
-            'df_cap': df_cap,
-            'df_capped_codes': stats.df_capped_codes,
-            'df_capped_postings': stats.df_capped_postings,
-            'batch_grams': batch_grams,
-            'hygiene_applied': apply_hygiene,
-            'excluded': stats.excluded,
-            'normalizer_version': NORMALIZER_VERSION,
-        },
-        'query': {
-            'df_band_edges': bands,
-        },
-        'timings': {
-            'seconds_pass1': stats.seconds_pass1,
-            'seconds_pass2': stats.seconds_pass2,
-            'seconds_total': stats.seconds_total,
-            'peak_slice_bytes': stats.peak_slice_bytes,
-            'scratch_bytes': stats.scratch_bytes,
-        },
-    })
-    return stats
+    # Reached only on the exceptional path -- the try block above either
+    # `return`s or falls into `except`, never both.
+    #
+    # The SAME exception object is re-raised with its traceback severed,
+    # rather than a fresh `type(exc)(*exc.args)`: reconstructing from args
+    # silently drops everything an exception carries outside them, and for
+    # the OSError family that is the `filename` -- so a build that died on a
+    # real file reported "[Errno 2] No such file or directory" without ever
+    # naming the path. Clearing `__traceback__` releases the frame chain
+    # (and with it pass 2's `streams` argument, whose mapping the `finally`
+    # above has already closed) just as completely, while `__context__` and
+    # `__cause__` are cleared so neither drags that chain back in by another
+    # route. Re-raising from OUTSIDE the `except` clause is what keeps
+    # `__context__` from being repopulated at the raise itself.
+    boundary_failure.__traceback__ = None
+    boundary_failure.__context__ = None
+    boundary_failure.__cause__ = None
+    raise boundary_failure

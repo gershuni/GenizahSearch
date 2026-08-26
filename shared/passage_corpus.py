@@ -21,7 +21,9 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-from typing import Iterable, Iterator
+from typing import Callable, Iterable, Iterator, Optional
+
+from shared.passage_index import BuildCancelled
 
 HEADER_RE = re.compile(r'^==>\s*(\S+)\s*<==\s*$')
 
@@ -54,10 +56,19 @@ def iter_records(path: str, *, encoding: str = 'utf-8') -> Iterator[tuple]:
         yield record_id, '\n'.join(lines)
 
 
-def sha256_file(path: str, *, chunk: int = _READ_CHUNK) -> str:
+def sha256_file(path: str, *, chunk: int = _READ_CHUNK,
+                cancel_check: Optional[Callable[[], bool]] = None) -> str:
+    """Full SHA-256 over `path`, checked between chunks.
+
+    A full pass over the ~1.47 GB corpus is otherwise uninterruptible, which
+    would defeat both the build Cancel button and the app-close drain -- the
+    file read alone takes long enough at ~350 chunks to matter.
+    """
     h = hashlib.sha256()
     with open(path, 'rb') as fh:
         while True:
+            if cancel_check is not None and cancel_check():
+                raise BuildCancelled(f'hashing {path} cancelled')
             b = fh.read(chunk)
             if not b:
                 break
@@ -65,7 +76,8 @@ def sha256_file(path: str, *, chunk: int = _READ_CHUNK) -> str:
     return h.hexdigest()
 
 
-def source_manifest(paths: Iterable[str]) -> list:
+def source_manifest(paths: Iterable[str], *,
+                    cancel_check: Optional[Callable[[], bool]] = None) -> list:
     """Per-input provenance: path, size, sha256.
 
     Artifact-specific by design. A single hash of one file cannot prove that
@@ -79,6 +91,6 @@ def source_manifest(paths: Iterable[str]) -> list:
         out.append({
             'path': os.path.basename(p),
             'bytes': os.path.getsize(p),
-            'sha256': sha256_file(p),
+            'sha256': sha256_file(p, cancel_check=cancel_check),
         })
     return out

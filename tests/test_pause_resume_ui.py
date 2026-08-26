@@ -78,7 +78,12 @@ class _FakeTimer:
 
 _METHODS = ('_pause_worker_for', '_apply_pause_state', '_pause_elapsed_str',
             '_paint_pause_status', '_on_pause_clicked', '_on_pause_ack',
-            '_on_search_phase')
+            '_on_search_phase',
+            # Phase 146: Pause is the fourth way to ask a scan to stop
+            # and now routes through the same guard as the other three.
+            # Both read only getattr-with-default state, so on this stub
+            # they answer 'no passage scan' and pause proceeds as before.
+            '_refuse_stop_during_passage_scan', '_passage_scan_in_flight')
 
 
 def _stub():

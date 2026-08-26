@@ -1324,6 +1324,26 @@ class SettingsDialog(QDialog):
         layout.addLayout(btn_row2)
         layout.addSpacing(4)
 
+        # Phase 146: the letter-level (passage) index. Modelled on
+        # btn_build_index directly above -- stored on main_win, disabled at
+        # creation, re-enabled in on_startup_finished's shared block. NOT
+        # modelled on the Zenodo button, which is a bare local with no
+        # enable/disable logic at all and could not carry a startup gate.
+        btn_row3 = QHBoxLayout()
+        self.main_win.btn_build_passage_index = QPushButton(
+            tr("Build / Rebuild Letter-Level Index"))
+        self.main_win.btn_build_passage_index.setToolTip(tr(
+            "Builds the index used by letter-level search, from the "
+            "transcriptions already on this computer. Needs about 11 GB free "
+            "while it runs; the finished index is about 3.5 GB."))
+        self.main_win.btn_build_passage_index.clicked.connect(
+            self.main_win.run_passage_index_build)
+        self.main_win.btn_build_passage_index.setEnabled(False)
+        btn_row3.addWidget(self.main_win.btn_build_passage_index)
+        btn_row3.addStretch()
+        layout.addLayout(btn_row3)
+        layout.addSpacing(4)
+
         self.main_win.index_progress = QProgressBar()
         self.main_win.index_progress.setVisible(False)
         layout.addWidget(self.main_win.index_progress)
