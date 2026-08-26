@@ -135,7 +135,9 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("New: pause and resume long searches"))
+        # Reuses the method selector's own marker rather than adding a
+        # near-duplicate of it: identical English is one entry.
+        self.lbl_msg.setText(tr("New! Letter-level search"))
         self.show()
 
     def on_learn_more(self):
@@ -269,9 +271,16 @@ class WhatsNewDialog(QDialog):
 
         is_heb = CURRENT_LANG == 'he'
         items = [
-            tr("Pause and Resume: a long search can be paused at any point and continues from exactly where it stopped — nothing is re-scanned. The clock stops while paused, and a paused search lets the computer sleep. A paused search lives in memory only: closing the program ends it."),
-            tr("Stop now works in Lab Mode. It previously did nothing at all, and could show an error message instead of stopping."),
-            tr("Stopping a search keeps what it already found. Title, Shelfmark and My Library searches used to discard every result when stopped, even though the results header said “Partial results”."),
+            tr(
+                "Letter-level search: a new way to find parallels in the Composition Search "
+                "tab. It is much faster than chunk search and returns far fewer unrelated "
+                "results. Chunk search stays the default and keeps its Exact / Variants / "
+                "Fuzzy modes — the two methods complement each other."),
+            tr(
+                "It runs on an index built on your own computer, from the transcriptions "
+                "already here. Building takes about ten minutes and needs about 11 GB of free "
+                "space while it runs; the finished index is about 3.5 GB. The program offers "
+                "to build it once, and you can build or rebuild it at any time from Settings."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)

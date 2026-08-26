@@ -2331,8 +2331,8 @@ TRANSLATIONS = {
     "Private - data stays on your computer": "פרטי - המידע נשאר במחשב שלך",
     "Regular updates via built-in updater": "עדכונים שוטפים דרך מעדכן מובנה",
     "Windows 10 or Windows 11": "ווינדוס 10 או ווינדוס 11",
-    "8 GB RAM minimum": "מינימום 8 ג'יגה זיכרון",
-    "2 GB free disk space": "2 ג'יגה מקום פנוי בדיסק",
+    "8 GB RAM minimum": "מינימום 8 גיגה זיכרון",
+    "2 GB free disk space": "2 גיגה מקום פנוי בדיסק",
     "Download from GitHub Releases": "הורד מ-GitHub Releases",
     "Follow the installation prompts": "עקוב אחר הנחיות ההתקנה",
     "On first launch, download the transcription data from Zenodo": "בהפעלה הראשונה, הורד את נתוני התעתיק מ-Zenodo",
@@ -4999,19 +4999,33 @@ TRANSLATIONS.update({
     # sentence is condensed rather than translated word for word.
     "New! Fast search feature":
         "חדש! פונקציית חיפוש מהיר",
+    "Letter-level parallels search — faster and more precise":
+        "חיפוש מקבילות ברמת האות - חיפוש מהיר ומדויק יותר",
+    "Get the most from the parallels search by entering several textual witnesses":
+        "מצו את חיפוש המקבילות בעזרת הזנת כמה עדי נוסח לחיפוש",
     "New! Letter-level search":
         "חדש! חיפוש ברמת האות",
     "Chunk search (slower)":
         "חיפוש מקטעים (איטי יותר)",
-    "Letter-level search: fast, yields fewer irrelevant results, and tolerates transcription errors, nikkud and line breaks.":
-        "חיפוש ברמת האות: מהיר, מחזיר פחות תוצאות לא רלוונטיות, ועמיד לשיבושי פענוח, לניקוד ולשבירות שורה.",
-    # Replaced that single group tooltip on 2026-08-25. It claimed
-    # tolerance of nikkud and line breaks as though they distinguished the
-    # two engines; they do not. The chunk engine strips nikkud per token at
-    # tokenization, and both treat a newline as an ordinary separator. The
-    # old key stays so an already-open page keeps rendering Hebrew.
-    "Faster, with fewer irrelevant results. Tolerates spelling and transcription differences.":
-        "מהיר יותר, עם פחות תוצאות לא רלוונטיות. עמיד להבדלי כתיב ולשיבושי פענוח.",
+    # This tooltip has been trimmed twice, both times because it named as
+    # a DIFFERENCE between the two engines something both of them do.
+    # First nikkud and line breaks (2026-08-25: the chunk engine strips
+    # nikkud per token at tokenization, and both treat a newline as an
+    # ordinary separator). Then tolerance of spelling and transcription
+    # differences (2026-08-26, owner review: chunk search's Variants and
+    # Fuzzy modes do that job). What is left is what actually differs --
+    # speed, and how much of the result list is worth reading. Both older
+    # keys were deleted rather than kept for open pages: nothing
+    # referenced them, and a rejected claim left in the table is one a
+    # future surface can copy back out of it.
+    # v9.0.0 desktop What's New (2026-08-26). Two bullets: the owner cut
+    # the policy-controls and export-fix ones on review.
+    "Letter-level search: a new way to find parallels in the Composition Search tab. It is much faster than chunk search and returns far fewer unrelated results. Chunk search stays the default and keeps its Exact / Variants / Fuzzy modes — the two methods complement each other.":
+        "חיפוש ברמת האות: דרך חדשה למצוא מקבילות בלשונית חיפוש חיבורים. הוא מהיר בהרבה מחיפוש מקטעים ומחזיר הרבה פחות תוצאות לא רלוונטיות. חיפוש מקטעים נשאר ברירת המחדל ושומר על מצבי מדויק / וריאנטים / מקורב — שתי השיטות משלימות זו את זו.",
+    "It runs on an index built on your own computer, from the transcriptions already here. Building takes about ten minutes and needs about 11 GB of free space while it runs; the finished index is about 3.5 GB. The program offers to build it once, and you can build or rebuild it at any time from Settings.":
+        "הוא פועל על אינדקס הנבנה במחשב שלכם, מתוך התעתיקים שכבר נמצאים בו. הבנייה אורכת כעשר דקות ודורשת כ‑11 גיגהבייט פנויים בזמן הריצה; האינדקס המוגמר תופס כ‑3.5 גיגהבייט. התוכנה מציעה לבנות אותו פעם אחת, ואפשר לבנות או לבנות מחדש בכל עת דרך ההגדרות.",
+    "Faster, with fewer irrelevant results.":
+        "מהיר יותר, עם פחות תוצאות לא רלוונטיות.",
     "The older method. Slower, but offers Exact / Variants / Fuzzy modes and cross-paragraph filtering.":
         "השיטה הוותיקה. איטית יותר, אך מציעה מצבי מדויק / וריאנטים / מקורב, וסינון חוצה-פסקאות.",
     "Match width":
@@ -5200,8 +5214,8 @@ TRANSLATIONS.update({
         'חיפוש ברמת האות פועל כעת',
     'Build letter-level index?':
         'לבנות אינדקס לחיפוש ברמת האות?',
-    'Letter-level search is a new way to find parallels in the Composition Search tab. It is much faster than chunk search and returns far fewer unrelated results, and it tolerates spelling and transcription differences.\n\nIt needs an index that has not been built on this computer yet. Building it takes about 10 minutes and needs about 11 GB of free disk space while it runs; the finished index is about 3.5 GB. You can always build it later from Settings.':
-        'חיפוש ברמת האות הוא דרך חדשה למצוא מקבילות בלשונית חיפוש חיבורים. הוא מהיר בהרבה מחיפוש מקטעים ומחזיר הרבה פחות תוצאות לא רלוונטיות, והוא עמיד להבדלי כתיב ולשיבושי פענוח.\n\nהוא זקוק לאינדקס שעדיין לא נבנה במחשב הזה. הבנייה אורכת כ‑10 דקות ודורשת כ‑11 גיגהבייט פנויים בדיסק בזמן הריצה; האינדקס המוגמר תופס כ‑3.5 גיגהבייט. תמיד אפשר לבנות אותו מאוחר יותר מההגדרות.',
+    'Letter-level search is a new way to find parallels in the Composition Search tab. It is much faster than chunk search and returns far fewer unrelated results.\n\nIt needs an index that has not been built on this computer yet. Building it takes about 10 minutes and needs about 11 GB of free disk space while it runs; the finished index is about 3.5 GB. You can always build it later from Settings.':
+        'חיפוש ברמת האות הוא דרך חדשה למצוא מקבילות בלשונית חיפוש חיבורים. הוא מהיר בהרבה מחיפוש מקטעים ומחזיר הרבה פחות תוצאות לא רלוונטיות.\n\nהוא זקוק לאינדקס שעדיין לא נבנה במחשב הזה. הבנייה אורכת כ‑10 דקות ודורשת כ‑11 גיגהבייט פנויים בדיסק בזמן הריצה; האינדקס המוגמר תופס כ‑3.5 גיגהבייט. תמיד אפשר לבנות אותו מאוחר יותר מההגדרות.',
     'Build now':
         'בנה עכשיו',
     'Ask me later':

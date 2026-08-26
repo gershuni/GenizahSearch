@@ -15883,8 +15883,7 @@ class GenizahGUI(QMainWindow):
         box.setText(tr(
             "Letter-level search is a new way to find parallels in the "
             "Composition Search tab. It is much faster than chunk search "
-            "and returns far fewer unrelated results, and it tolerates "
-            "spelling and transcription differences.\n\n"
+            "and returns far fewer unrelated results.\n\n"
             "It needs an index that has not been built on this computer "
             "yet. Building it takes about 10 minutes and needs about 11 "
             "GB of free disk space while it runs; the finished index is "
@@ -16431,8 +16430,7 @@ class GenizahGUI(QMainWindow):
     # than a class constant so `tr()` runs at call time, not import time.
     def _method_help_text(self, method):
         if method == 'passage':
-            return tr("Faster, with fewer irrelevant results. Tolerates "
-                      "spelling and transcription differences.")
+            return tr("Faster, with fewer irrelevant results.")
         return tr("The older method. Slower, but offers Exact / Variants / "
                   "Fuzzy modes and cross-paragraph filtering.")
 

@@ -450,8 +450,7 @@ _SHARED_WITH_WEB = (
     'Chunk search (slower)',
     'New! Letter-level search',
     # Per-method help lines
-    'Faster, with fewer irrelevant results. Tolerates spelling and '
-    'transcription differences.',
+    'Faster, with fewer irrelevant results.',
     'The older method. Slower, but offers Exact / Variants / Fuzzy modes '
     'and cross-paragraph filtering.',
     # Policy axis labels and items
