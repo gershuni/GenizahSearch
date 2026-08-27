@@ -518,3 +518,153 @@ def test_a_restored_set_starts_with_no_key():
     pw.invalidate_cache(st, ('k1',))
     assert pw.restore(pw.snapshot(st), FALLBACK).cache_key is None
 
+
+# --- Codex review round 10, 2026-08-28 -------------------------------------
+# Both findings are in this module, which nine rounds of review had never
+# looked at. Worth recording: I had pointed the reviewer here precisely
+# because it was heavily tested by me and unread by anyone else.
+
+
+def test_putting_the_original_seed_back_revives_its_witnesses():
+    """Staleness is a FACT about a digest versus the current seed, not an
+    event that happened once. Marking only one way left a witness stale for
+    ever: the panel went on claiming it belonged to another source and
+    silently kept it out of the dispatch, with its digest sitting there
+    matching the text being searched."""
+    st = _set('alpha beta gamma')                    # gathered for SEED
+    assert pw.mark_stale_against(st, 'a different work') == 1
+    assert st.entries[0].status == pw.STATUS_STALE
+
+    assert pw.mark_stale_against(st, SEED) == 1, (
+        'the transition back was not counted, so the panel never refreshes'
+    )
+    assert st.entries[0].status == pw.STATUS_PENDING
+    assert pw.pending(st), 'the witness is still excluded from dispatch'
+
+
+def test_a_stale_witness_stays_stale_against_a_THIRD_text():
+    """The gap a mutation found, and the one that matters: reviving on the
+    mere fact of being stale -- rather than on the digest matching -- would
+    silently adopt a witness of a genuinely different work into the current
+    search. That is precisely what staleness exists to prevent, and the user
+    would never be asked.
+
+    Two edits, not one: gathered for SEED, marked stale against work B, then
+    reconciled against work C. Every earlier test reconciled against a
+    MATCHING digest, so all of them passed the broken version.
+    """
+    st = _set('alpha beta gamma')                    # gathered for SEED
+    pw.mark_stale_against(st, 'the second work')
+    original = st.entries[0].seed_digest
+
+    assert pw.mark_stale_against(st, 'a third work entirely') == 0, (
+        'a witness of another work was quietly adopted into this search'
+    )
+    assert st.entries[0].status == pw.STATUS_STALE
+    assert st.entries[0].seed_digest == original, (
+        'the digest was re-stamped, so the witness can never be recognised '
+        'as belonging to its own source text again'
+    )
+    assert pw.pending(st) == [], 'it would be dispatched with this search'
+
+
+def test_reviving_does_not_re_stamp_the_digest():
+    """The distinction from `revive_stale`, which is the user ADOPTING stale
+    witnesses into a different text. Here nothing is adopted -- the digest
+    already matched, which is the whole reason the witness came back."""
+    st = _set('alpha beta gamma')
+    original = st.entries[0].seed_digest
+    pw.mark_stale_against(st, 'a different work')
+    pw.mark_stale_against(st, SEED)
+    assert st.entries[0].seed_digest == original
+
+
+def test_a_searched_witness_is_never_reconciled():
+    """It describes a run that really happened; its status is history, not a
+    prediction about the next dispatch."""
+    st = _set('alpha beta gamma')
+    st.entries[0].status = pw.STATUS_SEARCHED
+    assert pw.mark_stale_against(st, 'a different work') == 0
+    assert st.entries[0].status == pw.STATUS_SEARCHED
+
+
+def test_a_failed_witness_is_never_reconciled():
+    st = _set('alpha beta gamma')
+    st.entries[0].status = pw.STATUS_FAILED
+    assert pw.mark_stale_against(st, SEED) == 0
+    assert st.entries[0].status == pw.STATUS_FAILED
+
+
+def test_a_witness_adopted_by_revive_stale_stays_adopted():
+    """`revive_stale` re-stamps the digest to the CURRENT seed, so a later
+    reconciliation against that same seed must leave it alone rather than
+    treating the adoption as something to undo."""
+    st = _set('alpha beta gamma')
+    pw.mark_stale_against(st, 'a different work')
+    pw.revive_stale(st, 'a different work')
+    assert st.entries[0].status == pw.STATUS_PENDING
+    assert pw.mark_stale_against(st, 'a different work') == 0
+    assert st.entries[0].status == pw.STATUS_PENDING
+
+
+def _corpus_row(sys_id, score, **kw):
+    """A row whose header a sys_id parser can actually group by.
+
+    NOT named `_row`: this file already has one, and appending a second
+    definition silently shadowed it -- the older tests build plain headers
+    like 'shared', and every one of them started looking up a key that no
+    longer existed.
+    """
+    r = {'raw_header': '%s_IE1_P1_FL1' % sys_id, 'score': score}
+    r.update(kw)
+    return r
+
+
+def _two_witness_state(main_groups, filtered_groups):
+    """A state whose fusion yields `main_groups` / `filtered_groups` distinct
+    manuscripts. Two witnesses, so the fused path (not the single-witness
+    short-circuit) is the one under test."""
+    st = _set('alpha beta gamma')
+    st.rows[WITNESS_SEED_ID] = [
+        _corpus_row('99000000%04d' % i, 100 - i) for i in range(main_groups)]
+    st.rows[st.entries[0].id] = [
+        _corpus_row('99000000%04d' % i, 90 - i) for i in range(main_groups)]
+    st.filtered[WITNESS_SEED_ID] = [
+        _corpus_row('99100000%04d' % i, 80 - i) for i in range(filtered_groups)]
+    st.filtered[st.entries[0].id] = [
+        _corpus_row('99100000%04d' % i, 70 - i) for i in range(filtered_groups)]
+    return st
+
+
+def test_truncation_is_reported_when_only_the_FILTERED_bucket_overflows():
+    """`truncated` is this function's promise that the reader IS looking at
+    everything. The filtered flag was discarded, so a run that dropped
+    filtered manuscript groups reported `truncated_to_200=False` -- results
+    omitted in silence, which is the single thing the flag exists to prevent.
+    """
+    st = _two_witness_state(main_groups=2, filtered_groups=6)
+    main, filtered, truncated = pw.fuse_and_cap(st, cap=3)
+    assert truncated is True, (
+        'the filtered bucket was capped and the reader was not told'
+    )
+
+
+def test_truncation_is_still_reported_when_the_MAIN_bucket_overflows():
+    st = _two_witness_state(main_groups=6, filtered_groups=1)
+    _main, _filtered, truncated = pw.fuse_and_cap(st, cap=3)
+    assert truncated is True
+
+
+def test_nothing_is_claimed_when_neither_bucket_overflows():
+    """The other direction: a false `truncated` tells the reader results were
+    dropped when none were, which is its own dishonesty."""
+    st = _two_witness_state(main_groups=2, filtered_groups=2)
+    _main, _filtered, truncated = pw.fuse_and_cap(st, cap=10)
+    assert truncated is False
+
+
+def test_an_uncapped_fusion_claims_no_truncation():
+    st = _two_witness_state(main_groups=6, filtered_groups=6)
+    _main, _filtered, truncated = pw.fuse_and_cap(st, cap=0)
+    assert truncated is False
+

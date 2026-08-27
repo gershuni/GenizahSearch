@@ -317,17 +317,32 @@ def invalidate_cache(state: WitnessSet, key) -> bool:
 # --- staleness -------------------------------------------------------------
 
 def mark_stale_against(state: WitnessSet, seed_text: str) -> int:
-    """Mark every witness gathered for a DIFFERENT source text.
+    """Reconcile every witness against the source text about to be searched.
 
-    Measured against the text about to be searched, so it is read live. Only
-    a witness that would otherwise be dispatched is marked -- one already
+    Read live, so it always describes the text actually being searched. Only
+    a witness that would otherwise be dispatched is touched -- one already
     `searched` or `failed` describes a run that really happened.
+
+    BOTH directions, and the second one is not symmetry for its own sake.
+    Staleness is a fact about a witness's digest versus the current seed, not
+    an event that happened once: edit the seed and a pending witness goes
+    stale, put the ORIGINAL text back and it is no longer gathered for a
+    different work. Marking only one way left it stale for ever -- the panel
+    went on claiming it belonged to another source and silently kept it out
+    of the dispatch, with the digest sitting there matching.
+
+    Distinct from `revive_stale`, which is the user ADOPTING stale witnesses
+    into a different text and re-stamps their digests to say so. Here the
+    digest already matches and nothing is being adopted.
     """
     digest = witness_text_key(seed_text)
     n = 0
     for e in state.entries:
         if e.status == STATUS_PENDING and e.seed_digest != digest:
             e.status = STATUS_STALE
+            n += 1
+        elif e.status == STATUS_STALE and e.seed_digest == digest:
+            e.status = STATUS_PENDING
             n += 1
     return n
 
@@ -462,9 +477,14 @@ def fuse_and_cap(state: WitnessSet, cap: int = None):
         main, parser, cap=limit, order_key=order_key)
     # Both buckets, by the same function and the same cap, so rendered rows
     # and kept rows never disagree.
-    capped_filtered, _ = _cap_main_results_by_group(
+    capped_filtered, truncated_filtered = _cap_main_results_by_group(
         filtered, parser, cap=limit, order_key=order_key)
-    return capped_main, capped_filtered, truncated
+    # EITHER bucket overflowing means the reader is not looking at
+    # everything, and this function's contract is that it says so. Dropping
+    # the filtered flag made a run that had truncated the filtered bucket
+    # report `truncated_to_200=False` -- results omitted, silently, which is
+    # the one thing the flag exists to prevent.
+    return capped_main, capped_filtered, bool(truncated or truncated_filtered)
 
 
 # --- persistence -----------------------------------------------------------
