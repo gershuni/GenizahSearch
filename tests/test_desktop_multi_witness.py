@@ -1387,3 +1387,46 @@ def test_the_suffix_is_stripped_before_the_query_is_truncated():
     out = _render(entry)
     assert out.startswith('א' * 35)
     assert 'witnesses' not in out
+
+
+# ---------------------------------------------------------------------------
+# Two pre-existing export defects the owner found while hand-testing, both
+# unrelated to multi-witness.
+# ---------------------------------------------------------------------------
+
+def test_the_xlsx_category_and_group_columns_have_a_width():
+    """They had none, so Excel used its ~8.4-character default -- wide enough
+    for "Filtered" and not for "תוצאות עיקריות" (14 characters), so the Hebrew
+    export truncated its own section labels.
+
+    Sized rather than moved to a header row: one row per record is what lets
+    Excel sort and filter the sheet."""
+    from genizah_core import tr as _tr
+    src = _fn_src('export_comp_report')
+    assert "'A': 18" in src, 'the Category column has no width again'
+    assert "'B': 22" in src, 'the Group column has no width again'
+    longest = max(len(_tr(k)) for k in
+                  ('All Results', 'Main Results', 'Appendix - Grouped',
+                   'Filtered', 'Excluded'))
+    assert longest <= 18, (
+        'a section label is now wider than the column: %d' % longest)
+
+
+def test_the_metadata_dialog_does_not_mix_two_languages():
+    """Its title went through tr() while its body was a bare f-string, so the
+    window frame was Hebrew and its contents English -- owner-reported with a
+    screenshot. A drift guard cannot catch this: an f-string is not a tr()
+    call, so nothing was ever missing from the table."""
+    src = _fn_src('_fetch_metadata_with_dialog')
+    assert 'f"Loaded' not in src, 'the progress line is a bare f-string again'
+    assert 'tr("Loaded {curr}/{total} (ID: {sid})")' in src
+    assert 'QMessageBox.information(self, "Metadata"' not in src, (
+        'a hardcoded English dialog title is back')
+
+
+def test_the_metadata_dialog_title_defaults_through_tr():
+    """The default argument was the English literal `"Loading metadata..."`,
+    which no caller could translate."""
+    src = _fn_src('_fetch_metadata_with_dialog')
+    assert 'title=None' in src
+    assert 'tr("Loading metadata...")' in src

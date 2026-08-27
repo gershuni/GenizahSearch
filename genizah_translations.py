@@ -5111,7 +5111,11 @@ TRANSLATIONS.update({
         "חיפוש חוזר ונשנה עם התוצאות הטובות ביותר כעדים חדשים. ההיקף גדל והדיוק בראש הרשימה יורד.",
     "Rounds": "סבבים",
     "Top-K per round": "כמה לקחת בכל סבב",
-    "Run auto-expand now": "הפעילו הרחבה אוטומטית",
+    "Run auto-expand now": "הפעל הרחבה אוטומטית",
+    # The metadata-prefetch dialog shown before an export: its title
+    # was already translated while its body was a bare f-string, so
+    # the window showed two languages at once.
+    "Loaded {curr}/{total} (ID: {sid})": "נטענו {curr}/{total} (מזהה: {sid})",
     "Round {r}/{n}": "סבב {r}/{n}",
     "Witness {i}/{k}: {label}": "עד {i}/{k}: {label}",
     "Auto-expand stopped: witness cap reached.":

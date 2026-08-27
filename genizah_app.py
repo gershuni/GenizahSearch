@@ -23313,7 +23313,16 @@ class GenizahGUI(QMainWindow):
 
                     ws_report.sheet_properties.outlinePr.summaryBelow = True
 
-                    dims = {'D': 20, 'E': 18, 'F': 30, 'I': 50, 'J': 60}  # Columns shifted for Library
+                    # A (Category) and B (Group) had NO width set, so they
+                    # sat at Excel's ~8.4-character default. That is wide
+                    # enough for "Filtered" and not for "תוצאות עיקריות"
+                    # (14 chars), so the Hebrew export truncated its own
+                    # section labels -- owner-reported 2026-08-27. Sized to
+                    # the longest label in either language rather than
+                    # moved to a header row: keeping one row per record is
+                    # what lets Excel sort and filter the sheet.
+                    dims = {'A': 18, 'B': 22, 'D': 20, 'E': 18, 'F': 30,
+                            'I': 50, 'J': 60}  # Columns shifted for Library
                     for col, width in dims.items():
                         ws_report.column_dimensions[col].width = width
                         ws_raw.column_dimensions[col].width = width
@@ -26543,14 +26552,14 @@ class GenizahGUI(QMainWindow):
             ms_ctx
         ])
 
-    def _fetch_metadata_with_dialog(self, system_ids, title="Loading metadata..."):
+    def _fetch_metadata_with_dialog(self, system_ids, title=None):
 
         to_fetch = [sid for sid in system_ids if sid and sid not in self.meta_mgr.nli_cache]
         if not to_fetch:
             return False
 
         dialog = QProgressDialog(tr("Loading shelfmarks and titles..."), tr("Cancel"), 0, len(to_fetch), self)
-        dialog.setWindowTitle(title) 
+        dialog.setWindowTitle(title or tr("Loading metadata..."))
         dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
         dialog.setAutoClose(False)
         dialog.setAutoReset(False)
@@ -26564,7 +26573,12 @@ class GenizahGUI(QMainWindow):
         def on_progress(curr, total, sid):
             dialog.setMaximum(total)
             dialog.setValue(curr)
-            dialog.setLabelText(f"Loaded {curr}/{total} (ID: {sid})")
+            # tr(), not an f-string: this sat inside a dialog whose
+            # TITLE was already translated, so the window showed one
+            # language in its frame and another in its body
+            # (owner-reported 2026-08-27).
+            dialog.setLabelText(tr("Loaded {curr}/{total} (ID: {sid})")
+                                .format(curr=curr, total=total, sid=sid))
 
         def on_finished(was_cancelled):
             nonlocal cancelled
@@ -26572,7 +26586,7 @@ class GenizahGUI(QMainWindow):
             dialog.reset()
             loop.quit()
             if was_cancelled:
-                QMessageBox.information(self, "Metadata", tr("Loading metadata was cancelled."))
+                QMessageBox.information(self, tr("Metadata"), tr("Loading metadata was cancelled."))
 
         def on_error(err):
             QMessageBox.critical(self, tr("Metadata Error"), err)
