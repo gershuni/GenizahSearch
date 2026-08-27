@@ -561,6 +561,9 @@ class _Win2:
     _sort_comp_items = GAPP._sort_comp_items
     _current_comp_sort_mode = GAPP._current_comp_sort_mode
     _comp_export_settings_lines = GAPP._comp_export_settings_lines
+    _comp_chunk_preference = GAPP._comp_chunk_preference
+    _add_comp_search_to_history = GAPP._add_comp_search_to_history
+    _PASSAGE_FORCED_CONTROLS = GAPP._PASSAGE_FORCED_CONTROLS
     COMP_SORT_MODES = GAPP.COMP_SORT_MODES
 
 
@@ -896,3 +899,255 @@ def test_auto_expand_is_driven_by_completed_searches_not_a_loop():
     src = _fn_src('on_comp_scan_finished')
     assert '_advance_auto_expand' in src
     assert '_auto_expand_left' in src
+
+
+# ---------------------------------------------------------------------------
+# Owner hand-test follow-ups, 2026-08-27.
+# ---------------------------------------------------------------------------
+
+def test_new_clears_the_witness_list():
+    """"New" clears the search, and the witness list IS part of the search.
+    Left behind, it silently carried the previous work's witnesses into the
+    next one -- and a witness of one work is noise in another."""
+    src = _fn_src('_reset_composition')
+    assert 'passage_witnesses.WitnessSet()' in src, (
+        'New no longer clears the witnesses')
+    assert '_comp_last_result_witnesses = []' in src
+    assert '_auto_expand_left = 0' in src, (
+        'a running auto-expand survives New')
+
+
+def test_restored_manuscript_witnesses_are_rehydrated_before_dispatch():
+    """THE gap this follow-up closed. `snapshot()` stores a manuscript
+    witness WITHOUT its text, and the dispatch list skips a textless witness
+    -- so after a restart those witnesses were silently left out and the run
+    reported success with fewer witnesses than the dialog listed."""
+    src = _fn_src('run_composition')
+    assert '_rehydrate_witness_texts()' in src
+    tree = ast.parse(src)
+    order = [n.lineno for n in ast.walk(tree)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+             and n.func.attr in ('_rehydrate_witness_texts',
+                                 '_comp_witness_dispatch_list')]
+    calls = [n.func.attr for n in ast.walk(tree)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+             and n.func.attr in ('_rehydrate_witness_texts',
+                                 '_comp_witness_dispatch_list')]
+    pairs = sorted(zip(order, calls))
+    assert pairs[0][1] == '_rehydrate_witness_texts', (
+        'the dispatch list is built before the texts are put back')
+
+
+def test_rehydration_prefers_the_headers_the_promotion_recorded():
+    """A promoted witness is the concatenation of the pages that MATCHED, so
+    re-deriving headers from whatever rows are on screen now rebuilds a
+    different witness under the same label."""
+    src = _fn_src('_rehydrate_witness_texts')
+    assert 'headers_by_sid' in src
+    assert 'e.headers' in src or 'entry.headers' in src
+
+
+def test_an_unresolvable_witness_is_failed_with_a_reason_not_dropped():
+    src = _fn_src('_rehydrate_witness_texts')
+    assert 'STATUS_FAILED' in src
+    assert 'Could not load text for this manuscript.' in src
+
+
+def test_files_can_be_loaded_one_or_many():
+    src = _fn_src('_load_witness_files')
+    assert 'getOpenFileNames' in src, 'only one file can be chosen'
+    assert 'for path in paths' in src
+
+
+def test_loading_a_file_falls_back_from_utf8_to_the_hebrew_codepage():
+    """The owner's witness files come out of Word and Notepad; a hard utf-8
+    read turns a cp1255 file into an unreadable one."""
+    src = _fn_src('_load_witness_files')
+    assert 'utf-8-sig' in src
+    assert 'cp1255' in src
+
+
+def test_loading_files_reports_every_rejection():
+    """Same rule as the paste path: a load that quietly loses part of a
+    selection is the failure this repo treats as a defect."""
+    src = _fn_src('_load_witness_files')
+    assert '_report_witness_additions' in src
+    assert 'unreadable' in src
+
+
+def test_the_recursive_button_and_the_dialog_button_share_one_name():
+    """Two labels for one behaviour read as two features. In letter-level
+    mode the toolbar button runs exactly what the dialog's auto-expand button
+    runs, so it says exactly what that one says; in chunk mode it keeps its
+    own name, because there it does something else."""
+    applied = _fn_src('_apply_passage_mode_ui')
+    assert 'Run auto-expand now' in applied
+    assert 'Full Recursive Search' in applied, (
+        'the chunk name is no longer restored when leaving passage mode')
+
+
+def test_the_render_hook_does_not_put_the_chunk_name_back():
+    """`_update_recursive_button_state` rewrites the label on EVERY render,
+    so without a method branch it would undo the rename the moment any
+    result appeared."""
+    src = _fn_src('_update_recursive_button_state')
+    assert "_comp_method() == 'passage'" in src
+    assert 'Run auto-expand now' in src
+
+
+# ---------------------------------------------------------------------------
+# Two rules that a source-text assertion cannot check, and a mutation proved
+# it: `assert 'split_by_length' in src` passes with the CALL deleted, because
+# the name survives on the import line; `assert '{n} witnesses' in src` passes
+# with the branch disabled, because the literal is still there.
+# ---------------------------------------------------------------------------
+
+class _Fetcher:
+    """Stands in for the SearchEngine's two text fetchers."""
+
+    def __init__(self, by_header=None, whole=None):
+        self._by_header = by_header or {}
+        self._whole = whole or {}
+
+    def get_full_text_by_header(self, header):
+        return self._by_header.get(header)
+
+    def get_full_manuscript(self, sys_id):
+        text = self._whole.get(sys_id)
+        return [{'text': text}] if text else []
+
+
+def _rehydrate_win(entry, fetcher):
+    w = _win()
+    w._comp_witness_state().entries.append(entry)
+    w.searcher = fetcher
+    w._comp_last_fused_rows = []
+    w._witness_notify = lambda text: None
+    w._refresh_witness_panel = lambda: None
+    return w
+
+
+def _manuscript_entry(text=''):
+    return pw.WitnessEntry(
+        id='w1', label='T-S 1.1', kind='manuscript', sys_id='990000000001',
+        headers=['990000000001_1r'], text=text,
+        status=pw.STATUS_PENDING)
+
+
+def test_rehydration_puts_a_restored_manuscript_text_back():
+    """The gap this closed: a restored manuscript witness carries no text,
+    and the dispatch list skips a textless witness -- so the run completed
+    with fewer witnesses than the dialog listed and said nothing."""
+    entry = _manuscript_entry()
+    w = _rehydrate_win(entry, _Fetcher({'990000000001_1r': 'aleph bet gimel'}))
+    GAPP._rehydrate_witness_texts(w)
+    assert entry.text == 'aleph bet gimel'
+    assert entry.status == pw.STATUS_PENDING
+    ids = [wid for wid, _l, _t in GAPP._comp_witness_dispatch_list(w)]
+    assert 'w1' in ids, 'still left out of the search after rehydration'
+
+
+def test_rehydration_empties_an_over_long_refetch_rather_than_truncating():
+    """What comes back is NOT what was promoted -- the refetch falls back to
+    the whole manuscript -- so a reload could turn a capped witness into an
+    uncapped one that spends its entire run and fails. Emptied, not
+    truncated: half a manuscript searched as if it were the whole one is a
+    worse answer than none, and an invisible one."""
+    from shared.passage_fusion import MAX_WITNESS_CHARS
+
+    huge = 'a' * (MAX_WITNESS_CHARS + 1)
+    entry = _manuscript_entry()
+    w = _rehydrate_win(entry, _Fetcher({'990000000001_1r': huge}))
+    GAPP._rehydrate_witness_texts(w)
+    assert entry.text == '', 'an over-long refetch was accepted'
+    assert entry.status == pw.STATUS_FAILED
+    assert entry.error, 'failed with no reason'
+    ids = [wid for wid, _l, _t in GAPP._comp_witness_dispatch_list(w)]
+    assert 'w1' not in ids
+
+
+def test_rehydration_keeps_a_text_that_fits():
+    """The cap must not reject the ordinary case."""
+    entry = _manuscript_entry()
+    w = _rehydrate_win(entry, _Fetcher({'990000000001_1r': 'a' * 100}))
+    GAPP._rehydrate_witness_texts(w)
+    assert len(entry.text) == 100
+    assert entry.status == pw.STATUS_PENDING
+
+
+def test_rehydration_fails_a_manuscript_whose_text_cannot_be_found():
+    entry = _manuscript_entry()
+    w = _rehydrate_win(entry, _Fetcher({}))
+    GAPP._rehydrate_witness_texts(w)
+    assert entry.status == pw.STATUS_FAILED
+    assert entry.error
+
+
+def test_rehydration_leaves_a_pasted_witness_alone():
+    """Its text existed nowhere but the snapshot, so there is nothing to
+    re-fetch -- and it already has the text."""
+    entry = pw.WitnessEntry(id='w1', label='P', kind='pasted',
+                            text='aleph bet gimel', status=pw.STATUS_PENDING)
+    w = _rehydrate_win(entry, _Fetcher({}))
+    GAPP._rehydrate_witness_texts(w)
+    assert entry.text == 'aleph bet gimel'
+    assert entry.status == pw.STATUS_PENDING
+
+
+def test_history_names_the_witness_count_in_the_entry(monkeypatch):
+    """A history list showing only the seed offers two visibly identical
+    entries for two searches that asked different questions. Checked by
+    capturing the entry, not by grepping the source: the literal survives a
+    disabled branch."""
+    import genizah_app
+    import shared.session_persistence as sp
+
+    captured = {}
+    monkeypatch.setattr(sp, 'add_history_entry',
+                        lambda kind, entry, limit=None: captured.update(entry))
+    monkeypatch.setattr(genizah_app, 'load_app_config', lambda: {})
+
+    w = _win()
+
+    class _Line:
+        def text(self):
+            return 'Birkat Hamazon'
+    w.comp_title_input = _Line()
+    w.comp_raw_items = []
+    w.comp_raw_filtered = []
+    w._comp_last_result_witnesses = [{'id': 'w1'}, {'id': 'w2'}]
+    w.pre_search_filters = {}
+    # UI refresh is not what this test is about.
+    w._refresh_comp_history = lambda: None
+    w.excluded_raw_entries = []
+    for name in ('spin_chunk', 'spin_freq', 'spin_filter',
+                 'comp_mode_combo', 'comp_corpus_scope_combo'):
+        setattr(w, name, _Combo0())
+    w.btn_lab_mode_toggle_comp = _Combo0()
+    w.chk_lab_deep_comp = _Combo0()
+    w.chk_comp_flat = _Combo0()
+
+    GAPP._add_comp_search_to_history(w)
+
+    assert captured, 'nothing was written to history'
+    # Two witnesses plus the seed.
+    assert '3' in captured.get('query', ''), captured.get('query')
+    assert captured['search_params']['comp_witnesses'] == [
+        {'id': 'w1'}, {'id': 'w2'}]
+
+
+class _Combo0:
+    def value(self):
+        return 0
+
+    def currentIndex(self):
+        return 0
+
+    def currentData(self):
+        return 'genizah'
+
+    def isChecked(self):
+        return False
+
+    def text(self):
+        return ''

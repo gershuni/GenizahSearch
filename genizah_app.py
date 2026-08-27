@@ -2,6 +2,7 @@
 
 # genizah_app.py
 import sys
+import io
 import os
 import re
 import threading
@@ -16881,6 +16882,14 @@ class GenizahGUI(QMainWindow):
         btn_add = QPushButton(tr("Add witness text"))
         btn_add.clicked.connect(self._open_add_witness_dialog)
         actions.addWidget(btn_add)
+        btn_load = QPushButton(tr("Load from files..."))
+        btn_load.setToolTip(tr(
+            "Choose one or more files. Each file becomes a witness."))
+        btn_load.clicked.connect(self._load_witness_files)
+        actions.addWidget(btn_load)
+        self.chk_comp_witness_split_files = QCheckBox(tr(
+            "Split each file on blank lines"))
+        actions.addWidget(self.chk_comp_witness_split_files)
         self.btn_comp_witness_remove = QPushButton(tr("Remove selected"))
         self.btn_comp_witness_remove.clicked.connect(
             self._remove_selected_witnesses)
@@ -17085,6 +17094,134 @@ class GenizahGUI(QMainWindow):
         for wid in [e.id for e in state.entries]:
             passage_witnesses.remove(state, wid)
         self._after_witness_removal()
+
+    def _rehydrate_witness_texts(self):
+        """Re-fetch the text of restored MANUSCRIPT witnesses, before dispatch.
+
+        `snapshot()` stores a manuscript witness without its text on purpose --
+        the corpus still has it, and copying up to 25 x 20,000 characters into
+        a session file or a history entry buys nothing. Nothing put it back,
+        so after a restart those witnesses were silently left OUT of the
+        search: the dispatch list skips a textless witness, so the run
+        completed with fewer witnesses than the dialog listed and said
+        nothing. That is the same false negative the web shipped and fixed,
+        one step earlier in the pipeline.
+
+        Called from `run_composition`, so every dispatch path is covered.
+        Anything still unresolved is failed WITH A REASON rather than dropped.
+        """
+        state = self._comp_witness_state()
+        pending = [e for e in state.entries
+                   if e.status == passage_witnesses.STATUS_PENDING]
+        stale = [e for e in pending
+                 if e.kind == 'manuscript' and e.sys_id
+                 and not (e.text or '').strip()]
+        if not stale:
+            return
+        rows = list(getattr(self, '_comp_last_fused_rows', None) or [])
+        sys_ids = [e.sys_id for e in stale]
+        # The headers the PROMOTION used, where the snapshot preserved them.
+        # Re-deriving them from whatever rows are on screen now rebuilds a
+        # DIFFERENT witness under the same label.
+        derived = passage_witness_source.witness_headers_for(sys_ids, rows)
+        headers = {e.sys_id: (list(e.headers or [])
+                              or derived.get(e.sys_id) or [])
+                   for e in stale}
+        try:
+            texts, failed = passage_witness_source.collect_witness_texts(
+                sys_ids, rows,
+                fetch_header=self.searcher.get_full_text_by_header,
+                fetch_manuscript=self.searcher.get_full_manuscript,
+                headers_by_sid=headers)
+        except Exception:
+            logger.exception('witness rehydrate failed')
+            return
+        from shared.passage_fusion import MAX_WITNESS_CHARS, split_by_length
+        over = 0
+        for entry in stale:
+            text = texts.get(entry.sys_id) or ''
+            # The cap is re-applied HERE, not only where a witness is added:
+            # what comes back is not what was promoted. The refetch falls back
+            # to the whole manuscript, so a reload could otherwise turn a
+            # capped witness into an uncapped one that spends its whole run
+            # and fails.
+            fits, too_long = split_by_length([text]) if text else ([], [])
+            if too_long:
+                # Emptied, not truncated -- half a manuscript searched as if
+                # it were the whole one is a worse answer than none.
+                entry.text = ''
+                entry.status = passage_witnesses.STATUS_FAILED
+                entry.error = tr(
+                    "Witness text is too long (max {cap} characters)"
+                ).format(cap=MAX_WITNESS_CHARS)
+                over += 1
+                continue
+            entry.text = fits[0] if fits else ''
+            if not entry.text:
+                entry.status = passage_witnesses.STATUS_FAILED
+                entry.error = tr("Could not load text for this manuscript.")
+        if failed or over:
+            self._witness_notify(tr(
+                "Could not load text for {n} manuscripts: {names}").format(
+                n=len(failed) + over,
+                names=', '.join(str(s) for s in (failed or [])[:5]) or '—'))
+        self._refresh_witness_panel()
+
+    def _load_witness_files(self):
+        """Add witnesses from one or more files on disk.
+
+        The owner's witness sets are files, not clipboard contents -- the
+        seventeen Birkat Hamazon rites live in one text file, and a
+        manuscript transcription usually arrives as its own. Multi-select, so
+        seventeen files are one action rather than seventeen.
+
+        One file is ONE witness by default; the checkbox splits each file on
+        blank lines as well, which is the shape of the hand-maintained
+        witness files. Whichever is chosen, the same admission rules apply
+        and every rejection is counted.
+        """
+        paths, _filter = QFileDialog.getOpenFileNames(
+            self, tr("Load witness files"), "",
+            tr("Text files (*.txt);;All files (*)"))
+        if not paths:
+            return
+        split = bool(getattr(self, 'chk_comp_witness_split_files', None)
+                     and self.chk_comp_witness_split_files.isChecked())
+        state = self._comp_witness_state()
+        seed = self._comp_seed_text()
+        totals = passage_witnesses.AddReport()
+        unreadable = []
+        for path in paths:
+            try:
+                # utf-8-sig: the owner's files come out of Word and Notepad
+                # and carry a BOM more often than not.
+                raw = io.open(path, encoding='utf-8-sig').read()
+            except Exception:
+                try:
+                    raw = io.open(path, encoding='cp1255').read()
+                except Exception:
+                    unreadable.append(os.path.basename(path))
+                    continue
+            if split:
+                texts, skipped = passage_witnesses.split_paste(raw)
+                totals.too_short += skipped
+            else:
+                texts = [raw]
+            label = os.path.splitext(os.path.basename(path))[0]
+            report = passage_witnesses.add_texts(
+                state, texts, seed, tr("Pasted text"), label=label)
+            totals.added.extend(report.added)
+            totals.duplicates += report.duplicates
+            totals.too_long += report.too_long
+            totals.too_short += report.too_short
+            totals.over_cap += report.over_cap
+        self._report_witness_additions(totals)
+        if unreadable:
+            self._witness_notify(tr(
+                "Could not read {n} files: {names}").format(
+                n=len(unreadable), names=', '.join(unreadable[:5])))
+        self._refresh_witness_panel()
+        self._schedule_session_save()
 
     def _after_witness_removal(self):
         """Shared tail for every removal: re-fuse, redraw, persist, and say
@@ -17530,8 +17667,15 @@ class GenizahGUI(QMainWindow):
         # letter-level mode the button therefore runs rank-fused expansion
         # instead of concatenating. `run_recursive_composition` branches on
         # the method; nothing is disabled.
+        # ONE NAME for one action (owner, 2026-08-27). In letter-level mode
+        # this button runs exactly what the dialog's auto-expand button runs,
+        # and two labels for one behaviour read as two features. In chunk
+        # mode it keeps its own name, because there it does something else --
+        # it concatenates, which is correct for that engine.
         rec = getattr(self, 'btn_comp_recursive', None)
         if rec is not None:
+            rec.setText(tr("Run auto-expand now") if on
+                        else tr("Full Recursive Search"))
             rec.setToolTip(tr(
                 "Repeatedly search with the best results as new witnesses. "
                 "Reach goes up and top-of-list precision goes down.")
@@ -24146,6 +24290,16 @@ class GenizahGUI(QMainWindow):
         self.comp_has_grouped_results = False
         self.comp_known = []
         self.pending_recursive_search = False
+        # The witness list is part of the search, so "New" clears it
+        # with everything else (owner, 2026-08-27). Leaving it behind
+        # meant the next search silently carried the previous work's
+        # witnesses -- and a witness of one work is noise in another.
+        self._comp_witnesses = passage_witnesses.WitnessSet()
+        self._comp_last_result_witnesses = []
+        self._comp_last_result_witness_total = 0
+        self._comp_last_fused_rows = []
+        self._auto_expand_left = 0
+        self._refresh_witness_panel()
 
         # 7. Clear manuscript exclusions (shared with search)
         self.excluded_raw_entries = []
@@ -24484,6 +24638,10 @@ class GenizahGUI(QMainWindow):
                 _comp_min_boundary = min_boundary_matches
 
             if _comp_multi:
+                # Restored manuscript witnesses carry no text; put it
+                # back BEFORE the dispatch list is built, or they are
+                # silently left out of the search.
+                self._rehydrate_witness_texts()
                 _prior_rows, _prior_filtered = self._comp_witness_prior_rows()
                 self.comp_thread = MultiWitnessCompositionThread(
                     _comp_searcher,
@@ -26201,7 +26359,12 @@ class GenizahGUI(QMainWindow):
             self.btn_comp_recursive.setEnabled(False)
             return
         checked = self._collect_checked_comp_page_uids()
-        if checked:
+        if self._comp_method() == 'passage':
+            # Same action, same name as the dialog's button. This function
+            # runs on every render, so without this branch it would put the
+            # chunk name back the moment any result appeared.
+            self.btn_comp_recursive.setText(tr("Run auto-expand now"))
+        elif checked:
             self.btn_comp_recursive.setText(tr("Recursive Search in Results"))
         else:
             self.btn_comp_recursive.setText(tr("Full Recursive Search"))
@@ -27899,6 +28062,15 @@ class GenizahGUI(QMainWindow):
         if not source_text:
             return
         query = title or source_text[:60]
+        # A multi-witness search is not the seed text alone, and a history
+        # list that shows only the seed offers two visibly identical entries
+        # for two searches that asked different questions (owner,
+        # 2026-08-27). The count goes in the NAME; the witnesses themselves
+        # go in `search_params` below and are restored with the entry.
+        _hist_wits = getattr(self, '_comp_last_result_witnesses', None) or []
+        if _hist_wits:
+            query = '%s  [%s]' % (query, tr("{n} witnesses").format(
+                n=len(_hist_wits) + 1))
         results = getattr(self, 'comp_raw_items', [])
         filtered = getattr(self, 'comp_raw_filtered', [])
         cfg = load_app_config()
