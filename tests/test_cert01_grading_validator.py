@@ -9,6 +9,7 @@ check (and no earlier check masks it) raises `CheckFailure` -- i.e. "revert
 one, the test goes red."
 """
 import copy
+import json
 
 import pytest
 
@@ -363,7 +364,63 @@ def test_run_all_checks_reports_exactly_the_failing_check():
 # still empty because grading has not started -- Task 3 is a human
 # checkpoint). Confirms build_context()/main() wiring works against real
 # files without fabricating a verdict.
+#
+# ONE input path is overridden below, and the reason matters (2026-08-26).
+#
+# CERT-01 pinned the SHA-256 of four input files. Three are still
+# byte-identical on disk. The fourth, `seftja_dates.json`, is a WORKING file
+# that every date append rewrites IN PLACE: 407 -> 410 (135-07) -> 416 (REF6,
+# 2026-08-18) -> 430 (V4.2, 2026-08-19). CERT-01 froze the 410-entry version
+# (`0076028917...`) on 2026-07-26; that path now holds the 430-entry version
+# (`6ca6b40d...`), which is the CURRENT and CORRECT bake input -- the live
+# production sidecar records exactly that hash, so reverting the file would
+# be the wrong repair.
+#
+# `read_input_hashes` was therefore raising on a real divergence, and raising
+# correctly: a pre-registration cannot be re-verified against an input that
+# has since been overwritten. The pre-registration did not become wrong -- it
+# pinned a MUTABLE PATH rather than an archived copy, so every future append
+# breaks it again. The repair is to hand the verifier the bytes CERT-01
+# actually froze, kept beside the working file and named for its hash.
+#
+# This is NOT a softened assertion. `read_input_hashes` still recomputes that
+# file and still raises if it is not the pinned bytes; the other three inputs
+# still recompute from their live working paths, so an unannounced change to
+# any of them still fails here; and the archive itself is guarded by
+# `test_pinned_seftja_archive_is_the_bytes_cert01_froze` below.
+#
+# `scripts/verify_cert01_grading.py` is deliberately NOT edited -- D-02c
+# (tests/test_rebuild_preservation.py::test_verify_cert01_grading_unmodified)
+# holds check 10 immutable. Run by hand, that script still reads the working
+# path and still reports the divergence; whether its own default should move
+# to the archive is an owner call on the CERT-01 track, not a test's to make.
 # ---------------------------------------------------------------------------
+
+#: The bytes CERT-01 pinned as `seftja_dates_sha256`, kept clear of the
+#: appends that rewrite the working file. Gitignored like every other
+#: artifact this section reads, so CI skips rather than fails.
+_PINNED_SEFTJA = (
+    v.REPO_ROOT / "same_work_spike" / "probe" / "rsource" / "data"
+    / "seftja_dates.cert01-pinned-0076028917.json"
+)
+
+#: Repeated from `cert01_prereg.json` on purpose: the archive is checked
+#: against the PRE-REGISTRATION, never against itself or against whatever the
+#: sidecar happens to say.
+_PINNED_SEFTJA_SHA256 = (
+    "0076028917c60044ac72ee36504c173b9e6decd0a5aef9890ec0f0fe934b22d7"
+)
+
+
+def test_pinned_seftja_archive_is_the_bytes_cert01_froze():
+    """The archive becomes load-bearing the moment the test below reads it,
+    so it gets its own guard: it must hash to the value the pre-registration
+    recorded, and the pre-registration must still record that value."""
+    if not _PINNED_SEFTJA.exists() or not v.PREREG_PATH.exists():
+        pytest.skip("pinned seftja archive / pre-registration not on this box")
+    prereg = json.loads(v.PREREG_PATH.read_text(encoding="utf-8"))
+    assert prereg["seftja_dates_sha256"] == _PINNED_SEFTJA_SHA256
+    assert cf.hash_file(str(_PINNED_SEFTJA)) == _PINNED_SEFTJA_SHA256
 
 
 def test_main_against_real_artifacts_fails_only_on_missing_verdict():
@@ -371,7 +428,9 @@ def test_main_against_real_artifacts_fails_only_on_missing_verdict():
         pytest.skip("real CERT-01 artifacts not present on this box")
     if not v.SIDECAR_DB.exists() or not v.RESEARCH_DB.exists():
         pytest.skip("deployed sidecar / research DB not present on this box")
-    ctx = v.build_context()
+    if not _PINNED_SEFTJA.exists():
+        pytest.skip("pinned seftja archive not on this box -- see the note above")
+    ctx = v.build_context(seftja_dates_path=str(_PINNED_SEFTJA))
     results = v.run_all_checks(ctx)
     failing = [num for (num, _name, ok, _msg) in results if not ok]
     # As of this plan's execution, grading has not started yet (empty
