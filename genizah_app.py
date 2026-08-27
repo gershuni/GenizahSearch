@@ -17111,10 +17111,26 @@ class GenizahGUI(QMainWindow):
             tr("Search now ({n} pending)").format(n=len(pending))
             if pending else tr("Search now"))
         self.btn_comp_witness_retry.setVisible(bool(failed))
-        self.btn_comp_witness_remove.setEnabled(bool(state.entries))
-        self.btn_comp_witness_remove_all.setEnabled(bool(state.entries))
+        # Editing the roster under a running batch corrupts its result, so
+        # the removals go dead for its duration -- visibly, rather than by
+        # silently ignoring the click.
+        _locked = self._witness_edits_are_locked()
+        self.btn_comp_witness_remove.setEnabled(
+            bool(state.entries) and not _locked)
+        self.btn_comp_witness_remove_all.setEnabled(
+            bool(state.entries) and not _locked)
         self.btn_comp_auto_expand.setEnabled(bool(self._has_comp_results()))
         self.btn_comp_witness_promote.setEnabled(bool(self._has_comp_results()))
+
+    def _witness_edits_are_locked(self):
+        """True while a run owns the witness list.
+
+        The buttons are disabled too, but a modeless dialog can also be
+        driven by keyboard while the batch starts, and the disable happens
+        on a panel refresh that a fast user can beat. Both, therefore: the
+        disable explains, the guard enforces.
+        """
+        return bool(getattr(self, 'is_comp_running', False))
 
     def _witness_status_item(self, entry):
         item = QTableWidgetItem()
@@ -17146,6 +17162,18 @@ class GenizahGUI(QMainWindow):
         return [i for i in ids if i]
 
     def _remove_selected_witnesses(self):
+        # The dialog is MODELESS, so it stays open while a batch runs. The
+        # worker took its roster and prior rows by value at dispatch, so a
+        # removal now is not seen by it: it goes on searching the witness
+        # and files the rows under an id the panel no longer knows. The
+        # count then includes rows `searched_snapshot` cannot name.
+        #
+        # Worse, `_after_witness_removal` re-publishes through
+        # `on_comp_scan_finished`, which clears `is_comp_running` while the
+        # original worker is still alive -- and an idle-looking window
+        # accepts a second search on top of the first.
+        if self._witness_edits_are_locked():
+            return
         ids = self._selected_witness_ids()
         if not ids:
             return
@@ -17159,6 +17187,8 @@ class GenizahGUI(QMainWindow):
         Confirmed first: a witness list can be seventeen hand-pasted texts
         that exist nowhere else, and there is no undo.
         """
+        if self._witness_edits_are_locked():
+            return
         state = self._comp_witness_state()
         if not state.entries:
             return
@@ -29108,6 +29138,16 @@ class GenizahGUI(QMainWindow):
         reasons = self._passage_workers_busy()
         if not reasons:
             return False
+        # A PAUSED batch is parked at a witness boundary and will not reach
+        # another checkpoint until something un-parks it. `_passage_workers_
+        # busy()` therefore stays true for ever and the 400 ms retry polls
+        # for ever: the window simply cannot be closed unless the user goes
+        # back and presses Resume. `request_cancel` is flag-plus-un-park in
+        # one call, which is exactly what a close needs -- the witness in
+        # flight still finishes, so this shortens the wait without killing
+        # anything mid-search.
+        if self._passage_batch_in_flight():
+            self.comp_thread.request_cancel()
         event.ignore()
         if not getattr(self, '_close_pending', False):
             self._close_pending = True

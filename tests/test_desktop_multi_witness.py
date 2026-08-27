@@ -599,6 +599,33 @@ def _fn_src(name):
     raise AssertionError('%s not found' % name)
 
 
+def _calls_in(name):
+    """The attribute calls inside `name`, in source order, as bare names.
+
+    `_fn_src` returns TEXT, and a substring check against text cannot tell a
+    call from a comment describing one. That has now bitten four times in this
+    branch -- most recently a mutation that deleted a `request_cancel()` call
+    and stayed green because the comment above it still said the word.
+
+    Use this whenever the assertion is "does it CALL x", and keep `_fn_src` for
+    assertions that are genuinely about the text.
+    """
+    src = _app_src()
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            out = []
+            for call in ast.walk(node):
+                if isinstance(call, ast.Call):
+                    fn = call.func
+                    if isinstance(fn, ast.Attribute):
+                        out.append((fn.lineno, fn.col_offset, fn.attr))
+                    elif isinstance(fn, ast.Name):
+                        out.append((fn.lineno, fn.col_offset, fn.id))
+            return [n for _l, _c, n in sorted(out)]
+    raise AssertionError('%s not found' % name)
+
+
+
 class _Win2:
     """Borrows the real methods. A re-implementation would only prove the
     test agrees with itself."""
@@ -610,6 +637,7 @@ class _Win2:
     _comp_witness_dispatch_list = GAPP._comp_witness_dispatch_list
     _comp_witness_prior_rows = GAPP._comp_witness_prior_rows
     _comp_witness_cache_key = GAPP._comp_witness_cache_key
+    _witness_edits_are_locked = GAPP._witness_edits_are_locked
     _absorb_witness_result = GAPP._absorb_witness_result
     _comp_witness_total = GAPP._comp_witness_total
     _comp_sort_key = GAPP._comp_sort_key
@@ -2109,5 +2137,110 @@ def test_a_zero_total_beside_named_contributors_is_repaired():
     })
     assert w._comp_last_result_witness_total == 3, (
         'a total of zero was kept beside two named contributors'
+    )
+
+
+# --- Codex review round 6, 2026-08-27 --------------------------------------
+
+
+class _Btn:
+    def __init__(self):
+        self.enabled = None
+
+    def setEnabled(self, v):
+        self.enabled = bool(v)
+
+
+def test_a_running_batch_owns_the_witness_list():
+    """The dialog is MODELESS, so it stays open while a batch runs. The worker
+    took its roster and prior rows BY VALUE at dispatch, so a removal now is
+    invisible to it: it goes on searching that witness and files the rows under
+    an id the panel no longer knows."""
+    w = _win()
+    pw.add_texts(w._comp_witness_state(), ['alpha beta gamma'],
+                 w._comp_seed_text(), 'Pasted text')
+    w.is_comp_running = True
+    removed = []
+    w._selected_witness_ids = lambda: [w._comp_witness_state().entries[0].id]
+    w._after_witness_removal = lambda: removed.append(1)
+
+    GAPP._remove_selected_witnesses(w)
+    assert removed == [], 'a witness was removed out from under a live batch'
+    assert len(w._comp_witness_state().entries) == 1
+
+
+def test_remove_all_is_locked_during_a_batch_too():
+    """And BEFORE the confirmation dialog -- asking "remove all 17?" during a
+    run, then refusing to act, is worse than not asking."""
+    w = _win()
+    pw.add_texts(w._comp_witness_state(), ['alpha beta gamma'],
+                 w._comp_seed_text(), 'Pasted text')
+    w.is_comp_running = True
+    asked = []
+    w._after_witness_removal = lambda: asked.append('removed')
+
+    import genizah_app as _ga
+    real_q = _ga.QMessageBox.question
+    _ga.QMessageBox.question = staticmethod(
+        lambda *a, **k: asked.append('asked'))
+    try:
+        GAPP._remove_all_witnesses(w)
+    finally:
+        _ga.QMessageBox.question = real_q
+    assert asked == [], 'remove-all ran, or prompted, during a live batch'
+    assert len(w._comp_witness_state().entries) == 1
+
+
+def test_removal_is_allowed_again_once_the_batch_ends():
+    """The lock is for the duration of a run, not a permanent restriction."""
+    w = _win()
+    pw.add_texts(w._comp_witness_state(), ['alpha beta gamma'],
+                 w._comp_seed_text(), 'Pasted text')
+    w.is_comp_running = False
+    removed = []
+    w._selected_witness_ids = lambda: [w._comp_witness_state().entries[0].id]
+    w._after_witness_removal = lambda: removed.append(1)
+
+    GAPP._remove_selected_witnesses(w)
+    assert removed == [1]
+    assert w._comp_witness_state().entries == []
+
+
+def test_the_removal_buttons_go_dead_while_a_batch_runs():
+    """The guard enforces; the disable EXPLAINS. A click that silently does
+    nothing reads as a broken button."""
+    w = _win()
+    pw.add_texts(w._comp_witness_state(), ['alpha beta gamma'],
+                 w._comp_seed_text(), 'Pasted text')
+    src = _fn_src('_refresh_witness_panel')
+    assert '_witness_edits_are_locked' in src, (
+        'the removal buttons stay live during a batch'
+    )
+    w.is_comp_running = True
+    assert GAPP._witness_edits_are_locked(w) is True
+    w.is_comp_running = False
+    assert GAPP._witness_edits_are_locked(w) is False
+
+
+def test_a_close_unparks_a_paused_batch():
+    """A PAUSED batch is parked at a witness boundary and reaches no further
+    checkpoint on its own, so `_passage_workers_busy()` stays true and the
+    400 ms retry polls for ever -- the window cannot be closed unless the user
+    goes back and presses Resume. `request_cancel` is flag-plus-un-park in one
+    call, so the parked worker wakes, finishes its witness and exits."""
+    # CALLS, not text: the comment beside this code names `request_cancel`,
+    # so a substring check stayed green through a mutation that deleted the
+    # call itself.
+    calls = _calls_in('_defer_close_for_passage')
+    assert 'request_cancel' in calls, (
+        'a paused batch is never un-parked, so the close never completes'
+    )
+    assert calls.index('request_cancel') < calls.index('singleShot'), (
+        'the cancel is issued after the retry is armed, so the first poll '
+        'still sees a parked worker'
+    )
+    assert '_passage_batch_in_flight' in calls, (
+        'the cancel is not scoped to a batch -- a SINGLE passage search has '
+        'no checkpoint to honour it and must still be waited out'
     )
 
