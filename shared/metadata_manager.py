@@ -27,6 +27,7 @@ from shared.nli_circuit_breaker import (
 )
 from shared.codicological import CodicologicalManager
 from shared.browse_map_utils import normalize_shelfmark, natural_sort_key, _strip_library_prefix
+from shared.sys_id_patterns import ANY_SYS_ID_RE, CORPUS_SYS_ID_RE
 
 LOGGER = logging.getLogger("genizah." + __name__)
 
@@ -539,13 +540,18 @@ class MetadataManager:
         if ie and p and fl:
             return f"{ie.group(1)}_{p.group(1)}_{fl.group(1)}"
 
-        # Default: System ID (only if all else fails)
-        sys = re.search(r'(99\d+)', text)
+        # Default: System ID (only if all else fails).
+        # CORPUS namespace only -- every caller of this method ingests corpus
+        # transcription files (shared/indexer.py, shared/lab_engine.py); LOCAL
+        # has its own indexer. See shared/sys_id_patterns.py.
+        sys = CORPUS_SYS_ID_RE.search(text)
         return sys.group(1) if sys else "UNKNOWN"
 
     def parse_header_smart(self, full_header):
-        # Phase 95 D-13 (Codex P0) — broaden to recognize LOCAL 97-prefix in addition to 99.
-        sys_match = re.search(r'((?:99|97)\d{8,})', full_header)
+        # Phase 95 D-13 (Codex P0) — namespace-AGNOSTIC on purpose: this parser
+        # is reached with LOCAL ("My Library", 97-prefix) headers on desktop.
+        # Do NOT narrow to the corpus pattern. See shared/sys_id_patterns.py.
+        sys_match = ANY_SYS_ID_RE.search(full_header)
         sys_id = sys_match.group(1) if sys_match else None
         p_num = "Unknown"
         p_match = re.search(r'_P(\d+)_', full_header)
@@ -563,9 +569,10 @@ class MetadataManager:
         """
         result = {'sys_id': None, 'ie_id': None, 'p_num': None, 'fl_id': None}
 
-        # 1. System ID (99... or 97... for LOCAL — Phase 95 D-13 Codex P0)
-        # Phase 95 D-13 (Codex P0) — broaden for LOCAL 97-prefix.
-        sys_match = re.search(r'((?:99|97)\d{8,})', full_header)
+        # 1. System ID (99... or 97... for LOCAL — Phase 95 D-13 Codex P0).
+        # Namespace-AGNOSTIC on purpose; do NOT narrow to the corpus pattern.
+        # See shared/sys_id_patterns.py.
+        sys_match = ANY_SYS_ID_RE.search(full_header)
         if sys_match:
             result['sys_id'] = sys_match.group(1)
 

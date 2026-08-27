@@ -20,7 +20,7 @@ dict in a test.
 """
 from __future__ import annotations
 
-import re
+from shared.sys_id_patterns import CORPUS_SYS_ID_RE
 
 # The seed text is a witness like any other and is fused under this id.
 WITNESS_SEED_ID = 'seed'
@@ -31,24 +31,32 @@ WITNESS_SEED_ID = 'seed'
 # other visitor, the desktop does not).
 WITNESS_CAP = 25
 
-WITNESS_SYS_ID_RE = re.compile(r'((?:99|97)\d{8,})')
+WITNESS_SYS_ID_RE = CORPUS_SYS_ID_RE
 
 
 def witness_sys_id(row) -> str:
-    r"""The sys_id a result row belongs to.
+    r"""The sys_id a result row belongs to. THE one copy, for both surfaces.
 
-    Mirrors `shared/passage_parallels.py::_SYS_ID_RE` and the authoritative
-    `shared/metadata_manager.py`, both of which accept a 97 prefix as well as
-    99. THE one copy on this page.
+    `shared.sys_id_patterns.CORPUS_SYS_ID_RE`, the single definition every
+    corpus-facing site in the repo shares (PR #330). An earlier note here
+    argued for a WIDER pattern, one that also admitted a 97 prefix. Both
+    halves of that argument were wrong:
 
-    That is WIDER than the nine `r'(99\d{8,})'` patterns elsewhere in this
-    file, and wider than the serializer, the export writers and
-    `web/export_state.py`. The divergence is real but currently unreachable:
-    the live index holds 759,224 records and not one of them is 97-prefixed,
-    so no manuscript is skipped by the narrow patterns today. Following the
-    authoritative parser here is the safe direction -- a witness resolved by
-    the engine cannot fail to resolve on the page. Reconciling all of them is
-    a corpus-wide change, not a witness-feature one.
+    * **97 is not a corpus prefix at all.** It is the LOCAL "My Library"
+      namespace (Phase 95, `shared/local_sys_id.py`) -- a user's own files,
+      generated on the DESKTOP, never a Genizah record. Measured on
+      `libraries.csv`: 255,723 of 255,723 corpus records begin 99.
+    * **Wide was not the safe direction.** `re.search` scans anywhere, so a
+      corpus pattern run over a LOCAL header can match a 99 INSIDE the LOCAL
+      id's own digits and return a truncated, WRONG sys_id (6.36% of LOCAL
+      ids, measured). The shared constant is anchored on a digit boundary so
+      a LOCAL header misses cleanly instead.
+
+    That second point bites harder here than on the web, because this module
+    is the DESKTOP's copy too and the desktop is where 97 ids actually exist.
+
+    Do not re-widen and do not hand-roll a second pattern; both are enforced
+    by tests/test_sys_id_patterns.py.
     """
     m = WITNESS_SYS_ID_RE.search((row or {}).get('raw_header') or '')
     return m.group(1) if m else None

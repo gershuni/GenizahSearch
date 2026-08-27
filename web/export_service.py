@@ -12,7 +12,6 @@ Author: GenizahSearch Team
 """
 
 import io
-import re
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
@@ -29,6 +28,7 @@ from docx.shared import Pt
 # Imported early: `CREDITS_TEXT` below spreads it at module scope, above the
 # bulk `shared_export_utils` import further down.
 from shared.export_utils import MIDRASH_CREDIT_LINES
+from shared.sys_id_patterns import CORPUS_SYS_ID_RE
 
 
 # Constants
@@ -188,7 +188,7 @@ def _resolve_result_display(result: Dict[str, Any], meta_mgr) -> tuple:
             raw_header = result.get('raw_header', '') or ''
             if raw_header:
                 try:
-                    m = re.search(r'(99\d{8,})', raw_header)
+                    m = CORPUS_SYS_ID_RE.search(raw_header)
                     if m:
                         sys_id = m.group(1)
                 except Exception:
@@ -683,7 +683,7 @@ class ExportService:
             if not sys_id_for_cell:
                 raw_header = res.get('raw_header', '') or ''
                 if raw_header:
-                    m = re.search(r'(99\d{8,})', raw_header)
+                    m = CORPUS_SYS_ID_RE.search(raw_header)
                     if m:
                         sys_id_for_cell = m.group(1)
             if not sys_id_for_cell and self.meta_mgr:
@@ -942,7 +942,7 @@ class ExportService:
             if not sys_id_for_text:
                 raw_header = res.get('raw_header', '') or ''
                 if raw_header:
-                    m = re.search(r'(99\d{8,})', raw_header)
+                    m = CORPUS_SYS_ID_RE.search(raw_header)
                     if m:
                         sys_id_for_text = m.group(1)
             if not sys_id_for_text and self.meta_mgr:

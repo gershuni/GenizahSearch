@@ -21,6 +21,10 @@ ALLOWED_SEARCH_MODES = frozenset({"exact", "variants", "responsa"})
 ALLOWED_DIFFICULTIES = frozenset({"simple", "advanced", "research"})
 RESPONSA_FLAGS = frozenset({"variants", "ja", "flex_spaces", "bidirectional"})
 _ID_RE = re.compile(r"^[a-z][a-z0-9-]{2,63}$")
+# sys-id-pattern-exempt: this is a full-string VALIDATOR for curated static
+# content, not a header extractor. Anchored ``^99`` cannot mis-fire on a
+# 97-prefixed LOCAL id the way an unanchored search can, and the curated file
+# is hand-authored corpus ids only. See shared/sys_id_patterns.py.
 _SYS_ID_RE = re.compile(r"^99\d{10,}$")
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _WORK_ID_RE = re.compile(r"^w\d{6}$")

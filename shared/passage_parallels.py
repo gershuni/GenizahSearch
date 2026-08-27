@@ -234,6 +234,7 @@ from shared.passage_index import PassageIndex
 from shared.passage_normalize import nfc, norm_stream, norm_stream_fast, project_span
 from shared.passage_policy import PassagePolicy, get_preset
 from shared.passage_search import search_passage
+from shared.sys_id_patterns import CORPUS_SYS_ID_RE
 
 # How many score-adjacent SURVIVORS each rendered row is compared against in
 # the duplicate-photography pass. Duplicate photographs of one page score
@@ -257,7 +258,11 @@ HIGHLIGHT_CONTEXT_PAD = 60
 # own first-attempt regex so `uid` is byte-identical to what the Tantivy
 # `unique_id` field would hold for the SAME page).
 _UID_RE = re.compile(r'(IE\d+_P\d+_FL\d+)')
-_SYS_ID_RE = re.compile(r'((?:99|97)\d{8,})')
+# NARROWED to the CORPUS namespace (2026-08-25). The passage index is built
+# from the Genizah corpus and is web-only; a LOCAL ("My Library", 97-prefix)
+# record can never appear in it. Do not re-widen -- see
+# shared/sys_id_patterns.py for the measurement and the mis-match hazard.
+_SYS_ID_RE = CORPUS_SYS_ID_RE
 
 # A witness reference is a page `raw_header` -- the exact value carried on
 # every result row and stored verbatim in Tantivy's `full_header` field, e.g.

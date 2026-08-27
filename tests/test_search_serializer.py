@@ -20,6 +20,7 @@ Plan 01 deviations from CONTEXT.md (locked in 77-01-PLAN.md <plan_locked_decisio
 
 import pytest
 from unittest.mock import MagicMock
+from shared.sys_id_patterns import extract_any_sys_id
 
 
 # -----------------------------------------------------------------------------
@@ -44,11 +45,9 @@ def mock_meta_mgr():
         sys_id = None
         ie_id = None
         p_num = None
-        if '99' in header:
-            import re
-            m = re.search(r'(99\d{8,})', header)
-            if m:
-                sys_id = m.group(1)
+        # Mirror the REAL parser this doubles for (MetadataManager.
+        # parse_full_id_components), which is namespace-agnostic by design.
+        sys_id = extract_any_sys_id(header)
         if 'IE' in header:
             import re
             m = re.search(r'(IE\d+)', header)
