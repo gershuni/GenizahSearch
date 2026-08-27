@@ -512,3 +512,387 @@ def test_fusion_set_copies_the_row_lists():
     st = pw.fusion_set([('w1', 'A')], rows)
     st.rows['w1'].append({'raw_header': 'h2', 'score': 2})
     assert len(rows['w1']) == 1
+
+
+# ---------------------------------------------------------------------------
+# The surface. Qt-free throughout: the window's real methods are borrowed onto
+# a stub, so these run in the default lane with no QApplication.
+# ---------------------------------------------------------------------------
+
+import ast  # noqa: E402
+import io as _io  # noqa: E402
+import os as _os  # noqa: E402
+
+import genizah_app  # noqa: E402
+from desktop import passage_witnesses as pw  # noqa: E402
+from shared.passage_witness_source import WITNESS_SEED_ID  # noqa: E402
+
+GAPP = genizah_app.GenizahGUI
+_APP_PATH = _os.path.join(_os.path.dirname(_os.path.dirname(
+    _os.path.abspath(__file__))), 'genizah_app.py')
+
+
+def _app_src():
+    return _io.open(_APP_PATH, encoding='utf-8').read()
+
+
+def _fn_src(name):
+    src = _app_src()
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return ast.get_source_segment(src, node) or ''
+    raise AssertionError('%s not found' % name)
+
+
+class _Win2:
+    """Borrows the real methods. A re-implementation would only prove the
+    test agrees with itself."""
+
+    _comp_witness_state = GAPP._comp_witness_state
+    _comp_seed_text = GAPP._comp_seed_text
+    _comp_has_witnesses = GAPP._comp_has_witnesses
+    _comp_witness_roster = GAPP._comp_witness_roster
+    _comp_witness_dispatch_list = GAPP._comp_witness_dispatch_list
+    _comp_witness_prior_rows = GAPP._comp_witness_prior_rows
+    _absorb_witness_result = GAPP._absorb_witness_result
+    _comp_witness_total = GAPP._comp_witness_total
+    _comp_sort_key = GAPP._comp_sort_key
+    _sort_comp_items = GAPP._sort_comp_items
+    _current_comp_sort_mode = GAPP._current_comp_sort_mode
+    _comp_export_settings_lines = GAPP._comp_export_settings_lines
+    COMP_SORT_MODES = GAPP.COMP_SORT_MODES
+
+
+def _win(seed='the seed text of this work'):
+    w = _Win2()
+    w._comp_witnesses = pw.WitnessSet()
+    w.comp_text_area = _TextArea(seed)
+    w.comp_sort_mode = 'score'
+    w.comp_sort_reverse = True
+    return w
+
+
+class _TextArea:
+    def __init__(self, text=''):
+        self._t = text
+
+    def toPlainText(self):
+        return self._t
+
+
+def _grp(header, score, **kw):
+    """A manuscript-level item as `group_pages_by_manuscript` builds it."""
+    page = {'raw_header': header, 'score': score}
+    page.update(kw)
+    return {'type': 'manuscript', 'score': score, 'pages': [page]}
+
+
+# --- dispatch --------------------------------------------------------------
+
+def test_the_dispatch_list_includes_the_seed_when_it_has_no_rows():
+    """The seed IS a witness and the fusion is wrong without it."""
+    w = _win()
+    pw.add_texts(w._comp_witness_state(), ['alpha beta gamma'],
+                 w._comp_seed_text(), 'P')
+    ids = [wid for wid, _l, _t in GAPP._comp_witness_dispatch_list(w)]
+    assert ids[0] == WITNESS_SEED_ID
+
+
+def test_the_dispatch_list_skips_the_seed_once_it_has_rows():
+    """What keeps a later round linear: a witness is searched at most once."""
+    w = _win()
+    st = w._comp_witness_state()
+    st.rows[WITNESS_SEED_ID] = [{'raw_header': 'h', 'score': 1}]
+    pw.add_texts(st, ['alpha beta gamma'], 'the seed text of this work', 'P')
+    ids = [wid for wid, _l, _t in GAPP._comp_witness_dispatch_list(w)]
+    assert WITNESS_SEED_ID not in ids
+    assert len(ids) == 1
+
+
+def test_a_textless_witness_is_left_out_of_the_dispatch_list():
+    """Never dispatch an empty query: the engine answers it with nothing and
+    the panel would report an honest-looking "0 matches" for a search that
+    never ran."""
+    w = _win()
+    st = w._comp_witness_state()
+    st.entries.append(pw.WitnessEntry(id='w1', label='M', kind='manuscript',
+                                      sys_id='990000000001', text=''))
+    ids = [wid for wid, _l, _t in GAPP._comp_witness_dispatch_list(w)]
+    assert 'w1' not in ids
+
+
+def test_the_roster_is_the_full_picture_with_the_seed_first():
+    w = _win()
+    pw.add_texts(w._comp_witness_state(), ['alpha beta gamma'],
+                 'the seed text of this work', 'P')
+    roster = GAPP._comp_witness_roster(w)
+    assert roster[0][0] == WITNESS_SEED_ID
+    assert len(roster) == 2
+
+
+def test_dispatch_asks_for_an_uncapped_searcher_only_when_fusing():
+    """render_cap=0 for a batch, nothing for a single search. Capping each
+    witness before the fusion drops every contributor past rank 200 in its
+    own witness."""
+    src = _fn_src('run_composition')
+    assert 'render_cap=0 if _comp_multi else None' in src, (
+        'the multi-witness path no longer asks for an uncapped searcher')
+
+
+def test_dispatch_pins_the_index_generation_on_the_ui_thread():
+    """Pinned before the worker can take its first lease; a swap between the
+    two would otherwise go unnoticed."""
+    src = _fn_src('run_composition')
+    assert 'pinned_generation=' in src
+    assert 'current_state_generation()' in src
+
+
+def test_a_chunk_run_never_takes_the_multi_witness_path():
+    src = _fn_src('run_composition')
+    assert "_comp_multi = (_comp_dispatch_method == 'passage'" in src, (
+        'the multi-witness branch is no longer gated on the method')
+
+
+# --- absorbing a finished batch --------------------------------------------
+
+def test_absorbing_a_batch_moves_each_witness_to_its_new_status():
+    w = _win()
+    st = w._comp_witness_state()
+    pw.add_texts(st, ['alpha beta gamma', 'delta epsilon zeta'],
+                 'the seed text of this work', 'P')
+    a, b = st.entries[0].id, st.entries[1].id
+    GAPP._absorb_witness_result(w, {
+        'witness_rows': {a: [{'raw_header': 'h', 'score': 5}]},
+        'witness_filtered': {},
+        'witness_report': [
+            {'witness_id': a, 'status': 'searched', 'hits': 1},
+            {'witness_id': b, 'status': 'failed', 'reason': 'search_failed'},
+        ],
+    })
+    assert st.entries[0].status == pw.STATUS_SEARCHED
+    assert st.entries[0].hits == 1
+    assert st.entries[1].status == pw.STATUS_FAILED
+    assert st.entries[1].error, 'a failed witness carries no reason'
+
+
+def test_absorbing_keeps_the_reason_the_worker_knew():
+    """Rehydration empties an over-long witness and records WHY; a generic
+    "could not load" over that replaces a true reason with a false one and
+    the user retries forever."""
+    w = _win()
+    st = w._comp_witness_state()
+    pw.add_texts(st, ['alpha beta gamma'], 'the seed text of this work', 'P')
+    wid = st.entries[0].id
+    GAPP._absorb_witness_result(w, {
+        'witness_rows': {}, 'witness_filtered': {},
+        'witness_report': [{'witness_id': wid, 'status': 'failed',
+                            'reason': 'empty_text'}]})
+    # Compared against tr(), never an English literal: tr() reads the
+    # OWNER's configured language, so an assert-English test passes on a
+    # CI box and fails on a Hebrew desktop.
+    from genizah_core import tr as _tr
+    assert st.entries[0].error == _tr(
+        "Could not load text for this manuscript.")
+    assert st.entries[0].error != _tr(
+        "The letter-level search could not be completed. Details have been "
+        "written to the log."), 'the specific reason was overwritten'
+
+
+# --- the witness column and sorting ----------------------------------------
+
+def test_fused_sorting_reads_the_group_not_a_dropped_field():
+    """`group_pages_by_manuscript` keeps only summed raw `score` and drops
+    `fusion_score` on the way to manuscript level, so a sort that read the
+    field would put every manuscript into one tie at zero."""
+    w = _win()
+    w.comp_sort_mode = 'fused'
+    strong = _grp('990000000001_1r', 10, fusion_score=0.5, witness_count=3,
+                  witness_ids='seed,w1,w2')
+    weak = _grp('990000000002_1r', 900, fusion_score=0.01, witness_count=1,
+                witness_ids='seed')
+    out = GAPP._sort_comp_items(w, [weak, strong])
+    assert out[0] is strong, 'raw score beat the fusion'
+
+
+def test_witness_sorting_orders_by_distinct_contributors():
+    w = _win()
+    w.comp_sort_mode = 'witnesses'
+    many = _grp('990000000001_1r', 5, witness_count=4, witness_ids='seed,w1,w2,w3')
+    few = _grp('990000000002_1r', 800, witness_count=1, witness_ids='seed')
+    out = GAPP._sort_comp_items(w, [few, many])
+    assert out[0] is many
+
+
+def test_score_sorting_is_unchanged():
+    w = _win()
+    w.comp_sort_mode = 'score'
+    a, b = _grp('990000000001_1r', 10), _grp('990000000002_1r', 900)
+    assert GAPP._sort_comp_items(w, [a, b])[0] is b
+
+
+def test_an_unknown_sort_mode_falls_back_to_score_not_shelfmark():
+    """It used to fall THROUGH to shelfmark ordering, so a hand-edited
+    session file silently re-sorted the page."""
+    w = _win()
+    w.comp_sort_mode = 'nonsense-from-a-session-file'
+    assert GAPP._current_comp_sort_mode(w) == 'score'
+
+
+def test_a_fused_mode_is_a_known_mode():
+    w = _win()
+    w.comp_sort_mode = 'fused'
+    assert GAPP._current_comp_sort_mode(w) == 'fused'
+
+
+def test_the_witness_column_is_appended_so_no_index_moves():
+    """Every existing column index is load-bearing across the tree, the
+    exports and the header filters."""
+    src = _app_src()
+    assert 'self.comp_col_src = 8' in src
+    assert 'self.comp_col_witnesses = 9' in src
+
+
+def test_the_witness_column_visibility_is_set_on_every_render():
+    """There is no composition header visibility persistence, so a column
+    shown for a fused run would survive onto the next chunk result."""
+    src = _fn_src('display_comp_results')
+    assert 'setColumnHidden' in src and 'comp_col_witnesses' in src
+
+
+def test_the_witness_total_is_provenance_not_the_live_panel():
+    """Adding a witness after a search must not change the denominator
+    printed beside rows that search produced."""
+    w = _win()
+    w._comp_last_result_witness_total = 3
+    pw.add_texts(w._comp_witness_state(), ['alpha beta gamma'],
+                 'the seed text of this work', 'P')
+    assert GAPP._comp_witness_total(w) == 3
+
+
+# --- provenance, history, export -------------------------------------------
+
+def test_the_export_settings_name_the_witness_count():
+    w = _win()
+    w._comp_last_result_method = 'passage'
+    w._comp_last_result_width = 'widest-40'
+    w._comp_last_result_length = 'normal'
+    w._comp_last_result_depth = 'normal'
+    w._comp_last_result_witnesses = [{'id': 'w1'}, {'id': 'w2'}]
+    w._comp_axis_label = lambda axis, value: str(value)
+    lines = GAPP._comp_export_settings_lines(w)
+    # Two witnesses plus the seed.
+    assert any('3' in ln for ln in lines), lines
+
+
+def test_a_single_witness_export_gains_no_witness_line():
+    w = _win()
+    w._comp_last_result_method = 'passage'
+    w._comp_last_result_width = 'widest-40'
+    w._comp_last_result_length = 'normal'
+    w._comp_last_result_depth = 'normal'
+    w._comp_last_result_witnesses = []
+    w._comp_axis_label = lambda axis, value: str(value)
+    assert len(GAPP._comp_export_settings_lines(w)) == 4
+
+
+def test_history_records_the_witnesses_it_ran_with():
+    """Without it, re-running a saved multi-witness entry ran the SEED ALONE
+    under the same name."""
+    src = _fn_src('_add_comp_search_to_history')
+    assert "'comp_witnesses'" in src
+
+
+def test_history_restore_rebuilds_the_witnesses():
+    """The restore seam is `_restore_comp_passage_preferences`, which the
+    history path already calls -- so the key has to be the one it reads."""
+    assert "'comp_witnesses'" in _fn_src('_restore_comp_passage_preferences')
+    assert '_restore_comp_passage_preferences' in _fn_src(
+        '_restore_comp_search_from_state')
+
+
+def test_the_session_stores_the_witness_list_as_a_preference():
+    assert "'comp_witnesses'" in _fn_src('_comp_passage_preference_fields')
+
+
+def test_the_export_witness_column_is_conditional():
+    """A single-witness or chunk export stays byte-identical to v9.0.0; a
+    blank column would mean nothing.
+
+    Checked by AST, not substring: `assert '_comp_wit_col' in src` passes
+    just as happily against `_comp_wit_col = True`, which turns the column on
+    for every export. A mutation proved exactly that.
+    """
+    tree = ast.parse(_fn_src('export_comp_report'))
+    found = None
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id == '_comp_wit_col'):
+            found = node.value
+    assert found is not None, '_comp_wit_col is no longer assigned'
+    assert isinstance(found, ast.Compare), (
+        '_comp_wit_col is a constant, so the column is no longer conditional')
+    assert isinstance(found.ops[0], ast.Gt)
+    assert isinstance(found.comparators[0], ast.Constant)
+    assert found.comparators[0].value == 1, (
+        'the column now appears for a single-witness run too')
+
+
+# --- the recursive button ---------------------------------------------------
+
+def test_recursive_runs_fusion_on_passage_and_concatenation_on_chunk():
+    """Chunk keeps concatenating -- measured correct for its own engine, 392
+    manuscripts both ways with an empty difference in both directions. The
+    passage branch runs rank-fused expansion instead, and must RETURN: the
+    concatenation below it starves the posting budget to 48.2%, below the
+    56.7% of the best single witness.
+
+    The return is checked by AST. Asserting only that `'passage'` appears
+    before `combined_text` passes with the return deleted, which is precisely
+    the fall-through this guards -- a mutation proved it.
+    """
+    src = _fn_src('run_recursive_composition')
+    assert 'combined_text' in src, (
+        'the chunk branch no longer concatenates -- that is correct for it')
+
+    tree = ast.parse(src)
+    branch = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If) and any(
+                isinstance(c, ast.Constant) and c.value == 'passage'
+                for c in ast.walk(node.test)):
+            branch = node
+            break
+    assert branch is not None, 'no passage branch in run_recursive_composition'
+    calls = [n.func.attr for n in ast.walk(branch)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
+    assert '_run_auto_expand' in calls, (
+        'the passage branch no longer runs rank-fused expansion')
+    assert isinstance(branch.body[-1], ast.Return), (
+        'the passage branch falls through into the concatenating path')
+
+
+def test_the_recursive_button_is_no_longer_disabled_in_passage_mode():
+    """It was, and `_update_recursive_button_state` re-enabled it on the next
+    render anyway -- so the disable never held and only the programmatic
+    guard caught the click."""
+    src = _fn_src('_apply_passage_mode_ui')
+    assert 'rec.setEnabled' not in src
+
+
+def test_auto_expand_refuses_a_round_it_cannot_complete():
+    """Refused rather than silently shrunk: a control that quietly does less
+    than it says is a lie."""
+    src = _fn_src('_advance_auto_expand')
+    assert 'DESKTOP_WITNESS_CAP' in src
+    assert '_stop_auto_expand' in src
+
+
+def test_auto_expand_is_driven_by_completed_searches_not_a_loop():
+    """Each round IS a search, and the search is a worker thread. A loop
+    would either block the UI thread or start round two against round one's
+    unfinished results."""
+    src = _fn_src('on_comp_scan_finished')
+    assert '_advance_auto_expand' in src
+    assert '_auto_expand_left' in src

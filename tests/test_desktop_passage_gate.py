@@ -362,14 +362,43 @@ def test_the_restore_path_revalidates_too():
     assert '_passage_disabled_reason_now(' in seg
 
 
-def test_recursive_search_refuses_a_programmatic_passage_call():
-    """The button is disabled in passage mode, but a restored session or a
-    programmatic call still reaches the function. Concatenating result texts
-    starves the passage engine's posting budget -- measured 48.2% against
-    74.1% for the same witnesses fused."""
+def test_recursive_search_branches_by_engine_rather_than_refusing():
+    """"Recursive" means something different per engine, and both meanings
+    are correct for their own engine.
+
+    Chunk decomposes a query into independent per-chunk lookups with no
+    shared budget, so concatenating result texts is exactly equivalent to a
+    union -- measured, 392 manuscripts both ways with an empty difference in
+    both directions. The passage engine spends a per-query POSTING budget, so
+    the same concatenation starves: 48.2% against 74.1% fused, and below the
+    56.7% of the best SINGLE witness.
+
+    This replaces a guard that asserted the function REFUSED in passage mode.
+    That assertion still passes against the branching version -- both
+    `_comp_method()` and `'passage'` appear either way -- so it had stopped
+    testing anything it claimed to.
+    """
     seg = _function_source('run_recursive_composition')
-    assert "_comp_method()" in seg and "'passage'" in seg, (
-        'run_recursive_composition has no passage guard of its own')
+    assert "_run_auto_expand()" in seg, (
+        'the passage branch no longer runs rank-fused expansion')
+    assert "combined_text" in seg, (
+        'the chunk branch no longer concatenates -- that is correct for it')
+    # The passage branch must RETURN before reaching the concatenation.
+    passage_at = seg.index("'passage'")
+    concat_at = seg.index("combined_text")
+    assert passage_at < concat_at, (
+        'a passage run falls through into the concatenating path')
+
+
+def test_the_retired_refusal_string_is_gone_from_the_code():
+    """The button is no longer disabled in letter-level mode, so the message
+    explaining why it was has no caller. A string left behind outlives the
+    behaviour it described and reappears in the next translation sweep."""
+    assert 'Recursive search uses chunk search for now' not in _app_source()
+    import genizah_translations
+    assert not [k for k in genizah_translations.TRANSLATIONS
+                if 'Recursive search uses chunk search' in k], (
+        'the retired message is still in the translation table')
 
 
 def test_the_close_check_runs_before_any_shutdown_state_is_set():

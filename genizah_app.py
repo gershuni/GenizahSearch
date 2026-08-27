@@ -78,6 +78,9 @@ from desktop.pdf_image_controller import PdfImageController  # Phase 100 D-07b
 from desktop.ui_widgets import ShelfmarkTableWidgetItem, CheckBoxHeader, HiddenScrollArea, ListsTreeWidget
 from desktop.settings_dialogs import SettingsDialog, SearchSettingsDialog, HelpDialog, TabularQueryBuilderDialog, LabScoringDialog
 from desktop import passage_lifecycle  # Phase 146: letter-level (passage) search
+from desktop import passage_witnesses  # multi-witness state machine (pure)
+from shared import passage_witness_source  # witness resolution (pure, shared with web)
+from shared import passage_fusion  # RRF fusion (pure, shared with web + API)
 from desktop.update_ui import UpdateNotificationBar, WhatsNewBar, WhatsNewDialog, UpdateProgressDialog, TelemetryConsentBar  # Phase 127 update_ui; SEED-031 re-ask bar
 from filter_text_dialog import FilterTextDialog
 from column_filter_dialog import ColumnFilterDialog
@@ -1358,6 +1361,9 @@ class GenizahGUI(QMainWindow):
         self.comp_col_printed = 7  # Dedicated Printed column
         # Phase 95 D-12 — uniform Src column for LOCAL badge on Composition / Parallels.
         self.comp_col_src = 8  # New compact column appended after Printed
+        # Multi-witness only, and APPENDED so every index above is
+        # untouched. Hidden unless a rank-fused run produced the rows.
+        self.comp_col_witnesses = 9
         self.setWindowTitle(tr(f"Dicta Genizah Search Pro V{APP_VERSION}"))
         # Initial size - will be overridden by showMaximized() at startup
         self.setMinimumSize(1200, 700)
@@ -5701,6 +5707,9 @@ class GenizahGUI(QMainWindow):
         in_l.addWidget(self.lbl_comp_passage_reason)
         in_l.addWidget(self.lbl_comp_passage_dropped_warning)
 
+        # Several witnesses of one work. Letter-level only.
+        self._build_witness_panel(in_l)
+
         # The paragraph controls belong to CHUNK search (letter-level has no
         # paragraph boundaries), so they come after the method that selects
         # them rather than above it.
@@ -5815,7 +5824,7 @@ class GenizahGUI(QMainWindow):
         inp_w.setLayout(in_l); splitter.addWidget(inp_w)
         
         res_w = QWidget(); rl = QVBoxLayout()
-        self.comp_tree = QTreeWidget(); self.comp_tree.setHeaderLabels([tr("Score"), tr("Library"), tr("Shelfmark"), tr("Title"), tr("System ID"), tr("Context"), tr("MS Context"), tr("Printed"), tr("Src")])
+        self.comp_tree = QTreeWidget(); self.comp_tree.setHeaderLabels([tr("Score"), tr("Library"), tr("Shelfmark"), tr("Title"), tr("System ID"), tr("Context"), tr("MS Context"), tr("Printed"), tr("Src"), tr("Witnesses")])
         self.comp_tree.itemChanged.connect(self.on_comp_tree_item_changed)
         self.comp_tree.itemExpanded.connect(self.on_comp_tree_item_expanded)
         self.comp_tree.itemCollapsed.connect(self.on_comp_tree_item_collapsed)
@@ -5839,6 +5848,12 @@ class GenizahGUI(QMainWindow):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive) # Shelfmark
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # System ID
         header.setSectionResizeMode(self.comp_col_printed, QHeaderView.ResizeMode.Fixed) # Printed
+        header.setSectionResizeMode(self.comp_col_witnesses, QHeaderView.ResizeMode.ResizeToContents)
+        # There is no composition header width/visibility persistence to
+        # migrate, so this column's hidden state is set explicitly on
+        # every render. Set once here and never again, it would survive
+        # onto the next single-witness or chunk result.
+        self.comp_tree.setColumnHidden(self.comp_col_witnesses, True)
 
         self.comp_tree.setColumnWidth(0, 160) # Score - widened
 
@@ -15750,6 +15765,13 @@ class GenizahGUI(QMainWindow):
             'comp_passage_width': self._comp_passage_axis('width'),
             'comp_passage_length': self._comp_passage_axis('length'),
             'comp_passage_depth': self._comp_passage_axis('depth'),
+            # The witness LIST is a preference too: it is what the user has
+            # assembled, independent of whether it has been searched.
+            # Manuscript witnesses are stored without their text -- the
+            # corpus still has it, and 25 x 20,000 characters of it in a
+            # session file buys nothing.
+            'comp_witnesses': passage_witnesses.snapshot(
+                self._comp_witness_state()),
         }
 
     def _comp_chunk_preference(self, name):
@@ -16185,6 +16207,18 @@ class GenizahGUI(QMainWindow):
         policy axes from a saved dict, validating each INDEPENDENTLY against
         its widget's own options -- one bad axis must cost that axis its
         value, not take the other two (or the whole restore) with it."""
+        # The witness list, restored through the SHARED entry rules so the
+        # desktop and the web rebuild the same list from the same bytes. Every
+        # witness comes back `pending`, with empty row caches: the snapshot
+        # holds FUSED rows and per-witness ranks cannot be recovered from
+        # them, so a fusion rebuilt from partial inputs would be quietly wrong
+        # rather than visibly absent.
+        if 'comp_witnesses' in comp:
+            self._comp_witnesses = passage_witnesses.restore(
+                comp.get('comp_witnesses'), tr("Pasted text"))
+            if hasattr(self, 'comp_witness_list_layout'):
+                self._refresh_witness_panel()
+
         for axis in ('width', 'length', 'depth'):
             combo = getattr(self, 'comp_passage_%s_combo' % axis, None)
             if combo is None:
@@ -16353,7 +16387,7 @@ class GenizahGUI(QMainWindow):
         saved file as the rows.
         """
         if getattr(self, '_comp_last_result_method', 'chunk') == 'passage':
-            return [
+            lines = [
                 tr("Search method") + ": " + tr("Letter-level search"),
                 tr("Match width") + ": " + self._comp_axis_label(
                     'width', getattr(self, '_comp_last_result_width', None)),
@@ -16362,6 +16396,12 @@ class GenizahGUI(QMainWindow):
                 tr("Search depth") + ": " + self._comp_axis_label(
                     'depth', getattr(self, '_comp_last_result_depth', None)),
             ]
+            # From the PROVENANCE stamp, so editing the panel after a search
+            # cannot rewrite the settings block of a report already produced.
+            _wits = getattr(self, '_comp_last_result_witnesses', None) or []
+            if _wits:
+                lines.append(tr("Witnesses") + ": " + str(len(_wits) + 1))
+            return lines
 
         stamp = getattr(self, '_comp_last_result_chunk', None) or {}
         mode_index = stamp.get('mode_index',
@@ -16434,6 +16474,744 @@ class GenizahGUI(QMainWindow):
             self.lbl_comp_status.setStyleSheet(
                 "color: #e67e22; font-weight: bold;")
         return True
+
+    # --- multi-witness letter-level search ---------------------------------
+    # The state machine itself is `desktop/passage_witnesses.py` -- pure and
+    # Qt-free, so its rules are tested by calling them. What lives here is
+    # only the part that needs a window: which text is the seed, what the
+    # widgets say, and how a batch is dispatched.
+
+    def _on_witness_progress(self, index, total, label):
+        """"Witness 3/17: Ashkenaz" while a batch runs.
+
+        A batch shows no chunk-style percentage -- the passage engine emits
+        no progress inside a search -- so the witness count IS the progress
+        indicator, and saying which one is running is what makes a two-minute
+        wait legible rather than merely long.
+        """
+        text = tr("Witness {i}/{k}: {label}").format(
+            i=index, k=total, label=label)
+        if hasattr(self, 'lbl_comp_witness_progress'):
+            self.lbl_comp_witness_progress.setText(text)
+            self.lbl_comp_witness_progress.setVisible(True)
+        if hasattr(self, 'comp_progress'):
+            self.comp_progress.setFormat(text)
+
+    def _open_add_witness_dialog(self):
+        """Paste one witness, or a whole file split on blank lines."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle(tr("Add witness text"))
+        dlg.resize(640, 480)
+        dl = QVBoxLayout(dlg)
+
+        label_input = QLineEdit()
+        label_input.setPlaceholderText(tr("Label (optional)"))
+        dl.addWidget(label_input)
+
+        body_input = QPlainTextEdit()
+        body_input.setPlaceholderText(tr("Paste your Hebrew text here..."))
+        body_input.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        dl.addWidget(body_input)
+
+        chk_bulk = QCheckBox(tr(
+            "This paste contains several witnesses separated by blank lines"))
+        dl.addWidget(chk_bulk)
+
+        lbl_preview = QLabel("")
+        lbl_preview.setStyleSheet("color: #7f8c8d;")
+        dl.addWidget(lbl_preview)
+
+        def _preview():
+            texts, skipped = passage_witnesses.split_paste(
+                body_input.toPlainText())
+            parts = [tr("{n} witnesses detected").format(n=len(texts))]
+            if skipped:
+                # Never a silent drop: a paste that quietly loses part of a
+                # file is the failure this repo treats as a defect.
+                parts.append(tr("({n} skipped: too short)").format(n=skipped))
+            lbl_preview.setText("  ".join(parts))
+
+        btn_preview = QPushButton(tr("Preview split"))
+        btn_preview.clicked.connect(_preview)
+        btn_preview.setVisible(False)
+        chk_bulk.toggled.connect(btn_preview.setVisible)
+        dl.addWidget(btn_preview)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        btn_cancel = QPushButton(tr("Cancel"))
+        btn_cancel.clicked.connect(dlg.reject)
+        buttons.addWidget(btn_cancel)
+        btn_add = QPushButton(tr("Add"))
+        btn_add.setDefault(True)
+        buttons.addWidget(btn_add)
+        dl.addLayout(buttons)
+
+        def _commit():
+            raw = body_input.toPlainText()
+            if chk_bulk.isChecked():
+                texts, too_short = passage_witnesses.split_paste(raw)
+            else:
+                texts, too_short = [raw], 0
+            report = passage_witnesses.add_texts(
+                self._comp_witness_state(), texts, self._comp_seed_text(),
+                tr("Pasted text"), label=label_input.text())
+            self._report_witness_additions(report, extra_too_short=too_short)
+            if not report.added:
+                return
+            dlg.accept()
+            self._refresh_witness_panel()
+            self._schedule_session_save()
+
+        btn_add.clicked.connect(_commit)
+        dlg.exec()
+
+    def _report_witness_additions(self, report, extra_too_short=0):
+        """Say what was refused, and why, in ONE message per reason.
+
+        Fifteen identical toasts was the owner's first experience of the web
+        version of this feature; a single line naming the count is what
+        replaced it. Nothing is ever dropped in silence.
+        """
+        from shared.passage_fusion import MAX_WITNESS_CHARS
+        notes = []
+        too_short = report.too_short + extra_too_short
+        if too_short:
+            notes.append(tr("({n} skipped: too short)").format(n=too_short))
+        if report.duplicates:
+            notes.append(tr("({n} skipped: already added)").format(
+                n=report.duplicates))
+        if report.too_long:
+            notes.append(tr("Witness text is too long (max {cap} characters)"
+                            ).format(cap=MAX_WITNESS_CHARS))
+        if report.over_cap:
+            notes.append(tr("Witness list is full (max {n})").format(
+                n=passage_witnesses.DESKTOP_WITNESS_CAP))
+        if report.added:
+            notes.insert(0, tr("{n} witnesses detected").format(
+                n=len(report.added)))
+        elif not notes:
+            notes.append(tr("Enter at least 3 words"))
+        self.lbl_comp_witness_progress.setText("  ".join(notes))
+        self.lbl_comp_witness_progress.setVisible(True)
+
+    def _remove_witness(self, wid):
+        """Drop a witness and the rows it contributed.
+
+        `can_restrip` is False when there is nothing left to re-fuse FROM --
+        a restored session, whose per-witness caches are deliberately empty.
+        The rows on screen then keep the removed witness's contributions
+        whatever happens here, so the honest move is to SAY so rather than
+        destroy a result set that exists nowhere else.
+        """
+        can_restrip = passage_witnesses.remove(self._comp_witness_state(), wid)
+        self._refresh_witness_panel()
+        if not can_restrip and self._has_comp_results():
+            self.lbl_comp_witness_progress.setText(tr(
+                "Witness removed. The results on screen were found with the "
+                "previous witness list — run the search again to update "
+                "them."))
+            self.lbl_comp_witness_progress.setVisible(True)
+        else:
+            self._refuse_or_refresh_after_witness_change()
+        self._schedule_session_save()
+
+    def _refuse_or_refresh_after_witness_change(self):
+        """Re-fuse and redraw from the rows still in hand."""
+        fused = passage_witnesses.fuse_and_cap(self._comp_witness_state())
+        if fused is None:
+            return
+        main, filtered, _truncated = fused
+        self.on_comp_scan_finished({
+            'main': main, 'filtered': filtered, 'known': [],
+            'dropped_text_lookup_failures': 0, 'partial': False,
+        })
+
+    def _retry_witness(self, wid):
+        for entry in self._comp_witness_state().entries:
+            if entry.id == wid:
+                entry.status = passage_witnesses.STATUS_PENDING
+                entry.error = ''
+        self._refresh_witness_panel()
+        self._search_pending_witnesses()
+
+    def _revive_stale_witnesses(self):
+        passage_witnesses.revive_stale(
+            self._comp_witness_state(), self._comp_seed_text())
+        self._refresh_witness_panel()
+        self._schedule_session_save()
+
+    def _remove_stale_witnesses(self):
+        passage_witnesses.remove_stale(self._comp_witness_state())
+        self._refresh_witness_panel()
+        self._schedule_session_save()
+
+    def _search_pending_witnesses(self):
+        """Dispatch the pending witnesses through the ordinary search path.
+
+        ONE dispatch path, not two: `run_composition` already validates the
+        method, stamps provenance, freezes the controls and wires every
+        signal. A second entry point would be a second place for those to
+        drift.
+        """
+        if self.is_comp_running:
+            return
+        if self._comp_method() != 'passage':
+            return
+        # Witnesses gathered for a DIFFERENT source text are marked, not
+        # searched: a witness of one work is noise in another.
+        if passage_witnesses.mark_stale_against(
+                self._comp_witness_state(), self._comp_seed_text()):
+            self._refresh_witness_panel()
+        if not passage_witnesses.pending(self._comp_witness_state()):
+            self._refresh_witness_panel()
+            return
+        self.run_composition()
+
+    def _promote_checked_comp(self):
+        """Add the checked manuscripts as witnesses and search them.
+
+        Text comes from each manuscript's MATCHED pages, resolved by their own
+        `raw_header`s -- all of them, because a result group spans several
+        page-level hits and promoting only the best-scoring page throws away
+        most of the witness. Resolving through `get_full_manuscript` instead
+        was what made every promotion fail on the web: it goes via
+        `Config.BROWSE_MAP`, an auxiliary pickle with no guarantee of holding
+        an arbitrary manuscript.
+        """
+        if self.is_comp_running:
+            return
+        rows = list(getattr(self, '_comp_last_fused_rows', None) or [])
+        sys_ids = self._checked_comp_sys_ids(rows)
+        if not sys_ids:
+            return
+        self._promote_sys_ids(sys_ids, rows)
+
+    def _checked_comp_sys_ids(self, rows):
+        """The sys_ids of the CHECKED result rows, in display order.
+
+        Reuses the tree's own checkboxes rather than adding a second
+        selection concept beside them -- the same ones Export and the
+        recursive search already read.
+        """
+        uids = self._collect_checked_comp_page_uids()
+        if not uids:
+            return []
+        wanted, seen = [], set()
+        for row in rows:
+            sid = passage_witness_source.witness_sys_id(row)
+            if not sid or sid in seen:
+                continue
+            seen.add(sid)
+            wanted.append(sid)
+        checked = set()
+        for uid in uids:
+            m = passage_witness_source.WITNESS_SYS_ID_RE.search(str(uid))
+            if m:
+                checked.add(m.group(1))
+        return [s for s in wanted if s in checked]
+
+    def _promote_sys_ids(self, sys_ids, rows):
+        """Turn manuscripts into witnesses and search them."""
+        already = {e.sys_id for e in self._comp_witness_state().entries
+                   if e.sys_id}
+        sys_ids = [s for s in sys_ids if s not in already]
+        if not sys_ids:
+            return
+        headers = passage_witness_source.witness_headers_for(sys_ids, rows)
+        texts, failed = passage_witness_source.collect_witness_texts(
+            sys_ids, rows,
+            fetch_header=self.searcher.get_full_text_by_header,
+            fetch_manuscript=self.searcher.get_full_manuscript,
+            headers_by_sid=headers)
+        added = 0
+        for sid in sys_ids:
+            text = texts.get(sid)
+            if not text:
+                continue
+            label = sid
+            try:
+                shelf, _title = self.meta_mgr.get_meta_for_id(sid)
+                label = shelf or sid
+            except Exception:
+                pass
+            report = passage_witnesses.add_texts(
+                self._comp_witness_state(), [text], self._comp_seed_text(),
+                tr("Pasted text"), label=label, kind='manuscript',
+                sys_id=sid, headers=headers.get(sid) or [])
+            added += len(report.added)
+        if failed:
+            # ONE line naming what failed, not N identical messages saying
+            # nothing.
+            names = []
+            for sid in failed[:5]:
+                try:
+                    shelf, _t = self.meta_mgr.get_meta_for_id(sid)
+                except Exception:
+                    shelf = None
+                names.append(shelf or sid)
+            more = f' (+{len(failed) - 5})' if len(failed) > 5 else ''
+            self.lbl_comp_witness_progress.setText(tr(
+                "Could not load text for {n} manuscripts: {names}").format(
+                n=len(failed), names=', '.join(names) + more))
+            self.lbl_comp_witness_progress.setVisible(True)
+        self._refresh_witness_panel()
+        if added:
+            self._search_pending_witnesses()
+
+    # --- auto-expand -------------------------------------------------------
+    # Seed -> top-K -> repeat. Measured on Megillat Antiochus: frontier
+    # coverage 2 -> 4 -> 7 -> 9 of 20 over three rounds, monotone, with all 15
+    # promoted witnesses graded positive. The cost is the FIRST PAGE -- rows
+    # go from 191 to 2,795 and positives in the top 100 fall from 48 to 32.
+    # Reach up, precision down, which is why it is an explicit button with the
+    # trade-off written beside it and never folded into the search itself.
+
+    def _run_auto_expand(self):
+        if self.is_comp_running or getattr(self, '_auto_expand_left', 0):
+            return
+        if not self._has_comp_results():
+            self.lbl_comp_witness_progress.setText(
+                tr("Run a letter-level search first."))
+            self.lbl_comp_witness_progress.setVisible(True)
+            return
+        self._auto_expand_left = int(self.spin_comp_auto_rounds.value())
+        self._auto_expand_topk = int(self.spin_comp_auto_topk.value())
+        self._auto_expand_round = 0
+        self._advance_auto_expand()
+
+    def _advance_auto_expand(self):
+        """One round: promote the best K manuscripts and search them.
+
+        Driven from `on_comp_scan_finished` rather than a loop, because each
+        round IS a search and the search is a worker thread. A round that
+        would breach the witness cap is REFUSED rather than silently
+        shrunk -- a control that quietly does less than it says is a lie.
+        """
+        left = getattr(self, '_auto_expand_left', 0)
+        if left <= 0:
+            return
+        state = self._comp_witness_state()
+        cap = passage_witnesses.DESKTOP_WITNESS_CAP
+        topk = getattr(self, '_auto_expand_topk', 5)
+        if len(state.entries) + topk > cap:
+            self._stop_auto_expand(tr("Auto-expand stopped: witness cap "
+                                      "reached."))
+            return
+        rows = list(getattr(self, '_comp_last_fused_rows', None) or [])
+        already = {e.sys_id for e in state.entries if e.sys_id}
+        candidates = []
+        for row in rows:
+            sid = passage_witness_source.witness_sys_id(row)
+            if not sid or sid in already or sid in candidates:
+                continue
+            candidates.append(sid)
+            if len(candidates) >= topk:
+                break
+        if not candidates:
+            self._stop_auto_expand('')
+            return
+        self._auto_expand_left = left - 1
+        self._auto_expand_round = getattr(self, '_auto_expand_round', 0) + 1
+        self.lbl_comp_witness_progress.setText(tr("Round {r}/{n}").format(
+            r=self._auto_expand_round,
+            n=self._auto_expand_round + self._auto_expand_left))
+        self.lbl_comp_witness_progress.setVisible(True)
+        self._promote_sys_ids(candidates, rows)
+
+    def _stop_auto_expand(self, message):
+        self._auto_expand_left = 0
+        if message:
+            self.lbl_comp_witness_progress.setText(message)
+            self.lbl_comp_witness_progress.setVisible(True)
+
+    def _build_witness_panel(self, in_l):
+        """The Witnesses panel, letter-level only.
+
+        Hidden for chunk search, and that is a measurement rather than a
+        preference: on the chunk engine concatenation and union return the
+        IDENTICAL manuscript set (392 both ways, empty difference in both
+        directions), so there is no per-query budget to starve and nothing
+        for a fusion to add. Multi-witness there bought +2 positives of 74
+        with zero frontier gain at 4-6x the time.
+
+        Collapsed by default -- most searches use one text, and an always-open
+        block pushes the primary controls down the page for a feature they
+        never touch. It opens ITSELF when a witness needs attention, because
+        a warning inside a closed drawer is not a warning, and it never
+        auto-CLOSES: a user who opened it keeps it open.
+        """
+        self.comp_witness_box = QWidget()
+        box_l = QVBoxLayout(self.comp_witness_box)
+        box_l.setContentsMargins(0, 0, 0, 0)
+        box_l.setSpacing(4)
+
+        header = QHBoxLayout()
+        self.btn_comp_witness_toggle = QToolButton()
+        self.btn_comp_witness_toggle.setText(tr("Witnesses"))
+        self.btn_comp_witness_toggle.setCheckable(True)
+        self.btn_comp_witness_toggle.setChecked(False)
+        self.btn_comp_witness_toggle.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.btn_comp_witness_toggle.setArrowType(Qt.ArrowType.RightArrow)
+        self.btn_comp_witness_toggle.setAutoRaise(True)
+        self.btn_comp_witness_toggle.toggled.connect(
+            self._on_witness_panel_toggled)
+        header.addWidget(self.btn_comp_witness_toggle)
+        # The collapsed header is the only thing most users see, so it
+        # carries the live counts.
+        self.lbl_comp_witness_caption = QLabel("")
+        self.lbl_comp_witness_caption.setStyleSheet("color: #7f8c8d;")
+        header.addWidget(self.lbl_comp_witness_caption)
+        header.addStretch()
+        box_l.addLayout(header)
+
+        self.comp_witness_body = QWidget()
+        body = QVBoxLayout(self.comp_witness_body)
+        body.setContentsMargins(16, 0, 0, 0)
+        body.setSpacing(4)
+
+        self.lbl_comp_witness_empty = QLabel(tr(
+            "Add other copies of this work to search with. Each is searched "
+            "on its own and the results are merged."))
+        self.lbl_comp_witness_empty.setWordWrap(True)
+        self.lbl_comp_witness_empty.setStyleSheet("color: #7f8c8d;")
+        body.addWidget(self.lbl_comp_witness_empty)
+
+        self.comp_witness_list = QWidget()
+        self.comp_witness_list_layout = QVBoxLayout(self.comp_witness_list)
+        self.comp_witness_list_layout.setContentsMargins(0, 0, 0, 0)
+        self.comp_witness_list_layout.setSpacing(2)
+        body.addWidget(self.comp_witness_list)
+
+        # Appears when the source text changed under a witness list gathered
+        # for a different work.
+        self.comp_witness_stale_row = QWidget()
+        stale_l = QHBoxLayout(self.comp_witness_stale_row)
+        stale_l.setContentsMargins(0, 0, 0, 0)
+        self.lbl_comp_witness_stale = QLabel("")
+        self.lbl_comp_witness_stale.setWordWrap(True)
+        stale_l.addWidget(self.lbl_comp_witness_stale)
+        self.btn_comp_witness_revive = QPushButton(tr("Use them anyway"))
+        self.btn_comp_witness_revive.clicked.connect(self._revive_stale_witnesses)
+        stale_l.addWidget(self.btn_comp_witness_revive)
+        self.btn_comp_witness_drop_stale = QPushButton(tr("Remove them"))
+        self.btn_comp_witness_drop_stale.clicked.connect(self._remove_stale_witnesses)
+        stale_l.addWidget(self.btn_comp_witness_drop_stale)
+        stale_l.addStretch()
+        self.comp_witness_stale_row.setVisible(False)
+        body.addWidget(self.comp_witness_stale_row)
+
+        actions = QHBoxLayout()
+        self.btn_comp_witness_add = QPushButton(tr("Add witness text"))
+        self.btn_comp_witness_add.clicked.connect(self._open_add_witness_dialog)
+        actions.addWidget(self.btn_comp_witness_add)
+        # Promotion reuses the result tree's OWN checkboxes rather than
+        # adding a second selection concept beside them.
+        self.btn_comp_witness_promote = QPushButton(tr("Search with these too"))
+        self.btn_comp_witness_promote.clicked.connect(self._promote_checked_comp)
+        actions.addWidget(self.btn_comp_witness_promote)
+        self.btn_comp_witness_run = QPushButton(tr("Search now"))
+        self.btn_comp_witness_run.clicked.connect(self._search_pending_witnesses)
+        actions.addWidget(self.btn_comp_witness_run)
+        actions.addStretch()
+        body.addLayout(actions)
+
+        self.lbl_comp_witness_progress = QLabel("")
+        self.lbl_comp_witness_progress.setStyleSheet("color: #7f8c8d;")
+        self.lbl_comp_witness_progress.setVisible(False)
+        body.addWidget(self.lbl_comp_witness_progress)
+
+        # Auto-expand. A plain section, not a nested collapsible: a drawer
+        # inside a drawer is two clicks to reach a control and reads as a
+        # sub-feature of a sub-feature.
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setStyleSheet("color: #dfe4ea;")
+        body.addWidget(line)
+        lbl_auto = QLabel(tr("Auto-expand (optional)"))
+        lbl_auto.setStyleSheet("font-weight: bold;")
+        body.addWidget(lbl_auto)
+        lbl_auto_help = QLabel(tr(
+            "Repeatedly search with the best results as new witnesses. Reach "
+            "goes up and top-of-list precision goes down."))
+        lbl_auto_help.setWordWrap(True)
+        lbl_auto_help.setStyleSheet("color: #7f8c8d;")
+        body.addWidget(lbl_auto_help)
+        auto_row = QHBoxLayout()
+        auto_row.addWidget(QLabel(tr("Rounds")))
+        self.spin_comp_auto_rounds = QSpinBox()
+        self.spin_comp_auto_rounds.setRange(1, 5)
+        self.spin_comp_auto_rounds.setValue(3)
+        auto_row.addWidget(self.spin_comp_auto_rounds)
+        auto_row.addWidget(QLabel(tr("Top-K per round")))
+        self.spin_comp_auto_topk = QSpinBox()
+        self.spin_comp_auto_topk.setRange(1, 10)
+        self.spin_comp_auto_topk.setValue(5)
+        auto_row.addWidget(self.spin_comp_auto_topk)
+        auto_row.addStretch()
+        body.addLayout(auto_row)
+        self.btn_comp_auto_expand = QPushButton(tr("Run auto-expand now"))
+        self.btn_comp_auto_expand.clicked.connect(self._run_auto_expand)
+        self.btn_comp_auto_expand.setEnabled(False)
+        body.addWidget(self.btn_comp_auto_expand)
+
+        self.comp_witness_body.setVisible(False)
+        box_l.addWidget(self.comp_witness_body)
+        in_l.addWidget(self.comp_witness_box)
+        self.comp_witness_box.setVisible(False)
+
+    def _on_witness_panel_toggled(self, opened):
+        self.comp_witness_body.setVisible(bool(opened))
+        self.btn_comp_witness_toggle.setArrowType(
+            Qt.ArrowType.DownArrow if opened else Qt.ArrowType.RightArrow)
+
+    def _set_witness_panel_visible(self, visible):
+        """Shown only in letter-level mode. Called from the same place the
+        other passage-only controls are shown and hidden, so the two cannot
+        drift apart."""
+        box = getattr(self, 'comp_witness_box', None)
+        if box is not None:
+            box.setVisible(bool(visible))
+
+    def _refresh_witness_panel(self):
+        """Rebuild the list, the caption and the button states from the
+        WitnessSet. One function, called after every mutation, so there is no
+        second place for the panel and the state to disagree."""
+        layout = getattr(self, 'comp_witness_list_layout', None)
+        if layout is None:
+            return
+        while layout.count():
+            item = layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+
+        state = self._comp_witness_state()
+        for entry in state.entries:
+            layout.addWidget(self._build_witness_row(entry))
+
+        pending = passage_witnesses.pending(state)
+        stale = [e for e in state.entries
+                 if e.status == passage_witnesses.STATUS_STALE]
+        failed = [e for e in state.entries
+                  if e.status == passage_witnesses.STATUS_FAILED]
+
+        self.lbl_comp_witness_empty.setVisible(not state.entries)
+        self.comp_witness_stale_row.setVisible(bool(stale))
+        if stale:
+            self.lbl_comp_witness_stale.setText(tr(
+                "{n} witnesses were added for a different source text."
+            ).format(n=len(stale)))
+
+        bits = []
+        if state.entries:
+            bits.append(tr("{n} witnesses").format(n=len(state.entries)))
+            if stale:
+                bits.append(tr("{n} from another text").format(n=len(stale)))
+            elif pending:
+                bits.append(tr("{n} pending").format(n=len(pending)))
+            if failed:
+                bits.append(tr("{n} failed").format(n=len(failed)))
+        self.lbl_comp_witness_caption.setText("  ·  ".join(bits))
+
+        self.btn_comp_witness_run.setVisible(bool(pending))
+        self.btn_comp_witness_run.setText(
+            tr("Search now ({n} pending)").format(n=len(pending)))
+        # Auto-expand needs results to promote FROM.
+        self.btn_comp_auto_expand.setEnabled(bool(self._has_comp_results()))
+        self.btn_comp_witness_promote.setEnabled(bool(self._has_comp_results()))
+
+        # Opens itself when something needs attention; never closes itself.
+        if (stale or pending or failed) and not self.btn_comp_witness_toggle.isChecked():
+            self.btn_comp_witness_toggle.setChecked(True)
+
+    def _build_witness_row(self, entry):
+        row = QWidget()
+        rl = QHBoxLayout(row)
+        rl.setContentsMargins(2, 1, 2, 1)
+        label = QLabel(entry.label or entry.id)
+        label.setToolTip(entry.error or entry.label or '')
+        rl.addWidget(label)
+        chars = QLabel(str(len(entry.text or '')))
+        chars.setStyleSheet("color: #95a5a6;")
+        rl.addWidget(chars)
+        rl.addWidget(self._witness_status_chip(entry))
+        rl.addStretch()
+        if entry.status == passage_witnesses.STATUS_FAILED:
+            btn_retry = QPushButton(tr("Retry"))
+            btn_retry.clicked.connect(
+                lambda _c=False, wid=entry.id: self._retry_witness(wid))
+            rl.addWidget(btn_retry)
+        btn_del = QPushButton(tr("Remove"))
+        btn_del.clicked.connect(
+            lambda _c=False, wid=entry.id: self._remove_witness(wid))
+        rl.addWidget(btn_del)
+        return row
+
+    def _witness_status_chip(self, entry):
+        chip = QLabel()
+        if entry.status == passage_witnesses.STATUS_STALE:
+            chip.setText(tr("Other source text"))
+            chip.setStyleSheet("color: #e67e22;")
+            chip.setToolTip(tr(
+                "This witness was added for a different source text, so it "
+                "was not searched."))
+        elif entry.status == passage_witnesses.STATUS_SEARCHED:
+            chip.setText(tr("{n} matches found").format(n=entry.hits))
+            chip.setStyleSheet("color: #27ae60;")
+        elif entry.status == passage_witnesses.STATUS_FAILED:
+            chip.setText(tr("Failed"))
+            chip.setStyleSheet("color: #c0392b;")
+            chip.setToolTip(entry.error or '')
+        elif entry.status == passage_witnesses.STATUS_RUNNING:
+            chip.setText("…")
+        else:
+            chip.setText(tr("Pending"))
+            chip.setStyleSheet("color: #7f8c8d;")
+        return chip
+
+    def _apply_comp_witness_cell(self, node, ms_item):
+        """"{n} of {m} witnesses" on a manuscript row, tooltipped with which.
+
+        The count is a UNION across the group's rows, never a sum: two pages
+        of one manuscript found by the same witness are ONE witness. It is
+        recomputed from the rows rather than read off the item, because
+        `group_pages_by_manuscript` keeps only summed raw `score` and drops
+        `fusion_score` and `witness_count` on the way to manuscript level --
+        so a field read here would be absent or zero.
+        """
+        total = self._comp_witness_total()
+        if total <= 1:
+            return
+        pages = ms_item.get('pages') or [ms_item]
+        stats = passage_fusion.group_stats(pages)
+        if not stats['witness_count']:
+            return
+        self._set_comp_tree_text(
+            node, self.comp_col_witnesses,
+            tr("{n} of {m} witnesses").format(
+                n=stats['witness_count'], m=total))
+        labels = passage_witnesses.labels(
+            self._comp_witness_state(), tr("Your text"))
+        node.setToolTip(self.comp_col_witnesses, ", ".join(
+            labels.get(wid, wid) for wid in stats['witness_ids']))
+
+    def _comp_witness_total(self):
+        """How many witnesses produced the rows CURRENTLY on screen.
+
+        Provenance, not the live panel: adding a witness after a search must
+        not change the denominator printed beside rows that search produced.
+        """
+        return int(getattr(self, '_comp_last_result_witness_total', 0) or 0)
+
+    def _comp_witness_state(self):
+        """The window's `WitnessSet`, created on first use.
+
+        Owned by the UI thread and ONLY by it. The worker is handed data and
+        hands data back; it never mutates this. One owner is what keeps a
+        promotion arriving mid-batch from corrupting the row caches the
+        fusion is rebuilt from.
+        """
+        state = getattr(self, '_comp_witnesses', None)
+        if state is None:
+            state = self._comp_witnesses = passage_witnesses.WitnessSet()
+        return state
+
+    def _comp_seed_text(self):
+        """What is in the box RIGHT NOW.
+
+        Read live on purpose: staleness asks "was this witness gathered for
+        the text I am about to search?", and the answer has to be about the
+        text about to be searched, not the one that was there when the
+        witness was added.
+        """
+        return self.comp_text_area.toPlainText().strip()
+
+    def _comp_has_witnesses(self):
+        return bool(self._comp_witness_state().entries)
+
+    def _comp_witness_roster(self):
+        """`[(witness_id, label)]` in fusion order, the seed first.
+
+        Order is not cosmetic: `fuse()` breaks rank ties by witness POSITION,
+        so the roster a run is dispatched with has to be the roster its rows
+        are fused with.
+        """
+        state = self._comp_witness_state()
+        labels = passage_witnesses.labels(state, tr("Your text"))
+        return [(wid, labels.get(wid, '')) for wid in
+                passage_witnesses.order(state)]
+
+    def _comp_witness_dispatch_list(self, custom_text=None):
+        """`[(witness_id, label, text)]` for the witnesses to SEARCH now.
+
+        The seed is included whenever its own rows are missing -- it is a
+        witness like any other and the fusion is wrong without it. Witnesses
+        already searched are skipped, which is what keeps an auto-expand
+        round linear.
+
+        A witness with no text is left OUT rather than dispatched empty. The
+        engine answers an empty query with nothing, and the panel would then
+        report a perfectly honest-looking "0 matches" for a search that never
+        ran. Manuscript witnesses are rehydrated before this is called.
+        """
+        state = self._comp_witness_state()
+        seed = custom_text if custom_text is not None else self._comp_seed_text()
+        out = []
+        if state.rows.get(passage_witnesses.WITNESS_SEED_ID) is None:
+            out.append((passage_witnesses.WITNESS_SEED_ID,
+                        tr("Your text"), seed))
+        for entry in state.entries:
+            if entry.status != passage_witnesses.STATUS_PENDING:
+                continue
+            if not (entry.text or '').strip():
+                continue
+            out.append((entry.id, entry.label, entry.text))
+        return out
+
+    def _comp_witness_prior_rows(self):
+        """The rows of witnesses searched in an EARLIER round.
+
+        Handed to the worker so the fusion covers everything known, not just
+        what this run searched -- otherwise each round would overwrite the
+        last instead of widening it.
+        """
+        state = self._comp_witness_state()
+        return dict(state.rows), dict(state.filtered)
+
+    def _absorb_witness_result(self, result):
+        """Fold a finished batch's per-witness rows back into the WitnessSet.
+
+        Called on the UI thread from `on_comp_scan_finished`. The worker
+        returns rows; the STATUS transitions happen here, because status is
+        state and state has one owner.
+        """
+        state = self._comp_witness_state()
+        state.rows.update(result.get('witness_rows') or {})
+        state.filtered.update(result.get('witness_filtered') or {})
+        by_id = {r.get('witness_id'): r
+                 for r in (result.get('witness_report') or [])}
+        for entry in state.entries:
+            row = by_id.get(entry.id)
+            if row is None:
+                continue
+            if row.get('status') == 'searched':
+                entry.status = passage_witnesses.STATUS_SEARCHED
+                entry.hits = int(row.get('hits') or 0)
+                entry.error = ''
+            else:
+                entry.status = passage_witnesses.STATUS_FAILED
+                entry.hits = 0
+                # The reason the worker knew, not a generic one: rehydration
+                # empties an over-long witness and records WHY, and saying
+                # "could not load" over that replaces a true reason with a
+                # false one, so the user retries forever.
+                entry.error = (
+                    tr("Could not load text for this manuscript.")
+                    if row.get('reason') == 'empty_text'
+                    else tr("The letter-level search could not be completed. "
+                            "Details have been written to the log."))
 
     def _clear_passage_dropped_warning(self):
         lbl = getattr(self, 'lbl_comp_passage_dropped_warning', None)
@@ -16599,6 +17377,10 @@ class GenizahGUI(QMainWindow):
             w = getattr(self, name, None)
             if w is not None:
                 w.setVisible(bool(visible))
+        # The Witnesses panel joins the SAME contract rather than carrying a
+        # second visibility rule: one function decides what letter-level mode
+        # shows, so the panel cannot survive onto a chunk search.
+        self._set_witness_panel_visible(visible)
 
     def _apply_passage_mode_ui(self, on):
         """Force-set and disable the chunk knobs a letter-level search does
@@ -16658,17 +17440,26 @@ class GenizahGUI(QMainWindow):
 
         self._set_boundary_row_visible(not on)
 
-        # Recursive search concatenates result texts into ONE query, which
-        # starves the passage engine's per-query posting budget (measured
-        # 48.2% vs 74.1% fused). Owner ruling 2026-08-25: disable it in
-        # passage mode. `run_recursive_composition` carries its own guard for
-        # the programmatic paths this button cannot cover.
+        # Recursive search means something DIFFERENT per engine, and both
+        # meanings are correct for their own engine.
+        #
+        # Chunk decomposes a query into independent per-chunk lookups with no
+        # shared budget, so concatenating result texts into one query is
+        # exactly equivalent to a union -- measured, 392 manuscripts both ways
+        # with an empty difference in both directions.
+        #
+        # The passage engine spends a per-query POSTING budget, so the same
+        # concatenation starves: 48.2% against 74.1% for the same witnesses
+        # fused, and below the 56.7% of the best SINGLE witness. In
+        # letter-level mode the button therefore runs rank-fused expansion
+        # instead of concatenating. `run_recursive_composition` branches on
+        # the method; nothing is disabled.
         rec = getattr(self, 'btn_comp_recursive', None)
         if rec is not None:
-            rec.setEnabled(not on)
             rec.setToolTip(tr(
-                "Recursive search uses chunk search for now. Switch the "
-                "method back to chunk search to use it.") if on else "")
+                "Repeatedly search with the best results as new witnesses. "
+                "Reach goes up and top-of-list precision goes down.")
+                if on else "")
 
         if not on:
             self.__dict__.pop('_passage_cached_chunk_state', None)
@@ -21804,6 +22595,26 @@ class GenizahGUI(QMainWindow):
         # Phase 146: describes the RUN behind these rows, not the
         # controls as they stand now -- see `_comp_export_settings_lines`.
         comp_settings_lines = self._comp_export_settings_lines()
+        # An 11th column ONLY when a rank-fused run produced these rows.
+        # Conditional rather than always-present so a single-witness or
+        # chunk export stays byte-identical to v9.0.0 -- and blank for a
+        # run with no witnesses would be a column that means nothing.
+        _comp_wit_total = self._comp_witness_total()
+        _comp_wit_col = _comp_wit_total > 1
+
+        def _wit_cell(item):
+            """'3 of 17' for one manuscript, or [] when the column is off.
+
+            A UNION across the group's rows, never a sum: two pages found
+            by one witness are one witness. Recomputed here because
+            grouping drops `witness_count` on the way to manuscript
+            level."""
+            if not _comp_wit_col:
+                return []
+            pages = item.get('pages') or [item]
+            stats = passage_fusion.group_stats(pages)
+            return [tr("{n} of {m} witnesses").format(
+                n=stats['witness_count'], m=_comp_wit_total)]
 
         # Use shared sanitization utility for consistency with Web app
         sanitize_for_excel = shared_sanitize_excel
@@ -21945,7 +22756,7 @@ class GenizahGUI(QMainWindow):
                                 f"{ms_score} (P:{page.get('score',0)})",
                                 src_clean,
                                 ms_clean
-                             ])
+                             ] + _wit_cell(ms_item))
                     elif item_type == 'manuscript':
                         sid = ms_item['sys_id']
                         shelf, title = self.meta_mgr.get_meta_for_id(sid)
@@ -21975,7 +22786,7 @@ class GenizahGUI(QMainWindow):
                                 f"{ms_score} (P:{page.get('score',0)})",
                                 src_clean,
                                 ms_clean
-                             ])
+                             ] + _wit_cell(ms_item))
                     else:
                         # Fallback
                         sid, p_num, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
@@ -21996,7 +22807,7 @@ class GenizahGUI(QMainWindow):
                             str(ms_item.get('score', 0)),
                             src_clean,
                             ms_clean
-                        ])
+                        ] + _wit_cell(ms_item))
 
             if self.chk_comp_flat.isChecked():
                 all_items = self._collect_comp_items(
@@ -22101,7 +22912,7 @@ class GenizahGUI(QMainWindow):
                         tr("Score"),
                         tr("Source Context"),
                         tr("Manuscript Text"),
-                    ]
+                    ] + ([tr("Witnesses")] if _comp_wit_col else [])
 
                     # Raw Data sheet (flat)
                     raw_row = _write_credit_block(ws_raw, 1)
@@ -22362,7 +23173,7 @@ class GenizahGUI(QMainWindow):
                         tr("Score"),
                         tr("Source Context"),
                         tr("Manuscript Text"),
-                    ]
+                    ] + ([tr("Witnesses")] if _comp_wit_col else [])
                     from shared.export_dossier import (
                         local_documents_header_row as _local_hdr,
                         sheet_titles as _sheet_titles,
@@ -22458,14 +23269,20 @@ class GenizahGUI(QMainWindow):
                             tr("Score"),
                             tr("Source Context"),
                             tr("Manuscript Text"),
-                        ]
+                        ] + ([tr("Witnesses")] if _comp_wit_col else [])
                         table = doc.add_table(rows=1, cols=len(headers))
                         table.autofit = False
                         self._set_table_width_pct(table, 100)
                         hdr_cells = table.rows[0].cells
                         for idx, header in enumerate(headers):
                             hdr_cells[idx].text = header
+                        # Positional, so it has to track len(headers):
+                        # a short list silently leaves the last column
+                        # unsized rather than raising.
                         ratios = [0.04, 0.05, 0.06, 0.08, 0.06, 0.08, 0.05, 0.04, 0.27, 0.27]  # Adjusted for Library
+                        if _comp_wit_col:
+                            ratios = [0.04, 0.05, 0.06, 0.07, 0.06, 0.07, 0.05, 0.04,
+                                      0.25, 0.25, 0.06]
                         for idx, ratio in enumerate(ratios):
                             width = int(available_width * ratio)
                             for cell in table.columns[idx].cells:
@@ -23490,6 +24307,13 @@ class GenizahGUI(QMainWindow):
         # symmetry: letter-level mode FORCES them, so without a stamp
         # a later switch of method would rewrite the settings block of
         # a chunk report that had already been produced.
+        # The witness list this run was dispatched WITH. Provenance, like the
+        # method and the three axes beside it: editing the panel afterwards
+        # must not rewrite what a finished report or a history entry says
+        # produced its rows.
+        self._comp_last_result_witnesses = (
+            passage_witnesses.snapshot(self._comp_witness_state())
+            if _comp_dispatch_method == 'passage' else [])
         self._comp_last_result_chunk = {
             'chunk': self.spin_chunk.value(),
             'freq': self.spin_freq.value(),
@@ -23555,43 +24379,80 @@ class GenizahGUI(QMainWindow):
             # knobs happen to hold. `witnesses`/`witness_text_cap` are
             # keyword-only and deliberately NOT passed: single-witness only
             # in this phase.
+            # A MULTI-WITNESS run is a different worker and a different
+            # render cap, so it is decided before the searcher is built.
+            _comp_multi = (_comp_dispatch_method == 'passage'
+                           and self._comp_has_witnesses())
             if _comp_dispatch_method == 'passage':
+                # render_cap=0 -- UNCAPPED -- for a batch, because the cap
+                # has to be applied ONCE to the FUSED list. Capping each
+                # witness first fuses N already-truncated lists and drops
+                # every contributor past rank 200 in its own witness, which
+                # is exactly where a rare witness of a widely-copied work
+                # sits. A single search passes None and keeps the v9.0.0
+                # default byte for byte.
                 _comp_searcher = passage_lifecycle.get_passage_searcher(
                     self.searcher,
                     _comp_passage_width,
                     _comp_passage_length,
-                    _comp_passage_depth)
+                    _comp_passage_depth,
+                    render_cap=0 if _comp_multi else None)
                 _comp_mode_arg = 'literal'
                 _comp_boundary_mode = 'full'
                 _comp_min_boundary = 1
             else:
+                _comp_multi = False
                 _comp_searcher = self.searcher
                 _comp_mode_arg = mode
                 _comp_boundary_mode = boundary_mode
                 _comp_min_boundary = min_boundary_matches
 
-            # --- התיקון הקריטי כאן: הסרת progress_callback ---
-            self.comp_thread = CompositionThread(
-                _comp_searcher,
-                txt,
-                chunk=chunk_size,
-                freq=self.spin_freq.value(),
-                mode=_comp_mode_arg,
-                filter_text=self._get_filter_text(),
-                threshold=self.spin_filter.value(),
-                boundary_mode=_comp_boundary_mode,
-                boundary_delimiter=boundary_delimiter,
-                boundary_boost=boundary_boost,
-                min_boundary_matches=_comp_min_boundary,
-                min_delimiter_distance=min_delimiter_distance,
-                restrict_sys_ids=getattr(self, 'pre_search_restrict_sys_ids', None),
-                corpus_scope=_comp_scope,
-                run_id=_comp_run_id
-            )
-            if hasattr(self.comp_thread, 'scan_finished_signal'):
-                 self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
+            if _comp_multi:
+                _prior_rows, _prior_filtered = self._comp_witness_prior_rows()
+                self.comp_thread = MultiWitnessCompositionThread(
+                    _comp_searcher,
+                    self._comp_witness_dispatch_list(txt),
+                    filter_text=self._get_filter_text(),
+                    threshold=self.spin_filter.value(),
+                    restrict_sys_ids=getattr(
+                        self, 'pre_search_restrict_sys_ids', None),
+                    corpus_scope=_comp_scope,
+                    run_id=_comp_run_id,
+                    # Pinned HERE, on the UI thread, before the worker can
+                    # take its first lease: a swap between this line and the
+                    # first search would otherwise go unnoticed.
+                    pinned_generation=(
+                        passage_lifecycle.current_state_generation()),
+                    roster=self._comp_witness_roster(),
+                    prior_rows=_prior_rows,
+                    prior_filtered=_prior_filtered)
+                self.comp_thread.scan_finished_signal.connect(
+                    self.on_comp_scan_finished)
+                self.comp_thread.witness_progress_signal.connect(
+                    self._on_witness_progress)
             else:
-                 self.comp_thread.finished_signal.connect(self.on_comp_search_finished)
+                # --- התיקון הקריטי כאן: הסרת progress_callback ---
+                self.comp_thread = CompositionThread(
+                    _comp_searcher,
+                    txt,
+                    chunk=chunk_size,
+                    freq=self.spin_freq.value(),
+                    mode=_comp_mode_arg,
+                    filter_text=self._get_filter_text(),
+                    threshold=self.spin_filter.value(),
+                    boundary_mode=_comp_boundary_mode,
+                    boundary_delimiter=boundary_delimiter,
+                    boundary_boost=boundary_boost,
+                    min_boundary_matches=_comp_min_boundary,
+                    min_delimiter_distance=min_delimiter_distance,
+                    restrict_sys_ids=getattr(self, 'pre_search_restrict_sys_ids', None),
+                    corpus_scope=_comp_scope,
+                    run_id=_comp_run_id
+                )
+                if hasattr(self.comp_thread, 'scan_finished_signal'):
+                    self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
+                else:
+                    self.comp_thread.finished_signal.connect(self.on_comp_search_finished)
 
         self.comp_thread.progress_signal.connect(self.on_comp_progress)
         if hasattr(self.comp_thread, 'pause_ack_signal'):
@@ -23636,18 +24497,15 @@ class GenizahGUI(QMainWindow):
     def run_recursive_composition(self):
         if self.is_comp_running:
             return
-        # The button is disabled in passage mode, but a restored session, a
-        # keyboard path or a programmatic call can still land here. Recursive
-        # search concatenates result texts into ONE query, which starves the
-        # passage engine's per-query posting budget -- measured 48.2% against
-        # 74.1% for the same witnesses fused (owner ruling 2026-08-25).
+        # In letter-level mode "recursive" means rank-fused expansion, not
+        # concatenation. Concatenating starves the passage engine's per-query
+        # posting budget -- 48.2% against 74.1% fused, and below the 56.7% of
+        # the best single witness -- so the two engines take different paths
+        # from the same button. Everything below this branch is the chunk
+        # path and is unchanged.
         if self._comp_method() == 'passage':
             self._show_passage_reason(None)
-            if hasattr(self, 'lbl_comp_passage_reason'):
-                self.lbl_comp_passage_reason.setText(tr(
-                    "Recursive search uses chunk search for now. Switch the "
-                    "method back to chunk search to use it."))
-                self.lbl_comp_passage_reason.setVisible(True)
+            self._run_auto_expand()
             return
         base_text = self.comp_text_area.toPlainText().strip()
         if not base_text:
@@ -23749,6 +24607,43 @@ class GenizahGUI(QMainWindow):
                 _dropped = result_obj.get('dropped_text_lookup_failures') or 0
             self._show_passage_dropped_warning(_dropped)
         self._refresh_comp_method_enabled()
+
+        # Fold a multi-witness batch's per-witness rows back into the
+        # WitnessSet, and move each witness to its new status. Done HERE, on
+        # the UI thread, because status is state and state has one owner --
+        # the worker returns data and never touches it.
+        if isinstance(result_obj, dict):
+            # What promotion and auto-expand read. Stamped wherever rows
+            # arrive -- including a plain single-witness run -- so promoting
+            # never works from a previous search's rows.
+            self._comp_last_fused_rows = list(result_obj.get('main') or [])
+            # PROVENANCE: how many witnesses produced THESE rows. Adding a
+            # witness afterwards must not change the denominator printed
+            # beside rows an earlier search produced.
+            _searched = int(result_obj.get('witnesses_searched') or 0)
+            self._comp_last_result_witness_total = _searched
+            if _searched > 1:
+                # Default to the fused order the moment fusion exists.
+                # Leaving `score` selected would show a rank-fused result set
+                # re-sorted by raw matched letters -- the ranking the fusion
+                # exists to replace.
+                if self.comp_sort_mode in ('score', None, ''):
+                    self.comp_sort_mode = 'fused'
+                    self.comp_sort_reverse = True
+            elif self.comp_sort_mode in ('fused', 'witnesses'):
+                # A single-witness or chunk run carries no fusion, and a
+                # fused mode that outlives its rows sorts every manuscript
+                # into one tie at zero.
+                self.comp_sort_mode = 'score'
+                self.comp_sort_reverse = True
+        if isinstance(result_obj, dict) and 'witness_report' in result_obj:
+            self._absorb_witness_result(result_obj)
+            self._refresh_witness_panel()
+            # Each auto-expand round IS a search, so the next one starts from
+            # here rather than from a loop. Deferred to the event loop so the
+            # current result finishes rendering first.
+            if getattr(self, '_auto_expand_left', 0) > 0:
+                QTimer.singleShot(0, self._advance_auto_expand)
 
         # Phase 110 DESIGN CORRECTION (2026-06-08): standard composition queries the
         # REGULAR My-Library index, which has no staleness concept — an empty LOCAL
@@ -23939,9 +24834,10 @@ class GenizahGUI(QMainWindow):
         return all_items
 
     def on_comp_header_clicked(self, section):
-        if section not in (0, 1, 2, 3):
+        if section not in (0, 1, 2, 3, self.comp_col_witnesses):
             return
-        mode_map = {0: "score", 1: "shelfmark", 2: "title", 3: "system_id"}
+        mode_map = {0: "score", 1: "shelfmark", 2: "title", 3: "system_id",
+                    self.comp_col_witnesses: "witnesses"}
         new_mode = mode_map.get(section, "score")
         if new_mode == self.comp_sort_mode:
             self.comp_sort_reverse = not self.comp_sort_reverse
@@ -23967,8 +24863,20 @@ class GenizahGUI(QMainWindow):
                 self.comp_grouped_filtered_summary,
             )
 
+    COMP_SORT_MODES = ('score', 'shelfmark', 'title', 'system_id',
+                       'fused', 'witnesses')
+
     def _current_comp_sort_mode(self):
-        return self.comp_sort_mode or "score"
+        """The sort mode, validated.
+
+        `_comp_sort_key` falls through to shelfmark ordering for anything it
+        does not recognise, so an unknown mode does not fail -- it silently
+        re-sorts the page. A session file is user-editable and a `fused` mode
+        can outlive the fused rows that justified it, so both doors are
+        checked here rather than trusted.
+        """
+        mode = self.comp_sort_mode or "score"
+        return mode if mode in self.COMP_SORT_MODES else "score"
 
     def _get_comp_item_meta(self, item):
         sid = None
@@ -23992,6 +24900,17 @@ class GenizahGUI(QMainWindow):
         sort_mode = mode or self._current_comp_sort_mode()
         if sort_mode == "score":
             return item.get('score', 0)
+
+        # Rank fusion, recomputed from the group's rows rather than read off
+        # the item: `group_pages_by_manuscript` keeps only summed raw `score`
+        # and drops `fusion_score` on the way to manuscript level, so a field
+        # read here would sort every manuscript into one tie at zero.
+        if sort_mode in ("fused", "witnesses"):
+            stats = passage_fusion.group_stats(item.get('pages') or [item])
+            top = item.get('score', 0)
+            if sort_mode == "witnesses":
+                return (stats['witness_count'], stats['fusion_score'], top)
+            return (stats['fusion_score'], top)
 
         sid, shelf, title = self._get_comp_item_meta(item)
 
@@ -24158,6 +25077,12 @@ class GenizahGUI(QMainWindow):
                  QTimer.singleShot(10, self._process_snippet_queue)
 
     def display_comp_results(self, main_res, main_appx, main_summ, filt_res, filt_appx, filt_summ):
+        # Set on EVERY render, never once at construction: there is no
+        # composition header visibility persistence, so a column shown for a
+        # fused run would otherwise survive onto the next single-witness or
+        # chunk result and report "1 of 1" for every row.
+        self.comp_tree.setColumnHidden(
+            self.comp_col_witnesses, self._comp_witness_total() <= 1)
         # 1. Reset and cleanup
         # Phase 110 (fix 5): batch-prime the LOCAL filepath cache at the DISPLAY
         # entry point, covering BOTH the fresh-scan callback (already primes
@@ -24446,6 +25371,7 @@ class GenizahGUI(QMainWindow):
                 make_checkable(node)
                 node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
                 apply_printed_badge(node, sid)
+                self._apply_comp_witness_cell(node, ms_item)
                 # Phase 95 D-11 — Src cell with LOCAL color (composition tree, fallback node)
                 _src_val = str(ms_item.get('source', '') or (ms_item.get('display', {}) or {}).get('source', ''))
                 if _src_val == 'LOCAL':
@@ -24770,6 +25696,7 @@ class GenizahGUI(QMainWindow):
             self._make_node_checkable(node)
             node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
             self._apply_comp_printed_badge(node, sid)
+            self._apply_comp_witness_cell(node, ms_item)
             self._set_comp_node_previews(node, ms_item.get('source_ctx', ''), ms_item.get('text', ''), ms_item.get('highlight_pattern'), defer_widgets=defer_widgets)
 
     def _add_single_node_to_tree(self, parent, ms_item):
@@ -26935,6 +27862,12 @@ class GenizahGUI(QMainWindow):
                     self, '_comp_last_result_length', None),
                 'comp_passage_depth': getattr(
                     self, '_comp_last_result_depth', None),
+                # Without this, re-running a saved multi-witness search ran
+                # the SEED ALONE under the same name. `comp_witnesses` is the
+                # key `_restore_comp_passage_preferences` already reads, so
+                # the restore side needs no second implementation.
+                'comp_witnesses': getattr(
+                    self, '_comp_last_result_witnesses', None) or [],
             },
             'pre_search_filters': dict(getattr(self, 'pre_search_filters', {})),
             # NOTE: result snapshots intentionally NOT stored (see

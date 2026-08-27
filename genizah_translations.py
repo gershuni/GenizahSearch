@@ -5182,8 +5182,6 @@ TRANSLATIONS.update({
         'האינדקס לחיפוש ברמת האות נבנה כעת. הוא יהיה זמין בסיום הבנייה.',
     'The main index is not ready yet. Letter-level search needs it to load the text of its results.':
         'האינדקס הראשי עדיין אינו מוכן. חיפוש ברמת האות זקוק לו כדי לטעון את הטקסט של התוצאות.',
-    'Recursive search uses chunk search for now. Switch the method back to chunk search to use it.':
-        'חיפוש רקורסיבי משתמש בשלב זה בחיפוש מקטעים. יש להחליף את השיטה בחזרה לחיפוש מקטעים כדי להשתמש בו.',
     'Please wait':
         'נא להמתין',
     'The application is still starting up. Try again in a moment.':
