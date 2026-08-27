@@ -5210,6 +5210,14 @@ TRANSLATIONS.update({
         'ייסגר עם סיום הפעולה הנוכחית — {}. לא ניתן להפסיק חיפוש ברמת האות לאחר שהתחיל, והוא מסתיים בדרך כלל תוך שניות ספורות.',
     'the letter-level index is being built':
         'האינדקס לחיפוש ברמת האות נבנה כעת',
+    # Multi-witness batches. A batch CAN be stopped -- its loop
+    # checkpoints between witnesses -- but the witness already running
+    # finishes first, up to ~19s at Deepest. Both messages say so rather
+    # than promising an instant stop and then taking twenty seconds.
+    'Stopping after the current witness finishes. Results found so far are kept.':
+        'העצירה תתבצע בסיום חיפוש העד הנוכחי. התוצאות שנמצאו עד כה נשמרות.',
+    'Clearing once the current witness finishes.':
+        'הניקוי יתבצע בסיום חיפוש העד הנוכחי.',
     'a letter-level search is running':
         'חיפוש ברמת האות פועל כעת',
     'Build letter-level index?':

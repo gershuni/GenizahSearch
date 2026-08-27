@@ -1973,6 +1973,22 @@ gained a method selector beside the pre-existing Lab Mode toggle
 indexed here (too large; grep it directly, per this file's existing
 convention for `web/pages/search.py` / `web/pages/browse.py`).
 
+## shared/passage_witness_source.py
+
+Turning a WITNESS into searchable text -- pure, dependency-free, and shared by the web page, the public API and the desktop.
+
+Five rules, each of which was a bug on the web first: `witness_sys_id` (the one sys_id pattern, 99- and 97-prefixed), `restore_witness_entries` (a manuscript witness with a sys_id survives a reload WITHOUT its text; anything else textless is dropped), `witnesses_needing_text` (which restored witnesses can be re-fetched -- missing this made them search the empty string and report an honest-looking `0 matches`), `witness_headers_for` and `collect_witness_texts` (a promoted manuscript's text comes from the pages that MATCHED, via their own `raw_header`s -- resolving through `get_full_manuscript` goes via `Config.BROWSE_MAP` and made every promotion fail).
+
+Moved out of `web/pages/parallels.py` when the desktop needed the same rules; the page re-exports them, so its own callers are unchanged.
+
+## desktop/passage_witnesses.py
+
+The desktop's multi-witness state machine -- identity, duplication, staleness, capacity, fusion and persistence. Qt-free by construction, so every rule is reachable from a test without a QApplication.
+
+`fuse_and_cap` applies the 200-group cap ONCE to the fused list, ordered by `fusion_score`; each witness is searched uncapped (`get_passage_searcher(..., render_cap=0)`) because capping per witness first fuses already-truncated lists. `fusion_set` builds the set for one fusion from a roster plus row caches, so a later auto-expand round searches only what it just promoted -- `1 + rounds x K` searches rather than quadratic. The cap is a flat 25 at every depth, unlike the web's 25/8/4, because a desktop shares no pool and no timeout.
+
+The worker that drives it is `gui_threads.MultiWitnessCompositionThread`, which loops rather than using the engine's own `witnesses=[...]` fan-out so that Stop has a checkpoint between witnesses.
+
 ## shared/passage_fusion.py
 
 Rank fusion for multi-witness passage search. Pure -- no engine, no NiceGUI,

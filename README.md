@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 9.0.0
+# Dicta Genizah Search Pro 9.1.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -7,6 +7,18 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 > **Web Access:** [genizahsearch.com](https://genizahsearch.com) (אתר הגניזה של דיקטה) - Search, browse, and collaborate from any browser
 
 ---
+
+## What's New in Version 9.1.0?
+
+### v9.1.0: Several Witnesses of One Work (desktop)
+
+A work survives in many manuscripts, and no single copy of it finds every other. Letter-level search can now be given several copies at once: paste them one at a time, paste a whole file split on blank lines, or promote manuscripts straight from your own results. Each is searched on its own and the results are merged into one list that says how many witnesses point at each manuscript.
+
+Measured against the 614 Birkat Hamazon census manuscripts that have any indexed text: the best single witness finds 348, while the same seventeen searched separately and merged find 455. Joining them into one query instead finds 296 — fewer than one witness on its own.
+
+Auto-expand repeats the process with the best results as new witnesses. It reaches further and it puts more to skim at the top of the list, so it is a button you press rather than something the search does on its own.
+
+A multi-witness search can also be stopped, which a single letter-level search still cannot: the witness being searched finishes first, and everything found so far is kept.
 
 ## What's New in Version 8.6.0?
 
@@ -598,7 +610,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Dicta Geniza
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V9.0.0_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V9.1.0_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

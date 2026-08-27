@@ -4,6 +4,96 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [9.1.0] - 2026-08-27
+
+### Desktop — Several Witnesses of One Work
+
+Letter-level search shipped in 9.0.0 searching one text at a time. One text is
+not enough: a work survives in many manuscripts and no single copy of it
+retrieves every other.
+
+Measured through the shipped code against the 614 Birkat Hamazon census
+manuscripts that have any indexed text — the only denominator a search can be
+held to — the best **single** witness finds **348 (56.7%)**, while the same
+seventeen searched **separately and merged** find **455 (74.1%)**. Quote the
+count and its denominator, never the bare percentage.
+
+#### New Features
+
+- **A Witnesses panel in the Composition Search tab**, letter-level only. Add
+  other copies of the work by pasting them one at a time, or paste a whole
+  file split on blank lines with a preview of what the split found — and a
+  count of anything dropped as too short. Each witness is searched on its own
+  and the results are merged into one list.
+- **Promote manuscripts straight from your own results.** Tick the rows you
+  want and press *Search with these too*; the text comes from the pages that
+  actually matched, not from the manuscript record.
+- **Auto-expand (optional)** — seed, then top-K, then repeat. Measured on
+  Megillat Antiochus: frontier coverage 2 → 4 → 7 → **9 of 20** over three
+  rounds, monotone, with all fifteen promoted witnesses graded positive. The
+  cost is the first page: returned rows go from 191 to 2,795 and positives in
+  the top 100 fall from 48 to 32. Reach up, precision down — which is why it
+  is an explicit control with the trade-off written beside it.
+- **A Witnesses column** saying how many distinct witnesses point at each
+  manuscript, with a tooltip naming them, plus two new orderings: by combined
+  score and by number of witnesses. The fused order becomes the default the
+  moment there is a fusion to order by.
+- **Full Recursive Search now works in letter-level mode**, where it had been
+  disabled. It runs rank-fused expansion there and keeps concatenating in
+  chunk search, because concatenation is correct for the chunk engine and
+  wrong for this one.
+
+#### Stop, and what it can honestly promise
+
+A single letter-level search still cannot be interrupted — the engine has no
+mid-search cancel hook, and 9.0.0's ruling was to ship the depth axis and
+accept the wait. A **batch** is different: it is a loop, and the boundary
+between two witnesses is a real checkpoint.
+
+- **Stop now ends a multi-witness run** at the next witness boundary. The
+  witness already running finishes first (up to ~19 s at Deepest) and
+  everything found so far is kept. Pause and Resume work at the same points.
+- **"New" never terminates a running batch.** It asks it to stop and clears
+  once it has, because killing a thread that holds live memory mappings is an
+  access violation rather than a catchable error.
+- Because Stop works, the witness limit is a **flat 25 at every depth** rather
+  than the web's 25/8/4 — the web scales by depth because a witness there
+  costs a slot of a pool shared with every other visitor, and a desktop shares
+  nothing but the user's own wall clock.
+
+#### Never concatenated
+
+Joining witnesses into one query starves the engine's per-query posting
+budget. The seventeen Birkat Hamazon witnesses joined into one 33,180-character
+query admit **2.4%** of their own postings and reach **48.2%** — *worse than
+the best single witness* — against 74.1% fused. Fusion is by **rank**
+(reciprocal rank fusion, k=60), not score: a passage score counts matched
+*query* letters, so a long witness mechanically outscores a short one for
+reasons unrelated to match quality.
+
+This is a property of letter-level search specifically. On the chunk engine
+concatenation and union were measured to return the identical manuscript set
+(392 both ways, empty difference in both directions), which is why chunk
+search's own recursive search is unchanged.
+
+#### Under the hood
+
+- The fusion arithmetic is the **same module the web and the public API
+  already share** (`shared/passage_fusion.py`), now with a third caller. The
+  witness-resolution rules moved to `shared/passage_witness_source.py` for the
+  same reason.
+- Each witness is searched **uncapped** and the 200-group cap is applied once
+  to the fused list, ordered by fusion score. Capping per witness first would
+  fuse already-truncated lists and drop exactly the contributors a rare
+  witness supplies.
+- The index generation is pinned for the duration of a batch: if a rebuild
+  installs a new index mid-run, the batch is abandoned rather than published,
+  because ranks from two different artifacts were never comparable.
+- Witness lists survive a restart and are recorded in search history, so
+  re-running a saved multi-witness search re-runs the witnesses rather than
+  the seed alone. Exports name the witness count and carry a per-manuscript
+  column.
+
 ## [8.6.0] - 2026-08-20 — Pause/Resume, and Stop that actually stops (desktop)
 
 > **Desktop release.** It continues the desktop line from v8.5.2. When it shipped, 9.0.0 below
