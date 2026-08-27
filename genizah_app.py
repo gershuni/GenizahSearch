@@ -16215,11 +16215,26 @@ class GenizahGUI(QMainWindow):
         # holds FUSED rows and per-witness ranks cannot be recovered from
         # them, so a fusion rebuilt from partial inputs would be quietly wrong
         # rather than visibly absent.
-        if 'comp_witnesses' in comp:
-            self._comp_witnesses = passage_witnesses.restore(
-                comp.get('comp_witnesses'), tr("Pasted text"))
-            if hasattr(self, 'comp_witness_list_layout'):
-                self._refresh_witness_panel()
+        #
+        # UNCONDITIONAL, and that is the fix for a real bug: this ran only
+        # `if 'comp_witnesses' in comp`, so restoring an entry that HAS no
+        # witnesses -- every chunk search, and every search saved before this
+        # feature existed -- left whatever was in memory untouched. Loading an
+        # old chunk search and switching to letter-level then showed twenty-two
+        # witnesses belonging to a different work (owner, 2026-08-27).
+        #
+        # An absent key means "this search had none", never "keep the current
+        # ones". A restore describes a whole state, not a patch to one.
+        self._comp_witnesses = passage_witnesses.restore(
+            comp.get('comp_witnesses'), tr("Pasted text"))
+        # The rows those witnesses produced belong to the old search too.
+        self._comp_last_result_witnesses = list(
+            comp.get('comp_witnesses') or [])
+        self._auto_expand_left = 0
+        # And the progress line: "Witness 23/23: T-S 8H11.3" left over
+        # from the previous run described a search this one is not.
+        self._witness_notify('')
+        self._refresh_witness_panel()
 
         for axis in ('width', 'length', 'depth'):
             combo = getattr(self, 'comp_passage_%s_combo' % axis, None)
@@ -24299,6 +24314,7 @@ class GenizahGUI(QMainWindow):
         self._comp_last_result_witness_total = 0
         self._comp_last_fused_rows = []
         self._auto_expand_left = 0
+        self._witness_notify('')
         self._refresh_witness_panel()
 
         # 7. Clear manuscript exclusions (shared with search)

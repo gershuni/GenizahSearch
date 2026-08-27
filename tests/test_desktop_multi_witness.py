@@ -562,6 +562,7 @@ class _Win2:
     _current_comp_sort_mode = GAPP._current_comp_sort_mode
     _comp_export_settings_lines = GAPP._comp_export_settings_lines
     _comp_chunk_preference = GAPP._comp_chunk_preference
+    _restore_comp_passage_preferences = GAPP._restore_comp_passage_preferences
     _add_comp_search_to_history = GAPP._add_comp_search_to_history
     _PASSAGE_FORCED_CONTROLS = GAPP._PASSAGE_FORCED_CONTROLS
     COMP_SORT_MODES = GAPP.COMP_SORT_MODES
@@ -1151,3 +1152,84 @@ class _Combo0:
 
     def text(self):
         return ''
+
+
+# ---------------------------------------------------------------------------
+# A restore describes a WHOLE state, not a patch to the current one.
+# Owner-reported 2026-08-27: loading an old chunk search and switching to
+# letter-level showed twenty-two witnesses belonging to a different work.
+# ---------------------------------------------------------------------------
+
+def _restorable_win():
+    w = _win()
+    w._refresh_witness_panel = lambda: None
+    w._witness_notify = lambda text: None
+    return w
+
+
+def test_restoring_an_entry_with_no_witnesses_clears_the_current_ones():
+    """THE bug. The restore ran only `if 'comp_witnesses' in comp`, so every
+    chunk search -- and every search saved before this feature existed --
+    left whatever happened to be in memory untouched."""
+    w = _restorable_win()
+    pw.add_texts(w._comp_witness_state(),
+                 ['alpha beta gamma', 'delta epsilon zeta'], w._comp_seed_text(), 'P')
+    assert len(w._comp_witness_state().entries) == 2
+    GAPP._restore_comp_passage_preferences(w, {'chunk_size': 5})
+    assert w._comp_witness_state().entries == [], (
+        'a chunk entry left the previous search\'s witnesses behind')
+
+
+def test_restoring_an_empty_witness_list_clears_them_too():
+    """A saved multi-witness search whose witnesses were all removed before
+    saving is still a statement: none."""
+    w = _restorable_win()
+    pw.add_texts(w._comp_witness_state(), ['alpha beta gamma'], w._comp_seed_text(), 'P')
+    GAPP._restore_comp_passage_preferences(w, {'comp_witnesses': []})
+    assert w._comp_witness_state().entries == []
+
+
+def test_restoring_an_entry_with_witnesses_brings_exactly_those():
+    w = _restorable_win()
+    pw.add_texts(w._comp_witness_state(), ['stale one here'], w._comp_seed_text(), 'P')
+    GAPP._restore_comp_passage_preferences(w, {'comp_witnesses': [
+        {'kind': 'pasted', 'label': 'A', 'text': 'aleph bet gimel'},
+        {'kind': 'pasted', 'label': 'B', 'text': 'dalet he vav'},
+    ]})
+    got = [e.text for e in w._comp_witness_state().entries]
+    assert got == ['aleph bet gimel', 'dalet he vav'], got
+
+
+def test_a_restore_also_drops_the_previous_runs_provenance():
+    """`_comp_last_result_witnesses` feeds the export settings block and the
+    next history entry. Left behind, a restored chunk search would report
+    the previous search's witness count."""
+    w = _restorable_win()
+    w._comp_last_result_witnesses = [{'id': 'w1'}, {'id': 'w2'}]
+    GAPP._restore_comp_passage_preferences(w, {'chunk_size': 5})
+    assert w._comp_last_result_witnesses == []
+
+
+def test_a_restore_stops_a_running_auto_expand():
+    """Rounds queued against the old result set would promote from rows the
+    restore has just replaced."""
+    w = _restorable_win()
+    w._auto_expand_left = 2
+    GAPP._restore_comp_passage_preferences(w, {'chunk_size': 5})
+    assert w._auto_expand_left == 0
+
+
+def test_a_restore_clears_the_leftover_progress_line():
+    """"Witness 23/23: T-S 8H11.3" left on screen described a search the
+    restored one is not."""
+    w = _win()
+    w._refresh_witness_panel = lambda: None
+    seen = []
+    w._witness_notify = lambda text: seen.append(text)
+    GAPP._restore_comp_passage_preferences(w, {'chunk_size': 5})
+    assert '' in seen, 'the progress line was left as it was'
+
+
+def test_new_clears_the_progress_line_too():
+    src = _fn_src('_reset_composition')
+    assert "_witness_notify('')" in src
