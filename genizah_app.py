@@ -24361,6 +24361,9 @@ class GenizahGUI(QMainWindow):
         self._apply_pause_state(self._pause_comp, 'hidden')
         self._pause_comp.state = 'idle'
         self.comp_progress.setVisible(False)
+        # The other DOWN transition: a cancelled or errored run ends here
+        # and never reaches `display_comp_results`.
+        self._refresh_witness_panel()
         self.comp_summary_text = ""  # Clear persistent summary on reset
 
     def _retry_pending_reset(self):
@@ -25595,6 +25598,12 @@ class GenizahGUI(QMainWindow):
         except Exception:
             pass
         self.is_comp_running = False
+        # The DOWN transition, and the one that matters most in the default
+        # grouped flow: `start_grouping` disabled the removals on the way
+        # in, and this is where the run actually ends. Without it they stay
+        # dead after the results are on screen, until some unrelated panel
+        # mutation happens to refresh them.
+        self._refresh_witness_panel()
         self.btn_comp_run.setText(tr("Analyze Composition"))
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white;")
         # THE auto-expand trigger. Here because this is the one point every

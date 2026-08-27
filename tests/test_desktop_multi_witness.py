@@ -599,7 +599,7 @@ def _fn_src(name):
     raise AssertionError('%s not found' % name)
 
 
-def _busy_flag_is_followed_by(fn_name, call_name):
+def _busy_flag_is_followed_by(fn_name, call_name, value=True):
     """True when `fn_name` calls `call_name` UNCONDITIONALLY after setting
     `self.is_comp_running = True`.
 
@@ -624,7 +624,7 @@ def _busy_flag_is_followed_by(fn_name, call_name):
                         if (isinstance(tgt, ast.Attribute)
                                 and tgt.attr == 'is_comp_running'
                                 and isinstance(stmt.value, ast.Constant)
-                                and stmt.value.value is True):
+                                and stmt.value.value is value):
                             seen_flag = True
                 if (seen_flag and isinstance(stmt, ast.Expr)
                         and isinstance(stmt.value, ast.Call)
@@ -2391,4 +2391,48 @@ def test_a_close_unparks_a_paused_batch():
         'the cancel is not scoped to a batch -- a SINGLE passage search has '
         'no checkpoint to honour it and must still be waited out'
     )
+
+
+# --- Codex review round 8, 2026-08-28 --------------------------------------
+
+
+def test_the_removals_come_back_once_a_grouped_render_finishes():
+    """Round 7 covered both transitions UP and neither one DOWN.
+    `start_grouping` disables the removals on the way in, and
+    `display_comp_results` is where the run actually ends -- so without a
+    refresh there the buttons stayed dead after the results were on screen,
+    until some unrelated panel mutation happened to refresh them.
+    """
+    assert _busy_flag_is_followed_by(
+        'display_comp_results', '_refresh_witness_panel', value=False), (
+        'the removals stay disabled after a grouped render completes'
+    )
+
+
+def test_a_cancelled_or_errored_run_re_enables_the_removals_too():
+    """That path ends in `reset_comp_ui` and never reaches
+    `display_comp_results`."""
+    assert _busy_flag_is_followed_by(
+        'reset_comp_ui', '_refresh_witness_panel', value=False), (
+        'a cancelled run leaves the removals disabled'
+    )
+
+
+def test_every_busy_transition_refreshes_the_panel():
+    """The property, stated once. The removal buttons are computed from
+    `is_comp_running`, so every function that MOVES that flag has to recompute
+    them -- three rounds of review have each found one that did not.
+    """
+    ups = ('run_composition', 'start_grouping')
+    downs = ('display_comp_results', 'reset_comp_ui')
+    for fn in ups:
+        assert _busy_flag_is_followed_by(
+            fn, '_refresh_witness_panel', value=True), (
+            '%s marks the run busy without recomputing the buttons' % fn
+        )
+    for fn in downs:
+        assert _busy_flag_is_followed_by(
+            fn, '_refresh_witness_panel', value=False), (
+            '%s ends the run without recomputing the buttons' % fn
+        )
 
