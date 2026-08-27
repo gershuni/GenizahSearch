@@ -1255,12 +1255,135 @@ def test_a_single_witness_search_stores_no_witness_count():
 def test_the_history_list_renders_the_count_through_tr():
     """Rendered at DISPLAY time, in whatever language the list is being
     drawn in -- which is the half that was frozen before."""
-    src = _fn_src('_add_history_menu_item')
+    src = _fn_src('_history_query_with_witnesses')
     assert 'witness_count' in src
     assert 'tr("{n} witnesses")' in src
 
 
 def test_the_history_suffix_is_hidden_for_a_single_witness():
     """"1 witnesses" beside every ordinary search is noise."""
-    src = _fn_src('_add_history_menu_item')
-    assert '_wits > 1' in src
+    src = _fn_src('_history_query_with_witnesses')
+    assert 'wits > 1' in src
+
+
+# ---------------------------------------------------------------------------
+# History outlives a build. These fixtures are the SHAPES found in the
+# owner's real search_history.json on 2026-08-27 -- three code versions'
+# worth of records sitting side by side, two of them written by my own
+# earlier attempts.
+# ---------------------------------------------------------------------------
+
+class _HistWin:
+    _BAKED_WITNESS_SUFFIX = GAPP._BAKED_WITNESS_SUFFIX
+    _DANGLING_BRACKET = GAPP._DANGLING_BRACKET
+    _history_query_with_witnesses = GAPP._history_query_with_witnesses
+
+
+def _render(entry, query=None):
+    return GAPP._history_query_with_witnesses(
+        _HistWin(), entry, entry.get('query', '') if query is None else query)
+
+
+def _expected(n):
+    from genizah_core import tr as _tr
+    return _tr("{n} witnesses").format(n=n)
+
+
+def test_a_current_entry_uses_its_stored_count():
+    out = _render({'query': 'ברכת מזון', 'witness_count': 5})
+    assert _expected(5) in out
+
+
+def test_an_older_entry_recovers_the_count_from_its_witness_list():
+    """Owner-reported: "the first search has one (another) witness and it is
+    not mentioned". That record was written before the count existed -- but
+    it still carries the witnesses, so the number is recoverable. The seed is
+    a witness too, so one stored witness reads as two."""
+    out = _render({'query': 'ויהי בימי אנטיוכוס',
+                   'search_params': {'comp_witnesses': [{'id': 'w1'}]}})
+    assert _expected(2) in out, out
+
+
+def test_a_baked_english_suffix_is_replaced_not_appended_to():
+    """Owner-reported: "the other say in English instead of Hebrew". Those
+    records have the sentence baked in, in whatever language the app was in
+    when they were saved, and no re-translation can reach a string that no
+    longer knows it holds a number. Stripping it and re-rendering from the
+    count repairs them at display time."""
+    entry = {'query': 'ברכת מזון לשבת. נברך...  [23 witnesses]',
+             'search_params': {'comp_witnesses': [{'id': 'w%d' % i}
+                                                  for i in range(22)]}}
+    out = _render(entry)
+    assert 'witnesses' not in out, out
+    assert _expected(23) in out
+
+
+def test_the_owner_s_real_records_all_render_in_one_language():
+    """The shapes actually found in search_history.json on 2026-08-27 --
+    three builds' worth of records, two of them written by my own earlier
+    attempts. Found by running the real file through this function, not by
+    reading the code.
+
+    The failure they produced: an end-anchored pattern ran AFTER the 35-char
+    truncation had cut the suffix mid-word, so the line carried the count
+    twice, in two languages.
+    """
+    real_shapes = [
+        # written before the count existed, witnesses still recoverable
+        ({'query': 'ויהי בימי אנטיוכוס',
+          'search_params': {'comp_witnesses': [{'id': 'w1'}]}}, 2),
+        # sentence baked in, English
+        ({'query': 'ברכת מזון לשבת. נברך...  [23 witnesses]',
+          'witness_count': 23}, 23),
+        # baked in TWICE, then stored truncated -- the dedup updates in place
+        ({'query': 'ברכת מזון לשבת. נברך...  [23 witnesses]  [',
+          'witness_count': 23}, 23),
+        # plain chunk search, nothing to say
+        ({'query': 'אם שמעו אמרו להן...'}, 0),
+    ]
+    for entry, expect in real_shapes:
+        out = _render(entry)
+        assert 'witness' not in out, out
+        assert out.count('[') == (1 if expect > 1 else 0), out
+        if expect > 1:
+            assert _expected(expect) in out, out
+
+
+def test_a_doubly_suffixed_record_is_cleaned():
+    """An older build appended a suffix to an ALREADY-suffixed query -- the
+    dedup updates an entry in place, so it accumulated."""
+    entry = {'query': 'ברכת מזון...  [23 witnesses]  [', 'witness_count': 23}
+    out = _render(entry)
+    assert out.count('[') == 1, out
+    assert 'witnesses' not in out
+
+
+def test_a_hebrew_baked_suffix_is_stripped_as_well():
+    """Same defect, other direction: a Hebrew-locale build would have baked
+    Hebrew, which is just as unreadable to an English reader."""
+    entry = {'query': 'ברכת מזון  [23 עדים]', 'witness_count': 23}
+    out = _render(entry)
+    assert out.count('[') == 1, out
+
+
+def test_a_single_witness_search_gets_no_suffix():
+    """"1 witnesses" beside every ordinary search is noise."""
+    assert '[' not in _render({'query': 'הזן את העולם כולו', 'witness_count': 0})
+    assert '[' not in _render({'query': 'הזן את העולם כולו',
+                               'search_params': {'comp_witnesses': []}})
+
+
+def test_an_entry_with_no_witness_information_at_all_is_left_alone():
+    """Every pre-v9.1 record, and every chunk search."""
+    assert _render({'query': 'אם שמעו אמרו להן'}) == 'אם שמעו אמרו להן'
+
+
+def test_the_suffix_is_stripped_before_the_query_is_truncated():
+    """Truncating first cuts a baked suffix mid-word, which is exactly how
+    the double-count reached the screen. The visible text must be 35
+    characters of the TITLE, not 35 characters including a dead suffix."""
+    long_title = 'א' * 60
+    entry = {'query': long_title + '  [23 witnesses]', 'witness_count': 23}
+    out = _render(entry)
+    assert out.startswith('א' * 35)
+    assert 'witnesses' not in out

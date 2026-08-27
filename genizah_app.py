@@ -27793,10 +27793,55 @@ class GenizahGUI(QMainWindow):
             summary = summary[:max_len - 4] + '...]'
         return summary
 
+    # Every baked witness suffix, anywhere, in either language, with the
+    # closing bracket OPTIONAL. All three allowances are needed against real
+    # records: an older build appended a suffix to an ALREADY-suffixed query
+    # (the dedup updates an entry in place, so it accumulated), and the
+    # result was stored truncated -- leaving `[23 witnesses]  [` behind, which
+    # an end-anchored pattern cannot see.
+    _BAKED_WITNESS_SUFFIX = re.compile(
+        r"\s*\[\s*\d+\s*(?:witnesses|עדים)\s*\]?")
+    _DANGLING_BRACKET = re.compile(r"\s*\[\s*$")
+
+    def _history_query_with_witnesses(self, entry, query):
+        """The witness count on a history line, rendered NOW.
+
+        Two shapes have to be read, because history outlives a build:
+
+        * `witness_count`, an integer, which is what entries written from
+          2026-08-27 onward carry.
+        * older entries, which have no count at all -- some with the sentence
+          already BAKED into `query` in whatever language the app happened to
+          be in when they were saved. That is the defect that made this a
+          number: a rendered string in a persisted record can never be
+          re-translated. Existing records are repaired here rather than
+          written off -- the count is recovered from the witness list the
+          entry still carries, and the baked suffix is stripped so the line
+          does not say it twice, in two languages.
+
+        Hidden below two: "1 witnesses" beside every ordinary search is noise.
+        """
+        wits = entry.get('witness_count')
+        if not wits:
+            # Recovered from the witnesses themselves. `comp_witnesses` holds
+            # the ADDED ones; the seed is a witness too, so the displayed
+            # total is one more.
+            stored = (entry.get('search_params') or {}).get('comp_witnesses')
+            wits = (len(stored) + 1) if stored else 0
+        # Stripped from the FULL text, then truncated -- truncating first
+        # can cut the baked suffix mid-word ("[23 witnes"), which an
+        # end-anchored pattern cannot see, and the line then carried the
+        # count twice, in two languages.
+        query = self._BAKED_WITNESS_SUFFIX.sub('', query)
+        query = self._DANGLING_BRACKET.sub('', query)[:35]
+        if wits > 1:
+            query = '%s  [%s]' % (query, tr("{n} witnesses").format(n=wits))
+        return query
+
     def _add_history_menu_item(self, menu, search_type, index, entry):
         """Add a single history entry to a menu with a delete button."""
         from PyQt6.QtWidgets import QWidgetAction, QHBoxLayout, QVBoxLayout
-        query = entry.get('query', '')[:35]
+        query = entry.get('query', '')
         count = entry.get('result_count', 0)
         mode_idx = entry.get('search_params', {}).get('mode_index', 0)
         mode_char = self._MODE_CHARS[mode_idx] if mode_idx < len(self._MODE_CHARS) else '='
@@ -27808,11 +27853,7 @@ class GenizahGUI(QMainWindow):
         h.setSpacing(4)
 
         results_word = tr("{count} results").format(count=count)
-        # Rendered now, not stored: see `_add_comp_search_to_history`.
-        _wits = entry.get('witness_count') or 0
-        if _wits > 1:
-            query = '%s  [%s]' % (
-                query, tr("{n} witnesses").format(n=_wits))
+        query = self._history_query_with_witnesses(entry, query)
         if search_type == 'regular':
             label_text = f"{mode_char}  {query}  ({results_word})"
         else:
