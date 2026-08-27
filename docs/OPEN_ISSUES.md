@@ -1,6 +1,14 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-08-25 — the codebase-wide `sys_id` parser divergence reported from the
+> **Last Updated:** 2026-08-27 — one P3 added: mixed CRLF/bare-LF endings inside tracked `.py`
+> files. It is **working-tree only** — every tracked `.py` blob is pure LF, and `core.autocrlf`
+> normalisation is what hides it from `git diff`/`hash-object`. `git ls-files --eol` names the
+> ordinary case (`w/mixed`) but is NOT sufficient — one lone CR makes git call the file binary and
+> stop managing its endings at all. A byte-level guard test + repair script landed; the
+> `C:\GenizahSearch` working tree still needs `python scripts/normalize_line_endings.py --fix`,
+> which no cloud session can do. Found en route: two tracked `.md` files ARE mixed in the
+> committed blob (see the P3 entry) — left alone as out of scope.
+> Previous header (2026-08-25) — the codebase-wide `sys_id` parser divergence reported from the
 > multi-witness parallels review is CLOSED (entry in the archive). `97` is the LOCAL "My Library"
 > namespace, not an NLI corpus prefix, and the divergence was not latent: the 99-only pattern
 > mis-matched INSIDE a LOCAL id 6.36% of the time, live on the desktop LAB path. One definition now
@@ -73,7 +81,7 @@ Move to "Completed Issues" section at bottom with date
 |----------|------|
 | P1 Critical Bugs | 0 |
 | P2 Medium Bugs | 25 |
-| P3 Low Priority | 11 |
+| P3 Low Priority | 12 |
 | Documentation Issues | 2 |
 | Code Quality Debt | 1 |
 | Untested Areas | 4 |
@@ -268,6 +276,7 @@ The verbose pre-2026-05-29 "Last Updated" header log is archived at
 | **Phase 87 scanner edge case: bare chained attribute double-report** | `tests/test_no_raw_storage_access.py` (`_StorageAccessVisitor.visit_Attribute`) | ❌ Open (logged 2026-05-13, deferred — LOW) | The AST scanner in `tests/test_no_raw_storage_access.py` correctly handles `app.storage.user.get(K)` (Call) and `app.storage.user[K]` (Subscript) via parent tracking, but bare chained attributes like `x = app.storage.user.foo` would still be reported as 2 separate violations (the outer `.foo` attribute AND the inner `app.storage.user` attribute). Current production code does not use this pattern, so the gap is theoretical. **Source:** Codex round 2 review (87-REVIEWS.md) flagged this as LOW/MEDIUM after iteration 2 plan revision; user elected to defer to backlog during iteration 3 review walkthrough. **Fix when needed:** extend `_StorageAccessVisitor.visit_Attribute` to mark inner Attribute nodes as `_seen_inner_ids` when the outer Attribute itself contains `storage.user` in its chain. Add regression test `test_scanner_handles_bare_chained_attribute` with the synthetic input `x = app.storage.user.foo` asserting exactly 1 violation (not 2). |
 | **Phase 111 telemetry — Codex review F3: `identify()` passes `user_id` to PostHog unvalidated** | `desktop/telemetry.py::identify` (~line 582) | ⏳ Deferred (logged 2026-06-14) | Codex external review of Phase 111. `identify()` sends `user_id` straight to PostHog as `distinct_id` and persists it, scrubbing only the properties. By design the sole caller (desktop login) passes the Supabase `user.id` — an opaque UUID — so practical leak risk is low; deferred as hardening. **Fix when wired (Phase 114):** validate `user_id` against an opaque-ID shape, or hash/derive a pseudonymous distinct_id before enqueue + persist. Documented as accepted risk AR-111-02 in `111-SECURITY.md`. |
 | **Phase 111 telemetry — Codex review F6: default distinct_id substitution conflates NLI-breaker operational events with user identity** | `shared/posthog_server.py:184-187` (`enqueue_event` `distinct_id=='system'` substitution) | ⏳ Deferred (logged 2026-06-14) | Codex external review of Phase 111. The transport rewrites any `distinct_id=='system'` event to the desktop default install_id, so ungated NLI circuit-breaker operational events become user-linked. Applies only post-opt-in (consent granted), and with F1 fixed those events fire only under consent — minor data-modeling issue. **Fix:** don't substitute the default in the generic transport; have `desktop.telemetry` pass explicit distinct_ids only for sanctioned desktop events. Documented as accepted risk AR-111-03 in `111-SECURITY.md`. |
+| **Mixed CRLF/bare-LF line endings inside tracked `.py` files (working-tree only, invisible to git)** | `scripts/normalize_line_endings.py`, `tests/test_line_endings.py` | 🟡 Guarded (2026-08-27) — owner repair pending | Owner reported 17 tracked `.py` files in `C:\GenizahSearch` carrying both CRLF and bare-LF terminators in the same file. **The damage is working-tree only and is NOT in the repo:** all 911 non-empty tracked `.py` blobs are pure LF (`git ls-files --eol` → `i/lf`), so it is created after checkout by tools that write LF lines into a file `core.autocrlf=true` had made CRLF. Git hides it because it normalises the working tree CRLF → LF on the way in, folding a mixed file back onto its own blob — verified in a synthetic repro: `git diff` empty and `git hash-object` identical to HEAD. (`git status` did flag it as `M` with an empty diff on git 2.43.) `git ls-files --eol` names the ordinary case `w/mixed` but is **not a sufficient detector**: a single lone CR byte makes git classify the file as binary (`i/-text w/-text`), which switches git's eol handling off for that path and reports no ending at all — proven in a synthetic repro. Consequence: byte-level source matching silently fails — a PowerShell `.Replace()` with LF literals, or a mutation harness matching a CRLF pattern, reports a false result instead of an error. **Landed:** `tests/test_line_endings.py` fails on any mixed tracked `.py` (platform-invariant — it asserts only *not mixed*, never which ending), plus `scripts/normalize_line_endings.py` to repair. **Outstanding (owner, on Windows):** run `python scripts/normalize_line_endings.py --fix` in `C:\GenizahSearch` — a cloud session cannot reach that working tree, and nothing needs committing since the blobs were always clean. `.gitattributes` deliberately NOT widened; the repair honours its `eol=lf` pins. **Separate finding, NOT fixed:** `.planning/milestones/v6.5.0-ROADMAP.md` and `v7.6-ROADMAP.md` are mixed *in the committed blob* (299/375 CRLF + 2 bare LF + 1 lone CR each) and are exactly the files git calls binary, so nothing has ever normalised them. Out of scope (`.py` only, and these are historical planning docs whose bytes nothing byte-matches); repair if wanted with `python scripts/normalize_line_endings.py --ext .md --fix`. |
 
 ---
 
