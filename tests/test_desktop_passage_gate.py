@@ -131,6 +131,9 @@ class _Win:
     _comp_chunk_preference = APP._comp_chunk_preference
     _PASSAGE_FORCED_CONTROLS = APP._PASSAGE_FORCED_CONTROLS
     _passage_scan_in_flight = APP._passage_scan_in_flight
+    _passage_batch_in_flight = APP._passage_batch_in_flight
+    _reset_composition = APP._reset_composition
+    _retry_pending_reset = APP._retry_pending_reset
     _refuse_stop_during_passage_scan = APP._refuse_stop_during_passage_scan
     _on_pause_clicked = APP._on_pause_clicked
     _on_passage_build_finished = APP._on_passage_build_finished
@@ -1817,3 +1820,191 @@ def test_history_takes_the_scope_from_the_same_stamp_as_the_method():
     assert '_comp_last_result_scope' in tail, (
         'the history entry records the scope as it stands now, not the one '
         'the run was dispatched under')
+
+
+# ---------------------------------------------------------------------------
+# Stop, at the witness boundary (owner ruling 2026-08-27).
+#
+# A multi-witness batch CAN be stopped -- its loop checkpoints between
+# witnesses. It still cannot be KILLED: the witness in flight may be ~19s from
+# done at Deepest, and terminating a thread that holds live memory mappings is
+# the failure the single-search guard exists to prevent. Stoppable is not
+# killable, and these pin the difference.
+# ---------------------------------------------------------------------------
+
+class _Tree:
+    def __init__(self):
+        self.cleared = 0
+
+    def clear(self):
+        self.cleared += 1
+
+
+class _FakeBatchThread:
+    """Stands in for MultiWitnessCompositionThread. Not a subclass by
+    accident: `_passage_batch_in_flight` uses isinstance, so the tests
+    monkeypatch that symbol rather than fake an inheritance the real code
+    would then be free to stop relying on."""
+
+    def __init__(self, running=True):
+        self.cancelled = 0
+        self.terminated = 0
+        self.waited = []
+        self._running = running
+
+    def request_cancel(self):
+        self.cancelled += 1
+
+    def isRunning(self):
+        return self._running
+
+    def wait(self, ms=None):
+        self.waited.append(ms)
+        return True
+
+    def terminate(self):
+        self.terminated += 1
+
+
+def _batch_window(monkeypatch, running=True):
+    """A window mid-way through a multi-witness passage batch."""
+    w = _Win()
+    w.is_comp_running = True
+    w._comp_last_result_method = 'passage'
+    w._comp_grouping_active = False
+    w.comp_thread = _FakeBatchThread(running=running)
+    w.lbl_comp_status = _Label()
+    monkeypatch.setattr(genizah_app, 'MultiWitnessCompositionThread',
+                        _FakeBatchThread)
+    return w
+
+
+def _single_window():
+    """A window mid-way through an ORDINARY single-witness passage search."""
+    w = _Win()
+    w.is_comp_running = True
+    w._comp_last_result_method = 'passage'
+    w._comp_grouping_active = False
+    w.comp_thread = object()          # not a batch
+    w.lbl_comp_status = _Label()
+    return w
+
+
+def test_a_single_witness_passage_scan_still_refuses_stop():
+    """Unchanged from v9.0.0: one search has no checkpoint at all, so a flag
+    would leave "Cancelling..." on screen for up to ~19s and then complete
+    anyway."""
+    w = _single_window()
+    assert APP._refuse_stop_during_passage_scan(w) is True
+
+
+def test_a_multi_witness_batch_allows_stop(monkeypatch):
+    w = _batch_window(monkeypatch)
+    assert APP._refuse_stop_during_passage_scan(w) is False
+
+
+def test_stopping_a_batch_says_the_current_witness_finishes_first(monkeypatch):
+    """Promising an instant stop and then taking 19 seconds is the same lie
+    as refusing one that would work."""
+    w = _batch_window(monkeypatch)
+    APP._refuse_stop_during_passage_scan(w)
+    assert 'witness' in w.lbl_comp_status.text.lower()
+
+
+def test_a_chunk_search_is_untouched_by_any_of_this():
+    w = _Win()
+    w.is_comp_running = True
+    w._comp_last_result_method = 'chunk'
+    w._comp_grouping_active = False
+    assert APP._refuse_stop_during_passage_scan(w) is False
+    assert APP._passage_batch_in_flight(w) is False
+
+
+def test_reset_never_terminates_a_witness_batch(monkeypatch):
+    """THE guard. Reset's own path is request_cancel + wait(3000) +
+    terminate(), and terminate on a thread holding live memory mappings is an
+    access violation, not a catchable error. Being stoppable does not make a
+    batch killable."""
+    w = _batch_window(monkeypatch)
+    scheduled = []
+    monkeypatch.setattr(genizah_app.QTimer, 'singleShot',
+                        staticmethod(lambda ms, fn: scheduled.append((ms, fn))))
+    APP._reset_composition(w)
+    assert w.comp_thread.terminated == 0, 'Reset terminated a passage batch'
+    assert w.comp_thread.waited == [], 'Reset blocked the UI thread'
+    assert w.comp_thread.cancelled == 1, 'Reset did not ask it to stop'
+    assert scheduled, 'Reset neither completed nor scheduled a retry'
+
+
+def test_reset_of_a_batch_defers_rather_than_clearing_the_results(monkeypatch):
+    """Clearing while the worker is still writing rows is how a half-reset
+    tab ends up showing the next search's rows under the old title."""
+    w = _batch_window(monkeypatch)
+    w.comp_tree = _Tree()
+    monkeypatch.setattr(genizah_app.QTimer, 'singleShot',
+                        staticmethod(lambda ms, fn: None))
+    APP._reset_composition(w)
+    assert w.comp_tree.cleared == 0, 'results were cleared mid-batch'
+    assert w._reset_pending is True
+
+
+def test_the_deferred_reset_retries_while_the_batch_is_still_running(monkeypatch):
+    """It must RESCHEDULE and do nothing else.
+
+    Asserting only that a 400 ms timer was armed is not enough, and a
+    mutation proved it: with the busy check removed the retry falls straight
+    through into `_reset_composition`, which arms a 400 ms timer of its OWN.
+    The observable the test was watching looked identical while the reset had
+    in fact run against a live batch. So the assertion is that the reset was
+    NOT performed.
+    """
+    w = _batch_window(monkeypatch, running=True)
+    scheduled, reset_calls = [], []
+    monkeypatch.setattr(genizah_app.QTimer, 'singleShot',
+                        staticmethod(lambda ms, fn: scheduled.append(ms)))
+    w._reset_composition = lambda: reset_calls.append(1)
+    w._reset_pending = True
+    APP._retry_pending_reset(w)
+    assert reset_calls == [], 'the reset ran while the batch was still going'
+    assert w._reset_pending is True, 'it forgot it was still waiting'
+    assert scheduled == [400], 'the retry gave up while the batch ran'
+
+
+def test_the_deferred_reset_completes_once_the_batch_is_done(monkeypatch):
+    """And the poll is a timer, never a blocking wait(): the UI thread is
+    where the batch's own signals are delivered, so blocking here would stop
+    the thread it is waiting for from ever reporting done."""
+    w = _batch_window(monkeypatch)
+    w.is_comp_running = False          # the batch has finished
+    done = []
+    # The INSTANCE, not APP: `_Win` copied the unbound method onto its own
+    # class, so patching APP would not be seen through the stub.
+    w._reset_composition = lambda: done.append(1)
+    monkeypatch.setattr(genizah_app.QTimer, 'singleShot',
+                        staticmethod(lambda ms, fn: done.append('rescheduled')))
+    w._reset_pending = True
+    APP._retry_pending_reset(w)
+    assert done == [1], done
+    assert w._reset_pending is False
+
+
+def test_neither_deferred_reset_helper_ever_terminates():
+    """Source guard beside the existing one, which named only the close and
+    build helpers. Matched by statement, not substring: an earlier guard of
+    this kind matched its own explanatory COMMENT and passed against code
+    that was already wrong."""
+    import re
+    for name in ('_retry_pending_reset',):
+        seg = _function_source(name)
+        assert not re.search(r'^\s*\S*\.terminate\(\)', seg, re.M), (
+            name, 'calls terminate()')
+
+
+def test_reset_refuses_a_single_witness_scan_before_reaching_terminate():
+    """The ordering that matters: the refusal is the FIRST statement, so a
+    single-witness passage scan never reaches the wait/terminate block."""
+    w = _single_window()
+    w.comp_thread = _FakeBatchThread()
+    APP._reset_composition(w)
+    assert w.comp_thread.terminated == 0
+    assert w.comp_thread.cancelled == 0, 'it got past the refusal'

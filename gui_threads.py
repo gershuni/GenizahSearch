@@ -392,6 +392,202 @@ class CompositionThread(PausableSearchMixin, QThread):
             self.pause_gate.finish()
             _allow_sleep()
 
+class MultiWitnessCompositionThread(PausableSearchMixin, QThread):
+    """Search N witnesses of one work, one at a time, and rank-fuse them.
+
+    A sibling of `CompositionThread` rather than a mode of it. That class is
+    byte-unchanged since Phase 146 and 97 tests pin the fact; more to the
+    point, the two do genuinely different things -- one call versus a loop
+    whose whole reason for existing is the boundary BETWEEN the calls.
+
+    Why a loop and not the engine's own fan-out. `PassageSearcher.search_
+    composition_logic(..., witnesses=[...])` fuses N witnesses inside ONE
+    call, and the public API uses it. On the desktop that would be a single
+    uninterruptible call -- twenty-five witnesses at Deepest is about eight
+    minutes with a dead Stop button. Looping puts a real checkpoint between
+    witnesses, which is what makes Stop work here at all (owner ruling
+    2026-08-27, revising the 2026-08-25 "accept the wait" for batches).
+
+    Two things this thread must get right that no single search has to:
+
+    * **Each witness is searched UNCAPPED** (the adapter is built with
+      `render_cap=0`) and the group cap is applied ONCE to the fused list.
+      Capping per witness first fuses N already-truncated lists.
+    * **The index generation is pinned.** Every call resolves the index
+      current at THAT call -- deliberately, and it is what makes the loop
+      memory-safe -- but a batch is one answer assembled from N calls, and an
+      install between two of them fuses ranks that were never comparable.
+    """
+
+    # Signal-COMPATIBLE with CompositionThread, not merely similar: dispatch
+    # in genizah_app.py reaches for progress, error, status, pause_ack and
+    # perf unconditionally, so a partial interface either raises before the
+    # thread starts or silently drops Pause, status and telemetry.
+    progress_signal = pyqtSignal(int, int)
+    status_signal = pyqtSignal(str)
+    scan_finished_signal = pyqtSignal(object)
+    error_signal = pyqtSignal(str)
+    perf_signal = pyqtSignal(float, int)
+    pause_ack_signal = pyqtSignal(int, int)
+    # The one addition: which witness is running, for the panel's progress
+    # line. (index, total, label) -- 1-based, because a human reads it.
+    witness_progress_signal = pyqtSignal(int, int, str)
+
+    def __init__(self, searcher, witnesses, filter_text=None, threshold=5,
+                 restrict_sys_ids=None, corpus_scope='genizah', run_id=0,
+                 pinned_generation=None, group_cap=None,
+                 roster=None, prior_rows=None, prior_filtered=None):
+        super().__init__()
+        self.searcher = searcher
+        # [(witness_id, label, text)] -- the witnesses to SEARCH this run,
+        # every text non-empty. The caller rehydrates and filters BEFORE
+        # building this list; the check in run() is defence in depth, not
+        # the primary guard.
+        self.witnesses = list(witnesses or [])
+        # The full fusion picture, which is usually WIDER than what is being
+        # searched. `roster` is [(witness_id, label)] in fusion order and
+        # `prior_*` carry the rows of witnesses searched in an earlier round.
+        # Passing them is what keeps an R-round auto-expansion linear: each
+        # round searches only what it just promoted and re-fuses the rest
+        # from cache, so the cost is `1 + rounds x K` searches instead of
+        # re-running every witness every time.
+        #
+        # Defaulting the roster to this run's own witnesses keeps the simple
+        # case simple -- a first search has nothing prior to fuse with.
+        self.roster = (list(roster) if roster is not None
+                       else [(wid, label) for wid, label, _t in self.witnesses])
+        self.prior_rows = dict(prior_rows or {})
+        self.prior_filtered = dict(prior_filtered or {})
+        self.filter_text = filter_text
+        self.threshold = threshold
+        self.restrict_sys_ids = restrict_sys_ids
+        self.corpus_scope = corpus_scope
+        self.pinned_generation = pinned_generation
+        self.group_cap = group_cap
+        self._init_pause_support(run_id)
+
+    def run(self):
+        from desktop import passage_lifecycle as pl
+        from desktop import passage_witnesses as pw
+
+        _prevent_sleep()
+        t0 = time.perf_counter()
+        state = pw.WitnessSet()
+        report = []
+        dropped = 0
+        partial = False
+        try:
+            total = len(self.witnesses)
+            for i, (wid, label, text) in enumerate(self.witnesses, start=1):
+                # THE checkpoint. The passage engine emits no progress and
+                # cannot be interrupted mid-search, so this boundary is the
+                # only place a cancel or a pause can be honoured -- an
+                # in-flight witness always runs to completion.
+                if self._should_abort():
+                    partial = True
+                    break
+                try:
+                    self._checkpoint()
+                except InterruptedError:
+                    partial = True
+                    break
+
+                # Checked per ITERATION, not once: a swap can land between
+                # any two witnesses, and the batch is void from that moment.
+                if pl.generation_changed(self.pinned_generation):
+                    raise pl.PassageIndexReplaced(
+                        'the letter-level index was replaced while this '
+                        'search was running')
+
+                if not (text or '').strip():
+                    # Never dispatch an empty query. The engine answers it
+                    # with nothing, and the panel would then report a
+                    # perfectly honest-looking "0 matches" for a search that
+                    # never ran -- a false negative no user could detect.
+                    report.append({'witness_id': wid, 'label': label,
+                                   'status': 'failed', 'hits': 0,
+                                   'reason': 'empty_text'})
+                    continue
+
+                self.witness_progress_signal.emit(i, total, label or wid)
+                self.progress_signal.emit(i, total)
+                try:
+                    result = self.searcher.search_composition_logic(
+                        text,
+                        filter_text=self.filter_text,
+                        boundary_mode='full',
+                        min_boundary_matches=1,
+                        restrict_sys_ids=self.restrict_sys_ids,
+                        corpus_scope=self.corpus_scope,
+                    )
+                except pl.PassageSearchUnavailableError:
+                    # No index at all: every remaining witness fails the same
+                    # way, so stop rather than emit N identical failures.
+                    raise
+                except Exception as exc:
+                    # ONE witness failing is not the batch failing -- the
+                    # user asked for seventeen searches and can still have
+                    # sixteen. Recorded so the panel can offer Retry.
+                    logger.warning(
+                        'multi-witness: witness %s failed: %s', wid, exc)
+                    report.append({'witness_id': wid, 'label': label,
+                                   'status': 'failed', 'hits': 0,
+                                   'reason': 'search_failed'})
+                    continue
+
+                rows = list(result.get('main') or [])
+                filt = list(result.get('filtered') or [])
+                dropped += int(result.get('dropped_text_lookup_failures') or 0)
+                state.rows[wid] = rows
+                state.filtered[wid] = filt
+                report.append({'witness_id': wid, 'label': label,
+                               'status': 'searched', 'hits': len(rows),
+                               'reason': None})
+
+            # Fuse over the FULL roster, not just what this run searched:
+            # the rows of earlier rounds are every bit as much part of the
+            # answer, and dropping them would make each round overwrite the
+            # last instead of widening it.
+            merged_rows = dict(self.prior_rows)
+            merged_rows.update(state.rows)
+            merged_filtered = dict(self.prior_filtered)
+            merged_filtered.update(state.filtered)
+            fused = pw.fuse_and_cap(
+                pw.fusion_set(self.roster, merged_rows, merged_filtered),
+                cap=self.group_cap)
+            if fused is None:
+                main, filtered, truncated = [], [], False
+            else:
+                main, filtered, truncated = fused
+
+            self.scan_finished_signal.emit({
+                'main': main,
+                'filtered': filtered,
+                'known': [],
+                'dropped_text_lookup_failures': dropped,
+                'truncated_to_200': truncated,
+                'partial': partial,
+                # The per-witness lists, so the UI can refresh its own
+                # WitnessSet without re-running anything. The state machine
+                # has ONE owner (the UI thread); this hands it data, not
+                # control.
+                'witness_rows': dict(state.rows),
+                'witness_filtered': dict(state.filtered),
+                'witness_report': report,
+                'witnesses_searched': len(merged_rows),
+                'witnesses_requested': len(self.witnesses),
+            })
+            if not self.cancel_flag:
+                self.perf_signal.emit(
+                    (time.perf_counter() - t0
+                     - self.pause_gate.total_paused_s) * 1000.0,
+                    len(main) + len(filtered))
+        except Exception as e:
+            self.error_signal.emit(str(e))
+        finally:
+            self.pause_gate.finish()
+            _allow_sleep()
+
 class LabCompositionThread(PausableSearchMixin, QThread):
     """Execute Lab Composition Search (Broad-to-Narrow)."""
 

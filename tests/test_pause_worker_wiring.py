@@ -17,9 +17,16 @@ import pytest
 
 import gui_threads
 from gui_threads import (CompositionThread, GroupingThread, LabCompositionThread,
-                         LabSearchThread, PausableSearchMixin, SearchThread)
+                         LabSearchThread, MultiWitnessCompositionThread,
+                         PausableSearchMixin, SearchThread)
 
-PAUSABLE = (SearchThread, LabSearchThread, CompositionThread, LabCompositionThread)
+# Every worker that inherits the mixin belongs here. The multi-witness thread
+# is the one whose cancel path actually FIRES -- the passage engine calls no
+# progress callback, so its checkpoint lives at the witness boundary rather
+# than inside one -- which makes these five invariants load-bearing for it in
+# a way they are not for a worker nobody can interrupt.
+PAUSABLE = (SearchThread, LabSearchThread, CompositionThread,
+            LabCompositionThread, MultiWitnessCompositionThread)
 
 
 def _tree(fn):

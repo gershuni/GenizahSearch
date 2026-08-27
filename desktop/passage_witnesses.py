@@ -349,6 +349,81 @@ def fuse_all(state: WitnessSet):
     return fuse_routed(main_pairs, filt_pairs)
 
 
+def fusion_set(roster, rows, filtered=None) -> WitnessSet:
+    """A `WitnessSet` assembled for ONE fusion, from a roster and row caches.
+
+    `roster` is `[(witness_id, label), ...]` in FUSION ORDER, and it is the
+    caller's full picture -- every witness whose rows should take part,
+    including ones searched in an earlier round and not re-run now. That is
+    what keeps an R-round auto-expansion linear: round three fuses rounds one
+    and two from cache and searches only the K witnesses it just promoted,
+    so the cost is `1 + rounds x K` searches rather than re-running everything
+    every time.
+
+    Order is not cosmetic. `fuse()` breaks rank ties by witness POSITION, so
+    two rosters holding the same witnesses in different orders can rank the
+    same records differently. The roster the caller supplies is authoritative
+    and is reproduced exactly; the seed, which `order()` always puts first,
+    is skipped here rather than duplicated.
+    """
+    state = WitnessSet()
+    for wid, label in roster:
+        if wid == WITNESS_SEED_ID:
+            continue
+        state.entries.append(WitnessEntry(id=wid, label=label or ''))
+    state.rows = {k: list(v) for k, v in (rows or {}).items()}
+    state.filtered = {k: list(v) for k, v in (filtered or {}).items()}
+    return state
+
+
+def fuse_and_cap(state: WitnessSet, cap: int = None):
+    """`fuse_all`, then the group cap -- in that order, which is the whole
+    point of the multi-witness render-cap change.
+
+    Each witness is searched UNCAPPED (`render_cap=0`) so that its full
+    result list reaches the fusion. Capping per witness first would fuse N
+    already-truncated lists and silently drop every contributor that sat past
+    rank 200 in its own witness -- which is exactly where a rare witness of a
+    widely-copied work shows up. The cap belongs here, once, on the fused
+    list.
+
+    `order_key='fusion_score'` decides WHICH groups survive. Without it the
+    cap keeps the groups with the most raw matched letters, which is the
+    ranking the fusion exists to replace: a manuscript found by six witnesses
+    would be discarded in favour of one long single-witness match. The
+    parameter exists on `_cap_main_results_by_group` for precisely this path.
+
+    Returns `(main, filtered, truncated)`; `truncated` says the reader is
+    NOT looking at everything, which is a fact a search must never withhold.
+    Returns `None` when there is nothing to fuse from, exactly as `fuse_all`
+    does -- an empty result and no result are different answers.
+    """
+    from shared.parallels_service import (
+        PARALLELS_GROUP_CAP, _cap_main_results_by_group)
+    from shared.passage_parallels import _RegexSysIdParser
+
+    fused = fuse_all(state)
+    if fused is None:
+        return None
+    main, filtered = fused
+    limit = PARALLELS_GROUP_CAP if cap is None else cap
+    if not limit or limit <= 0:
+        return main, filtered, False
+
+    # Only a FUSED list carries `fusion_score`; the single-witness
+    # short-circuit deliberately leaves rows untouched, and ordering that by a
+    # key none of them has would collapse the page into one tie.
+    order_key = 'fusion_score' if searched_count(state) > 1 else None
+    parser = _RegexSysIdParser()
+    capped_main, truncated = _cap_main_results_by_group(
+        main, parser, cap=limit, order_key=order_key)
+    # Both buckets, by the same function and the same cap, so rendered rows
+    # and kept rows never disagree.
+    capped_filtered, _ = _cap_main_results_by_group(
+        filtered, parser, cap=limit, order_key=order_key)
+    return capped_main, capped_filtered, truncated
+
+
 # --- persistence -----------------------------------------------------------
 
 def snapshot(state: WitnessSet) -> list:

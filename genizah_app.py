@@ -47,7 +47,7 @@ if _CORE_IMPORT_ERROR:
     else:
         raise _CORE_IMPORT_ERROR
 from shared.search_engine import PHASE_LOCAL_SEARCH
-from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, PuzzleMetaLoaderThread, FilterCountWorker, RefinementReplayThread
+from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, PuzzleMetaLoaderThread, FilterCountWorker, RefinementReplayThread
 from desktop.widgets import (
     ActionsHoverWidget, _format_add_to_list_label,
     apply_find_highlight, _get_folio_number_from_shelfmark,
@@ -16390,14 +16390,42 @@ class GenizahGUI(QMainWindow):
                     == 'passage'
                     and not getattr(self, '_comp_grouping_active', False))
 
+    def _passage_batch_in_flight(self):
+        """True while a MULTI-WITNESS passage batch is running.
+
+        The distinction matters because such a batch CAN be stopped. The
+        engine still has no mid-search cancel hook -- an in-flight witness
+        always runs to completion -- but a batch is a loop, and the boundary
+        between two witnesses is a real checkpoint. A seventeen-witness run
+        is therefore interruptible where a single search is not, which is
+        what the flat 25-witness cap rests on.
+        """
+        thread = getattr(self, 'comp_thread', None)
+        return bool(self._passage_scan_in_flight()
+                    and isinstance(thread, MultiWitnessCompositionThread))
+
     def _refuse_stop_during_passage_scan(self):
         """The one guarded stop helper. `PassageSearcher` has no mid-search
         cancel hook -- the owner ruling (2026-08-25) is to ship the depth
         axis and accept the wait rather than withhold it -- so Stop, Escape,
         Pause and Reset all route through here and are told the truth
         instead of setting a flag nothing reads. Returns True when the
-        caller must NOT proceed."""
+        caller must NOT proceed.
+
+        A MULTI-WITNESS batch is the exception (owner ruling 2026-08-27):
+        its loop checkpoints between witnesses, so the flag IS read and Stop
+        does something. The caller proceeds; the witness already running
+        finishes first, and what the batch found so far is kept.
+        """
         if not self._passage_scan_in_flight():
+            return False
+        if self._passage_batch_in_flight():
+            if hasattr(self, 'lbl_comp_status'):
+                self.lbl_comp_status.setText(tr(
+                    "Stopping after the current witness finishes. Results "
+                    "found so far are kept."))
+                self.lbl_comp_status.setStyleSheet(
+                    "color: #e67e22; font-weight: bold;")
             return False
         if hasattr(self, 'lbl_comp_status'):
             self.lbl_comp_status.setText(tr(
@@ -23130,6 +23158,20 @@ class GenizahGUI(QMainWindow):
         self.comp_progress.setVisible(False)
         self.comp_summary_text = ""  # Clear persistent summary on reset
 
+    def _retry_pending_reset(self):
+        """Poll until the cancelled witness batch has actually finished, then
+        do the reset for real.
+
+        `QTimer.singleShot`, never a blocking `wait()`: the UI thread is what
+        the batch's own signals are delivered on, so blocking here would stop
+        the thread it is waiting for from ever reporting done.
+        """
+        if self._passage_batch_in_flight():
+            QTimer.singleShot(400, self._retry_pending_reset)
+            return
+        self._reset_pending = False
+        self._reset_composition()
+
     def _reset_composition(self):
         """Clear all composition search state and start fresh."""
         # Reset's own path is request_cancel + wait(3000) + terminate(). A
@@ -23137,6 +23179,22 @@ class GenizahGUI(QMainWindow):
         # seconds and then TERMINATE a thread mid-search, which is how a
         # memory-mapped reader gets killed holding its mappings.
         if self._refuse_stop_during_passage_scan():
+            return
+        # A multi-witness batch IS stoppable, but Reset's own path is
+        # request_cancel + wait(3000) + terminate() -- and terminating a
+        # thread that holds live memory mappings is exactly the failure the
+        # guard above prevents for a single search. Being stoppable does not
+        # make it killable: the witness in flight can still be seconds away
+        # (up to ~19s at Deepest), so Reset asks it to stop and comes back
+        # later, the same non-blocking retry `_defer_close_for_passage` uses.
+        if self._passage_batch_in_flight():
+            self.comp_thread.request_cancel()
+            if not getattr(self, '_reset_pending', False):
+                self._reset_pending = True
+                if hasattr(self, 'lbl_comp_status'):
+                    self.lbl_comp_status.setText(tr(
+                        "Clearing once the current witness finishes."))
+            QTimer.singleShot(400, self._retry_pending_reset)
             return
         self._apply_pause_state(self._pause_comp, 'hidden')
         self._pause_comp.state = 'idle'
