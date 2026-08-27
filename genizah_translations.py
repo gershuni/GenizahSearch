@@ -5083,7 +5083,7 @@ TRANSLATIONS.update({
     # term the owner uses for manuscript witnesses of a work.
     "Witnesses": "עדים",
     "Add other copies of this work to search with. Each is searched on its own and the results are merged.":
-        "הוסיפו עותקים נוספים של החיבור לחפש איתם. כל אחד נבדק בנפרד והתוצאות ממוזגות.",
+        "הוסף עותקים נוספים של החיבור לחפש איתם. כל אחד נבדק בנפרד והתוצאות ממוזגות.",
     "Add witness text": "הוספת נוסח עד",
     "This paste contains several witnesses separated by blank lines":
         "הטקסט מכיל כמה עדים המופרדים בשורות ריקות",
@@ -5095,10 +5095,10 @@ TRANSLATIONS.update({
     "Pending": "ממתין",
     "Failed": "נכשל",
     "{n} matches found": "נמצאו {n} התאמות",
-    "Search now ({n} pending)": "חפשו עכשיו ({n} ממתינים)",
-    "Search with these too": "חפשו גם עם אלו",
-    "Search with this manuscript too": "חפשו גם עם כתב יד זה",
-    "Clear selection": "נקו את הבחירה",
+    "Search now ({n} pending)": "חפש עכשיו ({n} ממתינים)",
+    "Search with these too": "חפש גם עם אלו",
+    "Search with this manuscript too": "חפש גם עם כתב יד זה",
+    "Clear selection": "נקה את הבחירה",
     "{n} manuscripts selected": "נבחרו {n} כתבי יד",
     "Added {n} witnesses — found {m} new matches.":
         "נוספו {n} עדים — נמצאו {m} התאמות חדשות.",
@@ -5121,17 +5121,17 @@ TRANSLATIONS.update({
     "Auto-expand stopped: witness cap reached.":
         "ההרחבה האוטומטית נעצרה: הושג המקסימום של עדים.",
     "{n} witnesses could not be searched — use Retry.":
-        "לא ניתן היה לחפש ב־{n} עדים — נסו שוב.",
+        "לא ניתן היה לחפש ב־{n} עדים — נסה שוב.",
     "Run a letter-level search first.": "יש להריץ תחילה חיפוש ברמת האות.",
     "Sort by combined score": "מיון לפי ציון משולב",
     "Sort by number of witnesses": "מיון לפי מספר העדים",
     "{n} of {m} witnesses": "{n} מתוך {m} עדים",
     "{n} witnesses are waiting, but only {cap} can be searched at this depth — remove some, or choose a shallower depth.":
-        "{n} עדים ממתינים, אך בעומק זה ניתן לחפש רק {cap} — הסירו חלק מהם או בחרו עומק רדוד יותר.",
+        "{n} עדים ממתינים, אך בעומק זה ניתן לחפש רק {cap} — הסר חלק מהם או בחר עומק רדוד יותר.",
     "Witness removed. The results on screen were found with the previous witness list — run the search again to update them.":
-        "העד הוסר. התוצאות המוצגות נמצאו עם רשימת העדים הקודמת — הריצו את החיפוש שוב כדי לעדכן אותן.",
+        "העד הוסר. התוצאות המוצגות נמצאו עם רשימת העדים הקודמת — הרץ את החיפוש שוב כדי לעדכן אותן.",
     "Witness list is full (max {n})": "רשימת העדים מלאה (עד {n})",
-    "Search now": "חפשו עכשיו",
+    "Search now": "חפש עכשיו",
     "Other source text": "טקסט מקור אחר",
     "{n} witnesses": "{n} עדים",
     "{n} from another text": "{n} מטקסט אחר",
@@ -5141,8 +5141,8 @@ TRANSLATIONS.update({
         "עד זה נוסף עבור טקסט מקור אחר, ולכן לא נבדק.",
     "{n} witnesses were added for a different source text.":
         "{n} עדים נוספו עבור טקסט מקור אחר.",
-    "Use them anyway": "השתמשו בהם בכל זאת",
-    "Remove them": "הסירו אותם",
+    "Use them anyway": "השתמש בהם בכל זאת",
+    "Remove them": "הסר אותם",
     "Label (optional)": "תוית (לא חובה)",
 })
 
@@ -5189,7 +5189,7 @@ TRANSLATIONS.update({
     'Please wait':
         'נא להמתין',
     'The application is still starting up. Try again in a moment.':
-        'התוכנה עדיין עולה. נסו שוב בעוד רגע.',
+        'התוכנה עדיין עולה. נסה שוב בעוד רגע.',
     'Already running':
         'כבר פועל',
     'The letter-level index is already being built.':
@@ -5238,7 +5238,7 @@ TRANSLATIONS.update({
     'Remove all {n} witnesses?':
         'להסיר את כל {n} העדים?',
     'Choose one or more files. Each file becomes a witness.':
-        'בחרו קובץ אחד או יותר. כל קובץ הופך לעד.',
+        'בחר קובץ אחד או יותר. כל קובץ הופך לעד.',
     'Text files (*.txt);;All files (*)':
         'קובצי טקסט (*.txt);;כל הקבצים (*)',
     'Could not read {n} files: {names}':
