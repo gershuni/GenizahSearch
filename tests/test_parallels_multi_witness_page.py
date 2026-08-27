@@ -348,17 +348,42 @@ def test_promotion_reads_the_matched_pages_not_the_browse_map():
     )
 
 
-def test_a_97_prefixed_manuscript_can_be_promoted():
-    """A 99-only pattern silently skips every 97-prefixed manuscript, so
-    auto-expand could never promote one. Three copies of that regex existed
-    on this page; there is now one."""
+def test_every_corpus_manuscript_can_be_promoted():
+    """Auto-expand must not silently skip a manuscript the engine found.
+
+    This test used to assert the opposite prefix. It was written to fix a real
+    defect -- three copies of the sys_id pattern on this page, one of them
+    99-only, so promotion behaved differently depending on which copy ran --
+    but it fixed it by widening to 97, on the premise that 97-prefixed
+    MANUSCRIPTS exist. They do not: 97 is the LOCAL "My Library" namespace
+    (desktop-only, 18 digits, never a Genizah record), and all 255,723 corpus
+    records in libraries.csv begin 99. Note the old fixture id `9700000001`
+    was 10 digits -- not a valid LOCAL id either.
+
+    The consolidation to ONE copy is kept and still pinned below; the dialect
+    is now the shared corpus constant. See shared/sys_id_patterns.py.
+    """
     from web.pages.parallels import collect_witness_texts, witness_sys_id
 
-    assert witness_sys_id({'raw_header': '9700000001_IE1_P1_FL1'}) == '9700000001'
+    sid = '990051620920205171'
+    assert witness_sys_id({'raw_header': f'{sid}_IE167198813_P000003_FL167198817'}) == sid
     texts, failed = collect_witness_texts(
-        ['9700000001'], [{'raw_header': '9700000001_IE1_P000001_FL1'}],
+        [sid], [{'raw_header': f'{sid}_IE1_P000001_FL1'}],
         fetch_header=lambda h: 'ok')
-    assert texts == {'9700000001': 'ok'} and failed == []
+    assert texts == {sid: 'ok'} and failed == []
+
+
+def test_a_local_my_library_header_is_not_a_promotable_witness():
+    """A LOCAL header is not a Genizah page, so it must resolve to nothing.
+
+    The guard that matters is that it yields None rather than a TRUNCATED id:
+    an unanchored corpus pattern matches the `99` inside this LOCAL id's own
+    digits and returns '993169503583183'. Promoting that would search a
+    manuscript nobody asked for.
+    """
+    from web.pages.parallels import witness_sys_id
+
+    assert witness_sys_id({'raw_header': '970993169503583183_LOCAL_P3_F0042'}) is None
 
 
 def test_promotion_falls_back_to_the_whole_manuscript_only_when_needed():
@@ -432,13 +457,30 @@ def test_promotion_reports_failures_once_and_by_name():
 
 
 def test_there_is_exactly_one_sys_id_pattern_on_the_page():
-    """Three copies existed, one of them 99-only. Behaviour is pinned by
-    test_a_97_prefixed_manuscript_can_be_promoted; this pins that the copies
-    do not come back."""
-    src = _source()
-    assert src.count("(?:99|97)") == 1, (
-        'the sys_id pattern has been duplicated again'
+    """Three copies existed, one of them 99-only -- so promotion behaved
+    differently depending on which ran. This pins that they do not come back.
+
+    Re-expressed for the shared constant (the page no longer spells a pattern
+    of its own at all, which is the stronger version of the same guard):
+    WITNESS_SYS_ID_RE must BE the shared corpus object, and no site on the
+    page may hand-roll a literal. Behaviour is pinned by
+    test_every_corpus_manuscript_can_be_promoted and
+    test_a_local_my_library_header_is_not_a_promotable_witness.
+    """
+    from shared.sys_id_patterns import CORPUS_SYS_ID_RE
+    from web.pages import parallels as _p
+
+    assert _p.WITNESS_SYS_ID_RE is CORPUS_SYS_ID_RE, (
+        'the page compiles its own sys_id pattern instead of sharing the one '
+        'in shared/sys_id_patterns.py'
     )
+    src = _source()
+    # sys-id-pattern-exempt: this line NAMES the dialects it forbids; it is the
+    # guard against a hand-rolled pattern, not one itself.
+    for dialect in ("(?:99|97)", "99\\d", "97\\d"):
+        assert dialect not in src, (
+            f'a hand-rolled sys_id pattern ({dialect}) is back on this page'
+        )
     for closure in ('_ranked_sys_ids', '_row_sys_id'):
         assert 're.search' not in _func_source(closure), (
             f'{closure} builds its own pattern instead of using '

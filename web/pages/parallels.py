@@ -43,6 +43,7 @@ from shared.browse_map_utils import (
     LIBRARY_CODES, get_library_display, sanitize_library_codes,
     library_codes_with_manuscripts,
 )
+from shared.sys_id_patterns import CORPUS_SYS_ID_RE
 
 # --- Multi-witness letter-level search ------------------------------------
 # Module level, not closure level: the tab-snapshot restore runs during page
@@ -59,7 +60,7 @@ WITNESS_CAP = 25          # mirrors SEARCH_API_PASSAGE_MAX_WITNESSES
 # rather than silently shrinking top-K, which would make the control a lie.
 WITNESS_DEPTH_CAP = {'normal': WITNESS_CAP, 'deep': 8, 'deepest': 4}
 
-WITNESS_SYS_ID_RE = re.compile(r'((?:99|97)\d{8,})')
+WITNESS_SYS_ID_RE = CORPUS_SYS_ID_RE
 
 
 def witness_depth_cap(ctx, widget_depth: str = None) -> int:
@@ -101,20 +102,36 @@ def witnesses_over_dispatch_cap(pending, ctx, widget_depth: str = None):
 
 
 def witness_sys_id(row) -> str:
-    r"""The sys_id a result row belongs to.
+    r"""The sys_id a result row belongs to. THE one copy on this page.
 
-    Mirrors `shared/passage_parallels.py::_SYS_ID_RE` and the authoritative
-    `shared/metadata_manager.py`, both of which accept a 97 prefix as well as
-    99. THE one copy on this page.
+    Now `shared.sys_id_patterns.CORPUS_SYS_ID_RE`, the single definition every
+    corpus-facing site in the repo shares. The earlier note here recorded the
+    divergence this page sat in the middle of and deferred it as corpus-wide
+    work; that reconciliation has since happened, and it settled the question
+    the other way. Both halves of the old rationale turned out to be wrong:
 
-    That is WIDER than the nine `r'(99\d{8,})'` patterns elsewhere in this
-    file, and wider than the serializer, the export writers and
-    `web/export_state.py`. The divergence is real but currently unreachable:
-    the live index holds 759,224 records and not one of them is 97-prefixed,
-    so no manuscript is skipped by the narrow patterns today. Following the
-    authoritative parser here is the safe direction -- a witness resolved by
-    the engine cannot fail to resolve on the page. Reconciling all of them is
-    a corpus-wide change, not a witness-feature one.
+    * **97 is not a corpus prefix at all.** It is the LOCAL "My Library"
+      namespace (Phase 95, `shared/local_sys_id.py`) -- a user's own files,
+      generated on the desktop, 18 digits, never a Genizah record and never
+      present on the web. Measured on `libraries.csv`: 255,723 of 255,723
+      corpus records begin 99, including all 473 NLI rows. So there is no
+      97-prefixed MANUSCRIPT for a narrow pattern to skip.
+    * **The wide pattern was not the safe direction.** `re.search` scans
+      anywhere, so a corpus pattern run over a LOCAL header can match a 99
+      INSIDE the LOCAL id's own digits and return a truncated, wrong sys_id
+      (6.36% of LOCAL ids, measured). The shared constants are anchored on a
+      digit boundary so that a LOCAL header misses cleanly instead.
+
+    "A witness resolved by the engine cannot fail to resolve on the page" is
+    still the invariant, and it is why this narrowed: the engine
+    (`shared/passage_parallels.py::_SYS_ID_RE`) is the same corpus constant
+    now, so mirroring it means corpus-only. Staying wide would have recreated
+    the divergence pointing the other way -- the page admitting a witness the
+    engine cannot resolve.
+
+    Do not re-widen, and do not add a second copy on this page; both are
+    enforced by tests/test_sys_id_patterns.py and the page's own
+    test_there_is_exactly_one_sys_id_pattern_on_the_page.
     """
     m = WITNESS_SYS_ID_RE.search((row or {}).get('raw_header') or '')
     return m.group(1) if m else None
@@ -530,7 +547,7 @@ def create_parallels_page(initial_text: str = None):
             if state.meta_mgr:
                 try:
                     raw_header = item.get('raw_header', '')
-                    sys_match = re.search(r'(99\d{8,})', raw_header)
+                    sys_match = CORPUS_SYS_ID_RE.search(raw_header)
                     if sys_match:
                         return state.meta_mgr.get_library_for_id(sys_match.group(1)) or ''
                 except Exception:
@@ -916,7 +933,7 @@ def create_parallels_page(initial_text: str = None):
     if initial_text and state.meta_mgr:
         try:
             # Try to find a sys_id reference in the URL text (e.g., "99NNN...")
-            sys_match = re.search(r'(99\d{8,})', initial_text)
+            sys_match = CORPUS_SYS_ID_RE.search(initial_text)
             if sys_match:
                 source_sys_id = sys_match.group(1)
                 p_state.auto_excluded_source_id = source_sys_id
@@ -3754,7 +3771,7 @@ def create_parallels_page(initial_text: str = None):
             if state.meta_mgr:
                 try:
                     raw_header = item.get('raw_header', '')
-                    sys_match = re.search(r'(99\d{8,})', raw_header)
+                    sys_match = CORPUS_SYS_ID_RE.search(raw_header)
                     if sys_match:
                         return state.meta_mgr.get_library_for_id(sys_match.group(1)) or ''
                 except Exception:
@@ -5445,7 +5462,7 @@ def create_parallels_page(initial_text: str = None):
                 all_sys_ids = []
                 for item in main_results:
                     raw_header = item.get('raw_header', '')
-                    sys_match = re.search(r'(99\d{8,})', raw_header)
+                    sys_match = CORPUS_SYS_ID_RE.search(raw_header)
                     if sys_match:
                         all_sys_ids.append(sys_match.group(1))
 
@@ -5619,7 +5636,7 @@ def create_parallels_page(initial_text: str = None):
     def _get_sys_id_from_parallels_item(item):
         """Extract sys_id from a parallels result item."""
         raw_header = item.get('raw_header', '')
-        sys_match = re.search(r'(99\d{8,})', raw_header)
+        sys_match = CORPUS_SYS_ID_RE.search(raw_header)
         return sys_match.group(1) if sys_match else None
 
     def _filter_parallels_by_domain(results):
@@ -5893,7 +5910,7 @@ def create_parallels_page(initial_text: str = None):
 
             if raw_header and state.meta_mgr:
                 try:
-                    sys_match = re.search(r'(99\d{8,})', raw_header)
+                    sys_match = CORPUS_SYS_ID_RE.search(raw_header)
                     if sys_match:
                         sys_id = sys_match.group(1)
                         shelf_temp, _ = state.meta_mgr.get_meta_for_id(sys_id)
@@ -5936,7 +5953,7 @@ def create_parallels_page(initial_text: str = None):
 
                 if raw_header and state.meta_mgr:
                     try:
-                        sys_match = re.search(r'(99\d{8,})', raw_header)
+                        sys_match = CORPUS_SYS_ID_RE.search(raw_header)
                         if sys_match:
                             sys_id = sys_match.group(1)
                             shelf_temp, _ = state.meta_mgr.get_meta_for_id(sys_id)
@@ -6501,7 +6518,7 @@ def create_parallels_page(initial_text: str = None):
         raw_header = item.get('raw_header', '')
         if raw_header and state.meta_mgr:
             try:
-                sys_match = re.search(r'(99\d{8,})', raw_header)
+                sys_match = CORPUS_SYS_ID_RE.search(raw_header)
                 if sys_match:
                     sys_id = sys_match.group(1)
                     shelf, _ = state.meta_mgr.get_meta_for_id(sys_id)
@@ -6522,7 +6539,7 @@ def create_parallels_page(initial_text: str = None):
 
         if raw_header and state.meta_mgr:
             try:
-                sys_match = re.search(r'(99\d{8,})', raw_header)
+                sys_match = CORPUS_SYS_ID_RE.search(raw_header)
                 if sys_match:
                     sys_id = sys_match.group(1)
                     shelf_temp, title_temp = state.meta_mgr.get_meta_for_id(sys_id)

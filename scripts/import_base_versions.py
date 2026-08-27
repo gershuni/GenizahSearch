@@ -17,6 +17,8 @@ from typing import Optional, Tuple
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from shared.sys_id_patterns import CORPUS_SYS_ID_RE
+
 from backend.models.database import init_db, SessionLocal
 from backend.models.transcription_version import VersionSource
 from backend.services.version_service import VersionService
@@ -39,8 +41,8 @@ def parse_header(header: str) -> Tuple[Optional[str], int]:
     Returns:
         Tuple of (sys_id, page_num)
     """
-    # Extract sys_id (18-digit number starting with 99)
-    match = re.search(r'(99\d{16,})', header)
+    # Extract the CORPUS sys_id (see shared/sys_id_patterns.py).
+    match = CORPUS_SYS_ID_RE.search(header)
     if not match:
         return None, 1
 
@@ -161,7 +163,7 @@ def import_file(
                         current_header = line
 
                     # Extract unique ID
-                    match = re.search(r'(99\d{16,})', line)
+                    match = CORPUS_SYS_ID_RE.search(line)
                     current_id = match.group(1) if match else None
                     current_text = []
                 else:

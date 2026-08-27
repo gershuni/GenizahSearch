@@ -1054,6 +1054,36 @@ Partial entry: the filter-state → read paths only, not the whole surface.
     - Method `close` (Line 126) — close all connections and reset state
     - Method `__bool__` (Line 138) — truthy for availability checks
 
+## shared/sys_id_patterns.py
+
+Canonical `sys_id` extraction patterns for BOTH namespaces (2026-08-25). Added because ~24
+sites hand-rolled their own regex inline and drifted into two incompatible dialects.
+
+**Two namespaces, deliberately disjoint:** `99` is the Genizah corpus (Alma MMS ids +
+Phase-85 synthetics); `97` is the LOCAL "My Library" namespace (Phase 95,
+`shared/local_sys_id.py`) — desktop-generated, never a corpus record. Do NOT unify the two
+constants; they answer different questions.
+
+**Module-level constants:**
+- `CORPUS_SYS_ID_PATTERN` / `CORPUS_SYS_ID_RE` — corpus namespace only. Use for anything
+  that resolves a record against corpus data: exports, grouping, allowlists, metadata.
+- `ANY_SYS_ID_PATTERN` / `ANY_SYS_ID_RE` — corpus OR LOCAL. Use ONLY where a LOCAL header
+  can genuinely arrive (the desktop namespace-agnostic parsers in `metadata_manager.py`).
+
+Both are anchored with a leading `(?<!\d)`, which is load-bearing rather than cosmetic: an
+unanchored corpus pattern run over a LOCAL header can match a `99` inside the LOCAL id's
+random digits and return a truncated, wrong sys_id (6.36% of LOCAL ids, measured) — silent
+corruption, not a silent drop.
+
+**Public API:**
+- **Function** `extract_corpus_sys_id(text)` — first corpus sys_id, or None (None for LOCAL)
+- **Function** `extract_any_sys_id(text)` — first sys_id from either namespace, or None
+
+**Enforcement:** `tests/test_sys_id_patterns.py` repo-greps every tracked `.py` and fails on
+a hand-rolled pattern lacking a `sys-id-pattern-exempt: <reason>` annotation, pins each
+migrated site to the shared object, and pins the never-match-LOCAL property.
+`scripts/check_sys_id_prefixes.py` re-measures which prefixes the corpus actually contains.
+
 ## shared/search_serializer.py
 
 Phase 77 single-source-of-truth serializer for the "Claude-friendly JSON" payload shape. One module powers both download handlers (`/api/export/json`, `/api/export/parallels/json`) and Phase 78+ API responses (`/api/search`, `/api/parallels`); modifying `_serialize_item()` updates download AND API in lockstep per EXPORT-03.
