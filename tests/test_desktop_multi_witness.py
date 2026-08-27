@@ -555,6 +555,7 @@ class _Win2:
     _comp_witness_roster = GAPP._comp_witness_roster
     _comp_witness_dispatch_list = GAPP._comp_witness_dispatch_list
     _comp_witness_prior_rows = GAPP._comp_witness_prior_rows
+    _comp_witness_cache_key = GAPP._comp_witness_cache_key
     _absorb_witness_result = GAPP._absorb_witness_result
     _comp_witness_total = GAPP._comp_witness_total
     _comp_sort_key = GAPP._comp_sort_key
@@ -894,12 +895,91 @@ def test_auto_expand_refuses_a_round_it_cannot_complete():
 
 
 def test_auto_expand_is_driven_by_completed_searches_not_a_loop():
-    """Each round IS a search, and the search is a worker thread. A loop
-    would either block the UI thread or start round two against round one's
-    unfinished results."""
+    """Each round IS a search, and the search is a worker thread. A loop would
+    either block the UI thread or start round two against round one's
+    unfinished results.
+
+    The scan callback ARMS the next round; it no longer fires it. See
+    test_the_next_round_is_not_fired_from_the_scan_callback for why.
+    """
     src = _fn_src('on_comp_scan_finished')
-    assert '_advance_auto_expand' in src
+    assert '_auto_expand_armed' in src
     assert '_auto_expand_left' in src
+
+
+def test_the_next_round_is_not_fired_from_the_scan_callback():
+    """Codex review, 2026-08-27: firing here stalls the DEFAULT configuration.
+
+    With `chk_comp_flat` unchecked -- the default -- `on_comp_scan_finished`
+    goes on to call `start_grouping`, which sets `is_comp_running = True`
+    synchronously. A zero-delay timer scheduled earlier in the same slot
+    therefore fires AFTER that flag is set, `_search_pending_witnesses`
+    returns on it, and nothing reschedules. The round counter stays positive,
+    the witnesses stay pending, and auto-expand simply stops after its first
+    search with no error anywhere.
+    """
+    src = _fn_src('on_comp_scan_finished')
+    assert '_advance_auto_expand' not in src, (
+        'the scan callback fires the next round again -- it will race '
+        'start_grouping and stall on the busy flag'
+    )
+
+
+def test_the_scan_callback_arms_before_it_can_start_grouping():
+    """The arm has to be recorded on the way past, because the grouped path
+    leaves this function without rendering anything."""
+    src = _fn_src('on_comp_scan_finished')
+    # The CALL, not the name: a comment in this function explains the race,
+    # and matching the bare name found the comment instead.
+    assert src.index('_auto_expand_armed') < src.index(
+        'self.start_grouping(')
+
+
+def test_the_next_round_fires_once_the_results_are_on_screen():
+    """`display_comp_results` is the one point every completion path passes
+    through with composition processing idle: flat rendering, grouped
+    rendering after `on_comp_finished`, and the `on_grouping_error` fallback
+    all arrive here."""
+    src = _fn_src('display_comp_results')
+    assert '_advance_auto_expand' in src, (
+        'nothing fires the next auto-expand round any more'
+    )
+    assert src.index('is_comp_running = False') < src.index(
+        '_advance_auto_expand'), (
+        'the round is scheduled before the busy flag is cleared, which is '
+        'the stall this fix exists to remove'
+    )
+
+
+def test_the_arm_is_consumed_not_merely_tested():
+    """`display_comp_results` also runs on session restore and on a re-render.
+    A round counter alone would let either of those spend a round."""
+    src = _fn_src('display_comp_results')
+    i = src.index('_auto_expand_armed')
+    assert '_auto_expand_armed = False' in src[i:], (
+        'the arm is read but never cleared, so an unrelated re-render can '
+        'spend an auto-expand round'
+    )
+
+
+def test_stopping_auto_expand_clears_the_arm_as_well_as_the_counter():
+    """Left armed, the next unrelated search to reach a render would spend a
+    round of an expansion the user had already stopped."""
+    src = _fn_src('_stop_auto_expand')
+    assert '_auto_expand_left = 0' in src
+    assert '_auto_expand_armed = False' in src
+
+
+def test_a_run_that_renders_nothing_stops_the_expansion():
+    """The no-results branch returns before any render, so an armed round
+    would never fire -- and a counter left positive BLOCKS the next
+    auto-expand, since `_run_auto_expand` refuses to start while one is
+    owed."""
+    src = _fn_src('on_comp_scan_finished')
+    head = src[:src.index('self.start_grouping(')]
+    assert head.count('self._stop_auto_expand(') >= 2, (
+        'an early return leaves auto-expand owed a round that can never fire'
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1314,7 +1394,10 @@ def test_a_baked_english_suffix_is_replaced_not_appended_to():
              'search_params': {'comp_witnesses': [{'id': 'w%d' % i}
                                                   for i in range(22)]}}
     out = _render(entry)
-    assert 'witnesses' not in out, out
+    # NOT `'witnesses' not in out`: in an English locale that is
+    # exactly what the CORRECT output says. One suffix, and it is
+    # the one tr() renders now -- true in either language.
+    assert out.count('[') == 1, out
     assert _expected(23) in out
 
 
@@ -1343,7 +1426,8 @@ def test_the_owner_s_real_records_all_render_in_one_language():
     ]
     for entry, expect in real_shapes:
         out = _render(entry)
-        assert 'witness' not in out, out
+        # Language-independent: the suffix appears exactly once (or
+        # not at all), and it is whatever tr() renders TODAY.
         assert out.count('[') == (1 if expect > 1 else 0), out
         if expect > 1:
             assert _expected(expect) in out, out
@@ -1355,7 +1439,7 @@ def test_a_doubly_suffixed_record_is_cleaned():
     entry = {'query': 'ברכת מזון...  [23 witnesses]  [', 'witness_count': 23}
     out = _render(entry)
     assert out.count('[') == 1, out
-    assert 'witnesses' not in out
+    assert _expected(23) in out
 
 
 def test_a_hebrew_baked_suffix_is_stripped_as_well():
@@ -1386,7 +1470,8 @@ def test_the_suffix_is_stripped_before_the_query_is_truncated():
     entry = {'query': long_title + '  [23 witnesses]', 'witness_count': 23}
     out = _render(entry)
     assert out.startswith('א' * 35)
-    assert 'witnesses' not in out
+    assert out.count('[') == 1, out
+    assert _expected(23) in out
 
 
 # ---------------------------------------------------------------------------
@@ -1430,3 +1515,149 @@ def test_the_metadata_dialog_title_defaults_through_tr():
     src = _fn_src('_fetch_metadata_with_dialog')
     assert 'title=None' in src
     assert 'tr("Loading metadata...")' in src
+
+
+# --- cache invalidation (Codex review, 2026-08-27) --------------------------
+# Pressing Analyze again after an edit found the seed's rows cached and every
+# witness `searched`, so the dispatch list came out EMPTY and the worker
+# re-published the PREVIOUS query's rows as the new query's answer. Silent, and
+# indistinguishable on screen from a correct result.
+
+
+class _Spin:
+    def __init__(self, v=5):
+        self._v = v
+
+    def value(self):
+        return self._v
+
+
+def _keyed(w, gen=1, filt='', thresh=5, restrict=None, monkeypatch=None):
+    """`w` wired up enough to build a cache key, at a pinned generation."""
+    w.spin_filter = _Spin(thresh)
+    w._get_filter_text = lambda: filt
+    w.pre_search_restrict_sys_ids = restrict
+    if monkeypatch is not None:
+        monkeypatch.setattr(pl, 'current_state_generation', lambda: gen)
+    return w
+
+
+def _key(w, seed=None, scope='genizah', width='normal', length='normal',
+         depth='normal'):
+    return w._comp_witness_cache_key(
+        seed if seed is not None else w._comp_seed_text(),
+        scope, width, length, depth)
+
+
+def test_the_cache_key_moves_when_any_search_input_moves(monkeypatch):
+    """Each of these changes what a search RETURNS, so rows produced under one
+    are not reusable under another. Enumerated one at a time: a key that
+    happened to ignore, say, depth would still pass a test that only ever
+    edited the seed text."""
+    w = _keyed(_win(), monkeypatch=monkeypatch)
+    base = _key(w)
+    assert _key(w, seed='a completely different work') != base
+    assert _key(w, scope='local') != base
+    assert _key(w, width='wide') != base
+    assert _key(w, length='long') != base
+    assert _key(w, depth='deepest') != base
+
+    assert _key(_keyed(_win(), filt='alpha', monkeypatch=monkeypatch)) != base
+    assert _key(_keyed(_win(), thresh=9, monkeypatch=monkeypatch)) != base
+    assert _key(_keyed(_win(), restrict=['990001'],
+                       monkeypatch=monkeypatch)) != base
+
+
+def test_the_cache_key_moves_when_the_index_is_replaced(monkeypatch):
+    """The one input no seed digest can see. Rows from a replaced index were
+    never comparable with rows from the current one -- the same reason the
+    worker pins the generation for the duration of a batch."""
+    w = _keyed(_win(), gen=1, monkeypatch=monkeypatch)
+    first = _key(w)
+    monkeypatch.setattr(pl, 'current_state_generation', lambda: 2)
+    assert _key(w) != first
+
+
+def test_the_cache_key_is_stable_when_nothing_moves(monkeypatch):
+    """The other half, and the one the whole design rests on: an auto-expand
+    round must reuse the rows it already has, or an R-round expansion costs
+    `rounds x roster` searches instead of `1 + rounds x K`."""
+    w = _keyed(_win(), monkeypatch=monkeypatch)
+    assert _key(w) == _key(w)
+
+
+def test_a_restriction_list_keys_by_content_not_by_order(monkeypatch):
+    """Otherwise re-selecting the same manuscripts in a different order throws
+    away a whole roster's worth of results for nothing."""
+    w = _keyed(_win(), restrict=['990002', '990001'], monkeypatch=monkeypatch)
+    a = _key(w)
+    w.pre_search_restrict_sys_ids = ['990001', '990002']
+    assert _key(w) == a
+
+
+def _completed_run(w):
+    """A finished multi-witness run: seed and witness both hold rows."""
+    st = w._comp_witness_state()
+    pw.add_texts(st, ['alpha beta gamma'], w._comp_seed_text(), 'Pasted text')
+    pw.invalidate_cache(st, _key(w))
+    st.rows[WITNESS_SEED_ID] = [{'raw_header': 'h', 'score': 1}]
+    st.rows[st.entries[0].id] = [{'raw_header': 'h2', 'score': 2}]
+    st.entries[0].status = pw.STATUS_SEARCHED
+    return st
+
+
+def test_an_edited_seed_makes_the_next_run_dispatch_again(monkeypatch):
+    """End to end over the real helpers: the defect was that this list came
+    back EMPTY, which the worker turns into a re-publish of the old rows."""
+    w = _keyed(_win(seed='the first work'), monkeypatch=monkeypatch)
+    st = _completed_run(w)
+    assert w._comp_witness_dispatch_list() == [], 'precondition: nothing owed'
+
+    w.comp_text_area = _TextArea('an entirely different work')
+    assert pw.invalidate_cache(st, _key(w)) is True
+    dispatched = w._comp_witness_dispatch_list()
+    assert dispatched, 'the run would have re-published the previous rows'
+    assert dispatched[0][0] == WITNESS_SEED_ID, (
+        'the seed was not re-searched against the text the user just typed'
+    )
+
+
+def test_a_settings_change_alone_re_dispatches(monkeypatch):
+    """No edit at all -- only the depth moved. Rows found at `normal` are not
+    the rows `deepest` would find, so fusing them is wrong in a way no digest
+    of the TEXT can detect."""
+    w = _keyed(_win(), monkeypatch=monkeypatch)
+    st = _completed_run(w)
+    assert pw.invalidate_cache(st, _key(w, depth='deepest')) is True
+    assert len(w._comp_witness_dispatch_list()) == 2
+
+
+def test_an_unchanged_query_still_reuses_its_rows(monkeypatch):
+    """The regression guard for the FIX: invalidating too eagerly would make
+    every auto-expand round re-run the entire roster."""
+    w = _keyed(_win(), monkeypatch=monkeypatch)
+    st = _completed_run(w)
+    assert pw.invalidate_cache(st, _key(w)) is False
+    assert w._comp_witness_dispatch_list() == []
+
+
+def test_the_caches_are_invalidated_before_the_dispatch_list_is_built():
+    """Order is the whole fix. Invalidating AFTER the list is built leaves the
+    list computed from the rows that were about to be thrown away, which is
+    exactly the behaviour being repaired."""
+    src = _fn_src('run_composition')
+    assert src.index('invalidate_cache') < src.index(
+        '_comp_witness_dispatch_list'), (
+        'run_composition builds the dispatch list before invalidating the '
+        'caches it is computed from'
+    )
+
+
+def test_the_main_button_marks_stale_witnesses_like_the_witness_button_does():
+    """`_search_pending_witnesses` did this and `run_composition` did not, so
+    editing the seed and pressing Analyze searched witnesses gathered for the
+    previous work without ever asking."""
+    assert 'mark_stale_against' in _fn_src('run_composition'), (
+        'the main Analyze button never marks witnesses stale'
+    )
+

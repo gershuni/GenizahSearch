@@ -431,3 +431,90 @@ def test_a_snapshot_round_trips():
 def test_restore_survives_a_malformed_snapshot(raw):
     """A hand-edited or truncated session file must not take the tab down."""
     assert pw.restore(raw, FALLBACK).entries == []
+
+
+# --- cache invalidation ----------------------------------------------------
+# The row caches make an auto-expand round cost one search per NEW witness.
+# They are only sound while they answer the SAME question, and nothing else in
+# this module notices when the question changes -- `mark_stale_against` reads
+# the seed digest but touches only `pending` entries.
+
+
+def test_the_first_key_ever_seen_invalidates_nothing_but_is_recorded():
+    st = _set('alpha beta gamma')
+    assert pw.invalidate_cache(st, ('k1',)) is False
+    assert st.cache_key == ('k1',)
+
+
+def test_an_identical_key_keeps_the_caches():
+    """This is the reuse the whole design rests on: an auto-expand round must
+    not re-run the witnesses it already searched."""
+    st = _set('alpha beta gamma')
+    pw.invalidate_cache(st, ('k1',))          # establish the key first
+    st.rows[WITNESS_SEED_ID] = [{'raw_header': 'h', 'score': 1}]
+    st.entries[0].status = pw.STATUS_SEARCHED
+
+    assert pw.invalidate_cache(st, ('k1',)) is False
+    assert st.rows, 'an unchanged query re-ran witnesses it already had'
+    assert st.entries[0].status == pw.STATUS_SEARCHED
+
+
+def test_a_changed_key_drops_the_rows_and_re_queues_the_searched():
+    """THE defect this exists for. Without it a second run finds the seed's
+    rows cached and every witness `searched`, dispatches NOTHING, and
+    re-publishes the previous query's rows as the new query's answer."""
+    st = _set('alpha beta gamma')
+    pw.invalidate_cache(st, ('k1',))          # establish the key first
+    st.rows[WITNESS_SEED_ID] = [{'raw_header': 'h', 'score': 1}]
+    st.rows[st.entries[0].id] = [{'raw_header': 'h2', 'score': 2}]
+    st.filtered[WITNESS_SEED_ID] = [{'raw_header': 'h3', 'score': 3}]
+    st.entries[0].status = pw.STATUS_SEARCHED
+    st.entries[0].hits = 9
+
+    assert pw.invalidate_cache(st, ('k2',)) is True
+    assert st.rows == {} and st.filtered == {}
+    assert st.entries[0].status == pw.STATUS_PENDING
+    assert st.entries[0].hits == 0
+
+
+def test_the_seed_rows_are_dropped_too_so_the_seed_is_re_searched():
+    """The seed is a witness like any other, and it is the one whose text the
+    user actually edited. Keeping ITS rows is the whole bug: the dispatch list
+    includes the seed only when `rows[seed]` is missing."""
+    st = pw.WitnessSet()
+    pw.invalidate_cache(st, ('k1',))          # establish the key first
+    st.rows[WITNESS_SEED_ID] = [{'raw_header': 'h', 'score': 1}]
+    pw.invalidate_cache(st, ('k2',))
+    assert st.rows.get(WITNESS_SEED_ID) is None
+
+
+def test_a_failed_witness_is_left_failed():
+    """It has no rows to invalidate, and silently re-queueing it would retry a
+    known failure on every settings change instead of leaving the user the
+    explicit Retry the panel offers."""
+    st = _set('alpha beta gamma')
+    st.entries[0].status = pw.STATUS_FAILED
+    st.entries[0].error = 'engine said no'
+    pw.invalidate_cache(st, ('k1',))
+    pw.invalidate_cache(st, ('k2',))
+    assert st.entries[0].status == pw.STATUS_FAILED
+    assert st.entries[0].error == 'engine said no'
+
+
+def test_a_stale_witness_is_left_stale():
+    """Staleness is a question already put to the user; an invalidation must
+    not answer it for them by quietly re-queueing the witness."""
+    st = _set('alpha beta gamma')
+    st.entries[0].status = pw.STATUS_STALE
+    pw.invalidate_cache(st, ('k1',))
+    pw.invalidate_cache(st, ('k2',))
+    assert st.entries[0].status == pw.STATUS_STALE
+
+
+def test_a_restored_set_starts_with_no_key():
+    """Its caches come back empty by design, so the first run after a restore
+    must record a key rather than match one."""
+    st = _set('alpha beta gamma')
+    pw.invalidate_cache(st, ('k1',))
+    assert pw.restore(pw.snapshot(st), FALLBACK).cache_key is None
+

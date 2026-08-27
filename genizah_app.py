@@ -16231,6 +16231,7 @@ class GenizahGUI(QMainWindow):
         self._comp_last_result_witnesses = list(
             comp.get('comp_witnesses') or [])
         self._auto_expand_left = 0
+        self._auto_expand_armed = False
         # And the progress line: "Witness 23/23: T-S 8H11.3" left over
         # from the previous run described a search this one is not.
         self._witness_notify('')
@@ -16793,6 +16794,9 @@ class GenizahGUI(QMainWindow):
 
     def _stop_auto_expand(self, message):
         self._auto_expand_left = 0
+        # Both halves, always together: a left-over arm would spend a round
+        # on the next unrelated search to reach `display_comp_results`.
+        self._auto_expand_armed = False
         if message:
             self._witness_notify(message)
 
@@ -17397,6 +17401,31 @@ class GenizahGUI(QMainWindow):
                 continue
             out.append((entry.id, entry.label, entry.text))
         return out
+
+    def _comp_witness_cache_key(self, seed_text, scope, width, length, depth):
+        """Everything a cached witness row depends on, as one comparable value.
+
+        Not a hash and not a digest of the rows: an EQUALITY key. Two runs may
+        reuse each other's rows only if every input below matches, because each
+        one changes what a search returns.
+
+        The index generation is in here for the same reason the worker pins it
+        per batch -- rows from a replaced index were never comparable with rows
+        from the current one, and an install between two runs is exactly the
+        case a seed digest cannot see.
+
+        Deliberately EXCLUDES the render cap: it is applied once to the fused
+        list, after these rows exist, so it cannot change them.
+        """
+        restrict = getattr(self, 'pre_search_restrict_sys_ids', None)
+        return (
+            passage_witnesses.witness_text_key(seed_text),
+            self._get_filter_text() or '',
+            int(self.spin_filter.value()),
+            tuple(sorted(restrict)) if restrict else None,
+            scope, width, length, depth,
+            passage_lifecycle.current_state_generation(),
+        )
 
     def _comp_witness_prior_rows(self):
         """The rows of witnesses searched in an EARLIER round.
@@ -24323,6 +24352,7 @@ class GenizahGUI(QMainWindow):
         self._comp_last_result_witness_total = 0
         self._comp_last_fused_rows = []
         self._auto_expand_left = 0
+        self._auto_expand_armed = False
         self._witness_notify('')
         self._refresh_witness_panel()
 
@@ -24662,6 +24692,30 @@ class GenizahGUI(QMainWindow):
                 _comp_boundary_mode = boundary_mode
                 _comp_min_boundary = min_boundary_matches
 
+            if _comp_dispatch_method == 'passage':
+                # The row caches answer ONE question. Reusing them across a
+                # different one is not a stale-looking result, it is a silent
+                # wrong one: the seed's rows are cached and every witness is
+                # `searched`, so the dispatch list comes out EMPTY and the
+                # worker re-publishes the PREVIOUS query's rows as this
+                # query's answer. (Found by review, not by any test here.)
+                #
+                # Applied to every passage run, not just a multi-witness one:
+                # a plain single-witness search leaves seed rows behind too,
+                # and adding a witness afterwards would fuse against them.
+                if passage_witnesses.invalidate_cache(
+                        self._comp_witness_state(),
+                        self._comp_witness_cache_key(
+                            txt, _comp_scope, _comp_passage_width,
+                            _comp_passage_length, _comp_passage_depth)):
+                    self._refresh_witness_panel()
+                # Witnesses gathered for a DIFFERENT source text are marked,
+                # not searched -- the same rule the `Search now` button
+                # applies, which the main button was skipping entirely.
+                if passage_witnesses.mark_stale_against(
+                        self._comp_witness_state(), txt):
+                    self._refresh_witness_panel()
+
             if _comp_multi:
                 # Restored manuscript witnesses carry no text; put it
                 # back BEFORE the dispatch list is built, or they are
@@ -24854,6 +24908,7 @@ class GenizahGUI(QMainWindow):
             # A close is waiting on exactly this worker. Rendering rows and
             # then STARTING a grouping thread would hand the deferral a new
             # worker to wait for, one the user never asked for.
+            self._stop_auto_expand('')
             return
 
         # Phase 146: rows the passage searcher matched but could not load
@@ -24899,10 +24954,19 @@ class GenizahGUI(QMainWindow):
             self._absorb_witness_result(result_obj)
             self._refresh_witness_panel()
             # Each auto-expand round IS a search, so the next one starts from
-            # here rather than from a loop. Deferred to the event loop so the
-            # current result finishes rendering first.
-            if getattr(self, '_auto_expand_left', 0) > 0:
-                QTimer.singleShot(0, self._advance_auto_expand)
+            # a finished search rather than from a loop. ARMED here, FIRED
+            # from `display_comp_results` -- not fired here.
+            #
+            # Firing here stalls the default configuration. With
+            # `chk_comp_flat` unchecked (the default) this callback goes on
+            # to call `start_grouping`, which sets `is_comp_running = True`
+            # synchronously -- so a zero-delay timer scheduled here fires
+            # AFTER that, `_search_pending_witnesses` returns on the busy
+            # flag, and nothing ever reschedules. The round counter stays
+            # positive, the witnesses stay pending, and auto-expand simply
+            # stops after its first search with no error anywhere.
+            self._auto_expand_armed = bool(
+                getattr(self, '_auto_expand_left', 0) > 0)
 
         # Phase 110 DESIGN CORRECTION (2026-06-08): standard composition queries the
         # REGULAR My-Library index, which has no staleness concept — an empty LOCAL
@@ -24976,6 +25040,10 @@ class GenizahGUI(QMainWindow):
         if not manuscripts and not filtered_manuscripts and not known_manuscripts:
             QMessageBox.information(self, tr("No Results"), tr("No composition matches found."))
             self.pending_recursive_search = False
+            # No render follows, so the armed round would never fire and the
+            # counter would stay positive -- blocking the NEXT auto-expand,
+            # since `_run_auto_expand` refuses to start while one is owed.
+            self._stop_auto_expand('')
             return
 
         if self.chk_comp_flat.isChecked():
@@ -25363,6 +25431,18 @@ class GenizahGUI(QMainWindow):
         self.is_comp_running = False
         self.btn_comp_run.setText(tr("Analyze Composition"))
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white;")
+        # THE auto-expand trigger. Here because this is the one point every
+        # completion path passes through with composition processing idle:
+        # flat rendering, grouped rendering, and the grouping-error fallback
+        # all arrive here, and `is_comp_running` has just been cleared above.
+        #
+        # One-shot, consumed rather than re-tested: `display_comp_results` is
+        # also called on session restore and on a re-render, and a round
+        # counter alone would let either of those spend a round.
+        if getattr(self, '_auto_expand_armed', False):
+            self._auto_expand_armed = False
+            if getattr(self, '_auto_expand_left', 0) > 0:
+                QTimer.singleShot(0, self._advance_auto_expand)
         # Restore persistent summary in progress bar (GAP-2/GAP-5)
         if self.comp_summary_text:
             self.comp_progress.setVisible(True)

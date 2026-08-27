@@ -101,6 +101,10 @@ class WitnessSet:
     seq: int = 0
     rows: dict = field(default_factory=dict)
     filtered: dict = field(default_factory=dict)
+    # WHAT the two caches above are answers TO: the seed text and the search
+    # settings their rows were produced under. Rows are reusable only for an
+    # identical key; see `invalidate_cache`.
+    cache_key: object = None
 
 
 # --- identity --------------------------------------------------------------
@@ -269,6 +273,45 @@ def remove(state: WitnessSet, wid: str) -> bool:
     state.rows.pop(wid, None)
     state.filtered.pop(wid, None)
     return bool(state.rows)
+
+
+def invalidate_cache(state: WitnessSet, key) -> bool:
+    """Drop the row caches when they answer a DIFFERENT question. Returns
+    whether anything was dropped.
+
+    The caches exist so an auto-expand round costs one search per NEW witness
+    instead of re-running the whole roster. That reuse is sound only while the
+    rows keep answering the same question, and nothing about a `WitnessSet`
+    notices when the question changes: `mark_stale_against` reads the seed
+    digest but touches only `pending` entries, so a witness already `searched`
+    keeps both its status and its rows.
+
+    Left uninvalidated, the failure is not a stale-LOOKING result -- it is a
+    silent one. A second run after an edit finds the seed's rows cached and
+    every witness `searched`, dispatches NOTHING, and re-publishes the previous
+    query's rows as though they were the new query's answer.
+
+    `key` is opaque here on purpose: which inputs a row depends on is a
+    property of the SEARCH, not of this list, so the surface builds it (see
+    `genizah_app.py::_comp_witness_cache_key`). Only equality is used.
+
+    Entries go back to `pending` rather than being dropped -- they are still
+    witnesses of the same work, they simply have no results any more. Only
+    `searched` ones are touched: a `failed` witness has no rows to invalidate,
+    and silently re-queueing it would retry a known failure on every settings
+    change instead of leaving the user their explicit Retry.
+    """
+    if state.cache_key == key:
+        return False
+    had = bool(state.rows or state.filtered)
+    state.rows.clear()
+    state.filtered.clear()
+    for e in state.entries:
+        if e.status == STATUS_SEARCHED:
+            e.status = STATUS_PENDING
+            e.hits = 0
+    state.cache_key = key
+    return had
 
 
 # --- staleness -------------------------------------------------------------
