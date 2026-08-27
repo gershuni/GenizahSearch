@@ -321,10 +321,17 @@ def test_a_failed_non_seed_witness_still_publishes():
     assert any(r['status'] == 'failed' for r in payload['witness_report'])
 
 
-def test_a_cancelled_batch_keeps_its_results_even_if_the_seed_failed():
-    """Stop promises "results found so far are kept", and that promise
-    outranks the seed rule: the user asked to stop and to keep what there
-    was."""
+def test_a_cancelled_batch_with_a_failed_seed_still_fails(monkeypatch):
+    """REVERSED at review round 9, and the reversal is the point.
+
+    Round 3 carved out an exception here: Stop promises "results found so far
+    are kept", so a cancelled batch published even when the seed had failed.
+    That confused completeness with validity. Stop keeps what THIS search
+    found, and a search whose seed never ran found nothing for the query that
+    was typed -- the surviving rows answer a different question, published
+    under the user's heading. Losing a witness's work is a cost; publishing it
+    under the wrong heading is a defect.
+    """
     s = _StubSearcher(
         {'two': _rows(('990000000002_1r', 90))},
         raises={'one': RuntimeError('boom')})
@@ -332,8 +339,41 @@ def test_a_cancelled_batch_keeps_its_results_even_if_the_seed_failed():
                  ('w1', 'B', 'two'), ('w2', 'C', 'three')],
                 s, abort_after=2)
     w.run()
+    assert w.scan_finished_signal.calls == [], (
+        'Stop published a later witness\'s rows as the answer to a source '
+        'text that was never searched'
+    )
+    assert w.error_signal.calls
+
+
+def test_a_cancelled_batch_with_a_GOOD_seed_still_keeps_its_results():
+    """The Stop promise itself is untouched. It was never the problem -- only
+    its use as an exemption from the seed rule was."""
+    s = _StubSearcher({'one': _rows(('990000000001_1r', 100)),
+                       'two': _rows(('990000000002_1r', 90))})
+    w = _worker([(WITNESS_SEED_ID, 'Your text', 'one'),
+                 ('w1', 'B', 'two'), ('w2', 'C', 'three')],
+                s, abort_after=2)
+    w.run()
     assert w.scan_finished_signal.calls, 'a cancelled batch lost its results'
-    assert w.scan_finished_signal.calls[0]['partial'] is True
+    payload = w.scan_finished_signal.calls[0]
+    assert payload['partial'] is True
+    assert payload['main'], 'the partial rows were discarded'
+
+
+def test_a_cached_seed_is_not_dispatched_so_it_cannot_fail_the_batch():
+    """An auto-expand round searches only what it just promoted; the seed's
+    rows come from the cache and it files no report. The seed rule must not
+    fire on an absence."""
+    s = _StubSearcher({'two': _rows(('990000000002_1r', 90))})
+    w = _worker([('w1', 'B', 'two')], s,
+                roster=[(WITNESS_SEED_ID, 'Your text'), ('w1', 'B')],
+                prior_rows={WITNESS_SEED_ID:
+                            _rows(('990000000001_1r', 100))['main']})
+    w.run()
+    assert w.scan_finished_signal.calls, (
+        'an auto-expand round was failed by a seed it never dispatched'
+    )
 
 
 def test_a_cancelled_run_emits_no_perf_sample():

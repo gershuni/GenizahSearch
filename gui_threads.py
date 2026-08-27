@@ -565,10 +565,23 @@ class MultiWitnessCompositionThread(PausableSearchMixin, QThread):
             # its report was silently dropped: the user's own source text
             # was never searched, yet a later witness's hits were published
             # as the answer to it. Nothing on screen could reveal that.
+            #
+            # Cancellation is NOT an exception to this, though it was until
+            # review round 9. The reasoning that carved one out -- Stop
+            # promises the results found so far are kept -- confused
+            # completeness with validity. Stop keeps what THIS search found,
+            # and a search whose seed never ran found nothing for the query
+            # that was typed; the rows are a different question's answer.
+            # Losing a witness's work is a cost, publishing it under the
+            # wrong heading is a defect.
+            #
+            # A seed whose rows were CACHED is not dispatched at all, so it
+            # files no report and cannot fail here -- an auto-expand round
+            # is unaffected.
             _seed_failed = any(
                 r.get('witness_id') == pw.WITNESS_SEED_ID
                 and r.get('status') == 'failed' for r in report)
-            if _seed_failed and not partial:
+            if _seed_failed:
                 self.error_signal.emit(
                     'the source text itself could not be searched')
                 return
