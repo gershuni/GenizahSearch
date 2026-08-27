@@ -282,6 +282,60 @@ def test_a_cancel_between_witnesses_stops_the_batch_and_keeps_what_it_found():
     assert payload['main'], 'a cancelled batch threw away what it had found'
 
 
+def test_a_failed_seed_fails_the_whole_batch():
+    """Codex review round 3. The seed is not a `WitnessEntry`, so
+    `_absorb_witness_result` -- which walks `state.entries` -- never saw its
+    report. A seed that raised was recorded and then silently discarded, and a
+    LATER witness's hits were published as the answer to a source text that had
+    never been searched. Nothing on screen could reveal it.
+
+    Failing the batch rather than annotating it: without the seed's rows the
+    fused list is not an answer to the query the user typed, and publishing it
+    under that heading is the dishonest outcome, not the empty one.
+    """
+    s = _StubSearcher(
+        {'beta text': _rows(('990000000002_1r', 90))},
+        raises={'alpha text': RuntimeError('index went away')})
+    w = _worker([(WITNESS_SEED_ID, 'Your text', 'alpha text'),
+                 ('w1', 'B', 'beta text')], s)
+    w.run()
+    assert w.scan_finished_signal.calls == [], (
+        'a batch whose seed never searched published results anyway'
+    )
+    assert w.error_signal.calls, 'the seed failure was swallowed entirely'
+
+
+def test_a_failed_non_seed_witness_still_publishes():
+    """The other half. One bad witness out of seventeen must not discard the
+    other sixteen -- that is the whole reason a witness failure is per-witness
+    in the first place."""
+    s = _StubSearcher(
+        {'alpha text': _rows(('990000000001_1r', 100))},
+        raises={'beta text': RuntimeError('one witness went wrong')})
+    w = _worker([(WITNESS_SEED_ID, 'Your text', 'alpha text'),
+                 ('w1', 'B', 'beta text')], s)
+    w.run()
+    assert w.scan_finished_signal.calls, 'one failed witness sank the batch'
+    payload = w.scan_finished_signal.calls[0]
+    assert payload['witnesses_searched'] == 1
+    assert any(r['status'] == 'failed' for r in payload['witness_report'])
+
+
+def test_a_cancelled_batch_keeps_its_results_even_if_the_seed_failed():
+    """Stop promises "results found so far are kept", and that promise
+    outranks the seed rule: the user asked to stop and to keep what there
+    was."""
+    s = _StubSearcher(
+        {'two': _rows(('990000000002_1r', 90))},
+        raises={'one': RuntimeError('boom')})
+    w = _worker([(WITNESS_SEED_ID, 'Your text', 'one'),
+                 ('w1', 'B', 'two'), ('w2', 'C', 'three')],
+                s, abort_after=2)
+    w.run()
+    assert w.scan_finished_signal.calls, 'a cancelled batch lost its results'
+    assert w.scan_finished_signal.calls[0]['partial'] is True
+
+
 def test_a_cancelled_run_emits_no_perf_sample():
     """Phase 115 D-08: telemetry describes COMPLETED runs. A partial batch
     would report a fast search that did a fraction of the work."""
@@ -1781,4 +1835,73 @@ def test_the_arming_is_what_witness_report_gates():
         'arming is no longer gated on witness_report, so a re-publish can '
         'spend an auto-expand round again'
     )
+
+
+# --- Codex review round 3, 2026-08-27 --------------------------------------
+
+
+def test_provenance_excludes_witnesses_the_run_left_out():
+    """A stale witness was gathered for a DIFFERENT source text and is
+    deliberately not dispatched, so it produced none of these rows. Recording
+    it made exports and history claim it took part, and made a history re-run
+    restore the same unusable roster."""
+    st = pw.WitnessSet()
+    pw.add_texts(st, ['alpha beta gamma'], 'first work', 'Pasted text')
+    pw.add_texts(st, ['delta epsilon zeta'], 'first work', 'Pasted text')
+    st.entries[1].status = pw.STATUS_STALE
+
+    kept = pw.contributing_snapshot(st)
+    assert [r['id'] for r in kept] == [st.entries[0].id]
+    assert len(pw.snapshot(st)) == 2, (
+        'the session snapshot must still hold the whole roster -- it restores '
+        "the user's working list, not a run's provenance"
+    )
+
+
+def test_provenance_is_re_stamped_after_staleness_is_decided():
+    """Order is the fix. The first stamp runs before `mark_stale_against`, so
+    it necessarily records witnesses the run is about to leave out."""
+    src = _fn_src('run_composition')
+    assert src.index('mark_stale_against') < src.rindex(
+        '_comp_last_result_witnesses'), (
+        'provenance is stamped before the run knows which witnesses it will '
+        'actually dispatch'
+    )
+    assert 'contributing_snapshot' in src
+
+
+def test_an_errored_round_does_not_disable_auto_expand_for_good():
+    """A round dispatched asynchronously can leave through `on_comp_error`
+    instead of a completion or a render. Nothing else clears the counter
+    there, and `_run_auto_expand` refuses to start while a round is owed -- so
+    one failure disabled the control permanently."""
+    assert '_stop_auto_expand' in _fn_src('on_comp_error'), (
+        'an errored round stays owed and blocks every later auto-expand'
+    )
+
+
+def test_manual_promotion_can_reach_a_checked_filtered_manuscript():
+    """The tree shows filtered results in their own section with live
+    checkboxes. Reading only the main bucket meant ticking one and pressing
+    `Search with these too` did nothing at all, silently."""
+    src = _fn_src('_promote_checked_comp')
+    assert '_comp_last_fused_filtered' in src, (
+        'a checked manuscript from the Filtered section is unreachable'
+    )
+
+
+def test_auto_expand_still_promotes_from_the_main_ranking_only():
+    """The other half, and deliberate: auto-expand promotes a ranked frontier,
+    and a filtered row is one the user's own filter pushed out of it."""
+    src = _fn_src('_advance_auto_expand')
+    assert '_comp_last_fused_filtered' not in src, (
+        'auto-expand now promotes rows the user filtered out'
+    )
+
+
+def test_the_filtered_rows_are_recorded_wherever_the_main_rows_are():
+    """Both are stamped on every completion and cleared by New together; one
+    surviving the other is a promotion built from two different searches."""
+    assert '_comp_last_fused_filtered' in _fn_src('on_comp_scan_finished')
+    assert '_comp_last_fused_filtered' in _fn_src('_reset_composition')
 

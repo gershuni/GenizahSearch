@@ -560,6 +560,18 @@ class MultiWitnessCompositionThread(PausableSearchMixin, QThread):
             else:
                 main, filtered, truncated = fused
 
+            # A failed SEED is a failed BATCH. `_absorb_witness_result`
+            # walks `state.entries`, and the seed is not one of them, so
+            # its report was silently dropped: the user's own source text
+            # was never searched, yet a later witness's hits were published
+            # as the answer to it. Nothing on screen could reveal that.
+            _seed_failed = any(
+                r.get('witness_id') == pw.WITNESS_SEED_ID
+                and r.get('status') == 'failed' for r in report)
+            if _seed_failed and not partial:
+                self.error_signal.emit(
+                    'the source text itself could not be searched')
+                return
             self.scan_finished_signal.emit({
                 'main': main,
                 'filtered': filtered,

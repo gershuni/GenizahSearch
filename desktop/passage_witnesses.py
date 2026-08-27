@@ -469,6 +469,19 @@ def fuse_and_cap(state: WitnessSet, cap: int = None):
 
 # --- persistence -----------------------------------------------------------
 
+def contributing_snapshot(state: WitnessSet) -> list:
+    """Serialise only the witnesses a run would actually DISPATCH.
+
+    Provenance answers "what produced these rows", and a STALE witness
+    produced nothing -- it was gathered for a different source text and
+    deliberately left out of the dispatch. Snapshotting the live roster
+    instead made exports and history claim it took part, and made a history
+    re-run restore the same unusable roster.
+    """
+    keep = {e.id for e in state.entries if e.status != STATUS_STALE}
+    return [row for row in snapshot(state) if row['id'] in keep]
+
+
 def snapshot(state: WitnessSet) -> list:
     """Serialise for the session file.
 

@@ -16659,6 +16659,7 @@ class GenizahGUI(QMainWindow):
         if self.is_comp_running:
             return
         rows = list(getattr(self, '_comp_last_fused_rows', None) or [])
+        rows += list(getattr(self, '_comp_last_fused_filtered', None) or [])
         sys_ids = self._checked_comp_sys_ids(rows)
         if not sys_ids:
             return
@@ -17285,7 +17286,7 @@ class GenizahGUI(QMainWindow):
                 # and the witness column disappeared, while exports and
                 # history went on naming the witness just removed.
                 self._comp_last_result_witnesses = (
-                    passage_witnesses.snapshot(state))
+                    passage_witnesses.contributing_snapshot(state))
                 # No `witness_report` key, deliberately: that is what gates
                 # the auto-expand arming, so a re-publish cannot spend a
                 # round. It is also what keeps `_absorb_witness_result` out
@@ -24387,6 +24388,7 @@ class GenizahGUI(QMainWindow):
         self._comp_last_result_witnesses = []
         self._comp_last_result_witness_total = 0
         self._comp_last_fused_rows = []
+        self._comp_last_fused_filtered = []
         self._auto_expand_left = 0
         self._auto_expand_armed = False
         self._witness_notify('')
@@ -24751,6 +24753,15 @@ class GenizahGUI(QMainWindow):
                 if passage_witnesses.mark_stale_against(
                         self._comp_witness_state(), txt):
                     self._refresh_witness_panel()
+                # PROVENANCE, re-stamped now that staleness is known. The
+                # earlier stamp ran before this call and so recorded the
+                # whole live roster -- including witnesses this run is
+                # about to leave OUT. Exports and history read that list,
+                # so they claimed the stale witnesses took part and a
+                # history re-run restored the same unusable roster.
+                self._comp_last_result_witnesses = (
+                    passage_witnesses.contributing_snapshot(
+                        self._comp_witness_state()))
 
             if _comp_multi:
                 # Restored manuscript witnesses carry no text; put it
@@ -24924,6 +24935,12 @@ class GenizahGUI(QMainWindow):
 
     def on_comp_error(self, err):
         """Handle errors during composition search."""
+        # A round dispatched asynchronously can leave through HERE instead
+        # of through a completion or a render -- the index replaced mid-
+        # batch, say. Nothing else clears the counter on this path, and a
+        # round left owed makes every LATER `_run_auto_expand` return
+        # immediately: one failure would disable the control for good.
+        self._stop_auto_expand('')
         self.reset_comp_ui()
         self._refresh_comp_method_enabled()
         if getattr(self, '_comp_last_result_method', 'chunk') == 'passage':
@@ -24967,6 +24984,15 @@ class GenizahGUI(QMainWindow):
             # arrive -- including a plain single-witness run -- so promoting
             # never works from a previous search's rows.
             self._comp_last_fused_rows = list(result_obj.get('main') or [])
+            # Kept separately because the two have different consumers.
+            # Manual promotion reads BOTH: the tree shows filtered results
+            # in their own section with live checkboxes, so a user could
+            # tick one and have `Search with these too` silently do
+            # nothing. Auto-expand still reads main only -- it promotes a
+            # ranked frontier, and a filtered row is one the user's own
+            # filter pushed out of it.
+            self._comp_last_fused_filtered = list(
+                result_obj.get('filtered') or [])
             # PROVENANCE: how many witnesses produced THESE rows. Adding a
             # witness afterwards must not change the denominator printed
             # beside rows an earlier search produced.
