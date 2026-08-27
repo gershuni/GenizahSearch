@@ -16689,12 +16689,20 @@ class GenizahGUI(QMainWindow):
         return [s for s in wanted if s in checked]
 
     def _promote_sys_ids(self, sys_ids, rows):
-        """Turn manuscripts into witnesses and search them."""
+        """Turn manuscripts into witnesses and search them.
+
+        Returns how many witnesses were actually ADDED. Auto-expand needs
+        the number: it has already spent a round by the time it calls this,
+        and a promotion can add nothing at all -- every candidate can fail
+        text loading, or be rejected as too short, too long or duplicate.
+        No witness added means no search, which means no completion, which
+        means nothing left to advance or clear the round it spent.
+        """
         already = {e.sys_id for e in self._comp_witness_state().entries
                    if e.sys_id}
         sys_ids = [s for s in sys_ids if s not in already]
         if not sys_ids:
-            return
+            return 0
         headers = passage_witness_source.witness_headers_for(sys_ids, rows)
         texts, failed = passage_witness_source.collect_witness_texts(
             sys_ids, rows,
@@ -16734,6 +16742,7 @@ class GenizahGUI(QMainWindow):
         self._refresh_witness_panel()
         if added:
             self._search_pending_witnesses()
+        return added
 
     # --- auto-expand -------------------------------------------------------
     # Seed -> top-K -> repeat. Measured on Megillat Antiochus: frontier
@@ -16790,7 +16799,11 @@ class GenizahGUI(QMainWindow):
         self._witness_notify(tr("Round {r}/{n}").format(
             r=self._auto_expand_round,
             n=self._auto_expand_round + self._auto_expand_left))
-        self._promote_sys_ids(candidates, rows)
+        if not self._promote_sys_ids(candidates, rows):
+            # The round is already spent. Left owed, the positive counter
+            # blocks every FUTURE auto-expand too, because
+            # `_run_auto_expand` refuses to start while one is outstanding.
+            self._stop_auto_expand('')
 
     def _stop_auto_expand(self, message):
         self._auto_expand_left = 0
@@ -17261,12 +17274,27 @@ class GenizahGUI(QMainWindow):
                 "previous witness list — run the search again to update "
                 "them."))
         else:
-            fused = passage_witnesses.fuse_and_cap(self._comp_witness_state())
+            state = self._comp_witness_state()
+            fused = passage_witnesses.fuse_and_cap(state)
             if fused is not None:
                 main, filtered, _truncated = fused
+                # This is a re-publish, so it carries the same provenance a
+                # real completion would. Omitting the count made
+                # `on_comp_scan_finished` read zero witnesses: it reset a
+                # fused sort back to raw score even with contributors left,
+                # and the witness column disappeared, while exports and
+                # history went on naming the witness just removed.
+                self._comp_last_result_witnesses = (
+                    passage_witnesses.snapshot(state))
+                # No `witness_report` key, deliberately: that is what gates
+                # the auto-expand arming, so a re-publish cannot spend a
+                # round. It is also what keeps `_absorb_witness_result` out
+                # of this path -- there is no new per-witness data to fold.
                 self.on_comp_scan_finished({
                     'main': main, 'filtered': filtered, 'known': [],
                     'dropped_text_lookup_failures': 0, 'partial': False,
+                    'witnesses_searched': passage_witnesses.searched_count(
+                        state),
                 })
         self._schedule_session_save()
 
@@ -24202,6 +24230,12 @@ class GenizahGUI(QMainWindow):
             # only -- grouping keeps today's Stop behaviour exactly.
             if self._refuse_stop_during_passage_scan():
                 return
+            # Stop means stop the WHOLE expansion, not just this batch.
+            # Both cancellation paths still render -- the worker emits
+            # partial rows, and interrupting grouping falls back to the
+            # ungrouped view -- so without this the render-side trigger
+            # starts the next round and Stop reads as a pause.
+            self._stop_auto_expand('')
             self._apply_pause_state(self._pause_comp, 'hidden')
             self._pause_comp.state = 'idle'
             if getattr(self, 'group_thread', None) and self.group_thread.isRunning():
@@ -24233,6 +24267,8 @@ class GenizahGUI(QMainWindow):
         """Cancel composition search gracefully (called by Escape shortcut)."""
         if self._refuse_stop_during_passage_scan():
             return
+        # Escape is a Stop, and a Stop ends the expansion too.
+        self._stop_auto_expand('')
         self._apply_pause_state(self._pause_comp, 'hidden')
         self._pause_comp.state = 'idle'
         if self.is_comp_running and getattr(self, 'comp_thread', None) and self.comp_thread.isRunning():

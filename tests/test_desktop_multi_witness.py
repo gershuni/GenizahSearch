@@ -1661,3 +1661,124 @@ def test_the_main_button_marks_stale_witnesses_like_the_witness_button_does():
         'the main Analyze button never marks witnesses stale'
     )
 
+
+# --- Codex review round 2, 2026-08-27 --------------------------------------
+# All three are consequences of moving the auto-expand trigger to the render
+# point (round 1, P2), or gaps that move exposed.
+
+
+def test_stop_ends_the_whole_expansion_not_just_the_current_batch():
+    """A cancelled run still RENDERS -- the worker emits partial rows, and
+    interrupting grouping falls back to the ungrouped view. Both reach the
+    render-side trigger with the round still owed, so without this Stop ended
+    one batch and immediately began another: a pause, not a stop."""
+    for fn in ('toggle_composition', 'cancel_composition'):
+        src = _fn_src(fn)
+        assert '_stop_auto_expand' in src, (
+            '%s cancels the batch but leaves the expansion owing a round' % fn
+        )
+
+
+def test_stop_clears_the_expansion_before_anything_can_render():
+    """Order matters: the grouping-interrupt branch of `toggle_composition`
+    calls `display_comp_results` itself, so clearing afterwards would be too
+    late."""
+    src = _fn_src('toggle_composition')
+    assert src.index('_stop_auto_expand') < src.index(
+        'self.display_comp_results('), (
+        'the expansion is cleared after the fallback has already rendered'
+    )
+
+
+def test_a_round_that_promotes_nothing_stops_the_expansion():
+    """`_advance_auto_expand` spends the round BEFORE promoting. Every
+    candidate can still fail text loading or be rejected as too short, too
+    long or duplicate -- and with nothing added there is no search, so no
+    completion, so nothing left to advance or clear the round just spent. The
+    positive counter then blocks every future auto-expand, because
+    `_run_auto_expand` refuses to start while one is owed."""
+    src = _fn_src('_advance_auto_expand')
+    assert 'if not self._promote_sys_ids(' in src, (
+        'the round is spent without checking whether anything was promoted'
+    )
+    tail = src[src.index('_promote_sys_ids('):]
+    assert '_stop_auto_expand' in tail
+
+
+def test_promotion_reports_how_many_witnesses_it_added():
+    """The number is the whole signal -- `_advance_auto_expand` cannot tell a
+    productive round from a barren one without it."""
+    src = _fn_src('_promote_sys_ids')
+    assert 'return 0' in src, 'the early no-candidates exit reports nothing'
+    assert src.rstrip().endswith('return added'), (
+        'the normal exit reports nothing'
+    )
+
+
+def _republish_keys():
+    """The literal keys of the dict `_after_witness_removal` publishes.
+
+    Read from the AST, not from the source text: this file has already been
+    caught twice matching an explanatory COMMENT instead of the code it
+    describes, and the keys are exactly what the consumer branches on.
+    """
+    src = _app_src()
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.FunctionDef)
+                and node.name == '_after_witness_removal'):
+            for call in ast.walk(node):
+                if (isinstance(call, ast.Call)
+                        and isinstance(call.func, ast.Attribute)
+                        and call.func.attr == 'on_comp_scan_finished'):
+                    arg = call.args[0]
+                    assert isinstance(arg, ast.Dict), (
+                        'the re-publish no longer passes a dict literal; this '
+                        'guard can no longer see what it publishes'
+                    )
+                    return {k.value for k in arg.keys
+                            if isinstance(k, ast.Constant)}
+    raise AssertionError('the re-publish call was not found')
+
+
+def test_a_removal_republish_carries_its_witness_count():
+    """Without it `on_comp_scan_finished` reads zero witnesses: it resets a
+    fused sort back to raw score even with contributors left, and hides the
+    witness column, on a result set that is still fused."""
+    assert 'witnesses_searched' in _republish_keys(), (
+        're-published rows claim no witnesses produced them'
+    )
+    assert 'searched_count' in _fn_src('_after_witness_removal'), (
+        'the count is hard-coded rather than read from the surviving rows'
+    )
+
+
+def test_a_removal_republish_refreshes_the_witness_provenance():
+    """`_comp_last_result_witnesses` is what exports and history name. Left
+    alone, both went on naming the witness that had just been removed."""
+    assert '_comp_last_result_witnesses' in _fn_src('_after_witness_removal'), (
+        'exports and history still name the removed witness'
+    )
+
+
+def test_a_removal_republish_cannot_spend_an_auto_expand_round():
+    """It is a re-publish, not a completed search. The arming in
+    `on_comp_scan_finished` is gated on `witness_report`, and this dict
+    deliberately omits that key -- pinned here because adding it would look
+    entirely harmless."""
+    assert 'witness_report' not in _republish_keys(), (
+        'the synthetic completion now arms auto-expand, so removing a witness '
+        'can start a search round'
+    )
+
+
+def test_the_arming_is_what_witness_report_gates():
+    """The other half of the pair above: if the arming ever moves out from
+    under that key, the test above stops meaning anything."""
+    src = _fn_src('on_comp_scan_finished')
+    gate = src.index("'witness_report' in result_obj")
+    assert src.index('_auto_expand_armed') > gate, (
+        'arming is no longer gated on witness_report, so a re-publish can '
+        'spend an auto-expand round again'
+    )
+
