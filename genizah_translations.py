@@ -5227,6 +5227,23 @@ TRANSLATIONS.update({
         'טען קובצי עדים',
     'Split each file on blank lines':
         'פצל כל קובץ לפי שורות ריקות',
+    'Remove selected':
+        'הסר את הנבחרים',
+    'Remove all':
+        'הסר את כולם',
+    'Remove all {n} witnesses?':
+        'להסיר את כל {n} העדים?',
+    'Choose one or more files. Each file becomes a witness.':
+        'בחרו קובץ אחד או יותר. כל קובץ הופך לעד.',
+    'Text files (*.txt);;All files (*)':
+        'קובצי טקסט (*.txt);;כל הקבצים (*)',
+    'Could not read {n} files: {names}':
+        'לא ניתן היה לקרוא {n} קבצים: {names}',
+    # Used by the WEB page too (three call sites in
+    # web/pages/parallels.py), which had no entry for it -- so Hebrew
+    # readers there saw English until this was approved.
+    'Witness text is too long (max {cap} characters)':
+        'טקסט העד ארוך מדי (עד {cap} תווים)',
     'a letter-level search is running':
         'חיפוש ברמת האות פועל כעת',
     'Build letter-level index?':

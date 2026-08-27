@@ -502,6 +502,43 @@ _SHARED_WITH_WEB = (
 )
 
 
+# The six that predate this work and are tracked separately. Listed rather
+# than pattern-matched so adding a seventh is a deliberate act.
+_UNTRANSLATED_BEFORE_THIS_WORK = {
+    'Filter Local', 'JSON', 'No Local', 'Only Local', 'PGP',
+    'Library Hide filter not applied to search/composition',
+}
+
+
+@pytest.mark.parametrize('rel_path', ['genizah_app.py',
+                                      os.path.join('web', 'pages',
+                                                   'parallels.py')])
+def test_every_tr_string_has_a_hebrew_entry(rel_path):
+    """`tr()` returns its ARGUMENT when the table has no entry, so a missing
+    translation is invisible on an English machine and shows up as a lone
+    English control on a Hebrew one. Nothing fails; it just reads wrong.
+
+    That is how the web shipped "Witness text is too long (max {cap}
+    characters)" untranslated across three call sites -- found only when the
+    desktop needed the same string.
+
+    Both files, because these two surfaces share one table: an English string
+    added to either without an entry is the same defect.
+    """
+    import genizah_translations
+
+    used = _tr_strings(rel_path)
+    missing = sorted(
+        s for s in used
+        if s not in genizah_translations.TRANSLATIONS
+        and s.isascii()                       # Hebrew literals are their own text
+        and s not in _UNTRANSLATED_BEFORE_THIS_WORK
+    )
+    assert missing == [], (
+        'these tr() strings have no Hebrew and will render in English on a '
+        'Hebrew machine: %r' % (missing,))
+
+
 @pytest.mark.parametrize('shared', _SHARED_WITH_WEB)
 def test_the_desktop_and_web_say_the_same_thing(shared):
     """Identical English on both surfaces, so one TRANSLATIONS entry serves
