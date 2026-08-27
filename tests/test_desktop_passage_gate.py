@@ -132,6 +132,10 @@ class _Win:
     _PASSAGE_FORCED_CONTROLS = APP._PASSAGE_FORCED_CONTROLS
     _passage_scan_in_flight = APP._passage_scan_in_flight
     _passage_batch_in_flight = APP._passage_batch_in_flight
+    _witness_notify = APP._witness_notify
+    _refresh_witness_panel = APP._refresh_witness_panel
+    _comp_witness_state = APP._comp_witness_state
+    _witness_dialog_is_open = APP._witness_dialog_is_open
     _reset_composition = APP._reset_composition
     _retry_pending_reset = APP._retry_pending_reset
     _refuse_stop_during_passage_scan = APP._refuse_stop_during_passage_scan
@@ -1974,7 +1978,14 @@ def test_stopping_a_batch_says_the_current_witness_finishes_first(monkeypatch):
     as refusing one that would work."""
     w = _batch_window(monkeypatch)
     APP._refuse_stop_during_passage_scan(w)
-    assert 'witness' in w.lbl_comp_status.text.lower()
+    # Compared against tr(), not an English substring. The earlier version
+    # asserted `'witness' in ...`, which passed only because the string had
+    # no Hebrew entry yet -- it was pinned to the translation GAP, and adding
+    # the approved Hebrew broke it.
+    from genizah_core import tr as _tr
+    assert w.lbl_comp_status.text == _tr(
+        "Stopping after the current witness finishes. Results found so far "
+        "are kept.")
 
 
 def test_a_chunk_search_is_untouched_by_any_of_this():
