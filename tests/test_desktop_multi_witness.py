@@ -2014,3 +2014,100 @@ def test_a_pre_provenance_session_still_restores_something():
         'an older session file loses its result provenance entirely'
     )
 
+
+# --- Codex review round 5, 2026-08-27 --------------------------------------
+
+
+def _restored(comp):
+    """A window with `comp` restored through the REAL method.
+
+    Only the UI sinks are stubbed -- a notification label and a panel
+    redraw. Everything that decides a value is the shipped code.
+    """
+    w = _win()
+    w._comp_passage_axis_widgets = {}
+    w._witness_notify = lambda *a, **k: None
+    w._refresh_witness_panel = lambda *a, **k: None
+    w._schedule_session_save = lambda *a, **k: None
+    GAPP._restore_comp_passage_preferences(w, comp)
+    return w
+
+
+def test_a_legacy_session_recovers_its_witness_total_from_the_roster():
+    """Half a migration is worse than none: the provenance list already falls
+    back to `comp_witnesses`, so restoring the total as zero left exports
+    reporting a fused run while the witness column was hidden on the very rows
+    they describe."""
+    w = _restored({'comp_witnesses': [
+        {'id': 'w1', 'label': 'A', 'kind': 'pasted', 'sys_id': None,
+         'seed_digest': '', 'headers': [], 'text': 'alpha beta gamma'},
+        {'id': 'w2', 'label': 'B', 'kind': 'pasted', 'sys_id': None,
+         'seed_digest': '', 'headers': [], 'text': 'delta epsilon zeta'},
+    ]})
+    assert len(w._comp_last_result_witnesses) == 2
+    assert w._comp_last_result_witness_total == 3, (
+        'the seed is fused as a witness too, so two stored witnesses is three'
+    )
+
+
+def test_a_legacy_session_with_no_witnesses_stays_at_zero():
+    """A single-witness or chunk run. The column is correctly hidden, and
+    inventing a total of one would show it on every ordinary result."""
+    w = _restored({'comp_witnesses': []})
+    assert w._comp_last_result_witness_total == 0
+    w2 = _restored({})
+    assert w2._comp_last_result_witness_total == 0
+
+
+def test_a_current_session_uses_its_own_stored_total():
+    """The dedicated key wins wherever it exists -- the roster arithmetic is a
+    migration path, not a recomputation. A run whose witnesses partly failed
+    stored a total LOWER than its roster, and that number is the true one."""
+    w = _restored({
+        'comp_witnesses': [
+            {'id': 'w%d' % i, 'label': 'L', 'kind': 'pasted', 'sys_id': None,
+             'seed_digest': '', 'headers': [], 'text': 'text %d here' % i}
+            for i in range(5)],
+        'comp_result_witnesses': [
+            {'id': 'w1', 'label': 'L', 'kind': 'pasted', 'sys_id': None,
+             'seed_digest': '', 'headers': [], 'text': 'text 1 here'}],
+        'comp_result_witness_total': 2,
+    })
+    assert w._comp_last_result_witness_total == 2, (
+        'the roster fallback overrode a stored total'
+    )
+    assert len(w._comp_last_result_witnesses) == 1
+
+
+def test_a_genuine_zero_total_survives():
+    """A chunk or single-witness run: no contributors named, no count. The
+    column must stay hidden, so the roster below must not leak into it.
+    """
+    w = _restored({
+        'comp_witnesses': [
+            {'id': 'w1', 'label': 'A', 'kind': 'pasted', 'sys_id': None,
+             'seed_digest': '', 'headers': [], 'text': 'alpha beta gamma'}],
+        'comp_result_witnesses': [],
+        'comp_result_witness_total': 0,
+    })
+    assert w._comp_last_result_witness_total == 0
+
+
+def test_a_zero_total_beside_named_contributors_is_repaired():
+    """The shape the PREVIOUS build wrote for a restored legacy session:
+    provenance recovered from the roster, total left at zero. Honouring the
+    zero would carry that contradiction into every later save -- exports
+    naming two witnesses while the column stays hidden on their rows.
+    """
+    w = _restored({
+        'comp_result_witnesses': [
+            {'id': 'w1', 'label': 'A', 'kind': 'pasted', 'sys_id': None,
+             'seed_digest': '', 'headers': [], 'text': 'alpha beta gamma'},
+            {'id': 'w2', 'label': 'B', 'kind': 'pasted', 'sys_id': None,
+             'seed_digest': '', 'headers': [], 'text': 'delta epsilon zeta'}],
+        'comp_result_witness_total': 0,
+    })
+    assert w._comp_last_result_witness_total == 3, (
+        'a total of zero was kept beside two named contributors'
+    )
+

@@ -16241,15 +16241,31 @@ class GenizahGUI(QMainWindow):
         # is not the roster above -- the user may have added one since
         # without re-running. Falls back to the roster only for sessions
         # written before provenance was persisted separately.
-        self._comp_last_result_witnesses = list(
-            comp.get('comp_result_witnesses')
-            if comp.get('comp_result_witnesses') is not None
-            else (comp.get('comp_witnesses') or []))
+        _prov = comp.get('comp_result_witnesses')
+        if _prov is None:
+            _prov = comp.get('comp_witnesses') or []
+        self._comp_last_result_witnesses = list(_prov)
         # Restored too, or a fresh start hides the witness column on
         # genuinely fused results: the column's visibility is recomputed
         # from this on every render.
-        self._comp_last_result_witness_total = int(
-            comp.get('comp_result_witness_total') or 0)
+        #
+        # The SAME fallback as the list above, or the migration is half
+        # applied: provenance would come back naming several witnesses while
+        # the total came back zero, so exports reported a fused run and the
+        # column was hidden on the very rows it describes.
+        _total = comp.get('comp_result_witness_total')
+        if not _total:
+            # Absent, and ALSO a stored zero standing beside a non-empty
+            # provenance list. That pair is never legitimate -- it is what
+            # the previous build wrote for a restored legacy session, list
+            # recovered and total not -- so honouring the zero would carry
+            # the same contradiction forward into every later save.
+            #
+            # +1 for the seed, which is fused as a witness like any other:
+            # the arithmetic `searched_count` does over `order()`. An empty
+            # list stays 0 -- a single-witness or chunk run, column hidden.
+            _total = (len(_prov) + 1) if _prov else 0
+        self._comp_last_result_witness_total = int(_total or 0)
         self._auto_expand_left = 0
         self._auto_expand_armed = False
         # And the progress line: "Witness 23/23: T-S 8H11.3" left over
