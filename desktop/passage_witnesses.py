@@ -469,6 +469,24 @@ def fuse_and_cap(state: WitnessSet, cap: int = None):
 
 # --- persistence -----------------------------------------------------------
 
+def searched_snapshot(state: WitnessSet) -> list:
+    """Serialise only the witnesses that actually produced rows.
+
+    The one honest answer to "what produced these results", and narrower
+    than `contributing_snapshot`, which can only describe INTENT: it is
+    taken before dispatch, so it still counts a witness that went on to
+    fail and, on a cancelled batch, ones never reached at all. Exports and
+    history read this list, so an intent-shaped answer inflates the count
+    against the worker's own `witnesses_searched` and restores witnesses
+    that produced none of the saved rows.
+
+    Keyed on the row caches for the same reason `searched_count` is: a
+    witness that searched and found NOTHING still took part, and dropping
+    it would make the denominator move with results.
+    """
+    return [row for row in snapshot(state) if row['id'] in state.rows]
+
+
 def contributing_snapshot(state: WitnessSet) -> list:
     """Serialise only the witnesses a run would actually DISPATCH.
 

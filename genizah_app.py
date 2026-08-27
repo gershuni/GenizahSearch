@@ -15774,6 +15774,16 @@ class GenizahGUI(QMainWindow):
             # session file buys nothing.
             'comp_witnesses': passage_witnesses.snapshot(
                 self._comp_witness_state()),
+            # PROVENANCE is persisted separately, because it answers a
+            # different question from the roster above and drifts from it
+            # the moment the user edits the panel without re-running:
+            # `comp_witnesses` then holds a witness that produced none of
+            # the rows still on screen. Restoring the roster as provenance
+            # made exports and freshly saved history claim it contributed.
+            'comp_result_witnesses': list(
+                getattr(self, '_comp_last_result_witnesses', None) or []),
+            'comp_result_witness_total': int(
+                getattr(self, '_comp_last_result_witness_total', 0) or 0),
         }
 
     def _comp_chunk_preference(self, name):
@@ -16227,9 +16237,19 @@ class GenizahGUI(QMainWindow):
         # ones". A restore describes a whole state, not a patch to one.
         self._comp_witnesses = passage_witnesses.restore(
             comp.get('comp_witnesses'), tr("Pasted text"))
-        # The rows those witnesses produced belong to the old search too.
+        # The rows on screen were produced by the witnesses SEARCHED, which
+        # is not the roster above -- the user may have added one since
+        # without re-running. Falls back to the roster only for sessions
+        # written before provenance was persisted separately.
         self._comp_last_result_witnesses = list(
-            comp.get('comp_witnesses') or [])
+            comp.get('comp_result_witnesses')
+            if comp.get('comp_result_witnesses') is not None
+            else (comp.get('comp_witnesses') or []))
+        # Restored too, or a fresh start hides the witness column on
+        # genuinely fused results: the column's visibility is recomputed
+        # from this on every render.
+        self._comp_last_result_witness_total = int(
+            comp.get('comp_result_witness_total') or 0)
         self._auto_expand_left = 0
         self._auto_expand_armed = False
         # And the progress line: "Witness 23/23: T-S 8H11.3" left over
@@ -16775,6 +16795,15 @@ class GenizahGUI(QMainWindow):
         left = getattr(self, '_auto_expand_left', 0)
         if left <= 0:
             return
+        # The method combo is re-enabled by `on_comp_scan_finished` BEFORE
+        # `start_grouping` marks the UI busy, so a user can switch to chunk
+        # in the gap between this round being armed and the timer firing.
+        # Promotion would then add witnesses that `_search_pending_
+        # witnesses` refuses to search, leaving them stranded and the
+        # counter positive -- which blocks every later auto-expand.
+        if self._comp_method() != 'passage':
+            self._stop_auto_expand('')
+            return
         state = self._comp_witness_state()
         cap = passage_witnesses.DESKTOP_WITNESS_CAP
         topk = getattr(self, '_auto_expand_topk', 5)
@@ -17285,8 +17314,11 @@ class GenizahGUI(QMainWindow):
                 # fused sort back to raw score even with contributors left,
                 # and the witness column disappeared, while exports and
                 # history went on naming the witness just removed.
+                # `searched_snapshot`, not `contributing_snapshot`: these
+                # rows ARE the row caches, so the witnesses that produced
+                # them are exactly the ones keyed there.
                 self._comp_last_result_witnesses = (
-                    passage_witnesses.contributing_snapshot(state))
+                    passage_witnesses.searched_snapshot(state))
                 # No `witness_report` key, deliberately: that is what gates
                 # the auto-expand arming, so a re-publish cannot spend a
                 # round. It is also what keeps `_absorb_witness_result` out
@@ -24315,6 +24347,13 @@ class GenizahGUI(QMainWindow):
         # (up to ~19s at Deepest), so Reset asks it to stop and comes back
         # later, the same non-blocking retry `_defer_close_for_passage` uses.
         if self._passage_batch_in_flight():
+            # BEFORE the cancel, not in the deferred reset 400 ms later.
+            # The cancelled batch's partial completion renders first, arms
+            # the expansion and schedules the next round at ZERO delay --
+            # which in flat mode reliably beats the retry timer. New then
+            # cancels a round it just spawned, once per round, and takes a
+            # witness-search duration each time to clear.
+            self._stop_auto_expand('')
             self.comp_thread.request_cancel()
             if not getattr(self, '_reset_pending', False):
                 self._reset_pending = True
@@ -25014,6 +25053,14 @@ class GenizahGUI(QMainWindow):
                 self.comp_sort_reverse = True
         if isinstance(result_obj, dict) and 'witness_report' in result_obj:
             self._absorb_witness_result(result_obj)
+            # PROVENANCE, final. The dispatch-time stamp could only record
+            # INTENT -- it still counted witnesses that went on to fail,
+            # and on a cancelled batch ones never reached. Exports and
+            # history read this, so it has to agree with the worker's own
+            # `witnesses_searched`, which counts row caches.
+            self._comp_last_result_witnesses = (
+                passage_witnesses.searched_snapshot(
+                    self._comp_witness_state()))
             self._refresh_witness_panel()
             # Each auto-expand round IS a search, so the next one starts from
             # a finished search rather than from a loop. ARMED here, FIRED

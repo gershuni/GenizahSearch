@@ -1905,3 +1905,112 @@ def test_the_filtered_rows_are_recorded_wherever_the_main_rows_are():
     assert '_comp_last_fused_filtered' in _fn_src('on_comp_scan_finished')
     assert '_comp_last_fused_filtered' in _fn_src('_reset_composition')
 
+
+# --- Codex review round 4, 2026-08-27 --------------------------------------
+# Two of these are the SIXTH and SEVENTH exits from a dispatched round -- the
+# ones I asked to be found after fixing an instance and missing a sibling twice
+# running. The invariant: every path out either advances the round or clears it.
+
+
+def test_new_clears_the_expansion_before_it_defers():
+    """New during a batch requests a cancel and comes back in 400 ms. The
+    cancelled batch's partial completion renders FIRST, arms the expansion and
+    schedules the next round at zero delay -- which beats the retry timer. New
+    then cancels a round it just spawned, once per remaining round, taking a
+    whole witness-search each time to clear."""
+    src = _fn_src('_reset_composition')
+    defer = src.index('_passage_batch_in_flight')
+    tail = src[defer:]
+    assert '_stop_auto_expand' in tail, (
+        'New defers without clearing the expansion, so it races the round it '
+        'is trying to cancel'
+    )
+    assert tail.index('_stop_auto_expand') < tail.index('request_cancel'), (
+        'the expansion is cleared after the cancel, which is the race itself'
+    )
+
+
+def test_a_round_checks_the_method_before_it_promotes():
+    """The method combo is re-enabled before `start_grouping` marks the UI
+    busy, so a user can switch to chunk between a round being armed and the
+    timer firing. Promotion would then add witnesses `_search_pending_
+    witnesses` refuses to search -- stranded witnesses, and a counter left
+    positive that blocks every later auto-expand."""
+    src = _fn_src('_advance_auto_expand')
+    assert '_comp_method' in src, (
+        'a round can fire after the user has left letter-level mode'
+    )
+    assert src.index('_comp_method') < src.index('_promote_sys_ids'), (
+        'the method is checked only after witnesses have been promoted'
+    )
+
+
+def test_provenance_counts_only_witnesses_that_produced_rows():
+    """`contributing_snapshot` describes INTENT -- it is taken before dispatch,
+    so it still counts a witness that went on to fail and, on a cancelled
+    batch, ones never reached. Exports and history read this list, so it has to
+    agree with the worker's own `witnesses_searched`."""
+    st = pw.WitnessSet()
+    pw.add_texts(st, ['alpha beta gamma'], 'work', 'Pasted text')
+    pw.add_texts(st, ['delta epsilon zeta'], 'work', 'Pasted text')
+    pw.add_texts(st, ['eta theta iota'], 'work', 'Pasted text')
+    searched, failed, never_reached = st.entries
+    st.rows[searched.id] = [{'raw_header': 'h', 'score': 1}]
+    failed.status = pw.STATUS_FAILED
+    # never_reached stays pending, as a cancelled batch leaves it
+
+    ids = [r['id'] for r in pw.searched_snapshot(st)]
+    assert ids == [searched.id], (
+        'provenance names witnesses that produced none of these rows'
+    )
+    assert len(pw.contributing_snapshot(st)) == 3, (
+        'the dispatch-time stamp should still describe what was attempted'
+    )
+
+
+def test_a_witness_that_searched_and_found_nothing_still_counts():
+    """It was consulted. Dropping it would make the denominator move with
+    results -- the same rule `searched_count` follows."""
+    st = pw.WitnessSet()
+    pw.add_texts(st, ['alpha beta gamma'], 'work', 'Pasted text')
+    st.rows[st.entries[0].id] = []
+    assert len(pw.searched_snapshot(st)) == 1
+
+
+def test_provenance_is_stamped_after_the_outcomes_are_known():
+    src = _fn_src('on_comp_scan_finished')
+    assert src.index('_absorb_witness_result') < src.index(
+        'searched_snapshot'), (
+        'provenance is built before the run outcomes have been folded in'
+    )
+
+
+def test_the_session_stores_provenance_apart_from_the_working_roster():
+    """They answer different questions and drift the moment the user edits the
+    panel without re-running: `comp_witnesses` then holds a witness that
+    produced none of the rows still on screen."""
+    src = _fn_src('_comp_passage_preference_fields')
+    assert 'comp_result_witnesses' in src
+    assert 'comp_result_witness_total' in src, (
+        'the witness total is not persisted, so a fresh start hides the '
+        'witness column on genuinely fused results'
+    )
+
+
+def test_a_restore_reads_provenance_from_its_own_key():
+    src = _fn_src('_restore_comp_passage_preferences')
+    assert 'comp_result_witnesses' in src, (
+        'the restore still assigns the working roster as provenance'
+    )
+    assert '_comp_last_result_witness_total' in src
+
+
+def test_a_pre_provenance_session_still_restores_something():
+    """Sessions written before this key existed must not come back with an
+    empty provenance and a hidden witness column."""
+    src = _fn_src('_restore_comp_passage_preferences')
+    i = src.index('comp_result_witnesses')
+    assert 'comp_witnesses' in src[i:i + 400], (
+        'an older session file loses its result provenance entirely'
+    )
+
