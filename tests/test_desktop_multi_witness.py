@@ -599,6 +599,42 @@ def _fn_src(name):
     raise AssertionError('%s not found' % name)
 
 
+def _busy_flag_is_followed_by(fn_name, call_name):
+    """True when `fn_name` calls `call_name` UNCONDITIONALLY after setting
+    `self.is_comp_running = True`.
+
+    Both halves are load-bearing, and each was learned from a mutation that
+    survived without it:
+
+    * **After the flag** -- `run_composition` refreshes the panel elsewhere
+      too, so a presence check was satisfied by an unrelated call.
+    * **Unconditionally** -- it also refreshes inside the cache-invalidation
+      branch, which does NOT fire when the query is unchanged. That is exactly
+      the case in the finding: a batch re-run with an unchanged cache left the
+      removal buttons visibly live while every click was refused. A nested
+      call cannot carry this property, so only top-level statements count.
+    """
+    src = _app_src()
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.FunctionDef) and node.name == fn_name:
+            seen_flag = False
+            for stmt in node.body:          # TOP LEVEL only, deliberately
+                if isinstance(stmt, ast.Assign):
+                    for tgt in stmt.targets:
+                        if (isinstance(tgt, ast.Attribute)
+                                and tgt.attr == 'is_comp_running'
+                                and isinstance(stmt.value, ast.Constant)
+                                and stmt.value.value is True):
+                            seen_flag = True
+                if (seen_flag and isinstance(stmt, ast.Expr)
+                        and isinstance(stmt.value, ast.Call)
+                        and isinstance(stmt.value.func, ast.Attribute)
+                        and stmt.value.func.attr == call_name):
+                    return True
+            return False
+    raise AssertionError('%s not found' % fn_name)
+
+
 def _calls_in(name):
     """The attribute calls inside `name`, in source order, as bare names.
 
@@ -2206,20 +2242,132 @@ def test_removal_is_allowed_again_once_the_batch_ends():
     assert w._comp_witness_state().entries == []
 
 
-def test_the_removal_buttons_go_dead_while_a_batch_runs():
-    """The guard enforces; the disable EXPLAINS. A click that silently does
-    nothing reads as a broken button."""
+class _FakeWidget:
+    """Enough of a Qt widget for `_refresh_witness_panel` to drive."""
+
+    def __init__(self):
+        self.enabled = None
+        self.visible = None
+        self.text = None
+        self.tooltip = None
+
+    def setEnabled(self, v):
+        self.enabled = bool(v)
+
+    def setVisible(self, v):
+        self.visible = bool(v)
+
+    def setText(self, t):
+        self.text = t
+
+    def setToolTip(self, t):
+        self.tooltip = t
+
+    def setTextAlignment(self, _a):
+        pass
+
+    def setRowCount(self, n):
+        self.rows = n
+
+    def setItem(self, *_a):
+        pass
+
+    def setData(self, *_a):
+        pass
+
+    def setFlags(self, *_a):
+        pass
+
+
+def _panel_window(monkeypatch, running, entries=1):
+    """A window whose witness DIALOG is open, so the panel refresh reaches
+    the buttons. Qt-free: the only Qt type the refresh constructs is
+    `QTableWidgetItem`, which is swapped for a plain stub."""
     w = _win()
-    pw.add_texts(w._comp_witness_state(), ['alpha beta gamma'],
-                 w._comp_seed_text(), 'Pasted text')
-    src = _fn_src('_refresh_witness_panel')
-    assert '_witness_edits_are_locked' in src, (
-        'the removal buttons stay live during a batch'
+    for i in range(entries):
+        pw.add_texts(w._comp_witness_state(), ['alpha beta gamma %d' % i],
+                     w._comp_seed_text(), 'Pasted text')
+    monkeypatch.setattr(genizah_app, 'QTableWidgetItem',
+                        lambda *a, **k: _FakeWidget())
+    for name in ('btn_comp_witnesses', 'comp_witness_table',
+                 'comp_witness_stale_row', 'lbl_comp_witness_stale',
+                 'btn_comp_witness_run', 'btn_comp_witness_retry',
+                 'btn_comp_witness_remove', 'btn_comp_witness_remove_all',
+                 'btn_comp_auto_expand', 'btn_comp_witness_promote'):
+        setattr(w, name, _FakeWidget())
+    w._witness_dialog_is_open = lambda: True
+    w._has_comp_results = lambda: True
+    w._witness_status_item = lambda e: _FakeWidget()
+    w.is_comp_running = running
+    GAPP._refresh_witness_panel(w)
+    return w
+
+
+def test_the_removal_buttons_go_dead_while_a_batch_runs(monkeypatch):
+    """The guard enforces; the disable EXPLAINS. A click that silently does
+    nothing reads as a broken button.
+
+    Calls the refresh and READS the buttons. The previous version of this test
+    checked that the helper's NAME appeared in the function source and,
+    separately, that the helper returned the right value -- which is true of a
+    refresh that never runs at the moment the flag changes, and that is exactly
+    the defect it missed (Codex review round 7).
+    """
+    w = _panel_window(monkeypatch, running=True)
+    assert w.btn_comp_witness_remove.enabled is False
+    assert w.btn_comp_witness_remove_all.enabled is False
+
+
+def test_the_removal_buttons_come_back_when_the_run_ends(monkeypatch):
+    w = _panel_window(monkeypatch, running=False)
+    assert w.btn_comp_witness_remove.enabled is True
+    assert w.btn_comp_witness_remove_all.enabled is True
+
+
+def test_an_empty_roster_leaves_the_removals_dead_either_way(monkeypatch):
+    """Nothing to remove is its own reason, independent of the run."""
+    for running in (True, False):
+        w = _panel_window(monkeypatch, running=running, entries=0)
+        assert w.btn_comp_witness_remove.enabled is False
+
+
+def test_starting_a_run_recomputes_the_buttons(monkeypatch):
+    """`run_composition` sets the busy flag; nothing else recomputes the
+    buttons on the way IN, so without a refresh there they stayed visibly live
+    while every click was refused."""
+    # AFTER the flag, not merely present: this function already refreshes
+    # the panel elsewhere, so a presence check was satisfied by that call
+    # and could not tell the new one had been deleted.
+    assert _busy_flag_is_followed_by(
+        'run_composition', '_refresh_witness_panel'), (
+        'the panel is never refreshed after the run marks itself busy'
     )
-    w.is_comp_running = True
-    assert GAPP._witness_edits_are_locked(w) is True
-    w.is_comp_running = False
-    assert GAPP._witness_edits_are_locked(w) is False
+
+
+def test_grouping_recomputes_the_buttons_too():
+    """The default grouped flow is the worse half: `on_comp_scan_finished`
+    refreshes while the flag is FALSE, then `start_grouping` sets it true
+    again -- so the buttons came back live for the whole grouping phase."""
+    assert _busy_flag_is_followed_by(
+        'start_grouping', '_refresh_witness_panel'), (
+        'the buttons come back live for the whole grouping phase'
+    )
+
+
+def test_a_history_restore_is_refused_while_a_batch_owns_the_roster():
+    """A restore REPLACES the witness list, renumbering it w1..wN, while the
+    worker holds the OLD roster by value -- so `_absorb_witness_result` would
+    attach one witness's rows and status to another and publish them under the
+    restored source text."""
+    calls = _calls_in('_restore_comp_search_from_state')
+    assert '_witness_edits_are_locked' in calls, (
+        'a history entry can be restored on top of a running batch'
+    )
+    src = _fn_src('_restore_comp_search_from_state')
+    assert src.index('_witness_edits_are_locked') < src.index(
+        'setPlainText'), (
+        'the roster is replaced before the guard runs'
+    )
 
 
 def test_a_close_unparks_a_paused_batch():

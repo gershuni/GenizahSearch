@@ -24598,6 +24598,12 @@ class GenizahGUI(QMainWindow):
         self._pause_comp.reset_for_run(_comp_run_id, time.monotonic())
 
         self.is_comp_running = True
+        # The dialog is modeless and may be open. Its removal buttons are
+        # enabled from this flag, and nothing else recomputes them on the
+        # way into a run -- so without this they stay visibly live while
+        # every click is silently refused, which is the exact 'broken
+        # button' the disable exists to prevent.
+        self._refresh_witness_panel()
         self.comp_search_start_time = time.time()
         self.comp_chunks_processed = 0
         self.comp_chunks_total = 0
@@ -25224,6 +25230,11 @@ class GenizahGUI(QMainWindow):
         self._apply_pause_state(self._pause_comp, 'hidden')
         self._pause_comp.state = 'idle'
         self.is_comp_running = True
+        # `on_comp_scan_finished` refreshed the panel while the flag was
+        # FALSE, a few lines before this set it true again -- so in the
+        # default grouped flow the buttons came back live for the whole
+        # grouping phase.
+        self._refresh_witness_panel()
         # Phase 146: read by `_refresh_comp_method_enabled` (the method combo
         # stays frozen through grouping, not just the scan) and by
         # `_passage_scan_in_flight` (the Stop guard is scoped to the SCAN --
@@ -28250,6 +28261,15 @@ class GenizahGUI(QMainWindow):
         params, filters and exclusions, switch to the composition tab and
         re-run. Legacy entries with a stored snapshot are restored instantly.
         """
+        # A restore REPLACES the witness list, renumbering it w1..wN. The
+        # running worker holds the OLD roster by value, so when it finishes
+        # `_absorb_witness_result` matches its report against ids that now
+        # belong to different witnesses -- attaching one witness's rows and
+        # status to another, and publishing them under the restored source
+        # text. Same rule as the removals, and for the same reason: a run
+        # owns the roster for its duration.
+        if self._witness_edits_are_locked():
+            return
         filter_pending = False
         if entry:
             self.comp_text_area.setPlainText(state.get('source_text', ''))
