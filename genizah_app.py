@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTreeWidget, QTreeWidgetItem, QListWidget, QPlainTextEdit, QStyle, QFormLayout,
                              QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
                              QScrollArea, QFrame, QSlider, QSizePolicy, QInputDialog,
-                             QToolButton, QAbstractSlider,
+                             QToolButton, QAbstractSlider, QAbstractItemView,
                              QCompleter)
 from PyQt6.QtCore import (Qt, QTimer, QUrl, pyqtSignal, QThread, QEventLoop, QEvent, QPoint)
 from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QColor,
@@ -5702,13 +5702,14 @@ class GenizahGUI(QMainWindow):
         passage_row.addWidget(self.comp_passage_width_combo)
         passage_row.addWidget(self.comp_passage_length_combo)
         passage_row.addWidget(self.comp_passage_depth_combo)
+        # Witnesses belongs with the policy selectors: they are all "how
+        # this search will run", and letter-level controls split across two
+        # places read as two features (owner, 2026-08-27).
+        self._build_witness_button(passage_row)
         passage_row.addStretch()
         in_l.addLayout(passage_row)
         in_l.addWidget(self.lbl_comp_passage_reason)
         in_l.addWidget(self.lbl_comp_passage_dropped_warning)
-
-        # Several witnesses of one work. Letter-level only.
-        self._build_witness_panel(in_l)
 
         # The paragraph controls belong to CHUNK search (letter-level has no
         # paragraph boundaries), so they come after the method that selects
@@ -16592,48 +16593,7 @@ class GenizahGUI(QMainWindow):
                 n=len(report.added)))
         elif not notes:
             notes.append(tr("Enter at least 3 words"))
-        self.lbl_comp_witness_progress.setText("  ".join(notes))
-        self.lbl_comp_witness_progress.setVisible(True)
-
-    def _remove_witness(self, wid):
-        """Drop a witness and the rows it contributed.
-
-        `can_restrip` is False when there is nothing left to re-fuse FROM --
-        a restored session, whose per-witness caches are deliberately empty.
-        The rows on screen then keep the removed witness's contributions
-        whatever happens here, so the honest move is to SAY so rather than
-        destroy a result set that exists nowhere else.
-        """
-        can_restrip = passage_witnesses.remove(self._comp_witness_state(), wid)
-        self._refresh_witness_panel()
-        if not can_restrip and self._has_comp_results():
-            self.lbl_comp_witness_progress.setText(tr(
-                "Witness removed. The results on screen were found with the "
-                "previous witness list — run the search again to update "
-                "them."))
-            self.lbl_comp_witness_progress.setVisible(True)
-        else:
-            self._refuse_or_refresh_after_witness_change()
-        self._schedule_session_save()
-
-    def _refuse_or_refresh_after_witness_change(self):
-        """Re-fuse and redraw from the rows still in hand."""
-        fused = passage_witnesses.fuse_and_cap(self._comp_witness_state())
-        if fused is None:
-            return
-        main, filtered, _truncated = fused
-        self.on_comp_scan_finished({
-            'main': main, 'filtered': filtered, 'known': [],
-            'dropped_text_lookup_failures': 0, 'partial': False,
-        })
-
-    def _retry_witness(self, wid):
-        for entry in self._comp_witness_state().entries:
-            if entry.id == wid:
-                entry.status = passage_witnesses.STATUS_PENDING
-                entry.error = ''
-        self._refresh_witness_panel()
-        self._search_pending_witnesses()
+        self._witness_notify("  ".join(notes))
 
     def _revive_stale_witnesses(self):
         passage_witnesses.revive_stale(
@@ -16751,10 +16711,9 @@ class GenizahGUI(QMainWindow):
                     shelf = None
                 names.append(shelf or sid)
             more = f' (+{len(failed) - 5})' if len(failed) > 5 else ''
-            self.lbl_comp_witness_progress.setText(tr(
+            self._witness_notify(tr(
                 "Could not load text for {n} manuscripts: {names}").format(
                 n=len(failed), names=', '.join(names) + more))
-            self.lbl_comp_witness_progress.setVisible(True)
         self._refresh_witness_panel()
         if added:
             self._search_pending_witnesses()
@@ -16771,9 +16730,7 @@ class GenizahGUI(QMainWindow):
         if self.is_comp_running or getattr(self, '_auto_expand_left', 0):
             return
         if not self._has_comp_results():
-            self.lbl_comp_witness_progress.setText(
-                tr("Run a letter-level search first."))
-            self.lbl_comp_witness_progress.setVisible(True)
+            self._witness_notify(tr("Run a letter-level search first."))
             return
         self._auto_expand_left = int(self.spin_comp_auto_rounds.value())
         self._auto_expand_topk = int(self.spin_comp_auto_topk.value())
@@ -16813,263 +16770,382 @@ class GenizahGUI(QMainWindow):
             return
         self._auto_expand_left = left - 1
         self._auto_expand_round = getattr(self, '_auto_expand_round', 0) + 1
-        self.lbl_comp_witness_progress.setText(tr("Round {r}/{n}").format(
+        self._witness_notify(tr("Round {r}/{n}").format(
             r=self._auto_expand_round,
             n=self._auto_expand_round + self._auto_expand_left))
-        self.lbl_comp_witness_progress.setVisible(True)
         self._promote_sys_ids(candidates, rows)
 
     def _stop_auto_expand(self, message):
         self._auto_expand_left = 0
         if message:
-            self.lbl_comp_witness_progress.setText(message)
-            self.lbl_comp_witness_progress.setVisible(True)
+            self._witness_notify(message)
 
-    def _build_witness_panel(self, in_l):
-        """The Witnesses panel, letter-level only.
+    def _build_witness_button(self, row):
+        """One button in the letter-level options row; everything else lives
+        in a dialog.
 
-        Hidden for chunk search, and that is a measurement rather than a
-        preference: on the chunk engine concatenation and union return the
-        IDENTICAL manuscript set (392 both ways, empty difference in both
-        directions), so there is no per-query budget to starve and nothing
-        for a fusion to add. Multi-witness there bought +2 positives of 74
-        with zero frontier gain at 4-6x the time.
+        Owner ruling 2026-08-27, from the first hand-test: an inline panel
+        put seventeen witness rows on the main window, where the labels are
+        long Hebrew lines squeezed beside a character count and a status and
+        are simply not readable. A witness list is reference material you
+        consult, not a control you keep in view, so the main window carries
+        the COUNT and the dialog carries the list.
 
-        Collapsed by default -- most searches use one text, and an always-open
-        block pushes the primary controls down the page for a feature they
-        never touch. It opens ITSELF when a witness needs attention, because
-        a warning inside a closed drawer is not a warning, and it never
-        auto-CLOSES: a user who opened it keeps it open.
+        The button sits with the three policy selectors rather than under
+        them: they are all "how this search will run", and letter-level
+        controls that live in two places read as two features.
         """
-        self.comp_witness_box = QWidget()
-        box_l = QVBoxLayout(self.comp_witness_box)
-        box_l.setContentsMargins(0, 0, 0, 0)
-        box_l.setSpacing(4)
-
-        header = QHBoxLayout()
-        self.btn_comp_witness_toggle = QToolButton()
-        self.btn_comp_witness_toggle.setText(tr("Witnesses"))
-        self.btn_comp_witness_toggle.setCheckable(True)
-        self.btn_comp_witness_toggle.setChecked(False)
-        self.btn_comp_witness_toggle.setToolButtonStyle(
-            Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.btn_comp_witness_toggle.setArrowType(Qt.ArrowType.RightArrow)
-        self.btn_comp_witness_toggle.setAutoRaise(True)
-        self.btn_comp_witness_toggle.toggled.connect(
-            self._on_witness_panel_toggled)
-        header.addWidget(self.btn_comp_witness_toggle)
-        # The collapsed header is the only thing most users see, so it
-        # carries the live counts.
-        self.lbl_comp_witness_caption = QLabel("")
-        self.lbl_comp_witness_caption.setStyleSheet("color: #7f8c8d;")
-        header.addWidget(self.lbl_comp_witness_caption)
-        header.addStretch()
-        box_l.addLayout(header)
-
-        self.comp_witness_body = QWidget()
-        body = QVBoxLayout(self.comp_witness_body)
-        body.setContentsMargins(16, 0, 0, 0)
-        body.setSpacing(4)
-
-        self.lbl_comp_witness_empty = QLabel(tr(
+        self.btn_comp_witnesses = QPushButton(tr("Witnesses"))
+        self.btn_comp_witnesses.setToolTip(tr(
             "Add other copies of this work to search with. Each is searched "
             "on its own and the results are merged."))
-        self.lbl_comp_witness_empty.setWordWrap(True)
-        self.lbl_comp_witness_empty.setStyleSheet("color: #7f8c8d;")
-        body.addWidget(self.lbl_comp_witness_empty)
+        self.btn_comp_witnesses.clicked.connect(self._open_witness_dialog)
+        row.addWidget(self.btn_comp_witnesses)
 
-        self.comp_witness_list = QWidget()
-        self.comp_witness_list_layout = QVBoxLayout(self.comp_witness_list)
-        self.comp_witness_list_layout.setContentsMargins(0, 0, 0, 0)
-        self.comp_witness_list_layout.setSpacing(2)
-        body.addWidget(self.comp_witness_list)
+        # The one line that stays on the main window: a batch shows no
+        # chunk-style percentage, so "Witness 3/17" IS the progress, and it
+        # has to be visible while the dialog is closed. Hidden otherwise.
+        self.lbl_comp_witness_progress = QLabel("")
+        self.lbl_comp_witness_progress.setStyleSheet("color: #7f8c8d;")
+        self.lbl_comp_witness_progress.setVisible(False)
+        row.addWidget(self.lbl_comp_witness_progress)
 
-        # Appears when the source text changed under a witness list gathered
-        # for a different work.
+    def _set_witness_panel_visible(self, visible):
+        """Letter-level only. Joins the same contract as the policy
+        selectors, so the button cannot survive onto a chunk search."""
+        for name in ('btn_comp_witnesses', 'lbl_comp_witness_progress'):
+            w = getattr(self, name, None)
+            if w is None:
+                continue
+            w.setVisible(bool(visible) and (
+                name != 'lbl_comp_witness_progress' or bool(w.text())))
+
+    def _open_witness_dialog(self):
+        """The witness list, its actions and auto-expand -- all here.
+
+        Modeless, and deliberately: pressing "Search now" from inside runs a
+        real search that can take minutes, and a modal dialog would hide the
+        results it produces. Kept on `self` so `_refresh_witness_panel` can
+        update it in place while a batch runs.
+        """
+        existing = getattr(self, '_witness_dialog', None)
+        if existing is not None and existing.isVisible():
+            existing.raise_()
+            existing.activateWindow()
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(tr("Witnesses"))
+        dlg.resize(720, 560)
+        dl = QVBoxLayout(dlg)
+
+        hint = QLabel(tr(
+            "Add other copies of this work to search with. Each is searched "
+            "on its own and the results are merged."))
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #7f8c8d;")
+        dl.addWidget(hint)
+
+        # A table, not a stack of rows: the labels are long Hebrew lines and
+        # need a column of their own to be legible at all.
+        self.comp_witness_table = QTableWidget(0, 3)
+        self.comp_witness_table.setHorizontalHeaderLabels(
+            [tr("Witness"), tr("Characters"), tr("Status")])
+        self.comp_witness_table.verticalHeader().setVisible(False)
+        self.comp_witness_table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows)
+        self.comp_witness_table.setEditTriggers(
+            QAbstractItemView.EditTrigger.NoEditTriggers)
+        _hdr = self.comp_witness_table.horizontalHeader()
+        _hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        _hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        _hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        dl.addWidget(self.comp_witness_table)
+
         self.comp_witness_stale_row = QWidget()
         stale_l = QHBoxLayout(self.comp_witness_stale_row)
         stale_l.setContentsMargins(0, 0, 0, 0)
         self.lbl_comp_witness_stale = QLabel("")
         self.lbl_comp_witness_stale.setWordWrap(True)
         stale_l.addWidget(self.lbl_comp_witness_stale)
-        self.btn_comp_witness_revive = QPushButton(tr("Use them anyway"))
-        self.btn_comp_witness_revive.clicked.connect(self._revive_stale_witnesses)
-        stale_l.addWidget(self.btn_comp_witness_revive)
-        self.btn_comp_witness_drop_stale = QPushButton(tr("Remove them"))
-        self.btn_comp_witness_drop_stale.clicked.connect(self._remove_stale_witnesses)
-        stale_l.addWidget(self.btn_comp_witness_drop_stale)
-        stale_l.addStretch()
+        btn_revive = QPushButton(tr("Use them anyway"))
+        btn_revive.clicked.connect(self._revive_stale_witnesses)
+        stale_l.addWidget(btn_revive)
+        btn_drop_stale = QPushButton(tr("Remove them"))
+        btn_drop_stale.clicked.connect(self._remove_stale_witnesses)
+        stale_l.addWidget(btn_drop_stale)
         self.comp_witness_stale_row.setVisible(False)
-        body.addWidget(self.comp_witness_stale_row)
+        dl.addWidget(self.comp_witness_stale_row)
 
         actions = QHBoxLayout()
-        self.btn_comp_witness_add = QPushButton(tr("Add witness text"))
-        self.btn_comp_witness_add.clicked.connect(self._open_add_witness_dialog)
-        actions.addWidget(self.btn_comp_witness_add)
-        # Promotion reuses the result tree's OWN checkboxes rather than
-        # adding a second selection concept beside them.
+        btn_add = QPushButton(tr("Add witness text"))
+        btn_add.clicked.connect(self._open_add_witness_dialog)
+        actions.addWidget(btn_add)
+        self.btn_comp_witness_remove = QPushButton(tr("Remove selected"))
+        self.btn_comp_witness_remove.clicked.connect(
+            self._remove_selected_witnesses)
+        actions.addWidget(self.btn_comp_witness_remove)
+        self.btn_comp_witness_remove_all = QPushButton(tr("Remove all"))
+        self.btn_comp_witness_remove_all.clicked.connect(
+            self._remove_all_witnesses)
+        actions.addWidget(self.btn_comp_witness_remove_all)
+        self.btn_comp_witness_retry = QPushButton(tr("Retry"))
+        self.btn_comp_witness_retry.clicked.connect(
+            self._retry_failed_witnesses)
+        self.btn_comp_witness_retry.setVisible(False)
+        actions.addWidget(self.btn_comp_witness_retry)
+        actions.addStretch()
         self.btn_comp_witness_promote = QPushButton(tr("Search with these too"))
         self.btn_comp_witness_promote.clicked.connect(self._promote_checked_comp)
         actions.addWidget(self.btn_comp_witness_promote)
         self.btn_comp_witness_run = QPushButton(tr("Search now"))
         self.btn_comp_witness_run.clicked.connect(self._search_pending_witnesses)
         actions.addWidget(self.btn_comp_witness_run)
-        actions.addStretch()
-        body.addLayout(actions)
+        dl.addLayout(actions)
 
-        self.lbl_comp_witness_progress = QLabel("")
-        self.lbl_comp_witness_progress.setStyleSheet("color: #7f8c8d;")
-        self.lbl_comp_witness_progress.setVisible(False)
-        body.addWidget(self.lbl_comp_witness_progress)
+        self.lbl_comp_witness_dialog_status = QLabel("")
+        self.lbl_comp_witness_dialog_status.setWordWrap(True)
+        self.lbl_comp_witness_dialog_status.setStyleSheet("color: #7f8c8d;")
+        dl.addWidget(self.lbl_comp_witness_dialog_status)
 
-        # Auto-expand. A plain section, not a nested collapsible: a drawer
-        # inside a drawer is two clicks to reach a control and reads as a
-        # sub-feature of a sub-feature.
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
-        line.setStyleSheet("color: #dfe4ea;")
-        body.addWidget(line)
+        dl.addWidget(line)
         lbl_auto = QLabel(tr("Auto-expand (optional)"))
         lbl_auto.setStyleSheet("font-weight: bold;")
-        body.addWidget(lbl_auto)
+        dl.addWidget(lbl_auto)
         lbl_auto_help = QLabel(tr(
             "Repeatedly search with the best results as new witnesses. Reach "
             "goes up and top-of-list precision goes down."))
         lbl_auto_help.setWordWrap(True)
         lbl_auto_help.setStyleSheet("color: #7f8c8d;")
-        body.addWidget(lbl_auto_help)
+        dl.addWidget(lbl_auto_help)
         auto_row = QHBoxLayout()
         auto_row.addWidget(QLabel(tr("Rounds")))
         self.spin_comp_auto_rounds = QSpinBox()
         self.spin_comp_auto_rounds.setRange(1, 5)
-        self.spin_comp_auto_rounds.setValue(3)
+        self.spin_comp_auto_rounds.setValue(
+            getattr(self, '_comp_auto_rounds_pref', 3))
         auto_row.addWidget(self.spin_comp_auto_rounds)
         auto_row.addWidget(QLabel(tr("Top-K per round")))
         self.spin_comp_auto_topk = QSpinBox()
         self.spin_comp_auto_topk.setRange(1, 10)
-        self.spin_comp_auto_topk.setValue(5)
+        self.spin_comp_auto_topk.setValue(
+            getattr(self, '_comp_auto_topk_pref', 5))
         auto_row.addWidget(self.spin_comp_auto_topk)
         auto_row.addStretch()
-        body.addLayout(auto_row)
         self.btn_comp_auto_expand = QPushButton(tr("Run auto-expand now"))
         self.btn_comp_auto_expand.clicked.connect(self._run_auto_expand)
-        self.btn_comp_auto_expand.setEnabled(False)
-        body.addWidget(self.btn_comp_auto_expand)
+        auto_row.addWidget(self.btn_comp_auto_expand)
+        dl.addLayout(auto_row)
 
-        self.comp_witness_body.setVisible(False)
-        box_l.addWidget(self.comp_witness_body)
-        in_l.addWidget(self.comp_witness_box)
-        self.comp_witness_box.setVisible(False)
+        close_row = QHBoxLayout()
+        close_row.addStretch()
+        btn_close = QPushButton(tr("Close"))
+        btn_close.clicked.connect(dlg.close)
+        close_row.addWidget(btn_close)
+        dl.addLayout(close_row)
 
-    def _on_witness_panel_toggled(self, opened):
-        self.comp_witness_body.setVisible(bool(opened))
-        self.btn_comp_witness_toggle.setArrowType(
-            Qt.ArrowType.DownArrow if opened else Qt.ArrowType.RightArrow)
+        # The spin boxes are destroyed with the dialog, so their values are
+        # remembered on the window -- otherwise reopening it silently resets
+        # a chosen round count back to the default.
+        def _remember():
+            self._comp_auto_rounds_pref = int(self.spin_comp_auto_rounds.value())
+            self._comp_auto_topk_pref = int(self.spin_comp_auto_topk.value())
+            self._witness_dialog = None
+        dlg.finished.connect(lambda _r: _remember())
 
-    def _set_witness_panel_visible(self, visible):
-        """Shown only in letter-level mode. Called from the same place the
-        other passage-only controls are shown and hidden, so the two cannot
-        drift apart."""
-        box = getattr(self, 'comp_witness_box', None)
-        if box is not None:
-            box.setVisible(bool(visible))
+        self._witness_dialog = dlg
+        # show() BEFORE the refresh: `_refresh_witness_panel` populates the
+        # table only when the dialog is visible, and isVisible() is False
+        # until shown -- so refreshing first opened an empty dialog.
+        dlg.show()
+        self._refresh_witness_panel()
+
+    def _witness_dialog_is_open(self):
+        dlg = getattr(self, '_witness_dialog', None)
+        return dlg is not None and dlg.isVisible()
 
     def _refresh_witness_panel(self):
-        """Rebuild the list, the caption and the button states from the
-        WitnessSet. One function, called after every mutation, so there is no
-        second place for the panel and the state to disagree."""
-        layout = getattr(self, 'comp_witness_list_layout', None)
-        if layout is None:
-            return
-        while layout.count():
-            item = layout.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.deleteLater()
+        """Update the button caption, and the dialog too if it is open.
 
+        One function, called after every mutation, so the button, the table
+        and the state cannot disagree. Safe to call when the dialog has never
+        been opened -- that is the common case.
+        """
         state = self._comp_witness_state()
-        for entry in state.entries:
-            layout.addWidget(self._build_witness_row(entry))
-
         pending = passage_witnesses.pending(state)
         stale = [e for e in state.entries
                  if e.status == passage_witnesses.STATUS_STALE]
         failed = [e for e in state.entries
                   if e.status == passage_witnesses.STATUS_FAILED]
 
-        self.lbl_comp_witness_empty.setVisible(not state.entries)
-        self.comp_witness_stale_row.setVisible(bool(stale))
-        if stale:
-            self.lbl_comp_witness_stale.setText(tr(
-                "{n} witnesses were added for a different source text."
-            ).format(n=len(stale)))
-
-        bits = []
-        if state.entries:
-            bits.append(tr("{n} witnesses").format(n=len(state.entries)))
+        btn = getattr(self, 'btn_comp_witnesses', None)
+        if btn is not None:
+            # The count on the button is the whole point of collapsing the
+            # panel: the main window must still say there ARE witnesses.
+            label = tr("Witnesses")
+            if state.entries:
+                label = '%s (%d)' % (label, len(state.entries))
+            btn.setText(label)
+            bits = []
             if stale:
                 bits.append(tr("{n} from another text").format(n=len(stale)))
             elif pending:
                 bits.append(tr("{n} pending").format(n=len(pending)))
             if failed:
                 bits.append(tr("{n} failed").format(n=len(failed)))
-        self.lbl_comp_witness_caption.setText("  ·  ".join(bits))
+            btn.setToolTip("  ·  ".join(bits) if bits else tr(
+                "Add other copies of this work to search with. Each is "
+                "searched on its own and the results are merged."))
 
-        self.btn_comp_witness_run.setVisible(bool(pending))
+        if not self._witness_dialog_is_open():
+            return
+
+        table = self.comp_witness_table
+        table.setRowCount(len(state.entries))
+        for i, entry in enumerate(state.entries):
+            name = QTableWidgetItem(entry.label or entry.id)
+            name.setToolTip(entry.error or entry.label or '')
+            name.setData(Qt.ItemDataRole.UserRole, entry.id)
+            table.setItem(i, 0, name)
+            chars = QTableWidgetItem(str(len(entry.text or '')))
+            chars.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            table.setItem(i, 1, chars)
+            table.setItem(i, 2, self._witness_status_item(entry))
+
+        self.comp_witness_stale_row.setVisible(bool(stale))
+        if stale:
+            self.lbl_comp_witness_stale.setText(tr(
+                "{n} witnesses were added for a different source text."
+            ).format(n=len(stale)))
+        self.btn_comp_witness_run.setEnabled(bool(pending))
         self.btn_comp_witness_run.setText(
-            tr("Search now ({n} pending)").format(n=len(pending)))
-        # Auto-expand needs results to promote FROM.
+            tr("Search now ({n} pending)").format(n=len(pending))
+            if pending else tr("Search now"))
+        self.btn_comp_witness_retry.setVisible(bool(failed))
+        self.btn_comp_witness_remove.setEnabled(bool(state.entries))
+        self.btn_comp_witness_remove_all.setEnabled(bool(state.entries))
         self.btn_comp_auto_expand.setEnabled(bool(self._has_comp_results()))
         self.btn_comp_witness_promote.setEnabled(bool(self._has_comp_results()))
 
-        # Opens itself when something needs attention; never closes itself.
-        if (stale or pending or failed) and not self.btn_comp_witness_toggle.isChecked():
-            self.btn_comp_witness_toggle.setChecked(True)
-
-    def _build_witness_row(self, entry):
-        row = QWidget()
-        rl = QHBoxLayout(row)
-        rl.setContentsMargins(2, 1, 2, 1)
-        label = QLabel(entry.label or entry.id)
-        label.setToolTip(entry.error or entry.label or '')
-        rl.addWidget(label)
-        chars = QLabel(str(len(entry.text or '')))
-        chars.setStyleSheet("color: #95a5a6;")
-        rl.addWidget(chars)
-        rl.addWidget(self._witness_status_chip(entry))
-        rl.addStretch()
-        if entry.status == passage_witnesses.STATUS_FAILED:
-            btn_retry = QPushButton(tr("Retry"))
-            btn_retry.clicked.connect(
-                lambda _c=False, wid=entry.id: self._retry_witness(wid))
-            rl.addWidget(btn_retry)
-        btn_del = QPushButton(tr("Remove"))
-        btn_del.clicked.connect(
-            lambda _c=False, wid=entry.id: self._remove_witness(wid))
-        rl.addWidget(btn_del)
-        return row
-
-    def _witness_status_chip(self, entry):
-        chip = QLabel()
+    def _witness_status_item(self, entry):
+        item = QTableWidgetItem()
         if entry.status == passage_witnesses.STATUS_STALE:
-            chip.setText(tr("Other source text"))
-            chip.setStyleSheet("color: #e67e22;")
-            chip.setToolTip(tr(
+            item.setText(tr("Other source text"))
+            item.setToolTip(tr(
                 "This witness was added for a different source text, so it "
                 "was not searched."))
         elif entry.status == passage_witnesses.STATUS_SEARCHED:
-            chip.setText(tr("{n} matches found").format(n=entry.hits))
-            chip.setStyleSheet("color: #27ae60;")
+            item.setText(tr("{n} matches found").format(n=entry.hits))
         elif entry.status == passage_witnesses.STATUS_FAILED:
-            chip.setText(tr("Failed"))
-            chip.setStyleSheet("color: #c0392b;")
-            chip.setToolTip(entry.error or '')
+            item.setText(tr("Failed"))
+            item.setToolTip(entry.error or '')
         elif entry.status == passage_witnesses.STATUS_RUNNING:
-            chip.setText("…")
+            item.setText("…")
         else:
-            chip.setText(tr("Pending"))
-            chip.setStyleSheet("color: #7f8c8d;")
-        return chip
+            item.setText(tr("Pending"))
+        return item
+
+    def _selected_witness_ids(self):
+        table = getattr(self, 'comp_witness_table', None)
+        if table is None:
+            return []
+        ids = []
+        for index in table.selectionModel().selectedRows():
+            item = table.item(index.row(), 0)
+            if item is not None:
+                ids.append(item.data(Qt.ItemDataRole.UserRole))
+        return [i for i in ids if i]
+
+    def _remove_selected_witnesses(self):
+        ids = self._selected_witness_ids()
+        if not ids:
+            return
+        for wid in ids:
+            passage_witnesses.remove(self._comp_witness_state(), wid)
+        self._after_witness_removal()
+
+    def _remove_all_witnesses(self):
+        """Clear the list in one action.
+
+        Confirmed first: a witness list can be seventeen hand-pasted texts
+        that exist nowhere else, and there is no undo.
+        """
+        state = self._comp_witness_state()
+        if not state.entries:
+            return
+        answer = QMessageBox.question(
+            self, tr("Witnesses"),
+            tr("Remove all {n} witnesses?").format(n=len(state.entries)),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        for wid in [e.id for e in state.entries]:
+            passage_witnesses.remove(state, wid)
+        self._after_witness_removal()
+
+    def _after_witness_removal(self):
+        """Shared tail for every removal: re-fuse, redraw, persist, and say
+        so when the rows on screen can no longer be corrected.
+
+        `remove()` reports whether there is anything left to re-fuse FROM.
+        After a session restore the per-witness caches are deliberately empty
+        -- ranks cannot be recovered from fused rows -- so the rows on screen
+        keep the removed witness's contributions whatever happens here. The
+        honest move is to say so, not to destroy a result set that exists
+        nowhere else.
+        """
+        can_restrip = bool(self._comp_witness_state().rows)
+        self._refresh_witness_panel()
+        if not can_restrip and self._has_comp_results():
+            self._witness_notify(tr(
+                "Witness removed. The results on screen were found with the "
+                "previous witness list — run the search again to update "
+                "them."))
+        else:
+            fused = passage_witnesses.fuse_and_cap(self._comp_witness_state())
+            if fused is not None:
+                main, filtered, _truncated = fused
+                self.on_comp_scan_finished({
+                    'main': main, 'filtered': filtered, 'known': [],
+                    'dropped_text_lookup_failures': 0, 'partial': False,
+                })
+        self._schedule_session_save()
+
+    def _witness_notify(self, text):
+        """One message, shown wherever the user is looking.
+
+        The dialog is modeless, so it may be open or closed while a batch
+        runs; writing to only one of the two labels loses the message half
+        the time.
+        """
+        lbl = getattr(self, 'lbl_comp_witness_progress', None)
+        if lbl is not None:
+            lbl.setText(text)
+            lbl.setVisible(bool(text))
+        dlg_lbl = getattr(self, 'lbl_comp_witness_dialog_status', None)
+        if dlg_lbl is not None and self._witness_dialog_is_open():
+            dlg_lbl.setText(text)
+
+    def _retry_failed_witnesses(self):
+        """Re-queue every failed witness.
+
+        A failure here is usually transient -- a busy engine, a text that
+        could not be loaded once -- so retrying is worth offering. Re-queued
+        rather than re-run silently: the user chooses when to spend the time.
+        """
+        state = self._comp_witness_state()
+        failed = [e for e in state.entries
+                  if e.status == passage_witnesses.STATUS_FAILED]
+        if not failed:
+            return
+        for entry in failed:
+            entry.status = passage_witnesses.STATUS_PENDING
+            entry.error = ''
+        self._refresh_witness_panel()
+        self._search_pending_witnesses()
 
     def _apply_comp_witness_cell(self, node, ms_item):
         """"{n} of {m} witnesses" on a manuscript row, tooltipped with which.

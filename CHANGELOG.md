@@ -20,11 +20,13 @@ count and its denominator, never the bare percentage.
 
 #### New Features
 
-- **A Witnesses panel in the Composition Search tab**, letter-level only. Add
+- **A Witnesses dialog**, opened from a button beside the letter-level
+  options, so the list stays off the main window. Add
   other copies of the work by pasting them one at a time, or paste a whole
   file split on blank lines with a preview of what the split found — and a
   count of anything dropped as too short. Each witness is searched on its own
-  and the results are merged into one list.
+  and the results are merged into one list. Witnesses can be removed
+  individually or all at once, and a failed one can be retried.
 - **Promote manuscripts straight from your own results.** Tick the rows you
   want and press *Search with these too*; the text comes from the pages that
   actually matched, not from the manuscript record.
