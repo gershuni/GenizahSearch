@@ -139,6 +139,9 @@ class _Win:
     _reset_composition = APP._reset_composition
     _retry_pending_reset = APP._retry_pending_reset
     _refuse_stop_during_passage_scan = APP._refuse_stop_during_passage_scan
+    # Borrowed, not stubbed: Reset clears the auto-expand state before it
+    # defers, and a stand-in would let that call vanish silently.
+    _stop_auto_expand = APP._stop_auto_expand
     _on_pause_clicked = APP._on_pause_clicked
     _on_passage_build_finished = APP._on_passage_build_finished
     _passage_snapshot_must_wait = APP._passage_snapshot_must_wait
@@ -2003,10 +2006,18 @@ def test_reset_never_terminates_a_witness_batch(monkeypatch):
     access violation, not a catchable error. Being stoppable does not make a
     batch killable."""
     w = _batch_window(monkeypatch)
+    w._auto_expand_left = 3
     scheduled = []
     monkeypatch.setattr(genizah_app.QTimer, 'singleShot',
                         staticmethod(lambda ms, fn: scheduled.append((ms, fn))))
     APP._reset_composition(w)
+    # Cleared BEFORE the deferral, or the cancelled batch's partial
+    # completion renders, arms the expansion and schedules the next round at
+    # zero delay -- which beats the 400 ms retry, so New spends a whole
+    # witness-search cancelling a round it just spawned, once per round.
+    assert w._auto_expand_left == 0, (
+        'Reset deferred without clearing the expansion it is racing'
+    )
     assert w.comp_thread.terminated == 0, 'Reset terminated a passage batch'
     assert w.comp_thread.waited == [], 'Reset blocked the UI thread'
     assert w.comp_thread.cancelled == 1, 'Reset did not ask it to stop'
