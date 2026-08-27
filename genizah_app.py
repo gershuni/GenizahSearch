@@ -27808,6 +27808,11 @@ class GenizahGUI(QMainWindow):
         h.setSpacing(4)
 
         results_word = tr("{count} results").format(count=count)
+        # Rendered now, not stored: see `_add_comp_search_to_history`.
+        _wits = entry.get('witness_count') or 0
+        if _wits > 1:
+            query = '%s  [%s]' % (
+                query, tr("{n} witnesses").format(n=_wits))
         if search_type == 'regular':
             label_text = f"{mode_char}  {query}  ({results_word})"
         else:
@@ -28079,14 +28084,15 @@ class GenizahGUI(QMainWindow):
             return
         query = title or source_text[:60]
         # A multi-witness search is not the seed text alone, and a history
-        # list that shows only the seed offers two visibly identical entries
-        # for two searches that asked different questions (owner,
-        # 2026-08-27). The count goes in the NAME; the witnesses themselves
-        # go in `search_params` below and are restored with the entry.
+        # list showing only the seed offers two visibly identical entries for
+        # two searches that asked different questions (owner, 2026-08-27).
+        #
+        # The COUNT is stored, not the sentence. A translated string written
+        # into a persisted record freezes the language at save time: entries
+        # saved in English would keep reading English in a Hebrew history
+        # list forever. `_add_history_menu_item` renders it through tr() at
+        # display time instead.
         _hist_wits = getattr(self, '_comp_last_result_witnesses', None) or []
-        if _hist_wits:
-            query = '%s  [%s]' % (query, tr("{n} witnesses").format(
-                n=len(_hist_wits) + 1))
         results = getattr(self, 'comp_raw_items', [])
         filtered = getattr(self, 'comp_raw_filtered', [])
         cfg = load_app_config()
@@ -28094,6 +28100,8 @@ class GenizahGUI(QMainWindow):
         add_history_entry('composition', {
             'query': query,
             'result_count': len(results),
+            # Seed included -- it is a witness like any other.
+            'witness_count': (len(_hist_wits) + 1) if _hist_wits else 0,
             'timestamp': datetime.now().isoformat(),
             'search_params': {
                 'chunk_size': (self._comp_chunk_preference('spin_chunk')

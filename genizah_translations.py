@@ -5218,6 +5218,15 @@ TRANSLATIONS.update({
         'העצירה תתבצע בסיום חיפוש העד הנוכחי. התוצאות שנמצאו עד כה נשמרות.',
     'Clearing once the current witness finishes.':
         'הניקוי יתבצע בסיום חיפוש העד הנוכחי.',
+    # Loading witnesses from disk: the owner's witness sets are files,
+    # not clipboard contents -- seventeen rites in one file, or a
+    # transcription per file.
+    'Load from files...':
+        'טען מקבצים...',
+    'Load witness files':
+        'טען קובצי עדים',
+    'Split each file on blank lines':
+        'פצל כל קובץ לפי שורות ריקות',
     'a letter-level search is running':
         'חיפוש ברמת האות פועל כעת',
     'Build letter-level index?':

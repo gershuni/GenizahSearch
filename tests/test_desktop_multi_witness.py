@@ -1131,8 +1131,18 @@ def test_history_names_the_witness_count_in_the_entry(monkeypatch):
     GAPP._add_comp_search_to_history(w)
 
     assert captured, 'nothing was written to history'
+    # The COUNT is stored, not a translated sentence: a translated string in
+    # a persisted record freezes the language at save time, so entries saved
+    # in English would keep reading English in a Hebrew history list.
     # Two witnesses plus the seed.
-    assert '3' in captured.get('query', ''), captured.get('query')
+    assert captured['witness_count'] == 3
+    # Compared against tr(), not the English literal: tr() reads the OWNER's
+    # configured language, so asserting the English form passes on a Hebrew
+    # desktop no matter what was stored. A mutation proved exactly that.
+    from genizah_core import tr as _tr
+    _rendered = _tr("{n} witnesses").format(n=3)
+    assert _rendered not in captured.get('query', ''), (
+        'a rendered sentence was baked into the stored entry')
     assert captured['search_params']['comp_witnesses'] == [
         {'id': 'w1'}, {'id': 'w2'}]
 
@@ -1233,3 +1243,24 @@ def test_a_restore_clears_the_leftover_progress_line():
 def test_new_clears_the_progress_line_too():
     src = _fn_src('_reset_composition')
     assert "_witness_notify('')" in src
+
+
+def test_a_single_witness_search_stores_no_witness_count():
+    """`witness_count` is what the history list keys its suffix on, so a
+    plain search must not carry one."""
+    src = _fn_src('_add_comp_search_to_history')
+    assert "'witness_count': (len(_hist_wits) + 1) if _hist_wits else 0" in src
+
+
+def test_the_history_list_renders_the_count_through_tr():
+    """Rendered at DISPLAY time, in whatever language the list is being
+    drawn in -- which is the half that was frozen before."""
+    src = _fn_src('_add_history_menu_item')
+    assert 'witness_count' in src
+    assert 'tr("{n} witnesses")' in src
+
+
+def test_the_history_suffix_is_hidden_for_a_single_witness():
+    """"1 witnesses" beside every ordinary search is noise."""
+    src = _fn_src('_add_history_menu_item')
+    assert '_wits > 1' in src
