@@ -177,6 +177,29 @@ def test_browse_service_has_no_runtime_web_import():
     )
 
 
+@pytest.mark.parametrize(
+    'module_path',
+    sorted((_REPO_ROOT / 'shared').glob('*.py'), key=lambda p: p.name),
+    ids=lambda p: p.name,
+)
+def test_no_shared_module_has_a_runtime_web_import(module_path):
+    """The whole of `shared/`, not a hand-maintained list of two.
+
+    The two named guards below came first and stay, because they record WHY
+    this layering exists. But a list of names only protects the modules
+    somebody remembered to add: `shared/passage_witness_source.py` was moved
+    out of `web/pages/parallels.py` precisely so the desktop could import it,
+    and it would have landed here with no coverage at all. Every module in
+    `shared/` was already clean when this sweep was written, so it costs
+    nothing today and catches the next one for free.
+    """
+    offenders = _web_imports_outside_type_checking(module_path)
+    assert offenders == [], (
+        f'shared/{module_path.name} imports web.* outside TYPE_CHECKING '
+        f'-- shared/ must not depend on the web surface: {offenders!r}'
+    )
+
+
 def test_parallels_service_has_no_runtime_web_import():
     offenders = _web_imports_outside_type_checking(
         _REPO_ROOT / 'shared' / 'parallels_service.py'

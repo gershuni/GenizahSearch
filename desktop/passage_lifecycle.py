@@ -297,6 +297,34 @@ def current_state_generation() -> int:
     return _state_generation
 
 
+class PassageIndexReplaced(RuntimeError):
+    """The installed index changed while a MULTI-WITNESS batch was running.
+
+    Every `search_composition_logic` call resolves the index that is current
+    AT THAT CALL -- deliberately, and it is what makes a loop memory-safe. But
+    a batch is one ANSWER assembled from N calls, and an install between two
+    of them means half the fused list describes one artifact and half another.
+    The rank-fusion arithmetic then combines ranks that were never comparable.
+
+    A swap is rare (it needs a rebuild to finish mid-search) and it is not a
+    per-witness failure: reporting it as one would tell the reader a witness
+    found nothing, when in fact the whole batch is void. Raised once, named
+    for what it is, and the batch is abandoned rather than published.
+    """
+
+
+def generation_changed(pinned: Optional[int]) -> bool:
+    """Has `_state` been swapped since `pinned` was captured?
+
+    Pure and module level so a caller can be tested without installing an
+    index. `pinned is None` means the caller never captured one, which is not
+    a change -- a batch that started before anything was installed fails at
+    its first lease with `PassageSearchUnavailableError`, which is the honest
+    error for that case and not this one.
+    """
+    return pinned is not None and pinned != _state_generation
+
+
 def load_passage_state(root: Optional[str] = None) -> Optional[PassageState]:
     """Computes and RETURNS a state -- never assigns. `open_index` scans the
     full CSR (~109.5 MB on the shipped corpus), so this must run off the UI
@@ -618,14 +646,18 @@ class PassageSearchAdapter:
     caller must not assume otherwise.
     """
 
-    __slots__ = ('_text_fetcher', '_width', '_length', '_depth')
+    __slots__ = ('_text_fetcher', '_width', '_length', '_depth',
+                 '_render_cap')
 
     def __init__(self, text_fetcher, width: str, length: str,
-                 depth: str) -> None:
+                 depth: str, render_cap: Optional[int] = None) -> None:
         self._text_fetcher = text_fetcher
         self._width = width
         self._length = length
         self._depth = depth
+        # None => let PassageSearcher apply its own default. See
+        # `get_passage_searcher` for why 0 is not the same as "no cap given".
+        self._render_cap = render_cap
 
     def search_composition_logic(
         self,
@@ -672,9 +704,15 @@ class PassageSearchAdapter:
         try:
             try:
                 from shared.passage_parallels import PassageSearcher  # local: keep this module import-light
+                # Omitted when None so the searcher's own default applies:
+                # passing `render_cap=None` explicitly would override the
+                # dataclass default with None and crash the cap comparison.
+                _cap_kw = ({} if self._render_cap is None
+                           else {'render_cap': self._render_cap})
                 searcher = PassageSearcher(
                     index=index, text_fetcher=self._text_fetcher,
-                    policy=compose(self._width, self._length, self._depth))
+                    policy=compose(self._width, self._length, self._depth),
+                    **_cap_kw)
                 return searcher.search_composition_logic(
                     full_text, chunk_size, max_freq, mode,
                     filter_text=filter_text, progress_callback=progress_callback,
@@ -735,7 +773,9 @@ class PassageSearchAdapter:
 
 def get_passage_searcher(text_fetcher, width: str = _DEFAULT_WIDTH,
                           length: str = DEFAULT_LENGTH,
-                          depth: str = DEFAULT_DEPTH) -> PassageSearchAdapter:
+                          depth: str = DEFAULT_DEPTH,
+                          render_cap: Optional[int] = None
+                          ) -> PassageSearchAdapter:
     """The one obvious way to get something searchable. Returns a
     `PassageSearchAdapter` unconditionally -- whether or not an index is
     installed right now -- because the adapter holds no index itself; use
@@ -755,9 +795,27 @@ def get_passage_searcher(text_fetcher, width: str = _DEFAULT_WIDTH,
     `compose`/`get_preset` raise on an unknown name, which is correct for a
     caller passing a literal, but wrong for a value that came out of a
     persisted settings file a user could have hand-edited or that predates a
-    preset being renamed. render_cap is deliberately omitted: PassageSearcher
-    defaults to PARALLELS_GROUP_CAP (200), which is already the right desktop
-    cap.
+    preset being renamed.
+
+    `render_cap` is THREE-valued, and the distinction is load-bearing:
+
+    * `None` (default) -- say nothing, and `PassageSearcher` applies its own
+      `PARALLELS_GROUP_CAP` (200). This is the single-witness desktop search,
+      unchanged from v9.0.0.
+    * `0` -- UNCAPPED, for the MULTI-WITNESS path. Each witness must come back
+      whole, because the cap has to be applied ONCE to the FUSED list. Capping
+      each witness first fuses N already-truncated lists and silently drops
+      every contributor that sat past rank 200 in its own witness -- which is
+      exactly where a rare witness of a widely-copied work shows up. The web
+      does the same thing for the same reason
+      (`web/pages/parallels.py`: `render_cap=0` on the seed and on every
+      witness, then one `_cap_main_results_by_group` after the fusion).
+    * any other int -- that cap, for a caller that knows what it wants.
+
+    Note `0` is a real value, not a falsy stand-in for "unset": the caps are
+    applied as `if self.render_cap and self.render_cap > 0`, so 0 means no cap
+    while None means no opinion. Testing this parameter for truthiness
+    anywhere would collapse the two.
     """
     if width not in PRESETS:
         width = _DEFAULT_WIDTH
@@ -765,7 +823,7 @@ def get_passage_searcher(text_fetcher, width: str = _DEFAULT_WIDTH,
         length = DEFAULT_LENGTH
     if depth != DEFAULT_DEPTH and depth not in DEPTH_PROFILES:
         depth = DEFAULT_DEPTH
-    return PassageSearchAdapter(text_fetcher, width, length, depth)
+    return PassageSearchAdapter(text_fetcher, width, length, depth, render_cap)
 
 
 # ---------------------------------------------------------------------------
