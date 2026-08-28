@@ -4999,14 +4999,15 @@ class GenizahGUI(QMainWindow):
         self.text_position_combo.setMaximumWidth(120)
         self.text_position_combo.setMinimumWidth(60)   # shrinkable: see exclude_input
         # Highlight when set to a non-default position so the user always sees
-        # the sticky state in the crowded toolbar row.
+        # the sticky state in the crowded toolbar row. The rule itself is
+        # `_text_position_accent`, on the window: it has to read the live
+        # palette, and a closure is not somewhere a test can reach.
         def _highlight_text_position(idx):
             if idx == 0:
                 self.text_position_combo.setStyleSheet("")
             else:
                 self.text_position_combo.setStyleSheet(
-                    "QComboBox { border: 2px solid #f39c12; background: #fff8e1; }"
-                )
+                    self._text_position_accent())
         self.text_position_combo.currentIndexChanged.connect(_highlight_text_position)
         _highlight_text_position(self.text_position_combo.currentIndex())
 
@@ -5588,9 +5589,11 @@ class GenizahGUI(QMainWindow):
         # Analyze -- while its own help line sat under the PARAGRAPH controls,
         # describing something two rows away.
         method_row = QHBoxLayout()
-        # Default is chunk regardless of whether a passage index exists --
-        # availability never changes what a fresh install starts on. The two
-        # methods are complementary, not ranked.
+        # Starts on chunk because nothing here KNOWS yet: the index loads
+        # off the UI thread and has not answered at construction time.
+        # `_apply_default_comp_method` flips it to letter-level once the
+        # index turns out to exist -- and only for a user who has never
+        # chosen (owner, 2026-08-28).
         self.comp_method_combo = QComboBox()
         # The web's exact item labels (web/pages/parallels.py method_radio).
         # Same English -> same TRANSLATIONS entry -> one vocabulary for one
@@ -5605,12 +5608,16 @@ class GenizahGUI(QMainWindow):
         self.comp_method_combo.currentIndexChanged.connect(
             self._on_comp_method_changed)
 
-        # "New!" lives inside the item text, and chunk is the default -- so
-        # the CLOSED control never showed it and the whole feature was
-        # invisible unless the user happened to open the list. The caption
-        # names the control; the badge and the accent border say there is
-        # something here worth trying. Both retire themselves the moment
-        # letter-level search is selected.
+        # "New!" lives inside the item text, so the CLOSED control never
+        # showed it and the whole feature was invisible unless the user
+        # happened to open the list. The caption names the control; the badge
+        # and the accent border say there is something here worth trying.
+        #
+        # Both are a ONE-SHOT announcement (owner, 2026-08-28): shown until
+        # the user has seen them once or has used the feature, whichever
+        # comes first, and never again on a later launch. An accent border
+        # that returns every session stops reading as "new" and starts
+        # reading as a control that is stuck.
         self.lbl_comp_method_caption = QLabel(tr("Search method") + ":")
         self.lbl_comp_method_new = QLabel(tr("New"))
         self.lbl_comp_method_new.setStyleSheet(
@@ -15860,6 +15867,9 @@ class GenizahGUI(QMainWindow):
                     self._apply_passage_mode_ui(True)
                     self._show_passage_reason(None)
                     self._update_comp_method_help()
+        # Only now does "there is an index" mean anything, so this is where
+        # the letter-level default can first be applied.
+        self._apply_default_comp_method()
         self._revalidate_comp_method()
         # A snapshot held back by the startup race is judged HERE, where
         # "not built" finally means what it says.
@@ -16074,6 +16084,9 @@ class GenizahGUI(QMainWindow):
             passage_lifecycle.install_passage_state(
                 passage_lifecycle.PassageState(index=index,
                                                live_dir=live_dir))
+        # A user who just built the index has said what they want more
+        # plainly than any default could; land them on it.
+        self._apply_default_comp_method()
         self._revalidate_comp_method()
         if status == 'installed':
             self.status_label.setText(
@@ -16214,11 +16227,25 @@ class GenizahGUI(QMainWindow):
         self._revalidate_comp_method()
         self._start_passage_build_worker(corpus_path)
 
-    def _restore_comp_passage_preferences(self, comp):
+    def _restore_comp_passage_preferences(self, comp, absent_method='chunk'):
         """Preference half of Task 8. Restores the method and the three
         policy axes from a saved dict, validating each INDEPENDENTLY against
         its widget's own options -- one bad axis must cost that axis its
-        value, not take the other two (or the whole restore) with it."""
+        value, not take the other two (or the whole restore) with it.
+
+        `absent_method` is what a MISSING `comp_method` key means, and the
+        two callers disagree:
+
+        * A HISTORY entry without one is pre-v9 and is chunk **by
+          definition** -- it recorded a search that ran before the method
+          existed, and re-running it as letter-level would run a different
+          search under the same name. `'chunk'`, the default here, so every
+          existing caller keeps today's behaviour.
+        * A SESSION without one has no stored preference at all, which is
+          exactly the case the letter-level default exists for. It passes
+          `None`: leave the method alone rather than write chunk over a
+          default `_apply_default_comp_method` may already have applied.
+        """
         # The witness list, restored through the SHARED entry rules so the
         # desktop and the web rebuild the same list from the same bytes. Every
         # witness comes back `pending`, with empty row caches: the snapshot
@@ -16287,9 +16314,22 @@ class GenizahGUI(QMainWindow):
         combo = getattr(self, 'comp_method_combo', None)
         if combo is None:
             return
-        method = comp.get('comp_method', 'chunk')
-        idx = combo.findData(method if method in ('chunk', 'passage')
-                             else 'chunk')
+        # A stored method is a DECISION and outranks the new letter-level
+        # default -- `chunk` included, because "don't override the last
+        # search state" is the whole of the owner's correction. Only a
+        # session that predates the method (or no session at all) leaves the
+        # default free to apply, and those store nothing here.
+        stored = comp.get('comp_method')
+        if stored in ('chunk', 'passage'):
+            self._comp_method_user_choice_seen = True
+            method = stored
+        elif absent_method is None:
+            # Not `= 'chunk'`: that would undo a default already applied by
+            # `_apply_default_comp_method` whenever the load finished first.
+            method = self._comp_method()
+        else:
+            method = absent_method
+        idx = combo.findData(method)
         if idx >= 0:
             combo.blockSignals(True)
             combo.setCurrentIndex(idx)
@@ -16881,6 +16921,19 @@ class GenizahGUI(QMainWindow):
         self.btn_comp_witnesses.clicked.connect(self._open_witness_dialog)
         row.addWidget(self.btn_comp_witnesses)
 
+        # The same one-shot announcement the method combo carries, for the
+        # same reason and now a more pressing one: letter-level search is the
+        # DEFAULT, so most people will never see the method badge that used
+        # to introduce this half of the tab. What is left is a plain button
+        # sitting among three policy selectors, reading as one more option --
+        # nothing says a fused multi-witness search is a different KIND of
+        # search from the one above it.
+        self.lbl_comp_witnesses_new = QLabel(tr("New"))
+        self.lbl_comp_witnesses_new.setStyleSheet(
+            "color: #e67e22; font-weight: bold;")
+        self.lbl_comp_witnesses_new.setVisible(False)
+        row.addWidget(self.lbl_comp_witnesses_new)
+
         # The one line that stays on the main window: a batch shows no
         # chunk-style percentage, so "Witness 3/17" IS the progress, and it
         # has to be visible while the dialog is closed. Hidden otherwise.
@@ -16898,6 +16951,98 @@ class GenizahGUI(QMainWindow):
                 continue
             w.setVisible(bool(visible) and (
                 name != 'lbl_comp_witness_progress' or bool(w.text())))
+        # The badge is NOT in that loop: it has a second condition of its own
+        # and must go dark in chunk mode even when it is still unspent.
+        self._update_witness_affordance(bool(visible))
+
+    def _accent_amber_pair(self):
+        """The (background, text) an amber accent paints, for the CURRENT
+        theme. ONE definition, deliberately.
+
+        Both accents in this window began as constants naming a light
+        `background` and no `color`. The text then kept the palette's own
+        near-white, and on the dark theme the control read as pale text on
+        cream -- the Witnesses button by owner screenshot (2026-08-28), the
+        Text Position selector silently since Phase 45. A rule that names one
+        half of a contrast pair inherits the other from a theme it knows
+        nothing about, and a second hand-rolled copy is a second chance to
+        make that mistake.
+
+        The pair is the one `_enter_browse_edit_mode` already established for
+        this exact choice.
+
+        The palette read is guarded: these accents are recomputed during
+        construction and teardown too, and a raising `palette()` must not
+        take a widget's styling with it.
+        """
+        try:
+            is_dark = self.palette().color(
+                QPalette.ColorRole.Window).lightness() < 128
+        except Exception:                                    # noqa: BLE001
+            is_dark = False
+        return ("#3d3522", "#f0e0b0") if is_dark else ("#fffacd", "#5a3a00")
+
+    def _witness_button_accent(self):
+        """The Witnesses button's accent, built from the LIVE palette.
+
+        Not a constant, and that is the whole point -- see
+        `_accent_amber_pair`.
+
+        The background is not decoration either: a QPushButton stylesheet
+        that sets only a border drops the native style entirely and leaves a
+        flat, unclickable-looking rectangle.
+        """
+        bg, fg = self._accent_amber_pair()
+        return ("QPushButton { border: 2px solid #e67e22; border-radius: "
+                "3px; padding: 3px 10px; background: %s; color: %s; }"
+                % (bg, fg))
+
+    def _text_position_accent(self):
+        """The Text Position selector's accent, for a non-default position.
+
+        Same defect, older: this rule shipped in Phase 45 naming
+        `background: #fff8e1` and no `color`, so on the dark theme the
+        control became unreadable the moment it was set to anything but
+        Anywhere -- which is precisely when it most needs to be read, since
+        the highlight exists to keep a sticky filter visible in a crowded
+        toolbar.
+
+        A method rather than a constant, for the reason `_accent_amber_pair`
+        gives, and unlike the button this one adds no padding or radius: a
+        QComboBox keeps its native look under a border-and-background rule,
+        and changing its metrics would move a control in a row that is
+        already 1423 px wide on a 1440 px screen.
+        """
+        bg, fg = self._accent_amber_pair()
+        return ("QComboBox { border: 2px solid #f39c12; background: %s; "
+                "color: %s; }" % (bg, fg))
+
+    def _update_witness_affordance(self, visible=None):
+        """Point at the Witnesses button once, then never again.
+
+        Shown only while the roster is EMPTY: someone who has already added a
+        witness has plainly found the button, and an announcement for a
+        feature in use is noise. `visible` is passed by
+        `_set_witness_panel_visible`, which knows the answer before the
+        widgets do; everyone else asks the method.
+
+        The accent names a background as well as a border on purpose -- a
+        QPushButton stylesheet that sets only a border drops the native style
+        entirely and leaves a flat, unclickable-looking rectangle.
+        """
+        btn = getattr(self, 'btn_comp_witnesses', None)
+        lbl = getattr(self, 'lbl_comp_witnesses_new', None)
+        if btn is None or lbl is None:
+            return
+        if visible is None:
+            visible = self._comp_method() == 'passage'
+        show = bool(visible
+                    and not self._comp_witness_state().entries
+                    and self._announcement_allowed(self._ANNOUNCE_WITNESSES))
+        lbl.setVisible(show)
+        btn.setStyleSheet(self._witness_button_accent() if show else "")
+        if show:
+            self._mark_announcement_seen(self._ANNOUNCE_WITNESSES)
 
     def _open_witness_dialog(self):
         """The witness list, its actions and auto-expand -- all here.
@@ -17043,6 +17188,9 @@ class GenizahGUI(QMainWindow):
         dlg.finished.connect(lambda _r: _remember())
 
         self._witness_dialog = dlg
+        # Opening the dialog IS finding the feature, so the badge comes down
+        # now rather than at the next launch.
+        self._retire_announcement(self._ANNOUNCE_WITNESSES)
         # show() BEFORE the refresh: `_refresh_witness_panel` populates the
         # table only when the dialog is visible, and isVisible() is False
         # until shown -- so refreshing first opened an empty dialog.
@@ -17085,6 +17233,10 @@ class GenizahGUI(QMainWindow):
             btn.setToolTip("  ·  ".join(bits) if bits else tr(
                 "Add other copies of this work to search with. Each is "
                 "searched on its own and the results are merged."))
+
+        # Adding the first witness ends the announcement's own condition, and
+        # this is the one function every mutation goes through.
+        self._update_witness_affordance()
 
         if not self._witness_dialog_is_open():
             return
@@ -17604,15 +17756,71 @@ class GenizahGUI(QMainWindow):
         return tr("The older method. Slower, but offers Exact / Variants / "
                   "Fuzzy modes and cross-paragraph filtering.")
 
+    # --- one-shot announcements -------------------------------------------
+    # An orange accent that comes back every launch stops reading as "this is
+    # new" and starts reading as "this control is in a warning state". Owner,
+    # 2026-08-28: each announcement appears ONCE.
+    #
+    # Stored in `config.pkl` (`load_app_config`), NOT the session file. "You
+    # have already been told" is a fact about the person, not about a search:
+    # a user who declines session restore, or clears it, must not be
+    # re-announced to on every launch.
+
+    _ANNOUNCE_METHOD = 'comp_method_new_seen'
+    _ANNOUNCE_WITNESSES = 'comp_witnesses_new_seen'
+
+    def _announcement_allowed(self, key):
+        """Whether this announcement may still be shown, decided ONCE per
+        launch.
+
+        Cached deliberately: `_mark_announcement_seen` writes the flag the
+        moment the badge is first painted, and re-reading the store would
+        then make the badge vanish from under whoever is reading it on the
+        very next refresh -- a repaint, a scope change, a finished search.
+        The launch that shows it keeps showing it; the next one does not.
+
+        Fails CLOSED. An unreadable config means we do not know whether the
+        user has been told, and silence is the cheaper of the two mistakes.
+        """
+        cache = self.__dict__.setdefault('_announcements_allowed', {})
+        if key not in cache:
+            try:
+                cache[key] = not bool(load_app_config().get(key))
+            except Exception:                                # noqa: BLE001
+                logger.exception('could not read the %s announcement', key)
+                cache[key] = False
+        return cache[key]
+
+    def _mark_announcement_seen(self, key):
+        """Record that it has now been shown. Idempotent within a launch --
+        the affordance updaters run on every refresh, and this is a pickle
+        rewrite."""
+        written = self.__dict__.setdefault('_announcements_written', set())
+        if key in written:
+            return
+        written.add(key)
+        try:
+            save_app_config({key: True})
+        except Exception:                                    # noqa: BLE001
+            logger.exception('could not record the %s announcement', key)
+
+    def _retire_announcement(self, key):
+        """The user has USED the feature, so stop pointing at it -- now, not
+        next launch. Marks it seen and closes the launch-scoped allowance,
+        which is the one case where the badge SHOULD disappear while the
+        window is open."""
+        self._mark_announcement_seen(key)
+        self.__dict__.setdefault('_announcements_allowed', {})[key] = False
+
     _METHOD_COMBO_ACCENT = (
         "QComboBox { border: 2px solid #e67e22; border-radius: 3px; }")
 
     def _update_comp_method_affordance(self):
         """Point at the new option while it is worth pointing at: chunk is
-        selected and letter-level is either ready or one build away. Silent
-        when switching would lead nowhere (a My Library scope, Lab Mode, no
-        corpus), because an affordance for something that will only refuse
-        is worse than none."""
+        selected, letter-level is either ready or one build away, and the
+        announcement has not been spent. Silent when switching would lead
+        nowhere (a My Library scope, Lab Mode, no corpus), because an
+        affordance for something that will only refuse is worse than none."""
         combo = getattr(self, 'comp_method_combo', None)
         badge = getattr(self, 'lbl_comp_method_new', None)
         if combo is None or badge is None:
@@ -17622,9 +17830,54 @@ class GenizahGUI(QMainWindow):
             reason == passage_lifecycle.REASON_NOT_BUILT
             and bool(getattr(Config, 'FILE_V8', ''))
             and os.path.exists(getattr(Config, 'FILE_V8', '')))
-        highlight = bool(worth_offering and self._comp_method() == 'chunk')
+        highlight = bool(worth_offering and self._comp_method() == 'chunk'
+                         and self._announcement_allowed(self._ANNOUNCE_METHOD))
         badge.setVisible(highlight)
         combo.setStyleSheet(self._METHOD_COMBO_ACCENT if highlight else "")
+        if highlight:
+            self._mark_announcement_seen(self._ANNOUNCE_METHOD)
+
+    def _apply_default_comp_method(self):
+        """Letter-level search is the DEFAULT once an index exists.
+
+        Owner, 2026-08-28. It is faster and returns far fewer unrelated
+        results, and a default nobody reaches is not a recommendation. The
+        combo cannot start there, though: at construction the index has not
+        loaded and "not built" is indistinguishable from "not answered yet",
+        so this runs from `_on_passage_loaded` and from the end of a build --
+        the two moments the question first has a true answer.
+
+        The correction that shapes it (owner, same day): a STORED method is a
+        decision and outranks the default, `chunk` included. This only ever
+        fires for a user who has never chosen -- a first launch, or a session
+        written before the method existed. It never overrides the last search
+        state.
+        """
+        if getattr(self, '_comp_method_user_choice_seen', False):
+            return
+        if getattr(self, '_restoring_session', False):
+            # Not yet: the restore has not said whether there IS a stored
+            # choice, and `_apply_passage_mode_ui` would cache the
+            # construction chunk values as the user's own. `_restore_session`
+            # re-enters this in its `finally`, on every path.
+            return
+        combo = getattr(self, 'comp_method_combo', None)
+        if combo is None or self._comp_method() != 'chunk':
+            return
+        if self._passage_disabled_reason_now() is not None:
+            return
+        idx = combo.findData('passage')
+        if idx < 0:
+            return
+        combo.blockSignals(True)
+        combo.setCurrentIndex(idx)
+        combo.blockSignals(False)
+        # blockSignals means the handler never ran, so the mode UI has to be
+        # applied by hand -- the same rule `_restore_comp_passage_preferences`
+        # already lives by.
+        self._apply_passage_mode_ui(True)
+        self._show_passage_reason(None)
+        self._update_comp_method_help()
 
     def _update_comp_method_help(self):
         lbl = getattr(self, 'lbl_comp_method_help', None)
@@ -17865,6 +18118,13 @@ class GenizahGUI(QMainWindow):
 
     def _on_comp_method_changed(self, _index):
         method = self._comp_method()
+        # Every programmatic move blocks signals, so reaching this handler
+        # means a person moved the control. That is the decision
+        # `_apply_default_comp_method` must never overrule -- for `chunk`
+        # every bit as much as for `passage` (owner correction, 2026-08-28).
+        self._comp_method_user_choice_seen = True
+        if method == 'passage':
+            self._retire_announcement(self._ANNOUNCE_METHOD)
         self._update_comp_method_help()
         self._update_comp_method_affordance()
         if method != 'passage':
@@ -28309,6 +28569,8 @@ class GenizahGUI(QMainWindow):
             # the session restore uses, so a recorded letter-level entry
             # that can no longer run falls back to chunk with a visible
             # reason instead of silently running something else.
+            # `absent_method` left at its default: a history entry with no
+            # method is pre-v9, which is chunk by definition.
             self._restore_comp_passage_preferences(params or {})
             # Restore pre-search filters
             psf = entry.get('pre_search_filters', {})
@@ -28890,7 +29152,9 @@ class GenizahGUI(QMainWindow):
             # against the widget's own options, so a hand-edited or stale
             # value degrades to its default instead of raising later inside
             # `compose`.
-            self._restore_comp_passage_preferences(comp)
+            # `absent_method=None`: a session with no stored method has no
+            # preference to honour, so the letter-level default stands.
+            self._restore_comp_passage_preferences(comp, absent_method=None)
 
             self._comp_domain_exclusions = set(comp.get('domain_exclusions', []))
             self._comp_printed_filter_state = comp.get('printed_filter', 'all')
@@ -29092,6 +29356,14 @@ class GenizahGUI(QMainWindow):
             logger.error("Failed to restore session: %s", e)
         finally:
             self._restoring_session = False
+            # Whichever way the startup race went, this is where the
+            # letter-level default becomes safe to apply: the stored method
+            # is known, and the chunk knobs hold the values a cache may keep.
+            # A no-op unless there was no stored choice and an index exists.
+            try:
+                self._apply_default_comp_method()
+            except Exception:                                # noqa: BLE001
+                logger.exception('could not apply the default search method')
             self.search_progress.setVisible(False)
             # Phase 96 fix-8 (supersedes fix-7): notify MyLibraryTab
             # unconditionally in the finally block so that _auto_select_first_folder

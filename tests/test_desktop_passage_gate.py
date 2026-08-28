@@ -152,10 +152,38 @@ class _Win:
     _update_comp_method_help = APP._update_comp_method_help
     _update_comp_method_affordance = APP._update_comp_method_affordance
     _METHOD_COMBO_ACCENT = APP._METHOD_COMBO_ACCENT
+    _update_witness_affordance = APP._update_witness_affordance
+    _witness_button_accent = APP._witness_button_accent
+    _accent_amber_pair = APP._accent_amber_pair
+    _text_position_accent = APP._text_position_accent
+    _announcement_allowed = APP._announcement_allowed
+    _mark_announcement_seen = APP._mark_announcement_seen
+    _retire_announcement = APP._retire_announcement
+    _ANNOUNCE_METHOD = APP._ANNOUNCE_METHOD
+    _ANNOUNCE_WITNESSES = APP._ANNOUNCE_WITNESSES
+    # Borrowed, not stubbed: the letter-level default is applied from two
+    # handlers this file already drives, and a stand-in would let either call
+    # vanish without a test noticing.
+    _apply_default_comp_method = APP._apply_default_comp_method
+
+
+def _unannounced(w):
+    """Cut a stub window off from the real `config.pkl`.
+
+    The one-shot announcements live in the owner's own app config, so a test
+    that let them read it would pass or fail by whether the owner had ever
+    seen the badge -- green here, red on a fresh machine, and neither result
+    about the code. Both caches are pre-seeded: allowed, and already
+    written, so nothing reaches the disk in either direction.
+    """
+    w._announcements_allowed = {APP._ANNOUNCE_METHOD: True,
+                                APP._ANNOUNCE_WITNESSES: True}
+    w._announcements_written = {APP._ANNOUNCE_METHOD, APP._ANNOUNCE_WITNESSES}
+    return w
 
 
 def _window(scope='genizah', lab=False, engine_ready=True, building=False):
-    w = _Win()
+    w = _unannounced(_Win())
     w.searcher = _Engine(engine_ready)
     w.comp_corpus_scope_combo = _Combo(
         [('genizah', 'G'), ('local', 'L'), ('all', 'A')],
@@ -275,7 +303,7 @@ def test_a_garbage_method_stamp_is_refused(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def _axis_window():
-    w = _Win()
+    w = _unannounced(_Win())
     w.comp_passage_width_combo = _Combo(
         [('standard-40', ''), ('wide-40', ''), ('wider-40', ''),
          ('widest-40', ''), ('max-40', '')], index=3)
@@ -2096,3 +2124,390 @@ def test_reset_refuses_a_single_witness_scan_before_reaching_terminate():
     APP._reset_composition(w)
     assert w.comp_thread.terminated == 0
     assert w.comp_thread.cancelled == 0, 'it got past the refusal'
+
+
+# ---------------------------------------------------------------------------
+# The announcements are ONE-SHOT (owner, 2026-08-28).
+#
+# An orange accent that returns every launch stops reading as "this is new"
+# and starts reading as "this control is in a warning state". Stored in
+# `config.pkl`, not the session file: "you have already been told" is a fact
+# about the person, and a user who declines session restore must not be
+# re-announced to on every launch.
+# ---------------------------------------------------------------------------
+
+def _announce_window(monkeypatch, seen=False, raises=False, method='chunk'):
+    """A window whose announcement store is a dict in this test, not the
+    owner's real config."""
+    reads, writes = [], []
+    # STATEFUL, because that is the only shape in which a re-read can be
+    # caught: a store that forgets every write makes a badge that re-reads
+    # look exactly like one that does not.
+    store = {APP._ANNOUNCE_METHOD: seen, APP._ANNOUNCE_WITNESSES: seen}
+
+    def _load():
+        reads.append(1)
+        if raises:
+            raise OSError('unreadable config')
+        return dict(store)
+
+    def _save(data):
+        writes.append(data)
+        store.update(data)
+
+    monkeypatch.setattr(genizah_app, 'load_app_config', _load)
+    monkeypatch.setattr(genizah_app, 'save_app_config', _save)
+    monkeypatch.setattr(pl, 'passage_available', lambda: True)
+    monkeypatch.setattr(genizah_app.Config, 'FILE_V8', __file__)
+    w = _window(scope='genizah')
+    # Undo `_unannounced`: these tests are ABOUT the store, so they supply
+    # their own rather than skipping it.
+    del w._announcements_allowed
+    del w._announcements_written
+    w.comp_method_combo = _Combo([('chunk', ''), ('passage', '')],
+                                 index=0 if method == 'chunk' else 1)
+    w.lbl_comp_method_new = _Label()
+    w.reads, w.writes = reads, writes
+    return w
+
+
+def test_the_method_badge_is_silent_once_it_has_been_seen(monkeypatch):
+    w = _announce_window(monkeypatch, seen=True)
+    APP._update_comp_method_affordance(w)
+    assert not w.lbl_comp_method_new.visible, (
+        'the badge is announced again on a launch that already announced it')
+    assert 'border' not in (w.comp_method_combo.style or ''), (
+        'the accent border comes back every launch, which reads as a '
+        'control stuck in a warning state')
+
+
+def test_showing_the_method_badge_spends_it(monkeypatch):
+    w = _announce_window(monkeypatch, seen=False)
+    APP._update_comp_method_affordance(w)
+    assert w.lbl_comp_method_new.visible, 'the first launch says nothing'
+    assert w.writes == [{APP._ANNOUNCE_METHOD: True}], (
+        'nothing was recorded, so the badge is announced again next launch')
+
+
+def test_the_badge_does_not_vanish_from_under_the_reader(monkeypatch):
+    """The write happens on the first paint. Re-reading the store on the next
+    refresh -- a scope change, a finished search, any repaint -- would take
+    the badge away mid-launch, which is not "once", it is a flicker."""
+    w = _announce_window(monkeypatch, seen=False)
+    APP._update_comp_method_affordance(w)
+    w.writes[:] = []
+    APP._update_comp_method_affordance(w)
+    assert w.lbl_comp_method_new.visible, (
+        'the badge disappeared during the very launch that showed it')
+    assert w.writes == [], 'the config is rewritten on every refresh'
+
+
+def test_choosing_letter_level_takes_the_badge_down_now(monkeypatch):
+    """Not next launch: the user has plainly found the feature."""
+    w = _announce_window(monkeypatch, seen=False)
+    APP._update_comp_method_affordance(w)
+    assert w.lbl_comp_method_new.visible
+    APP._retire_announcement(w, APP._ANNOUNCE_METHOD)
+    w.comp_method_combo.setCurrentIndex(0)      # back to chunk in the same run
+    APP._update_comp_method_affordance(w)
+    assert not w.lbl_comp_method_new.visible, (
+        'switching back to chunk re-announces a feature the user has used')
+
+
+def test_an_unreadable_config_stays_quiet(monkeypatch):
+    """We do not know whether the user has been told, and silence is the
+    cheaper of the two mistakes."""
+    w = _announce_window(monkeypatch, raises=True)
+    APP._update_comp_method_affordance(w)
+    assert not w.lbl_comp_method_new.visible
+
+
+def test_the_store_is_read_once_per_launch(monkeypatch):
+    """It is a pickle load. Three refreshes must not be three reads."""
+    w = _announce_window(monkeypatch, seen=False)
+    for _ in range(3):
+        APP._update_comp_method_affordance(w)
+    assert len(w.reads) == 1, 'the config is re-read on every refresh'
+
+
+# ---------------------------------------------------------------------------
+# Letter-level search is the DEFAULT once an index exists (owner,
+# 2026-08-28) -- but a stored method is a decision and outranks it, `chunk`
+# included. The correction that shapes this: never override the last search
+# state.
+# ---------------------------------------------------------------------------
+
+def _default_window(monkeypatch, available=True, scope='genizah',
+                    method='chunk'):
+    monkeypatch.setattr(pl, 'passage_available', lambda: available)
+    w = _window(scope=scope)
+    w.comp_method_combo = _Combo([('chunk', ''), ('passage', '')],
+                                 index=0 if method == 'chunk' else 1)
+    w.applied = []
+    w._apply_passage_mode_ui = lambda on: w.applied.append(on)
+    w._show_passage_reason = lambda _k: None
+    w._update_comp_method_help = lambda: None
+    return w
+
+
+def test_letter_level_is_the_default_once_an_index_exists(monkeypatch):
+    w = _default_window(monkeypatch)
+    APP._apply_default_comp_method(w)
+    assert w.comp_method_combo.currentData() == 'passage', (
+        'a faster method with far fewer unrelated results is still behind a '
+        'dropdown nobody opens')
+    assert w.applied == [True], (
+        'the method moved but the letter-level controls did not follow it -- '
+        'a programmatic setCurrentIndex fires no handler')
+
+
+def test_the_default_does_not_fire_without_an_index(monkeypatch):
+    w = _default_window(monkeypatch, available=False)
+    APP._apply_default_comp_method(w)
+    assert w.comp_method_combo.currentData() == 'chunk'
+
+
+def test_the_default_does_not_fire_where_letter_level_would_refuse(
+        monkeypatch):
+    """A My Library scope refuses letter-level search outright; defaulting to
+    it would open on a method that can only say no."""
+    w = _default_window(monkeypatch, scope='local')
+    APP._apply_default_comp_method(w)
+    assert w.comp_method_combo.currentData() == 'chunk'
+
+
+def test_a_stored_chunk_choice_outranks_the_new_default(monkeypatch):
+    """The owner's correction, and the whole reason this is not simply a new
+    initial index: do not override the last search state."""
+    w = _default_window(monkeypatch)
+    w._refresh_comp_method_enabled = lambda: None
+    w._refresh_witness_panel = lambda: None
+    APP._restore_comp_passage_preferences(w, {'comp_method': 'chunk'})
+    APP._apply_default_comp_method(w)
+    assert w.comp_method_combo.currentData() == 'chunk', (
+        "the user's own last method was overwritten by the default")
+
+
+def test_a_session_with_no_stored_method_leaves_the_default_standing(
+        monkeypatch):
+    """A pre-Phase-146 session stores no method at all. Restoring it must not
+    write `chunk` over a default the load race already applied."""
+    w = _default_window(monkeypatch, method='passage')
+    w._refresh_comp_method_enabled = lambda: None
+    w._refresh_witness_panel = lambda: None
+    APP._restore_comp_passage_preferences(w, {}, absent_method=None)
+    assert w.comp_method_combo.currentData() == 'passage', (
+        'a session that predates the method silently demoted the default')
+
+
+def test_a_history_entry_with_no_method_is_still_chunk_by_definition(
+        monkeypatch):
+    """The SAME absent key means the opposite thing here. A pre-v9 history
+    entry recorded a search that ran before the method existed; re-running it
+    as letter-level would run a different search under the same name -- and
+    now that letter-level is the default, that is what "leave it alone" would
+    do."""
+    w = _default_window(monkeypatch, method='passage')
+    w._refresh_comp_method_enabled = lambda: None
+    w._refresh_witness_panel = lambda: None
+    APP._restore_comp_passage_preferences(w, {})
+    assert w.comp_method_combo.currentData() == 'chunk', (
+        'a pre-v9 history entry re-runs as a letter-level search')
+
+
+def test_the_two_callers_disagree_on_purpose():
+    """Reached, not merely correct: the distinction is worth nothing if both
+    call sites pass the same thing."""
+    hist = _function_source('_restore_comp_search_from_state')
+    sess = _function_source('_restore_session')
+    assert '_restore_comp_passage_preferences(params or {})' in hist, (
+        'the history restore no longer takes the pre-v9 chunk fallback')
+    assert 'absent_method=None' in sess, (
+        'the session restore writes chunk over the letter-level default')
+
+
+def test_a_click_on_chunk_is_a_choice_the_default_must_not_undo(monkeypatch):
+    """Every programmatic move blocks signals, so reaching the handler means
+    a person moved the control -- and choosing chunk is as much a decision as
+    choosing letter-level."""
+    w = _default_window(monkeypatch)
+    w._update_comp_method_help = lambda: None
+    w._update_comp_method_affordance = lambda: None
+    w._save_session = lambda: None
+    APP._on_comp_method_changed(w, 0)
+    APP._apply_default_comp_method(w)
+    assert w.comp_method_combo.currentData() == 'chunk', (
+        'the default overrode a method the user had just picked by hand')
+
+
+def test_the_default_is_applied_where_the_index_first_answers(monkeypatch):
+    """Reached, not merely correct: at construction the combo cannot know
+    whether an index exists, so the only two moments with a true answer are
+    the startup load and the end of a build."""
+    monkeypatch.setattr(pl, 'passage_available', lambda: True)
+    monkeypatch.setattr(pl, 'install_passage_state', lambda st: True)
+    w = _default_window(monkeypatch)
+    w._revalidate_comp_method = lambda: None
+    w._maybe_offer_passage_build = lambda: None
+    APP._on_passage_loaded(w, type('R', (), {
+        'index': object(), 'live_dir': 'd', 'status': 'live_ok'})())
+    assert w.comp_method_combo.currentData() == 'passage'
+
+    w2 = _default_window(monkeypatch)
+    w2._close_pending = False
+    w2.status_label = _Label()
+    w2._finish_passage_build = lambda: None
+    w2._revalidate_comp_method = lambda: None
+    w2._start_passage_load = lambda: None
+    APP._on_passage_build_finished(w2, type('R', (), {
+        'index': object(), 'live_dir': 'd', 'status': 'installed'})())
+    assert w2.comp_method_combo.currentData() == 'passage', (
+        'a user who just spent ten minutes building the index is left on '
+        'the method they built it to replace')
+
+
+def test_the_default_waits_for_the_session_restore(monkeypatch):
+    """`_apply_passage_mode_ui` caches the chunk knobs as "the user's own"
+    the FIRST time it runs and only then. Applying the default while the
+    restore is still pending caches the construction values (5 / 10 / Exact);
+    the restore then writes the real ones into widgets that are already
+    forced and disabled, and the next save reads the cache -- silently
+    resetting the user's chunk settings."""
+    w = _default_window(monkeypatch)
+    w._restoring_session = True
+    APP._apply_default_comp_method(w)
+    assert w.comp_method_combo.currentData() == 'chunk', (
+        'the default ran during the restore window and cached the '
+        "construction chunk values as the user's own")
+    assert w.applied == [], 'the mode UI was applied mid-restore'
+
+    w._restoring_session = False
+    APP._apply_default_comp_method(w)
+    assert w.comp_method_combo.currentData() == 'passage', (
+        'held back and never applied is not a deferral, it is a drop')
+
+
+def test_the_restore_re_enters_the_default_on_every_path():
+    """It sits in the `finally`, so a no-data start, a declined restore,
+    `restore_mode='never'` and an exception mid-restore all reach it -- and
+    those are the starts most likely to have no stored method at all."""
+    seg = _function_source('_restore_session')
+    _, _, after = seg.partition('self._restoring_session = False')
+    assert '_apply_default_comp_method' in after.split('def ')[0], (
+        'the default is never re-applied after the restore window closes, '
+        'so a load that beat the restore drops it silently')
+
+
+# ---------------------------------------------------------------------------
+# Amber accents and the dark theme.
+#
+# Both accents shipped naming a light `background` and no `color`, so the
+# text kept the palette's own near-white and the control read as pale text on
+# cream. The Witnesses button was reported with a screenshot (owner,
+# 2026-08-28); the Text Position selector had been doing it silently since
+# Phase 45, and only when set to a non-default position -- which is exactly
+# when the highlight exists to be read.
+# ---------------------------------------------------------------------------
+
+class _Colour:
+    def __init__(self, lightness):
+        self._l = lightness
+
+    def lightness(self):
+        return self._l
+
+
+class _Palette:
+    def __init__(self, lightness):
+        self._c = _Colour(lightness)
+
+    def color(self, _role):
+        return self._c
+
+
+def _themed_window(lightness=240):
+    w = _unannounced(_Win())
+    w.palette = lambda: _Palette(lightness)
+    return w
+
+
+def _calls_inside(name):
+    """The attribute calls inside `name`, as bare names.
+
+    A substring check against the source cannot tell a call from the comment
+    above it -- which has bitten this branch four times -- and
+    `_highlight_text_position` is a CLOSURE, so `ast.walk` over the module is
+    also the only way to reach it by name at all.
+    """
+    tree = ast.parse(io.open(
+        os.path.join(REPO_ROOT, 'genizah_app.py'), encoding='utf-8').read())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return {c.func.attr for c in ast.walk(node)
+                    if isinstance(c, ast.Call)
+                    and isinstance(c.func, ast.Attribute)}
+    raise AssertionError('no function named %r' % name)
+
+
+def test_the_text_position_accent_names_both_halves_of_its_pair():
+    for lightness in (20, 240):
+        style = APP._text_position_accent(_themed_window(lightness))
+        assert 'background' in style and 'color' in style, (
+            'the accent leaves half the contrast pair to the theme, so the '
+            'combo is unreadable on one of them (lightness=%d)' % lightness)
+
+
+def test_the_text_position_accent_follows_the_theme():
+    dark = APP._text_position_accent(_themed_window(20))
+    light = APP._text_position_accent(_themed_window(240))
+    assert dark != light, (
+        'one hard-coded background for both themes is the reported bug')
+    assert '#3d3522' in dark and '#fffacd' in light
+
+
+def test_the_text_position_accent_keeps_its_own_border_colour():
+    """It is not the Witnesses button. Sharing the PAIR is the point; sharing
+    the whole rule would repaint a control this change is not about, and
+    adding padding or a radius would move a toolbar row that already needs
+    1423 px on a 1440 px screen."""
+    style = APP._text_position_accent(_themed_window())
+    assert '#f39c12' in style, 'the Text Position border changed colour'
+    assert 'padding' not in style and 'border-radius' not in style, (
+        'the accent now changes the combo metrics, not just its colours')
+
+
+def test_a_raising_palette_still_yields_an_accent():
+    """These are recomputed during construction and teardown too."""
+    w = _unannounced(_Win())
+
+    def _boom():
+        raise RuntimeError('no palette yet')
+
+    w.palette = _boom
+    assert 'background' in APP._text_position_accent(w)
+
+
+def test_both_accents_read_one_pair():
+    """A second hand-rolled copy is a second chance to make the same
+    mistake -- which is how there came to be two of them."""
+    for name in ('_witness_button_accent', '_text_position_accent'):
+        assert '_accent_amber_pair' in _calls_inside(name), (
+            '%s computes its own colours again' % name)
+
+
+def test_the_highlight_closure_reaches_the_helper():
+    """Reached, not merely correct: the rule lived inline in a closure, where
+    no test could see it and the palette was never consulted."""
+    calls = _calls_inside('_highlight_text_position')
+    assert '_text_position_accent' in calls, (
+        'the closure still hard-codes its own stylesheet')
+
+
+def test_the_default_position_clears_the_accent_rather_than_repainting_it():
+    """`Anywhere` is not a filter, so the control must go back to the
+    theme's own look -- an accent recoloured to "normal" is still a control
+    the theme no longer owns."""
+    seg = _function_source('_highlight_text_position')
+    head, _, _ = seg.partition('else:')
+    assert 'setStyleSheet("")' in head, (
+        'the default position no longer clears the stylesheet')

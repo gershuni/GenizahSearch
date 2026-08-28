@@ -78,6 +78,24 @@ concatenation and union were measured to return the identical manuscript set
 (392 both ways, empty difference in both directions), which is why chunk
 search's own recursive search is unchanged.
 
+#### Letter-level search is now the default, and says so only once
+
+- **Letter-level search is selected by default** once the index exists on this
+  computer -- but only for someone who has never chosen. A stored method is a
+  decision and outranks the default, `chunk` included, so the last search
+  state is never overridden. The combo still starts on chunk, because at
+  construction the index has not finished loading and "not built" is
+  indistinguishable from "not answered yet"; the default is applied at the two
+  moments the question first has a true answer -- when the index finishes
+  loading, and when a build finishes.
+- **The orange "New" markers appear once and never again.** Both the accent on
+  the method selector and a new one on the Witnesses button are one-shot: they
+  show until they have been seen once or the feature has been used, whichever
+  comes first, and are recorded in the app config rather than the session, so
+  declining session restore does not start the announcement over. An accent
+  that returns every launch stops reading as "this is new" and starts reading
+  as a control stuck in a warning state.
+
 #### Under the hood
 
 - The fusion arithmetic is the **same module the web and the public API

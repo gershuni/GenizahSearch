@@ -725,10 +725,28 @@ class _Win2:
     _add_comp_search_to_history = GAPP._add_comp_search_to_history
     _PASSAGE_FORCED_CONTROLS = GAPP._PASSAGE_FORCED_CONTROLS
     COMP_SORT_MODES = GAPP.COMP_SORT_MODES
+    _update_witness_affordance = GAPP._update_witness_affordance
+    _set_witness_panel_visible = GAPP._set_witness_panel_visible
+    _comp_method = GAPP._comp_method
+    _witness_button_accent = GAPP._witness_button_accent
+    _accent_amber_pair = GAPP._accent_amber_pair
+    _announcement_allowed = GAPP._announcement_allowed
+    _mark_announcement_seen = GAPP._mark_announcement_seen
+    _retire_announcement = GAPP._retire_announcement
+    _ANNOUNCE_METHOD = GAPP._ANNOUNCE_METHOD
+    _ANNOUNCE_WITNESSES = GAPP._ANNOUNCE_WITNESSES
 
 
 def _win(seed='the seed text of this work'):
     w = _Win2()
+    # The one-shot announcements live in the owner's own `config.pkl`, so a
+    # stub that read it would pass or fail by whether the owner had ever seen
+    # the badge. Pre-seeded allowed AND already-written: nothing reaches the
+    # disk in either direction.
+    w._announcements_allowed = {GAPP._ANNOUNCE_METHOD: True,
+                                GAPP._ANNOUNCE_WITNESSES: True}
+    w._announcements_written = {GAPP._ANNOUNCE_METHOD,
+                                GAPP._ANNOUNCE_WITNESSES}
     w._comp_witnesses = pw.WitnessSet()
     w.comp_text_area = _TextArea(seed)
     w.comp_sort_mode = 'score'
@@ -2290,6 +2308,7 @@ class _FakeWidget:
         self.visible = None
         self.text = None
         self.tooltip = None
+        self.style = None
 
     def setEnabled(self, v):
         self.enabled = bool(v)
@@ -2302,6 +2321,9 @@ class _FakeWidget:
 
     def setToolTip(self, t):
         self.tooltip = t
+
+    def setStyleSheet(self, s):
+        self.style = s
 
     def setTextAlignment(self, _a):
         pass
@@ -2476,3 +2498,173 @@ def test_every_busy_transition_refreshes_the_panel():
             '%s ends the run without recomputing the buttons' % fn
         )
 
+
+# ---------------------------------------------------------------------------
+# The Witnesses button announces itself ONCE (owner, 2026-08-28).
+#
+# It matters more than the method badge now: letter-level search is the
+# DEFAULT, so most people will never see the badge that used to introduce
+# this half of the tab. What is left is a plain button among three policy
+# selectors, reading as one more option -- nothing says a fused multi-witness
+# search is a different KIND of search from the one above it.
+# ---------------------------------------------------------------------------
+
+def _witness_badge_window(monkeypatch, seen=False, entries=0):
+    writes = []
+    store = {GAPP._ANNOUNCE_WITNESSES: seen}
+
+    def _save(data):
+        writes.append(data)
+        store.update(data)
+
+    monkeypatch.setattr(genizah_app, 'load_app_config', lambda: dict(store))
+    monkeypatch.setattr(genizah_app, 'save_app_config', _save)
+    w = _win()
+    # These tests are ABOUT the store, so they supply their own rather than
+    # inheriting `_win`'s blanket isolation.
+    del w._announcements_allowed
+    del w._announcements_written
+    for i in range(entries):
+        pw.add_texts(w._comp_witness_state(), ['alpha beta gamma %d' % i],
+                     w._comp_seed_text(), 'Pasted text')
+    w.btn_comp_witnesses = _FakeWidget()
+    w.lbl_comp_witnesses_new = _FakeWidget()
+    w.writes = writes
+    return w
+
+
+def test_the_witnesses_button_announces_itself_on_a_first_launch(monkeypatch):
+    w = _witness_badge_window(monkeypatch)
+    GAPP._update_witness_affordance(w, True)
+    assert w.lbl_comp_witnesses_new.visible, (
+        'nothing marks the Witnesses button as new, so a multi-witness '
+        'search reads as one more policy selector')
+    assert 'border' in (w.btn_comp_witnesses.style or ''), (
+        'the button carries no accent, so the badge is the only cue')
+    assert w.writes == [{GAPP._ANNOUNCE_WITNESSES: True}], (
+        'nothing was recorded, so it is announced again next launch')
+
+
+def test_the_witness_accent_keeps_the_button_looking_like_a_button(
+        monkeypatch):
+    """A QPushButton stylesheet that sets only a border drops the native
+    style entirely and leaves a flat rectangle."""
+    w = _witness_badge_window(monkeypatch)
+    GAPP._update_witness_affordance(w, True)
+    assert 'background' in w.btn_comp_witnesses.style
+
+
+class _Colour:
+    def __init__(self, lightness):
+        self._l = lightness
+
+    def lightness(self):
+        return self._l
+
+
+class _Palette:
+    def __init__(self, lightness):
+        self._c = _Colour(lightness)
+
+    def color(self, _role):
+        return self._c
+
+
+def _themed(monkeypatch, lightness):
+    w = _witness_badge_window(monkeypatch)
+    w.palette = lambda: _Palette(lightness)
+    GAPP._update_witness_affordance(w, True)
+    return w.btn_comp_witnesses.style
+
+
+def test_the_witness_accent_names_both_halves_of_its_contrast_pair(
+        monkeypatch):
+    """Owner-reported with a screenshot: the first version named a light
+    `background` and no `color`, so the label kept the palette's own
+    near-white and the button read as pale text on cream on the dark theme.
+    A rule that sets one half of a contrast pair inherits the other from a
+    theme it knows nothing about."""
+    for lightness in (20, 240):
+        style = _themed(monkeypatch, lightness)
+        assert 'background' in style and 'color' in style, (
+            'the accent leaves half the contrast pair to the theme '
+            '(lightness=%d)' % lightness)
+
+
+def test_the_witness_accent_follows_the_theme(monkeypatch):
+    dark = _themed(monkeypatch, 20)
+    light = _themed(monkeypatch, 240)
+    assert dark != light, (
+        'one hard-coded background for both themes is the reported bug')
+    assert '#3d3522' in dark and '#fffacd' in light, (
+        'the accent no longer uses the amber pair the browse editor already '
+        'established for this exact choice')
+
+
+def test_a_window_with_no_palette_still_gets_an_accent(monkeypatch):
+    """Every other caller reaches this through a real QWidget, but the
+    affordance runs during construction and teardown too, and a raising
+    palette must not take the button's styling with it."""
+    w = _witness_badge_window(monkeypatch)
+
+    def _boom():
+        raise RuntimeError('no palette yet')
+
+    w.palette = _boom
+    GAPP._update_witness_affordance(w, True)
+    assert 'background' in w.btn_comp_witnesses.style
+
+
+def test_the_witness_badge_is_silent_once_it_has_been_seen(monkeypatch):
+    w = _witness_badge_window(monkeypatch, seen=True)
+    GAPP._update_witness_affordance(w, True)
+    assert not w.lbl_comp_witnesses_new.visible
+    assert not (w.btn_comp_witnesses.style or ''), (
+        'the accent border comes back on a launch that already announced it')
+
+
+def test_the_witness_badge_is_silent_once_there_are_witnesses(monkeypatch):
+    """Someone who has added a witness has plainly found the button, and an
+    announcement for a feature in use is noise."""
+    w = _witness_badge_window(monkeypatch, entries=1)
+    GAPP._update_witness_affordance(w, True)
+    assert not w.lbl_comp_witnesses_new.visible
+
+
+def test_chunk_mode_takes_the_witness_badge_down_with_the_button(monkeypatch):
+    """It is not in the visibility LOOP -- it has a second condition of its
+    own -- so it needs its own call, or it survives onto a chunk search
+    beside a button that is no longer there."""
+    w = _witness_badge_window(monkeypatch)
+    GAPP._set_witness_panel_visible(w, True)
+    assert w.lbl_comp_witnesses_new.visible
+    GAPP._set_witness_panel_visible(w, False)
+    assert not w.lbl_comp_witnesses_new.visible
+    assert not (w.btn_comp_witnesses.style or '')
+
+
+def test_adding_the_first_witness_ends_the_announcement(monkeypatch):
+    """Through the refresh every mutation goes through, not by calling the
+    updater directly."""
+    w = _witness_badge_window(monkeypatch)
+    w._comp_method = lambda: 'passage'
+    w._witness_dialog_is_open = lambda: False
+    GAPP._refresh_witness_panel(w)
+    assert w.lbl_comp_witnesses_new.visible
+    pw.add_texts(w._comp_witness_state(), ['alpha beta gamma'],
+                 w._comp_seed_text(), 'Pasted text')
+    GAPP._refresh_witness_panel(w)
+    assert not w.lbl_comp_witnesses_new.visible, (
+        'the badge outlives the roster it was pointing at')
+
+
+def test_opening_the_dialog_retires_the_witness_badge():
+    """Now, not next launch -- and asserted as a CALL, because a substring
+    check against the source cannot tell a call from the comment above it."""
+    assert '_retire_announcement' in _calls_in('_open_witness_dialog'), (
+        'opening the witness dialog leaves the badge advertising a feature '
+        'the user is looking at')
+
+
+def test_the_panel_refresh_is_what_keeps_the_badge_in_step():
+    assert '_update_witness_affordance' in _calls_in('_refresh_witness_panel')
