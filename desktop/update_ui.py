@@ -140,9 +140,16 @@ class WhatsNewBar(QFrame):
         # banner a full sentence on 2026-08-26, and a sentence that long
         # inside a QComboBox item would be unreadable. Different text on
         # different surfaces is two entries, not one.
+        #
+        # v9.1.0: the bar names the witnesses and stops there. My draft
+        # also announced letter-level search becoming the default; the
+        # owner cut that clause (2026-08-28). The release changes the
+        # default without advertising it, which is a choice about noise,
+        # not an oversight -- but note what it is NOT: the v9.0.0 text this
+        # replaces said "Chunk search stays the default", and leaving that
+        # in place would have asserted the opposite of what now happens.
         self.lbl_msg.setText(tr(
-            "New! Letter-level composition search - much faster, with "
-            "fewer irrelevant results"))
+            "New! Search several copies of one work at once"))
         self.show()
 
     def on_learn_more(self):
@@ -277,15 +284,11 @@ class WhatsNewDialog(QDialog):
         is_heb = CURRENT_LANG == 'he'
         items = [
             tr(
-                "Letter-level search: a new way to find parallels in the Composition Search "
-                "tab. It is much faster than chunk search and returns far fewer unrelated "
-                "results. Chunk search stays the default and keeps its Exact / Variants / "
-                "Fuzzy modes — the two methods complement each other."),
-            tr(
-                "It runs on an index built on your own computer, from the transcriptions "
-                "already here. Building takes about ten minutes and needs about 11 GB of free "
-                "space while it runs; the finished index is about 3.5 GB. The program offers "
-                "to build it once, and you can build or rebuild it at any time from Settings."),
+                "Several witnesses of one work: letter-level search can now be given more "
+                "than one copy of the text you are looking for. Paste them one at a time, "
+                "load a whole file split on blank lines, or promote manuscripts straight "
+                "from your own results. Each is searched on its own and the results are "
+                "merged into one list."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)

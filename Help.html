@@ -252,13 +252,53 @@
     <h3>Two Search Methods</h3>
     <p>Composition Search offers two ways to find parallels. They are complementary: neither replaces the other, and which one suits you depends on the text in front of you.</p>
     <ul>
-        <li><b>Chunk search</b> is the original method and remains the default. It compares blocks of words, and it is the only method that offers the Exact / Variants / Fuzzy modes and cross-paragraph filtering described below.</li>
+        <li><b>Chunk search</b> is the original method. It compares blocks of words, and it is the only method that offers the Exact / Variants / Fuzzy modes and cross-paragraph filtering described below.</li>
         <li><b>Letter-level search</b> compares sequences of letters instead. It is much faster than chunk search and returns far fewer unrelated results, but it does not offer the chunk-mode parameters &mdash; when you select it, those controls are set aside and the letter-level controls appear in their place.</li>
     </ul>
     <p>Letter-level search runs on an index built on this computer from the transcriptions you already have. The program offers to build it once, and you can build or rebuild it at any time from Settings. The build takes about ten minutes, needs about 11 GB of free disk space while it runs, and produces an index of about 3.5 GB. Cancelling a build, or a build that fails, always leaves the index you already had intact and working.</p>
-    <p>Letter-level search covers the Genizah corpus. With My Library or the combined scope selected, the method stays on chunk search and the reason is shown on screen. Full Recursive Search likewise uses chunk search: joining several texts into one query works for chunk search but measurably harms letter-level search.</p>
+    <p>Letter-level search covers the Genizah corpus. With My Library or the combined scope selected, the method stays on chunk search and the reason is shown on screen. Once the index exists on this computer, letter-level search is the method the Composition tab starts on; if you have already chosen a method yourself, your choice is kept.</p>
 
-    <h4>Letter-Level Controls</h4>
+    <h4>Several Witnesses of One Work</h4>
+
+<p>A work survives in many manuscripts, and no single copy of it finds every
+other. Letter-level search can be given more than one copy of the text you are
+looking for &mdash; each is searched on its own, and the results are merged
+into one list. Press <b>Witnesses</b> beside the letter-level controls to open
+the list.</p>
+
+<p>There are three ways to add one:</p>
+<ul>
+<li><b>Paste a text</b> &mdash; one witness at a time.</li>
+<li><b>Load a file</b> &mdash; a whole file split on blank lines. The preview
+tells you how many it found and how many were too short to use.</li>
+<li><b>Promote from your results</b> &mdash; tick manuscripts in the result
+list and press <i>Search with these too</i>. The text comes from the pages
+that actually matched, not from the manuscript record.</li>
+</ul>
+
+<p>Do not join several copies into one box. Joining them into a single query
+works for chunk search but measurably harms letter-level search, which spends
+a fixed budget per query: measured against the 614 Birkat Hamazon census
+manuscripts that have any indexed text, the best single copy finds 348 and
+seventeen copies searched separately and merged find 455 &mdash; while the
+same seventeen joined into one query find 296, fewer than a single copy on its
+own.</p>
+
+<p>The results list gains a <b>Witnesses</b> column saying how many distinct
+copies point at each manuscript, with a tooltip naming them, and two new
+orderings: by combined score and by number of witnesses.</p>
+
+<p><b>Auto-expand</b> repeats the search using the best results as new
+witnesses. It reaches further and it puts more to skim at the top of the list,
+so it is a button you press rather than something the search does on its own.
+In letter-level mode <i>Full Recursive Search</i> runs this expansion; in
+chunk mode it keeps its own behaviour, which is correct for that engine.</p>
+
+<p>A multi-witness search can be <b>stopped</b>, which a single letter-level
+search still cannot: the copy being searched finishes first, and everything
+found so far is kept. Up to 25 witnesses can be held at once.</p>
+
+<h4>Letter-Level Controls</h4>
     <ul>
         <li><b>Match width:</b> How far a manuscript may drift from your text and still count as a match. Wider settings find more damaged or variant witnesses; the strongest matches are always ranked first.</li>
         <li><b>Passage length:</b> Whether a short shared passage counts as a match. "Also short passages" roughly doubles what you have to read through, and finds witnesses that the normal setting does not reach.</li>

@@ -5003,8 +5003,11 @@ TRANSLATIONS.update({
         "חיפוש מקבילות ברמת האות - חיפוש מהיר ומדויק יותר",
     "Get the most from the parallels search by entering several textual witnesses":
         "מצו את חיפוש המקבילות בעזרת הזנת כמה עדי נוסח לחיפוש",
-    "New! Letter-level composition search - much faster, with fewer irrelevant results":
-        "חדש! חיפוש חיבורים ברמת האות - מהיר בהרבה, עם פחות תוצאות לא רלוונטיות",
+    # v9.1.0 desktop What's New bar (2026-08-28). My draft ended
+    # "-- and letter-level search is now the default"; the owner cut that
+    # clause. The release changes the default without advertising it.
+    "New! Search several copies of one work at once":
+        "חדש! חיפוש בכמה עדים של אותה יצירה בבת אחת",
     "New! Letter-level search":
         "חדש! חיפוש ברמת האות",
     "Chunk search (slower)":
@@ -5020,12 +5023,14 @@ TRANSLATIONS.update({
     # keys were deleted rather than kept for open pages: nothing
     # referenced them, and a rejected claim left in the table is one a
     # future surface can copy back out of it.
-    # v9.0.0 desktop What's New (2026-08-26). Two bullets: the owner cut
-    # the policy-controls and export-fix ones on review.
-    "Letter-level search: a new way to find parallels in the Composition Search tab. It is much faster than chunk search and returns far fewer unrelated results. Chunk search stays the default and keeps its Exact / Variants / Fuzzy modes — the two methods complement each other.":
-        "חיפוש ברמת האות: דרך חדשה למצוא מקבילות בלשונית חיפוש חיבורים. הוא מהיר בהרבה מחיפוש מקטעים ומחזיר הרבה פחות תוצאות לא רלוונטיות. חיפוש מקטעים נשאר ברירת המחדל ושומר על מצבי מדויק / וריאנטים / מקורב — שתי השיטות משלימות זו את זו.",
-    "It runs on an index built on your own computer, from the transcriptions already here. Building takes about ten minutes and needs about 11 GB of free space while it runs; the finished index is about 3.5 GB. The program offers to build it once, and you can build or rebuild it at any time from Settings.":
-        "הוא פועל על אינדקס הנבנה במחשב שלכם, מתוך התעתיקים שכבר נמצאים בו. הבנייה אורכת כעשר דקות ודורשת כ‑11 גיגהבייט פנויים בזמן הריצה; האינדקס המוגמר תופס כ‑3.5 גיגהבייט. התוכנה מציעה לבנות אותו פעם אחת, ואפשר לבנות או לבנות מחדש בכל עת דרך ההגדרות.",
+    # v9.1.0 desktop What's New dialog (2026-08-28). ONE bullet: the owner
+    # cut the measurement, the new-default and the Stop bullets from my
+    # draft. The two v9.0.0 bullets this replaces are deleted rather than
+    # kept -- one of them asserted "Chunk search stays the default", which
+    # this release makes false, and a false claim left in the table is one a
+    # future surface can copy back out of it.
+    "Several witnesses of one work: letter-level search can now be given more than one copy of the text you are looking for. Paste them one at a time, load a whole file split on blank lines, or promote manuscripts straight from your own results. Each is searched on its own and the results are merged into one list.":
+        "כמה עדים של יצירה אחת: אפשר לתת לחיפוש ברמת האות יותר מעותק אחד של הטקסט שאתם מחפשים. הדביקו אותם אחד אחד, טענו קובץ שלם המחולק בשורות ריקות, או קדמו כתבי יד ישירות מתוך התוצאות שלכם. כל אחד נבדק בנפרד והתוצאות מתמזגות לרשימה אחת.",
     "Faster, with fewer irrelevant results.":
         "מהיר יותר, עם פחות תוצאות לא רלוונטיות.",
     "The older method. Slower, but offers Exact / Variants / Fuzzy modes and cross-paragraph filtering.":
