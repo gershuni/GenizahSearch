@@ -131,7 +131,17 @@ class _Win:
     _comp_chunk_preference = APP._comp_chunk_preference
     _PASSAGE_FORCED_CONTROLS = APP._PASSAGE_FORCED_CONTROLS
     _passage_scan_in_flight = APP._passage_scan_in_flight
+    _passage_batch_in_flight = APP._passage_batch_in_flight
+    _witness_notify = APP._witness_notify
+    _refresh_witness_panel = APP._refresh_witness_panel
+    _comp_witness_state = APP._comp_witness_state
+    _witness_dialog_is_open = APP._witness_dialog_is_open
+    _reset_composition = APP._reset_composition
+    _retry_pending_reset = APP._retry_pending_reset
     _refuse_stop_during_passage_scan = APP._refuse_stop_during_passage_scan
+    # Borrowed, not stubbed: Reset clears the auto-expand state before it
+    # defers, and a stand-in would let that call vanish silently.
+    _stop_auto_expand = APP._stop_auto_expand
     _on_pause_clicked = APP._on_pause_clicked
     _on_passage_build_finished = APP._on_passage_build_finished
     _passage_snapshot_must_wait = APP._passage_snapshot_must_wait
@@ -142,10 +152,43 @@ class _Win:
     _update_comp_method_help = APP._update_comp_method_help
     _update_comp_method_affordance = APP._update_comp_method_affordance
     _METHOD_COMBO_ACCENT = APP._METHOD_COMBO_ACCENT
+    _update_witness_affordance = APP._update_witness_affordance
+    _witness_button_accent = APP._witness_button_accent
+    _accent_amber_pair = APP._accent_amber_pair
+    _text_position_accent = APP._text_position_accent
+    _composition_tab_is_current = APP._composition_tab_is_current
+    _honour_deferred_comp_method = APP._honour_deferred_comp_method
+    # Borrowed: the demotion is where a NOT_BUILT deferral is recorded,
+    # and a stand-in would let that recording vanish.
+    _revert_comp_method_to_chunk = APP._revert_comp_method_to_chunk
+    _announcement_allowed = APP._announcement_allowed
+    _mark_announcement_seen = APP._mark_announcement_seen
+    _retire_announcement = APP._retire_announcement
+    _ANNOUNCE_METHOD = APP._ANNOUNCE_METHOD
+    _ANNOUNCE_WITNESSES = APP._ANNOUNCE_WITNESSES
+    # Borrowed, not stubbed: the letter-level default is applied from two
+    # handlers this file already drives, and a stand-in would let either call
+    # vanish without a test noticing.
+    _apply_default_comp_method = APP._apply_default_comp_method
+
+
+def _unannounced(w):
+    """Cut a stub window off from the real `config.pkl`.
+
+    The one-shot announcements live in the owner's own app config, so a test
+    that let them read it would pass or fail by whether the owner had ever
+    seen the badge -- green here, red on a fresh machine, and neither result
+    about the code. Both caches are pre-seeded: allowed, and already
+    written, so nothing reaches the disk in either direction.
+    """
+    w._announcements_allowed = {APP._ANNOUNCE_METHOD: True,
+                                APP._ANNOUNCE_WITNESSES: True}
+    w._announcements_written = {APP._ANNOUNCE_METHOD, APP._ANNOUNCE_WITNESSES}
+    return w
 
 
 def _window(scope='genizah', lab=False, engine_ready=True, building=False):
-    w = _Win()
+    w = _unannounced(_Win())
     w.searcher = _Engine(engine_ready)
     w.comp_corpus_scope_combo = _Combo(
         [('genizah', 'G'), ('local', 'L'), ('all', 'A')],
@@ -265,7 +308,7 @@ def test_a_garbage_method_stamp_is_refused(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def _axis_window():
-    w = _Win()
+    w = _unannounced(_Win())
     w.comp_passage_width_combo = _Combo(
         [('standard-40', ''), ('wide-40', ''), ('wider-40', ''),
          ('widest-40', ''), ('max-40', '')], index=3)
@@ -359,14 +402,43 @@ def test_the_restore_path_revalidates_too():
     assert '_passage_disabled_reason_now(' in seg
 
 
-def test_recursive_search_refuses_a_programmatic_passage_call():
-    """The button is disabled in passage mode, but a restored session or a
-    programmatic call still reaches the function. Concatenating result texts
-    starves the passage engine's posting budget -- measured 48.2% against
-    74.1% for the same witnesses fused."""
+def test_recursive_search_branches_by_engine_rather_than_refusing():
+    """"Recursive" means something different per engine, and both meanings
+    are correct for their own engine.
+
+    Chunk decomposes a query into independent per-chunk lookups with no
+    shared budget, so concatenating result texts is exactly equivalent to a
+    union -- measured, 392 manuscripts both ways with an empty difference in
+    both directions. The passage engine spends a per-query POSTING budget, so
+    the same concatenation starves: 48.2% against 74.1% fused, and below the
+    56.7% of the best SINGLE witness.
+
+    This replaces a guard that asserted the function REFUSED in passage mode.
+    That assertion still passes against the branching version -- both
+    `_comp_method()` and `'passage'` appear either way -- so it had stopped
+    testing anything it claimed to.
+    """
     seg = _function_source('run_recursive_composition')
-    assert "_comp_method()" in seg and "'passage'" in seg, (
-        'run_recursive_composition has no passage guard of its own')
+    assert "_run_auto_expand()" in seg, (
+        'the passage branch no longer runs rank-fused expansion')
+    assert "combined_text" in seg, (
+        'the chunk branch no longer concatenates -- that is correct for it')
+    # The passage branch must RETURN before reaching the concatenation.
+    passage_at = seg.index("'passage'")
+    concat_at = seg.index("combined_text")
+    assert passage_at < concat_at, (
+        'a passage run falls through into the concatenating path')
+
+
+def test_the_retired_refusal_string_is_gone_from_the_code():
+    """The button is no longer disabled in letter-level mode, so the message
+    explaining why it was has no caller. A string left behind outlives the
+    behaviour it described and reappears in the next translation sweep."""
+    assert 'Recursive search uses chunk search for now' not in _app_source()
+    import genizah_translations
+    assert not [k for k in genizah_translations.TRANSLATIONS
+                if 'Recursive search uses chunk search' in k], (
+        'the retired message is still in the translation table')
 
 
 def test_the_close_check_runs_before_any_shutdown_state_is_set():
@@ -468,6 +540,43 @@ _SHARED_WITH_WEB = (
     'damaged and reworked copies a fast pass misses. Long texts benefit '
     'the most.',
 )
+
+
+# The six that predate this work and are tracked separately. Listed rather
+# than pattern-matched so adding a seventh is a deliberate act.
+_UNTRANSLATED_BEFORE_THIS_WORK = {
+    'Filter Local', 'JSON', 'No Local', 'Only Local', 'PGP',
+    'Library Hide filter not applied to search/composition',
+}
+
+
+@pytest.mark.parametrize('rel_path', ['genizah_app.py',
+                                      os.path.join('web', 'pages',
+                                                   'parallels.py')])
+def test_every_tr_string_has_a_hebrew_entry(rel_path):
+    """`tr()` returns its ARGUMENT when the table has no entry, so a missing
+    translation is invisible on an English machine and shows up as a lone
+    English control on a Hebrew one. Nothing fails; it just reads wrong.
+
+    That is how the web shipped "Witness text is too long (max {cap}
+    characters)" untranslated across three call sites -- found only when the
+    desktop needed the same string.
+
+    Both files, because these two surfaces share one table: an English string
+    added to either without an entry is the same defect.
+    """
+    import genizah_translations
+
+    used = _tr_strings(rel_path)
+    missing = sorted(
+        s for s in used
+        if s not in genizah_translations.TRANSLATIONS
+        and s.isascii()                       # Hebrew literals are their own text
+        and s not in _UNTRANSLATED_BEFORE_THIS_WORK
+    )
+    assert missing == [], (
+        'these tr() strings have no Hebrew and will render in English on a '
+        'Hebrew machine: %r' % (missing,))
 
 
 @pytest.mark.parametrize('shared', _SHARED_WITH_WEB)
@@ -1817,3 +1926,950 @@ def test_history_takes_the_scope_from_the_same_stamp_as_the_method():
     assert '_comp_last_result_scope' in tail, (
         'the history entry records the scope as it stands now, not the one '
         'the run was dispatched under')
+
+
+# ---------------------------------------------------------------------------
+# Stop, at the witness boundary (owner ruling 2026-08-27).
+#
+# A multi-witness batch CAN be stopped -- its loop checkpoints between
+# witnesses. It still cannot be KILLED: the witness in flight may be ~19s from
+# done at Deepest, and terminating a thread that holds live memory mappings is
+# the failure the single-search guard exists to prevent. Stoppable is not
+# killable, and these pin the difference.
+# ---------------------------------------------------------------------------
+
+class _Tree:
+    def __init__(self):
+        self.cleared = 0
+
+    def clear(self):
+        self.cleared += 1
+
+
+class _FakeBatchThread:
+    """Stands in for MultiWitnessCompositionThread. Not a subclass by
+    accident: `_passage_batch_in_flight` uses isinstance, so the tests
+    monkeypatch that symbol rather than fake an inheritance the real code
+    would then be free to stop relying on."""
+
+    def __init__(self, running=True):
+        self.cancelled = 0
+        self.terminated = 0
+        self.waited = []
+        self._running = running
+
+    def request_cancel(self):
+        self.cancelled += 1
+
+    def isRunning(self):
+        return self._running
+
+    def wait(self, ms=None):
+        self.waited.append(ms)
+        return True
+
+    def terminate(self):
+        self.terminated += 1
+
+
+def _batch_window(monkeypatch, running=True):
+    """A window mid-way through a multi-witness passage batch."""
+    w = _Win()
+    w.is_comp_running = True
+    w._comp_last_result_method = 'passage'
+    w._comp_grouping_active = False
+    w.comp_thread = _FakeBatchThread(running=running)
+    w.lbl_comp_status = _Label()
+    monkeypatch.setattr(genizah_app, 'MultiWitnessCompositionThread',
+                        _FakeBatchThread)
+    return w
+
+
+def _single_window():
+    """A window mid-way through an ORDINARY single-witness passage search."""
+    w = _Win()
+    w.is_comp_running = True
+    w._comp_last_result_method = 'passage'
+    w._comp_grouping_active = False
+    w.comp_thread = object()          # not a batch
+    w.lbl_comp_status = _Label()
+    return w
+
+
+def test_a_single_witness_passage_scan_still_refuses_stop():
+    """Unchanged from v9.0.0: one search has no checkpoint at all, so a flag
+    would leave "Cancelling..." on screen for up to ~19s and then complete
+    anyway."""
+    w = _single_window()
+    assert APP._refuse_stop_during_passage_scan(w) is True
+
+
+def test_a_multi_witness_batch_allows_stop(monkeypatch):
+    w = _batch_window(monkeypatch)
+    assert APP._refuse_stop_during_passage_scan(w) is False
+
+
+def test_stopping_a_batch_says_the_current_witness_finishes_first(monkeypatch):
+    """Promising an instant stop and then taking 19 seconds is the same lie
+    as refusing one that would work."""
+    w = _batch_window(monkeypatch)
+    APP._refuse_stop_during_passage_scan(w)
+    # Compared against tr(), not an English substring. The earlier version
+    # asserted `'witness' in ...`, which passed only because the string had
+    # no Hebrew entry yet -- it was pinned to the translation GAP, and adding
+    # the approved Hebrew broke it.
+    from genizah_core import tr as _tr
+    assert w.lbl_comp_status.text == _tr(
+        "Stopping after the current witness finishes. Results found so far "
+        "are kept.")
+
+
+def test_a_chunk_search_is_untouched_by_any_of_this():
+    w = _Win()
+    w.is_comp_running = True
+    w._comp_last_result_method = 'chunk'
+    w._comp_grouping_active = False
+    assert APP._refuse_stop_during_passage_scan(w) is False
+    assert APP._passage_batch_in_flight(w) is False
+
+
+def test_reset_never_terminates_a_witness_batch(monkeypatch):
+    """THE guard. Reset's own path is request_cancel + wait(3000) +
+    terminate(), and terminate on a thread holding live memory mappings is an
+    access violation, not a catchable error. Being stoppable does not make a
+    batch killable."""
+    w = _batch_window(monkeypatch)
+    w._auto_expand_left = 3
+    scheduled = []
+    monkeypatch.setattr(genizah_app.QTimer, 'singleShot',
+                        staticmethod(lambda ms, fn: scheduled.append((ms, fn))))
+    APP._reset_composition(w)
+    # Cleared BEFORE the deferral, or the cancelled batch's partial
+    # completion renders, arms the expansion and schedules the next round at
+    # zero delay -- which beats the 400 ms retry, so New spends a whole
+    # witness-search cancelling a round it just spawned, once per round.
+    assert w._auto_expand_left == 0, (
+        'Reset deferred without clearing the expansion it is racing'
+    )
+    assert w.comp_thread.terminated == 0, 'Reset terminated a passage batch'
+    assert w.comp_thread.waited == [], 'Reset blocked the UI thread'
+    assert w.comp_thread.cancelled == 1, 'Reset did not ask it to stop'
+    assert scheduled, 'Reset neither completed nor scheduled a retry'
+
+
+def test_reset_of_a_batch_defers_rather_than_clearing_the_results(monkeypatch):
+    """Clearing while the worker is still writing rows is how a half-reset
+    tab ends up showing the next search's rows under the old title."""
+    w = _batch_window(monkeypatch)
+    w.comp_tree = _Tree()
+    monkeypatch.setattr(genizah_app.QTimer, 'singleShot',
+                        staticmethod(lambda ms, fn: None))
+    APP._reset_composition(w)
+    assert w.comp_tree.cleared == 0, 'results were cleared mid-batch'
+    assert w._reset_pending is True
+
+
+def test_the_deferred_reset_retries_while_the_batch_is_still_running(monkeypatch):
+    """It must RESCHEDULE and do nothing else.
+
+    Asserting only that a 400 ms timer was armed is not enough, and a
+    mutation proved it: with the busy check removed the retry falls straight
+    through into `_reset_composition`, which arms a 400 ms timer of its OWN.
+    The observable the test was watching looked identical while the reset had
+    in fact run against a live batch. So the assertion is that the reset was
+    NOT performed.
+    """
+    w = _batch_window(monkeypatch, running=True)
+    scheduled, reset_calls = [], []
+    monkeypatch.setattr(genizah_app.QTimer, 'singleShot',
+                        staticmethod(lambda ms, fn: scheduled.append(ms)))
+    w._reset_composition = lambda: reset_calls.append(1)
+    w._reset_pending = True
+    APP._retry_pending_reset(w)
+    assert reset_calls == [], 'the reset ran while the batch was still going'
+    assert w._reset_pending is True, 'it forgot it was still waiting'
+    assert scheduled == [400], 'the retry gave up while the batch ran'
+
+
+def test_the_deferred_reset_completes_once_the_batch_is_done(monkeypatch):
+    """And the poll is a timer, never a blocking wait(): the UI thread is
+    where the batch's own signals are delivered, so blocking here would stop
+    the thread it is waiting for from ever reporting done."""
+    w = _batch_window(monkeypatch)
+    w.is_comp_running = False          # the batch has finished
+    done = []
+    # The INSTANCE, not APP: `_Win` copied the unbound method onto its own
+    # class, so patching APP would not be seen through the stub.
+    w._reset_composition = lambda: done.append(1)
+    monkeypatch.setattr(genizah_app.QTimer, 'singleShot',
+                        staticmethod(lambda ms, fn: done.append('rescheduled')))
+    w._reset_pending = True
+    APP._retry_pending_reset(w)
+    assert done == [1], done
+    assert w._reset_pending is False
+
+
+def test_neither_deferred_reset_helper_ever_terminates():
+    """Source guard beside the existing one, which named only the close and
+    build helpers. Matched by statement, not substring: an earlier guard of
+    this kind matched its own explanatory COMMENT and passed against code
+    that was already wrong."""
+    import re
+    for name in ('_retry_pending_reset',):
+        seg = _function_source(name)
+        assert not re.search(r'^\s*\S*\.terminate\(\)', seg, re.M), (
+            name, 'calls terminate()')
+
+
+def test_reset_refuses_a_single_witness_scan_before_reaching_terminate():
+    """The ordering that matters: the refusal is the FIRST statement, so a
+    single-witness passage scan never reaches the wait/terminate block."""
+    w = _single_window()
+    w.comp_thread = _FakeBatchThread()
+    APP._reset_composition(w)
+    assert w.comp_thread.terminated == 0
+    assert w.comp_thread.cancelled == 0, 'it got past the refusal'
+
+
+# ---------------------------------------------------------------------------
+# The announcements are ONE-SHOT (owner, 2026-08-28).
+#
+# An orange accent that returns every launch stops reading as "this is new"
+# and starts reading as "this control is in a warning state". Stored in
+# `config.pkl`, not the session file: "you have already been told" is a fact
+# about the person, and a user who declines session restore must not be
+# re-announced to on every launch.
+# ---------------------------------------------------------------------------
+
+class _CurrentTab:
+    """A QTabWidget stand-in that answers only the question the announcement
+    asks: is this the tab in front of the user."""
+
+    def __init__(self, current):
+        self._current = current
+
+    def currentWidget(self):
+        return self._current
+
+
+def _announce_window(monkeypatch, seen=False, raises=False, method='chunk'):
+    """A window whose announcement store is a dict in this test, not the
+    owner's real config."""
+    reads, writes = [], []
+    # STATEFUL, because that is the only shape in which a re-read can be
+    # caught: a store that forgets every write makes a badge that re-reads
+    # look exactly like one that does not.
+    store = {APP._ANNOUNCE_METHOD: seen, APP._ANNOUNCE_WITNESSES: seen}
+
+    def _load():
+        reads.append(1)
+        if raises:
+            raise OSError('unreadable config')
+        return dict(store)
+
+    def _save(data):
+        writes.append(data)
+        store.update(data)
+
+    monkeypatch.setattr(genizah_app, 'load_app_config', _load)
+    monkeypatch.setattr(genizah_app, 'save_app_config', _save)
+    monkeypatch.setattr(pl, 'passage_available', lambda: True)
+    monkeypatch.setattr(genizah_app.Config, 'FILE_V8', __file__)
+    w = _window(scope='genizah')
+    # Undo `_unannounced`: these tests are ABOUT the store, so they supply
+    # their own rather than skipping it.
+    del w._announcements_allowed
+    del w._announcements_written
+    w.comp_method_combo = _Combo([('chunk', ''), ('passage', '')],
+                                 index=0 if method == 'chunk' else 1)
+    w.lbl_comp_method_new = _Label()
+    # ON the tab: every test here is about what happens once the badge can
+    # be SEEN. The construction case has its own test below.
+    w.composition_tab = object()
+    w.tabs = _CurrentTab(w.composition_tab)
+    w.reads, w.writes = reads, writes
+    return w
+
+
+def test_the_method_badge_is_silent_once_it_has_been_seen(monkeypatch):
+    w = _announce_window(monkeypatch, seen=True)
+    APP._update_comp_method_affordance(w)
+    assert not w.lbl_comp_method_new.visible, (
+        'the badge is announced again on a launch that already announced it')
+    assert 'border' not in (w.comp_method_combo.style or ''), (
+        'the accent border comes back every launch, which reads as a '
+        'control stuck in a warning state')
+
+
+def test_showing_the_method_badge_spends_it(monkeypatch):
+    w = _announce_window(monkeypatch, seen=False)
+    APP._update_comp_method_affordance(w)
+    assert w.lbl_comp_method_new.visible, 'the first launch says nothing'
+    assert w.writes == [{APP._ANNOUNCE_METHOD: True}], (
+        'nothing was recorded, so the badge is announced again next launch')
+
+
+def test_the_badge_does_not_vanish_from_under_the_reader(monkeypatch):
+    """The write happens on the first paint. Re-reading the store on the next
+    refresh -- a scope change, a finished search, any repaint -- would take
+    the badge away mid-launch, which is not "once", it is a flicker."""
+    w = _announce_window(monkeypatch, seen=False)
+    APP._update_comp_method_affordance(w)
+    w.writes[:] = []
+    APP._update_comp_method_affordance(w)
+    assert w.lbl_comp_method_new.visible, (
+        'the badge disappeared during the very launch that showed it')
+    assert w.writes == [], 'the config is rewritten on every refresh'
+
+
+def test_choosing_letter_level_takes_the_badge_down_now(monkeypatch):
+    """Not next launch: the user has plainly found the feature."""
+    w = _announce_window(monkeypatch, seen=False)
+    APP._update_comp_method_affordance(w)
+    assert w.lbl_comp_method_new.visible
+    APP._retire_announcement(w, APP._ANNOUNCE_METHOD)
+    w.comp_method_combo.setCurrentIndex(0)      # back to chunk in the same run
+    APP._update_comp_method_affordance(w)
+    assert not w.lbl_comp_method_new.visible, (
+        'switching back to chunk re-announces a feature the user has used')
+
+
+def test_an_unreadable_config_stays_quiet(monkeypatch):
+    """We do not know whether the user has been told, and silence is the
+    cheaper of the two mistakes."""
+    w = _announce_window(monkeypatch, raises=True)
+    APP._update_comp_method_affordance(w)
+    assert not w.lbl_comp_method_new.visible
+
+
+def test_the_store_is_read_once_per_launch(monkeypatch):
+    """It is a pickle load. Three refreshes must not be three reads."""
+    w = _announce_window(monkeypatch, seen=False)
+    for _ in range(3):
+        APP._update_comp_method_affordance(w)
+    assert len(w.reads) == 1, 'the config is re-read on every refresh'
+
+
+# ---------------------------------------------------------------------------
+# Letter-level search is the DEFAULT once an index exists (owner,
+# 2026-08-28) -- but a stored method is a decision and outranks it, `chunk`
+# included. The correction that shapes this: never override the last search
+# state.
+# ---------------------------------------------------------------------------
+
+def _default_window(monkeypatch, available=True, scope='genizah',
+                    method='chunk'):
+    monkeypatch.setattr(pl, 'passage_available', lambda: available)
+    w = _window(scope=scope)
+    w.comp_method_combo = _Combo([('chunk', ''), ('passage', '')],
+                                 index=0 if method == 'chunk' else 1)
+    w.applied = []
+    w._apply_passage_mode_ui = lambda on: w.applied.append(on)
+    w._show_passage_reason = lambda _k: None
+    w._update_comp_method_help = lambda: None
+    return w
+
+
+def test_letter_level_is_the_default_once_an_index_exists(monkeypatch):
+    w = _default_window(monkeypatch)
+    APP._apply_default_comp_method(w)
+    assert w.comp_method_combo.currentData() == 'passage', (
+        'a faster method with far fewer unrelated results is still behind a '
+        'dropdown nobody opens')
+    assert w.applied == [True], (
+        'the method moved but the letter-level controls did not follow it -- '
+        'a programmatic setCurrentIndex fires no handler')
+
+
+def test_the_default_does_not_fire_without_an_index(monkeypatch):
+    w = _default_window(monkeypatch, available=False)
+    APP._apply_default_comp_method(w)
+    assert w.comp_method_combo.currentData() == 'chunk'
+
+
+def test_the_default_does_not_fire_where_letter_level_would_refuse(
+        monkeypatch):
+    """A My Library scope refuses letter-level search outright; defaulting to
+    it would open on a method that can only say no."""
+    w = _default_window(monkeypatch, scope='local')
+    APP._apply_default_comp_method(w)
+    assert w.comp_method_combo.currentData() == 'chunk'
+
+
+def test_a_stored_chunk_choice_outranks_the_new_default(monkeypatch):
+    """The owner's correction, and the whole reason this is not simply a new
+    initial index: do not override the last search state."""
+    w = _default_window(monkeypatch)
+    w._refresh_comp_method_enabled = lambda: None
+    w._refresh_witness_panel = lambda: None
+    APP._restore_comp_passage_preferences(w, {'comp_method': 'chunk'})
+    APP._apply_default_comp_method(w)
+    assert w.comp_method_combo.currentData() == 'chunk', (
+        "the user's own last method was overwritten by the default")
+
+
+def test_a_session_with_no_stored_method_leaves_the_default_standing(
+        monkeypatch):
+    """A pre-Phase-146 session stores no method at all. Restoring it must not
+    write `chunk` over a default the load race already applied."""
+    w = _default_window(monkeypatch, method='passage')
+    w._refresh_comp_method_enabled = lambda: None
+    w._refresh_witness_panel = lambda: None
+    APP._restore_comp_passage_preferences(w, {}, absent_method=None)
+    assert w.comp_method_combo.currentData() == 'passage', (
+        'a session that predates the method silently demoted the default')
+
+
+def test_a_history_entry_with_no_method_is_still_chunk_by_definition(
+        monkeypatch):
+    """The SAME absent key means the opposite thing here. A pre-v9 history
+    entry recorded a search that ran before the method existed; re-running it
+    as letter-level would run a different search under the same name -- and
+    now that letter-level is the default, that is what "leave it alone" would
+    do."""
+    w = _default_window(monkeypatch, method='passage')
+    w._refresh_comp_method_enabled = lambda: None
+    w._refresh_witness_panel = lambda: None
+    APP._restore_comp_passage_preferences(w, {})
+    assert w.comp_method_combo.currentData() == 'chunk', (
+        'a pre-v9 history entry re-runs as a letter-level search')
+
+
+def test_the_two_callers_disagree_on_purpose():
+    """Reached, not merely correct: the distinction is worth nothing if both
+    call sites pass the same thing."""
+    hist = _function_source('_restore_comp_search_from_state')
+    sess = _function_source('_restore_session')
+    assert '_restore_comp_passage_preferences(params or {})' in hist, (
+        'the history restore no longer takes the pre-v9 chunk fallback')
+    assert 'absent_method=None' in sess, (
+        'the session restore writes chunk over the letter-level default')
+
+
+def test_a_click_on_chunk_is_a_choice_the_default_must_not_undo(monkeypatch):
+    """Every programmatic move blocks signals, so reaching the handler means
+    a person moved the control -- and choosing chunk is as much a decision as
+    choosing letter-level."""
+    w = _default_window(monkeypatch)
+    w._update_comp_method_help = lambda: None
+    w._update_comp_method_affordance = lambda: None
+    w._save_session = lambda: None
+    APP._on_comp_method_changed(w, 0)
+    APP._apply_default_comp_method(w)
+    assert w.comp_method_combo.currentData() == 'chunk', (
+        'the default overrode a method the user had just picked by hand')
+
+
+def test_the_default_is_applied_where_the_index_first_answers(monkeypatch):
+    """Reached, not merely correct: at construction the combo cannot know
+    whether an index exists, so the only two moments with a true answer are
+    the startup load and the end of a build."""
+    monkeypatch.setattr(pl, 'passage_available', lambda: True)
+    monkeypatch.setattr(pl, 'install_passage_state', lambda st: True)
+    w = _default_window(monkeypatch)
+    w._revalidate_comp_method = lambda: None
+    w._maybe_offer_passage_build = lambda: None
+    APP._on_passage_loaded(w, type('R', (), {
+        'index': object(), 'live_dir': 'd', 'status': 'live_ok'})())
+    assert w.comp_method_combo.currentData() == 'passage'
+
+    w2 = _default_window(monkeypatch)
+    w2._close_pending = False
+    w2.status_label = _Label()
+    w2._finish_passage_build = lambda: None
+    w2._revalidate_comp_method = lambda: None
+    w2._start_passage_load = lambda: None
+    APP._on_passage_build_finished(w2, type('R', (), {
+        'index': object(), 'live_dir': 'd', 'status': 'installed'})())
+    assert w2.comp_method_combo.currentData() == 'passage', (
+        'a user who just spent ten minutes building the index is left on '
+        'the method they built it to replace')
+
+
+def test_the_default_waits_for_the_session_restore(monkeypatch):
+    """`_apply_passage_mode_ui` caches the chunk knobs as "the user's own"
+    the FIRST time it runs and only then. Applying the default while the
+    restore is still pending caches the construction values (5 / 10 / Exact);
+    the restore then writes the real ones into widgets that are already
+    forced and disabled, and the next save reads the cache -- silently
+    resetting the user's chunk settings."""
+    w = _default_window(monkeypatch)
+    w._restoring_session = True
+    APP._apply_default_comp_method(w)
+    assert w.comp_method_combo.currentData() == 'chunk', (
+        'the default ran during the restore window and cached the '
+        "construction chunk values as the user's own")
+    assert w.applied == [], 'the mode UI was applied mid-restore'
+
+    w._restoring_session = False
+    APP._apply_default_comp_method(w)
+    assert w.comp_method_combo.currentData() == 'passage', (
+        'held back and never applied is not a deferral, it is a drop')
+
+
+def test_the_restore_re_enters_the_default_on_every_path():
+    """It sits in the `finally`, so a no-data start, a declined restore,
+    `restore_mode='never'` and an exception mid-restore all reach it -- and
+    those are the starts most likely to have no stored method at all."""
+    seg = _function_source('_restore_session')
+    _, _, after = seg.partition('self._restoring_session = False')
+    assert '_apply_default_comp_method' in after.split('def ')[0], (
+        'the default is never re-applied after the restore window closes, '
+        'so a load that beat the restore drops it silently')
+
+
+# ---------------------------------------------------------------------------
+# Amber accents and the dark theme.
+#
+# Both accents shipped naming a light `background` and no `color`, so the
+# text kept the palette's own near-white and the control read as pale text on
+# cream. The Witnesses button was reported with a screenshot (owner,
+# 2026-08-28); the Text Position selector had been doing it silently since
+# Phase 45, and only when set to a non-default position -- which is exactly
+# when the highlight exists to be read.
+# ---------------------------------------------------------------------------
+
+class _Colour:
+    def __init__(self, lightness):
+        self._l = lightness
+
+    def lightness(self):
+        return self._l
+
+
+class _Palette:
+    def __init__(self, lightness):
+        self._c = _Colour(lightness)
+
+    def color(self, _role):
+        return self._c
+
+
+def _themed_window(lightness=240):
+    w = _unannounced(_Win())
+    w.palette = lambda: _Palette(lightness)
+    return w
+
+
+def _calls_inside(name):
+    """The attribute calls inside `name`, as bare names.
+
+    A substring check against the source cannot tell a call from the comment
+    above it -- which has bitten this branch four times -- and
+    `_highlight_text_position` is a CLOSURE, so `ast.walk` over the module is
+    also the only way to reach it by name at all.
+    """
+    tree = ast.parse(io.open(
+        os.path.join(REPO_ROOT, 'genizah_app.py'), encoding='utf-8').read())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return {c.func.attr for c in ast.walk(node)
+                    if isinstance(c, ast.Call)
+                    and isinstance(c.func, ast.Attribute)}
+    raise AssertionError('no function named %r' % name)
+
+
+def test_the_text_position_accent_names_both_halves_of_its_pair():
+    for lightness in (20, 240):
+        style = APP._text_position_accent(_themed_window(lightness))
+        assert 'background' in style and 'color' in style, (
+            'the accent leaves half the contrast pair to the theme, so the '
+            'combo is unreadable on one of them (lightness=%d)' % lightness)
+
+
+def test_the_text_position_accent_follows_the_theme():
+    dark = APP._text_position_accent(_themed_window(20))
+    light = APP._text_position_accent(_themed_window(240))
+    assert dark != light, (
+        'one hard-coded background for both themes is the reported bug')
+    assert '#3d3522' in dark and '#fffacd' in light
+
+
+def test_the_text_position_accent_keeps_its_own_border_colour():
+    """It is not the Witnesses button. Sharing the PAIR is the point; sharing
+    the whole rule would repaint a control this change is not about, and
+    adding padding or a radius would move a toolbar row that already needs
+    1423 px on a 1440 px screen."""
+    style = APP._text_position_accent(_themed_window())
+    assert '#f39c12' in style, 'the Text Position border changed colour'
+    assert 'padding' not in style and 'border-radius' not in style, (
+        'the accent now changes the combo metrics, not just its colours')
+
+
+def test_a_raising_palette_still_yields_an_accent():
+    """These are recomputed during construction and teardown too."""
+    w = _unannounced(_Win())
+
+    def _boom():
+        raise RuntimeError('no palette yet')
+
+    w.palette = _boom
+    assert 'background' in APP._text_position_accent(w)
+
+
+def test_both_accents_read_one_pair():
+    """A second hand-rolled copy is a second chance to make the same
+    mistake -- which is how there came to be two of them."""
+    for name in ('_witness_button_accent', '_text_position_accent'):
+        assert '_accent_amber_pair' in _calls_inside(name), (
+            '%s computes its own colours again' % name)
+
+
+def test_the_highlight_closure_reaches_the_helper():
+    """Reached, not merely correct: the rule lived inline in a closure, where
+    no test could see it and the palette was never consulted."""
+    calls = _calls_inside('_highlight_text_position')
+    assert '_text_position_accent' in calls, (
+        'the closure still hard-codes its own stylesheet')
+
+
+def test_the_default_position_clears_the_accent_rather_than_repainting_it():
+    """`Anywhere` is not a filter, so the control must go back to the
+    theme's own look -- an accent recoloured to "normal" is still a control
+    the theme no longer owns."""
+    seg = _function_source('_highlight_text_position')
+    head, _, _ = seg.partition('else:')
+    assert 'setStyleSheet("")' in head, (
+        'the default position no longer clears the stylesheet')
+
+
+# ---------------------------------------------------------------------------
+# Codex review round 12. Three findings, all real, all introduced by the
+# letter-level default and its one-shot markers.
+# ---------------------------------------------------------------------------
+
+def test_an_explicit_click_survives_the_build_it_asked_for():
+    """The sharpest of the three. With no index, clicking letter-level
+    records a CHOICE (correctly -- a person moved the control), reverts to
+    chunk and offers the build. Ten minutes later the build succeeds and the
+    default cannot help, because the default's whole rule is that it never
+    overrules a choice. The user is handed back the method they had just
+    asked to leave."""
+    seg = _function_source('_on_comp_method_changed')
+    head, _, _ = seg.partition('_revert_comp_method_to_chunk')
+    assert "_comp_method_deferred = 'passage'" in head, (
+        'the intent is not recorded before the demotion, so nothing can '
+        'bring it back')
+
+
+def test_the_build_honours_the_deferral_before_the_default():
+    """Order matters: the deferral carries an explicit choice, the default
+    only fills a vacuum. Reached, not merely correct -- the deferral used to
+    live inline in the load handler, which a build never runs."""
+    calls = _calls_inside('_on_passage_build_finished')
+    assert '_honour_deferred_comp_method' in calls, (
+        'a finished build never re-applies the method that asked for it')
+    seg = _function_source('_on_passage_build_finished')
+    assert (seg.index('_honour_deferred_comp_method')
+            < seg.index('_apply_default_comp_method')), (
+        'the default runs first and returns, so the deferral is moot')
+
+
+def test_the_deferral_is_one_helper_for_both_moments():
+    calls = _calls_inside('_on_passage_loaded')
+    assert '_honour_deferred_comp_method' in calls, (
+        'the load handler grew its own second copy of the deferral')
+
+
+def test_a_deferred_passage_choice_is_applied_once_the_index_exists(
+        monkeypatch):
+    w = _default_window(monkeypatch)
+    w._comp_method_deferred = 'passage'
+    APP._honour_deferred_comp_method(w)
+    assert w.comp_method_combo.currentData() == 'passage'
+    assert w.applied == [True], 'the mode UI did not follow the method'
+    assert w._comp_method_deferred is None, 'the deferral must be one-shot'
+
+
+def test_a_deferral_is_refused_while_letter_level_still_cannot_run(
+        monkeypatch):
+    """A demotion for scope or Lab Mode reflects real current state."""
+    w = _default_window(monkeypatch, scope='local')
+    w._comp_method_deferred = 'passage'
+    APP._honour_deferred_comp_method(w)
+    assert w.comp_method_combo.currentData() == 'chunk'
+
+
+def test_a_stored_method_is_read_before_the_restore_can_bail_out():
+    """`restore_mode='never'`, a declined prompt and a no-data start all
+    return before `_restore_comp_passage_preferences` runs -- so nothing
+    marked a stored `chunk` as chosen, and the default in the `finally`
+    then overrode a preference the user had actually expressed."""
+    seg = _function_source('_restore_session')
+    head, _, _ = seg.partition("if restore_mode == 'never':")
+    assert '_apply_persistent_session_preferences' in head, (
+        'the persistent-preference path no longer precedes the early exits')
+    pref = _function_source('_apply_persistent_session_preferences')
+    assert '_comp_method_user_choice_seen' in pref, (
+        'a stored method is never marked as chosen on the path that '
+        'survives every early return')
+
+
+def _persist_window(stored):
+    w = _unannounced(_Win())
+    w._local_file_optouts = set()
+    w.corpus_scope_combo = _Combo([('genizah', ''), ('local', ''),
+                                   ('all', '')], index=0)
+    w.comp_corpus_scope_combo = _Combo([('genizah', ''), ('local', ''),
+                                        ('all', '')], index=0)
+    state = {'composition_search': {}}
+    if stored is not None:
+        state['composition_search']['comp_method'] = stored
+    APP._apply_persistent_session_preferences(w, state)
+    return w
+
+
+def test_a_stored_chunk_survives_a_session_restore_that_never_ran():
+    w = _persist_window('chunk')
+    assert w._comp_method_user_choice_seen is True, (
+        "the user's stored chunk is treated as no preference, so the "
+        'letter-level default overrides it')
+
+
+def test_a_stored_passage_survives_it_too():
+    """Same footing as the corpus scope (Phase 110): a preference has to
+    outlive `restore_mode='never'`. The index has not loaded yet, so it goes
+    through the same deferral the full restore uses."""
+    w = _persist_window('passage')
+    assert w._comp_method_user_choice_seen is True
+    assert w._comp_method_deferred == 'passage'
+
+
+def test_no_stored_method_still_means_no_preference():
+    """The case the default exists for. It must stay free to apply."""
+    w = _persist_window(None)
+    assert getattr(w, '_comp_method_user_choice_seen', False) is False
+    assert getattr(w, '_comp_method_deferred', None) is None
+
+
+def test_a_marker_is_not_spent_while_its_tab_is_out_of_sight(monkeypatch):
+    """`create_composition_tab` runs the updaters before the tab has been
+    added to `self.tabs` at all. On a machine with a corpus and no
+    letter-level index that spent the method marker during CONSTRUCTION, so
+    a user who never opened Composition Search that launch lost it
+    permanently without ever seeing it."""
+    w = _announce_window(monkeypatch, seen=False)
+    w.tabs = _CurrentTab(object())          # some other tab is in front
+    APP._update_comp_method_affordance(w)
+    assert w.writes == [], (
+        'the marker was spent on a tab the user is not looking at')
+
+
+def test_a_marker_with_no_tabs_at_all_is_not_spent(monkeypatch):
+    """Construction proper: `self.tabs` does not exist yet."""
+    w = _announce_window(monkeypatch, seen=False)
+    del w.tabs
+    APP._update_comp_method_affordance(w)
+    assert w.writes == []
+
+
+def test_arriving_on_the_tab_spends_what_is_showing():
+    """Reached, not merely correct: without this the marker would be shown
+    forever, because the only place that spends it is a visibility test that
+    was false when the badge was computed."""
+    calls = _calls_inside('_on_tab_changed')
+    for name in ('_update_comp_method_affordance',
+                 '_update_witness_affordance'):
+        assert name in calls, (
+            'entering the composition tab does not recompute %s, so a '
+            'marker computed off-tab is never spent' % name)
+
+
+# ---------------------------------------------------------------------------
+# Round 13: the DEFERRAL'S LIFETIME.
+#
+# `_comp_method_deferred` has three writers (a restore, the persistent-
+# preference path, an explicit click) and two consumers (the startup load, a
+# finished build). Two findings, one rule: a deferral lives until it is
+# HONOURED or until a newer method decision SUPERSEDES it. Nothing else may
+# end it -- and until round 13 the load ended it just by running.
+# ---------------------------------------------------------------------------
+
+def test_a_deferral_survives_a_load_that_found_no_index(monkeypatch):
+    """The load's whole news, on a machine with no index, is that there is no
+    index. Consuming the intent there threw it away at the one moment it was
+    guaranteed to be unusable -- and the build the user then accepted had
+    nothing left to honour, while the default could not step in either
+    because a stored method had already recorded a choice."""
+    w = _default_window(monkeypatch, available=False)
+    w._comp_method_deferred = 'passage'
+    APP._honour_deferred_comp_method(w)
+    assert w._comp_method_deferred == 'passage', (
+        'the deferral was spent by a load that could not act on it')
+    assert w.comp_method_combo.currentData() == 'chunk'
+
+
+def test_the_build_then_honours_the_retained_deferral(monkeypatch):
+    """The whole point of retaining it. Same window, index now present."""
+    w = _default_window(monkeypatch, available=False)
+    w._comp_method_deferred = 'passage'
+    APP._honour_deferred_comp_method(w)              # load: no index
+    monkeypatch.setattr(pl, 'passage_available', lambda: True)
+    APP._honour_deferred_comp_method(w)              # build finished
+    assert w.comp_method_combo.currentData() == 'passage', (
+        'the user built the index they asked for and stayed on chunk')
+    assert w._comp_method_deferred is None, (
+        'honoured, so now it must be spent')
+
+
+def test_a_deferral_is_retained_but_not_re_honoured(monkeypatch):
+    """Consumed exactly once, on the call that succeeds."""
+    w = _default_window(monkeypatch)
+    w._comp_method_deferred = 'passage'
+    APP._honour_deferred_comp_method(w)
+    w.comp_method_combo.setCurrentIndex(0)           # user goes back to chunk
+    w.applied[:] = []
+    APP._honour_deferred_comp_method(w)
+    assert w.comp_method_combo.currentData() == 'chunk', (
+        'a spent deferral fired a second time and overrode the user')
+    assert w.applied == []
+
+
+def _deferral_restore_window(monkeypatch, stored):
+    w = _default_window(monkeypatch, method='passage')
+    w._refresh_comp_method_enabled = lambda: None
+    w._refresh_witness_panel = lambda: None
+    w._comp_method_deferred = 'passage'
+    APP._restore_comp_passage_preferences(w, {'comp_method': stored})
+    return w
+
+
+def test_a_chunk_restore_cancels_a_pending_passage_intent(monkeypatch):
+    """Restoring a chunk history entry while the startup load is still
+    running left the older deferral to flip the UI back to passage when the
+    load landed -- possibly on top of the chunk re-run that restore had just
+    started."""
+    w = _deferral_restore_window(monkeypatch, 'chunk')
+    assert w.comp_method_combo.currentData() == 'chunk'
+    assert w._comp_method_deferred is None, (
+        'the stale passage intent outlived the newer chunk decision')
+
+
+def test_a_passage_restore_keeps_its_own_intent(monkeypatch):
+    """The cancel must be aimed at chunk only -- cancelling on every restore
+    would delete the intent the restore had just expressed."""
+    monkeypatch.setattr(pl, 'passage_available', lambda: False)
+    w = _default_window(monkeypatch, available=False, method='chunk')
+    w._refresh_comp_method_enabled = lambda: None
+    w._refresh_witness_panel = lambda: None
+    APP._restore_comp_passage_preferences(w, {'comp_method': 'passage'})
+    assert w._comp_method_deferred == 'passage', (
+        'a restored passage preference on an unbuilt index left nothing to '
+        'bring it back')
+
+
+def test_picking_chunk_by_hand_cancels_it_too(monkeypatch):
+    """The strongest supersession there is. Not in the review, but the same
+    rule: an intent must not outlive the person changing their mind."""
+    w = _default_window(monkeypatch)
+    w._update_comp_method_help = lambda: None
+    w._update_comp_method_affordance = lambda: None
+    w._save_session = lambda: None
+    w._comp_method_deferred = 'passage'
+    w.comp_method_combo.setCurrentIndex(0)
+    APP._on_comp_method_changed(w, 0)
+    assert w._comp_method_deferred is None, (
+        'the method flips back to passage when the index finishes loading, '
+        'undoing a choice the user made by hand')
+
+
+# ---------------------------------------------------------------------------
+# Round 14, and the first finding on this branch that does NOT hold.
+#
+# The proposal: the index finishes loading before the 200 ms restore timer,
+# `_on_passage_loaded` selects passage as the default, a restore that then
+# bails out early only sets the choice flag, and the stored `chunk` is left
+# overridden.
+#
+# The ordering is real; the consequence is not. `__init__` sets
+# `_restoring_session = True` before it builds any UI at all, and the load's
+# slot cannot run until `__init__` has returned to the event loop -- so
+# `_apply_default_comp_method` refuses for the whole startup window. That
+# guard was added in round 12 for an unrelated reason (the chunk-knob cache),
+# and it closes this too.
+#
+# These two tests exist so that reasoning cannot quietly stop being true.
+# ---------------------------------------------------------------------------
+
+def _method_source(cls_name, fn_name):
+    """`_function_source` matches the FIRST function of that name in the
+    module, which for `__init__` is some other class entirely."""
+    src = _app_source()
+    tree = ast.parse(src)
+    for cls in ast.walk(tree):
+        if isinstance(cls, ast.ClassDef) and cls.name == cls_name:
+            for fn in cls.body:
+                if isinstance(fn, ast.FunctionDef) and fn.name == fn_name:
+                    return ast.get_source_segment(src, fn) or ''
+    raise AssertionError('%s.%s not found' % (cls_name, fn_name))
+
+
+def test_the_restore_window_opens_before_any_ui_exists():
+    """The invariant the whole argument rests on. If this assignment ever
+    moves below `init_ui`, a fast index load really could land first."""
+    seg = _method_source('GenizahGUI', '__init__')
+    flag = seg.index('self._restoring_session = True')
+    assert flag < seg.index('self.init_ui()'), (
+        'the startup window opens after the UI is built, so a load that '
+        'beats the restore timer is no longer refused')
+
+
+def test_a_fast_index_load_cannot_override_a_stored_chunk(monkeypatch):
+    """The proposed sequence, end to end: load first, then a restore that
+    takes an early exit."""
+    monkeypatch.setattr(pl, 'passage_available', lambda: True)
+    monkeypatch.setattr(pl, 'install_passage_state', lambda st: True)
+    w = _default_window(monkeypatch)
+    w._restoring_session = True          # `__init__` set this; nothing has
+    w._revalidate_comp_method = lambda: None
+    w._maybe_offer_passage_build = lambda: None
+    w._local_file_optouts = set()
+    w.corpus_scope_combo = _Combo([('genizah', ''), ('local', ''),
+                                   ('all', '')], index=0)
+    w.comp_corpus_scope_combo = _Combo([('genizah', ''), ('local', ''),
+                                        ('all', '')], index=0)
+
+    # 1. The index finishes loading first.
+    APP._on_passage_loaded(w, type('R', (), {
+        'index': object(), 'live_dir': 'd', 'status': 'live_ok'})())
+    assert w.comp_method_combo.currentData() == 'chunk', (
+        'the default fired during the startup window, before the stored '
+        'method had been read')
+
+    # 2. The restore reads the stored method, then takes an early exit
+    #    (`restore_mode='never'`, a declined prompt, or no data) -- so
+    #    `_restore_comp_passage_preferences` never runs.
+    APP._apply_persistent_session_preferences(
+        w, {'composition_search': {'comp_method': 'chunk'}})
+
+    # 3. What the `finally` does on every one of those paths.
+    w._restoring_session = False
+    APP._apply_default_comp_method(w)
+
+    assert w.comp_method_combo.currentData() == 'chunk', (
+        "the user's stored chunk was overridden on a fast startup")
+
+
+def test_the_same_ordering_still_reaches_a_user_with_no_stored_method(
+        monkeypatch):
+    """The other half: the guard must DELAY the default, not cancel it."""
+    monkeypatch.setattr(pl, 'passage_available', lambda: True)
+    monkeypatch.setattr(pl, 'install_passage_state', lambda st: True)
+    w = _default_window(monkeypatch)
+    w._restoring_session = True
+    w._revalidate_comp_method = lambda: None
+    w._maybe_offer_passage_build = lambda: None
+    w._local_file_optouts = set()
+    w.corpus_scope_combo = _Combo([('genizah', ''), ('local', ''),
+                                   ('all', '')], index=0)
+    w.comp_corpus_scope_combo = _Combo([('genizah', ''), ('local', ''),
+                                        ('all', '')], index=0)
+
+    APP._on_passage_loaded(w, type('R', (), {
+        'index': object(), 'live_dir': 'd', 'status': 'live_ok'})())
+    APP._apply_persistent_session_preferences(w, {'composition_search': {}})
+    w._restoring_session = False
+    APP._apply_default_comp_method(w)
+
+    assert w.comp_method_combo.currentData() == 'passage', (
+        'the startup guard swallowed the default instead of deferring it')

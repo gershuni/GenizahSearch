@@ -46,12 +46,20 @@ from shared.browse_map_utils import (
 from shared.sys_id_patterns import CORPUS_SYS_ID_RE
 
 # --- Multi-witness letter-level search ------------------------------------
+# The witness-resolution rules live in `shared/passage_witness_source.py` so
+# the DESKTOP surface can use the same ones (it must not import from `web/`).
+# Re-exported here, not wrapped: every existing caller and test keeps
+# importing them from this module.
+#
 # Module level, not closure level: the tab-snapshot restore runs during page
 # build, BEFORE the witness helpers are defined, and a constant it cannot see
 # is a NameError at build time -- the exact failure that once took the whole
 # page down (owner-reported 2026-08-23).
-WITNESS_SEED_ID = 'seed'
-WITNESS_CAP = 25          # mirrors SEARCH_API_PASSAGE_MAX_WITNESSES
+from shared.passage_witness_source import (  # noqa: F401  (re-export)
+    WITNESS_SEED_ID, WITNESS_CAP, WITNESS_SYS_ID_RE,
+    witness_sys_id, restore_witness_entries, witnesses_needing_text,
+    witness_headers_for, collect_witness_texts,
+)
 
 # Per-depth ceiling on how many witnesses ONE click may search. Deep and
 # deepest cost ~6s and ~19s per witness against normal's ~0.7s, so a flat cap
@@ -59,8 +67,6 @@ WITNESS_CAP = 25          # mirrors SEARCH_API_PASSAGE_MAX_WITNESSES
 # -- and auto-expand refuses to START a round that would breach the cap
 # rather than silently shrinking top-K, which would make the control a lie.
 WITNESS_DEPTH_CAP = {'normal': WITNESS_CAP, 'deep': 8, 'deepest': 4}
-
-WITNESS_SYS_ID_RE = CORPUS_SYS_ID_RE
 
 
 def witness_depth_cap(ctx, widget_depth: str = None) -> int:
@@ -101,191 +107,6 @@ def witnesses_over_dispatch_cap(pending, ctx, widget_depth: str = None):
     return (count, cap) if count > cap else None
 
 
-def witness_sys_id(row) -> str:
-    r"""The sys_id a result row belongs to. THE one copy on this page.
-
-    Now `shared.sys_id_patterns.CORPUS_SYS_ID_RE`, the single definition every
-    corpus-facing site in the repo shares. The earlier note here recorded the
-    divergence this page sat in the middle of and deferred it as corpus-wide
-    work; that reconciliation has since happened, and it settled the question
-    the other way. Both halves of the old rationale turned out to be wrong:
-
-    * **97 is not a corpus prefix at all.** It is the LOCAL "My Library"
-      namespace (Phase 95, `shared/local_sys_id.py`) -- a user's own files,
-      generated on the desktop, 18 digits, never a Genizah record and never
-      present on the web. Measured on `libraries.csv`: 255,723 of 255,723
-      corpus records begin 99, including all 473 NLI rows. So there is no
-      97-prefixed MANUSCRIPT for a narrow pattern to skip.
-    * **The wide pattern was not the safe direction.** `re.search` scans
-      anywhere, so a corpus pattern run over a LOCAL header can match a 99
-      INSIDE the LOCAL id's own digits and return a truncated, wrong sys_id
-      (6.36% of LOCAL ids, measured). The shared constants are anchored on a
-      digit boundary so that a LOCAL header misses cleanly instead.
-
-    "A witness resolved by the engine cannot fail to resolve on the page" is
-    still the invariant, and it is why this narrowed: the engine
-    (`shared/passage_parallels.py::_SYS_ID_RE`) is the same corpus constant
-    now, so mirroring it means corpus-only. Staying wide would have recreated
-    the divergence pointing the other way -- the page admitting a witness the
-    engine cannot resolve.
-
-    Do not re-widen, and do not add a second copy on this page; both are
-    enforced by tests/test_sys_id_patterns.py and the page's own
-    test_there_is_exactly_one_sys_id_pattern_on_the_page.
-    """
-    m = WITNESS_SYS_ID_RE.search((row or {}).get('raw_header') or '')
-    return m.group(1) if m else None
-
-
-def restore_witness_entries(raw, default_label: str, cap: int = None) -> list:
-    """Normalise a tab snapshot's witness list back into witness dicts.
-
-    Pure, module level and dependency-injected (`default_label` is the only
-    thing it would otherwise need `tr()` for) so the RULES are testable.
-    A mutation sweep proved they were not: reverting the drop rule below to
-    the obvious `if not text.strip()` -- which deletes every restored
-    manuscript witness -- left the entire page suite green.
-
-    Three rules:
-
-    * **A manuscript witness with a `sys_id` survives without text.** The
-      snapshot drops its text deliberately (the corpus still has it) and
-      `witnesses_needing_text` / the rehydrator put it back before dispatch.
-      Dropping it here would quietly shrink a restored 17-witness search.
-    * **Anything else with no text is dropped**, because nothing in the world
-      can recover it and a witness that cannot be searched must not sit in
-      the list pretending otherwise.
-    * **Ids are renumbered `w1..wN` over the SURVIVORS.** Reusing the stored
-      ids would leave gaps that `_witness_new_id` could then re-issue, and
-      two witnesses sharing an id corrupt the per-witness row cache.
-
-    Every witness comes back `pending`: the snapshot holds the FUSED rows, so
-    per-witness ranks cannot be recovered, and a fusion rebuilt from partial
-    inputs would be quietly wrong rather than visibly absent.
-
-    Returns the list; the caller assigns it and resets the row caches.
-    """
-    if not isinstance(raw, list) or not raw:
-        return []
-    out = []
-    for entry in raw[:(cap if cap is not None else WITNESS_CAP)]:
-        if not isinstance(entry, dict):
-            continue
-        kind = 'manuscript' if entry.get('kind') == 'manuscript' else 'pasted'
-        text = str(entry.get('text') or '')
-        sys_id = entry.get('sys_id')
-        if not text.strip() and not (kind == 'manuscript' and sys_id):
-            continue
-        out.append({
-            'id': f'w{len(out) + 1}',
-            'label': str(entry.get('label') or '') or (sys_id or default_label),
-            'kind': kind,
-            'sys_id': sys_id,
-            'seed_digest': str(entry.get('seed_digest') or ''),
-            'headers': [str(h) for h in (entry.get('headers') or []) if h],
-            'text': text,
-            'status': 'pending',
-            'hits': 0,
-            'error': '',
-        })
-    return out
-
-
-def witnesses_needing_text(pending) -> list:
-    """Which pending witnesses have no text to search and can get one back.
-
-    `_persist_active_snapshot` stores a MANUSCRIPT witness without its text on
-    purpose -- the corpus still has it, and copying up to 25 x 20,000 chars of
-    corpus text into a tab snapshot buys nothing. Nothing re-fetched it on
-    restore, so after a reload those witnesses searched the empty string and
-    reported `searched, 0 matches`: a false negative indistinguishable from a
-    real one. (Found by review, not by any test here.)
-
-    Module level and pure so the RULE is tested rather than its plumbing. A
-    pasted witness is never included -- its text existed nowhere but the
-    snapshot, so there is nothing to re-fetch -- and neither is one with no
-    `sys_id` to fetch by. Both are refused at dispatch instead.
-    """
-    return [w for w in (pending or [])
-            if w.get('kind') == 'manuscript'
-            and w.get('sys_id')
-            and not (w.get('text') or '').strip()]
-
-
-def witness_headers_for(sys_ids, rows) -> dict:
-    """Which page headers make up each promoted manuscript's witness text.
-
-    Extracted from `collect_witness_texts` so the promotion can RECORD its
-    choice. A promoted witness is not a deterministic function of its
-    `sys_id`: it is the concatenation of the pages that MATCHED, which is a
-    property of the result set on screen at that moment. Re-deriving it later
-    from a different result set yields a different witness under the same
-    label.
-    """
-    wanted = set(sys_ids)
-    headers_by_sid: dict = {}
-    for row in rows or []:
-        sid = witness_sys_id(row)
-        if sid in wanted and row.get('raw_header'):
-            headers_by_sid.setdefault(sid, []).append(row['raw_header'])
-    return headers_by_sid
-
-
-def collect_witness_texts(sys_ids, rows, fetch_header,
-                          fetch_manuscript=None, headers_by_sid=None):
-    """Gather the text to search a promoted manuscript WITH.
-
-    Module level and dependency-injected so it can be tested without building
-    a page: the AST tests that covered this logic in the closure were proven
-    vacuous against the exact bug it was written to fix -- a source-text
-    assertion cannot tell `for header in headers` from `for header in []`.
-
-    Two rules, both learned the hard way:
-
-    * **The matched pages' own `raw_header`s are the PRIMARY source.** The
-      first version used `get_full_manuscript(sys_id)`, which resolves through
-      `Config.BROWSE_MAP` -- an auxiliary pickle with no guarantee of holding
-      an arbitrary manuscript. Owner-reported: every promotion failed, because
-      that map held two entries. `fetch_header` is the same fetcher the engine
-      just used to render those rows, so it cannot fail for a row on screen.
-    * **Every matched page, not the best one.** A result GROUP spans several
-      page-level hits; one page is usually a fraction of the witness.
-
-    `fetch_manuscript` (optional) is the whole-manuscript fallback, tried only
-    when no header resolves.
-
-    Returns `(texts_by_sys_id, failed_sys_ids)` -- failures are RETURNED, not
-    logged and dropped, so the caller can name them once instead of emitting
-    one anonymous toast per manuscript.
-    """
-    # Caller-supplied headers win: on a REHYDRATE those are the headers the
-    # promotion actually used, and re-deriving them from whatever rows are on
-    # screen now would rebuild a different witness under the same label.
-    if headers_by_sid is None:
-        headers_by_sid = witness_headers_for(sys_ids, rows)
-
-    out, failed = {}, []
-    for sid in sys_ids:
-        parts = []
-        for header in (headers_by_sid.get(sid) or []):
-            try:
-                page = fetch_header(header)
-            except Exception:
-                page = None
-            if page:
-                parts.append(page)
-        text = "\n".join(parts).strip()
-        if not text and fetch_manuscript is not None:
-            try:
-                pages = fetch_manuscript(sid) or []
-            except Exception:
-                pages = []
-            text = "\n".join(p.get('text') or '' for p in pages).strip()
-        if text:
-            out[sid] = text
-        else:
-            failed.append(sid)
-    return out, failed
 
 
 # Phase 145: passage-matching parallels search (fail-closed -- flag AND
@@ -2581,7 +2402,7 @@ def create_parallels_page(initial_text: str = None):
         short-circuit exactly, so a one-witness page search and a one-witness
         API search produce the same row shape.
         """
-        from shared.passage_fusion import fuse_routed, tag_rows
+        from shared.passage_fusion import fuse_routed, rank_and_route
 
         order = [wid for wid in _witness_order()
                  if p_state.witness_rows.get(wid) is not None]
@@ -2616,17 +2437,13 @@ def create_parallels_page(initial_text: str = None):
             label = labels.get(wid, '')
             main = list(p_state.witness_rows.get(wid) or [])
             filt = list(p_state.witness_filtered.get(wid) or [])
-            # Rank over BOTH buckets together, in score order -- the same
-            # basis the engine's own fan-out uses, which tags the full result
-            # list BEFORE splitting it. Ranking each bucket from 1
-            # independently gave a filtered row the rank of a top hit, and
-            # left every main row's rank short by however many rows the
-            # engine had demoted ahead of it. Either way the RRF sums came
-            # out different from the API's for the same witnesses.
-            combined = sorted(main + filt,
-                              key=lambda r: float(r.get('score') or 0.0),
-                              reverse=True)
-            tag_rows(combined, wid, label)
+            # Rank over BOTH buckets together, in score order, without
+            # reordering either -- the same basis the engine's own fan-out
+            # uses. The rule itself lives in the shared module because the
+            # desktop worker is a third caller and three copies of an
+            # ordering rule is how three surfaces start disagreeing about a
+            # number they all publish.
+            main, filt = rank_and_route(main, filt, wid, label)
             main_pairs.append((wid, main))
             filt_pairs.append((wid, filt))
         # Routing and the contributor arithmetic both live in `fuse_routed`,

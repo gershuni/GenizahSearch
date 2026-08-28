@@ -5083,7 +5083,7 @@ TRANSLATIONS.update({
     # term the owner uses for manuscript witnesses of a work.
     "Witnesses": "עדים",
     "Add other copies of this work to search with. Each is searched on its own and the results are merged.":
-        "הוסיפו עותקים נוספים של החיבור לחפש איתם. כל אחד נבדק בנפרד והתוצאות ממוזגות.",
+        "הוסף עותקים נוספים של החיבור לחפש איתם. כל אחד נבדק בנפרד והתוצאות ממוזגות.",
     "Add witness text": "הוספת נוסח עד",
     "This paste contains several witnesses separated by blank lines":
         "הטקסט מכיל כמה עדים המופרדים בשורות ריקות",
@@ -5095,10 +5095,10 @@ TRANSLATIONS.update({
     "Pending": "ממתין",
     "Failed": "נכשל",
     "{n} matches found": "נמצאו {n} התאמות",
-    "Search now ({n} pending)": "חפשו עכשיו ({n} ממתינים)",
-    "Search with these too": "חפשו גם עם אלו",
-    "Search with this manuscript too": "חפשו גם עם כתב יד זה",
-    "Clear selection": "נקו את הבחירה",
+    "Search now ({n} pending)": "חפש עכשיו ({n} ממתינים)",
+    "Search with these too": "חפש גם עם אלו",
+    "Search with this manuscript too": "חפש גם עם כתב יד זה",
+    "Clear selection": "נקה את הבחירה",
     "{n} manuscripts selected": "נבחרו {n} כתבי יד",
     "Added {n} witnesses — found {m} new matches.":
         "נוספו {n} עדים — נמצאו {m} התאמות חדשות.",
@@ -5111,23 +5111,27 @@ TRANSLATIONS.update({
         "חיפוש חוזר ונשנה עם התוצאות הטובות ביותר כעדים חדשים. ההיקף גדל והדיוק בראש הרשימה יורד.",
     "Rounds": "סבבים",
     "Top-K per round": "כמה לקחת בכל סבב",
-    "Run auto-expand now": "הפעילו הרחבה אוטומטית",
+    "Run auto-expand now": "הפעל הרחבה אוטומטית",
+    # The metadata-prefetch dialog shown before an export: its title
+    # was already translated while its body was a bare f-string, so
+    # the window showed two languages at once.
+    "Loaded {curr}/{total} (ID: {sid})": "נטענו {curr}/{total} (מזהה: {sid})",
     "Round {r}/{n}": "סבב {r}/{n}",
     "Witness {i}/{k}: {label}": "עד {i}/{k}: {label}",
     "Auto-expand stopped: witness cap reached.":
         "ההרחבה האוטומטית נעצרה: הושג המקסימום של עדים.",
     "{n} witnesses could not be searched — use Retry.":
-        "לא ניתן היה לחפש ב־{n} עדים — נסו שוב.",
+        "לא ניתן היה לחפש ב־{n} עדים — נסה שוב.",
     "Run a letter-level search first.": "יש להריץ תחילה חיפוש ברמת האות.",
     "Sort by combined score": "מיון לפי ציון משולב",
     "Sort by number of witnesses": "מיון לפי מספר העדים",
     "{n} of {m} witnesses": "{n} מתוך {m} עדים",
     "{n} witnesses are waiting, but only {cap} can be searched at this depth — remove some, or choose a shallower depth.":
-        "{n} עדים ממתינים, אך בעומק זה ניתן לחפש רק {cap} — הסירו חלק מהם או בחרו עומק רדוד יותר.",
+        "{n} עדים ממתינים, אך בעומק זה ניתן לחפש רק {cap} — הסר חלק מהם או בחר עומק רדוד יותר.",
     "Witness removed. The results on screen were found with the previous witness list — run the search again to update them.":
-        "העד הוסר. התוצאות המוצגות נמצאו עם רשימת העדים הקודמת — הריצו את החיפוש שוב כדי לעדכן אותן.",
+        "העד הוסר. התוצאות המוצגות נמצאו עם רשימת העדים הקודמת — הרץ את החיפוש שוב כדי לעדכן אותן.",
     "Witness list is full (max {n})": "רשימת העדים מלאה (עד {n})",
-    "Search now": "חפשו עכשיו",
+    "Search now": "חפש עכשיו",
     "Other source text": "טקסט מקור אחר",
     "{n} witnesses": "{n} עדים",
     "{n} from another text": "{n} מטקסט אחר",
@@ -5137,8 +5141,8 @@ TRANSLATIONS.update({
         "עד זה נוסף עבור טקסט מקור אחר, ולכן לא נבדק.",
     "{n} witnesses were added for a different source text.":
         "{n} עדים נוספו עבור טקסט מקור אחר.",
-    "Use them anyway": "השתמשו בהם בכל זאת",
-    "Remove them": "הסירו אותם",
+    "Use them anyway": "השתמש בהם בכל זאת",
+    "Remove them": "הסר אותם",
     "Label (optional)": "תוית (לא חובה)",
 })
 
@@ -5182,12 +5186,10 @@ TRANSLATIONS.update({
         'האינדקס לחיפוש ברמת האות נבנה כעת. הוא יהיה זמין בסיום הבנייה.',
     'The main index is not ready yet. Letter-level search needs it to load the text of its results.':
         'האינדקס הראשי עדיין אינו מוכן. חיפוש ברמת האות זקוק לו כדי לטעון את הטקסט של התוצאות.',
-    'Recursive search uses chunk search for now. Switch the method back to chunk search to use it.':
-        'חיפוש רקורסיבי משתמש בשלב זה בחיפוש מקטעים. יש להחליף את השיטה בחזרה לחיפוש מקטעים כדי להשתמש בו.',
     'Please wait':
         'נא להמתין',
     'The application is still starting up. Try again in a moment.':
-        'התוכנה עדיין עולה. נסו שוב בעוד רגע.',
+        'התוכנה עדיין עולה. נסה שוב בעוד רגע.',
     'Already running':
         'כבר פועל',
     'The letter-level index is already being built.':
@@ -5212,6 +5214,40 @@ TRANSLATIONS.update({
         'ייסגר עם סיום הפעולה הנוכחית — {}. לא ניתן להפסיק חיפוש ברמת האות לאחר שהתחיל, והוא מסתיים בדרך כלל תוך שניות ספורות.',
     'the letter-level index is being built':
         'האינדקס לחיפוש ברמת האות נבנה כעת',
+    # Multi-witness batches. A batch CAN be stopped -- its loop
+    # checkpoints between witnesses -- but the witness already running
+    # finishes first, up to ~19s at Deepest. Both messages say so rather
+    # than promising an instant stop and then taking twenty seconds.
+    'Stopping after the current witness finishes. Results found so far are kept.':
+        'העצירה תתבצע בסיום חיפוש העד הנוכחי. התוצאות שנמצאו עד כה נשמרות.',
+    'Clearing once the current witness finishes.':
+        'הניקוי יתבצע בסיום חיפוש העד הנוכחי.',
+    # Loading witnesses from disk: the owner's witness sets are files,
+    # not clipboard contents -- seventeen rites in one file, or a
+    # transcription per file.
+    'Load from files...':
+        'טען מקבצים...',
+    'Load witness files':
+        'טען קובצי עדים',
+    'Split each file on blank lines':
+        'פצל כל קובץ לפי שורות ריקות',
+    'Remove selected':
+        'הסר את הנבחרים',
+    'Remove all':
+        'הסר את כולם',
+    'Remove all {n} witnesses?':
+        'להסיר את כל {n} העדים?',
+    'Choose one or more files. Each file becomes a witness.':
+        'בחר קובץ אחד או יותר. כל קובץ הופך לעד.',
+    'Text files (*.txt);;All files (*)':
+        'קובצי טקסט (*.txt);;כל הקבצים (*)',
+    'Could not read {n} files: {names}':
+        'לא ניתן היה לקרוא {n} קבצים: {names}',
+    # Used by the WEB page too (three call sites in
+    # web/pages/parallels.py), which had no entry for it -- so Hebrew
+    # readers there saw English until this was approved.
+    'Witness text is too long (max {cap} characters)':
+        'טקסט העד ארוך מדי (עד {cap} תווים)',
     'a letter-level search is running':
         'חיפוש ברמת האות פועל כעת',
     'Build letter-level index?':

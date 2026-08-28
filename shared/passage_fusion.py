@@ -331,6 +331,53 @@ def _as_pairs(rows_by_witness):
             if hasattr(rows_by_witness, 'items') else list(rows_by_witness))
 
 
+def rank_and_route(main, filtered, witness_id: str, witness_label: str = ''):
+    """Rank ONE witness's two result buckets and tag them, without reordering
+    either.
+
+    A witness's rank is its position in that witness's FULL result list, so the
+    two buckets must be ranked TOGETHER and only then kept apart. Ranking each
+    bucket from 1 independently gave a filtered row the rank of a top hit, and
+    left every main row's rank short by however many rows the engine had
+    demoted ahead of it -- either way the page's RRF sums came out different
+    from the API's for the same witnesses.
+
+    This is the same basis the engine's own fan-out uses (`_run_one_witness`
+    tags the full list before splitting it). It lived inline in
+    `web/pages/parallels.py::_fuse_and_store`, which is one of the two places
+    the rule was written out; the desktop's worker is the third caller, and
+    three copies of an ordering rule is how three surfaces start disagreeing
+    about a number they all publish.
+
+    The contract, precisely, because every clause here is load-bearing:
+
+    * Sort `main + filtered` by ``float(row['score'])`` DESCENDING. `score`,
+      never `final_score`: on an untouched engine row the two agree, but a row
+      that has already been through `fuse()` carries the WINNER's score in
+      both, and reading the wrong one would rank a re-fused row against a
+      different quantity than a fresh one.
+    * The sort is STABLE (Python's `sorted`), so rows of equal score keep their
+      incoming order -- every `main` row ahead of every `filtered` row of the
+      same score, each in its original relative order. Ties are common: the
+      engine scores in whole matched letters.
+    * `tag_rows` mutates the row dicts IN PLACE, and both buckets hold those
+      same dicts, so tagging the combined list tags both buckets.
+    * The buckets come back with their original membership and original order
+      UNCHANGED. Only the tags are new. Callers rely on this: routing is
+      `fuse_routed`'s job, and a reordering here would silently change which
+      row `fuse` picks as the winner among equals.
+
+    Returns `(main, filtered)` as new lists (the row objects are shared).
+    """
+    main = list(main or [])
+    filtered = list(filtered or [])
+    combined = sorted(main + filtered,
+                      key=lambda r: float(r.get('score') or 0.0),
+                      reverse=True)
+    tag_rows(combined, witness_id, witness_label)
+    return main, filtered
+
+
 def fuse_routed(eligible_pairs, filtered_pairs, key: str = 'raw_header'):
     """Fuse two ROUTED buckets into `(main, filtered)`.
 

@@ -39,6 +39,13 @@ def _source() -> str:
         return fh.read()
 
 
+def _source_of(module) -> str:
+    """Source of an arbitrary module, for guards that span more than the
+    page. `_source()` stays page-only so its many callers read unambiguously."""
+    with open(module.__file__, encoding='utf-8') as fh:
+        return fh.read()
+
+
 def _func_source(name: str) -> str:
     src = _source()
     tree = ast.parse(src)
@@ -466,27 +473,43 @@ def test_there_is_exactly_one_sys_id_pattern_on_the_page():
     page may hand-roll a literal. Behaviour is pinned by
     test_every_corpus_manuscript_can_be_promoted and
     test_a_local_my_library_header_is_not_a_promotable_witness.
+
+    The definition since moved to `shared/passage_witness_source.py`, because
+    the DESKTOP surface needs the same resolution rules and must not import
+    from `web/`. So the guard now covers the PAIR: checking only the page
+    would pass just as happily if the shared module grew a copy of its own --
+    and the shared module is the half that runs where 97-prefixed LOCAL ids
+    ACTUALLY exist, which is where a re-widened pattern would do its damage.
     """
     from shared.sys_id_patterns import CORPUS_SYS_ID_RE
     from web.pages import parallels as _p
+    import shared.passage_witness_source as _pws
 
     assert _p.WITNESS_SYS_ID_RE is CORPUS_SYS_ID_RE, (
         'the page compiles its own sys_id pattern instead of sharing the one '
         'in shared/sys_id_patterns.py'
     )
-    src = _source()
+    assert _pws.WITNESS_SYS_ID_RE is CORPUS_SYS_ID_RE, (
+        'shared/passage_witness_source.py compiles its own sys_id pattern '
+        'instead of sharing the one in shared/sys_id_patterns.py'
+    )
     # sys-id-pattern-exempt: this line NAMES the dialects it forbids; it is the
     # guard against a hand-rolled pattern, not one itself.
-    for dialect in ("(?:99|97)", "99\\d", "97\\d"):
+    _dialects = ("(?:99|97)", r"99\d", r"97\d")
+    src = _source()
+    for dialect in _dialects:
         assert dialect not in src, (
             f'a hand-rolled sys_id pattern ({dialect}) is back on this page'
+        )
+        assert dialect not in _source_of(_pws), (
+            f'a hand-rolled sys_id pattern ({dialect}) is back in '
+            f'shared/passage_witness_source.py'
         )
     for closure in ('_ranked_sys_ids', '_row_sys_id'):
         assert 're.search' not in _func_source(closure), (
             f'{closure} builds its own pattern instead of using '
             f'witness_sys_id()'
         )
-
 
 def test_promotion_skips_manuscripts_already_in_the_witness_list():
     """Two witnesses with identical text would BOTH contribute to
@@ -530,7 +553,13 @@ def test_the_page_fuses_through_the_shared_module():
     """One definition of the ranking, two callers. A second implementation
     on the page would drift from the API's."""
     src = _func_source('_fuse_and_store')
-    assert 'from shared.passage_fusion import fuse_routed, tag_rows' in src
+    # Both halves: `fuse_routed` for the contributor arithmetic and the
+    # routing rule, `rank_and_route` for the cross-bucket ranking that used
+    # to be written out inline here. The desktop worker calls the same two.
+    assert 'from shared.passage_fusion import fuse_routed, rank_and_route' in src
+    assert 'rank_and_route(' in src, (
+        'the page has stopped delegating the ranking rule'
+    )
 
 
 def test_a_single_witness_passes_through_unfused():
@@ -550,14 +579,54 @@ def test_ranks_are_assigned_over_both_buckets_together():
     left every main row short by however many rows were demoted ahead of it
     -- so the page and the API computed different RRF sums for the same
     witnesses. Measured on 17 Birkat Hamazon witnesses before the fix: the
-    two paths agreed on total census recall but not on the top 20."""
-    src = _func_source('_fuse_and_store')
-    assert 'combined = sorted(main + filt' in src, (
-        'ranks must be assigned over both buckets in score order'
+    two paths agreed on total census recall but not on the top 20.
+
+    The rule now lives in `shared.passage_fusion.rank_and_route` (the desktop
+    worker is a third caller). This checks the RANKING, not the source text:
+    the assertion it replaced looked for the literal line `combined =
+    sorted(main + filt`, which would have passed just as happily with the
+    comparison key or the sort direction wrong.
+    """
+    from shared.passage_fusion import rank_and_route
+
+    main = [{'raw_header': 'm1', 'score': 10}, {'raw_header': 'm2', 'score': 5}]
+    filt = [{'raw_header': 'f1', 'score': 7}, {'raw_header': 'f2', 'score': 5}]
+    out_main, out_filt = rank_and_route(main, filt, 'w1', 'Witness One')
+
+    # Interleaved by score across BOTH buckets: 10, 7, 5, 5.
+    assert [r['witness_rank'] for r in out_main] == [1, 3]
+    assert [r['witness_rank'] for r in out_filt] == [2, 4]
+    # A filtered row consumed rank 2, which is the whole point.
+    assert out_filt[0]['witness_rank'] == 2
+
+    # Buckets keep their own membership and order -- routing is fuse_routed's
+    # job, and a reorder here changes which row `fuse` picks among equals.
+    assert [r['raw_header'] for r in out_main] == ['m1', 'm2']
+    assert [r['raw_header'] for r in out_filt] == ['f1', 'f2']
+
+    # Stable on ties (the engine scores in whole matched letters, so ties are
+    # common): equal scores keep incoming order, main ahead of filtered.
+    assert out_main[1]['witness_rank'] < out_filt[1]['witness_rank']
+
+    for row in out_main + out_filt:
+        assert row['witness_id'] == 'w1'
+        assert row['witness_label'] == 'Witness One'
+
+
+def test_rank_and_route_ranks_on_score_not_final_score():
+    """`score`, never `final_score`. On a fresh engine row the two agree, but
+    a row that has already been through `fuse()` carries the WINNER's score in
+    both -- reading the wrong field would rank a re-fused row against a
+    different quantity than a fresh one. Invisible to a source-text guard."""
+    from shared.passage_fusion import rank_and_route
+
+    rows = [{'raw_header': 'a', 'score': 1, 'final_score': 99},
+            {'raw_header': 'b', 'score': 50, 'final_score': 2}]
+    out_main, _ = rank_and_route(rows, [], 'w1')
+    ranks = {r['raw_header']: r['witness_rank'] for r in out_main}
+    assert ranks == {'b': 1, 'a': 2}, (
+        f'ranked on final_score instead of score: {ranks}'
     )
-    assert re.search(r"tag_rows\(combined,", src)
-    # ... and NOT per bucket, which is the shape this replaced.
-    assert 'tag_rows(list(p_state.witness_rows' not in src
 
 
 def test_a_record_is_filtered_only_when_every_witness_filters_it():
