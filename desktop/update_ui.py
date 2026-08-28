@@ -149,7 +149,8 @@ class WhatsNewBar(QFrame):
         # replaces said "Chunk search stays the default", and leaving that
         # in place would have asserted the opposite of what now happens.
         self.lbl_msg.setText(tr(
-            "New! Search several copies of one work at once"))
+            "New in Composition Search! Search using several witnesses of "
+            "the same work"))
         self.show()
 
     def on_learn_more(self):

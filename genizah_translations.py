@@ -5006,8 +5006,8 @@ TRANSLATIONS.update({
     # v9.1.0 desktop What's New bar (2026-08-28). My draft ended
     # "-- and letter-level search is now the default"; the owner cut that
     # clause. The release changes the default without advertising it.
-    "New! Search several copies of one work at once":
-        "חדש! חיפוש בכמה עדים של אותה יצירה בבת אחת",
+    "New in Composition Search! Search using several witnesses of the same work":
+        "חדש בחיפוש חיבורים! חיפוש בכמה עדים של אותה יצירה",
     "New! Letter-level search":
         "חדש! חיפוש ברמת האות",
     "Chunk search (slower)":
