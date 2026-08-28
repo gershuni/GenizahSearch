@@ -290,6 +290,11 @@ class WhatsNewDialog(QDialog):
                 "load a whole file split on blank lines, or promote manuscripts straight "
                 "from your own results. Each is searched on its own and the results are "
                 "merged into one list."),
+            tr(
+                "The manuscript viewer now highlights letter-level matches in the page "
+                "text — they used to open unmarked — and new Prev / Next "
+                "Manuscript buttons skip the remaining pages of a manuscript you have "
+                "already read."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)

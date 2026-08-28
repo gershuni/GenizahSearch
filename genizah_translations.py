@@ -5035,6 +5035,12 @@ TRANSLATIONS.update({
     # future surface can copy back out of it.
     "Several witnesses of one work: letter-level search can now be given more than one copy of the text you are looking for. Paste them one at a time, load a whole file split on blank lines, or promote manuscripts straight from your own results. Each is searched on its own and the results are merged into one list.":
         "כמה עדי נוסח של יצירה אחת: אפשר לתת לחיפוש ברמת האות יותר מעותק אחד של הטקסט שאתם מחפשים. הדביקו אותם אחד אחד, טענו קובץ שלם המחולק בשורות ריקות, או קדמו כתבי יד ישירות מתוך התוצאות שלכם. כל אחד נבדק בנפרד והתוצאות מתמזגות לרשימה אחת.",
+    # Second bullet added 2026-08-28 (owner "yes"): the viewer fixes folded
+    # into 9.1.0 before its tag -- letter-level highlighting, and the
+    # manuscript-level nav. The button names inside it match the tr() entries
+    # the buttons themselves use.
+    "The manuscript viewer now highlights letter-level matches in the page text — they used to open unmarked — and new Prev / Next Manuscript buttons skip the remaining pages of a manuscript you have already read.":
+        "צפיין כתב היד מסמן כעת התאמות של חיפוש ברמת האות בטקסט העמוד — עד כה הן נפתחו ללא סימון — ולחצנים חדשים, לכתב היד הבא ולכתב היד הקודם, מדלגים על שאר עמודי כתב היד שכבר קראתם.",
     "Faster, with fewer irrelevant results.":
         "מהיר יותר, עם פחות תוצאות לא רלוונטיות.",
     "The older method. Slower, but offers Exact / Variants / Fuzzy modes and cross-paragraph filtering.":
