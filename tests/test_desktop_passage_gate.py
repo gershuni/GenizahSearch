@@ -2771,3 +2771,105 @@ def test_picking_chunk_by_hand_cancels_it_too(monkeypatch):
     assert w._comp_method_deferred is None, (
         'the method flips back to passage when the index finishes loading, '
         'undoing a choice the user made by hand')
+
+
+# ---------------------------------------------------------------------------
+# Round 14, and the first finding on this branch that does NOT hold.
+#
+# The proposal: the index finishes loading before the 200 ms restore timer,
+# `_on_passage_loaded` selects passage as the default, a restore that then
+# bails out early only sets the choice flag, and the stored `chunk` is left
+# overridden.
+#
+# The ordering is real; the consequence is not. `__init__` sets
+# `_restoring_session = True` before it builds any UI at all, and the load's
+# slot cannot run until `__init__` has returned to the event loop -- so
+# `_apply_default_comp_method` refuses for the whole startup window. That
+# guard was added in round 12 for an unrelated reason (the chunk-knob cache),
+# and it closes this too.
+#
+# These two tests exist so that reasoning cannot quietly stop being true.
+# ---------------------------------------------------------------------------
+
+def _method_source(cls_name, fn_name):
+    """`_function_source` matches the FIRST function of that name in the
+    module, which for `__init__` is some other class entirely."""
+    src = _app_source()
+    tree = ast.parse(src)
+    for cls in ast.walk(tree):
+        if isinstance(cls, ast.ClassDef) and cls.name == cls_name:
+            for fn in cls.body:
+                if isinstance(fn, ast.FunctionDef) and fn.name == fn_name:
+                    return ast.get_source_segment(src, fn) or ''
+    raise AssertionError('%s.%s not found' % (cls_name, fn_name))
+
+
+def test_the_restore_window_opens_before_any_ui_exists():
+    """The invariant the whole argument rests on. If this assignment ever
+    moves below `init_ui`, a fast index load really could land first."""
+    seg = _method_source('GenizahGUI', '__init__')
+    flag = seg.index('self._restoring_session = True')
+    assert flag < seg.index('self.init_ui()'), (
+        'the startup window opens after the UI is built, so a load that '
+        'beats the restore timer is no longer refused')
+
+
+def test_a_fast_index_load_cannot_override_a_stored_chunk(monkeypatch):
+    """The proposed sequence, end to end: load first, then a restore that
+    takes an early exit."""
+    monkeypatch.setattr(pl, 'passage_available', lambda: True)
+    monkeypatch.setattr(pl, 'install_passage_state', lambda st: True)
+    w = _default_window(monkeypatch)
+    w._restoring_session = True          # `__init__` set this; nothing has
+    w._revalidate_comp_method = lambda: None
+    w._maybe_offer_passage_build = lambda: None
+    w._local_file_optouts = set()
+    w.corpus_scope_combo = _Combo([('genizah', ''), ('local', ''),
+                                   ('all', '')], index=0)
+    w.comp_corpus_scope_combo = _Combo([('genizah', ''), ('local', ''),
+                                        ('all', '')], index=0)
+
+    # 1. The index finishes loading first.
+    APP._on_passage_loaded(w, type('R', (), {
+        'index': object(), 'live_dir': 'd', 'status': 'live_ok'})())
+    assert w.comp_method_combo.currentData() == 'chunk', (
+        'the default fired during the startup window, before the stored '
+        'method had been read')
+
+    # 2. The restore reads the stored method, then takes an early exit
+    #    (`restore_mode='never'`, a declined prompt, or no data) -- so
+    #    `_restore_comp_passage_preferences` never runs.
+    APP._apply_persistent_session_preferences(
+        w, {'composition_search': {'comp_method': 'chunk'}})
+
+    # 3. What the `finally` does on every one of those paths.
+    w._restoring_session = False
+    APP._apply_default_comp_method(w)
+
+    assert w.comp_method_combo.currentData() == 'chunk', (
+        "the user's stored chunk was overridden on a fast startup")
+
+
+def test_the_same_ordering_still_reaches_a_user_with_no_stored_method(
+        monkeypatch):
+    """The other half: the guard must DELAY the default, not cancel it."""
+    monkeypatch.setattr(pl, 'passage_available', lambda: True)
+    monkeypatch.setattr(pl, 'install_passage_state', lambda st: True)
+    w = _default_window(monkeypatch)
+    w._restoring_session = True
+    w._revalidate_comp_method = lambda: None
+    w._maybe_offer_passage_build = lambda: None
+    w._local_file_optouts = set()
+    w.corpus_scope_combo = _Combo([('genizah', ''), ('local', ''),
+                                   ('all', '')], index=0)
+    w.comp_corpus_scope_combo = _Combo([('genizah', ''), ('local', ''),
+                                        ('all', '')], index=0)
+
+    APP._on_passage_loaded(w, type('R', (), {
+        'index': object(), 'live_dir': 'd', 'status': 'live_ok'})())
+    APP._apply_persistent_session_preferences(w, {'composition_search': {}})
+    w._restoring_session = False
+    APP._apply_default_comp_method(w)
+
+    assert w.comp_method_combo.currentData() == 'passage', (
+        'the startup guard swallowed the default instead of deferring it')
