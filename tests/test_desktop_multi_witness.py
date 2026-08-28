@@ -187,6 +187,9 @@ def _worker(witnesses, searcher, pinned=None, abort_after=None, cap=None,
         # the machinery this thread's whole cancel story rests on, so it is
         # the real `PauseGate`, not a stand-in that cannot park.
         run = MW.run
+        # Borrowed, not stubbed: it is now called on BOTH sides of every
+        # search, and a stand-in would let either call vanish silently.
+        _abort_if_generation_moved = MW._abort_if_generation_moved
         _checkpoint = pl_mixin._checkpoint
         _should_abort = pl_mixin._should_abort
         _emit_pause_ack = pl_mixin._emit_pause_ack
@@ -730,6 +733,7 @@ class _Win2:
     _comp_method = GAPP._comp_method
     _witness_button_accent = GAPP._witness_button_accent
     _accent_amber_pair = GAPP._accent_amber_pair
+    _composition_tab_is_current = GAPP._composition_tab_is_current
     _announcement_allowed = GAPP._announcement_allowed
     _mark_announcement_seen = GAPP._mark_announcement_seen
     _retire_announcement = GAPP._retire_announcement
@@ -2509,6 +2513,17 @@ def test_every_busy_transition_refreshes_the_panel():
 # search is a different KIND of search from the one above it.
 # ---------------------------------------------------------------------------
 
+class _CurrentTab:
+    """A QTabWidget stand-in that answers only the question the announcement
+    asks: is this the tab in front of the user."""
+
+    def __init__(self, current):
+        self._current = current
+
+    def currentWidget(self):
+        return self._current
+
+
 def _witness_badge_window(monkeypatch, seen=False, entries=0):
     writes = []
     store = {GAPP._ANNOUNCE_WITNESSES: seen}
@@ -2529,6 +2544,8 @@ def _witness_badge_window(monkeypatch, seen=False, entries=0):
                      w._comp_seed_text(), 'Pasted text')
     w.btn_comp_witnesses = _FakeWidget()
     w.lbl_comp_witnesses_new = _FakeWidget()
+    w.composition_tab = object()
+    w.tabs = _CurrentTab(w.composition_tab)
     w.writes = writes
     return w
 
@@ -2668,3 +2685,88 @@ def test_opening_the_dialog_retires_the_witness_badge():
 
 def test_the_panel_refresh_is_what_keeps_the_badge_in_step():
     assert '_update_witness_affordance' in _calls_in('_refresh_witness_panel')
+
+
+def test_the_witness_marker_is_not_spent_off_tab(monkeypatch):
+    """Same rule as the method marker: the passage load can fire while the
+    Search tab is in front, and spending the marker there loses it unseen."""
+    w = _witness_badge_window(monkeypatch)
+    w.tabs = _CurrentTab(object())
+    GAPP._update_witness_affordance(w, True)
+    assert w.lbl_comp_witnesses_new.visible, (
+        'the badge must still be READY -- it is the persistence that waits')
+    assert w.writes == [], 'the marker was spent out of sight'
+
+
+def _worker_src():
+    return _io.open(_os.path.join(_os.path.dirname(_APP_PATH),
+                                  'gui_threads.py'), encoding='utf-8').read()
+
+
+def _worker_run_src():
+    """`run` lives in gui_threads.py, which `_fn_src` does not read -- and
+    there are several classes with a `run`, so it is found through its own
+    class rather than by bare name."""
+    src = _worker_src()
+    tree = ast.parse(src)
+    for cls in ast.walk(tree):
+        if (isinstance(cls, ast.ClassDef)
+                and cls.name == 'MultiWitnessCompositionThread'):
+            for fn in cls.body:
+                if isinstance(fn, ast.FunctionDef) and fn.name == 'run':
+                    return ast.get_source_segment(src, fn) or ''
+    raise AssertionError('MultiWitnessCompositionThread.run not found')
+
+
+def test_the_generation_is_rechecked_after_the_search_returns():
+    """The pre-check cannot cover the window that matters most: the
+    call-scoped lease is acquired INSIDE `search_composition_logic`, so a
+    swap landing between the check and the acquisition is searched against
+    the new generation.
+
+    Counted as CALLS, not as text: the comment above each one says the same
+    words, and a substring assertion has been satisfied by a comment four
+    times on this branch."""
+    src = _worker_run_src()
+    fn = ast.parse('\n'.join(l[4:] if l.startswith('    ') else l
+                              for l in src.splitlines()))
+    calls = [c for c in ast.walk(fn)
+             if isinstance(c, ast.Call)
+             and isinstance(c.func, ast.Attribute)
+             and c.func.attr == '_abort_if_generation_moved']
+    assert len(calls) >= 2, (
+        'the generation is checked %d time(s) per witness; the one AFTER '
+        'the search is the one that catches a swap during the lease'
+        % len(calls))
+    after = src.index('_abort_if_generation_moved',
+                      src.index('search_composition_logic'))
+    assert after < src.index("rows = list(result.get('main')"), (
+        'the recheck happens after the rows are recorded, so a void batch '
+        'has already reached the witness caches')
+
+
+def test_a_swap_during_the_LAST_witness_search_voids_the_batch(monkeypatch):
+    """The case the pre-check structurally cannot see.
+
+    Deliberately ONE witness: the existing swap test uses two and is caught
+    by the next iteration's pre-check, which is why this gap survived it.
+    Here there is no next iteration, so without the recheck the rows are
+    recorded, fused with the pinned generation and published."""
+    s = _StubSearcher({'one': _rows(('990000000001_1r', 100))})
+    pinned = pl.current_state_generation()
+    w = _worker([('w1', 'A', 'one')], s, pinned=pinned)
+    original = s.search_composition_logic
+
+    def _swap(text, **kw):
+        # What a lease acquired INSIDE the call looks like from out here.
+        out = original(text, **kw)
+        monkeypatch.setattr(pl, '_state_generation', pinned + 1)
+        return out
+
+    s.search_composition_logic = _swap
+    w.run()
+    assert s.searched == ['one'], 'the search never ran'
+    assert w.scan_finished_signal.calls == [], (
+        'a batch whose only witness was searched against a NEW index was '
+        'published anyway')
+    assert w.error_signal.calls, 'the swap was silent'

@@ -156,6 +156,8 @@ class _Win:
     _witness_button_accent = APP._witness_button_accent
     _accent_amber_pair = APP._accent_amber_pair
     _text_position_accent = APP._text_position_accent
+    _composition_tab_is_current = APP._composition_tab_is_current
+    _honour_deferred_comp_method = APP._honour_deferred_comp_method
     _announcement_allowed = APP._announcement_allowed
     _mark_announcement_seen = APP._mark_announcement_seen
     _retire_announcement = APP._retire_announcement
@@ -2136,6 +2138,17 @@ def test_reset_refuses_a_single_witness_scan_before_reaching_terminate():
 # re-announced to on every launch.
 # ---------------------------------------------------------------------------
 
+class _CurrentTab:
+    """A QTabWidget stand-in that answers only the question the announcement
+    asks: is this the tab in front of the user."""
+
+    def __init__(self, current):
+        self._current = current
+
+    def currentWidget(self):
+        return self._current
+
+
 def _announce_window(monkeypatch, seen=False, raises=False, method='chunk'):
     """A window whose announcement store is a dict in this test, not the
     owner's real config."""
@@ -2167,6 +2180,10 @@ def _announce_window(monkeypatch, seen=False, raises=False, method='chunk'):
     w.comp_method_combo = _Combo([('chunk', ''), ('passage', '')],
                                  index=0 if method == 'chunk' else 1)
     w.lbl_comp_method_new = _Label()
+    # ON the tab: every test here is about what happens once the badge can
+    # be SEEN. The construction case has its own test below.
+    w.composition_tab = object()
+    w.tabs = _CurrentTab(w.composition_tab)
     w.reads, w.writes = reads, writes
     return w
 
@@ -2511,3 +2528,145 @@ def test_the_default_position_clears_the_accent_rather_than_repainting_it():
     head, _, _ = seg.partition('else:')
     assert 'setStyleSheet("")' in head, (
         'the default position no longer clears the stylesheet')
+
+
+# ---------------------------------------------------------------------------
+# Codex review round 12. Three findings, all real, all introduced by the
+# letter-level default and its one-shot markers.
+# ---------------------------------------------------------------------------
+
+def test_an_explicit_click_survives_the_build_it_asked_for():
+    """The sharpest of the three. With no index, clicking letter-level
+    records a CHOICE (correctly -- a person moved the control), reverts to
+    chunk and offers the build. Ten minutes later the build succeeds and the
+    default cannot help, because the default's whole rule is that it never
+    overrules a choice. The user is handed back the method they had just
+    asked to leave."""
+    seg = _function_source('_on_comp_method_changed')
+    head, _, _ = seg.partition('_revert_comp_method_to_chunk')
+    assert "_comp_method_deferred = 'passage'" in head, (
+        'the intent is not recorded before the demotion, so nothing can '
+        'bring it back')
+
+
+def test_the_build_honours_the_deferral_before_the_default():
+    """Order matters: the deferral carries an explicit choice, the default
+    only fills a vacuum. Reached, not merely correct -- the deferral used to
+    live inline in the load handler, which a build never runs."""
+    calls = _calls_inside('_on_passage_build_finished')
+    assert '_honour_deferred_comp_method' in calls, (
+        'a finished build never re-applies the method that asked for it')
+    seg = _function_source('_on_passage_build_finished')
+    assert (seg.index('_honour_deferred_comp_method')
+            < seg.index('_apply_default_comp_method')), (
+        'the default runs first and returns, so the deferral is moot')
+
+
+def test_the_deferral_is_one_helper_for_both_moments():
+    calls = _calls_inside('_on_passage_loaded')
+    assert '_honour_deferred_comp_method' in calls, (
+        'the load handler grew its own second copy of the deferral')
+
+
+def test_a_deferred_passage_choice_is_applied_once_the_index_exists(
+        monkeypatch):
+    w = _default_window(monkeypatch)
+    w._comp_method_deferred = 'passage'
+    APP._honour_deferred_comp_method(w)
+    assert w.comp_method_combo.currentData() == 'passage'
+    assert w.applied == [True], 'the mode UI did not follow the method'
+    assert w._comp_method_deferred is None, 'the deferral must be one-shot'
+
+
+def test_a_deferral_is_refused_while_letter_level_still_cannot_run(
+        monkeypatch):
+    """A demotion for scope or Lab Mode reflects real current state."""
+    w = _default_window(monkeypatch, scope='local')
+    w._comp_method_deferred = 'passage'
+    APP._honour_deferred_comp_method(w)
+    assert w.comp_method_combo.currentData() == 'chunk'
+
+
+def test_a_stored_method_is_read_before_the_restore_can_bail_out():
+    """`restore_mode='never'`, a declined prompt and a no-data start all
+    return before `_restore_comp_passage_preferences` runs -- so nothing
+    marked a stored `chunk` as chosen, and the default in the `finally`
+    then overrode a preference the user had actually expressed."""
+    seg = _function_source('_restore_session')
+    head, _, _ = seg.partition("if restore_mode == 'never':")
+    assert '_apply_persistent_session_preferences' in head, (
+        'the persistent-preference path no longer precedes the early exits')
+    pref = _function_source('_apply_persistent_session_preferences')
+    assert '_comp_method_user_choice_seen' in pref, (
+        'a stored method is never marked as chosen on the path that '
+        'survives every early return')
+
+
+def _persist_window(stored):
+    w = _unannounced(_Win())
+    w._local_file_optouts = set()
+    w.corpus_scope_combo = _Combo([('genizah', ''), ('local', ''),
+                                   ('all', '')], index=0)
+    w.comp_corpus_scope_combo = _Combo([('genizah', ''), ('local', ''),
+                                        ('all', '')], index=0)
+    state = {'composition_search': {}}
+    if stored is not None:
+        state['composition_search']['comp_method'] = stored
+    APP._apply_persistent_session_preferences(w, state)
+    return w
+
+
+def test_a_stored_chunk_survives_a_session_restore_that_never_ran():
+    w = _persist_window('chunk')
+    assert w._comp_method_user_choice_seen is True, (
+        "the user's stored chunk is treated as no preference, so the "
+        'letter-level default overrides it')
+
+
+def test_a_stored_passage_survives_it_too():
+    """Same footing as the corpus scope (Phase 110): a preference has to
+    outlive `restore_mode='never'`. The index has not loaded yet, so it goes
+    through the same deferral the full restore uses."""
+    w = _persist_window('passage')
+    assert w._comp_method_user_choice_seen is True
+    assert w._comp_method_deferred == 'passage'
+
+
+def test_no_stored_method_still_means_no_preference():
+    """The case the default exists for. It must stay free to apply."""
+    w = _persist_window(None)
+    assert getattr(w, '_comp_method_user_choice_seen', False) is False
+    assert getattr(w, '_comp_method_deferred', None) is None
+
+
+def test_a_marker_is_not_spent_while_its_tab_is_out_of_sight(monkeypatch):
+    """`create_composition_tab` runs the updaters before the tab has been
+    added to `self.tabs` at all. On a machine with a corpus and no
+    letter-level index that spent the method marker during CONSTRUCTION, so
+    a user who never opened Composition Search that launch lost it
+    permanently without ever seeing it."""
+    w = _announce_window(monkeypatch, seen=False)
+    w.tabs = _CurrentTab(object())          # some other tab is in front
+    APP._update_comp_method_affordance(w)
+    assert w.writes == [], (
+        'the marker was spent on a tab the user is not looking at')
+
+
+def test_a_marker_with_no_tabs_at_all_is_not_spent(monkeypatch):
+    """Construction proper: `self.tabs` does not exist yet."""
+    w = _announce_window(monkeypatch, seen=False)
+    del w.tabs
+    APP._update_comp_method_affordance(w)
+    assert w.writes == []
+
+
+def test_arriving_on_the_tab_spends_what_is_showing():
+    """Reached, not merely correct: without this the marker would be shown
+    forever, because the only place that spends it is a visibility test that
+    was false when the badge was computed."""
+    calls = _calls_inside('_on_tab_changed')
+    for name in ('_update_comp_method_affordance',
+                 '_update_witness_affordance'):
+        assert name in calls, (
+            'entering the composition tab does not recompute %s, so a '
+            'marker computed off-tab is never spent' % name)

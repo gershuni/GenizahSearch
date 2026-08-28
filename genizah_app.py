@@ -2209,6 +2209,13 @@ class GenizahGUI(QMainWindow):
         try:
             current_widget = self.tabs.widget(index)
             logger.debug("current_widget=%s", current_widget)
+            if (hasattr(self, 'composition_tab')
+                    and current_widget is self.composition_tab):
+                # Arriving IS the first sight. Both markers are recomputed
+                # here so the one that is showing gets spent now, rather
+                # than during a construction the user never watched.
+                self._update_comp_method_affordance()
+                self._update_witness_affordance()
             if hasattr(self, 'community_tab') and current_widget == self.community_tab:
                 logger.debug("Matched community_tab, _community_data_loaded=%s", getattr(self, '_community_data_loaded', False))
                 # Load community data when tab is first shown or refresh if needed
@@ -15849,24 +15856,7 @@ class GenizahGUI(QMainWindow):
                     index=index, live_dir=getattr(result, 'live_dir', '')))
         logger.info('passage index at startup: %s', status)
 
-        # The gate could only say "not built" until this moment, so a session
-        # that was restored with letter-level search selected was demoted to
-        # chunk before the index had any chance to load. Re-apply it now --
-        # but ONLY when the demotion was that transient reason. A demotion
-        # for scope or Lab Mode reflects real current state and must stand.
-        if getattr(self, '_comp_method_deferred', None) == 'passage':
-            self._comp_method_deferred = None
-            combo = getattr(self, 'comp_method_combo', None)
-            if (combo is not None
-                    and self._passage_disabled_reason_now() is None):
-                idx = combo.findData('passage')
-                if idx >= 0:
-                    combo.blockSignals(True)
-                    combo.setCurrentIndex(idx)
-                    combo.blockSignals(False)
-                    self._apply_passage_mode_ui(True)
-                    self._show_passage_reason(None)
-                    self._update_comp_method_help()
+        self._honour_deferred_comp_method()
         # Only now does "there is an index" mean anything, so this is where
         # the letter-level default can first be applied.
         self._apply_default_comp_method()
@@ -15880,6 +15870,40 @@ class GenizahGUI(QMainWindow):
         # yet" -- offering before this point would fire on every launch,
         # including the ones where an index was about to appear.
         self._maybe_offer_passage_build()
+
+    def _honour_deferred_comp_method(self):
+        """Re-apply a letter-level selection that was demoted for "not built".
+
+        The gate could only say "not built" until the index answered, so an
+        intent expressed before then -- a restored session, or a user who
+        picked letter-level and was offered the build -- was demoted to chunk
+        with nothing to bring it back. ONLY that transient reason is
+        deferred: a demotion for scope or Lab Mode reflects real current
+        state and must stand.
+
+        Called from BOTH moments the reason can stop being true: the startup
+        load, and the end of a build. It used to live inline in the first of
+        those, so a user who explicitly asked for letter-level, accepted the
+        build offer and waited ten minutes was handed back a chunk search --
+        and `_apply_default_comp_method` could not rescue them, because their
+        click had (correctly) recorded a choice it must never overrule
+        (Codex review, 2026-08-28).
+        """
+        if getattr(self, '_comp_method_deferred', None) != 'passage':
+            return
+        self._comp_method_deferred = None
+        combo = getattr(self, 'comp_method_combo', None)
+        if combo is None or self._passage_disabled_reason_now() is not None:
+            return
+        idx = combo.findData('passage')
+        if idx < 0:
+            return
+        combo.blockSignals(True)
+        combo.setCurrentIndex(idx)
+        combo.blockSignals(False)
+        self._apply_passage_mode_ui(True)
+        self._show_passage_reason(None)
+        self._update_comp_method_help()
 
     def _maybe_offer_passage_build(self, explicit=False):
         """Offer to build the letter-level index when there is none, once per
@@ -16085,7 +16109,10 @@ class GenizahGUI(QMainWindow):
                 passage_lifecycle.PassageState(index=index,
                                                live_dir=live_dir))
         # A user who just built the index has said what they want more
-        # plainly than any default could; land them on it.
+        # plainly than any default could; land them on it. The deferral
+        # FIRST: an explicit click is a choice, so it is the deferral and not
+        # the default that carries it through the build.
+        self._honour_deferred_comp_method()
         self._apply_default_comp_method()
         self._revalidate_comp_method()
         if status == 'installed':
@@ -17041,7 +17068,7 @@ class GenizahGUI(QMainWindow):
                     and self._announcement_allowed(self._ANNOUNCE_WITNESSES))
         lbl.setVisible(show)
         btn.setStyleSheet(self._witness_button_accent() if show else "")
-        if show:
+        if show and self._composition_tab_is_current():
             self._mark_announcement_seen(self._ANNOUNCE_WITNESSES)
 
     def _open_witness_dialog(self):
@@ -17769,6 +17796,31 @@ class GenizahGUI(QMainWindow):
     _ANNOUNCE_METHOD = 'comp_method_new_seen'
     _ANNOUNCE_WITNESSES = 'comp_witnesses_new_seen'
 
+    def _composition_tab_is_current(self):
+        """Whether the user can actually SEE the composition tab right now.
+
+        The announcements are spent on first sight, and "first sight" is not
+        "first computed": `create_composition_tab` runs both updaters before
+        the tab has been added to `self.tabs` at all. On a machine with a
+        corpus and no letter-level index that spent the method marker during
+        construction, so a user who never opened Composition Search that
+        launch lost it permanently without ever seeing it (Codex review,
+        2026-08-28).
+
+        Visibility of the WIDGET is not the test -- during construction it
+        answers False for reasons that have nothing to do with the user --
+        so the question asked is the one that matters: is this the tab in
+        front of them.
+        """
+        tabs = getattr(self, 'tabs', None)
+        tab = getattr(self, 'composition_tab', None)
+        if tabs is None or tab is None:
+            return False
+        try:
+            return tabs.currentWidget() is tab
+        except Exception:                                    # noqa: BLE001
+            return False
+
     def _announcement_allowed(self, key):
         """Whether this announcement may still be shown, decided ONCE per
         launch.
@@ -17834,7 +17886,11 @@ class GenizahGUI(QMainWindow):
                          and self._announcement_allowed(self._ANNOUNCE_METHOD))
         badge.setVisible(highlight)
         combo.setStyleSheet(self._METHOD_COMBO_ACCENT if highlight else "")
-        if highlight:
+        # Spent only when it can have been SEEN -- see
+        # `_composition_tab_is_current`. `_on_tab_changed` re-runs this on
+        # entry, so a badge computed while another tab was in front is spent
+        # the moment the user arrives.
+        if highlight and self._composition_tab_is_current():
             self._mark_announcement_seen(self._ANNOUNCE_METHOD)
 
     def _apply_default_comp_method(self):
@@ -18134,6 +18190,12 @@ class GenizahGUI(QMainWindow):
             return
         reason = self._passage_disabled_reason_now()
         if reason is not None:
+            if reason == passage_lifecycle.REASON_NOT_BUILT:
+                # Remember the intent BEFORE demoting it. The build is about
+                # to be offered, and without this a successful one lands the
+                # user back on chunk: the click above recorded a choice, and
+                # the default refuses to overrule a choice.
+                self._comp_method_deferred = 'passage'
             self._revert_comp_method_to_chunk(reason)
             if reason == passage_lifecycle.REASON_NOT_BUILT:
                 # The one refusal the user can do something about right now.
@@ -28810,6 +28872,25 @@ class GenizahGUI(QMainWindow):
                 self.comp_corpus_scope_combo.blockSignals(True)
                 self.comp_corpus_scope_combo.setCurrentIndex(comp_scope_idx)
                 self.comp_corpus_scope_combo.blockSignals(False)
+
+        # The search METHOD is a preference on exactly the same footing, and
+        # it has to be read HERE for the same reason the scope is: everything
+        # below this function's caller can be skipped. With
+        # `restore_mode='never'`, or a declined prompt, or no data,
+        # `_restore_comp_passage_preferences` never runs -- so nothing marked
+        # a stored `chunk` as chosen, and the letter-level default then
+        # overrode a preference the user had actually expressed (Codex
+        # review, 2026-08-28).
+        #
+        # An ABSENT method still means no preference: that is the case the
+        # default exists for, and it must stay free to apply.
+        _stored_method = comp_pref.get('comp_method')
+        if _stored_method in ('chunk', 'passage'):
+            self._comp_method_user_choice_seen = True
+            if _stored_method == 'passage':
+                # The index has not loaded yet, so the selection is made
+                # through the same deferral the full restore uses.
+                self._comp_method_deferred = 'passage'
 
     def _save_session(self):
         """Save current search state to disk for session persistence."""

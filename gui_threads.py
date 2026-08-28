@@ -466,6 +466,21 @@ class MultiWitnessCompositionThread(PausableSearchMixin, QThread):
         self.group_cap = group_cap
         self._init_pause_support(run_id)
 
+    def _abort_if_generation_moved(self):
+        """Void the batch if the index was replaced under it.
+
+        Called on BOTH sides of every search: before, because a swap can land
+        between two witnesses; after, because the lease is acquired inside
+        the search and the pre-check cannot cover that window. One helper
+        rather than two copies -- a second copy is where the two checks drift
+        apart.
+        """
+        from desktop import passage_lifecycle as pl
+        if pl.generation_changed(self.pinned_generation):
+            raise pl.PassageIndexReplaced(
+                'the letter-level index was replaced while this '
+                'search was running')
+
     def run(self):
         from desktop import passage_lifecycle as pl
         from desktop import passage_witnesses as pw
@@ -494,10 +509,7 @@ class MultiWitnessCompositionThread(PausableSearchMixin, QThread):
 
                 # Checked per ITERATION, not once: a swap can land between
                 # any two witnesses, and the batch is void from that moment.
-                if pl.generation_changed(self.pinned_generation):
-                    raise pl.PassageIndexReplaced(
-                        'the letter-level index was replaced while this '
-                        'search was running')
+                self._abort_if_generation_moved()
 
                 if not (text or '').strip():
                     # Never dispatch an empty query. The engine answers it
@@ -534,6 +546,19 @@ class MultiWitnessCompositionThread(PausableSearchMixin, QThread):
                                    'status': 'failed', 'hits': 0,
                                    'reason': 'search_failed'})
                     continue
+
+                # And AGAIN, now that the search has returned. The check
+                # above is not sufficient on its own: the call-scoped lease
+                # is taken INSIDE `search_composition_logic`, so a swap
+                # landing between the check and the acquisition is searched
+                # against the NEW generation. On the last witness there is no
+                # next iteration to catch it, and its rows would be fused
+                # with pinned-generation rows and published as one result
+                # set (Codex review P1, 2026-08-27).
+                #
+                # Before recording the rows, so a void batch never reaches
+                # `state.rows` at all.
+                self._abort_if_generation_moved()
 
                 rows = list(result.get('main') or [])
                 filt = list(result.get('filtered') or [])
