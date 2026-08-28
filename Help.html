@@ -255,8 +255,11 @@
         <li><b>Chunk search</b> is the original method. It compares blocks of words, and it is the only method that offers the Exact / Variants / Fuzzy modes and cross-paragraph filtering described below.</li>
         <li><b>Letter-level search</b> compares sequences of letters instead. It is much faster than chunk search and returns far fewer unrelated results, but it does not offer the chunk-mode parameters &mdash; when you select it, those controls are set aside and the letter-level controls appear in their place.</li>
     </ul>
+    <p>In a sample test at the default settings, letter-level search ran 8&times; to 22&times; faster than chunk search; the share of relevant results in the first 100 and first 500 was 3 to 25 percentage points higher; and chunk search's noisiest form (2-word chunks) did yield true results letter-level search missed &mdash; but only past its first 1,500 results, some of them fragments too short to be in the letter-level index at all.</p>
     <p>Letter-level search runs on an index built on this computer from the transcriptions you already have. The program offers to build it once, and you can build or rebuild it at any time from Settings. The build takes about ten minutes, needs about 11 GB of free disk space while it runs, and produces an index of about 3.5 GB. Cancelling a build, or a build that fails, always leaves the index you already had intact and working.</p>
     <p>Letter-level search covers the Genizah corpus. With My Library or the combined scope selected, the method stays on chunk search and the reason is shown on screen. Once the index exists on this computer, letter-level search is the method the Composition tab starts on; if you have already chosen a method yourself, your choice is kept.</p>
+
+    <p>The letter-level index deliberately leaves some pages out. Three kinds are dropped when it is built: pages whose transcription holds fewer than about 80 Hebrew letters &mdash; a line or two, too little text to carry letter-level evidence; microfilm catalog cards; and library-stamp pages photographed alongside the manuscripts. On the current corpus that is about a quarter of the pages, almost all of them tiny scraps. The practical consequence: a very small fragment can be found by chunk search, which searches every transcribed page, and never by letter-level search &mdash; one more reason the two methods complement each other.</p>
 
     <h4>Several Witnesses of One Work</h4>
 
@@ -276,9 +279,10 @@ list and press <i>Search with these too</i>. The text comes from the pages
 that actually matched, not from the manuscript record.</li>
 </ul>
 
-<p>Do not join several copies into one box. Joining them into a single query
-works for chunk search but measurably harms letter-level search, which spends
-a fixed budget per query: measured against the 614 Birkat Hamazon census
+<p><b>In letter-level search, do not join several copies into one box.</b>
+Joining works in chunk search &mdash; that is how you would use several copies
+there &mdash; but letter-level search spends a fixed budget per query, so
+joining measurably harms it: measured against the 614 Birkat Hamazon census
 manuscripts that have any indexed text, the best single copy finds 348 and
 seventeen copies searched separately and merged find 455 &mdash; while the
 same seventeen joined into one query find 296, fewer than a single copy on its
@@ -304,6 +308,11 @@ found so far is kept. Up to 25 witnesses can be held at once.</p>
         <li><b>Passage length:</b> Whether a short shared passage counts as a match. "Also short passages" roughly doubles what you have to read through, and finds witnesses that the normal setting does not reach.</li>
         <li><b>Search depth:</b> How much of the corpus the search may examine. Deeper searches take seconds longer and return more manuscripts, including badly damaged and reworked copies that a fast pass misses. Long texts benefit the most. <b>A deep search cannot be interrupted once it has started</b> &mdash; Stop, Escape and closing the window all wait for it to finish.</li>
     </ul>
+
+    <h3>Opening a Result</h3>
+    <p>Double-clicking a result opens the Manuscript Viewer on that page, with the matched text marked in red. Beside it the viewer shows your own text, with the part that matched marked there too.</p>
+    <p>In letter-level search the two sides are not the same letters &mdash; that is what approximate matching means. What is marked in the manuscript is what the manuscript has; what is marked in your text is what yours has. Where the copy that produced the match was not the text in the box &mdash; a promoted manuscript, or another witness &mdash; the panel shows that witness's own excerpt instead of your unmarked text.</p>
+    <p>A composition result list is made of <i>pages</i>, so several results in a row can belong to one manuscript. <b>Next Manuscript</b> and <b>Prev Manuscript</b> go to the nearest result belonging to a different one, skipping the remaining pages of the fragment you are reading. They appear only when some manuscript in the list holds more than one result.</p>
 
     <h3>How Chunk Search Works (The Mechanism)</h3>
     <p>Unlike a regular search, the engine does not search for the entire text as a single unit. The process works as follows:</p>
@@ -798,6 +807,17 @@ found so far is kept. Up to 25 witnesses can be held at once.</p>
         <li><b>סינון עמודות:</b> לחיצה על כותרות העמודות (מספר מדף, כותרת, קטע) מאפשרת לסנן תוצאות לפי טקסט. סמנו "החרג" כדי להסתיר תוצאות תואמות במקום להציג אותן.</li>
     </ul>
 
+    <h3>עצירה והשהיה של חיפוש</h3>
+    <p>בזמן שחיפוש רץ, לחצן <b>חיפוש</b> הופך ל<b>עצור</b>, ולצדו מופיע לחצן השהיה (<b>&#9208;</b>). שניהם יחד תופסים בדיוק את המקום שתפס לחצן החיפוש, כך ששום דבר לא זז מתחת לעכבר כשהחיפוש מתחיל.</p>
+    <ul>
+        <li><b>עצור</b> מסיים את החיפוש ושומר כל תוצאה שכבר נמצאה. כותרת התוצאות מסמנת את הרשימה כ"תוצאות חלקיות", כדי שיהיה ברור שהריצה לא הושלמה.</li>
+        <li><b>&#9208; השהיה</b> משהה את החיפוש בנקודת הביקורת הבאה שלו. מכיוון שהוא ממתין לנקודת ביקורת ואינו נעצר מיידית, הלחצן מציג תחילה <b>&#8987;</b> לרגע; משעה שהחיפוש הושהה בפועל הוא הופך ל<b>&#9654;</b>. רחפו מעל הלחצן לתיאור המצב שבו הוא נמצא.</li>
+        <li><b>&#9654; המשך</b> ממשיך בדיוק מהנקודה שבה החיפוש נעצר &mdash; שום דבר שכבר נסרק אינו נסרק שוב. זמן ההשהיה אינו נספר בזמן שחלף, ובחיפוש חיבורים הוא מוחרג גם מהערכת הזמן שנותר.</li>
+        <li>חיפוש מושהה משחרר את ההגדרה שמונעת מהמחשב לישון, כך שמחשב שנשאר מושהה יכול לישון כרגיל.</li>
+        <li><b>חיפוש מושהה נשמר בזיכרון בלבד.</b> סגירת התוכנה מסיימת אותו &mdash; אין מה להמשיך בהפעלה הבאה.</li>
+    </ul>
+    <p>השהיה זמינה בחיפוש רגיל, בחיפושים של מצב מעבדה ובחיפוש חיבורים. היא אינה מוצעת בשלב הקיבוץ שבסוף סריקת חיבורים, שכרגע אינו ניתן להפסקה נקייה.</p>
+
     <h3>הגדרות חיפוש (&#9881;)</h3>
     <p>לחצו על סמל גלגל השיניים לפתיחת הגדרות חיפוש מתקדמות:</p>
     <ul>
@@ -887,7 +907,44 @@ found so far is kept. Up to 25 witnesses can be held at once.</p>
     <h2 id="composition">חיפוש חיבורים</h2>
     <p>כלי זה נועד לחוקרים המעוניינים למצוא מקבילות לטקסט ספרותי שלם (כגון פיוט, פירוש מימי הביניים או חיבור נדיר אחר) בתוך הגניזה, ובכך לאתר עדי נוסח נוספים, ישירים ועקיפים.</p>
 
-    <h3>איך זה עובד? (המנגנון)</h3>
+    <h3>שתי שיטות חיפוש</h3>
+    <p>חיפוש חיבורים מציע שתי דרכים למצוא מקבילות. הן משלימות זו את זו: אף אחת אינה מחליפה את השנייה, והמתאימה לכם תלויה בטקסט שלפניכם.</p>
+    <ul>
+        <li><b>חיפוש מקטעים</b> הוא השיטה המקורית. הוא משווה גושי מילים, והוא השיטה היחידה המציעה את מצבי מדויק / וריאנטים / מקורב ואת החיפוש חוצה-הפסקאות המתוארים להלן.</li>
+        <li><b>חיפוש ברמת האות</b> משווה רצפי אותיות במקום זאת. הוא מהיר בהרבה מחיפוש מקטעים ומחזיר הרבה פחות תוצאות לא רלוונטיות, אך אינו מציע את הפרמטרים של חיפוש מקטעים — כשבוחרים בו, הפקדים ההם מוסטים הצידה ובמקומם מופיעים פקדי רמת האות.</li>
+    </ul>
+    <p>בבדיקה מדגמית, עלה כי בהגדרות ברירת המחדל מהירות החיפוש ברמת האות גבוהה פי 8 עד פי 22 ממהירות חיפוש המקטעים; אחוז התוצאות הרלוונטיות ב־100 וב־500 התוצאות הראשונות גבוה יותר ב־3 עד 25 נקודות אחוז; וחיפוש המקטעים בגרסתו ה"רועשת" ביותר (מקטעים של 2 מילים) מניב תוצאות אמת שהחיפוש ברמת האות לא השיג — אך רק לאחר 1,500 התוצאות הראשונות, וחלקן קטעים קצרים שאינם כלולים באינדקס של רמת האות כלל.</p>
+    <p>חיפוש ברמת האות פועל על אינדקס הנבנה במחשב הזה מתוך התעתוקים שכבר נמצאים כאן. התוכנה מציעה לבנות אותו פעם אחת, ואפשר לבנות או לבנות מחדש בכל עת מתוך ההגדרות. הבנייה אורכת כעשר דקות, דורשת כ-11 ג'יגה-בייט מקום פנוי בזמן שהיא רצה, ומייצרת אינדקס בגודל כ-3.5 ג'יגה-בייט. ביטול בנייה, או בנייה שנכשלה, משאירים תמיד את האינדקס שכבר היה לכם שלם ופעיל.</p>
+    <p>חיפוש ברמת האות מכסה את קורפוס הגניזה. כאשר נבחר היקף "הספרייה שלי" או ההיקף המשולב, השיטה נשארת חיפוש מקטעים והסיבה מוצגת על המסך. ברגע שהאינדקס קיים במחשב הזה, חיפוש ברמת האות הוא השיטה שבה נפתחת לשונית חיפוש חיבורים; אם כבר בחרתם שיטה בעצמכם, הבחירה שלכם נשמרת.</p>
+
+    <p>האינדקס של רמת האות משמיט חלק מהעמודים במכוון. שלושה סוגים נופלים בבנייתו: עמודים שבתעתוקם פחות מכ־80 אותיות — שורה או שתיים, מעט מדי טקסט לראָיה ברמת האות; כרטיסי קטלוג של מיקרופילם; ועמודי חותמת ספרייה שצולמו לצד כתבי היד. בקורפוס הנוכחי מדובר בכרבע מהעמודים, כמעט כולם קטעי טקסט זעירים. המסקנה המעשית: קטע קטן מאוד יכול להימצא בחיפוש מקטעים, שמחפש בכל עמוד מתועתק, ולא להימצא כלל בחיפוש ברמת האות — עוד סיבה לכך ששתי השיטות משלימות זו את זו.</p>
+
+    <h4>כמה עדי נוסח של יצירה אחת</h4>
+    <p>יצירה שורדת בכתבי יד רבים, ואף עותק אחד שלה אינו מוצא את כל האחרים. אפשר לתת לחיפוש ברמת האות יותר מעותק אחד של הטקסט שאתם מחפשים — כל אחד נבדק בנפרד, והתוצאות מתמזגות לרשימה אחת. לחצו על <b>עדים</b> לצד פקדי רמת האות כדי לפתוח את הרשימה.</p>
+    <p>יש שלוש דרכים להוסיף עד:</p>
+    <ul>
+        <li><b>הדבקת טקסט</b> — עד אחד בכל פעם.</li>
+        <li><b>טעינת קובץ</b> — קובץ שלם המחולק בשורות ריקות. התצוגה המקדימה מראה כמה עדים נמצאו וכמה היו קצרים מכדי לשמש.</li>
+        <li><b>קידום מתוך התוצאות שלכם</b> — סמנו כתבי יד ברשימת התוצאות ולחצו <i>חפש גם עם אלו</i>. הטקסט נלקח מן העמודים שנמצאו בפועל, לא מרשומת כתב היד.</li>
+    </ul>
+    <p><b>בחיפוש ברמת האות, אל תאחדו כמה עותקים לתיבה אחת.</b> בחיפוש מקטעים האיחוד עובד — כך אכן משתמשים שם בכמה עותקים — אבל חיפוש ברמת האות מקצה תקציב קבוע לכל שאילתה, ולכן האיחוד פוגע בו במידה מדידה: במדידה מול 614 כתבי היד שברשימת ברכת המזון שיש להם טקסט מאונדקס, העותק היחיד הטוב ביותר מוצא 348, ושבעה-עשר עותקים שנבדקו בנפרד ומוזגו מוצאים 455 — ואילו אותם שבעה-עשר, מאוחדים לשאילתה אחת, מוצאים 296, פחות מעותק בודד.</p>
+    <p>ברשימת התוצאות מתווספת עמודת <b>עדים</b> המציינת כמה עותקים שונים מצביעים על כל כתב יד, עם חלונית מידע המונה אותם בשמם, ושני מיונים חדשים: לפי ניקוד משולב ולפי מספר העדים.</p>
+    <p><b>הרחבה אוטומטית</b> חוזרת על החיפוש כשהתוצאות הטובות ביותר משמשות כעדים חדשים. היא מגיעה רחוק יותר, אבל גם מוסיפה חומר לסריקה בראש הרשימה — ולכן היא לחצן שאתם לוחצים ולא משהו שהחיפוש עושה מעצמו. במצב רמת האות <i>חיפוש רקורסיבי מלא</i> מפעיל את ההרחבה הזו; במצב מקטעים הוא שומר על ההתנהגות שלו, הנכונה למנוע ההוא.</p>
+    <p>חיפוש עם כמה עדים אפשר <b>לעצור</b>, מה שחיפוש יחיד ברמת האות עדיין לא מאפשר: העותק שנבדק כרגע מסיים, וכל מה שנמצא עד כה נשמר. אפשר להחזיק עד 25 עדים בבת אחת.</p>
+
+    <h4>פקדי רמת האות</h4>
+    <ul>
+        <li><b>רוחב התאמה:</b> עד כמה כתב יד רשאי להתרחק מהטקסט שלכם ועדיין להיחשב התאמה. הגדרות רחבות יותר מוצאות עדי נוסח פגומים או שונים; ההתאמות החזקות ביותר תמיד מדורגות ראשונות.</li>
+        <li><b>אורך הקטע:</b> האם קטע משותף קצר נחשב התאמה. "גם קטעים קצרים" מכפיל בערך את כמות החומר שצריך לעבור עליו, ומוצא עדים שההגדרה הרגילה אינה מגיעה אליהם.</li>
+        <li><b>עומק החיפוש:</b> כמה מן הקורפוס החיפוש רשאי לבחון. חיפושים עמוקים אורכים שניות ספורות יותר ומחזירים יותר כתבי יד, כולל עותקים פגומים ומעובדים שמעבר מהיר מפספס. הטקסטים הארוכים מרוויחים מזה הכי הרבה. <b>חיפוש עמוק אינו ניתן להפסקה אחרי שהתחיל</b> — עצירה, Escape וסגירת החלון, כולם ממתינים לסיומו.</li>
+    </ul>
+
+    <h3>פתיחת תוצאה</h3>
+    <p>לחיצה כפולה על תוצאה פותחת את צפיין כתב היד באותו עמוד, כשהטקסט שנמצא מסומן באדום. לצדו מוצג הטקסט שלכם, והחלק שהתאים מסומן גם בו.</p>
+    <p>בחיפוש ברמת האות שני הצדדים אינם אותן אותיות — זו בדיוק משמעותה של התאמה מקורבת. מה שמסומן בכתב היד הוא מה שיש בכתב היד; מה שמסומן בטקסט שלכם הוא מה שיש בשלכם. כאשר העותק שהניב את ההתאמה לא היה הטקסט שבתיבה — כתב יד שקודם, או עד אחר — הפאנל מציג את הקטע של אותו עד במקום את הטקסט שלכם ללא סימון.</p>
+    <p>רשימת תוצאות של חיפוש חיבורים בנויה מ<i>עמודים</i>, ולכן כמה תוצאות רצופות יכולות להיות של אותו כתב יד. <b>לכתב היד הבא</b> ו<b>לכתב היד הקודם</b> עוברים לתוצאה הקרובה ביותר ששייכת לכתב יד אחר, ומדלגים על שאר עמודי הקטע שאתם קוראים. הלחצנים מופיעים רק כאשר לכתב יד כלשהו ברשימה יש יותר מתוצאה אחת.</p>
+
+    <h3>איך חיפוש מקטעים עובד? (המנגנון)</h3>
     <p>בניגוד לחיפוש רגיל, המנוע לא מחפש את הטקסט כולו כמקשה אחת. התהליך מתבצע כך:</p>
     <ol>
         <li>התוכנה מחלקת את טקסט המקור שהזנתם למקטעים קטנים.</li>
@@ -896,7 +953,7 @@ found so far is kept. Up to 25 witnesses can be held at once.</p>
         <li>בסוף התהליך, התוכנה <b>מקשרת מחדש</b> את התוצאות: אם כתב יד מכיל הרבה מקטעים שנמצאו, הוא יקבל ציון גבוה ויופיע בראש הרשימה.</li>
     </ol>
 
-    <h3>פרמטרים חשובים</h3>
+    <h3>פרמטרים חשובים (חיפוש מקטעים)</h3>
     <ul>
         <li><b>מקטע:</b> מספר המילים בכל יחידת חיפוש. ערך נמוך יחזיר הרבה תוצאות לא רלוונטיות; ערך גבוה עלול להחמיץ תוצאות אמת.</li>
         <li><b>תדירות מקס':</b> כלי לסינון ביטויים נפוצים. אם המנוע מגלה שרצף מילים מסוים מופיע פעמים רבות בקורפוס (כמו מטבעות לשון או פסוקים), הוא יסנן אותו לנספח.</li>

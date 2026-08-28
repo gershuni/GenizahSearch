@@ -114,6 +114,29 @@ search's own recursive search is unchanged.
   the seed alone. Exports name the witness count and carry a per-manuscript
   column.
 
+#### The manuscript viewer
+
+- **Letter-level matches are now highlighted there.** They were not, and the
+  reason is worth recording: the viewer does not render the excerpt a result
+  carries — it fetches the whole page and re-marks it from a regular
+  expression — and a letter-level result had no expression to re-mark it
+  with, so a match opened as an unmarked wall of text. Every accepted span
+  now travels with the literal text it matched, on both sides. The
+  composition pane is marked with the **query** side rather than the
+  manuscript's, because approximate matching means the two sides matched
+  different text and one pattern cannot mark both. Where even the query-side
+  pattern finds nothing — a promoted manuscript, or another witness that was
+  never the text in the box — the pane falls back to the excerpt that does
+  show what matched.
+- **Prev / Next Manuscript.** A composition result list is pages, so several
+  results in a row can belong to one fragment and *Next Result* walks through
+  a manuscript already read before reaching the next one. The new buttons go
+  to the nearest result, that way, that belongs to a **different**
+  manuscript — exactly where pressing Prev/Next Result repeatedly would land,
+  minus the pages in between. They appear only when the list actually has
+  that shape; where every result is its own manuscript they would merely
+  repeat the two buttons beside them.
+
 ## [8.6.0] - 2026-08-20 — Pause/Resume, and Stop that actually stops (desktop)
 
 > **Desktop release.** It continues the desktop line from v8.5.2. When it shipped, 9.0.0 below

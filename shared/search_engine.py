@@ -3602,6 +3602,7 @@ class SearchEngine:
                     'text': rep_page['text'],
                     'source_ctx': rep_page.get('source_ctx', ''),
                     'highlight_pattern': rep_page.get('highlight_pattern', ''),
+                    'source_highlight_pattern': rep_page.get('source_highlight_pattern', ''),
                     'oxford_title': part_meta.get('title', '') if part_meta else '',
                     'oxford_contents': part_meta.get('contents', '') if part_meta else '',
                 }
@@ -3615,6 +3616,7 @@ class SearchEngine:
                     'text': rep_page['text'],
                     'source_ctx': rep_page.get('source_ctx', ''),
                     'highlight_pattern': rep_page.get('highlight_pattern', ''),
+                    'source_highlight_pattern': rep_page.get('source_highlight_pattern', ''),
                     # Phase 110 UAT (Issue 1): carry the representative page's source
                     # label + shelfmark (filename) so the comp UI can render LOCAL
                     # manuscript rows as filename / parent-folder (mirroring regular

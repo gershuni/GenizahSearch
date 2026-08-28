@@ -29867,6 +29867,7 @@ class GenizahGUI(QMainWindow):
                 'full_text': None,
                 'source_ctx': node_data.get('source_ctx', ''),
                 'highlight_pattern': hl_pattern,
+                'source_highlight_pattern': node_data.get('source_highlight_pattern'),
                 'display': {
                     'id': sid,
                     'shelfmark': shelf,
@@ -29904,6 +29905,7 @@ class GenizahGUI(QMainWindow):
                         'full_text': None,
                         'source_ctx': p.get('source_ctx', ''),
                         'highlight_pattern': p.get('highlight_pattern'),
+                        'source_highlight_pattern': p.get('source_highlight_pattern'),
                         'display': {'id': sid, 'shelfmark': shelf, 'title': title,
                                     'img': p_num, 'source': _src_lbl}
                     })
@@ -29926,6 +29928,7 @@ class GenizahGUI(QMainWindow):
                     'full_text': None,
                     'source_ctx': item_data.get('source_ctx', ''),
                     'highlight_pattern': item_data.get('highlight_pattern'),
+                    'source_highlight_pattern': item_data.get('source_highlight_pattern'),
                     'display': {'id': sid, 'shelfmark': shelf, 'title': title,
                                 'img': p_num, 'source': _src_lbl}
                 })

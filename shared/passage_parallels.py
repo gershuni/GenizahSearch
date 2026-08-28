@@ -6,9 +6,10 @@ Contract: docs/specs/passage-matching-algorithm.md sections 6-8; the plan's
 surface). This is the ONLY place a passage-matching result becomes a row
 shaped like `shared/parallels_service.py::CompositionSearcher` expects --
 `{uid, raw_header, src_lbl, source_ctx, text, score, final_score,
-chunk_count, chunk_hits}` -- so both serializers, both UIs, exports and the
-public envelope keep working unmodified against it, exactly as they do
-against `SearchEngine.search_composition_logic`.
+chunk_count, chunk_hits, highlight_pattern, source_highlight_pattern}` --
+so both serializers, both UIs, exports and the public envelope keep working
+unmodified against it, exactly as they do against
+`SearchEngine.search_composition_logic`.
 
 Design decisions this module makes, so they are not re-litigated per call
 site:
@@ -119,6 +120,17 @@ site:
   snippet builder happens to skip this, but the established pattern does
   not, and a literal asterisk in manuscript text would otherwise be
   indistinguishable from marker syntax downstream).
+* `highlight_pattern` / `source_highlight_pattern` are literal
+  alternations of the matched substrings, NOT the query. They exist for the
+  one consumer that does not render the snippets this row already carries:
+  the desktop viewer (desktop/result_dialog.py) fetches the whole page and
+  re-marks it from a regex, which is why a passage row without one opened
+  with nothing highlighted at all. Two patterns because the record side and
+  the query side matched DIFFERENT text -- approximate matching's whole
+  point -- so a single pattern cannot mark both panes. They are best-effort
+  by construction: a consumer whose copy of the text differs from the
+  indexed one simply finds no match, which is the pre-existing behaviour
+  and never worse than it.
 * Highlight text (`text`, `source_ctx`, and each `chunk_hits` tuple's
   `manuscript_snippet`) is built for exactly the rows this method RETURNS
   (both `main` and `filtered`, each capped independently to `render_cap`
@@ -361,6 +373,51 @@ class _RegexSysIdParser:
         return {'sys_id': _extract_sys_id(uid_or_header)}
 
 
+def _orig_span(offsets, start: int, end: int, text_len: int):
+    """Original-text `[s, e)` for normalized-stream span `[start, end)`, or
+    None when the span is out of range.
+
+    Factored out of `_highlight_span` (whose arithmetic this is, unchanged)
+    so the pattern builder can reach the same bounds without re-deriving
+    them from the marked-up snippet -- the snippet has already had literal
+    asterisks replaced by spaces, so text cut from IT would no longer be a
+    substring of the page.
+    """
+    if not len(offsets) or start >= len(offsets) or end <= start:
+        return None
+    end = min(end, len(offsets))
+    s = offsets[start]
+    e = min(text_len, offsets[end - 1] + 1)
+    return s, e
+
+
+def _match_pattern(literals) -> str:
+    """A regex re-finding exactly `literals` -- an ordered alternation of
+    escaped literal substrings.
+
+    Longest first, because alternation is first-match-wins: a short literal
+    that happens to prefix a longer one would otherwise truncate it. A
+    literal wholly contained in another is dropped rather than kept, so the
+    marker pass cannot nest one match inside another and produce `*a*b*c*`.
+
+    Returns '' when there is nothing to match; every consumer already
+    treats a falsy pattern as "no highlighting", so that is the honest
+    no-op rather than a regex that matches everywhere.
+    """
+    seen, uniq = set(), []
+    for lit in literals:
+        if not lit or lit in seen:
+            continue
+        seen.add(lit)
+        uniq.append(lit)
+    uniq.sort(key=len, reverse=True)
+    kept = []
+    for lit in uniq:
+        if not any(lit in bigger for bigger in kept):
+            kept.append(lit)
+    return '|'.join(re.escape(lit) for lit in kept)
+
+
 def _highlight_span(orig_text: str, offsets, start: int, end: int,
                      pad: int = HIGHLIGHT_CONTEXT_PAD) -> str:
     """Build a `*match*`-marked snippet around normalized-stream span
@@ -378,11 +435,10 @@ def _highlight_span(orig_text: str, offsets, start: int, end: int,
     span (mirrors `project_span`'s own bounds handling) rather than raising
     -- a display helper must never crash a search that otherwise succeeded.
     """
-    if not len(offsets) or start >= len(offsets) or end <= start:
+    bounds = _orig_span(offsets, start, end, len(orig_text))
+    if bounds is None:
         return ''
-    end = min(end, len(offsets))
-    s = offsets[start]
-    e = min(len(orig_text), offsets[end - 1] + 1)
+    s, e = bounds
     win_start = max(0, s - pad)
     win_end = min(len(orig_text), e + pad)
     # Sanitize the WINDOW (not the whole orig_text) -- .replace() preserves
@@ -560,6 +616,8 @@ class PassageSearcher:
                     'src_lbl': '',
                     'source_ctx': '',
                     'text': '',
+                    'highlight_pattern': '',
+                    'source_highlight_pattern': '',
                     'score': float(hit.score),
                     'final_score': float(hit.score),
                     'chunk_count': int(hit.n_spans),
@@ -984,6 +1042,7 @@ class PassageSearcher:
         _r_stream, r_offsets = norm_stream(orig_text)
 
         src_snips, ms_snips, chunk_hits = [], [], []
+        ms_literals, src_literals = [], []
         for q0, q1, r0, r1, _density in hit.spans:
             src_snips.append(_highlight_span(q_nfc, q_offsets, q0, q1))
             ms_snip = _highlight_span(r_nfc, r_offsets, r0, r1)
@@ -991,8 +1050,20 @@ class PassageSearcher:
             plain_query_text = project_span(q_offsets, q0, q1, q_nfc)
             chunk_index = span_index_of_q0.get(q0, 0)
             chunk_hits.append((chunk_index, plain_query_text, float(q1 - q0), ms_snip))
+            # Cut from the NFC text the offsets belong to, not from the
+            # snippets above: those are padded with context and have had
+            # literal asterisks blanked, so neither is a substring of the
+            # page a viewer would re-mark.
+            r_bounds = _orig_span(r_offsets, r0, r1, len(r_nfc))
+            if r_bounds is not None:
+                ms_literals.append(r_nfc[r_bounds[0]:r_bounds[1]])
+            q_bounds = _orig_span(q_offsets, q0, q1, len(q_nfc))
+            if q_bounds is not None:
+                src_literals.append(q_nfc[q_bounds[0]:q_bounds[1]])
 
         row['source_ctx'] = "\n\n".join(src_snips)
         row['text'] = "\n...\n".join(ms_snips)
         row['chunk_hits'] = chunk_hits
+        row['highlight_pattern'] = _match_pattern(ms_literals)
+        row['source_highlight_pattern'] = _match_pattern(src_literals)
         return True

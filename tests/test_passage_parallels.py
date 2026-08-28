@@ -172,6 +172,9 @@ _ROW_KEYS = {
     'uid': str, 'raw_header': str, 'src_lbl': str, 'source_ctx': str,
     'text': str, 'score': float, 'final_score': float, 'chunk_count': int,
     'chunk_hits': list,
+    # The two re-highlight patterns. ADDITIVE, like every key before them:
+    # a consumer that never reads them is unaffected by their presence.
+    'highlight_pattern': str, 'source_highlight_pattern': str,
 }
 
 
@@ -324,6 +327,114 @@ def test_source_ctx_highlights_the_query_side(searcher, synthetic_corpus):
     combined = ''.join(marked)
     assert ' ' in combined or 'ִ' in combined, (
         'source_ctx did not carry the query-side noise through its span projection')
+
+
+# ---------------------------------------------------------------------------
+# 2b. The re-highlight patterns.
+#
+# The desktop viewer does not render the snippets a row carries. It fetches
+# the WHOLE page and re-marks it from `highlight_pattern`, a regex -- which
+# passage rows did not have, so a letter-level result opened with nothing
+# highlighted in it at all.
+# ---------------------------------------------------------------------------
+
+def test_highlight_pattern_refinds_the_match_in_the_page(searcher,
+                                                         synthetic_corpus):
+    _idx, originals, motif = synthetic_corpus
+    result = searcher.search_composition_logic(full_text=motif)
+    row = next(r for r in result['main'] if r['raw_header'] == _record_id(0))
+
+    pattern = row['highlight_pattern']
+    assert pattern, 'no highlight_pattern -- the viewer has nothing to mark'
+
+    page = originals[_record_id(0)]
+    found = re.findall(pattern, page)
+    assert found, (
+        'the pattern does not match the very page it was built from -- it '
+        'was cut from the snippet (padded, asterisk-blanked) rather than '
+        'from the original text')
+
+    # It must mark the SAME letters the row's own snippet marked, and no
+    # others: a pattern that highlights an unrelated stretch is worse than
+    # no highlighting.
+    marked = set(_MARKER_RE.findall(row['text']))
+    assert set(found) <= marked, (
+        f'the pattern found text the row never matched: '
+        f'{set(found) - marked!r}')
+    assert max(found, key=len) == max(marked, key=len)
+
+
+def test_source_highlight_pattern_refinds_the_match_in_the_query(
+        searcher, synthetic_corpus):
+    """The two sides matched DIFFERENT text -- that is what approximate
+    matching means -- so the record-side pattern cannot mark the
+    composition pane and the row carries a second one for it."""
+    _idx, _originals, motif = synthetic_corpus
+    query = _aperiodic(200, salt=55) + _interleave_with_noise(motif)
+    result = searcher.search_composition_logic(full_text=query)
+    row = next(r for r in result['main'] if r['raw_header'] == _record_id(0))
+
+    pattern = row['source_highlight_pattern']
+    assert pattern
+    found = re.findall(pattern, query)
+    assert found, 'the query-side pattern does not match the query'
+    marked = set(_MARKER_RE.findall(row['source_ctx']))
+    assert set(found) <= marked
+
+
+def test_the_two_patterns_are_not_the_same_pattern(searcher,
+                                                   synthetic_corpus):
+    """If they were, one of the two panes would be marked with the other
+    pane's text -- which is precisely the bug a single pattern causes."""
+    _idx, _originals, motif = synthetic_corpus
+    # The record holds the motif WITH spaces and nikud interleaved; the
+    # query here is the bare motif. Same letters, different characters.
+    result = searcher.search_composition_logic(full_text=motif)
+    row = next(r for r in result['main'] if r['raw_header'] == _record_id(0))
+    assert row['highlight_pattern'] != row['source_highlight_pattern']
+
+
+def test_filtered_rows_get_patterns_too(searcher, synthetic_corpus):
+    """`filtered` rows open in the same viewer as `main` ones."""
+    _idx, _originals, motif = synthetic_corpus
+    result = searcher.search_composition_logic(
+        full_text=motif, filter_text=motif)
+    assert result['filtered'], 'the fixture did not route anything to filtered'
+    for row in result['filtered']:
+        assert row['highlight_pattern']
+        assert row['source_highlight_pattern']
+
+
+def test_match_pattern_prefers_the_longest_literal():
+    """Alternation is first-match-wins: a short literal that prefixes a
+    longer one would truncate every match of it."""
+    from shared.passage_parallels import _match_pattern
+    pat = _match_pattern(['abc', 'abcdef'])
+    assert re.findall(pat, 'xxabcdefxx') == ['abcdef']
+
+
+def test_match_pattern_drops_a_literal_contained_in_another():
+    """Otherwise the marker pass nests one match inside another and the
+    viewer renders `*a*b*c*`."""
+    from shared.passage_parallels import _match_pattern
+    pat = _match_pattern(['bcd', 'abcdef'])
+    assert pat.count('|') == 0
+
+
+def test_match_pattern_escapes_regex_metacharacters():
+    from shared.passage_parallels import _match_pattern
+    pat = _match_pattern(['a.c'])
+    assert re.findall(pat, 'abc') == []
+    assert re.findall(pat, 'a.c') == ['a.c']
+
+
+def test_match_pattern_of_nothing_is_empty_not_match_everything():
+    """`'|'.join([])` is '', and re.compile('') matches at EVERY position.
+    Every consumer treats a falsy pattern as "no highlighting", so '' is
+    the honest answer -- but only because it is returned, not compiled."""
+    from shared.passage_parallels import _match_pattern
+    assert _match_pattern([]) == ''
+    assert _match_pattern(['', '']) == ''
 
 
 # ---------------------------------------------------------------------------

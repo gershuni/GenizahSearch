@@ -117,7 +117,22 @@ class ResultDialog(QDialog):
         self.btn_compact_toggle.clicked.connect(lambda checked: self._toggle_compact_mode(checked))
         self.btn_res_next = QPushButton(tr("Next Result ▶")); self.btn_res_next.clicked.connect(lambda: self.navigate_results(1))
         self.btn_res_next.setAutoDefault(False)
-        top_bar.addWidget(self.btn_res_prev); top_bar.addWidget(self.lbl_res_count, 1); top_bar.addWidget(self.btn_compact_toggle); top_bar.addWidget(self.btn_res_next)
+        # Manuscript-level navigation. A composition result list is PAGES:
+        # several consecutive entries can belong to one manuscript, so Next
+        # Result walks through a fragment already read before reaching the
+        # next one. Hidden unless the list actually has that shape -- see
+        # _update_manuscript_nav.
+        self.btn_res_prev_ms = QPushButton(tr("◀◀ Prev Manuscript"))
+        self.btn_res_prev_ms.setToolTip(tr("Skip to the previous manuscript in the results"))
+        self.btn_res_prev_ms.setAutoDefault(False)
+        self.btn_res_prev_ms.setVisible(False)
+        self.btn_res_prev_ms.clicked.connect(lambda: self.navigate_manuscript_results(-1))
+        self.btn_res_next_ms = QPushButton(tr("Next Manuscript ▶▶"))
+        self.btn_res_next_ms.setToolTip(tr("Skip to the next manuscript in the results"))
+        self.btn_res_next_ms.setAutoDefault(False)
+        self.btn_res_next_ms.setVisible(False)
+        self.btn_res_next_ms.clicked.connect(lambda: self.navigate_manuscript_results(1))
+        top_bar.addWidget(self.btn_res_prev_ms); top_bar.addWidget(self.btn_res_prev); top_bar.addWidget(self.lbl_res_count, 1); top_bar.addWidget(self.btn_compact_toggle); top_bar.addWidget(self.btn_res_next); top_bar.addWidget(self.btn_res_next_ms)
         main_layout.addLayout(top_bar)
         main_layout.addWidget(QSplitter(Qt.Orientation.Horizontal))
 
@@ -645,6 +660,89 @@ class ResultDialog(QDialog):
         if 0 <= new_idx < len(self.all_results):
             self.current_result_idx = new_idx
             self.load_result_by_index(new_idx)
+
+    def _result_manuscript_key(self, idx):
+        """Which manuscript result `idx` belongs to.
+
+        The sys_id parsed from the header, which is what every other part of
+        this dialog treats as manuscript identity. Falls back to the
+        display id and then the shelfmark so a header the parser cannot
+        place still groups with its own siblings; last of all to the index
+        itself, so unparseable rows count as separate manuscripts rather
+        than collapsing into one enormous fake one.
+        """
+        try:
+            res = self.all_results[idx]
+        except (IndexError, TypeError, KeyError):
+            return None
+        display = res.get('display', {}) or {}
+        sid = None
+        try:
+            sid = self.meta_mgr.parse_full_id_components(
+                res.get('raw_header', '') or '').get('sys_id')
+        except Exception:                                    # noqa: BLE001
+            sid = None
+        return sid or display.get('id') or display.get('shelfmark') or f'#{idx}'
+
+    def _manuscript_keys(self):
+        """One manuscript key per result, computed once per list length.
+
+        Recomputed wholesale rather than appended to: `load_by_shelfmark`
+        grows the list, and a cache that only ever grew would keep stale
+        keys for rows a caller had replaced.
+        """
+        cache = self.__dict__.setdefault('_ms_key_cache', [])
+        if len(cache) != len(self.all_results):
+            cache[:] = [self._result_manuscript_key(i)
+                        for i in range(len(self.all_results))]
+        return cache
+
+    def _next_manuscript_index(self, direction):
+        """Index of the NEAREST result, that way, in a different manuscript.
+
+        Nearest in BOTH directions -- exactly where pressing Prev/Next
+        Result repeatedly would land, minus the pages in between. Going
+        back therefore reaches the LAST page of the previous manuscript,
+        not its first: skipping past a manuscript to its top would pass
+        over results the reader has not seen.
+        """
+        keys = self._manuscript_keys()
+        idx = self.current_result_idx
+        if not keys or not (0 <= idx < len(keys)):
+            return None
+        step = 1 if direction > 0 else -1
+        current = keys[idx]
+        j = idx + step
+        while 0 <= j < len(keys) and keys[j] == current:
+            j += step
+        if not (0 <= j < len(keys)):
+            return None
+        return j
+
+    def navigate_manuscript_results(self, direction):
+        target = self._next_manuscript_index(direction)
+        if target is None:
+            return
+        self.current_result_idx = target
+        self.load_result_by_index(target)
+
+    def _update_manuscript_nav(self):
+        """Show the manuscript buttons only where they do something Next
+        Result does not -- i.e. when some manuscript holds more than one
+        result, which is the ordinary shape of a composition search and not
+        of a one-row-per-page list. Two buttons that merely duplicate the
+        two beside them are worse than no buttons."""
+        keys = self._manuscript_keys()
+        distinct = set(keys)
+        useful = len(distinct) > 1 and len(keys) > len(distinct)
+        self.btn_res_prev_ms.setVisible(useful)
+        self.btn_res_next_ms.setVisible(useful)
+        if not useful:
+            return
+        self.btn_res_prev_ms.setEnabled(
+            self._next_manuscript_index(-1) is not None)
+        self.btn_res_next_ms.setEnabled(
+            self._next_manuscript_index(1) is not None)
 
     def open_full_transcription(self):
         parent = self._app
@@ -1952,6 +2050,44 @@ class ResultDialog(QDialog):
             text_browser.ensureCursorVisible()
         QTimer.singleShot(0, _do_scroll)
 
+    def _source_pane(self, data, pattern_str):
+        """(text, pattern) for the composition pane beside the manuscript.
+
+        Three rules, in order.
+
+        WHICH REGEX. Chunk search matched the composition and the page with
+        one and the same pattern, so `highlight_pattern` marks both panes. A
+        letter-level row's two sides matched DIFFERENT text -- approximate
+        matching's whole point -- so it carries a separate query-side
+        pattern, and that one wins here when present.
+
+        WHICH TEXT. The whole pasted composition, when there is one, rather
+        than the row's own excerpt: the excerpt is a +-60 character window,
+        and the pane exists to show the match in its context.
+
+        WHEN TO GIVE THAT UP. The full text is only better while the match
+        can be FOUND in it. It cannot be when the winning witness was not
+        the text in the box -- a promoted manuscript, or another witness of
+        the same work -- and an unmarked wall of text says less than the
+        excerpt that shows what actually matched. Guarded on the query-side
+        pattern, which nothing but a letter-level row sets, so chunk search
+        keeps its existing behaviour exactly.
+        """
+        src_pattern_str = data.get('source_highlight_pattern') or pattern_str
+        source_text = ""
+        if 'source_ctx' in data:
+            parent = self._app
+            if parent and hasattr(parent, "comp_text_area"):
+                source_text = parent.comp_text_area.toPlainText().strip()
+            if not source_text:
+                source_text = data.get('source_ctx', '')
+        source_text = self._apply_source_highlights(source_text, src_pattern_str)
+        if (data.get('source_highlight_pattern')
+                and source_text and '*' not in source_text
+                and data.get('source_ctx')):
+            source_text = data.get('source_ctx', '')
+        return source_text, src_pattern_str
+
     def _apply_source_highlights(self, text, pattern_str):
         if not text:
             return ""
@@ -2152,6 +2288,7 @@ class ResultDialog(QDialog):
         self.lbl_res_count.setText(tr("Result {} of {}").format(idx + 1, len(self.all_results)))
         self.btn_res_prev.setEnabled(idx > 0)
         self.btn_res_next.setEnabled(idx < len(self.all_results) - 1)
+        self._update_manuscript_nav()
 
         # Parse Meta
         ids = self.meta_mgr.parse_full_id_components(data.get('raw_header', ''))
@@ -2217,18 +2354,11 @@ class ResultDialog(QDialog):
         self._refresh_find_highlights()
         
         # 2. Source Context
-        source_text = ""
-        if 'source_ctx' in data:
-            parent = self._app
-            if parent and hasattr(parent, "comp_text_area"):
-                source_text = parent.comp_text_area.toPlainText().strip()
-            if not source_text:
-                source_text = data.get('source_ctx', '')
-        source_text = self._apply_source_highlights(source_text, pattern_str)
+        source_text, src_pattern_str = self._source_pane(data, pattern_str)
         if source_text:
             self.src_widget.setVisible(True)
             self.text_src.setHtml(self._htmlify(source_text))
-            self._scroll_to_first_highlight(self.text_src, pattern_str)
+            self._scroll_to_first_highlight(self.text_src, src_pattern_str)
         else:
             self.src_widget.setVisible(False)
             self.text_src.clear()

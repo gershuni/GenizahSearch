@@ -556,6 +556,10 @@ TRANSLATIONS = {
 
     "◀ Prev Result": "▶ לתוצאה קודמת",
     "Next Result ▶": "לתוצאה הבאה ◀",
+    "◀◀ Prev Manuscript": "▶▶ לכתב היד הקודם",
+    "Next Manuscript ▶▶": "לכתב היד הבא ◀◀",
+    "Skip to the previous manuscript in the results": "דלג לכתב היד הקודם ברשימת התוצאות",
+    "Skip to the next manuscript in the results": "דלג לכתב היד הבא ברשימת התוצאות",
     "View result": "הצג תוצאה",
     "Showing top {} of {} results. (Export for full list)": "מציג {} הראשונות מתוך {} תוצאות. (לייצוא הרשימה המלאה)",
 
