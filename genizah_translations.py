@@ -5007,7 +5007,7 @@ TRANSLATIONS.update({
     # "-- and letter-level search is now the default"; the owner cut that
     # clause. The release changes the default without advertising it.
     "New in Composition Search! Search using several witnesses of the same work":
-        "חדש בחיפוש חיבורים! חיפוש בכמה עדים של אותה יצירה",
+        "חדש בחיפוש חיבורים! חיפוש באמצעות כמה עדי נוסח של אותו טקסט",
     "New! Letter-level search":
         "חדש! חיפוש ברמת האות",
     "Chunk search (slower)":
@@ -5030,7 +5030,7 @@ TRANSLATIONS.update({
     # this release makes false, and a false claim left in the table is one a
     # future surface can copy back out of it.
     "Several witnesses of one work: letter-level search can now be given more than one copy of the text you are looking for. Paste them one at a time, load a whole file split on blank lines, or promote manuscripts straight from your own results. Each is searched on its own and the results are merged into one list.":
-        "כמה עדים של יצירה אחת: אפשר לתת לחיפוש ברמת האות יותר מעותק אחד של הטקסט שאתם מחפשים. הדביקו אותם אחד אחד, טענו קובץ שלם המחולק בשורות ריקות, או קדמו כתבי יד ישירות מתוך התוצאות שלכם. כל אחד נבדק בנפרד והתוצאות מתמזגות לרשימה אחת.",
+        "כמה עדי נוסח של יצירה אחת: אפשר לתת לחיפוש ברמת האות יותר מעותק אחד של הטקסט שאתם מחפשים. הדביקו אותם אחד אחד, טענו קובץ שלם המחולק בשורות ריקות, או קדמו כתבי יד ישירות מתוך התוצאות שלכם. כל אחד נבדק בנפרד והתוצאות מתמזגות לרשימה אחת.",
     "Faster, with fewer irrelevant results.":
         "מהיר יותר, עם פחות תוצאות לא רלוונטיות.",
     "The older method. Slower, but offers Exact / Variants / Fuzzy modes and cross-paragraph filtering.":
