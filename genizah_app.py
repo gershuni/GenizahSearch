@@ -15891,13 +15891,23 @@ class GenizahGUI(QMainWindow):
         """
         if getattr(self, '_comp_method_deferred', None) != 'passage':
             return
-        self._comp_method_deferred = None
         combo = getattr(self, 'comp_method_combo', None)
         if combo is None or self._passage_disabled_reason_now() is not None:
+            # RETAINED, not consumed. This helper runs from the startup load,
+            # and on a machine with no index that load's whole news is that
+            # there is no index -- so clearing here threw the intent away at
+            # the one moment it was guaranteed to be unusable. The build the
+            # user then accepted had nothing left to honour, and the default
+            # could not step in either, because a stored method had already
+            # recorded a choice (Codex review, 2026-08-28).
+            #
+            # It is safe to keep: the only two callers are index-lifecycle
+            # events, and a newer method decision cancels it explicitly.
             return
         idx = combo.findData('passage')
         if idx < 0:
             return
+        self._comp_method_deferred = None
         combo.blockSignals(True)
         combo.setCurrentIndex(idx)
         combo.blockSignals(False)
@@ -16378,6 +16388,12 @@ class GenizahGUI(QMainWindow):
                 self._apply_passage_mode_ui(True)
                 self._show_passage_reason(None)
         else:
+            # A newer decision for CHUNK supersedes any pending passage
+            # intent. Without this, restoring a chunk history entry while
+            # the startup load is still running left the older deferral to
+            # flip the UI back to passage when the load landed -- possibly
+            # on top of the chunk re-run that restore had just started.
+            self._comp_method_deferred = None
             self._apply_passage_mode_ui(False)
             self._show_passage_reason(None)
         self._update_comp_method_help()
@@ -18181,6 +18197,12 @@ class GenizahGUI(QMainWindow):
         self._comp_method_user_choice_seen = True
         if method == 'passage':
             self._retire_announcement(self._ANNOUNCE_METHOD)
+        else:
+            # The strongest supersession there is: a person picked chunk,
+            # just now, by hand. Same rule as the restore path above -- a
+            # pending passage intent must not outlive it and flip the method
+            # back when the index finishes loading.
+            self._comp_method_deferred = None
         self._update_comp_method_help()
         self._update_comp_method_affordance()
         if method != 'passage':

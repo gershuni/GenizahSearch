@@ -158,6 +158,9 @@ class _Win:
     _text_position_accent = APP._text_position_accent
     _composition_tab_is_current = APP._composition_tab_is_current
     _honour_deferred_comp_method = APP._honour_deferred_comp_method
+    # Borrowed: the demotion is where a NOT_BUILT deferral is recorded,
+    # and a stand-in would let that recording vanish.
+    _revert_comp_method_to_chunk = APP._revert_comp_method_to_chunk
     _announcement_allowed = APP._announcement_allowed
     _mark_announcement_seen = APP._mark_announcement_seen
     _retire_announcement = APP._retire_announcement
@@ -2670,3 +2673,101 @@ def test_arriving_on_the_tab_spends_what_is_showing():
         assert name in calls, (
             'entering the composition tab does not recompute %s, so a '
             'marker computed off-tab is never spent' % name)
+
+
+# ---------------------------------------------------------------------------
+# Round 13: the DEFERRAL'S LIFETIME.
+#
+# `_comp_method_deferred` has three writers (a restore, the persistent-
+# preference path, an explicit click) and two consumers (the startup load, a
+# finished build). Two findings, one rule: a deferral lives until it is
+# HONOURED or until a newer method decision SUPERSEDES it. Nothing else may
+# end it -- and until round 13 the load ended it just by running.
+# ---------------------------------------------------------------------------
+
+def test_a_deferral_survives_a_load_that_found_no_index(monkeypatch):
+    """The load's whole news, on a machine with no index, is that there is no
+    index. Consuming the intent there threw it away at the one moment it was
+    guaranteed to be unusable -- and the build the user then accepted had
+    nothing left to honour, while the default could not step in either
+    because a stored method had already recorded a choice."""
+    w = _default_window(monkeypatch, available=False)
+    w._comp_method_deferred = 'passage'
+    APP._honour_deferred_comp_method(w)
+    assert w._comp_method_deferred == 'passage', (
+        'the deferral was spent by a load that could not act on it')
+    assert w.comp_method_combo.currentData() == 'chunk'
+
+
+def test_the_build_then_honours_the_retained_deferral(monkeypatch):
+    """The whole point of retaining it. Same window, index now present."""
+    w = _default_window(monkeypatch, available=False)
+    w._comp_method_deferred = 'passage'
+    APP._honour_deferred_comp_method(w)              # load: no index
+    monkeypatch.setattr(pl, 'passage_available', lambda: True)
+    APP._honour_deferred_comp_method(w)              # build finished
+    assert w.comp_method_combo.currentData() == 'passage', (
+        'the user built the index they asked for and stayed on chunk')
+    assert w._comp_method_deferred is None, (
+        'honoured, so now it must be spent')
+
+
+def test_a_deferral_is_retained_but_not_re_honoured(monkeypatch):
+    """Consumed exactly once, on the call that succeeds."""
+    w = _default_window(monkeypatch)
+    w._comp_method_deferred = 'passage'
+    APP._honour_deferred_comp_method(w)
+    w.comp_method_combo.setCurrentIndex(0)           # user goes back to chunk
+    w.applied[:] = []
+    APP._honour_deferred_comp_method(w)
+    assert w.comp_method_combo.currentData() == 'chunk', (
+        'a spent deferral fired a second time and overrode the user')
+    assert w.applied == []
+
+
+def _deferral_restore_window(monkeypatch, stored):
+    w = _default_window(monkeypatch, method='passage')
+    w._refresh_comp_method_enabled = lambda: None
+    w._refresh_witness_panel = lambda: None
+    w._comp_method_deferred = 'passage'
+    APP._restore_comp_passage_preferences(w, {'comp_method': stored})
+    return w
+
+
+def test_a_chunk_restore_cancels_a_pending_passage_intent(monkeypatch):
+    """Restoring a chunk history entry while the startup load is still
+    running left the older deferral to flip the UI back to passage when the
+    load landed -- possibly on top of the chunk re-run that restore had just
+    started."""
+    w = _deferral_restore_window(monkeypatch, 'chunk')
+    assert w.comp_method_combo.currentData() == 'chunk'
+    assert w._comp_method_deferred is None, (
+        'the stale passage intent outlived the newer chunk decision')
+
+
+def test_a_passage_restore_keeps_its_own_intent(monkeypatch):
+    """The cancel must be aimed at chunk only -- cancelling on every restore
+    would delete the intent the restore had just expressed."""
+    monkeypatch.setattr(pl, 'passage_available', lambda: False)
+    w = _default_window(monkeypatch, available=False, method='chunk')
+    w._refresh_comp_method_enabled = lambda: None
+    w._refresh_witness_panel = lambda: None
+    APP._restore_comp_passage_preferences(w, {'comp_method': 'passage'})
+    assert w._comp_method_deferred == 'passage', (
+        'a restored passage preference on an unbuilt index left nothing to '
+        'bring it back')
+
+
+def test_picking_chunk_by_hand_cancels_it_too(monkeypatch):
+    """The strongest supersession there is. Not in the review, but the same
+    rule: an intent must not outlive the person changing their mind."""
+    w = _default_window(monkeypatch)
+    w._update_comp_method_help = lambda: None
+    w._update_comp_method_affordance = lambda: None
+    w._save_session = lambda: None
+    w._comp_method_deferred = 'passage'
+    w.comp_method_combo.setCurrentIndex(0)
+    APP._on_comp_method_changed(w, 0)
+    assert w._comp_method_deferred is None, (
+        'the method flips back to passage when the index finishes loading, '
+        'undoing a choice the user made by hand')
