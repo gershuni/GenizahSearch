@@ -67,9 +67,10 @@ PREVIEW_MODES = ("image", "frame", "off")
 # than merely discouraged. An unmapped code renders as a neutral placeholder --
 # fail-closed, never the raw string.
 CORPUS_LABELS = {
-    "sefaria": "general",
+    "sefaria": "Sefaria (open texts)",
     "ja": "Judeo-Arabic",
     "msource": "M-source",
+    "rsource": "R-source",
 }
 CORPUS_UNKNOWN = "other reference corpus"
 
@@ -216,19 +217,112 @@ FACET_COLS = ("evidence_id", "sys_id", "shelfmark", "domain", "work_id",
               # sort keys. Without these, every one of those controls would
               # have had to scan review_row.
               "source_corpus", "confidence_band", "adjudication_status",
-              "main_pool_reason", "matched_letters", "coverage_ppm", "n_spans")
+              "main_pool_reason", "matched_letters", "coverage_ppm", "n_spans",
+              "owner_ruling",
+              # the citable-address filter ("locus contains") scans this, and
+              # the From/To range control orders loci by w_start
+              "locus_label", "w_start")
 
 # DERIVED at build time, not per request. "Fewest matched pages first" needs the
 # number of rows in each identification (sys_id x work_id); computing that with
 # a window function per page turn is a full scan of the projection, so it is
 # materialised once instead.
-FACET_DERIVED = (("id_pages", "COUNT(*) OVER (PARTITION BY sys_id, work_id)"),)
+FACET_DERIVED = (("id_pages", "COUNT(*) OVER (PARTITION BY sys_id, work_id)"),
+                 # 0/1 from `scripture_fact` where that table is attached
+                 # (scripts/attach_scripture_facts.py); NULL where it is not,
+                 # or for rows outside its scope. The expression is swapped for
+                 # a literal NULL at build time when the table is absent -- see
+                 # `ensure_facet_table` -- so a v3-era file still opens.
+                 ("scripture_flagged",
+                  "(SELECT sf.flagged FROM scripture_fact sf "
+                  "WHERE sf.evidence_id = review_row.evidence_id)"),
+                 # the liturgy/formulary label (scripts/attach_formula_flags.py);
+                 # NULL fallback when the table is absent, like scripture
+                 ("formula_kind",
+                  "(SELECT ff.kind FROM formula_fact ff "
+                  "WHERE ff.evidence_id = review_row.evidence_id)"),
+                 # the LLM adjudication verdicts (scripts/attach_gate_verdicts.py)
+                 # -- PAIR grain, so every row of an identification carries its
+                 # pair's verdict; NULL fallback when the table is absent
+                 ("gate_divergence",
+                  "(SELECT gv.verdict FROM gate_verdict_fact gv "
+                  "WHERE gv.sys_id = review_row.sys_id "
+                  "AND gv.work_id = review_row.work_id "
+                  "AND gv.task = 'divergence')"),
+                 ("gate_new_finds",
+                  "(SELECT gv.verdict FROM gate_verdict_fact gv "
+                  "WHERE gv.sys_id = review_row.sys_id "
+                  "AND gv.work_id = review_row.work_id "
+                  "AND gv.task = 'new_finds')"),
+                 # filled by an UPDATE right after the build (it reads the
+                 # derived columns above) -- see TRIAGE_SQL
+                 ("triage", "NULL"))
+
+# THE POOLS (owner, 2026-08-30): the one sorting a reviewer actually needs --
+# main pool (worth grading first), a citation relationship, or two sides
+# merely sharing the same quoted text (near-useless). Bucket NAMES commit to
+# nothing (owner: not "probably the work" -- "main pool"); the rule is
+# deterministic over stored signals and is what the headline filter and the
+# row's first chip show.
+#   main          -- witness verdict, not scripture-flagged, and the match
+#                    covers >= 85% of the page (owner ruling 2026-08-30,
+#                    tuned on the owner's own 80-card blind deck over THIS
+#                    artifact: 85-100 graded 40/40 clean, 70-85 graded 82.5%). The owner's key: a page whose
+#                    text mostly does NOT match the work is probably not a
+#                    copy of it, so mere clearance of the router's validated
+#                    29.8% line is not enough for the main pool.
+#   citation      -- quotation verdict, not scripture-flagged
+#   shared_quotes -- the matched text itself is scripture both sides could be
+#                    quoting (the flag), or the router said shared_text
+#   unclear       -- everything else: held-back rows, 29.8-85% witnesses,
+#                    flagged witnesses
+TRIAGE_SQL = """UPDATE facet_row SET triage = CASE
+  WHEN scripture_flagged = 1 AND (router_verdict != 'same_work'
+                                  OR router_verdict IS NULL)
+       THEN 'shared_quotes'
+  WHEN formula_kind = 'embedded_section' THEN 'shared_quotes'
+  WHEN router_verdict = 'shared_text' THEN 'shared_quotes'
+  WHEN router_verdict = 'same_work' AND COALESCE(scripture_flagged, 0) = 0
+       -- documentary_page is deliberately NOT here: it is a catalogue-derived
+       -- label, and the catalogue never judges an identification (owner,
+       -- 2026-08-30). It renders as context only.
+       AND COALESCE(formula_kind, '') NOT IN ('embedded_section',
+                                              'standalone_unit')
+       AND COALESCE(owner_ruling, '') NOT IN
+           ('dropped_as_identification_reference',
+            'excluded_from_public_identities')
+       AND (coverage_ppm >= 850000
+            OR (source_corpus = 'rsource' AND coverage_ppm >= 750000))
+       THEN 'main'
+  WHEN router_verdict = 'parallel' AND COALESCE(scripture_flagged, 0) = 0
+       THEN 'citation'
+  ELSE 'unclear'
+END"""
+
+DOC_TRIAGE = (
+    "A deterministic sorting rule over the stored signals, never a verdict -- "
+    "the bucket names deliberately claim nothing. MAIN POOL = the router "
+    "called it a witness, the matched text is not flagged as shared "
+    "scripture, the work is not owner-ruled out as an identification "
+    "reference, and the match covers at least 85% of the page's letters -- "
+    "75% for R-source, whose letter-exact coverage against printed editions "
+    "tops out at 83.5% (both bars owner-graded blind: base 85-100 scored "
+    "40/40, R-source >=75 scored 37/40, every miss formulaic text). The key "
+    "is how much of the manuscript does NOT match the work: a page mostly "
+    "unmatched is probably not a copy, however real the match. "
+    "CITATION = the router called it a quotation and it is not "
+    "scripture-flagged. SHARED QUOTATIONS = the matched text itself is a "
+    "third text both sides could be quoting -- near-useless for "
+    "identification. UNCLEAR = everything else: held-back rows, witnesses "
+    "between the router's validated 29.8% line and the 85% main-pool bar, "
+    "scripture-flagged witnesses.")
 
 FACET_INDEXES = ("domain", "work_id", "work_author", "novelty_status",
                  "main_pool", "claim_type", "router_verdict", "routing_status",
                  "evidence_id", "sys_id", "source_corpus", "confidence_band",
                  "adjudication_status", "main_pool_reason", "matched_letters",
-                 "coverage_ppm", "id_pages")
+                 "coverage_ppm", "id_pages", "scripture_flagged", "formula_kind",
+                 "gate_divergence", "gate_new_finds", "triage")
 
 
 def ensure_facet_table(db_path, say=print):
@@ -277,10 +371,26 @@ def ensure_facet_table(db_path, say=print):
                 have = 0
         if not have:
             say("facets    : building the facet index table (one time)...")
+            # A db without `scripture_fact` (v3-era, or the attach script never
+            # run) still builds -- the column exists and is NULL everywhere,
+            # which the filter renders as "not computed", never as an error.
+            has = {n: con.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (tbl,)).fetchone()
+                for n, tbl in (("scripture_flagged", "scripture_fact"),
+                               ("formula_kind", "formula_fact"),
+                               ("gate_divergence", "gate_verdict_fact"),
+                               ("gate_new_finds", "gate_verdict_fact"))}
+            exprs = tuple((name, "NULL" if (name in has and not has[name])
+                           else expr)
+                          for name, expr in FACET_DERIVED)
             select = ", ".join(FACET_COLS + tuple(
-                "%s AS %s" % (expr, name) for name, expr in FACET_DERIVED))
+                "%s AS %s" % (expr, name) for name, expr in exprs))
             con.execute("CREATE TABLE facet_row AS SELECT %s FROM review_row"
                         % select)
+            con.execute(TRIAGE_SQL)
+            con.execute("INSERT OR REPLACE INTO meta VALUES "
+                        "('doc.triage', ?)", (DOC_TRIAGE,))
             for col in FACET_INDEXES:
                 con.execute("CREATE INDEX ix_fr_%s ON facet_row(%s)" % (col, col))
         n = con.execute("SELECT COUNT(*) FROM facet_row").fetchone()[0]
@@ -972,7 +1082,7 @@ button:hover{border-color:var(--primary-600)}
 PAGE_HTML = r"""<!doctype html><html lang="en" dir="ltr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<title>v3 review — computed identifications (private)</title>
+<title>Computed identifications — private review (v5)</title>
 <style>__CSS__</style></head><body>
 
 <div class="gs-topbar">
@@ -988,7 +1098,7 @@ PAGE_HTML = r"""<!doctype html><html lang="en" dir="ltr"><head><meta charset="ut
 <div class="gs-discovery gs-findings">
 
   <div class="phead">
-    <h1>v3 review — computed identifications (private)</h1>
+    <h1>Computed identifications — private review (v5)</h1>
 
     <div class="caveat side gap-2">
       <span class="glyph" style="font-size:18px" aria-hidden="true">ⓘ</span>
@@ -1035,6 +1145,12 @@ PAGE_HTML = r"""<!doctype html><html lang="en" dir="ltr"><head><meta charset="ut
 
 PAGE_JS = r"""
 const DIV = ["catalogue_correct","claim_correct","unclear"];
+// Button LABELS only -- the stored values above are the grades-file contract
+// and must not move. "claim" confused readers who had just been told about
+// claim_type ("span rank"): the grade is about OUR IDENTIFICATION.
+const DIV_LABELS = {catalogue_correct: "the catalogue is right",
+                    claim_correct: "our identification is right",
+                    unclear: "unclear"};
 const NULL_TOKEN = "__null__";
 const SITE = "__SITE__";
 const PREVIEW = "__PREVIEW__";
@@ -1110,21 +1226,54 @@ const RELCARD = {same_work:"Witness — this page is a copy of the work",
 // tool's raw shade facet. They are SEPARATE keys on purpose: the view is the
 // question the public surface asks, the shades are the gate being graded, and
 // the server ANDs them, so a view narrows the shade list to its members.
+// THE DEFAULT VIEW IS NOT "everything" (owner rulings, 2026-08-30): a grader
+// opens onto "probably the work itself" -- the population worth human minutes
+// first. The chip shows as a selection and clears normally; Reset returns
+// HERE, and the "everything" state is one click away.
+const DEFAULT_TRIAGE = ["main"];
+const TRIAGE_LABELS = {
+  main: "Main pool — witness candidates, most of the page matches",
+  citation: "Citation relationship — one quotes the other",
+  shared_quotes: "Only shared quotations — near-useless",
+  unclear: "Unclear / borderline"};
+const TRIAGE_ORDER = ["main", "citation", "shared_quotes", "unclear"];
+// LLM adjudication verdicts (gate_verdict_fact) -- shared by the two advanced
+// cards and the row chips, so a label can never say two different things.
+const GATE_LABELS = {
+  catalogue_right_match_is_quotation: "Catalogue right — the match is a quotation",
+  catalogue_right_claim_mistaken: "Catalogue right — computed ID mistaken",
+  both_right_multiple_works: "Both right — the page carries several works",
+  catalogue_too_general: "Catalogue too general — computed ID compatible, more specific",
+  computed_right_catalogue_mismatch: "Claims the catalogue is wrong — NEEDS HUMAN REVIEW",
+  credible_new_identification: "Credible new identification",
+  plausible_needs_expert_check: "Plausible — needs an expert check",
+  weak_match_generic_text: "Weak match — generic/shared text",
+  actually_recorded: "Actually recorded — an aid already names it",
+  wrong_identification: "Wrong identification",
+  not_checked: "Model abstained",
+};
 const S = {relation:new Set(), novelty:new Set(), pool:new Set(),
-           corpus:new Set(), poolreason:"", claim:"", disagree:false,
-           domain:"", author:"", work:"", nontiera:false, adjudicated:false,
+           corpus:new Set(), scripture:new Set(),
+           gatediv:new Set(), gatenew:new Set(),
+           triage:new Set(DEFAULT_TRIAGE),
+           poolreason:"", claim:"", disagree:false,
+           domain:"", author:"", work:"", locus:"", locus_from:"", locus_to:"",
+           coverage:"", nontiera:false, adjudicated:false,
            letters:"", graded:"", q:"", view:"all", sort:"work", size:25, off:0};
 // "" is what clearAxis leaves behind and "all" is what the control ships with;
 // both mean the unfiltered state, and neither is ever sent on the wire.
 const curView = () => S.view || "all";
 const DOPEN = new Set();          // which domain parents are expanded
 let OTHER_NOV = false;            // card 4's "other" group expanded
+let ADV_OPEN = false;             // the Advanced raw-signals block
 
 function params(extra){
   const p = new URLSearchParams();
-  for (const k of ["relation","novelty","pool","corpus"])
+  for (const k of ["relation","novelty","pool","corpus","scripture",
+                   "gatediv","gatenew","triage"])
     for (const v of S[k]) p.append(k, v);
-  for (const k of ["poolreason","claim","domain","author","work","graded","q","sort"])
+  for (const k of ["poolreason","claim","domain","author","work","locus",
+                   "locus_from","locus_to","coverage","graded","q","sort"])
     if (S[k]) p.set(k, S[k]);
   if (curView() !== "all") p.set("view", curView());
   if (S.disagree) p.set("disagree", "1");
@@ -1155,6 +1304,9 @@ const COMBOS = ["author","work"];
 const MAP = {author:{}, work:{}};
 function picked(k){
   const t = ($(k + "_t").value || "").trim();
+  // a From/To range belongs to ONE work; changing or clearing the work
+  // clears it, or the range would silently constrain the next work.
+  if (k === "work") { S.locus_from = ""; S.locus_to = ""; }
   if (!t) { S[k] = ""; apply(); return; }
   if (t in MAP[k]) { S[k] = MAP[k][t]; apply(); }   // only query on a real pick
 }
@@ -1166,14 +1318,32 @@ function typed(){
   clearTimeout(typeTimer);
   typeTimer = setTimeout(() => { S.q = $("q").value.trim(); apply(); }, 300);
 }
+let locusTimer = null;
+function locusTyped(){
+  clearTimeout(locusTimer);
+  locusTimer = setTimeout(() => {
+    S.locus = $("locus_t").value.trim(); apply();
+  }, 300);
+}
+function setLocusRange(which, v){
+  if (which === "from") S.locus_from = v; else S.locus_to = v;
+  apply();
+}
+function setCoverage(v){ S.coverage = (S.coverage === v) ? "" : v; apply(); }
 function reset(){
+  // Back to the DEFAULT view ("probably the work itself"), not to
+  // "everything" -- Reset means "as I opened it".
   S.relation = new Set(); S.novelty = new Set(); S.pool = new Set();
-  S.corpus = new Set();
+  S.corpus = new Set(); S.scripture = new Set();
+  S.gatediv = new Set(); S.gatenew = new Set();
+  S.triage = new Set(DEFAULT_TRIAGE);
   S.poolreason = ""; S.claim = ""; S.disagree = false; S.domain = "";
-  S.author = ""; S.work = ""; S.nontiera = false; S.adjudicated = false;
+  S.author = ""; S.work = ""; S.locus = ""; S.locus_from = ""; S.locus_to = "";
+  S.coverage = ""; S.nontiera = false; S.adjudicated = false;
   S.letters = ""; S.graded = ""; S.q = ""; S.view = "all";
   S.sort = "work"; S.off = 0;
   $("q").value = "";
+  const lc = $("locus_t"); if (lc) lc.value = "";
   for (const k of COMBOS) { const el = $(k + "_t"); if (el) el.value = ""; }
   load(0);
 }
@@ -1232,11 +1402,28 @@ function chipBtn(on, label, count, onclick, title){
 function renderSidebar(f){
   const relVals = ["same_work","parallel","not_shipped","shared_text"];
   const out = [];
+  const adv = [];   // the raw signals, collapsed under "Advanced" at the end
 
-  // CARD 1 -- the headline axis, pinned first by `.fg.relgrp { order:-1 }`.
+  // CARD 0 -- THE POOLS (owner, 2026-08-30): the one sorting every other
+  // control was circling. Bucket names deliberately claim nothing; the rule
+  // is deterministic, recorded in the file, and shown in the tooltip.
+  out.push(card("relgrp", "The pools — where should your minutes go?",
+    `<div class="stack">` + TRIAGE_ORDER.map(v => chipBtn(isOn("triage", v),
+        esc(TRIAGE_LABELS[v]), findN(f.triage, v),
+        `toggleMulti('triage','${v}',${JSON.stringify(TRIAGE_ORDER).replace(/"/g,"&quot;")})`,
+        DOCS["doc.triage"] || "")).join("") + `</div>`,
+    "A sorting rule over the signals below — the router's relation, the " +
+    "shared-scripture detectors, and page coverage — never a verdict. The " +
+    "main pool demands that nearly the WHOLE page match the work (≥85%): a page " +
+    "mostly unmatched is probably not a copy, however real the match. " +
+    "&lsquo;Shared quotations&rsquo; means the matched text is a third text " +
+    "both sides quote — near-useless. The raw signals stay available under " +
+    "&lsquo;Advanced&rsquo;."));
+
+  // CARD 1 -- the router's own axis.
   // Its labels say witness and quotes in full sentences precisely so it cannot
   // be confused with card 2, whose labels contain neither word.
-  out.push(card("relgrp",
+  adv.push(card("",
     "Relation — is this page a copy of the work, or does it quote it?",
     `<div class="stack">` + relVals.map(v => chipBtn(isOn("relation", v),
         esc(RELCARD[v]), findN(f.relation, v),
@@ -1246,7 +1433,7 @@ function renderSidebar(f){
     "plus 400 more, graded by hand. Decided by how much of the page the match covers."));
 
   // CARD 2 -- span rank. NOT a relation, and labelled so it cannot be read as one.
-  out.push(card("", "Span rank — NOT a relation",
+  adv.push(card("", "Span rank — NOT a relation",
     `<div class="stack">` +
     chipBtn(!S.claim, "Any", null, `setClaim('')`) +
     chipBtn(S.claim === "direct_witness", "Largest span on page",
@@ -1260,6 +1447,72 @@ function renderSidebar(f){
     "Says only which matched span is largest on this page. No minimum length, " +
     "never reads the text, and a page with a single match gets &lsquo;largest&rsquo; " +
     "by default however short. Shown so you can see where it disagrees with the router."));
+
+  // CARD 2a -- page coverage. The router's own quantity, as a filter: 29.8%
+  // page coverage is the validated witness threshold, so 30-40% is the
+  // "barely a witness" band -- the population where a quotation of a long
+  // passage most often slips over the line (the Harkavy-responsum case).
+  const covVals = [["lt10", "under 10%"], ["10to30", "10–30%"],
+                   ["30to60", "30–60% — over the router's witness line"],
+                   ["60to85", "60–85% — under the main-pool bar"],
+                   ["ge85", "85%+ — main-pool grade"]];
+  adv.push(card("", "Page coverage — how much of the page the match covers",
+    `<div class="stack">` +
+    chipBtn(!S.coverage, "Any", null, `setCoverage('')`) +
+    covVals.map(([v, lab]) => chipBtn(S.coverage === v, esc(lab), null,
+      `setCoverage('${v}')`)).join("") + `</div>`,
+    "The quantity the lines are drawn on: the router calls a witness at " +
+    "≥29.8%; the main pool starts at 85% — 75% for R-source, whose " +
+    "letter-exact coverage against printed editions tops out at 83.5%, so " +
+    "the 85%+ bucket itself never holds R-source rows."));
+
+  // CARD 2b -- shared scripture. Computed by scripts/attach_scripture_facts.py;
+  // on a db without the table every row is "not computed" and the card says so.
+  const scrVals = ["1","0",NULL_TOKEN];
+  const scrLabel = v => v === "1"
+      ? "Flagged — may rest on text both sides quote"
+      : (v === "0" ? "Checked, not flagged" : "Not computed");
+  adv.push(card("", "Shared scripture — is the matched TEXT itself scripture?",
+    `<div class="stack">` + scrVals.map(v => chipBtn(isOn("scripture", v),
+        esc(scrLabel(v)), findN(f.scripture, v),
+        `toggleMulti('scripture','${v}',${JSON.stringify(scrVals).replace(/"/g,"&quot;")})`,
+        DOCS["doc.scripture_flag"] || "")).join("") + `</div>`,
+    "A DIFFERENT question from the Relation card: the relation says how this " +
+    "page relates to this work (by page coverage — witness or quotation); " +
+    "this asks whether the matched text is a THIRD text both could be " +
+    "quoting independently — a verse, a mishnah. A &lsquo;quotation&rsquo; " +
+    "relation can be genuine while this is clean, and a &lsquo;witness&rsquo; " +
+    "row can still be flagged. Detectors: the matched text found verbatim in " +
+    "scripture; a citation formula at the boundary of a short match; a span " +
+    "mostly inside quotations the pre-matching mask caught. Each row's chip " +
+    "names which fired. Computed for EVERY corpus except works that are " +
+    "themselves canonical scripture (Bible, Mishnah, Talmud, Tosefta…) — " +
+    "there a verbatim-scripture span IS the identification, and those rows " +
+    "read &lsquo;not computed&rsquo;. The triage card above already folds this " +
+    "flag in; use these chips to work with the raw signal itself."));
+
+  // CARD 2c -- the LLM adjudication verdicts (gate_verdict_fact; absent on a
+  // db where the attach script never ran -- every row is then "not judged").
+  const gdivVals = ["catalogue_right_match_is_quotation",
+                    "catalogue_right_claim_mistaken", "both_right_multiple_works",
+                    "catalogue_too_general", "computed_right_catalogue_mismatch",
+                    NULL_TOKEN];
+  const gnewVals = ["credible_new_identification", "plausible_needs_expert_check",
+                    "weak_match_generic_text", "actually_recorded",
+                    "wrong_identification", NULL_TOKEN];
+  const gateLabel = v => GATE_LABELS[v] || (v === NULL_TOKEN ? "Not judged" : v);
+  adv.push(card("", "Model adjudication — catalogue vs computed (divergent pairs)",
+    `<div class="stack">` + gdivVals.map(v => chipBtn(isOn("gatediv", v),
+        esc(gateLabel(v)), findN(f.gatediv, v),
+        `toggleMulti('gatediv','${v}',${JSON.stringify(gdivVals).replace(/"/g,"&quot;")})`,
+        DOCS["doc.gate_divergence"] || "")).join("") + `</div>`,
+    DOCS["doc.gate_divergence"] || ""));
+  adv.push(card("", "Model check — candidate NEW identifications",
+    `<div class="stack">` + gnewVals.map(v => chipBtn(isOn("gatenew", v),
+        esc(gateLabel(v)), findN(f.gatenew, v),
+        `toggleMulti('gatenew','${v}',${JSON.stringify(gnewVals).replace(/"/g,"&quot;")})`,
+        DOCS["doc.gate_new_finds"] || "")).join("") + `</div>`,
+    DOCS["doc.gate_new_finds"] || ""));
 
   // CARD 3 -- pool. THREE states plus All; the third is the never-evaluated block.
   const poolVals = ["1","0",NULL_TOKEN];
@@ -1278,7 +1531,7 @@ function renderSidebar(f){
         `<option value="${esc(t[0])}"${S.poolreason===String(t[0])?" selected":""}>` +
         `${esc(t[0])} (${num(t[2])})</option>`).join("") + `</select>`;
   }
-  out.push(card("", "Pool", poolBody,
+  adv.push(card("", "Public-site display rule (its own ‘main pool’)", poolBody,
     "&lsquo;More matches&rsquo; means the evidence did not meet the rule — " +
     "not that the identification is wrong. &lsquo;No identification record&rsquo; " +
     "is a third state: the rule was never evaluated. <code>shared_wording</code> " +
@@ -1336,8 +1589,32 @@ function renderSidebar(f){
     "the filter still matches every form."));
 
   // CARD 8 -- work, keyed on work_id. 43 titles are shared by more than one
-  // work_id, so a title alone does not name a work.
-  out.push(card("", "Work", combo("work", "work: all", f.works), ""));
+  // work_id, so a title alone does not name a work. When a work is chosen,
+  // the Part-of-work From/To appears below it -- the live app's control, fed
+  // by this work's loci in stream order (f.loci from the server).
+  let workBody = combo("work", "work: all", f.works);
+  if (S.work && (f.loci || []).length > 1) {
+    const opt = (sel) => `<option value=""></option>` + f.loci.map(l =>
+      `<option value="${esc(l)}"${sel === l ? " selected" : ""}>${esc(l)}</option>`).join("");
+    workBody += `<div class="gs-findings-card-header" style="margin-block-start:6px">
+        Part of work</div>
+      <div class="side gap-2">
+        <select dir="auto" style="max-width:47%" onchange="setLocusRange('from', this.value)">
+          ${opt(S.locus_from)}</select>
+        <select dir="auto" style="max-width:47%" onchange="setLocusRange('to', this.value)">
+          ${opt(S.locus_to)}</select>
+      </div>
+      <div class="dnote">From … to, in the order the work runs. Leave one side
+        empty for an open range.</div>`;
+  }
+  out.push(card("", "Work", workBody, ""));
+
+  // CARD 8b -- locus contains. A plain substring over the citable address:
+  // type a tractate, a chapter, a siman. No wildcards, no surprises.
+  out.push(card("", "Locus — the citable address",
+    `<input id="locus_t" dir="auto" placeholder="locus contains…"
+       value="${esc(S.locus)}" oninput="locusTyped()">`,
+    "Matches anywhere inside the address — e.g. ברכות, פרק ג, or a folio."));
 
   // CARD 9 -- reference corpus, ALWAYS through the redaction map.
   const corpVals = L(f.corpus).map(t => String(t[0]));
@@ -1356,13 +1633,16 @@ function renderSidebar(f){
   const lenVals = [["","Any"],
                    ["short", "Short matches only — under " + SHORT_MATCH + " letters"],
                    ["long", SHORT_MATCH + " letters or more"]];
-  out.push(card("", "Escape hatches",
+  adv.push(card("", "Narrow further",
     `<div class="stack">` +
-    chipBtn(S.nontiera, "Only non-tier-A evidence bands", f.nontiera_n,
+    chipBtn(S.nontiera, "Only bands below the top confidence tier", f.nontiera_n,
             `toggleFlag('nontiera')`) +
     chipBtn(S.adjudicated, "Only rows a person already looked at", f.adjudicated_n,
             `toggleFlag('adjudicated')`,
             "The earlier adjudication pass. Grades entered here do not update it.") +
+    `<div class="dnote">"Already looked at" is an EARLIER review pass, frozen —
+      a different process from the grading you do here, and your grades do not
+      update it.</div>` +
     `<div class="gs-findings-card-header" style="margin-block-start:6px">Match length</div>` +
     lenVals.map(([v,lab]) => chipBtn(S.letters === v, esc(lab),
         v === "" ? null : (v === "short" ? f.short_n : f.long_n),
@@ -1373,6 +1653,14 @@ function renderSidebar(f){
         v === "" ? f.graded_total_here : (v === "yes" ? f.graded_n : f.ungraded_n),
         `setGraded('${v}')`)).join("") + `</div>`, ""));
 
+  // The raw signals behind the triage, one collapsed block. `ADV_OPEN` keeps
+  // the reader's open/closed choice across re-renders (every filter click
+  // rebuilds the sidebar; a details element that snapped shut each time would
+  // be unusable).
+  out.push(`<details class="gs-findings-howto"${ADV_OPEN ? " open" : ""}
+      ontoggle="ADV_OPEN=this.open">
+    <summary>Advanced — the raw signals behind the triage</summary>
+    ${adv.join("")}</details>`);
   $("sidebar").innerHTML = out.join("");
   fillCombo("author", f.authors);
   fillCombo("work", f.works);
@@ -1507,6 +1795,12 @@ function rowHtml(x){
   // 1 relation -- VISUALLY NEUTRAL (.rel). It is a KIND, not a quality; the
   // moment it is colour-coded the row acquires a confidence treatment the
   // grader reads before reading the text.
+  // 0 the triage -- the committed-but-hedged reading, FIRST (absent on a
+  // facet build that predates it)
+  if (x.triage && TRIAGE_LABELS[x.triage])
+    m.push(chip(x.triage === "main" ? "rel" :
+                (x.triage === "shared_quotes" ? "needs" : "chip"),
+                TRIAGE_LABELS[x.triage], DOCS["doc.triage"] || ""));
   m.push(chip("rel", poolLabel("relation", x.router_verdict),
     DOCS["doc.router_verdict"] + (x.relation_kind
       ? "\n\nearlier relation verdict (superseded): " + x.relation_kind : "")));
@@ -1527,16 +1821,74 @@ function rowHtml(x){
   // 6 demotion reason -- visible text, only when the row was actually demoted
   if (x.main_pool === 0 && x.main_pool_reason)
     m.push(`<span class="dnote text-xs">${esc(x.main_pool_reason)}</span>`);
-  // 7 routing
-  if (x.routing_status !== "shipped")
+  // 7 routing. On R-source rows `routing_status='shipped'` describes the
+  // matching run's internal tiering, NOT the website -- that corpus is not on
+  // the live site at all, so every one of its rows carries the marker (the
+  // outside audit found 113,078 shipped+parallel rows wearing no signal).
+  if (x.corpus_label === "R-source")
+    m.push(chip("needs", "not on the live site — this whole corpus is review-only",
+                DOCS["doc.routing_status"]));
+  else if (x.routing_status !== "shipped")
     m.push(chip("needs", "review only — not shown on the site",
                 DOCS["doc.routing_status"]));
+  // 7b owner ruling + compilation risk + title provenance (R-source works;
+  // columns absent on an older file -> nothing renders)
+  if (x.owner_ruling)
+    m.push(chip("needs", "owner ruling: " + esc(x.owner_ruling) +
+      (x.owner_ruling_date ? " (" + esc(x.owner_ruling_date) + ")" : ""),
+      x.owner_ruling_note || ""));
+  if (x.compilation_risk === "high" || x.compilation_risk === "medium")
+    m.push(chip(x.compilation_risk === "high" ? "needs" : "chip",
+      "compilation risk: " + esc(x.compilation_risk),
+      "A computed suspicion that this work is an anthology quoting other " +
+      "texts, so a match may witness the SOURCE it compiled. It excludes " +
+      "nothing by itself."));
+  // 7c the liturgy/formulary label (formula_fact; absent on older files)
+  if (x.formula_kind === "embedded_section")
+    m.push(chip("needs", "fixed prayer / formulary section — carrier text, " +
+      "not this work's own voice", DOCS["doc.formula_kind"] || ""));
+  else if (x.formula_kind === "standalone_unit")
+    m.push(chip("needs", "standalone liturgy unit — a generic prayer excerpt " +
+      "identifies no page", DOCS["doc.formula_kind"] || ""));
+  else if (x.formula_kind === "documentary_page")
+    // CONTEXT ONLY -- catalogue-derived, so it never moves a row between
+    // pools (the catalogue is a yardstick, never evidence)
+    m.push(chip("chip", "page catalogued as a legal document only — its " +
+      "formula may be what the work quotes", DOCS["doc.formula_kind"] || ""));
+  // 7d the LLM adjudication verdicts (pair-grain; absent before the attach
+  // script ran). The reason/doubt ride on x.llm for the 25 rows on screen.
+  const llmTip = (task, doc) => {
+    const l = x.llm && x.llm[task];
+    return (doc || "") + (l && l.reason ? "\n\nmodel's reason: " + l.reason : "")
+         + (l && l.doubt ? "\nexpert should check: " + l.doubt : "");
+  };
+  if (x.gate_divergence)
+    m.push(chip(x.gate_divergence === "computed_right_catalogue_mismatch"
+                ? "needs" : "chip",
+                "model: " + esc(GATE_LABELS[x.gate_divergence] || x.gate_divergence),
+                llmTip("divergence", DOCS["doc.gate_divergence"])));
+  if (x.gate_new_finds)
+    m.push(chip(x.gate_new_finds === "credible_new_identification"
+                ? "rel" : "chip",
+                "model: " + esc(GATE_LABELS[x.gate_new_finds] || x.gate_new_finds),
+                llmTip("new_finds", DOCS["doc.gate_new_finds"])));
+  if (x.title_provenance === "collection_retitle")
+    m.push(chip("chip", "a collection file — the locus names the actual work",
+      "This source file holds more than one work; the file-level title now " +
+      "says so, and each row's locus names the sub-work the match is in."));
+  else if (x.title_provenance && x.title_provenance !== "both_agreed_correct")
+    m.push(`<span class="dnote text-xs" title="How this work's title was verified:
+      two models judged all titles; disagreements were adjudicated with a
+      recorded reason.">title: ${esc(x.title_provenance)}</span>`);
   // 8 evidence. `coverage_status` is `measured` on all 254,612 rows, so no
   // gating is needed -- but the qualifier stays attached: a bare percentage on a
   // discovery surface is what the qualifier exists to prevent.
   let ev = num(x.matched_letters) + " letters";
   if (x.n_spans > 1) ev += " · " + num(x.n_spans) + " spans";
-  ev += " · covers " + (Number(x.coverage_ppm || 0) / 10000).toFixed(1) +
+  // NULL is "not recorded", never 0.0% -- a number here reads as a measurement.
+  ev += x.coverage_ppm === null || x.coverage_ppm === undefined
+      ? " · page coverage not recorded"
+      : " · covers " + (Number(x.coverage_ppm) / 10000).toFixed(1) +
         "% of this page's letters";
   m.push(`<span class="dnote text-xs">${esc(ev)}</span>`);
   // 9 corpus -- server already mapped it; the raw code never reaches the client
@@ -1550,9 +1902,34 @@ function rowHtml(x){
       "The earlier adjudication pass. Grades entered here do not update it."));
   // 12 short-match prompt -- the SAME threshold the sidebar's length filter cuts
   // at, so the warning and the control that selects for it cannot disagree.
-  if (Number(x.matched_letters) < SHORT_MATCH)
+  // Suppressed when the computed detectors (chip 12b) have an ANSWER for this
+  // row either way: "check whether" next to "checked, and ..." reads as two
+  // tools disagreeing.
+  if (Number(x.matched_letters) < SHORT_MATCH && !x.scripture)
     m.push(`<span class="dnote text-xs" title="${esc(DOCS["doc.known_weakness"])}">` +
            `short match — check whether this rests on shared scripture</span>`);
+  // 12b computed shared-scripture detectors (scripture_fact, R-source only).
+  // The chip names its REASONS: a bare flag would read as a verdict, and this
+  // is a heuristic label, never a relation.
+  // The reasons mirror the attach script's union EXACTLY (its thresholds are
+  // in meta `scripture_fact.thresholds`); a reason renders only if it fired.
+  if (x.scripture && x.scripture.flagged) {
+    const s = x.scripture, why = [];
+    const pct = v => Math.round(v * 100) + "%";
+    if (Math.max(s.bible, s.canon) >= 0.5)
+      why.push(s.bible >= s.canon
+        ? pct(s.bible) + " of the matched text is verbatim Bible"
+        : pct(s.canon) + " of the matched text is verbatim Mishnah/Talmud/Targum");
+    if (s.flank && Number(x.matched_letters) < 150)
+      why.push("a citation " + (s.flank === "formula" ? "formula" : "sits") +
+               " at the match boundary, and the match is short");
+    if (s.mask_overlap !== null && s.mask_overlap >= 0.5)
+      why.push(pct(s.mask_overlap) +
+               " of the span lies inside quotations the mask caught");
+    m.push(chip("needs", "may rest on shared scripture — " +
+      (why.join("; ") || "see the help entry"),
+      DOCS["doc.scripture_flag"] || ""));
+  }
   // 13 graded
   if (x.grade) m.push(chip("nov", "graded: " + x.grade));
 
@@ -1576,7 +1953,10 @@ function rowHtml(x){
   const wid = `<span class="chip mono">${esc(x.work_id)}</span>`;
   // Never "Unknown author" -- that would be a claim about the work.
   const author = x.work_author
-    ? `<div class="dnote" dir="auto" style="unicode-bidi:isolate">${esc(x.work_author)}</div>`
+    ? `<div class="dnote" dir="auto" style="unicode-bidi:isolate">${esc(x.work_author)}` +
+      (x.author_provenance === "from_title"
+        ? ` <span class="text-xs" title="Derived verbatim from the work's own title — no new attribution claim.">(מן הכותרת)</span>`
+        : ``) + `</div>`
     : ``;
   // Both library_code and shelfmark are NULL on 14,349 rows (5.6%); fall back to
   // the sys_id in a monospace chip, never to a blank line.
@@ -1594,14 +1974,24 @@ function rowHtml(x){
     ? `<div class="side gap-2 items-center flex-wrap"><span class="dnote">Catalogued as:</span>
        <span dir="auto" style="unicode-bidi:isolate">${esc(x.catalogue_title)}</span></div>`
     : ``;
+  // The citable address, on the card itself (the live findings page shows
+  // its locus the same way). `whole_work` is not shown here -- its label is
+  // the work title, which the card already leads with.
+  // right under the title, no label (owner, 2026-08-30) -- the address IS
+  // self-describing
+  const locus = (x.locus_label && x.locus_status === "resolved")
+    ? `<div class="dnote" dir="auto" style="unicode-bidi:isolate">${esc(x.locus_label)}</div>`
+    : ``;
 
   return `<div class="row gs-findings-row w-full gap-1 p-2"
       style="border-block-end:1px solid var(--border-light)">
     <div class="side gap-2 items-center flex-wrap">${title}${wid}</div>
+    ${locus}
     ${author}
     <div class="side gap-2 items-center flex-wrap">${shelf}</div>
     ${cat}
     ${readBlock(x)}
+    ${provBlock(x)}
     <div class="gs-findings-row-meta side items-center gap-2 flex-wrap">${m.join("")}</div>
     <div class="cols" id="txt-${id}">${panes(x)}</div>
     <div class="dnote" id="txtnote-${id}">${esc(DOCS["doc.ms_match_vs_ref_match"])}</div>
@@ -1646,9 +2036,11 @@ function readBlock(x){
       gate (novelty <b>not_checked</b>), so there is nothing it read. The line
       above is the catalogue title only.</div>`;
   } else if (r.missing_table) {
-    flag = " — not available";
-    body = `<div class="dnote">The <code>gate_fact</code> table is not attached to
-      this review DB. Run <code>scripts/attach_gate_facts.py</code>.</div>`;
+    flag = " — not recorded in this file";
+    body = `<div class="dnote">This file does not carry the gate's own reading
+      material (it was not extracted for this build). The verdict on the row is
+      still real; what is missing is only the ability to see WHAT the gate read
+      when it judged. Nothing you need for grading depends on it.</div>`;
   } else {
     const parts = [];
     if (r.nothing_else)
@@ -1706,6 +2098,85 @@ function readBlock(x){
 }
 function toggleRead(id, btn){
   const box = $("readb-" + id);
+  if (!box) return;
+  const hidden = box.style.display === "none";
+  box.style.display = hidden ? "block" : "none";
+  btn.classList.toggle("here", hidden);
+}
+// ---- pane D: where each side of the match came from, DEFAULT CLOSED -------
+// New in the v5 artifact: file + character offsets on BOTH sides. All offsets
+// count characters of the NFC-normalized text, 0-based, end exclusive. A v3 db
+// has none of these columns; the block then says "not recorded" and nothing
+// else changes.
+function fmtN(v){ return (v === null || v === undefined) ? "?" : Number(v).toLocaleString("en-US"); }
+function provBlock(x){
+  const id = x.evidence_id;
+  const hasMs = x.ms_provenance_status !== undefined && x.ms_provenance_status !== null;
+  const hasRef = x.ref_provenance_status !== undefined && x.ref_provenance_status !== null;
+  if (!hasMs && !hasRef)
+    return `<div class="readwrap">
+      <button class="fchip" disabled>Where this came from — not recorded (a v3-era file)</button></div>`;
+  const parts = [];
+  // -- manuscript side ------------------------------------------------------
+  if (hasMs) {
+    if (x.ms_provenance_status === "ok") {
+      parts.push(`<div class="rdrow"><span class="rdlab">Manuscript</span>
+        <span class="rdtxt mono">Transcriptions.txt · chars ${fmtN(x.file_char_start)}–${fmtN(x.file_char_end)}
+        (this page: ${fmtN(x.page_char_start)}–${fmtN(x.page_char_end)})</span></div>`);
+    } else if (x.ms_provenance_status === "offsets_missing") {
+      parts.push(`<div class="rdrow weak"><span class="rdlab">Manuscript</span>
+        <span class="rdtxt">no address in the corpus file — this page's text came
+        from another source (FGP/PGP)` +
+        (x.page_char_start != null ? `; within the page: chars ${fmtN(x.page_char_start)}–${fmtN(x.page_char_end)}` : ``) +
+        `</span></div>`);
+    } else if (x.ms_provenance_status === "nfc_shift") {
+      parts.push(`<div class="rdrow weak"><span class="rdlab">Manuscript</span>
+        <span class="rdtxt">file offsets withheld: this page's raw bytes differ from
+        their NFC form, so a file address would be off by a character or two.
+        Within the NFC page text: chars ${fmtN(x.page_char_start)}–${fmtN(x.page_char_end)}</span></div>`);
+    } else {
+      parts.push(`<div class="rdrow weak"><span class="rdlab">Manuscript</span>
+        <span class="rdtxt mono">${esc(x.ms_provenance_status)}</span></div>`);
+    }
+  }
+  // -- reference side -------------------------------------------------------
+  if (hasRef) {
+    const s = x.src;
+    let fileLine;
+    if (s && s.file) fileLine = esc(s.file);
+    else if (s && s.masked) fileLine = `<span class="chip mono">${esc(s.ref_id)}</span> — a masked
+      source: this id resolves to a real file only through a key file kept by
+      the project, on purpose. You are not missing anything, and grading does
+      not need it`;
+    else fileLine = `<span class="chip mono">${esc(x.witness_id || "?")}</span>`;
+    if (x.ref_provenance_status === "ok") {
+      parts.push(`<div class="rdrow"><span class="rdlab">Reference</span>
+        <span class="rdtxt" dir="auto" style="unicode-bidi:isolate">${fileLine}</span></div>`);
+      parts.push(`<div class="rdrow"><span class="rdlab"></span>
+        <span class="rdtxt mono">chars ${fmtN(x.ref_char_start)}–${fmtN(x.ref_char_end)} ·
+        letter stream ${fmtN(x.w_start)}–${fmtN(x.w_end)}</span></div>`);
+    } else {
+      parts.push(`<div class="rdrow weak"><span class="rdlab">Reference</span>
+        <span class="rdtxt">no per-file address (<code>${esc(x.ref_provenance_status)}</code>) —
+        the reference pane shows the work's letter stream, positions ${fmtN(x.w_start)}–${fmtN(x.w_end)}</span></div>`);
+    }
+    if (x.locus_label)
+      parts.push(`<div class="rdrow"><span class="rdlab">Citable locus</span>
+        <span class="rdtxt" dir="auto" style="unicode-bidi:isolate">${esc(x.locus_label)}</span></div>`);
+  }
+  parts.push(`<div class="dnote">Offsets count characters of the NFC-normalized
+    text (not bytes), 0-based, end exclusive. Every one was re-derived
+    independently and matched before this file shipped.</div>`);
+  const flag = (hasMs && x.ms_provenance_status === "ok" && x.ref_provenance_status === "ok")
+    ? " — file + offsets, both sides" : " — partial (see why)";
+  return `<div class="readwrap">
+    <button class="fchip" id="pv2-${esc(id)}" onclick="toggleProv('${escJs(id)}',this)"
+      >Where this came from${flag}</button>
+    <div class="readbody" id="provb-${esc(id)}" style="display:none">${parts.join("")}</div>
+  </div>`;
+}
+function toggleProv(id, btn){
+  const box = $("provb-" + id);
   if (!box) return;
   const hidden = box.style.display === "none";
   box.style.display = hidden ? "block" : "none";
@@ -1809,7 +2280,7 @@ function gradeBar(x){
     <span class="lbl">Which is right?</span>
     ${DIV.map(v => `<button class="fchip${x.grade===v?" here":""}"
        aria-pressed="${x.grade===v?"true":"false"}"
-       onclick="grade('${id}','${v}',this)">${v.replace("_"," ")}</button>`).join("")}
+       onclick="grade('${id}','${v}',this)">${esc(DIV_LABELS[v] || v.replace("_"," "))}</button>`).join("")}
     <button class="fchip" onclick="grade('${id}','',this)">clear</button>
     <input type="text" id="note-${id}" value="${esc(x.note)}"
       placeholder="why? (saved as you type)" oninput="noteTyped('${id}')">
@@ -1887,6 +2358,8 @@ function renderChipBar(f){
   const out = [];
   const add = (label, clear) => out.push(`<span class="achip">${esc(label)}
     <button aria-label="Remove" onclick="${clear}">✕</button></span>`);
+  if (S.triage.size) add("pool: " + [...S.triage].map(v =>
+      (TRIAGE_LABELS[v] || v).split(" — ")[0]).join(", "), `clearAxis('triage')`);
   if (S.relation.size) add("relation: " + [...S.relation].map(v =>
       poolLabel("relation", v)).join(", "), `clearAxis('relation')`);
   if (S.claim) add("span rank: " + poolLabel("claim", S.claim), `clearAxis('claim')`);
@@ -1904,8 +2377,18 @@ function renderChipBar(f){
                     `clearAxis('domain')`);
   if (S.author) add("author: " + authorLabel(f), `clearAxis('author')`);
   if (S.work) add("work: " + workLabel(f), `clearAxis('work')`);
+  if (S.locus) add("locus contains: " + S.locus, `clearAxis('locus')`);
+  if (S.locus_from || S.locus_to)
+    add("part of work: " + (S.locus_from || "start") + " → " + (S.locus_to || "end"),
+        `S.locus_from='';S.locus_to='';apply()`);
+  if (S.coverage) add("page coverage: " + ({lt10:"under 10%","10to30":"10–30%",
+      "30to60":"30–60%","60to85":"60–85%",ge85:"85%+"}[S.coverage] || S.coverage),
+      `clearAxis('coverage')`);
   if (S.corpus.size) add("corpus: " + [...S.corpus].map(v =>
       corpusLabel(f, v)).join(", "), `clearAxis('corpus')`);
+  if (S.scripture.size) add("shared scripture: " + [...S.scripture].map(v =>
+      v === "1" ? "flagged" : (v === "0" ? "not flagged" : "not computed"))
+      .join(", "), `clearAxis('scripture')`);
   if (S.nontiera) add("only non-tier-A bands", `clearAxis('nontiera')`);
   if (S.adjudicated) add("only rows a person looked at", `clearAxis('adjudicated')`);
   if (S.letters) add("match length: " + (S.letters === "short"
@@ -2012,6 +2495,8 @@ HELP_SECTIONS = (
      "and that is not an error", "warn"),
     ("doc.known_weakness", "a short match on a famous passage is a known weakness",
      "", "warn"),
+    ("doc.scripture_flag", "may rest on shared scripture",
+     "a computed label — three detectors, named on the chip", "warn"),
 )
 
 
@@ -2078,7 +2563,11 @@ MULTI_FILTERS = (("relation", "router_verdict"),
                  ("novelty", "novelty_status"),
                  ("pool", "main_pool"),
                  ("corpus", "source_corpus"),
-                 ("poolreason", "main_pool_reason"))
+                 ("poolreason", "main_pool_reason"),
+                 ("scripture", "scripture_flagged"),
+                 ("gatediv", "gate_divergence"),
+                 ("gatenew", "gate_new_finds"),
+                 ("triage", "triage"))
 
 SINGLE_FILTERS = (("work", "work_id"),
                   ("claim", "claim_type"),
@@ -2119,7 +2608,12 @@ FACET_AXES = (("relation", "router_verdict", "router_verdict", "relation"),
               ("routing", "routing_status", "routing_status", "routing"),
               ("band", "confidence_band", "confidence_band", "nontiera"),
               ("adjudication", "adjudication_status", "adjudication_status",
-               "adjudicated"))
+               "adjudicated"),
+              ("scripture", "scripture_flagged", "scripture_flagged",
+               "scripture"),
+              ("gatediv", "gate_divergence", "gate_divergence", "gatediv"),
+              ("gatenew", "gate_new_finds", "gate_new_finds", "gatenew"),
+              ("triage", "triage", "triage", "triage"))
 
 
 class QueryFailed(Exception):
@@ -2246,9 +2740,9 @@ class Handler(BaseHTTPRequestHandler):
                 continue
             want_null = NULL_TOKEN in vals
             rest = [v for v in vals if v != NULL_TOKEN]
-            if key == "pool":
-                # main_pool is an INTEGER column; bind integers so the comparison
-                # never depends on affinity coercion of a text literal.
+            if key in ("pool", "scripture"):
+                # INTEGER columns; bind integers so the comparison never
+                # depends on affinity coercion of a text literal.
                 rest = [int(v) for v in rest if v in ("0", "1")]
             parts = []
             if rest:
@@ -2302,6 +2796,75 @@ class Handler(BaseHTTPRequestHandler):
                 cl.append("(r.domain = :domain OR r.domain LIKE :domain_pfx)")
                 pr["domain"] = d
                 pr["domain_pfx"] = d + " / %"
+
+        # Locus contains. `instr`, not LIKE: the reader types a fragment of a
+        # citation address (a tractate, a chapter) and wildcards would only be
+        # a way to be surprised.
+        if exclude != "locus":
+            v = self._one(q, "locus")
+            if v:
+                cl.append("instr(r.locus_label, :locus) > 0")
+                pr["locus"] = v
+
+        # Locus RANGE (From/To), meaningful only with a work selected. The
+        # bounds are stream positions: From = the first occurrence of that
+        # locus in the work's letter stream, To = the last -- so the range is
+        # "from where locus A starts to where locus B ends", which is what the
+        # live app's Part-of-work control means.
+        if exclude != "locusrange":
+            lf, lt = self._one(q, "locus_from"), self._one(q, "locus_to")
+            w = self._one(q, "work")
+            if w and (lf or lt):
+                use_lu = self._has_locus_units(con)
+                if lf:
+                    row = self._query(
+                        con, "where.locus_from",
+                        "SELECT MIN(start_offset) AS p FROM locus_unit "
+                        "WHERE work_id=:w AND label_he=:l" if use_lu else
+                        "SELECT MIN(w_start) AS p FROM facet_row "
+                        "WHERE work_id=:w AND locus_label=:l",
+                        {"w": w, "l": lf}).fetchone()
+                    if row and row["p"] is not None:
+                        cl.append("r.w_start >= :lr0")
+                        pr["lr0"] = row["p"]
+                if lt:
+                    if use_lu:
+                        # up to (not including) the unit AFTER the last unit
+                        # carrying the To label; the last unit of the work has
+                        # no successor -> open upper bound
+                        row = self._query(
+                            con, "where.locus_to",
+                            "SELECT MIN(start_offset) AS p FROM locus_unit "
+                            "WHERE work_id=:w AND unit_ord > ("
+                            "  SELECT MAX(unit_ord) FROM locus_unit"
+                            "  WHERE work_id=:w AND label_he=:l)",
+                            {"w": w, "l": lt}).fetchone()
+                        if row and row["p"] is not None:
+                            cl.append("r.w_start < :lr1")
+                            pr["lr1"] = row["p"]
+                    else:
+                        row = self._query(
+                            con, "where.locus_to",
+                            "SELECT MAX(w_start) AS p FROM facet_row "
+                            "WHERE work_id=:w AND locus_label=:l",
+                            {"w": w, "l": lt}).fetchone()
+                        if row and row["p"] is not None:
+                            cl.append("r.w_start <= :lr1")
+                            pr["lr1"] = row["p"]
+
+        # Page coverage buckets. 29.8% is the validated witness threshold, so
+        # 30-40% is the "barely a witness" band worth suspicion.
+        if exclude != "coverage":
+            v = self._one(q, "coverage")
+            bounds = {"lt10": "r.coverage_ppm < 100000",
+                      "10to30": "r.coverage_ppm >= 100000 AND r.coverage_ppm < 300000",
+                      "30to60": "r.coverage_ppm >= 300000 AND r.coverage_ppm < 600000",
+                      "60to85": "r.coverage_ppm >= 600000 AND r.coverage_ppm < 850000",
+                      "ge85": "r.coverage_ppm >= 850000"}
+            if v == NULL_TOKEN:
+                cl.append("r.coverage_ppm IS NULL")
+            elif v in bounds:
+                cl.append("(" + bounds[v] + ")")
 
         if exclude != "author":
             a = self._one(q, "author")
@@ -2453,6 +3016,121 @@ class Handler(BaseHTTPRequestHandler):
                 "AND name='gate_fact'").fetchone())
         return Handler._gate_table
 
+    # `reference_witness`/`source_file` exist only in schema-v2 artifacts (the
+    # v5 file); a v3 db must keep working with the block saying "not recorded".
+    # Same probe-once pattern as `gate_fact`.
+    _witness_tables = None
+
+    def _has_witness(self, con):
+        if Handler._witness_tables is None:
+            Handler._witness_tables = bool(self._query(
+                con, "rows.witness_probe",
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='reference_witness'").fetchone())
+        return Handler._witness_tables
+
+    def _attach_witness(self, con, rows):
+        """Hang the reference-side source file on each payload as `src`.
+
+        `display_ref` is NULL on every masked source BY CONSTRUCTION (the
+        builder stores the real path only in the local key file, outside the
+        repo), so the fallback to the opaque `ref_id` here is showing a
+        codename, never a filename. One IN(...) query for the <=25 witnesses
+        on screen -- the pattern `_attach_gate` set.
+        """
+        if not rows or not self._has_witness(con):
+            return
+        wids = sorted({r["witness_id"] for r in rows if r.get("witness_id")})
+        if not wids:
+            return
+        names = {"w%d" % i: w for i, w in enumerate(wids)}
+        info = {}
+        for x in self._query(
+                con, "rows.witness",
+                "SELECT rw.witness_id AS w, sf.display_ref AS f, "
+                "sf.ref_id AS rid, sf.masked AS m, sf.kind AS k "
+                "FROM reference_witness rw "
+                "JOIN source_file sf ON sf.id = rw.source_file_id "
+                "WHERE rw.witness_id IN (%s)"
+                % ",".join(":" + n for n in names), names).fetchall():
+            info[x["w"]] = {"file": x["f"], "ref_id": x["rid"],
+                            "masked": bool(x["m"]), "kind": x["k"]}
+        for r in rows:
+            r["src"] = info.get(r.get("witness_id"))
+
+    # `scripture_fact` (scripts/attach_scripture_facts.py) is additive, like
+    # `gate_fact`: absent on a v3-era file or before the attach script ran.
+    _scripture_table = None
+
+    def _has_scripture(self, con):
+        if Handler._scripture_table is None:
+            Handler._scripture_table = bool(self._query(
+                con, "rows.scripture_probe",
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='scripture_fact'").fetchone())
+        return Handler._scripture_table
+
+    def _attach_scripture(self, con, rows):
+        """Hang the shared-scripture detectors on each payload as `scripture`."""
+        if not rows or not self._has_scripture(con):
+            return
+        names = {"e%d" % i: r["evidence_id"] for i, r in enumerate(rows)}
+        info = {}
+        for x in self._query(
+                con, "rows.scripture",
+                "SELECT evidence_id, bible_share, canon_share, flank_cite, "
+                "flank_kind, mask_distance, mask_overlap, flagged "
+                "FROM scripture_fact WHERE evidence_id IN (%s)"
+                % ",".join(":" + n for n in names), names).fetchall():
+            info[x["evidence_id"]] = {
+                "bible": x["bible_share"], "canon": x["canon_share"],
+                "flank": x["flank_kind"], "mask_distance": x["mask_distance"],
+                "mask_overlap": x["mask_overlap"],
+                "flagged": bool(x["flagged"])}
+        for r in rows:
+            r["scripture"] = info.get(r["evidence_id"])
+
+    # `gate_verdict_fact` (scripts/attach_gate_verdicts.py) is additive too.
+    _llm_table = None
+
+    def _has_llm(self, con):
+        if Handler._llm_table is None:
+            Handler._llm_table = bool(self._query(
+                con, "rows.llm_probe",
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='gate_verdict_fact'").fetchone())
+        return Handler._llm_table
+
+    def _attach_llm_verdicts(self, con, rows):
+        """Hang the LLM adjudication's reason/doubt on each payload as `llm`
+        -- {task: {verdict, reason, doubt}} at pair grain, for the <=25 rows
+        on screen. The VERDICT itself also rides the facet columns (filterable);
+        this carries the prose the chip tooltip shows."""
+        if not rows or not self._has_llm(con):
+            return
+        pairs, params, clauses = [], [], []
+        for d in rows:
+            key = (d.get("sys_id"), d.get("work_id"))
+            if key in pairs or not key[0]:
+                continue
+            pairs.append(key)
+            clauses.append("(sys_id = ? AND work_id = ?)")
+            params.extend(key)
+        if not pairs:
+            return
+        got = {}
+        for x in self._query(
+                con, "rows.llm",
+                "SELECT sys_id, work_id, task, verdict, reason, doubt "
+                "FROM gate_verdict_fact WHERE " + " OR ".join(clauses),
+                params).fetchall():
+            got.setdefault((x["sys_id"], x["work_id"]), {})[x["task"]] = {
+                "verdict": x["verdict"],
+                "reason": self._route_corpus_mentions(x["reason"]),
+                "doubt": self._route_corpus_mentions(x["doubt"])}
+        for d in rows:
+            d["llm"] = got.get((d.get("sys_id"), d.get("work_id")))
+
     @staticmethod
     def _route_corpus_mentions(text):
         """Every corpus name in gate text goes out through `corpus_label()`.
@@ -2554,7 +3232,61 @@ class Handler(BaseHTTPRequestHandler):
                 items.append([NULL_TOKEN if x["v"] is None else x["v"], lab, x["n"]])
             out[key] = items
         out["authors"] = self._author_facet(con, q)
+
+        # Works sharing one display title (13 R-source groups: two works both
+        # called רש״י, three called רא״ש...) get their DOMAIN leaf appended, so
+        # the dropdown separates them by what they are, not by an opaque id.
+        works = out.get("works") or []
+        lab_n = {}
+        for it in works:
+            lab_n[it[1]] = lab_n.get(it[1], 0) + 1
+        dups = [it[0] for it in works
+                if lab_n[it[1]] > 1 and it[0] != NULL_TOKEN]
+        if dups:
+            names = {"w%d" % i: v for i, v in enumerate(dups)}
+            dmap = dict(self._query(
+                con, "facets.workdomain",
+                "SELECT work_id, MAX(domain) FROM facet_row "
+                "WHERE work_id IN (%s) GROUP BY 1"
+                % ",".join(":" + n for n in names), names).fetchall())
+            for it in works:
+                d = dmap.get(it[0])
+                if lab_n[it[1]] > 1 and d:
+                    it[1] = "%s — %s" % (it[1], d.split(" / ")[-1])
+
+        # The From/To range control: this work's ATOMIC loci in reading order,
+        # from the embedded `locus_unit` table (the live app's own list) --
+        # never from the rows' labels, which on the base corpora are RANGE
+        # labels ("פרק ב–ג") whenever a claim spans units. Falls back to the
+        # row labels only on an artifact without the table.
+        w = self._one(q, "work")
+        if w:
+            if self._has_locus_units(con):
+                loci = [x[0] for x in self._query(
+                    con, "facets.loci",
+                    "SELECT label_he FROM locus_unit WHERE work_id=:w "
+                    "ORDER BY unit_ord", {"w": w}).fetchall()]
+                # consecutive duplicates collapse (a label can repeat when a
+                # unit splits); order is preserved
+                out["loci"] = [l for i, l in enumerate(loci)
+                               if i == 0 or l != loci[i - 1]]
+            else:
+                out["loci"] = [x[0] for x in self._query(
+                    con, "facets.loci_fallback",
+                    "SELECT locus_label FROM facet_row WHERE work_id=:w "
+                    "AND locus_label IS NOT NULL AND locus_label != '' "
+                    "GROUP BY 1 ORDER BY MIN(w_start)", {"w": w}).fetchall()]
         return out
+
+    _locus_units = None
+
+    def _has_locus_units(self, con):
+        if Handler._locus_units is None:
+            Handler._locus_units = bool(self._query(
+                con, "facets.lu_probe",
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='locus_unit'").fetchone())
+        return Handler._locus_units
 
     def _author_facet(self, con, q):
         """`[key, display, n]` -- one entry per PERSON, not per surface spelling.
@@ -2723,8 +3455,12 @@ class Handler(BaseHTTPRequestHandler):
                 names = {"e%d" % i: e for i, e in enumerate(evs)}
                 fat = self._query(
                     con, "rows.body",
-                    "SELECT r.*, hg.divergence_correctness AS grade, "
+                    "SELECT r.*, fr.triage AS triage, fr.formula_kind AS formula_kind, "
+                    "fr.gate_divergence AS gate_divergence, "
+                    "fr.gate_new_finds AS gate_new_finds, "
+                    "hg.divergence_correctness AS grade, "
                     "hg.note AS note FROM review_row r "
+                    "LEFT JOIN facet_row fr ON fr.evidence_id = r.evidence_id "
                     "LEFT JOIN g.human_grade hg ON hg.evidence_id = r.evidence_id "
                     "WHERE r.evidence_id IN (%s)"
                     % ",".join(":" + n for n in names), names).fetchall()
@@ -2738,8 +3474,11 @@ class Handler(BaseHTTPRequestHandler):
                     d["grade"] = d.get("grade") or ""
                     d["note"] = d.get("note") or ""
                     rows.append(d)
-                # ONE extra query, for the 25 addresses already on screen.
+                # ONE extra query each, for the 25 addresses already on screen.
                 self._attach_gate(con, rows)
+                self._attach_witness(con, rows)
+                self._attach_scripture(con, rows)
+                self._attach_llm_verdicts(con, rows)
             graded_total = self._query(
                 con, "rows.graded_total",
                 "SELECT COUNT(*) AS c FROM g.human_grade WHERE "
@@ -2908,11 +3647,15 @@ def main(argv=None) -> int:
                     help="where the manuscript preview points; a reviewer already "
                          "running the web app locally can pass "
                          "http://127.0.0.1:8080 and get their own session")
-    ap.add_argument("--preview", choices=PREVIEW_MODES, default="image",
-                    help="image: a folio <img>, no session and no script. "
-                         "frame: the live bare viewer. off: a plain link.")
+    # Default "frame" (owner ruling, 2026-08-30): the preview pane is the live
+    # web viewer, folio navigation and transcription included. --preview image
+    # remains for a reviewer who wants the sessionless <img>.
+    ap.add_argument("--preview", choices=PREVIEW_MODES, default="frame",
+                    help="frame: the live bare viewer (default). "
+                         "image: a folio <img>, no session and no script. "
+                         "off: a plain link.")
     # An alias, not a fourth mode: the same dest, and declared AFTER --preview so
-    # the "image" default is the one that lands on the namespace.
+    # the "frame" default is the one that lands on the namespace.
     ap.add_argument("--no-preview", dest="preview", action="store_const",
                     const="off", default=argparse.SUPPRESS,
                     help="alias for --preview off")
