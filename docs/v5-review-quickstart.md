@@ -17,7 +17,15 @@ python serve_v3_review.py --db discovery-v5-REVIEW.db
 ```
 
 Open the address it prints — `http://127.0.0.1:8777`. Python 3.8 or newer.
-Nothing is uploaded anywhere: the server listens on your own machine only.
+The server listens on your own machine only, and **nothing you do is uploaded**:
+filters, grades and notes never leave the machine.
+
+**One feature does reach the internet.** The manuscript **Preview** button
+embeds the live site's folio viewer, so it sends that manuscript's system number
+to `genizahsearch.com` and needs a connection; in some browsers an embedded
+frame is blocked and the panel says so. Nothing else in the tool makes a network
+request. Start with `--preview image` for the plain folio image instead, or
+`--preview off` to disable previews entirely.
 
 ---
 
@@ -133,7 +141,7 @@ aligned excerpts and the computed signals:
   "catalogue right" verdicts were 98.8% owner-confirmed. The one verdict to
   distrust is **"model claims the catalogue is wrong"**: it asserts scholars
   erred and went 0-for-4 when contested — read it as *needs human review*.
-* **New-find candidates** (11,045 pairs no finding aid records): 7,130 judged
+* **New-find candidates** (11,045 pairs no finding aid records): 7,588 judged
   **credible new identifications** (precision 58/60 on the owner's graded
   cases), each carrying a `doubt` — the one thing an expert should verify.
 
@@ -169,6 +177,13 @@ Nothing is merged and nothing is averaged:
 * Each card keeps **every** evidence row, with its raw `work_id`, which witness
   it came from, and the offsets pointing at that witness's own file. The grade
   buttons stay on the rows, so your grades key to evidence exactly as before.
+
+  **Which row do you grade on a multi-witness card?** Grade the one you read.
+  A card's witnesses are copies of the same work, so a judgement about the page
+  holds for all of them; grading one row is a complete answer and the card shows
+  how many of its rows are graded. Grade a second row only if its own excerpt
+  changed your mind — two rows of one card may disagree, and both answers are
+  kept. Nothing requires a card to be fully graded.
 * Where a card's rows **disagree** — one says `confirms`, another
   `diverges_work` — the card reads **mixed** rather than picking a side
   (12,771 cards for novelty, 10,978 for pool, 5,592 for relation).
@@ -182,10 +197,11 @@ The **witness strip** under each card header is the honesty surface. Every
 witness of the known work is listed, aligned here or not:
 
 * **aligned here (n)** — this witness produced n of the card's rows.
-* **no returned alignment** — the engine ran this witness and returned nothing
-  for this page. That is *not* the same as the witness being irrelevant, and the
-  strip does not pretend to know which. 75,055 cards have at least one such
-  witness.
+* **no returned alignment** — this witness produced no row for this page.
+  That is ALL it means. The file records matches, not attempts, so it cannot
+  tell you whether the witness was compared against this page and lost, or was
+  never compared at all — and the strip does not pretend to know which. Do not
+  read it as a negative result. 75,055 cards have at least one such witness.
 * **not applicable here** — said **only** where the file can prove it: a
   division-scoped witness of an anthology whose rows on this page belong to a
   *different* division, where the divisions partition that container's rows.
@@ -215,6 +231,13 @@ Two things to read carefully:
   ruling; the viewer shows them as a chip, never as a merge.
 * **One known work is `provisional`** — minted from a routing nobody has ruled
   on yet. It says so on the card.
+
+  Careful: **"provisional" appears on screen in a second, unrelated sense.**
+  `adjudication_status='provisional'` on 14,917 rows is about the PUBLIC SITE's
+  own review state for that identification — whether a person has confirmed it
+  there (`human_confirmed`, 121 rows) — and says nothing about the work's
+  identity. The card-level chip is about the identity; the row-level status is
+  about the site. They are different columns and never interact.
 * `known_work_assertion` holds identity claims with **no evidence rows at all**
   (one row: a census member absent from this artifact). It is never evidence and
   never reaches a card.
@@ -255,20 +278,20 @@ sits in the result bar if you want the old row-at-a-time view.
 they claim nothing:
 
 * **Main pool — witness candidates, nearly the whole page matches**
-  (117,611 rows) — the default view. Two bars, both set by blind owner-graded
+  (117,608 rows) — the default view. Two bars, both set by blind owner-graded
   decks over THIS artifact: 85% of the page's letters for most corpora
   (graded 40/40 clean; 70–85% graded 82.5%), and 75% for R-source (graded
   37/40 — its letter-exact coverage against printed editions tops out at
   83.5%, so 85% would exclude the corpus wholesale). Works owner-ruled out
   as identification references never enter the pool.
-* **Citation relationship** — one text quotes the other (158,709).
+* **Citation relationship** — one text quotes the other (158,700).
 * **Only shared quotations** — both sides quote the same third text,
-  near-useless for identification (100,341). This now includes matches whose
+  near-useless for identification (100,369). This now includes matches whose
   section, by the work's own header, is a fixed prayer or a notarial formula
   embedded in a non-liturgy work (Mishneh Torah's prayer appendix, Seder Rav
   Amram's orders, Sefer ha-Shetarot's deeds) — carrier text every siddur or
   deed shares.
-* **Unclear / borderline** (142,721) — matches to standalone liturgy units
+* **Unclear / borderline** (142,705) — matches to standalone liturgy units
   (an Amidah, a Haggadah — a generic prayer excerpt identifies no page),
   held-back rows, witnesses between the
   router's validated 29.8% line and the 85% main-pool bar, conflicting
@@ -310,6 +333,13 @@ is explained there. Terms you will meet on the way, in one line each:
   strongest. You do not need them to grade.
 * **R-source**, like the other corpus labels, is an internal codename on
   purpose; it is not meant to be decoded.
+* **Two corpora show a codename where you would expect a filename.** The
+  provenance line reads `RS:10.2.3` or `M:...` rather than a file name for
+  every R-source (344) and M-source (882) source file: those corpora are
+  restricted, so the review database stores only opaque ids, and the real file
+  names live outside it. This is by design, not missing provenance — the
+  character ranges beside the codename are exact, and the Access index you were
+  sent separately carries the file names for the corpora you already hold.
 
 **When you are done** (or want to send partial progress): send back the file
 `discovery-v5-REVIEW.db.grades.db` that appears next to the database — or
@@ -328,10 +358,12 @@ empty. Yours is the only signal. Grades save to a separate file
   verdicts are real, but the bundle of catalogue/bibliography text the gate
   read when judging was not extracted for this build — the button on each row
   says so. Grading does not depend on it.
-* **Manuscript shelfmarks for R-source-only manuscripts come straight from
-  the catalogue file** (first listed variant), not from the curated display
-  table the other corpora use — 124 manuscripts have no shelfmark anywhere
-  and show their system number instead.
+* **Some manuscripts have no shelfmark at all** — 18,409 rows over 7,707
+  manuscripts (3.5% of rows), in every corpus: sefaria 6,470 manuscripts,
+  M-source 2,056, JA 1,013, R-source 8. Those rows show the **system number**
+  in a monospace chip instead, never a blank. R-source shelfmarks additionally
+  come straight from the catalogue file (first listed variant) rather than the
+  curated display table the other corpora use.
 
 * **"No returned alignment" does not distinguish "searched and found nothing"
   from "never searched".** The file records positives only: which witness

@@ -2730,15 +2730,55 @@ async function grade(id, val, btn){
   renderSession(j.graded_total);
 }
 const noteTimers = {};
+// The field says "saved as you type", and a 500 ms debounce means the last
+// keystrokes are still in the browser when the reviewer closes the tab or
+// switches away -- so the claim was false for exactly the words they typed last.
+// Every pending note is now flushed on the way out, with sendBeacon (which the
+// browser delivers even as the page unloads) and a synchronous XHR fallback.
+const noteText = {};
+function flushNotes(){
+  const ids = Object.keys(noteTimers);
+  for (const id of ids) {
+    if (noteTimers[id] === undefined) continue;
+    clearTimeout(noteTimers[id]);
+    delete noteTimers[id];
+    const el = $("note-" + id);
+    const body = JSON.stringify({evidence_id: id,
+                                 note: el ? el.value : (noteText[id] || "")});
+    let sent = false;
+    try {
+      if (navigator.sendBeacon)
+        sent = navigator.sendBeacon("/api/grade",
+                 new Blob([body], {type: "application/json"}));
+    } catch (e) {}
+    if (!sent) {
+      try {                       // last resort: synchronous, unload-safe
+        const x = new XMLHttpRequest();
+        x.open("POST", "/api/grade", false);
+        x.setRequestHeader("Content-Type", "application/json");
+        x.send(body);
+      } catch (e) {}
+    }
+  }
+}
 function noteTyped(id){
   clearTimeout(noteTimers[id]);
+  const el0 = $("note-" + id);
+  if (el0) noteText[id] = el0.value;   // survives the row being re-rendered
   noteTimers[id] = setTimeout(async () => {
     const el = $("note-" + id);
+    delete noteTimers[id];
     await fetch("/api/grade", {method:"POST",
       headers:{"Content-Type":"application/json"},
       body: JSON.stringify({evidence_id:id, note: el ? el.value : ""})});
   }, 500);
 }
+// pagehide fires on close/navigate; visibilitychange catches a switched tab or a
+// closed laptop, which is where an unsaved note would otherwise sit for hours
+window.addEventListener("pagehide", flushNotes);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") flushNotes();
+});
 // The safeguard against the worst outcome: an hour of grading that never reached
 // disk. It is written per click, so the number must go up as the reviewer works.
 function renderSession(totalGraded){
