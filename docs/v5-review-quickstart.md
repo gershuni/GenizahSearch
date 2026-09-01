@@ -1,12 +1,14 @@
 # v5 review artifact — how to open it, and what is new
 
-You have been sent two files. This is everything needed to open them; there is
-nothing to install beyond Python itself.
+You have been sent **four things**. The first two are all you need to start
+reading; nothing has to be installed beyond Python itself.
 
 | File | Size | What it is |
 |---|---|---|
 | `discovery-v5-REVIEW.db` | ~3.5 GB | The review set: **519,382** candidate identifications — grouped into **433,911 cards**, one per page and work — each with both sides of the match, the manuscript text and the reference text, and **where each side came from**. |
 | `serve_v3_review.py` | ~220 KB | A small local viewer for it. Python standard library only — no `pip install`. |
+| the reference text files | — | The corpora the matches were made against, as you already hold them. |
+| `discovery-v5-INDEX.accdb` | ~0.7 GB | An Access copy of everything except the text: the same rows, cards and identities, **plus the real file name** for each masked source. It is how you turn a match into a position in a file you hold — see "Finding a match inside your own files" below. |
 
 ## Run it
 
@@ -51,15 +53,21 @@ Two cautions worth reading once:
   Where a source's NFC form differs from its raw form, the row says so
   (`ms_provenance_status='nfc_shift'`) and withholds the file offsets rather
   than giving you an address that is off by a character or two.
-* **18,982 of 667,411 manuscript pages have no address in the corpus file** —
-  their text came from a different source (FGP/PGP). Those rows carry
-  `ms_provenance_status='offsets_missing'`, not a guess.
+* **Some pages have no address in the corpus file** because their text came
+  from a different source (FGP/PGP). Those rows say so
+  (`ms_provenance_status='offsets_missing'`) rather than guessing: **7,890 of
+  the 519,382 rows here**, 1.5%. (Corpus-wide the figure was 18,982 of 667,411
+  pages, but that whole-corpus population is not what this file contains, so
+  you cannot check it from the file.)
 
 Every offset in this file was verified by an independent re-derivation: a
 separate checker, written so that it cannot call any of the code that produced
 the offsets, re-computed them from the source files and compared. **424,659
 reference-side offsets and 336,899 manuscript-side offsets were checked with
-zero mismatches.**
+zero mismatches.** That run happened before this file was packaged and its log
+is not inside it — the claim is ours, not something you can re-check from the
+db alone. Ask for `scripts/verify_v3_review_offsets.py` and the source files if
+you want to re-run it yourself; that is what it is for.
 
 ### 2. A fourth reference corpus (R-source)
 
@@ -98,7 +106,9 @@ matches) and flagged, so you can see what you are looking at:
   other texts. It excludes nothing by itself; it is there so these can be
   judged later.
 
-20,057 rows sit on works carrying an owner ruling of some kind (the rulings
+41,602 rows sit on works carrying an owner ruling of some kind — 19,321
+`kept_by_owner_ruling`, 9,775 `dropped_as_identification_reference`, 9,414
+`excluded_from_public_identities`, 3,092 `compilation_class` (the rulings
 also cover works dropped as reference sources or excluded from public
 identities, not only compilations); the ruling, its date and its note appear
 as a chip on each such row. `compilation_risk` shows as a chip on `high` and
@@ -152,8 +162,9 @@ the model's reason and doubt.
 ### 5. Work titles were checked by two models
 
 The R-source titles had never been reviewed. Two independent models judged all
-351 of them against their catalogue metadata; the 104 they disagreed on were
-adjudicated with a recorded reason. `title_provenance` on each work says which
+of them against their catalogue metadata; the ones they disagreed on were
+adjudicated with a recorded reason. As shipped: **344** R-source works, **101**
+of them adjudicated. `title_provenance` on each work says which
 route it took (`both_agreed_correct`, `adjudicated`, `both_agreed_wrong_corrected`,
 or `unsure_using_catalogue`). This caught real errors — six unrelated works had
 all inherited the title "הלכות גדולות", and fifteen had no title at all.
@@ -317,8 +328,9 @@ The manuscript preview pane embeds the **live web viewer** by default
 
 A **Page coverage** card filters by the router's own quantity. The 30–40%
 band is where a long quotation most easily slips over the 29.8% witness line;
-**witness + novelty `diverges_work` + coverage 30–40%** (8,258 rows) is the
-population of witness claims most worth suspicion.
+**witness + novelty `diverges_work` + coverage 30–40%** is the population of
+witness claims most worth suspicion — the 30–40% band has its own button in that
+card (8,453 rows carry that coverage).
 
 Filter to something you know — a work, an author, a domain — and read the two
 panes side by side. Click **What these columns mean** at the top: every column
@@ -352,6 +364,32 @@ out of 28 on that question, so its answer is worthless and the column ships
 empty. Yours is the only signal. Grades save to a separate file
 (`discovery-v5-REVIEW.db.grades.db`) the moment you click.
 
+## Finding a match inside your own files
+
+Two of the four reference corpora are restricted, so the review database stores
+**opaque codenames** instead of file names — `RS:10.2.3`, `M:Ytext1000_00` — for
+344 R-source and 882 M-source source files. That covers 260,466 of the 519,382
+rows, and it is deliberate: the names live outside the database.
+
+The **Access index** you were sent is where they are resolved, because you
+already hold those corpora. Its `source_file` table carries the real base file
+name for each codename, so the route from a row to a position in a file you have
+is:
+
+    identification_row.witness_id  ->  reference_witness.witness_id
+    reference_witness.source_file_id  ->  source_file.filename
+    then read ref_char_start .. ref_char_end in that file
+
+The manuscript side needs no lookup: those offsets are positions in
+`Transcriptions.txt` itself, and the viewer prints both addresses on every row.
+
+**Handle the Access file as the more sensitive of the two.** It is the only
+place where the restricted corpora's file names appear next to our matches. It
+should not be forwarded, and it should not travel further than the database
+does.
+
+---
+
 ## Known limitations, stated plainly
 
 * **"What the software read" is not available in this file.** The novelty
@@ -364,6 +402,16 @@ empty. Yours is the only signal. Grades save to a separate file
   in a monospace chip instead, never a blank. R-source shelfmarks additionally
   come straight from the catalogue file (first listed variant) rather than the
   curated display table the other corpora use.
+
+* **Citation-relationship pairs were never model-adjudicated, and the
+  shared-scripture flag can miss a short stock passage.** The two LLM passes ran
+  only on pairs that also have a main-pool or unclear row, so all 76,366 pairs
+  whose evidence is entirely "citation relationship" carry no model verdict at
+  all — an absence, not a clean bill. Separately, the scripture flag needs half
+  the matched span to be canonical text, so a short quotation of a stock
+  Talmudic passage (21,776 citation rows are under 150 letters with 5–50%
+  canonical overlap) can pass unflagged. Treat a short citation-pool match on a
+  famous passage as unjudged.
 
 * **"No returned alignment" does not distinguish "searched and found nothing"
   from "never searched".** The file records positives only: which witness

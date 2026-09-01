@@ -242,6 +242,14 @@ def _build(con, say=print):
                 card_id=cid, page_id=r["page_id"], kw_id=kw, sys_id=r["sys_id"],
                 shelfmark=r["shelfmark"], library_code=r["library_code"],
                 rows=[], witnesses=set(), corpora=set())
+        # A shelfmark belongs to the PAGE, so any row of this card that has one
+        # speaks for the card. Taking it from whichever row arrived first left
+        # 1,584 of 2,021 multi-row cards blank in the header while a sibling row
+        # printed the shelfmark a few lines below.
+        if not c["shelfmark"] and r["shelfmark"]:
+            c["shelfmark"] = r["shelfmark"]
+        if not c["library_code"] and r["library_code"]:
+            c["library_code"] = r["library_code"]
         c["rows"].append(r)
         c["witnesses"].add(key)
         c["corpora"].add(r["source_corpus"] or UNSET)

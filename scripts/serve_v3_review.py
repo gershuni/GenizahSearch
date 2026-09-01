@@ -174,6 +174,53 @@ NOVELTY_VIEW_WARNING = (
     "Neither side has been adjudicated — read them with that in mind.")
 
 
+# ---------------------------------------------------------------------------
+# Structural markers inside the text
+# ---------------------------------------------------------------------------
+# Owner, 2026-09-01: the live site already handles these. Its rule lives in
+# `scripts/bake_discovery_excerpts.py::clean_ja_markers` (owner ruling
+# 2026-08-13) and is REPEATED here rather than imported, because this file ships
+# to a reviewer as a single stdlib-only script and cannot import the repo.
+# `tests/test_review_marker_cleaning.py` asserts the two agree, so the copy
+# cannot drift silently.
+#
+# TWO families are removed, both structural, neither ever content:
+#   +פסוק~ +כב~   J-corpus label/value markers (9,148 rows). `+` and `~` are
+#                 never content characters in that corpus.
+#   >>            the verse/paragraph start marker carried by the M-source text
+#                 (197,982 rows, most of them Bible), and its `<<` partner.
+#
+# THREE families are deliberately KEPT, because they are philology and a
+# scholar needs to see them:
+#   <יָצֹא ...>   editorial restoration / ketiv-qere brackets (31,561 rows)
+#   {בשמ' רחמ'}  editorial restoration (27,354 rows)
+#   ?קר?          an uncertain reading in the transcription
+#
+# Display-only, applied AFTER slicing: the stored offsets index the ORIGINAL
+# text and are never touched, so an address printed on the row still lands on
+# the same characters in the source file.
+_JA_MARKER_RE = re.compile(r"\+[^+~\n]{0,40}~")
+_SECTION_MARK_RE = re.compile(r"(?:^|(?<=\s))(?:>>|<<)(?=\s|$)", re.M)
+
+
+def clean_display_markers(text):
+    """Strip structural markers from ONE already-cut display piece."""
+    if not text or not isinstance(text, str):
+        return text
+    s = text
+    if "+" in s or "~" in s:
+        s = _JA_MARKER_RE.sub("", s)
+        # a marker the slice cut in half, at either end of the piece
+        s = re.sub(r"^[^+~\n]{0,40}~", "", s)
+        s = re.sub(r"\+[^+~\n]{0,40}$", "", s)
+    if ">>" in s or "<<" in s:
+        s = _SECTION_MARK_RE.sub("", s)
+    s = re.sub(r"[ \t]{2,}", " ", s)
+    s = re.sub(r" ?\n ?", "\n", s)
+    s = re.sub(r"\n{3,}", "\n\n", s)
+    return s.strip(" ")
+
+
 def check_novelty_views(say=print) -> bool:
     """Re-derive the grouping from the service and report any drift.
 
@@ -1718,6 +1765,10 @@ function renderSidebar(f){
   // "barely a witness" band -- the population where a quotation of a long
   // passage most often slips over the line (the Harkavy-responsum case).
   const covVals = [["lt10", "under 10%"], ["10to30", "10–30%"],
+                   // the band the handoff note calls the population most worth
+                   // suspicion had no control of its own, so the note pointed at
+                   // something the reader could not select
+                   ["30to40", "30–40% — where a long quotation slips over the line"],
                    ["30to60", "30–60% — over the router's witness line"],
                    ["60to85", "60–85% — under the main-pool bar"],
                    ["ge85", "85%+ — main-pool grade"]];
@@ -2093,7 +2144,8 @@ function kwCardHtml(c){
   // aggregate, or a witness of this work that did NOT align here.
   if (rows.length === 1 && c.kw_witnesses === 1) {
     const differs = c.kw_title && c.kw_title !== rows[0].work_title;
-    if (!differs && !c.provisional) return rowHtml(rows[0]);
+    const soloBasis = c.kw_title_basis && c.kw_title_basis !== "singleton";
+    if (!differs && !c.provisional && !soloBasis) return rowHtml(rows[0]);
     // the two things a bare card can still be needed for
     const head = [];
     if (differs)
@@ -2122,7 +2174,11 @@ function kwCardHtml(c){
   // with one row, the shelfmark/folio/locus line below is the row's own line
   // repeated a box further out; the identity and the witness count are what
   // the card contributes
-  const where = rows.length === 1 ? `` : `<div class="kwnums">${esc(c.shelfmark || "")}
+  // the card-level shelfmark can be null while a member row carries it (1,584
+  // of 2,021 such cards) -- fall back the way the row path already does
+  const shelf = c.shelfmark || (rows.find(r => r.shelfmark) || {}).shelfmark
+                || c.sys_id || "";
+  const where = rows.length === 1 ? `` : `<div class="kwnums">${esc(shelf)}
           · folio ${esc(rows.length ? (rows[0].page_num || "?") : "?")}
           · ${locus}</div>`;
   const head = `<div class="kwhead">
@@ -2135,12 +2191,42 @@ function kwCardHtml(c){
     </div>`;
   // the aggregate line is for AGGREGATES: with a single row it would only
   // restate that row's own pool/verdict chips, one box further out
-  const summary = rows.length === 1 ? `` : `<div class="side items-center gap-2 flex-wrap kwnums">
-      <span>pool: ${mix(c.main_pool)}</span>
+  // THE POOL A CARD SHOWS IS ITS OWN ROWS' POOL. It used to come from
+  // review_row.main_pool -- the public site's display rule -- while every row
+  // chip below showed facet_row.triage, the four pools this tool sorts by. On
+  // 112,844 cards those two disagreed, and the card's "pool: yes" sat directly
+  // above chips reading "Unclear". Deriving it from the rows makes disagreement
+  // impossible, and the site's own rule is named separately where it appears.
+  const pools = [...new Set(rows.map(r => r.triage).filter(Boolean))];
+  const poolTxt = !pools.length ? `\u2014`
+    : pools.length === 1 ? esc(TRIAGE_SHORT[pools[0]] || pools[0])
+    : `<b title="This card's evidence rows fall in different pools; the rows below say which.">mixed</b> \u2014 `
+      + pools.map(t => esc(TRIAGE_SHORT[t] || t)).join(", ");
+  // what DECIDED this identity: an owner ruling for this artifact reads very
+  // differently from the production reference contract, and both used to render
+  // as nothing at all
+  const BASIS_LABEL = {
+    owner_merge: "identity: owner ruling (this artifact)",
+    work_group: "identity: owner ruling (two halves are one work)",
+    census_canonical: "identity: production reference contract",
+    cluster: "identity: cross-corpus same-work link",
+    family: "identity: container file and its parts",
+    mint: "identity: minted from a division name",
+  };
+  const basis = (c.kw_title_basis && c.kw_title_basis !== "singleton")
+    ? chip("chip", BASIS_LABEL[c.kw_title_basis] || ("identity: " + c.kw_title_basis),
+           "How this known work's identity was decided. An owner ruling applies "
+           + "to this review artifact; the production contract is what the "
+           + "public corpus already says.")
+    : ``;
+  const summary = rows.length === 1 && !basis ? `` : `<div class="side items-center gap-2 flex-wrap kwnums">
+      <span>pool: ${poolTxt}</span>` +
+    (rows.length === 1 ? `` : `
       <span>vs catalogue: ${mix(c.novelty_status)}</span>
       <span>relation: ${mix(c.router_verdict)}</span>
       <span>corpus: ${esc(c.source_corpora || "")}</span>
-      ${verdictMix(rows)} ${prov}
+      ${verdictMix(rows)}`) + `
+      ${basis} ${prov}
     </div>`;
   const strip = `<div class="wstrip">` +
     (c.witness_strip || []).map(witHtml).join("") + `</div>`;
@@ -2345,10 +2431,16 @@ function rowHtml(x){
   }
   // Two separate elements, never one concatenated string, and the title verbatim
   // in one language. Absent on 19,786 rows -- render nothing at all.
+  // 44,432 rows have NO catalogue line. Rendering nothing made that
+  // indistinguishable from a field that was never captured -- and the whole
+  // novelty axis is measured against the catalogue, so its silence is a fact
+  // the reader needs.
   const cat = x.catalogue_title
     ? `<div class="side gap-2 items-center flex-wrap"><span class="dnote">Catalogued as:</span>
        <span dir="auto" style="unicode-bidi:isolate">${esc(x.catalogue_title)}</span></div>`
-    : ``;
+    : `<div class="side gap-2 items-center flex-wrap"><span class="dnote"
+         title="No finding-aid entry for this manuscript reached this file. It is an absence of a record, not an unfilled column.">Catalogued as:
+         no catalogue record on file</span></div>`;
   // The citable address, on the card itself (the live findings page shows
   // its locus the same way). `whole_work` is not shown here -- its label is
   // the work title, which the card already leads with.
@@ -2883,6 +2975,7 @@ function renderChipBar(f){
     add("part of work: " + (S.locus_from || "start") + " → " + (S.locus_to || "end"),
         `S.locus_from='';S.locus_to='';apply()`);
   if (S.coverage) add("page coverage: " + ({lt10:"under 10%","10to30":"10–30%",
+      "30to40":"30–40%",
       "30to60":"30–60%","60to85":"60–85%",ge85:"85%+"}[S.coverage] || S.coverage),
       `clearAxis('coverage')`);
   if (S.corpus.size) add("corpus: " + [...S.corpus].map(v =>
@@ -3380,6 +3473,7 @@ class Handler(BaseHTTPRequestHandler):
             v = self._one(q, "coverage")
             bounds = {"lt10": "r.coverage_ppm < 100000",
                       "10to30": "r.coverage_ppm >= 100000 AND r.coverage_ppm < 300000",
+                      "30to40": "r.coverage_ppm >= 300000 AND r.coverage_ppm < 400000",
                       "30to60": "r.coverage_ppm >= 300000 AND r.coverage_ppm < 600000",
                       "60to85": "r.coverage_ppm >= 600000 AND r.coverage_ppm < 850000",
                       "ge85": "r.coverage_ppm >= 850000"}
@@ -3510,9 +3604,16 @@ class Handler(BaseHTTPRequestHandler):
         computed here and the raw code never crosses the wire, which makes a raw
         render impossible in the client rather than merely discouraged. An
         unmapped code becomes a neutral placeholder -- fail-closed.
+
+        The six text pieces also lose their STRUCTURAL markers here -- the same
+        display-only cleaning the live site applies to its own excerpt panes.
         """
         d = dict(row)
         d["corpus_label"] = corpus_label(d.pop("source_corpus", None))
+        for k in ("ms_before", "ms_match", "ms_after",
+                  "ref_before", "ref_match", "ref_after"):
+            if k in d:
+                d[k] = clean_display_markers(d[k])
         return d
 
     # -- what the novelty gate actually read --------------------------------
@@ -4329,10 +4430,15 @@ class Handler(BaseHTTPRequestHandler):
         try:
             rows = self._query(
                 con, "export",
+                # A NOTE IS WORK TOO. Filtering on the verdict alone dropped
+                # every row where the reviewer typed a note while still
+                # deciding -- silent loss in exactly the "partial progress"
+                # flow the handoff note recommends this button for.
                 "SELECT %s FROM g.human_grade hg "
                 "JOIN facet_row r ON r.evidence_id = hg.evidence_id "
-                "WHERE hg.divergence_correctness IS NOT NULL "
-                "AND hg.divergence_correctness <> '' "
+                "WHERE (hg.divergence_correctness IS NOT NULL "
+                "       AND hg.divergence_correctness <> '') "
+                "   OR (hg.note IS NOT NULL AND TRIM(hg.note) <> '') "
                 "ORDER BY hg.graded_at"
                 % ", ".join("%s.%s" % f for f in self.EXPORT_FIELDS)).fetchall()
         finally:
@@ -4345,8 +4451,11 @@ class Handler(BaseHTTPRequestHandler):
                           ensure_ascii=False, indent=1).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        # named after the db it came from: three round sidecars coexist, and a
+        # file called v3-human-grades.json from the v5 artifact is a trap
+        stem = os.path.splitext(os.path.basename(self.db_path))[0]
         self.send_header("Content-Disposition",
-                         "attachment; filename=v3-human-grades.json")
+                         "attachment; filename=%s.grades.json" % stem)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -4488,6 +4597,35 @@ def main(argv=None) -> int:
     # the whole value of the grouped view is that it matches the public page,
     # and a mismatch that nobody is told about is worse than no control at all.
     _views_ok = check_novelty_views(say=lambda m: print(m, flush=True))
+
+    # WHICH SIDECAR, AND WHAT IS ALREADY IN IT. The grades file is derived from
+    # the db path, so relaunching against a moved or renamed copy silently
+    # attaches a FRESH, empty sidecar -- an hour of grading apparently gone,
+    # with nothing saying why. Name the path and the counts at every launch, so
+    # "starting fresh" can never be mistaken for "found my work".
+    _side = args.db + ".grades.db"
+    try:
+        _g = sqlite3.connect(_side)
+        _has = _g.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+            "AND name='human_grade'").fetchone()[0]
+        _graded = _noted = 0
+        if _has:
+            _graded = _g.execute(
+                "SELECT COUNT(*) FROM human_grade WHERE divergence_correctness "
+                "IS NOT NULL AND divergence_correctness <> ''").fetchone()[0]
+            _noted = _g.execute(
+                "SELECT COUNT(*) FROM human_grade WHERE note IS NOT NULL "
+                "AND TRIM(note) <> ''").fetchone()[0]
+        _g.close()
+        if _graded or _noted:
+            print("grades    : %s -- %d graded, %d with notes"
+                  % (_side, _graded, _noted), flush=True)
+        else:
+            print("grades    : %s -- STARTING FRESH (nothing graded in it yet)"
+                  % _side, flush=True)
+    except sqlite3.Error as _e:
+        print("grades    : could not read %s (%s)" % (_side, _e), flush=True)
 
     port = args.port
     if _port_is_taken(port):
