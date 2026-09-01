@@ -175,6 +175,143 @@ NOVELTY_VIEW_WARNING = (
 
 
 # ---------------------------------------------------------------------------
+# "View on Sefaria" -- a citation link for the canonical works
+# ---------------------------------------------------------------------------
+# A CONVENIENCE BESIDE THE ADDRESS, never instead of it (owner, 2026-09-01: the
+# important thing is the exact char mapping file to file). The link locates the
+# chapter or folio; it cannot locate the matched span, because our offsets index
+# our own files and Sefaria serves a different edition with its own numbering.
+#
+# Only the three families whose address maps EXACTLY are linked. Yerushalmi,
+# Tosefta and Mishneh Torah are left unlinked on purpose -- their numbering or
+# their section names do not correspond 1:1, and a link to the wrong passage is
+# worse than no link.
+_SEF_TANAKH = {
+    "בראשית": "Genesis", "שמות": "Exodus", "ויקרא": "Leviticus",
+    "במדבר": "Numbers", "דברים": "Deuteronomy", "יהושע": "Joshua",
+    "שופטים": "Judges", "שמואל א": "I_Samuel", "שמואל ב": "II_Samuel",
+    "מלכים א": "I_Kings", "מלכים ב": "II_Kings", "ישעיהו": "Isaiah",
+    "ירמיהו": "Jeremiah", "יחזקאל": "Ezekiel", "הושע": "Hosea",
+    "יואל": "Joel", "עמוס": "Amos", "עובדיה": "Obadiah", "יונה": "Jonah",
+    "מיכה": "Micah", "נחום": "Nahum", "חבקוק": "Habakkuk",
+    "צפניה": "Zephaniah", "חגי": "Haggai", "זכריה": "Zechariah",
+    "מלאכי": "Malachi", "תהלים": "Psalms", "משלי": "Proverbs",
+    "איוב": "Job", "שיר השירים": "Song_of_Songs", "רות": "Ruth",
+    "איכה": "Lamentations", "קהלת": "Ecclesiastes", "אסתר": "Esther",
+    "דניאל": "Daniel", "עזרא": "Ezra", "נחמיה": "Nehemiah",
+    "דברי הימים א": "I_Chronicles", "דברי הימים ב": "II_Chronicles",
+}
+# tractate names shared by Bavli and Mishnah; Mishnah takes a "Mishnah_" prefix
+_SEF_TRACTATE = {
+    "ברכות": "Berakhot", "שבת": "Shabbat", "עירובין": "Eruvin",
+    "פסחים": "Pesachim", "שקלים": "Shekalim", "יומא": "Yoma",
+    "סוכה": "Sukkah", "ביצה": "Beitzah", "ראש השנה": "Rosh_Hashanah",
+    "תענית": "Taanit", "מגילה": "Megillah", "מועד קטן": "Moed_Katan",
+    "חגיגה": "Chagigah", "יבמות": "Yevamot", "כתובות": "Ketubot",
+    "נדרים": "Nedarim", "נזיר": "Nazir", "סוטה": "Sotah",
+    "גיטין": "Gittin", "קידושין": "Kiddushin", "בבא קמא": "Bava_Kamma",
+    "בבא מציעא": "Bava_Metzia", "בבא בתרא": "Bava_Batra",
+    "סנהדרין": "Sanhedrin", "מכות": "Makkot", "שבועות": "Shevuot",
+    "עבודה זרה": "Avodah_Zarah", "הוריות": "Horayot", "זבחים": "Zevachim",
+    "מנחות": "Menachot", "חולין": "Chullin", "בכורות": "Bekhorot",
+    "ערכין": "Arakhin", "תמורה": "Temurah", "כריתות": "Keritot",
+    "מעילה": "Meilah", "תמיד": "Tamid", "מידות": "Middot",
+    "קינים": "Kinnim", "נידה": "Niddah", "אבות": "Pirkei_Avot",
+    "פאה": "Peah", "דמאי": "Demai", "כלאים": "Kilayim",
+    "שביעית": "Sheviit", "תרומות": "Terumot", "מעשרות": "Maasrot",
+    "מעשר שני": "Maaser_Sheni", "חלה": "Challah", "ערלה": "Orlah",
+    "ביכורים": "Bikkurim", "עדיות": "Eduyot", "כלים": "Kelim",
+    "אהלות": "Oholot", "נגעים": "Negaim", "פרה": "Parah",
+    "טהרות": "Tahorot", "מקואות": "Mikvaot", "מכשירין": "Makhshirin",
+    "זבים": "Zavim", "טבול יום": "Tevul_Yom", "ידים": "Yadayim",
+    "עוקצין": "Oktzin",
+}
+_GEM = {"א": 1, "ב": 2, "ג": 3, "ד": 4, "ה": 5, "ו": 6, "ז": 7, "ח": 8,
+        "ט": 9, "י": 10, "כ": 20, "ך": 20, "ל": 30, "מ": 40, "ם": 40,
+        "נ": 50, "ן": 50, "ס": 60, "ע": 70, "פ": 80, "ף": 80, "צ": 90,
+        "ץ": 90, "ק": 100, "ר": 200, "ש": 300, "ת": 400}
+
+
+def _gematria(tok):
+    """A Hebrew numeral to an int, or None.
+
+    "Every letter is a numeral letter" is NOT a usable test -- EVERY Hebrew
+    letter has a value, so that rule read \u05e9\u05dc\u05de\u05d4 as 375 and would have invented
+    an address. A Hebrew numeral is written in NON-INCREASING order of value,
+    so that is what is enforced: \u05e7\u05d9\u05d8 (100, 10, 9) parses; \u05e9\u05dc\u05de\u05d4 (300, 30, 40, 5
+    -- 40 follows 30) does not. Call sites bound the result to what a chapter
+    or a folio can actually be.
+    """
+    tok = (tok or "").replace("\u05f3", "").replace("'", "").replace(
+        "\u05f4", "").replace('"', "").strip()
+    if not tok:
+        return None
+    n, prev = 0, None
+    for ch in tok:
+        v = _GEM.get(ch)
+        if v is None:
+            return None
+        if prev is not None and v > prev:
+            return None      # a word made of numeral letters, not a numeral
+        prev = v
+        n += v
+    return n or None
+
+
+#: Beyond these a "numeral" was a word that happened to descend. Psalms 150 is
+#: the largest chapter in the canon; Bavli folios stop well under 200.
+_MAX_CHAPTER = 150
+_MAX_FOLIO = 200
+
+
+def sefaria_ref(work_title, locus_label):
+    """(url, human_label) for a canonical work with a resolvable address, else
+    (None, None). Never guesses: an unmapped book or an unparsable locus yields
+    no link at all."""
+    if not work_title or not locus_label:
+        return None, None
+    title, locus = work_title.strip(), locus_label.strip()
+    if ", " not in title:
+        return None, None
+    fam, book = title.split(", ", 1)
+    fam, book = fam.strip(), book.strip()
+    slug = chap = None
+    if fam in ("\u05ea\u05e0\u05f4\u05da", '\u05ea\u05e0"\u05da'):
+        slug = _SEF_TANAKH.get(book)
+        if slug and locus.startswith("\u05e4\u05e8\u05e7 "):
+            # a range ("פרק א–ב") links to its first chapter
+            first = locus[4:].split("\u2013")[0].split("-")[0]
+            chap = _gematria(first)
+            if chap and chap > _MAX_CHAPTER:
+                chap = None
+    elif fam in ("\u05ea\u05dc\u05de\u05d5\u05d3 \u05d1\u05d1\u05dc\u05d9",):
+        slug = _SEF_TRACTATE.get(book)
+        parts = locus.split()
+        if slug and len(parts) == 2:
+            folio = _gematria(parts[0])
+            if folio and folio > _MAX_FOLIO:
+                folio = None
+            side = parts[1].replace("\u05f4", '"')
+            if folio and side in ('\u05e2"\u05d0', '\u05e2"\u05d1'):
+                return ("https://www.sefaria.org/%s.%d%s"
+                        % (slug, folio, "a" if side.endswith("\u05d0") else "b"),
+                        "%s %d%s" % (slug.replace("_", " "), folio,
+                                     "a" if side.endswith("\u05d0") else "b"))
+        return None, None
+    elif fam == "\u05de\u05e9\u05e0\u05d4":
+        t = _SEF_TRACTATE.get(book)
+        slug = ("Mishnah_" + t) if t and t != "Pirkei_Avot" else t
+        if slug and locus.startswith("\u05e4\u05e8\u05e7 "):
+            chap = _gematria(locus[4:].split("\u2013")[0].split("-")[0])
+            if chap and chap > _MAX_CHAPTER:
+                chap = None
+    if not slug or not chap:
+        return None, None
+    return ("https://www.sefaria.org/%s.%d" % (slug, chap),
+            "%s %d" % (slug.replace("_", " "), chap))
+
+
+# ---------------------------------------------------------------------------
 # Structural markers inside the text
 # ---------------------------------------------------------------------------
 # Owner, 2026-09-01: the live site already handles these. Its rule lives in
@@ -2489,8 +2626,20 @@ function rowHtml(x){
 // neither closes the other: the text pane is the grading instrument and the
 // folio pane is the confirmation step, so sharing one region would hide the
 // manuscript text at exactly the moment the reviewer is comparing them.
-function pane(kind, id, title, b, m, a, isStream){
-  return `<div class="pane"><h4><span>${esc(title)}</span>
+// the citation link sits with the REFERENCE pane's heading, next to the
+// address, so it reads as one more way to reach the text -- not as the address
+function sefariaLink(x){
+  if (!x.sefaria_url) return ``;
+  return ` <a href="${esc(x.sefaria_url)}" target="_blank" rel="noopener"
+    title="Open ${esc(x.sefaria_label)} on Sefaria. It locates the chapter or
+folio, NOT the matched span: the character offsets on this row index our own
+source file, and Sefaria serves a different edition with its own numbering."
+    >Sefaria \u2197</a>`;
+}
+// `extra` is TRUSTED HTML built server-side or by sefariaLink() -- the title
+// itself is still escaped, so a corpus label can never inject markup
+function pane(kind, id, title, b, m, a, isStream, extra){
+  return `<div class="pane"><h4><span>${esc(title)}</span>${extra || ``}
     ${isStream?'<span class="stream">[unspaced letter stream]</span>':''}
     <button class="fchip" onclick="copyPane('${id}','${kind}',this)">copy</button></h4>
     <div class="txt" dir="rtl"><span class="ctx">${esc(b)}</span><mark>${esc(m)}</mark><span class="ctx">${esc(a)}</span></div></div>`;
@@ -2499,7 +2648,8 @@ function panes(x){
   return pane("ms", x.evidence_id, "Manuscript",
               x.ms_before, x.ms_match, x.ms_after, false) +
          pane("ref", x.evidence_id, "Reference edition — " + x.corpus_label,
-              x.ref_before, x.ref_match, x.ref_after, x.ref_is_stream);
+              x.ref_before, x.ref_match, x.ref_after, x.ref_is_stream,
+              sefariaLink(x));
 }
 // ---- pane C: what the novelty gate read, DEFAULT CLOSED ------------------
 // The row's "Catalogued as:" line is libraries.csv column 7 ALONE; the gate
@@ -3614,6 +3764,9 @@ class Handler(BaseHTTPRequestHandler):
                   "ref_before", "ref_match", "ref_after"):
             if k in d:
                 d[k] = clean_display_markers(d[k])
+        url, label = sefaria_ref(d.get("work_title"), d.get("locus_label"))
+        if url:
+            d["sefaria_url"], d["sefaria_label"] = url, label
         return d
 
     # -- what the novelty gate actually read --------------------------------
