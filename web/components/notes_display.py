@@ -13,10 +13,10 @@ Supports:
 import logging
 import re
 import asyncio
-from nicegui import ui
+from nicegui import run, ui
 from web.translations import tr
 from web.auth_state import GlobalAuthState
-from web.supabase_client import get_comments
+from web.supabase_client import get_comments, get_user_client
 from web.components.translate_button import detect_language, translate_text
 from typing import Optional, List
 
@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 # Pattern to match shelfmark mentions: [[shelfmark:xxx|id:yyy]]
 SHELFMARK_MENTION_PATTERN = re.compile(r'\[\[shelfmark:([^\]|]+)\|id:([^\]]+)\]\]')
+_CONTEXT_UNSET = object()
 
 
 def render_content_with_mentions(content: str, container_classes: str = '', container_style: str = '', show_translate: bool = False):
@@ -167,7 +168,14 @@ def render_content_with_mentions(content: str, container_classes: str = '', cont
     return text_element
 
 
-def fetch_document_comments(document_id: str, page_number: int = None, ie_id: str = None) -> List[dict]:
+def fetch_document_comments(
+    document_id: str,
+    page_number: int = None,
+    ie_id: str = None,
+    *,
+    client=None,
+    user_id=_CONTEXT_UNSET,
+) -> List[dict]:
     """
     Fetch comments for a document.
 
@@ -181,12 +189,24 @@ def fetch_document_comments(document_id: str, page_number: int = None, ie_id: st
     """
     try:
         # Get public comments for this document
-        comments = get_comments(sys_id=document_id, is_public=True, ie_id=ie_id)
+        comments = get_comments(
+            sys_id=document_id,
+            is_public=True,
+            ie_id=ie_id,
+            client=client,
+        )
 
         # Also get user's private comments if logged in
-        user_id = GlobalAuthState.get_user_id()
+        if user_id is _CONTEXT_UNSET:
+            user_id = GlobalAuthState.get_user_id()
         if user_id:
-            private_comments = get_comments(sys_id=document_id, author_id=user_id, is_public=False, ie_id=ie_id)
+            private_comments = get_comments(
+                sys_id=document_id,
+                author_id=user_id,
+                is_public=False,
+                ie_id=ie_id,
+                client=client,
+            )
             comments.extend(private_comments)
 
         # Sort by created_at
@@ -221,6 +241,28 @@ def fetch_document_comments(document_id: str, page_number: int = None, ie_id: st
         return []
 
 
+async def fetch_document_comments_async(
+    document_id: str,
+    page_number: int = None,
+    ie_id: str = None,
+) -> List[dict]:
+    """Fetch comments off the event loop without losing the user's auth context."""
+    # NiceGUI's user storage is context-bound and is not available inside an
+    # io_bound worker. Resolve both values on the event loop, then pass plain
+    # captured values into the blocking Supabase reader.
+    user_id = GlobalAuthState.get_user_id()
+    client = get_user_client()
+    return await run.io_bound(
+        lambda: fetch_document_comments(
+            document_id,
+            page_number,
+            ie_id=ie_id,
+            client=client,
+            user_id=user_id,
+        )
+    )
+
+
 def create_notes_panel(
     document_id: str,
     page_number: Optional[int] = None,
@@ -248,13 +290,14 @@ def create_notes_panel(
     with panel:
         notes_container = ui.column().classes('w-full gap-2 p-2')
 
-        def load_notes():
+        async def load_notes():
             """Load and display notes."""
+            comments = await fetch_document_comments_async(
+                document_id, page_number, ie_id=ie_id
+            )
             notes_container.clear()
 
             with notes_container:
-                comments = fetch_document_comments(document_id, page_number, ie_id=ie_id)
-
                 if not comments:
                     with ui.row().classes('w-full justify-center p-4'):
                         ui.label(tr('No comments yet')).classes('text-sm').style('color: var(--text-muted);')
@@ -262,15 +305,15 @@ def create_notes_panel(
                     for comment in comments:
                         create_comment_card(comment)
 
-        def refresh_and_expand():
+        async def refresh_and_expand():
             """Refresh notes and expand the panel to show new content."""
             panel.value = True  # Expand the panel
-            load_notes()
+            await load_notes()
 
         # Load on expansion
-        def on_expand(e):
+        async def on_expand(e):
             if e.args:
-                load_notes()
+                await load_notes()
 
         panel.on('update:model-value', on_expand)
 
@@ -379,7 +422,10 @@ def create_notes_button(
     container = ui.element('div').classes('relative inline-block')
 
     with container:
-        def show_notes_dialog():
+        async def show_notes_dialog():
+            comments = await fetch_document_comments_async(
+                document_id, page_number, ie_id=ie_id
+            )
             dialog = ui.dialog()
 
             with dialog, ui.card().classes('w-96 max-h-96'):
@@ -389,8 +435,6 @@ def create_notes_button(
 
                 with ui.scroll_area().classes('w-full').style('height: 300px;'):
                     with ui.column().classes('w-full gap-2 p-4'):
-                        comments = fetch_document_comments(document_id, page_number, ie_id=ie_id)
-
                         if not comments:
                             with ui.row().classes('w-full justify-center'):
                                 ui.label(tr('No comments yet')).classes('text-sm').style('color: var(--text-muted);')
@@ -412,23 +456,27 @@ def create_notes_button(
         )
 
         # Check for comments and show indicator
-        def check_comments():
+        async def check_comments():
             try:
-                comments = fetch_document_comments(document_id, page_number, ie_id=ie_id)
+                comments = await fetch_document_comments_async(
+                    document_id, page_number, ie_id=ie_id
+                )
                 if comments:
                     indicator.style(add='display: block;')
                     btn.style(add='color: #f59e0b;')
-            except Exception as e:
+            except Exception:
                 pass  # Silently ignore errors in background check
 
-        def _safe_check():
+        async def _safe_check():
             try:
-                check_comments()
+                await check_comments()
             except RuntimeError:
                 pass  # Parent element was deleted (NiceGUI timer lifecycle)
 
         # Use call_later instead of ui.timer to avoid parent_slot RuntimeError
         # when content_container.clear() destroys the timer's parent element
-        asyncio.get_event_loop().call_later(0.1, _safe_check)
+        asyncio.get_event_loop().call_later(
+            0.1, lambda: asyncio.create_task(_safe_check())
+        )
 
     return container

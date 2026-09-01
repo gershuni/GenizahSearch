@@ -4,6 +4,28 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## Unreleased - 2026-09-01
+
+### Fixed — crawler-triggered `/browse` outage (web, 2026-08-31)
+
+- **Anonymous browse requests no longer rewrite the shared recent-history
+  store.** The anonymous session used the process-wide local lists store, so
+  recording every viewed manuscript caused cross-user history leakage and a
+  backup plus multi-megabyte pickle rewrite on the single event-loop thread.
+  Recent manuscripts are now persisted only for signed-in users.
+- **Notes and version reads no longer block every concurrent web request.**
+  Comment, approved-correction, and pending-correction Supabase/PostgREST reads
+  now capture the current authentication context before running in an I/O
+  worker. Slow upstream responses therefore do not freeze the event loop or
+  prevent the server from accepting unrelated requests.
+- **Added regression coverage** for anonymous and authenticated browse-history
+  behavior, authentication-context propagation, and event-loop offloading for
+  notes and version data.
+- **Production mitigation:** nginx now rejects the exact anonymous crawler
+  signature that triggered the corpus-wide sweep. The independent synchronous
+  connected-fragments fetch remains tracked in `docs/OPEN_ISSUES.md` and is not
+  claimed as fixed here.
+
 ## [9.1.0] - 2026-08-27
 
 ### Desktop — Several Witnesses of One Work

@@ -844,8 +844,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 # Sync browser URL bar for sharing/bookmarking
                 _update_browser_url()
 
-                # Track recently viewed item
-                if state.sys_id and service.is_ready:
+                # Anonymous web traffic shares the process-wide local lists store;
+                # persisting recents there causes cross-user leakage and blocking
+                # whole-file rewrites on every uncached browse request.
+                if state.sys_id and service.is_ready and GlobalAuthState.is_logged_in():
                     try:
                         from web.state import state as app_state
                         if app_state.lists_mgr:

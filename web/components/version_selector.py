@@ -11,7 +11,7 @@ Allows users to switch between different versions of a transcription:
 
 import asyncio
 import logging
-from nicegui import ui
+from nicegui import run, ui
 from web.translations import tr, get_language
 from web.supabase_client import get_corrections
 from web.auth_state import GlobalAuthState
@@ -29,12 +29,14 @@ logger = logging.getLogger(__name__)
 _FGP_COLOR = '#7c3aed'
 
 
-def fetch_page_versions(sys_id: str, page_num: int = 1) -> dict:
+def fetch_page_versions(sys_id: str, page_num: int = 1, *, client=None) -> dict:
     """Fetch all versions for a page from Supabase corrections."""
     default_response = {'all_versions': [], 'current_default': None, 'total': 0}
     try:
         # Get approved corrections for this document/page
-        corrections = get_corrections(sys_id=sys_id, status='approved')
+        corrections = get_corrections(
+            sys_id=sys_id, status='approved', client=client
+        )
         if page_num:
             corrections = [c for c in corrections if c.get('page_number') == page_num]
 
@@ -70,10 +72,14 @@ def fetch_page_versions(sys_id: str, page_num: int = 1) -> dict:
         return default_response
 
 
-def fetch_document_corrections(document_id: str, page_number: int = None) -> List[dict]:
+def fetch_document_corrections(
+    document_id: str, page_number: int = None, *, client=None
+) -> List[dict]:
     """Fetch approved corrections for a document from Supabase."""
     try:
-        corrections = get_corrections(sys_id=document_id, status='approved')
+        corrections = get_corrections(
+            sys_id=document_id, status='approved', client=client
+        )
         if page_number is not None:
             corrections = [c for c in corrections if c.get('page_number') == page_number]
 
@@ -94,6 +100,42 @@ def fetch_document_corrections(document_id: str, page_number: int = None) -> Lis
     except Exception as e:
         logger.error("Error fetching corrections: %s", e)
         return []
+
+
+async def fetch_page_versions_async(sys_id: str, page_num: int = 1) -> dict:
+    """Fetch approved versions off-loop with a client captured on-loop."""
+    reader_client = get_user_client()
+    return await run.io_bound(
+        lambda: fetch_page_versions(sys_id, page_num, client=reader_client)
+    )
+
+
+async def fetch_version_menu_data_async(
+    document_id: str, page_number: int
+) -> tuple[List[dict], List[dict]]:
+    """Fetch approved and current-user pending corrections off the event loop."""
+    is_authenticated = GlobalAuthState.is_logged_in()
+    user_id = GlobalAuthState.get_user_id() if is_authenticated else None
+    reader_client = get_user_client()
+
+    def _read():
+        corrections = fetch_document_corrections(
+            document_id, page_number, client=reader_client
+        )
+        pending_corrections = []
+        if is_authenticated and user_id:
+            try:
+                pending_corrections = get_pending_corrections_for_page(
+                    client=reader_client,
+                    sys_id=document_id,
+                    page_number=page_number,
+                    user_id=user_id,
+                )
+            except Exception as e:
+                logger.error("Error fetching pending corrections: %s", e)
+        return corrections, pending_corrections
+
+    return await run.io_bound(_read)
 
 
 def create_version_selector(
@@ -151,7 +193,7 @@ def create_version_selector(
             'color: var(--text-secondary);'
         )
 
-        def load_and_apply_latest():
+        async def load_and_apply_latest():
             """Load versions and apply the latest/default one."""
             # If multi-source available, use first edition as default
             if all_sources:
@@ -226,7 +268,9 @@ def create_version_selector(
                 return
 
             # Fall back to user corrections or V0.8
-            versions_data = fetch_page_versions(document_id, page_number)
+            versions_data = await fetch_page_versions_async(
+                document_id, page_number
+            )
             current_default = versions_data.get('current_default')
 
             if current_default:
@@ -240,39 +284,29 @@ def create_version_selector(
             else:
                 version_label.text = 'V0.8'
 
-        def _safe_load():
+        async def _safe_load():
             try:
-                load_and_apply_latest()
+                await load_and_apply_latest()
             except RuntimeError:
                 pass  # Parent element was deleted (NiceGUI timer lifecycle)
 
         # Use call_later instead of ui.timer to avoid parent_slot RuntimeError
         # when content_container.clear() destroys the timer's parent element
-        asyncio.get_event_loop().call_later(0.1, _safe_load)
+        asyncio.get_event_loop().call_later(
+            0.1, lambda: asyncio.create_task(_safe_load())
+        )
 
         with ui.button(icon='history').props(f'flat dense size={size}').tooltip(tr('Version History')) as btn:
             menu = ui.menu()
             with menu:
                 ui.menu_item(tr('Loading...')).props('disable')
 
-            def load_versions():
-                # Load corrections from Supabase
-                corrections = fetch_document_corrections(document_id, page_number)
-
-                # Fetch pending corrections for logged-in user
-                pending_corrections = []
-                if GlobalAuthState.is_logged_in():
-                    try:
-                        user_client = get_user_client()
-                        user_id = GlobalAuthState.get_user_id()
-                        pending_corrections = get_pending_corrections_for_page(
-                            client=user_client,
-                            sys_id=document_id,
-                            page_number=page_number,
-                            user_id=user_id
-                        )
-                    except Exception as e:
-                        logger.error("Error fetching pending corrections: %s", e)
+            async def load_versions():
+                corrections, pending_corrections = (
+                    await fetch_version_menu_data_async(
+                        document_id, page_number
+                    )
+                )
 
                 # Rebuild the menu
                 menu.clear()
