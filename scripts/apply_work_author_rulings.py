@@ -28,6 +28,7 @@ Then rebuild what reads authors: build_work_registry.py, attach_review_cards.py.
 import argparse
 import csv
 import os
+import re
 import sqlite3
 import sys
 
@@ -66,6 +67,26 @@ class GateError(SystemExit):
     pass
 
 
+_GERSHAYIM = re.compile(r"(?<=[֐-ת])\"(?=[֐-ת])")
+_GERESH = re.compile(r"(?<=[֐-ת])'")
+
+
+def normalize_hebrew_quotes(s):
+    """ASCII quotes typed on a keyboard -> the corpus's gershayim/geresh.
+
+    The canonical author form here is "full name + acronym" with HEBREW
+    gershayim -- רמב״ם, not רמב"ם -- and `attach_author_authority.VARIANTS`
+    already exists to map the ASCII spellings onto the Hebrew ones. So an
+    edited cell typed as ראב"ש is the same name as ראב״ש, and storing it
+    verbatim would put two spellings of one person in a db whose whole author
+    authority is "one string per person". Only quotes BETWEEN Hebrew letters
+    (or a geresh after one) are touched; nothing else in the string is.
+    """
+    if not s:
+        return s
+    return _GERESH.sub("׳", _GERSHAYIM.sub("״", s))
+
+
 def _read_csv(path):
     """Read the edited export.
 
@@ -89,15 +110,22 @@ def _read_csv(path):
             if not wid:
                 continue
             drop = (r.get("DROP_AUTHOR") or "").strip() in TRUTHY
-            author = (r.get("NEW_AUTHOR") or "").strip()
-            title = (r.get("NEW_TITLE") or "").strip()
+            author = normalize_hebrew_quotes((r.get("NEW_AUTHOR") or "").strip())
+            title = normalize_hebrew_quotes((r.get("NEW_TITLE") or "").strip())
             old_cols = bool(drop or author or title)
             edit_author = edit_title = None
             if in_place:
-                cell_a = (r.get("work_author") or "").strip()
-                cell_t = (r.get("work_title") or "").strip()
-                base_a = (r.get("ORIG_AUTHOR") or "").strip()
-                base_t = (r.get("ORIG_TITLE") or "").strip()
+                cell_a = normalize_hebrew_quotes(
+                    (r.get("work_author") or "").strip())
+                cell_t = normalize_hebrew_quotes(
+                    (r.get("work_title") or "").strip())
+                # BOTH sides normalized, or a stored value that itself uses
+                # ASCII quotes would read as an edit on every cycle and the
+                # export/apply loop would invent changes nobody made
+                base_a = normalize_hebrew_quotes(
+                    (r.get("ORIG_AUTHOR") or "").strip())
+                base_t = normalize_hebrew_quotes(
+                    (r.get("ORIG_TITLE") or "").strip())
                 if cell_a != base_a:
                     edit_author = cell_a          # "" means: clear the author
                 if cell_t != base_t:
@@ -133,7 +161,7 @@ def _read_csv(path):
     return out
 
 
-def apply(db_path, rulings=None, csv_path=None, say=print):
+def apply(db_path, rulings=None, csv_path=None, say=print, dry_run=False):
     source = "csv" if csv_path else "code"
     rulings = _read_csv(csv_path) if csv_path else dict(rulings or RULINGS)
     if not rulings:
@@ -179,6 +207,34 @@ def apply(db_path, rulings=None, csv_path=None, say=print):
                 raise GateError(
                     f"{len(stale)} row(s) corrected against an author the db no "
                     "longer carries -- re-export and redo those rows")
+        # what this file would do, in the reader's own terms, BEFORE any write:
+        # an author cleared, corrected, or supplied where there was none are
+        # three different acts and are counted as three
+        kinds = {"author cleared": [], "author changed": [],
+                 "author added": [], "title changed": []}
+        for wid, r in sorted(rulings.items()):
+            title_now, author_now = live[wid]
+            if r.get("drop_author") and author_now is not None:
+                kinds["author cleared"].append((wid, author_now, None))
+            elif r.get("author") and r["author"] != author_now:
+                kinds["author added" if not author_now
+                      else "author changed"].append(
+                          (wid, author_now, r["author"]))
+            if r.get("title") and r["title"] != title_now:
+                kinds["title changed"].append((wid, title_now, r["title"]))
+        for k in ("author cleared", "author changed", "author added",
+                  "title changed"):
+            if not kinds[k]:
+                continue
+            say(f"{k}: {len(kinds[k])}")
+            for wid, old, new in kinds[k][:8]:
+                say(f"    {wid}: {old!r} -> {new!r}")
+            if len(kinds[k]) > 8:
+                say(f"    ... and {len(kinds[k]) - 8} more")
+        if dry_run:
+            say("DRY RUN -- nothing written")
+            return (len(kinds["author cleared"]) + len(kinds["author changed"])
+                    + len(kinds["author added"]), len(kinds["title changed"]))
         con.execute("BEGIN")
         con.execute(DDL)
         n_auth = n_title = 0
@@ -238,8 +294,10 @@ def main(argv=None):
     ap.add_argument("--csv", default=None,
                     help="an edited work_authors.csv (default: the RULINGS "
                          "recorded in this file)")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="report what the file would change and write nothing")
     args = ap.parse_args(argv)
-    apply(args.db, csv_path=args.csv)
+    apply(args.db, csv_path=args.csv, dry_run=args.dry_run)
     return 0
 
 

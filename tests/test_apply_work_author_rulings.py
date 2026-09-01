@@ -9,7 +9,8 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "scripts"))
-from apply_work_author_rulings import GateError, apply  # noqa: E402
+from apply_work_author_rulings import (  # noqa: E402
+    GateError, apply, normalize_hebrew_quotes)
 from export_work_authors import COLUMNS, export, flag_of  # noqa: E402
 
 ROWS = [
@@ -141,7 +142,8 @@ def test_in_place_title_edit(tmp_path):
     _csv(out, rows)
     assert apply(db, csv_path=out, say=lambda *a: None) == (0, 1)
     got, ruled = state(db)
-    assert got["w2"][0].endswith('ל"ב מידות)') and got["w2"][3] == "owner_ruling"
+    # gershayim, not the ASCII quote typed into the cell
+    assert got["w2"][0].endswith("ל״ב מידות)") and got["w2"][3] == "owner_ruling"
     assert ruled[("w2", "title")][0] == "משנת רבי אליעזר"
 
 
@@ -255,3 +257,43 @@ def test_export_flags_are_not_noisy():
     assert flag_of("תשובות על דונש",
                    "תלמידי מנחם בן סרוק") == "relation_to_person"
     assert flag_of("ספר כלשהו", "") == ""
+
+
+def test_ascii_quotes_normalize_to_gershayim():
+    """The owner types ראב"ש on a keyboard; the corpus spells it ראב״ש, and the
+    author authority's whole point is one string per person."""
+    n = normalize_hebrew_quotes
+    assert n('אברהם בן שלמה (ראב"ש)') == "אברהם בן שלמה (ראב״ש)"
+    assert n('רמב"ם') == "רמב״ם"
+    assert n("ר' יוסף") == "ר׳ יוסף"
+    assert n('פירוש לעשרת הדיברות(?)') == "פירוש לעשרת הדיברות(?)"
+    # a quote NOT between Hebrew letters is left alone
+    assert n('X"Y') == 'X"Y'
+    assert n('"פתיחה') == '"פתיחה'
+    assert n("") == "" and n(None) is None
+
+
+def test_edited_cell_is_normalized_before_storing(tmp_path):
+    db = make_db(str(tmp_path / "n.db"))
+    out = str(tmp_path / "wa.csv")
+    rows = _exported(db, out)
+    for r in rows:
+        if r["work_id"] == "w2":
+            r["work_author"] = 'אברהם בן שלמה (ראב"ש)'
+    _csv(out, rows)
+    apply(db, csv_path=out, say=lambda *a: None)
+    got, _ = state(db)
+    assert got["w2"][1] == "אברהם בן שלמה (ראב״ש)"
+
+
+def test_stored_ascii_quotes_do_not_read_as_edits(tmp_path):
+    """A db value that itself uses ASCII quotes must not look edited on every
+    cycle -- otherwise the loop invents changes nobody made."""
+    db = make_db(str(tmp_path / "q.db"),
+                 rows=[("e1", "wq", 'ספר של"ב', 'פלוני (רמב"ם)', None,
+                        "sefaria", None)])
+    out = str(tmp_path / "wa.csv")
+    _csv(out, _exported(db, out))
+    assert apply(db, csv_path=out, say=lambda *a: None) == (0, 0)
+    got, _ = state(db)
+    assert got["wq"][1] == 'פלוני (רמב"ם)'      # left exactly as it was

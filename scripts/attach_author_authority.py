@@ -77,7 +77,10 @@ VARIANTS = {
     # one-string-per-person merges where a fuller corpus form exists
     "רבינו יונה": "יונה בן אברהם (יונה גירונדי)",
     "אבן עזרא": "אברהם אבן עזרא",
-    'אברהם בן הרמב"ם': "רבי אברהם בן הרמב״ם",
+    # owner 2026-09-01 restyled this to name + acronym; the variant must point
+    # at the CURRENT canonical form or a re-run would revert the ruling
+    'אברהם בן הרמב"ם': "אברהם בן הרמב״ם (ראב״ם)",
+    "רבי אברהם בן הרמב״ם": "אברהם בן הרמב״ם (ראב״ם)",
     "רבינו גרשום": "רבנו גרשום בן יהודה מאור הגולה",
     # his Torah commentary; NOT the חובות הלבבות Bahya (בחיי אבן פקודה)
     "רבינו בחיי": "בחיי בן אשר",

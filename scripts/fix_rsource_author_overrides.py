@@ -30,10 +30,12 @@ OVERRIDES = {
     "rs039d56a5ad4f": (None, None),
     # תלמידי הרשב"א: same pattern
     "rsd91ddad50fc1": (None, None),
-    # רבי אברהם בן הרמב"ם is the AUTHOR named by these titles, not רמב"ם
-    "rsf75c30530030": ("רבי אברהם בן הרמב״ם", "from_title"),
-    "rs86b18b09c3c0": ("רבי אברהם בן הרמב״ם", "from_title"),
-    "rsb73a28f86fbf": ("רבי אברהם בן הרמב״ם", "from_title"),
+    # אברהם בן הרמב"ם is the AUTHOR named by these titles, not רמב"ם.
+    # Restyled to name + acronym and relabelled owner_ruling (owner
+    # 2026-09-01); the from_title label was retired with the derivation.
+    "rsf75c30530030": ("אברהם בן הרמב״ם (ראב״ם)", "owner_ruling"),
+    "rs86b18b09c3c0": ("אברהם בן הרמב״ם (ראב״ם)", "owner_ruling"),
+    "rsb73a28f86fbf": ("אברהם בן הרמב״ם (ראב״ם)", "owner_ruling"),
     # מכלול: owner ruling 2026-08-31
     "rs01ec1e799568": ("רד״ק", "owner_ruling"),
     # איסור והיתר לרש"י stays רש"י (owner: "I would stick with רש\"י even
