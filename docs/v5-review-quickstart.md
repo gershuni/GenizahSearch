@@ -333,6 +333,19 @@ empty. Yours is the only signal. Grades save to a separate file
   table the other corpora use — 124 manuscripts have no shelfmark anywhere
   and show their system number instead.
 
+* **"No returned alignment" does not distinguish "searched and found nothing"
+  from "never searched".** The file records positives only: which witness
+  matched which page. Whether a given witness was ever *compared* against a
+  given page lives in the producers' run records, which were not exported here,
+  so the witness strip says the weaker, true thing rather than implying a
+  search it cannot prove happened.
+
+* **The counts beside each sidebar control are evidence-row counts, in card
+  grain too.** Card counts would need a `COUNT(DISTINCT card_id)` per axis:
+  4.1 s for one axis over 519,382 rows, so the ~15 axes would take about a
+  minute and the browser would abandon the response. The card total in the
+  result-bar header is exact; the sidebar says which grain its numbers are in.
+
 * **One row of 519,382 trips the automated name-screen.** It is a Hebrew word in
   a genuine Genizah transcription that happens to coincide with a restricted
   corpus name; the word occurs naturally in 5 of 667,411 pages. It is a

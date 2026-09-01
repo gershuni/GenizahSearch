@@ -354,3 +354,11 @@ skills/*/state/throttle.json
 # machine-local; added 2026-08-20 after a release-time `git add -A` would have staged
 # 3.6 GB of it from the repo root while a job was still writing to it.
 passage_index/
+
+# Work/author correction sheets for the private review artifact: generated from
+# the db by scripts/export_work_authors.py and scripts/report_author_issues.py,
+# edited by the owner, applied by scripts/apply_work_author_rulings.py. Every
+# applied ruling lives in the artifact's own `work_author_ruling` table, so
+# these files are working copies, not a record -- and they carry reference-work
+# titles, which do not belong in the repo.
+/work_authors*.csv

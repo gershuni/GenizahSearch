@@ -16,6 +16,11 @@ masking-scanned before the export is written; a hit stops the run.
 
 Tables:
   identification_row  -- one per review row (no text), incl. pool (triage)
+  card / card_member  -- one card per (page, known work) + its evidence rows
+  known_work          -- the deduped work identities (1,701 works -> 1,447)
+  known_work_member   -- which witness belongs to which identity, at what scope
+  known_work_assertion, work_relation
+                      -- identity claims with no evidence; non-identity links
   source_file         -- masked id -> kind + filename
   reference_witness   -- witness -> work + source file
   meta                -- provenance + the column documentation (doc.*)
@@ -162,9 +167,104 @@ def main(argv=None) -> int:
                           "FROM reference_witness"):
         cur.execute("INSERT INTO reference_witness VALUES (?,?,?,?)", tuple(r2))
 
+    # ---- the identity and card grains (2026-09-01) -------------------------
+    # Without these, an Access copy shows 1,701 works with no way to see that
+    # several of them are ONE work, and no way to ask a page-and-work question
+    # once. They are small (1,447 + 1,736 + 433,911 + 519,382 narrow rows) and
+    # carry no text, so they fit inside Access's 2 GB cap.
+    cur.execute("CREATE TABLE known_work ([kw_id] TEXT(32), [anchor] TEXT(255), "
+                "[title] LONGTEXT, [author] LONGTEXT, [author_basis] TEXT(32), "
+                "[title_basis] TEXT(32), [provisional] LONG, "
+                "[main_witness_work] TEXT(32), [main_witness_scope] LONGTEXT)")
+    for r2 in src.execute(
+            "SELECT kw_id, anchor, title, author, author_basis, title_basis, "
+            "provisional, main_witness_work, main_witness_scope FROM known_work"):
+        cur.execute("INSERT INTO known_work VALUES (?,?,?,?,?,?,?,?,?)",
+                    tuple(r2))
+    cur.execute("CREATE TABLE known_work_member ([kw_id] TEXT(32), "
+                "[work_id] TEXT(32), [scope] LONGTEXT, [scope_prefix] LONGTEXT, "
+                "[basis] TEXT(32), [route_basis] TEXT(32), "
+                "[evidence_rows] LONG)")
+    for r2 in src.execute(
+            "SELECT kw_id, work_id, scope, scope_prefix, basis, route_basis, "
+            "evidence_rows FROM known_work_member"):
+        cur.execute("INSERT INTO known_work_member VALUES (?,?,?,?,?,?,?)",
+                    tuple(r2))
+    cur.execute("CREATE TABLE work_relation ([work_a] TEXT(32), "
+                "[work_b] TEXT(32), [relation] TEXT(32), [note] LONGTEXT)")
+    for r2 in src.execute("SELECT work_a, work_b, relation, note "
+                          "FROM work_relation"):
+        cur.execute("INSERT INTO work_relation VALUES (?,?,?,?)", tuple(r2))
+    cur.execute("CREATE TABLE known_work_assertion ([kw_id] TEXT(32), "
+                "[work_id] TEXT(32), [note] LONGTEXT)")
+    for r2 in src.execute("SELECT kw_id, work_id, note "
+                          "FROM known_work_assertion"):
+        cur.execute("INSERT INTO known_work_assertion VALUES (?,?,?)", tuple(r2))
+    cur.execute("CREATE INDEX ix_kwm_kw ON known_work_member ([kw_id])")
+    cur.execute("CREATE INDEX ix_kwm_work ON known_work_member ([work_id])")
+    acc.commit()
+
+    have_cards = src.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+        "AND name='card_member'").fetchone()[0]
+    if have_cards:
+        card_cols = [(r2[1], r2[2]) for r2 in src.execute(
+            "PRAGMA table_info(card)")]
+        cddl = ", ".join("[%s] %s" % (c, access_type(c, t)) for c, t in card_cols)
+        cnames = [c for c, _ in card_cols]
+        cur.execute("CREATE TABLE card (%s)" % cddl)
+        cins = ("INSERT INTO card (%s) VALUES (%s)"
+                % (", ".join("[%s]" % c for c in cnames),
+                   ", ".join(["?"] * len(cnames))))
+        batch, n_c = [], 0
+        for row in src.execute("SELECT %s FROM card" % ", ".join(cnames)):
+            batch.append([row[i] for i in range(len(cnames))])
+            if len(batch) >= 2000:
+                cur.executemany(cins, batch)
+                n_c += len(batch)
+                batch = []
+        if batch:
+            cur.executemany(cins, batch)
+            n_c += len(batch)
+        acc.commit()
+        cur.execute("CREATE TABLE card_member ([evidence_id] TEXT(32), "
+                    "[card_id] TEXT(32), [work_id] TEXT(32), [scope] LONGTEXT, "
+                    "[scope_prefix] LONGTEXT, [member_basis] TEXT(32), "
+                    "[route_basis] TEXT(32))")
+        cmins = "INSERT INTO card_member VALUES (?,?,?,?,?,?,?)"
+        batch, n_m = [], 0
+        for row in src.execute(
+                "SELECT evidence_id, card_id, work_id, scope, scope_prefix, "
+                "member_basis, route_basis FROM card_member"):
+            batch.append(tuple(row))
+            if len(batch) >= 2000:
+                cur.executemany(cmins, batch)
+                n_m += len(batch)
+                batch = []
+        if batch:
+            cur.executemany(cmins, batch)
+            n_m += len(batch)
+        acc.commit()
+        cur.execute("CREATE INDEX ix_card_kw ON card ([kw_id])")
+        cur.execute("CREATE INDEX ix_cm_card ON card_member ([card_id])")
+        cur.execute("CREATE INDEX ix_cm_ev ON card_member ([evidence_id])")
+        # the same reconciliation the sqlite side gates on: every evidence row
+        # in exactly one card, and the card totals summing to it
+        want_c = src.execute("SELECT COUNT(*) FROM card").fetchone()[0]
+        want_m = src.execute("SELECT COUNT(*) FROM card_member").fetchone()[0]
+        if (n_c, n_m) != (want_c, want_m):
+            raise SystemExit("card export mismatch: %d/%d != %d/%d"
+                             % (n_c, n_m, want_c, want_m))
+        got_m = cur.execute("SELECT COUNT(*) FROM card_member").fetchone()[0]
+        if got_m != want:
+            raise SystemExit("card_member %d != review_row %d -- an evidence "
+                             "row is in no card or in two" % (got_m, want))
+        print("cards     : %d cards / %d members" % (n_c, n_m))
+
     cur.execute("CREATE TABLE meta ([meta_key] TEXT(255), [meta_value] LONGTEXT)")
     for k, v in src.execute("SELECT key, value FROM meta WHERE key LIKE 'doc.%' "
-                            "OR key LIKE 'rsource_%' OR key IN "
+                            "OR key LIKE 'rsource_%' OR key LIKE 'card_grain.%' "
+                            "OR key LIKE 'work_registry.%' OR key IN "
                             "('schema','rows','merged_at')"):
         cur.execute("INSERT INTO meta VALUES (?,?)", (k, str(v)))
     cur.execute("INSERT INTO meta VALUES (?,?)", (
