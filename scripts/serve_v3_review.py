@@ -959,6 +959,14 @@ button:hover{border-color:var(--primary-600)}
   border-radius:999px;line-height:1;display:flex;align-items:center;
   justify-content:center;color:var(--text-secondary)}
 
+/* the always-visible file+offsets line (provLine): quiet, monospaced, one
+   line per side, sitting directly under the two text panes */
+.gs-discovery .pvline{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:11.5px;
+  color:var(--text-secondary);padding:4px 0}
+.gs-discovery .pvline .pvside{display:inline-flex;gap:6px;align-items:baseline}
+.gs-discovery .pvline b{font-weight:700;color:var(--text-primary)}
+.gs-discovery .pvline .weak{opacity:.75}
+
 /* --- private E2: the CARD grain -------------------------------------------
    A card is a QUESTION ("is this page this work?"), so it reads as one block
    with its evidence indented inside it. Deliberately no new accent colour: the
@@ -2110,7 +2118,12 @@ function kwCardHtml(c){
     (c.witness_strip || []).map(witHtml).join("") + `</div>`;
   // the evidence stays one click away: a card is the question, the rows are
   // the answer's raw material, and each row keeps its own grade control
-  const open = rows.length <= 1 ? " open" : "";
+  // Open by default up to three rows: that is 98.4% of cards (379,331 hold one
+  // row, 35,916 two, 11,542 three), so the file+offsets line under each row is
+  // there without a click. Above that a card would flood the page -- the
+  // largest holds 22 rows -- so it stays collapsed with its count in the
+  // summary.
+  const open = rows.length <= 3 ? " open" : "";
   const ev = `<details class="kwev"${open}><summary>${num(rows.length)}
       ${rows.length === 1 ? "evidence row" : "evidence rows"} ·
       ${num(c.graded_rows || 0)} graded</summary>` +
@@ -2338,6 +2351,7 @@ function rowHtml(x){
     ${cautions.length ? `<div class="cautions">${cautions.join("")}</div>` : ``}
     <div class="cols" id="txt-${id}">${panes(x)}</div>
     <div class="dnote" id="txtnote-${id}">${esc(DOCS["doc.ms_match_vs_ref_match"])}</div>
+    ${provLine(x)}
     ${previewBtn ? `<div style="margin-block-start:6px">${previewBtn}</div>` : ``}
     <div class="prev" id="prev-${id}"></div>
     <details class="mdet"><summary>Sources &amp; provenance — files and
@@ -2459,6 +2473,41 @@ function toggleRead(id, btn){
 // has none of these columns; the block then says "not recorded" and nothing
 // else changes.
 function fmtN(v){ return (v === null || v === undefined) ? "?" : Number(v).toLocaleString("en-US"); }
+// The FILE AND CHARACTER RANGE of both sides, always visible on the row. This
+// is the thing the v5 artifact exists to carry, and it used to sit two clicks
+// down (a <details> plus a toggle) -- three in card grain, where the row is
+// itself inside the card's evidence <details>. The full block below still holds
+// the statuses, the witness id and the NFC caveat; this line holds the address.
+//
+// A masked corpus shows its CODENAME (RS:10.2.3), never a filename: the real
+// basename exists only in the local key file, outside this artifact.
+function provLine(x){
+  const n = v => (v === null || v === undefined) ? "?" : Number(v).toLocaleString("en-US");
+  const parts = [];
+  if (x.ms_provenance_status === "ok") {
+    parts.push(`<span class="pvside"><b>MS</b> <span class="mono">Transcriptions.txt
+      · chars ${n(x.file_char_start)}–${n(x.file_char_end)}</span></span>`);
+  } else if (x.page_char_start !== null && x.page_char_start !== undefined) {
+    parts.push(`<span class="pvside"><b>MS</b> <span class="mono">this page:
+      chars ${n(x.page_char_start)}–${n(x.page_char_end)}</span>
+      <span class="weak">· no corpus-file address</span></span>`);
+  }
+  const src = x.src;
+  const name = src ? (src.file || src.ref_id) : null;
+  if (name) {
+    const range = (x.ref_char_start !== null && x.ref_char_end !== null &&
+                   x.ref_char_start !== undefined)
+      ? `· chars ${n(x.ref_char_start)}–${n(x.ref_char_end)}`
+      : `· letter-stream ${n(x.w_start)}–${n(x.w_end)}`;
+    parts.push(`<span class="pvside"><b>Ref</b> <span class="mono">${esc(name)}
+      ${range}</span>` +
+      (src.masked ? ` <span class="weak">(codename)</span>` : ``) + `</span>`);
+  }
+  if (!parts.length) return ``;
+  return `<div class="pvline" title="The file each side was taken from and the
+    character range of the match inside it. Offsets count characters of the
+    NFC-normalized text, 0-based, end exclusive.">${parts.join("")}</div>`;
+}
 function provBlock(x){
   const id = x.evidence_id;
   const hasMs = x.ms_provenance_status !== undefined && x.ms_provenance_status !== null;
