@@ -268,7 +268,8 @@ What changed, and what it means for reading:
   nothing the title did not. They now carry no author.
 * **Attribution notes are not authors.** "מיוחס לר' אליעזר בן הורקנוס (נתחבר
   במאות ה-8-9)" is a note about an attribution plus a dating; the five
-  פרקי (ד)רבי אליעזר works now carry no author.
+  פרקי (ד)רבי אליעזר works — five witnesses of one known work, across both
+  title spellings and all three corpora — now carry no author.
 * **"אנונימי" is not an author** either — it is the absence of one, and those
   works are now empty rather than asserting anonymity.
 * **862 of 1,701 works carry an author; 839 do not**, and that is mostly
@@ -379,6 +380,11 @@ is:
     identification_row.witness_id  ->  reference_witness.witness_id
     reference_witness.source_file_id  ->  source_file.filename
     then read ref_char_start .. ref_char_end in that file
+
+That route resolves **519,104 of the 519,382 rows** (99.95%); the 278 that do
+not are the Sefaria rows whose reference text came from a re-derived stream
+rather than a single file, and they say so (`ref_provenance_status =
+'stream_fallback'`).
 
 The manuscript side needs no lookup: those offsets are positions in
 `Transcriptions.txt` itself, and the viewer prints both addresses on every row.
