@@ -5,8 +5,8 @@ nothing to install beyond Python itself.
 
 | File | Size | What it is |
 |---|---|---|
-| `discovery-v5-REVIEW.db` | ~3.0 GB | The review set: **519,382** candidate identifications, each with both sides of the match — the manuscript text and the reference text — and now **where each side came from**. |
-| `serve_v3_review.py` | ~36 KB | A small local viewer for it. Python standard library only — no `pip install`. |
+| `discovery-v5-REVIEW.db` | ~3.5 GB | The review set: **519,382** candidate identifications — grouped into **433,911 cards**, one per page and work — each with both sides of the match, the manuscript text and the reference text, and **where each side came from**. |
+| `serve_v3_review.py` | ~220 KB | A small local viewer for it. Python standard library only — no `pip install`. |
 
 ## Run it
 
@@ -150,9 +150,106 @@ route it took (`both_agreed_correct`, `adjudicated`, `both_agreed_wrong_correcte
 or `unsure_using_catalogue`). This caught real errors — six unrelated works had
 all inherited the title "הלכות גדולות", and fifteen had no title at all.
 
+### 6. One question per page and work: **cards**
+
+A row in this file is one *alignment*. The same page and the same work can
+therefore appear several times, because a work has several witnesses — an
+R-source whole-work file and the base corpus's per-book works, two editions,
+two halves of one midrash. Asked as rows, you would judge the same question
+three or sixteen times.
+
+So the viewer opens in **card** grain: one card per (page, known work), with
+every witness's evidence beneath it. **519,382 evidence rows become 433,911
+cards** over 211,510 pages and 55,383 manuscripts; 54,583 cards (12.6%) hold
+more than one row, the largest 22. A `Cards / Evidence rows` toggle in the
+result bar switches grain at any time — the row view is unchanged from before.
+
+Nothing is merged and nothing is averaged:
+
+* Each card keeps **every** evidence row, with its raw `work_id`, which witness
+  it came from, and the offsets pointing at that witness's own file. The grade
+  buttons stay on the rows, so your grades key to evidence exactly as before.
+* Where a card's rows **disagree** — one says `confirms`, another
+  `diverges_work` — the card reads **mixed** rather than picking a side
+  (12,771 cards for novelty, 10,978 for pool, 5,592 for relation).
+* Where its rows cite **different addresses**, the card says how many rather
+  than choosing one ("13 addresses").
+* The header reports **three numbers, never one**: cards, the evidence rows
+  inside them, and manuscripts. The counts beside each sidebar control still
+  count evidence rows, and the sidebar says so.
+
+The **witness strip** under each card header is the honesty surface. Every
+witness of the known work is listed, aligned here or not:
+
+* **aligned here (n)** — this witness produced n of the card's rows.
+* **no returned alignment** — the engine ran this witness and returned nothing
+  for this page. That is *not* the same as the witness being irrelevant, and the
+  strip does not pretend to know which. 75,055 cards have at least one such
+  witness.
+* **not applicable here** — said **only** where the file can prove it: a
+  division-scoped witness of an anthology whose rows on this page belong to a
+  *different* division, where the divisions partition that container's rows.
+
+### 7. Works that are one work are now one identity
+
+1,701 corpus works resolve to **1,447 known works**, with 1,736 witness
+memberships. This is what lets a card ask its question once. The identity of
+each known work comes from exactly one source, recorded in `title_basis`:
+
+| basis | count | what decided it |
+|---|---|---|
+| `singleton` | 1,329 | nothing to merge |
+| `census_canonical` | 63 | the production reference-merge contract |
+| `cluster` | 20 | a same-work link between corpora |
+| `family` | 17 | a container file and its parts are one work |
+| `mint` | 9 | a named division with no work of its own to point at |
+| `work_group` | 5 | an owner ruling that two halves are one work |
+| `owner_merge` | 4 | an owner ruling this artifact carries on its own |
+
+Two things to read carefully:
+
+* **`work_relation` is not identity.** 16 pairs are recorded as
+  `shares_material` — works that share text without being the same work
+  (Tanchuma recensions, a reworking of ספר המצוות, geonic responsa shared
+  between collections). They were demoted from identity links by explicit
+  ruling; the viewer shows them as a chip, never as a merge.
+* **One known work is `provisional`** — minted from a routing nobody has ruled
+  on yet. It says so on the card.
+* `known_work_assertion` holds identity claims with **no evidence rows at all**
+  (one row: a census member absent from this artifact). It is never evidence and
+  never reaches a card.
+
+### 8. Authors and titles were corrected by hand
+
+The author column was rebuilt around one rule: **one canonical string per
+person**, in the form *full name + acronym* with Hebrew gershayim
+(`שלמה בן יצחק (רש״י)`). 215 owner rulings are recorded inside the file in
+`work_author_ruling` — the old value, the new one, and why — so nothing can
+quietly re-derive over a decision.
+
+What changed, and what it means for reading:
+
+* **No author is derived from a work's own title any more.** 37 works had one;
+  every single one repeated a name already spelled in its title, so it said
+  nothing the title did not. They now carry no author.
+* **Attribution notes are not authors.** "מיוחס לר' אליעזר בן הורקנוס (נתחבר
+  במאות ה-8-9)" is a note about an attribution plus a dating; the five
+  פרקי (ד)רבי אליעזר works now carry no author.
+* **"אנונימי" is not an author** either — it is the absence of one, and those
+  works are now empty rather than asserting anonymity.
+* **862 of 1,701 works carry an author; 839 do not**, and that is mostly
+  correct rather than incomplete — the largest are Bible books, which have no
+  author. An empty author is never "unknown author" on screen; the line simply
+  does not appear.
+
 ---
 
 ## What to do in it
+
+You are reading **cards** by default — one per (page, known work), each holding
+its witnesses' evidence (section 6). Everything below describes the filters and
+signals, which work the same in either grain; the `Cards / Evidence rows` toggle
+sits in the result bar if you want the old row-at-a-time view.
 
 **The first card sorts everything into four pools** — deliberately named so
 they claim nothing:

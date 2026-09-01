@@ -1619,6 +1619,20 @@ function renderSidebar(f){
   const out = [];
   const adv = [];   // the raw signals, collapsed under "Advanced" at the end
 
+  // In CARD grain the counts beside each control still count EVIDENCE ROWS,
+  // and a card can hold several. Making them count cards means a
+  // COUNT(DISTINCT card_id) per axis: measured at 4.1 s for one axis over
+  // 519,382 rows, so ~15 axes would take a minute and the browser would
+  // cancel the response -- which leaves every control empty with nothing
+  // saying why. The list header above carries the EXACT card total, so the
+  // honest fix is to say which grain these numbers are in rather than to
+  // approximate them.
+  if (CARDS_OK && S.grain === "card")
+    out.push(`<div class="dnote" style="padding:0 2px 4px">The counts beside
+      each control below count <b>evidence rows</b>; the header above counts
+      <b>cards</b>. A card holds one or more evidence rows, so the two differ
+      wherever a work has several witnesses on one page.</div>`);
+
   // CARD 0 -- THE POOLS (owner, 2026-08-30): the one sorting every other
   // control was circling. Bucket names deliberately claim nothing; the rule
   // is deterministic, recorded in the file, and shown in the tooltip.
