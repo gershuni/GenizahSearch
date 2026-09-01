@@ -297,3 +297,91 @@ def test_stored_ascii_quotes_do_not_read_as_edits(tmp_path):
     assert apply(db, csv_path=out, say=lambda *a: None) == (0, 0)
     got, _ = state(db)
     assert got["wq"][1] == 'פלוני (רמב"ם)'      # left exactly as it was
+
+
+ISSUE_COLUMNS = ("kind", "detail", "work_id", "work_title", "work_author",
+                 "source_corpus", "evidence_rows", "kw_id", "kw_title")
+
+
+def _issues(path, rows):
+    with open(path, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=ISSUE_COLUMNS)
+        w.writeheader()
+        for r in rows:
+            w.writerow({c: r.get(c, "") for c in ISSUE_COLUMNS})
+    return path
+
+
+def test_issues_report_can_be_filled_in(tmp_path):
+    """The report was meant to be read-only; the owner filled authors into it,
+    which is reasonable -- it IS the list of what is missing. The db is the
+    baseline there."""
+    db = make_db(str(tmp_path / "i1.db"),
+                 rows=[("e1", "wm", "ספר בלי מחבר", None, None, "sefaria",
+                        None),
+                       ("e2", "wk", "ספר אחר", "פלוני", None, "sefaria", None)])
+    out = _issues(str(tmp_path / "iss.csv"), [
+        dict(kind="missing_author", work_id="wm", work_title="ספר בלי מחבר",
+             work_author='אברהם בן שלמה (ראב"ש)'),
+        dict(kind="duplicate_person", work_id="wk", work_title="ספר אחר",
+             work_author="פלוני"),                    # untouched
+    ])
+    assert apply(db, csv_path=out, say=lambda *a: None) == (1, 0)
+    got, ruled = state(db)
+    assert got["wm"][1] == "אברהם בן שלמה (ראב״ש)"     # normalized on store
+    assert got["wk"][1] == "פלוני"                     # untouched stays put
+    assert ruled[("wm", "author")] == (None, "אברהם בן שלמה (ראב״ש)")
+
+
+def test_issues_report_untouched_is_a_no_op(tmp_path):
+    """Including the ascii_quotes rows: normalization must not turn a row the
+    owner never touched into an edit."""
+    db = make_db(str(tmp_path / "i2.db"),
+                 rows=[("e1", "wq", "ספר", 'פלוני (רמ"ה)', None, "sefaria",
+                        None)])
+    out = _issues(str(tmp_path / "iss.csv"), [
+        dict(kind="ascii_quotes", work_id="wq", work_title="ספר",
+             work_author='פלוני (רמ"ה)')])
+    assert apply(db, csv_path=out, say=lambda *a: None) == (0, 0)
+    got, _ = state(db)
+    assert got["wq"][1] == 'פלוני (רמ"ה)'
+
+
+def test_issues_retyped_with_gershayim_is_applied(tmp_path):
+    """...but retyping the SAME name with gershayim is a real correction and
+    must not be swallowed."""
+    db = make_db(str(tmp_path / "i3.db"),
+                 rows=[("e1", "wq", "ספר", 'פלוני (רמ"ה)', None, "sefaria",
+                        None)])
+    out = _issues(str(tmp_path / "iss.csv"), [
+        dict(kind="ascii_quotes", work_id="wq", work_title="ספר",
+             work_author="פלוני (רמ״ה)")])
+    assert apply(db, csv_path=out, say=lambda *a: None) == (1, 0)
+    got, _ = state(db)
+    assert got["wq"][1] == "פלוני (רמ״ה)"
+
+
+def test_issues_contradiction_refuses(tmp_path):
+    """A work appears once per kind, so two rows can disagree."""
+    db = make_db(str(tmp_path / "i4.db"),
+                 rows=[("e1", "wk", "ספר", "פלוני", None, "sefaria", None)])
+    out = _issues(str(tmp_path / "iss.csv"), [
+        dict(kind="duplicate_person", work_id="wk", work_title="ספר",
+             work_author="אלמוני"),
+        dict(kind="ascii_quotes", work_id="wk", work_title="ספר",
+             work_author="פלמוני")])
+    with pytest.raises(GateError, match="appears twice in the report"):
+        apply(db, csv_path=out, say=lambda *a: None)
+
+
+def test_issues_drifted_row_refuses(tmp_path):
+    """The report has no baseline of its own, so the row must still describe
+    the work it names."""
+    db = make_db(str(tmp_path / "i5.db"),
+                 rows=[("e1", "wk", "הכותרת החדשה", None, None, "sefaria",
+                        None)])
+    out = _issues(str(tmp_path / "iss.csv"), [
+        dict(kind="missing_author", work_id="wk",
+             work_title="הכותרת הישנה", work_author="פלוני")])
+    with pytest.raises(GateError, match="no longer describe the work"):
+        apply(db, csv_path=out, say=lambda *a: None)

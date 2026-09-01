@@ -104,6 +104,16 @@ def _read_csv(path):
         if "work_id" not in cols:
             raise GateError(f"{path} has no work_id column -- is it the file "
                             "scripts/export_work_authors.py writes?")
+        # The ISSUES report (scripts/report_author_issues.py) was meant to be
+        # read-only, and the owner filled authors into it anyway -- which is
+        # reasonable, since that file is the list of what is missing. It has no
+        # ORIG_* baseline, so the DB is the baseline: a cell that differs from
+        # what the db holds is the edit. Two guards replace the missing
+        # baseline -- the row's work_title must still match the db (else the row
+        # no longer describes that work), and one work_id may not appear twice
+        # with different values (the report repeats a work across its kinds).
+        if "kind" in cols and "ORIG_AUTHOR" not in cols:
+            return _read_issues_csv(rdr)
         in_place = "ORIG_AUTHOR" in cols or "ORIG_TITLE" in cols
         for i, r in enumerate(rdr, start=2):
             wid = (r.get("work_id") or "").strip()
@@ -115,26 +125,25 @@ def _read_csv(path):
             old_cols = bool(drop or author or title)
             edit_author = edit_title = None
             if in_place:
-                cell_a = normalize_hebrew_quotes(
-                    (r.get("work_author") or "").strip())
-                cell_t = normalize_hebrew_quotes(
-                    (r.get("work_title") or "").strip())
-                # BOTH sides normalized, or a stored value that itself uses
-                # ASCII quotes would read as an edit on every cycle and the
-                # export/apply loop would invent changes nobody made
-                base_a = normalize_hebrew_quotes(
-                    (r.get("ORIG_AUTHOR") or "").strip())
-                base_t = normalize_hebrew_quotes(
-                    (r.get("ORIG_TITLE") or "").strip())
+                # Compare the cells RAW and store the NORMALIZED value. Both
+                # halves matter: normalizing before the comparison would make a
+                # stored ASCII-quote value look edited on every cycle (phantom
+                # changes nobody made), while comparing normalized forms would
+                # SWALLOW an owner who retypes the same name with gershayim.
+                cell_a = (r.get("work_author") or "").strip()
+                cell_t = (r.get("work_title") or "").strip()
+                base_a = (r.get("ORIG_AUTHOR") or "").strip()
+                base_t = (r.get("ORIG_TITLE") or "").strip()
                 if cell_a != base_a:
-                    edit_author = cell_a          # "" means: clear the author
+                    # "" means: clear the author
+                    edit_author = normalize_hebrew_quotes(cell_a)
                 if cell_t != base_t:
                     if not cell_t:
                         raise GateError(
                             f"line {i} ({wid}): work_title was emptied. A work "
                             "must keep a title -- correct it instead of "
                             "clearing it.")
-                    edit_title = cell_t
+                    edit_title = normalize_hebrew_quotes(cell_t)
             if old_cols and (edit_author is not None or edit_title is not None):
                 raise GateError(
                     f"line {i} ({wid}): edited in place AND filled the "
@@ -161,6 +170,28 @@ def _read_csv(path):
     return out
 
 
+def _read_issues_csv(rdr):
+    """The issues report, edited: cell vs the DB is the diff (see _read_csv)."""
+    seen = {}
+    for i, r in enumerate(rdr, start=2):
+        wid = (r.get("work_id") or "").strip()
+        if not wid:
+            continue
+        cell = (r.get("work_author") or "").strip()   # raw; normalized on store
+        title = (r.get("work_title") or "").strip()
+        prev = seen.get(wid)
+        if prev is not None and prev["cell_author"] != cell:
+            raise GateError(
+                f"line {i} ({wid}): this work appears twice in the report with "
+                f"different authors ({prev['cell_author']!r} on line "
+                f"{prev['line']}, {cell!r} here) -- make them agree")
+        seen[wid] = dict(from_issues=True, cell_author=cell, seen_title=title,
+                         note=None, kw_author="", line=i,
+                         drop_author=False, author=None, title=None,
+                         seen_author=None)
+    return seen
+
+
 def apply(db_path, rulings=None, csv_path=None, say=print, dry_run=False):
     source = "csv" if csv_path else "code"
     rulings = _read_csv(csv_path) if csv_path else dict(rulings or RULINGS)
@@ -175,6 +206,34 @@ def apply(db_path, rulings=None, csv_path=None, say=print, dry_run=False):
         missing = sorted(w for w in rulings if w not in live)
         if missing:
             raise GateError(f"work_id(s) not in this db: {missing[:10]}")
+        if any(r.get("from_issues") for r in rulings.values()):
+            # resolve the report's cells into actions against the db, and drop
+            # the rows that changed nothing (most of a 1,097-row report)
+            drifted, resolved = [], {}
+            for wid, r in rulings.items():
+                title_now, author_now = live[wid]
+                if r["seen_title"] and r["seen_title"] != (title_now or ""):
+                    drifted.append((wid, r["seen_title"], title_now or ""))
+                    continue
+                cell = r["cell_author"]
+                if cell == (author_now or ""):
+                    continue                      # untouched row
+                resolved[wid] = dict(
+                    drop_author=(cell == ""),
+                    author=normalize_hebrew_quotes(cell) or None, title=None,
+                    note=r.get("note"), seen_author=(author_now or ""),
+                    kw_author="", line=r["line"])
+            if drifted:
+                for wid, seen_t, now_t in drifted[:10]:
+                    say(f"DRIFTED {wid}: report says title {seen_t!r}, db has "
+                        f"{now_t!r}")
+                raise GateError(
+                    f"{len(drifted)} report row(s) no longer describe the work "
+                    "they name -- re-run report_author_issues.py and redo them")
+            rulings = resolved
+            if not rulings:
+                say("nothing to apply")
+                return 0, 0
         if csv_path:
             # An edit to kw_author cannot work: the identity's author is
             # DERIVED from its witnesses by the registry. Refuse rather than
