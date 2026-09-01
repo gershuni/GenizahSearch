@@ -254,6 +254,16 @@ FACET_DERIVED = (("id_pages", "COUNT(*) OVER (PARTITION BY sys_id, work_id)"),
                   "WHERE gv.sys_id = review_row.sys_id "
                   "AND gv.work_id = review_row.work_id "
                   "AND gv.task = 'new_finds')"),
+                 # the ONE model column the primary sidebar filters on. The two
+                 # tasks ran on DISJOINT novelty populations (divergent vs
+                 # fills_gap pairs), so a row has at most one verdict and a
+                 # COALESCE is lossless -- the per-task columns above stay for
+                 # the Advanced knobs.
+                 ("model_verdict",
+                  "(SELECT gv.verdict FROM gate_verdict_fact gv "
+                  "WHERE gv.sys_id = review_row.sys_id "
+                  "AND gv.work_id = review_row.work_id "
+                  "ORDER BY gv.task LIMIT 1)"),
                  # filled by an UPDATE right after the build (it reads the
                  # derived columns above) -- see TRIAGE_SQL
                  ("triage", "NULL"))
@@ -322,7 +332,7 @@ FACET_INDEXES = ("domain", "work_id", "work_author", "novelty_status",
                  "evidence_id", "sys_id", "source_corpus", "confidence_band",
                  "adjudication_status", "main_pool_reason", "matched_letters",
                  "coverage_ppm", "id_pages", "scripture_flagged", "formula_kind",
-                 "gate_divergence", "gate_new_finds", "triage")
+                 "gate_divergence", "gate_new_finds", "model_verdict", "triage")
 
 
 def ensure_facet_table(db_path, say=print):
@@ -380,7 +390,8 @@ def ensure_facet_table(db_path, say=print):
                 for n, tbl in (("scripture_flagged", "scripture_fact"),
                                ("formula_kind", "formula_fact"),
                                ("gate_divergence", "gate_verdict_fact"),
-                               ("gate_new_finds", "gate_verdict_fact"))}
+                               ("gate_new_finds", "gate_verdict_fact"),
+                               ("model_verdict", "gate_verdict_fact"))}
             exprs = tuple((name, "NULL" if (name in has and not has[name])
                            else expr)
                           for name, expr in FACET_DERIVED)
@@ -1057,12 +1068,68 @@ button:hover{border-color:var(--primary-600)}
   display:block;background:#fff}
 
 /* --- private I: the grade bar -------------------------------------------- */
-.gs-discovery .grade{margin-block-start:10px;display:flex;gap:8px;
-  align-items:center;flex-wrap:wrap;padding-block-start:8px;
-  border-block-start:1px solid var(--border-light)}
+.gs-discovery .grade{margin-block-start:6px;display:flex;gap:8px;
+  align-items:center;flex-wrap:wrap;padding-block-start:6px}
 .gs-discovery .grade .lbl{font-size:12px;color:var(--text-secondary)}
 .gs-discovery .grade input[type=text]{flex:1 1 220px;min-width:160px;
   font-size:12px}
+
+/* --- private J: the 2026-08-31 rework (Codex 1-6) ------------------------- */
+/* J1: the fixed three-slot assessment strip. dir=ltr chrome; grayscale only.
+   Amber (.attn) marks REVIEWER ATTENTION, never model confidence. */
+.gs-discovery .slots{display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+  gap:8px;margin-block:6px;direction:ltr}
+.gs-discovery .sdot{display:inline-block;width:9px;height:9px;
+  border-radius:50%;margin-inline-end:6px}
+.gs-discovery .slot details>summary{cursor:pointer;list-style:none}
+.gs-discovery .slot details>summary::after{content:" ▸";color:var(--text-secondary)}
+.gs-discovery .slot details[open]>summary::after{content:" ▾"}
+.gs-discovery .slot .sbody{font-size:12px;color:var(--text-secondary);
+  line-height:1.5;margin-block-start:4px}
+@media(max-width:900px){.gs-discovery .slots{grid-template-columns:1fr}}
+.gs-discovery .slot{border:1px solid var(--border-light);border-radius:8px;
+  padding:5px 9px;background:var(--bg-tertiary);min-width:0}
+.gs-discovery .slot .slbl{font-size:10px;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--text-secondary)}
+.gs-discovery .slot .sval{font-size:13px;line-height:1.4}
+.gs-discovery .slot .ssub{font-size:11px;color:var(--text-secondary);
+  font-family:monospace}
+.gs-discovery .slot.attn{border-color:#b8860b;background:
+  color-mix(in srgb, #b8860b 12%, var(--bg-tertiary))}
+.gs-discovery .slot.attn .slbl::after{content:" · REVIEW REQUIRED";color:#b8860b}
+/* J2: clamped rationale lines */
+.gs-discovery .rationale{font-size:12px;color:var(--text-secondary);
+  line-height:1.5;margin-block:2px;display:-webkit-box;-webkit-line-clamp:2;
+  -webkit-box-orient:vertical;overflow:hidden}
+.gs-discovery .rationale b{color:var(--text-primary);font-weight:600}
+/* J3: cautions line -- separate from ordinary metadata */
+.gs-discovery .cautions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;
+  margin-block:2px}
+/* J4: labeled disclosures replacing chip piles */
+.gs-discovery details.mdet{margin-block-start:6px}
+.gs-discovery details.mdet>summary{cursor:pointer;font-size:12px;
+  color:var(--text-secondary)}
+.gs-discovery details.mdet .mrows>*{display:block;margin-block:3px;
+  width:fit-content;max-width:100%}
+/* J5: checkbox-dropdown filters */
+.gs-discovery .dd{position:relative;display:block;margin-block:4px}
+.gs-discovery .dd .ddbtn{width:100%;text-align:start;display:flex;
+  justify-content:space-between;align-items:center;gap:6px}
+/* expands IN PLACE (a floated popover is clipped by the sidebar's own
+   scroll container) */
+.gs-discovery .dd .ddpop{margin-block-start:2px;max-height:320px;
+  overflow:auto;background:var(--bg-card);border:1px solid var(--border-medium);
+  border-radius:8px;padding:6px;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+.gs-discovery .ddopt{display:flex;gap:8px;align-items:center;padding:4px 6px;
+  border-radius:6px;cursor:pointer;font-size:12.5px}
+.gs-discovery .ddopt:hover{background:var(--bg-tertiary)}
+.gs-discovery .ddopt .c{margin-inline-start:auto;color:var(--text-secondary);
+  font-size:11px}
+/* J6: global texts toggle */
+.gs-discovery .rows.notext .cols,.gs-discovery .rows.notext #txtnote{display:none}
+.gs-discovery .rows.notext [id^="txt-"]{display:none}
+.gs-discovery .rows.notext [id^="txtnote-"]{display:none}
 """
 
 # ---------------------------------------------------------------------------
@@ -1089,6 +1156,7 @@ PAGE_HTML = r"""<!doctype html><html lang="en" dir="ltr"><head><meta charset="ut
   <input id="q" type="text" placeholder="shelfmark or sys_id contains…" size="22"
          oninput="typed()" onkeydown="if(event.key==='Enter')apply()">
   <button onclick="reset()">Reset</button>
+  <button id="textsbtn" onclick="toggleAllTexts()">Hide all texts</button>
   <button onclick="exportGrades()">Export grades</button>
   <button id="themebtn" onclick="toggleTheme()" title="light / dark">◐ dark</button>
   <span class="grow"></span>
@@ -1100,18 +1168,12 @@ PAGE_HTML = r"""<!doctype html><html lang="en" dir="ltr"><head><meta charset="ut
   <div class="phead">
     <h1>Computed identifications — private review (v5)</h1>
 
-    <div class="caveat side gap-2">
-      <span class="glyph" style="font-size:18px" aria-hidden="true">ⓘ</span>
-      <div>
-        <b>You are grading <code>divergence_correctness</code>, and only a person
-        can.</b> When our identification and the catalogue disagree, which is
-        right. The model scored 8/28 on this question — at or below chance for
-        three options — while the owner scored 31/32, so it was removed from the
-        model&#39;s job and the column is empty by design in every artifact. Your
-        answers write to <code>&lt;db&gt;.grades.db</code> immediately and survive
-        a rebuild of the review projection.
-      </div>
-    </div>
+    <div class="dnote">The point of this tool is the TEXT REUSE itself — read
+      the aligned panes. Machine judgments are labels to steer your minutes,
+      never verdicts. Dot colours mark a signal&#39;s DIRECTION, not its
+      confidence: green = the computed identification looks right here,
+      orange = it does not, amber = needs a person, gray = no answer.
+      Grading is optional (each row&#39;s &ldquo;grade&rdquo; disclosure).</div>
 
     <div id="sessionstrip" class="dnote" style="display:none"></div>
   </div>
@@ -1244,7 +1306,8 @@ const GATE_LABELS = {
   catalogue_right_claim_mistaken: "Catalogue right — computed ID mistaken",
   both_right_multiple_works: "Both right — the page carries several works",
   catalogue_too_general: "Catalogue too general — computed ID compatible, more specific",
-  computed_right_catalogue_mismatch: "Claims the catalogue is wrong — NEEDS HUMAN REVIEW",
+  computed_right_catalogue_mismatch: "ID right, catalogue entry may not fit — NEEDS HUMAN REVIEW",
+  overlapping_works: "Two overlapping works — the matched text cannot decide",
   credible_new_identification: "Credible new identification",
   plausible_needs_expert_check: "Plausible — needs an expert check",
   weak_match_generic_text: "Weak match — generic/shared text",
@@ -1252,9 +1315,57 @@ const GATE_LABELS = {
   wrong_identification: "Wrong identification",
   not_checked: "Model abstained",
 };
+// short forms for the ROW chips -- the long forms stay on the filter cards
+const GATE_SHORT = {
+  catalogue_right_match_is_quotation: "catalogue right — quotation",
+  catalogue_right_claim_mistaken: "catalogue right — ID mistaken",
+  both_right_multiple_works: "both right — multi-work page",
+  catalogue_too_general: "catalogue too general",
+  computed_right_catalogue_mismatch: "catalogue entry may not fit this page — verify",
+  overlapping_works: "two overlapping works — the text cannot decide",
+  credible_new_identification: "credible new find",
+  plausible_needs_expert_check: "plausible — needs check",
+  weak_match_generic_text: "weak — generic text",
+  actually_recorded: "already recorded",
+  wrong_identification: "wrong ID",
+  not_checked: "abstained",
+};
+const TRIAGE_SHORT = {main: "Main pool", citation: "Citation",
+                      shared_quotes: "Shared quotations only", unclear: "Unclear"};
+// the two PRIMARY grouped controls (owner, 2026-08-31): "is it new/divergent?"
+// and "what does the model say?" -- each group toggles its RAW values, so the
+// wire and the Advanced knobs stay untouched.
+const NOV_GROUPS = [
+  ["New — nothing in the aids identifies it", ["fills_gap", "extends"]],
+  ["Diverges from the catalogue", ["diverges_work", "diverges_part"]],
+  ["Aligned with the catalogue",
+   ["confirms", "aid_more_specific", "container_predicts",
+    "refines_granularity", "alias_merge"]],
+  ["Not checked", ["not_checked"]],
+];
+const MODEL_GROUPS = [
+  ["Backs the identification",
+   ["credible_new_identification", "plausible_needs_expert_check",
+    "both_right_multiple_works", "catalogue_too_general"]],
+  ["Backs the catalogue / rejects it",
+   ["catalogue_right_match_is_quotation", "catalogue_right_claim_mistaken",
+    "weak_match_generic_text", "wrong_identification"]],
+  ["ID right, catalogue entry may not fit — needs human review",
+   ["computed_right_catalogue_mismatch"]],
+  ["Two overlapping works — cannot decide", ["overlapping_works"]],
+  ["Already recorded after all", ["actually_recorded"]],
+  ["Not judged", ["__null__", "not_checked"]],
+];
+// the FULL vocabularies, static. toggleGroup's set math needs allVals to hold
+// every possible value; deriving it from the CURRENT facet broke the control —
+// a zero-count value missing from the facet made a fully-selected group read
+// as unselected, so a click ADDED values instead of removing them and the
+// dropdown snapped back to select-all.
+const NOV_ALL = NOV_GROUPS.flatMap(g => g[1]);
+const MODEL_ALL = MODEL_GROUPS.flatMap(g => g[1]);
 const S = {relation:new Set(), novelty:new Set(), pool:new Set(),
            corpus:new Set(), scripture:new Set(),
-           gatediv:new Set(), gatenew:new Set(),
+           gatediv:new Set(), gatenew:new Set(), model:new Set(),
            triage:new Set(DEFAULT_TRIAGE),
            poolreason:"", claim:"", disagree:false,
            domain:"", author:"", work:"", locus:"", locus_from:"", locus_to:"",
@@ -1270,7 +1381,7 @@ let ADV_OPEN = false;             // the Advanced raw-signals block
 function params(extra){
   const p = new URLSearchParams();
   for (const k of ["relation","novelty","pool","corpus","scripture",
-                   "gatediv","gatenew","triage"])
+                   "gatediv","gatenew","model","triage"])
     for (const v of S[k]) p.append(k, v);
   for (const k of ["poolreason","claim","domain","author","work","locus",
                    "locus_from","locus_to","coverage","graded","q","sort"])
@@ -1295,6 +1406,70 @@ function toggleMulti(key, v, allVals){
   apply();
 }
 function setSingle(key, v){ S[key] = (S[key] === v) ? "" : v; apply(); }
+// A grouped chip toggles ALL its raw values as one unit -- same set semantics
+// as toggleMulti (empty set = everything), so it composes with the raw
+// Advanced chips over the same axis instead of fighting them.
+function toggleGroup(key, values, allVals){
+  const eff = S[key].size ? new Set(S[key]) : new Set(allVals);
+  const on = values.every(v => eff.has(v));
+  for (const v of values) { if (on) eff.delete(v); else eff.add(v); }
+  S[key] = (eff.size === 0 || eff.size === allVals.length) ? new Set() : eff;
+  apply();
+}
+function groupOn(key, values){
+  return S[key].size ? values.every(v => S[key].has(v)) : true;
+}
+function groupCount(facet, values){
+  let n = 0, seen = false;
+  for (const t of (facet || [])) {
+    const key = t[0] === null ? "__null__" : String(t[0]);
+    if (values.includes(key)) { n += t[2]; seen = true; }
+  }
+  return seen ? n : 0;
+}
+
+// ---- checkbox-dropdown filters (Codex 2026-08-31, point 1) -----------------
+// A closed dropdown shows "label · k of n" so an active hidden filter is
+// always visible; open state survives the re-render every apply() causes.
+const DD_OPEN = new Set();
+function ddToggle(key){
+  if (DD_OPEN.has(key)) DD_OPEN.delete(key); else DD_OPEN.add(key);
+  if (lastFacets) renderSidebar(lastFacets);
+}
+document.addEventListener("click", ev => {
+  if (!ev.target.closest(".dd") && DD_OPEN.size) {
+    DD_OPEN.clear();
+    if (lastFacets) renderSidebar(lastFacets);
+  }
+});
+// items: [{on, lab, n, onchange}] -- each row is a checkbox; `onchange` is the
+// same toggle the old chip ran, so set semantics are unchanged.
+function ddMulti(key, label, items){
+  const open = DD_OPEN.has(key);
+  const onN = items.filter(i => i.on).length;
+  const state = onN === items.length ? "all" : (onN + " of " + items.length);
+  return `<div class="dd" data-dd="${key}">
+    <button class="fchip ddbtn${onN !== items.length ? " here" : ""}"
+      onclick="event.stopPropagation();ddToggle('${key}')"
+      aria-expanded="${open}">${esc(label)} · ${state}<span>▾</span></button>
+    ${open ? `<div class="ddpop" onclick="event.stopPropagation()">` +
+      items.map(i => `<label class="ddopt"><input type="checkbox"
+          ${i.on ? "checked" : ""} onchange="${i.onchange}">
+        <span>${i.lab}</span>` +
+        (i.n === null ? `` : `<span class="c">${num(i.n)}</span>`) +
+        `</label>`).join("") + `</div>` : ``}
+  </div>`;
+}
+
+// ---- global texts toggle (grading is secondary; the texts are the point) ---
+let TEXTS_ON = true;
+function toggleAllTexts(){
+  TEXTS_ON = !TEXTS_ON;
+  const r = document.getElementById("rows");
+  if (r) r.classList.toggle("notext", !TEXTS_ON);
+  const b = $("textsbtn");
+  if (b) b.textContent = TEXTS_ON ? "Hide all texts" : "Show all texts";
+}
 
 // TYPEABLE FILTERS. `datalist` gives native type-ahead over hundreds of options
 // (1,269 works make a plain <select> unusable), but its value is the LABEL, so
@@ -1335,7 +1510,7 @@ function reset(){
   // "everything" -- Reset means "as I opened it".
   S.relation = new Set(); S.novelty = new Set(); S.pool = new Set();
   S.corpus = new Set(); S.scripture = new Set();
-  S.gatediv = new Set(); S.gatenew = new Set();
+  S.gatediv = new Set(); S.gatenew = new Set(); S.model = new Set();
   S.triage = new Set(DEFAULT_TRIAGE);
   S.poolreason = ""; S.claim = ""; S.disagree = false; S.domain = "";
   S.author = ""; S.work = ""; S.locus = ""; S.locus_from = ""; S.locus_to = "";
@@ -1388,10 +1563,15 @@ const findN = (list, v) => {
   return hit ? hit[2] : 0;
 };
 function card(cls, header, bodyHtml, prose){
+  // The explanation is REAL but collapsed (owner, 2026-08-31: paragraphs on
+  // every filter made the sidebar unreadable). One click on "what is this?"
+  // opens it; nothing is lost, nothing is inline by default.
   return `<div class="fg ${cls}">
     <div class="gs-findings-card-header">${header}</div>
     ${bodyHtml}
-    ${prose ? `<div class="dnote">${prose}</div>` : ``}</div>`;
+    ${prose ? `<details class="whyd"><summary class="dnote"
+        style="cursor:pointer">what is this?</summary>
+        <div class="dnote">${prose}</div></details>` : ``}</div>`;
 }
 function chipBtn(on, label, count, onclick, title){
   return `<button class="fchip${on?" here":""}" aria-pressed="${on?"true":"false"}"
@@ -1420,15 +1600,43 @@ function renderSidebar(f){
     "both sides quote — near-useless. The raw signals stay available under " +
     "&lsquo;Advanced&rsquo;."));
 
+  // CARD 0b -- "is it new or divergent?" (owner, 2026-08-31): the grouped
+  // catalogue-relationship control. Each chip toggles its RAW novelty shades,
+  // so it composes with the full ten-shade card under Advanced.
+  out.push(card("", "Vs the catalogue — is it new or divergent?",
+    ddMulti("novelty", "Vs the catalogue", NOV_GROUPS.map(([lab, vals]) => ({
+      on: groupOn("novelty", vals), lab: esc(lab),
+      n: groupCount(f.novelty, vals),
+      onchange: `toggleGroup('novelty',${JSON.stringify(vals).replace(/"/g,"&quot;")},NOV_ALL)`}))),
+    "Groups of the ten raw novelty shades (all ten stay under Advanced). " +
+    "&lsquo;New&rsquo; means none of the checked finding aids identify this " +
+    "fragment; &lsquo;diverges&rsquo; means an aid names a DIFFERENT work; " +
+    "&lsquo;aligned&rsquo; covers confirms and the granularity variants."));
+
+  // CARD 0c -- "what does the model say?" One control over BOTH gates'
+  // verdicts (they ran on disjoint populations, so a row has at most one);
+  // the per-task raw cards stay under Advanced.
+  out.push(card("", "What does the model say?",
+    ddMulti("model", "Model's reading", MODEL_GROUPS.map(([lab, vals]) => ({
+      on: groupOn("model", vals), lab: esc(lab),
+      n: groupCount(f.model, vals),
+      onchange: `toggleGroup('model',${JSON.stringify(vals).replace(/"/g,"&quot;")},MODEL_ALL)`}))),
+    "The LLM adjudication (2026-08-31, main+unclear pairs): for divergent " +
+    "pairs, who is right — the catalogue or the computed identification; for " +
+    "unrecorded pairs, is the proposed NEW identification credible. Verdicts " +
+    "are labels, never pool gates. &lsquo;Claims the catalogue is wrong&rsquo; " +
+    "went 0-for-4 when the owner contested it — treat as a review queue, not " +
+    "a finding. Each row shows the model's reason under its chips; the " +
+    "per-verdict raw controls are under Advanced."));
+
   // CARD 1 -- the router's own axis.
   // Its labels say witness and quotes in full sentences precisely so it cannot
   // be confused with card 2, whose labels contain neither word.
   adv.push(card("",
     "Relation — is this page a copy of the work, or does it quote it?",
-    `<div class="stack">` + relVals.map(v => chipBtn(isOn("relation", v),
-        esc(RELCARD[v]), findN(f.relation, v),
-        `toggleMulti('relation','${v}',${JSON.stringify(relVals).replace(/"/g,"&quot;")})`,
-        DOCS["doc.router_verdict"])).join("") + `</div>`,
+    ddMulti("relation", "Relation", relVals.map(v => ({
+      on: isOn("relation", v), lab: esc(RELCARD[v]), n: findN(f.relation, v),
+      onchange: `toggleMulti('relation','${v}',${JSON.stringify(relVals).replace(/"/g,"&quot;")})`}))),
     "The only witness-vs-quotation axis that was validated — ~1,400 blind cards " +
     "plus 400 more, graded by hand. Decided by how much of the page the match covers."));
 
@@ -1473,10 +1681,9 @@ function renderSidebar(f){
       ? "Flagged — may rest on text both sides quote"
       : (v === "0" ? "Checked, not flagged" : "Not computed");
   adv.push(card("", "Shared scripture — is the matched TEXT itself scripture?",
-    `<div class="stack">` + scrVals.map(v => chipBtn(isOn("scripture", v),
-        esc(scrLabel(v)), findN(f.scripture, v),
-        `toggleMulti('scripture','${v}',${JSON.stringify(scrVals).replace(/"/g,"&quot;")})`,
-        DOCS["doc.scripture_flag"] || "")).join("") + `</div>`,
+    ddMulti("scripture", "Shared scripture", scrVals.map(v => ({
+      on: isOn("scripture", v), lab: esc(scrLabel(v)), n: findN(f.scripture, v),
+      onchange: `toggleMulti('scripture','${v}',${JSON.stringify(scrVals).replace(/"/g,"&quot;")})`}))),
     "A DIFFERENT question from the Relation card: the relation says how this " +
     "page relates to this work (by page coverage — witness or quotation); " +
     "this asks whether the matched text is a THIRD text both could be " +
@@ -1495,23 +1702,21 @@ function renderSidebar(f){
   // db where the attach script never ran -- every row is then "not judged").
   const gdivVals = ["catalogue_right_match_is_quotation",
                     "catalogue_right_claim_mistaken", "both_right_multiple_works",
-                    "catalogue_too_general", "computed_right_catalogue_mismatch",
-                    NULL_TOKEN];
+                    "catalogue_too_general", "overlapping_works",
+                    "computed_right_catalogue_mismatch", NULL_TOKEN];
   const gnewVals = ["credible_new_identification", "plausible_needs_expert_check",
                     "weak_match_generic_text", "actually_recorded",
                     "wrong_identification", NULL_TOKEN];
   const gateLabel = v => GATE_LABELS[v] || (v === NULL_TOKEN ? "Not judged" : v);
   adv.push(card("", "Model adjudication — catalogue vs computed (divergent pairs)",
-    `<div class="stack">` + gdivVals.map(v => chipBtn(isOn("gatediv", v),
-        esc(gateLabel(v)), findN(f.gatediv, v),
-        `toggleMulti('gatediv','${v}',${JSON.stringify(gdivVals).replace(/"/g,"&quot;")})`,
-        DOCS["doc.gate_divergence"] || "")).join("") + `</div>`,
+    ddMulti("gatediv", "Raw divergence verdicts", gdivVals.map(v => ({
+      on: isOn("gatediv", v), lab: esc(gateLabel(v)), n: findN(f.gatediv, v),
+      onchange: `toggleMulti('gatediv','${v}',${JSON.stringify(gdivVals).replace(/"/g,"&quot;")})`}))),
     DOCS["doc.gate_divergence"] || ""));
   adv.push(card("", "Model check — candidate NEW identifications",
-    `<div class="stack">` + gnewVals.map(v => chipBtn(isOn("gatenew", v),
-        esc(gateLabel(v)), findN(f.gatenew, v),
-        `toggleMulti('gatenew','${v}',${JSON.stringify(gnewVals).replace(/"/g,"&quot;")})`,
-        DOCS["doc.gate_new_finds"] || "")).join("") + `</div>`,
+    ddMulti("gatenew", "Raw new-find verdicts", gnewVals.map(v => ({
+      on: isOn("gatenew", v), lab: esc(gateLabel(v)), n: findN(f.gatenew, v),
+      onchange: `toggleMulti('gatenew','${v}',${JSON.stringify(gnewVals).replace(/"/g,"&quot;")})`}))),
     DOCS["doc.gate_new_finds"] || ""));
 
   // CARD 3 -- pool. THREE states plus All; the third is the never-evaluated block.
@@ -1546,7 +1751,7 @@ function renderSidebar(f){
   // NO COUNTS ON THE OPTIONS -- also the public page's rule (a number inside a
   // filter reads as a finding). The counts a grader needs are right below, on
   // the shades themselves, and they already narrow to the chosen view.
-  out.push(card("", "Which findings — the public page's grouping",
+  adv.push(card("", "Which findings — the public page's grouping",
     `<select onchange="setView(this.value)">` + VIEWS.map(t =>
       `<option value="${esc(t[0])}"${curView()===String(t[0])?" selected":""}>` +
       `${esc(t[1])}</option>`).join("") + `</select>`,
@@ -1560,21 +1765,11 @@ function renderSidebar(f){
   // subset: the grader is grading the gate, and hiding eight of its outputs
   // makes it ungradeable.
   const novAll = L(f.novelty).map(t => String(t[0]));
-  const big = L(f.novelty).filter(t => t[2] >= 100);
-  const small = L(f.novelty).filter(t => t[2] < 100);
-  let novBody = `<div class="wrap">` + big.map(t => chipBtn(isOn("novelty", t[0]),
-      esc(t[0]), t[2],
-      `toggleMulti('novelty','${t[0]}',${JSON.stringify(novAll).replace(/"/g,"&quot;")})`,
-      DOCS["doc.novelty_status"])).join("");
-  if (small.length) {
-    novBody += OTHER_NOV
-      ? small.map(t => chipBtn(isOn("novelty", t[0]), esc(t[0]), t[2],
-          `toggleMulti('novelty','${t[0]}',${JSON.stringify(novAll).replace(/"/g,"&quot;")})`,
-          DOCS["doc.novelty_status"])).join("")
-      : chipBtn(false, "other", small.reduce((a,t) => a + t[2], 0), `toggleOtherNov()`);
-  }
-  novBody += `</div>`;
-  out.push(card("", "What this adds to the catalogue", novBody,
+  const novBody = ddMulti("novelty_raw", "Raw novelty shades",
+    L(f.novelty).map(t => ({
+      on: isOn("novelty", String(t[0])), lab: esc(String(t[0])), n: t[2],
+      onchange: `toggleMulti('novelty','${t[0]}',${JSON.stringify(novAll).replace(/"/g,"&quot;")})`})));
+  adv.push(card("", "What this adds to the catalogue — all ten raw shades", novBody,
     "<code>not_checked</code> is an honest &lsquo;no answer&rsquo;, never a guess — and " +
     num(NUMS.never_evaluated) + " of its " + num(NUMS.not_checked) +
     " rows are the never-evaluated block, i.e. the rule never ran."));
@@ -1789,130 +1984,92 @@ function imageUrl(x){
          "?page=" + encodeURIComponent(x.page_num || 0);
 }
 
+// which primary group a raw novelty shade belongs to -- the slot's big label
+function novGroupOf(shade){
+  if (shade === "fills_gap" || shade === "extends") return "New";
+  if (shade === "diverges_work" || shade === "diverges_part") return "Diverges";
+  if (shade === "not_checked" || !shade) return "Not checked";
+  return "Aligned";
+}
+
 function rowHtml(x){
   const id = x.evidence_id;
-  const m = [];
-  // 1 relation -- VISUALLY NEUTRAL (.rel). It is a KIND, not a quality; the
-  // moment it is colour-coded the row acquires a confidence treatment the
-  // grader reads before reading the text.
-  // 0 the triage -- the committed-but-hedged reading, FIRST (absent on a
-  // facet build that predates it)
-  if (x.triage && TRIAGE_LABELS[x.triage])
-    m.push(chip(x.triage === "main" ? "rel" :
-                (x.triage === "shared_quotes" ? "needs" : "chip"),
-                TRIAGE_LABELS[x.triage], DOCS["doc.triage"] || ""));
-  m.push(chip("rel", poolLabel("relation", x.router_verdict),
-    DOCS["doc.router_verdict"] + (x.relation_kind
-      ? "\n\nearlier relation verdict (superseded): " + x.relation_kind : "")));
-  // 2 span rank
-  m.push(chip("chip", poolLabel("claim", x.claim_type), DOCS["doc.claim_type"]));
-  // 3 disagreement -- the ONE non-uniform mark on a row, and it flags a
-  // two-column DATA condition, not a verdict.
-  if (x.router_verdict === "parallel" && x.claim_type === "direct_witness")
-    m.push(chip("needs", "span rank disagrees with the router",
-                num(NUMS.disagree) + " rows are in this state"));
-  // 4 novelty -- all ten raw shade names
-  m.push(chip(x.novelty_status === "not_checked" ? "nov unknown" : "nov",
-              x.novelty_status, DOCS["doc.novelty_status"]));
-  // 5 pool
-  m.push(chip("chip", x.main_pool===null ? "no identification record"
-                                         : poolLabel("pool", x.main_pool),
-              DOCS["doc.main_pool"]));
-  // 6 demotion reason -- visible text, only when the row was actually demoted
-  if (x.main_pool === 0 && x.main_pool_reason)
-    m.push(`<span class="dnote text-xs">${esc(x.main_pool_reason)}</span>`);
-  // 7 routing. On R-source rows `routing_status='shipped'` describes the
-  // matching run's internal tiering, NOT the website -- that corpus is not on
-  // the live site at all, so every one of its rows carries the marker (the
-  // outside audit found 113,078 shipped+parallel rows wearing no signal).
-  if (x.corpus_label === "R-source")
-    m.push(chip("needs", "not on the live site — this whole corpus is review-only",
-                DOCS["doc.routing_status"]));
-  else if (x.routing_status !== "shipped")
-    m.push(chip("needs", "review only — not shown on the site",
-                DOCS["doc.routing_status"]));
-  // 7b owner ruling + compilation risk + title provenance (R-source works;
-  // columns absent on an older file -> nothing renders)
+  // THE THREE-SLOT ASSESSMENT STRIP (Codex 2026-08-31): same three questions
+  // in the same position on every row -- pool, vs-catalogue, model reading.
+  // Grayscale by design; amber marks REVIEWER ATTENTION only, never model
+  // confidence.
+  const mVerdict = x.gate_divergence || x.gate_new_finds;
+  const mLlm = x.llm && (x.llm.divergence || x.llm.new_finds);
+  const attn = mVerdict === "computed_right_catalogue_mismatch";
+  // colours mark DIRECTION, not confidence (owner, 2026-08-31): green = the
+  // computed identification looks right here, orange = it does not,
+  // amber = needs human review, gray = no answer. Stated once in the page note.
+  const NOVG_DOT = {"New": "#2e9e6b", "Diverges": "#8a6bbf",
+                    "Aligned": "#5a7ca8", "Not checked": "#8a8f98"};
+  // the model slot's HEADLINE is the owner's question -- "is the computed ID
+  // right on this page?" -- because the catalogue being right does NOT make
+  // our identification wrong (multi-work pages, general entries). The raw
+  // verdict is the second line; the rationale expands from the answer.
+  const YES_VERDICTS = new Set(["credible_new_identification",
+    "plausible_needs_expert_check", "both_right_multiple_works",
+    "catalogue_too_general", "computed_right_catalogue_mismatch",
+    "actually_recorded"]);
+  const mAnswer = !mVerdict ? null :
+    mVerdict === "not_checked" ? ["no answer", "#8a8f98"] :
+    mVerdict === "overlapping_works" ? ["Cannot tell", "#8a8f98"] :
+    YES_VERDICTS.has(mVerdict) ? ["Yes", "#2e9e6b"] : ["No", "#c77b21"];
+  const dot = c => c ? `<span class="sdot" style="background:${c}"></span>` : ``;
+  // each slot carries its OWN one-line tooltip; the long docs live in the
+  // sidebar cards' "what is this?"
+  const slot = (lbl, val, sub, cls, tip, body) =>
+    `<div class="slot${cls ? " " + cls : ""}"${tip ? ` title="${esc(tip)}"` : ``}>
+      <div class="slbl">${lbl}</div>` +
+    (body ? `<details><summary class="sval">${val}</summary>
+               <div class="sbody">${body}</div></details>`
+          : `<div class="sval">${val}</div>`) +
+    (sub ? `<div class="ssub">${sub}</div>` : ``) + `</div>`;
+  // the model's rationale expands FROM its verdict (owner, 2026-08-31)
+  const mBody = mLlm && (mLlm.reason || mLlm.doubt)
+    ? `<b>Rationale (unverified):</b> ${esc(mLlm.reason || "")}` +
+      (mLlm.doubt ? `<br><b>Suggested check:</b> ${esc(mLlm.doubt)}` : ``)
+    : ``;
+  const slots = `<div class="slots">` +
+    slot("Pool", esc(TRIAGE_SHORT[x.triage] || "—"), "", "",
+         "Where this row's minutes rank: a deterministic sort over the " +
+         "relation, the flags and page coverage — never a verdict.") +
+    slot("Vs catalogue",
+         dot(NOVG_DOT[novGroupOf(x.novelty_status)]) +
+         esc(novGroupOf(x.novelty_status)),
+         esc(x.novelty_status || ""), "",
+         "How this identification relates to the finding aids: new, " +
+         "divergent, or aligned.") +
+    // no slot at all when the pair was never judged (owner, 2026-08-31)
+    (mVerdict ? slot("Model: computed ID right here?",
+         dot(mAnswer[1]) + esc(mAnswer[0]) +
+           (attn ? " — but verify" : ""),
+         esc(GATE_SHORT[mVerdict] || mVerdict), attn ? "attn" : "",
+         "An LLM's unverified answer — click it to read the rationale. " +
+         "The second line is the model's specific verdict.",
+         mBody) : ``) +
+    `</div>`;
+  // -- cautions: separate from ordinary metadata, only when they fire --------
+  const cautions = [];
   if (x.owner_ruling)
-    m.push(chip("needs", "owner ruling: " + esc(x.owner_ruling) +
-      (x.owner_ruling_date ? " (" + esc(x.owner_ruling_date) + ")" : ""),
+    cautions.push(chip("needs", "owner ruling: " + x.owner_ruling +
+      (x.owner_ruling_date ? " (" + x.owner_ruling_date + ")" : ""),
       x.owner_ruling_note || ""));
-  if (x.compilation_risk === "high" || x.compilation_risk === "medium")
-    m.push(chip(x.compilation_risk === "high" ? "needs" : "chip",
-      "compilation risk: " + esc(x.compilation_risk),
+  if (x.compilation_risk === "high")
+    cautions.push(chip("needs", "compilation risk: high",
       "A computed suspicion that this work is an anthology quoting other " +
       "texts, so a match may witness the SOURCE it compiled. It excludes " +
       "nothing by itself."));
-  // 7c the liturgy/formulary label (formula_fact; absent on older files)
   if (x.formula_kind === "embedded_section")
-    m.push(chip("needs", "fixed prayer / formulary section — carrier text, " +
-      "not this work's own voice", DOCS["doc.formula_kind"] || ""));
+    cautions.push(chip("needs", "fixed prayer / formulary section",
+      DOCS["doc.formula_kind"] || ""));
   else if (x.formula_kind === "standalone_unit")
-    m.push(chip("needs", "standalone liturgy unit — a generic prayer excerpt " +
-      "identifies no page", DOCS["doc.formula_kind"] || ""));
-  else if (x.formula_kind === "documentary_page")
-    // CONTEXT ONLY -- catalogue-derived, so it never moves a row between
-    // pools (the catalogue is a yardstick, never evidence)
-    m.push(chip("chip", "page catalogued as a legal document only — its " +
-      "formula may be what the work quotes", DOCS["doc.formula_kind"] || ""));
-  // 7d the LLM adjudication verdicts (pair-grain; absent before the attach
-  // script ran). The reason/doubt ride on x.llm for the 25 rows on screen.
-  const llmTip = (task, doc) => {
-    const l = x.llm && x.llm[task];
-    return (doc || "") + (l && l.reason ? "\n\nmodel's reason: " + l.reason : "")
-         + (l && l.doubt ? "\nexpert should check: " + l.doubt : "");
-  };
-  if (x.gate_divergence)
-    m.push(chip(x.gate_divergence === "computed_right_catalogue_mismatch"
-                ? "needs" : "chip",
-                "model: " + esc(GATE_LABELS[x.gate_divergence] || x.gate_divergence),
-                llmTip("divergence", DOCS["doc.gate_divergence"])));
-  if (x.gate_new_finds)
-    m.push(chip(x.gate_new_finds === "credible_new_identification"
-                ? "rel" : "chip",
-                "model: " + esc(GATE_LABELS[x.gate_new_finds] || x.gate_new_finds),
-                llmTip("new_finds", DOCS["doc.gate_new_finds"])));
-  if (x.title_provenance === "collection_retitle")
-    m.push(chip("chip", "a collection file — the locus names the actual work",
-      "This source file holds more than one work; the file-level title now " +
-      "says so, and each row's locus names the sub-work the match is in."));
-  else if (x.title_provenance && x.title_provenance !== "both_agreed_correct")
-    m.push(`<span class="dnote text-xs" title="How this work's title was verified:
-      two models judged all titles; disagreements were adjudicated with a
-      recorded reason.">title: ${esc(x.title_provenance)}</span>`);
-  // 8 evidence. `coverage_status` is `measured` on all 254,612 rows, so no
-  // gating is needed -- but the qualifier stays attached: a bare percentage on a
-  // discovery surface is what the qualifier exists to prevent.
-  let ev = num(x.matched_letters) + " letters";
-  if (x.n_spans > 1) ev += " · " + num(x.n_spans) + " spans";
-  // NULL is "not recorded", never 0.0% -- a number here reads as a measurement.
-  ev += x.coverage_ppm === null || x.coverage_ppm === undefined
-      ? " · page coverage not recorded"
-      : " · covers " + (Number(x.coverage_ppm) / 10000).toFixed(1) +
-        "% of this page's letters";
-  m.push(`<span class="dnote text-xs">${esc(ev)}</span>`);
-  // 9 corpus -- server already mapped it; the raw code never reaches the client
-  m.push(chip("chip", x.corpus_label));
-  // 10 band
-  if (x.confidence_band && x.confidence_band !== "tier_a")
-    m.push(chip("chip", x.confidence_band));
-  // 11 prior review
-  if (x.adjudication_status && x.adjudication_status !== "unreviewed")
-    m.push(chip("chip", poolLabel("adjudication", x.adjudication_status),
-      "The earlier adjudication pass. Grades entered here do not update it."));
-  // 12 short-match prompt -- the SAME threshold the sidebar's length filter cuts
-  // at, so the warning and the control that selects for it cannot disagree.
-  // Suppressed when the computed detectors (chip 12b) have an ANSWER for this
-  // row either way: "check whether" next to "checked, and ..." reads as two
-  // tools disagreeing.
-  if (Number(x.matched_letters) < SHORT_MATCH && !x.scripture)
-    m.push(`<span class="dnote text-xs" title="${esc(DOCS["doc.known_weakness"])}">` +
-           `short match — check whether this rests on shared scripture</span>`);
-  // 12b computed shared-scripture detectors (scripture_fact, R-source only).
-  // The chip names its REASONS: a bare flag would read as a verdict, and this
-  // is a heuristic label, never a relation.
-  // The reasons mirror the attach script's union EXACTLY (its thresholds are
-  // in meta `scripture_fact.thresholds`); a reason renders only if it fired.
+    cautions.push(chip("needs", "standalone liturgy unit",
+      DOCS["doc.formula_kind"] || ""));
+  let scrWhy = "";
   if (x.scripture && x.scripture.flagged) {
     const s = x.scripture, why = [];
     const pct = v => Math.round(v * 100) + "%";
@@ -1926,22 +2083,69 @@ function rowHtml(x){
     if (s.mask_overlap !== null && s.mask_overlap >= 0.5)
       why.push(pct(s.mask_overlap) +
                " of the span lies inside quotations the mask caught");
-    m.push(chip("needs", "may rest on shared scripture — " +
-      (why.join("; ") || "see the help entry"),
-      DOCS["doc.scripture_flag"] || ""));
+    scrWhy = why.join("; ");
+    cautions.push(chip("needs", "may rest on shared scripture",
+      (scrWhy ? scrWhy + "\n\n" : "") + (DOCS["doc.scripture_flag"] || "")));
   }
-  // 13 graded
-  if (x.grade) m.push(chip("nov", "graded: " + x.grade));
-
+  if (Number(x.matched_letters) < SHORT_MATCH && !x.scripture)
+    cautions.push(`<span class="dnote text-xs" title="${esc(DOCS["doc.known_weakness"])}">` +
+           `short match — check whether this rests on shared scripture</span>`);
+  if (x.router_verdict === "parallel" && x.claim_type === "direct_witness")
+    cautions.push(chip("needs", "span rank disagrees with the router",
+                num(NUMS.disagree) + " rows are in this state"));
+  // -- evidence line ---------------------------------------------------------
+  let ev = num(x.matched_letters) + " letters";
+  if (x.n_spans > 1) ev += " · " + num(x.n_spans) + " spans";
+  ev += x.coverage_ppm === null || x.coverage_ppm === undefined
+      ? " · page coverage not recorded"
+      : " · covers " + (Number(x.coverage_ppm) / 10000).toFixed(1) +
+        "% of this page's letters";
+  // -- everything else: "Machine details", nothing dropped ------------------
+  const more = [];
+  more.push(chip("rel", poolLabel("relation", x.router_verdict),
+    DOCS["doc.router_verdict"] + (x.relation_kind
+      ? "\n\nearlier relation verdict (superseded): " + x.relation_kind : "")));
+  more.push(chip("chip", poolLabel("claim", x.claim_type), DOCS["doc.claim_type"]));
+  more.push(chip("chip", x.main_pool===null ? "no identification record"
+                                            : poolLabel("pool", x.main_pool),
+              DOCS["doc.main_pool"]));
+  if (x.main_pool === 0 && x.main_pool_reason)
+    more.push(`<span class="dnote text-xs">${esc(x.main_pool_reason)}</span>`);
+  if (x.corpus_label === "R-source")
+    more.push(chip("chip", "not on the live site — this whole corpus is review-only",
+                DOCS["doc.routing_status"]));
+  else if (x.routing_status !== "shipped")
+    more.push(chip("chip", "review only — not shown on the site",
+                DOCS["doc.routing_status"]));
+  if (x.compilation_risk === "medium")
+    more.push(chip("chip", "compilation risk: medium",
+      "A computed suspicion that this work is an anthology quoting other " +
+      "texts. It excludes nothing by itself."));
+  if (x.formula_kind === "documentary_page")
+    // CONTEXT ONLY -- catalogue-derived, so it never moves a row between pools
+    more.push(chip("chip", "page catalogued as a legal document only — its " +
+      "formula may be what the work quotes", DOCS["doc.formula_kind"] || ""));
+  if (x.title_provenance === "collection_retitle")
+    more.push(chip("chip", "a collection file — the locus names the actual work",
+      "This source file holds more than one work; the file-level title now " +
+      "says so, and each row's locus names the sub-work the match is in."));
+  else if (x.title_provenance && x.title_provenance !== "both_agreed_correct")
+    more.push(`<span class="dnote text-xs">title: ${esc(x.title_provenance)}</span>`);
+  if (x.confidence_band && x.confidence_band !== "tier_a")
+    more.push(chip("chip", x.confidence_band));
+  if (x.adjudication_status && x.adjudication_status !== "unreviewed")
+    more.push(chip("chip", poolLabel("adjudication", x.adjudication_status),
+      "The earlier adjudication pass. Grades entered here do not update it."));
+  if (scrWhy)
+    more.push(`<span class="dnote text-xs">shared-scripture detectors: ${esc(scrWhy)}</span>`);
   const full = browseUrl(x, false);
-  m.push(`<button class="fchip gs-findings-row-preview-toggle" id="tt-${id}"
-      onclick="toggleText('${id}',this)">Hide the texts</button>`);
+  let previewBtn = ``;
   if (PREVIEW !== "off" && x.sys_id)
-    m.push(`<button class="fchip gs-findings-row-preview-toggle" id="pv-${id}"
-        onclick="preview('${id}',this)">Preview the manuscript</button>`);
+    previewBtn = `<button class="fchip gs-findings-row-preview-toggle" id="pv-${id}"
+        onclick="preview('${id}',this)">Preview the manuscript</button>`;
   else if (full)
-    m.push(`<a class="fchip gs-findings-row-preview-toggle" href="${esc(full)}"
-        target="_blank" rel="noopener">open the manuscript in a tab ↗</a>`);
+    previewBtn = `<a class="fchip gs-findings-row-preview-toggle" href="${esc(full)}"
+        target="_blank" rel="noopener">open the manuscript in a tab ↗</a>`;
 
   // Identity lines. Titles are NEVER machine-translated -- discovery work titles
   // are Hebrew-only -- and `dir="auto"` + isolation keeps a Hebrew title from
@@ -1983,20 +2187,36 @@ function rowHtml(x){
     ? `<div class="dnote" dir="auto" style="unicode-bidi:isolate">${esc(x.locus_label)}</div>`
     : ``;
 
+  // Codex point 4: catalogue text right under its comparison slot; scattered
+  // metadata merged into one compact line; cautions on their own line;
+  // Sources & provenance and Machine details as labeled disclosures (point 6);
+  // grading minimized behind a disclosure (owner: the texts are the point).
   return `<div class="row gs-findings-row w-full gap-1 p-2"
       style="border-block-end:1px solid var(--border-light)">
-    <div class="side gap-2 items-center flex-wrap">${title}${wid}</div>
+    <div class="side gap-2 items-center flex-wrap">${title}${wid}
+      ${x.grade ? chip("nov", "graded: " + x.grade) : ``}</div>
     ${locus}
     ${author}
-    <div class="side gap-2 items-center flex-wrap">${shelf}</div>
+    <div class="side gap-2 items-center flex-wrap">${shelf}
+      ${chip("chip", x.corpus_label)}
+      <span class="dnote text-xs">${esc(ev)}</span>
+      ${x.alias_twin && x.alias_twin.length
+        ? chip("chip", "same work in another corpus: " + x.alias_twin.join(" · "),
+               DOCS["doc.work_alias"] || "") : ``}</div>
+    ${slots}
     ${cat}
-    ${readBlock(x)}
-    ${provBlock(x)}
-    <div class="gs-findings-row-meta side items-center gap-2 flex-wrap">${m.join("")}</div>
+    ${cautions.length ? `<div class="cautions">${cautions.join("")}</div>` : ``}
     <div class="cols" id="txt-${id}">${panes(x)}</div>
     <div class="dnote" id="txtnote-${id}">${esc(DOCS["doc.ms_match_vs_ref_match"])}</div>
+    ${previewBtn ? `<div style="margin-block-start:6px">${previewBtn}</div>` : ``}
     <div class="prev" id="prev-${id}"></div>
-    ${gradeBar(x)}
+    <details class="mdet"><summary>Sources &amp; provenance — files and
+        character offsets, both sides</summary>
+      ${readBlock(x)}${provBlock(x)}</details>
+    <details class="mdet"><summary>Machine details (${more.length})</summary>
+      <div class="mrows">${more.join("")}</div></details>
+    <details class="mdet"><summary>Grade${x.grade ? ": " + esc(x.grade) : ""} —
+        optional</summary>${gradeBar(x)}</details>
   </div>`;
 }
 
@@ -2446,8 +2666,13 @@ async function load(newOff){
   total = d.total; shown = d.rows.length; LAST = d.rows;
   $("count").textContent = `${num(d.total)} rows` +
     (d.total ? ` · showing ${num(S.off+1)}-${num(S.off+shown)}` : ``);
-  $("pageno").textContent = d.total
-    ? `${num(Math.floor(S.off / S.size) + 1)} / ${num(Math.ceil(d.total / S.size))}` : ``;
+  // typeable page number (owner, 2026-08-31)
+  $("pageno").innerHTML = d.total
+    ? `<input type="number" min="1" max="${Math.ceil(d.total / S.size)}"
+         value="${Math.floor(S.off / S.size) + 1}" style="width:5.5em"
+         onchange="gotoPage(this.value)"
+         onkeydown="if(event.key==='Enter')gotoPage(this.value)">
+       / ${num(Math.ceil(d.total / S.size))}` : ``;
   renderRbar(d);
   renderSession(d.graded_total);
   // The empty state keeps the public shape and drops the pool invitation inside
@@ -2459,8 +2684,15 @@ async function load(newOff){
        what is reachable.</div></div>`;
   facets();
 }
-function next(){ if (S.off + S.size < total) load(S.off + S.size); }
-function prev(){ if (S.off > 0) load(Math.max(0, S.off - S.size)); }
+// paging returns the reader to the top of the new page (owner, 2026-08-31)
+function pageTo(off){ load(off); window.scrollTo({top: 0}); }
+function next(){ if (S.off + S.size < total) pageTo(S.off + S.size); }
+function prev(){ if (S.off > 0) pageTo(Math.max(0, S.off - S.size)); }
+function gotoPage(p){
+  const pages = Math.max(1, Math.ceil(total / S.size));
+  const n = Math.min(pages, Math.max(1, parseInt(p, 10) || 1));
+  pageTo((n - 1) * S.size);
+}
 function exportGrades(){ window.location = "/api/export"; }
 
 function boot(){
@@ -2567,6 +2799,7 @@ MULTI_FILTERS = (("relation", "router_verdict"),
                  ("scripture", "scripture_flagged"),
                  ("gatediv", "gate_divergence"),
                  ("gatenew", "gate_new_finds"),
+                 ("model", "model_verdict"),
                  ("triage", "triage"))
 
 SINGLE_FILTERS = (("work", "work_id"),
@@ -2613,6 +2846,7 @@ FACET_AXES = (("relation", "router_verdict", "router_verdict", "relation"),
                "scripture"),
               ("gatediv", "gate_divergence", "gate_divergence", "gatediv"),
               ("gatenew", "gate_new_finds", "gate_new_finds", "gatenew"),
+              ("model", "model_verdict", "model_verdict", "model"),
               ("triage", "triage", "triage", "triage"))
 
 
@@ -3090,6 +3324,35 @@ class Handler(BaseHTTPRequestHandler):
         for r in rows:
             r["scripture"] = info.get(r["evidence_id"])
 
+    # `work_alias_fact` (scripts/attach_work_alias.py) is additive too.
+    _alias_table = None
+
+    def _has_alias(self, con):
+        if Handler._alias_table is None:
+            Handler._alias_table = bool(self._query(
+                con, "rows.alias_probe",
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='work_alias_fact'").fetchone())
+        return Handler._alias_table
+
+    def _attach_alias_twin(self, con, rows):
+        """When the SAME page also matches a linked twin of this row's work
+        (the same work under another corpus), name the twin on the payload --
+        the duplication is visible instead of puzzling. One indexed query per
+        on-screen row."""
+        if not rows or not self._has_alias(con):
+            return
+        for d in rows:
+            titles = [x["t"] for x in self._query(
+                con, "rows.alias_twin",
+                "SELECT DISTINCT b.work_title AS t FROM work_alias_fact w "
+                "JOIN review_row b ON b.page_id = :page AND b.work_id = "
+                "  CASE WHEN w.rs_work = :wid THEN w.base_work ELSE w.rs_work END "
+                "WHERE :wid IN (w.rs_work, w.base_work)",
+                {"page": d.get("page_id"), "wid": d.get("work_id")}).fetchall()]
+            if titles:
+                d["alias_twin"] = titles[:3]
+
     # `gate_verdict_fact` (scripts/attach_gate_verdicts.py) is additive too.
     _llm_table = None
 
@@ -3479,6 +3742,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._attach_witness(con, rows)
                 self._attach_scripture(con, rows)
                 self._attach_llm_verdicts(con, rows)
+                self._attach_alias_twin(con, rows)
             graded_total = self._query(
                 con, "rows.graded_total",
                 "SELECT COUNT(*) AS c FROM g.human_grade WHERE "

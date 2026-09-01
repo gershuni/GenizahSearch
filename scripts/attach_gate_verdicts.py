@@ -44,7 +44,7 @@ DEFAULT_RUNS = (
 
 VERDICTS = ("catalogue_right_match_is_quotation", "catalogue_right_claim_mistaken",
             "both_right_multiple_works", "catalogue_too_general",
-            "computed_right_catalogue_mismatch",
+            "overlapping_works", "computed_right_catalogue_mismatch",
             "credible_new_identification", "plausible_needs_expert_check",
             "weak_match_generic_text", "actually_recorded", "wrong_identification",
             "not_checked")

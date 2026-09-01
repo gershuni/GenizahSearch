@@ -79,6 +79,7 @@ VERDICTS = (
     "catalogue_right_claim_mistaken",
     "both_right_multiple_works",
     "catalogue_too_general",
+    "overlapping_works",
     "computed_right_catalogue_mismatch",
 )
 
@@ -88,27 +89,34 @@ PRIOR: the catalogue deserves substantial weight -- it was written by scholars w
   1. The catalogue term is GENERAL (a genre word, a broad container like "midrash", "halakha", "prayers") and the computed work is a compatible, more specific identity within it.
   2. The page carries SEVERAL works (very common: Bible verses interleaved with Targum, Tafsir, or a commentary; a halakhic text quoting liturgy) and the catalogue names only one of them, while the computed identification names another that is GENUINELY there.
 
+SHARED-MATERIAL BASE RATE: much of this corpus is liturgy, Bible, and Talmud that many works reproduce wholesale. When the matched text is such shared material, ask what a page like this MOST PROBABLY is: a page of prayers is most probably a siddur or mahzor -- not the prayer-order section of a halakhic code, however exactly it matches one; a page of scripture is most probably a Bible codex. Attribute the page to the larger work only if the excerpts show that work's OWN FINGERPRINT beyond the shared text -- its headings, its surrounding prose, its distinctive ordering or glosses. Without such a fingerprint, the humbler identity wins.
+
 The main FAILURE modes of the computed identification, which you must also weigh:
   - The matched text is a QUOTATION: the computed work quotes a text the page carries (or both quote a shared third text -- scripture, a fixed prayer, a legal formula), so the overlap does not make the page a copy of the computed work.
   - The computed work is simply MISTAKEN: a lookalike passage, generic phrasing, or a text family shared across many works.
 
 INPUT: one JSON object per case:
   - "manuscript": shelfmark and library.
-  - "catalogue": the catalogue's structured genre tags, its free-text identification prose, bibliography entries, and any Princeton Geniza Project description. READ THE PROSE -- a structured tag pointing elsewhere is never by itself proof of a real disagreement.
+  - "catalogue": the catalogue's structured genre tags, its free-text identification prose, bibliography entries, and any Princeton Geniza Project description. READ THE PROSE -- a structured tag pointing elsewhere is never by itself proof of a real disagreement. Read the WHOLE field: a genre word followed by a qualifier (a parenthetical scope, an incipit, a chapter range) makes the entry SPECIFIC, not general.
   - "computed_identification": the claimed work's title, author, domain, WHICH SECTIONS of the work matched, what fraction of the page's letters the match covers (page_coverage_percent -- high coverage means the page is mostly this text; low coverage means most of the page is something else), the number of matched pages in this manuscript, and machine flags (a relation verdict; whether the match looks like shared scripture; whether the matched section is a liturgy/formulary unit).
   - "text_samples": up to two aligned excerpts -- the manuscript page's own transcription around the match, and the computed work's text around the same match. Compare them: does the page read AS the computed work (continuous running text of it), or does it read as another text that shares a passage with it?
 
-DECISION VALUES -- choose exactly ONE "verdict":
+DECISION VALUES -- choose exactly ONE "verdict" (six values):
   - "catalogue_right_match_is_quotation": the catalogue's identification stands; the textual overlap exists because the computed work QUOTES text the page carries, or both share a third text (scripture, liturgy, a formula). The page is not a copy of the computed work.
   - "catalogue_right_claim_mistaken": the computed identification is simply wrong for this page (lookalike or generic text); the catalogue is the better account.
   - "both_right_multiple_works": the page genuinely carries the computed work IN ADDITION to what the catalogue names (interleaved or sharing the page).
-  - "catalogue_too_general": the catalogue's term is broad or generic and does not contradict the computed work; the computed identification is a compatible, more specific identity.
-  - "computed_right_catalogue_mismatch": the evidence shows the page IS the computed work and the catalogue entry does not fit the page's actual text. Use this ONLY when the excerpts clearly read as continuous text of the computed work AND page coverage is high; it asserts scholars erred, so it needs the strongest evidence.
+  - "catalogue_too_general": the catalogue's term is a broad GENRE or CONTAINER word ("midrash", "halakha", "prayers", "commentary fragments") that does not contradict the computed work; the computed identification is a compatible, more specific identity. NEVER use this when the catalogue names a specific work by name -- a named work is not "general", however much its text resembles the claimed one.
+  - "overlapping_works": the catalogue names a DIFFERENT SPECIFIC work whose text is known to overlap or share material wholesale with the claimed work (sister compilations from one school, parallel recensions, anthologies drawing on the same sources) -- the matched text cannot decide between the two works. This answers "cannot tell", endorsing neither side.
+  - "computed_right_catalogue_mismatch": the evidence shows the page IS the computed work and the catalogue entry does not fit the page's actual text. Use this ONLY when the excerpts clearly read as continuous text of the computed work AND page_coverage_percent is at least 75; it asserts scholars erred, so it needs the strongest evidence.
 
-STRUCTURED ABSTENTION: if the evidence given cannot support any of the five -- too short, contradictory, or you would be guessing -- respond {"abstain": true, "reason": "<short reason>"}. An abstention is a real, useful answer and is never penalized.
+SELF-CONSISTENCY: your verdict must match the mechanism your own reason describes -- if your reason says the works "quote", "share", or ride a common formula, the verdict must be catalogue_right_match_is_quotation or overlapping_works, never an endorsing one.
+
+GROUNDING: every scholar, edition, or catalogue claim in your reason must come from THIS input -- never cite general knowledge as if you read it here, and never reference another case.
+
+STRUCTURED ABSTENTION: if the evidence given cannot support any of the six -- too short, contradictory, or you would be guessing -- respond {"abstain": true, "reason": "<short reason>"}. An abstention is a real, useful answer and is never penalized.
 
 Respond ONLY with a single JSON object:
-{"verdict": "<one of the five values>", "confidence": "<high|medium|low>", "reason": "<at most 25 words, in English>"}
+{"verdict": "<one of the six values>", "confidence": "<high|medium|low>", "reason": "<at most 25 words, in English>"}
 OR the abstention object above. No prose outside the JSON object, and no other fields.
 """
 
@@ -142,15 +150,19 @@ Judge THREE things, in this order:
    - a QUOTATION: the page carries another text that the computed work quotes, or both quote a shared third text (scripture, a fixed prayer, a legal formula, a famous aggadah);
    - GENERIC TEXT: liturgical or formulaic passages every siddur/notary shares, standard blessings, common halakhic phrases -- text that cannot single out one work;
    - a LOOKALIKE: a text family shared across many works (parallel midrashim, reused talmudic sugyot in later compilations -- late compilations quoting talmudic text are VERY common).
-   Weigh page_coverage_percent (high = the page is mostly this text; low = most of the page is something else), the number of matched pages in the manuscript (several consecutive matched pages = strong), and whether the excerpts show the manuscript text following the work's own order and wording.
+   Weigh page_coverage_percent (high = the page is mostly this text; low = most of the page is something else), the number of matched pages in the manuscript (several consecutive matched pages = strong), and whether the excerpts show the manuscript text following the work's own order and wording. At high coverage, calling the match GENERIC or a LOOKALIKE requires NAMING a specific competing work in your reason -- "a prayerbook" or "standard liturgy" is not a name; if you cannot name one, prefer plausible_needs_expert_check and put the suspected rival in `doubt`.
 
-2. IS IT REALLY NEW? Read the catalogue prose, bibliography and PGP text yourself. If any of them in fact names this work for this fragment -- under any spelling, alias, or looser phrasing -- the automated check missed it and this is NOT a new find (verdict `actually_recorded`). A catalogue naming only a broad genre ("halakha", "midrash", "piyyut") does NOT count as recording it.
+SHARED-MATERIAL BASE RATE: much of this corpus is liturgy, Bible, and Talmud that many works reproduce wholesale. When the matched text is such shared material, ask what a page like this MOST PROBABLY is: a page of prayers is most probably a siddur or mahzor -- not the prayer-order section of a halakhic code, however exactly it matches one. Attribute the page to the larger work only if the excerpts show that work's OWN FINGERPRINT beyond the shared text -- its headings, its surrounding prose, its distinctive ordering or glosses. Without such a fingerprint, the humbler identity wins.
 
-3. WHAT WOULD AN EXPERT CHECK? Every verdict must carry a `doubt`: the single most useful thing for a human scholar to verify (a specific competing source, a nusach variant, a folio to read).
+2. IS IT REALLY NEW? Read the catalogue prose, bibliography and PGP text yourself. If any of them in fact names this work for this fragment -- under any spelling, alias, or looser phrasing -- the automated check missed it and this is NOT a new find (verdict `actually_recorded`). A catalogue naming only a broad genre ("halakha", "midrash", "piyyut") does NOT count as recording it. `actually_recorded` is available ONLY when you can quote or closely paraphrase, FROM THIS INPUT's aid texts, the words that record the identification; when the aid text is absent or names only a genre, the verdict is unavailable, however famous or well-published the computed work is elsewhere.
+
+3. WHAT WOULD AN EXPERT CHECK? Every verdict must carry a `doubt`: the single most useful thing for a human scholar to verify (a specific competing source, a nusach variant, a folio to read). `doubt` is never "none" -- if nothing material remains, say plainly what makes the case airtight instead.
+
+GROUNDING: every scholar, edition, or catalogue claim in your reason or doubt must come from THIS input -- never cite general knowledge as if you read it here, and never reference another case.
 
 DECISION VALUES -- choose exactly ONE "verdict":
   - "credible_new_identification": the excerpts read as continuous text of the computed work, coverage/context supports a witness, and no aid records it. A real find candidate.
-  - "plausible_needs_expert_check": probably right, but one specific weakness remains (short match, partial coverage, a plausible competing source) -- name it in `doubt`.
+  - "plausible_needs_expert_check": probably right, but one specific weakness remains (short match, partial coverage, a plausible competing source) -- name it in `doubt`. Also the verdict for a tie with a specific named sister work the excerpt cannot rule out -- name that rival in `doubt`, never force a confident wrong_identification.
   - "weak_match_generic_text": the overlap is quotation/shared/generic text that cannot identify the page as this work.
   - "actually_recorded": an aid's own text already records this identification -- not new.
   - "wrong_identification": the page is identifiably something else (say what, in `reason`).
@@ -164,7 +176,8 @@ NEW_FINDS_PROMPT_SHA256 = hashlib.sha256(
 
 NEW_FINDS_BATCH_TAIL = (
     "You will be given SEVERAL numbered cases at once. Judge EACH ONE INDEPENDENTLY, "
-    "exactly as if it were the only case given; a case must never influence another. "
+    "exactly as if it were the only case given; a case must never influence another, "
+    "and no reason or doubt may reference another case number. "
     'Respond ONLY with a single JSON object mapping every case number to its own verdict: '
     '{"results": {"1": {"verdict": "<one of the five values>", "doubt": "<at most 20 words>", '
     '"reason": "<at most 25 words, in English>"}, "2": {"abstain": true, "reason": "<short reason>"}}}. '
@@ -182,7 +195,7 @@ NEW_FINDS_BATCH_PROMPT_TEMPLATE = (
 # ---------------------------------------------------------------------------
 
 _SINGLE_TAIL = """Respond ONLY with a single JSON object:
-{"verdict": "<one of the five values>", "confidence": "<high|medium|low>", "reason": "<at most 25 words, in English>"}
+{"verdict": "<one of the six values>", "confidence": "<high|medium|low>", "reason": "<at most 25 words, in English>"}
 OR the abstention object above. No prose outside the JSON object, and no other fields.
 """
 
@@ -191,9 +204,10 @@ assert PROMPT_TEMPLATE.endswith(_SINGLE_TAIL), (
 
 _BATCH_TAIL = (
     "You will be given SEVERAL numbered cases at once. Judge EACH ONE INDEPENDENTLY, "
-    "exactly as if it were the only case given; a case must never influence another. "
+    "exactly as if it were the only case given; a case must never influence another, "
+    "and no reason or doubt may reference another case number. "
     'Respond ONLY with a single JSON object mapping every case number to its own verdict: '
-    '{"results": {"1": {"verdict": "<one of the five values>", "confidence": "<high|medium|low>", '
+    '{"results": {"1": {"verdict": "<one of the six values>", "confidence": "<high|medium|low>", '
     '"reason": "<at most 25 words, in English>"}, "2": {"abstain": true, "reason": "<short reason>"}}}. '
     "Include EVERY case number exactly once. No prose outside the JSON object.\n"
 )
@@ -725,7 +739,7 @@ def cmd_eval_gold(args) -> int:
     recs = [json.loads(l) for l in open(ckpt_path, encoding="utf-8") if l.strip()]
     recs = [r for r in recs if r.get("prompt_sha") == task["prompt_sha"]]
     by_key = {(r["page_id"], r["work_id"]): r for r in recs}
-    agree = disagree = abstain = 0
+    agree = disagree = abstain = undecided = 0
     confusion: Dict[Tuple[str, str], int] = {}
     for g in usable:
         r = by_key.get((g["page_id"], g["work_id"]))
@@ -737,6 +751,10 @@ def cmd_eval_gold(args) -> int:
         confusion[(g["gold"], v)] = confusion.get((g["gold"], v), 0) + 1
         if v == "not_checked":
             abstain += 1
+        elif v == "overlapping_works":
+            # "cannot decide between the two works" endorses neither side --
+            # scored outside the binary, reported in the confusion table
+            undecided += 1
         elif (g["gold"] == "genuine") == (v in task["genuine"]):
             agree += 1
         else:
@@ -746,7 +764,7 @@ def cmd_eval_gold(args) -> int:
           f"calls_this_run={n_run} spend_total=${spent(cost_log):.4f}")
     if total:
         print(f"AGREEMENT: {agree}/{total} = {100.0*agree/total:.1f}%  "
-              f"(abstained: {abstain})")
+              f"(abstained: {abstain}, overlapping_works: {undecided})")
     print("confusion (gold -> verdict):")
     for (gold_l, v), n in sorted(confusion.items(), key=lambda kv: -kv[1]):
         print(f"  {gold_l:11s} -> {v:38s} {n}")
@@ -763,16 +781,30 @@ def cmd_run(args) -> int:
     con.row_factory = sqlite3.Row
     pools = tuple(p.strip() for p in args.pools.split(",") if p.strip())
     ns = task["novelty_statuses"]
+    # --only-verdicts: selective re-run of pairs whose CURRENT stored verdict
+    # (gate_verdict_fact) is in the list -- the owner's "re-run only the
+    # classes we found problematic" mode (2026-08-31). Verdict provenance per
+    # pair stays honest via the prompt_sha column.
+    only = tuple(v.strip() for v in (args.only_verdicts or "").split(",") if v.strip())
+    only_join = only_where = ""
+    if only:
+        only_join = ("JOIN gate_verdict_fact gv ON gv.sys_id = f.sys_id "
+                     "AND gv.work_id = f.work_id AND gv.task = ?")
+        only_where = f"AND gv.verdict IN ({','.join('?' * len(only))})"
     q = f"""SELECT sys_id, work_id, page_id, triage, novelty_status FROM (
         SELECT f.sys_id, f.work_id, r.page_id, f.triage, f.novelty_status,
                ROW_NUMBER() OVER (PARTITION BY f.sys_id, f.work_id
                  ORDER BY f.matched_letters DESC, r.page_id ASC) rn
         FROM facet_row f JOIN review_row r ON r.evidence_id = f.evidence_id
+        {only_join}
         WHERE f.novelty_status IN ({','.join('?'*len(ns))})
           AND f.triage IN ({','.join('?'*len(pools))})
+          {only_where}
     ) WHERE rn = 1"""
-    pairs = [dict(r) for r in con.execute(q, (*ns, *pools))]
-    print(f"task={args.task} pools={pools}: {len(pairs)} pairs", flush=True)
+    params = ((args.task,) if only else ()) + (*ns, *pools) + only
+    pairs = [dict(r) for r in con.execute(q, params)]
+    print(f"task={args.task} pools={pools} only={only or 'ALL'}: "
+          f"{len(pairs)} pairs", flush=True)
 
     model_slug = args.model.replace("/", "_").replace(".", "_")
     cost_log = os.path.join(args.out_dir, f"run_cost_{args.task}_{model_slug}.jsonl")
@@ -841,6 +873,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                    help="production run at pair grain over --pools")
     p.add_argument("--pools", default="main,unclear",
                    help="comma-separated triage pools for --run")
+    p.add_argument("--only-verdicts", default=None,
+                   help="selective re-run: only pairs whose CURRENT verdict "
+                        "in gate_verdict_fact is in this comma-separated list")
     p.add_argument("--dry-run", type=int, default=0,
                    help="render N cases to a file, no network")
     p.add_argument("--cost-ceiling", type=float, default=None,
