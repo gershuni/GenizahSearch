@@ -46,6 +46,9 @@ the file they were taken from and the exact character range inside it:
 | `ref_char_start` / `ref_char_end` | the character range in the reference work's own source file |
 | `witness_id` | joins `reference_witness` → `source_file`: **which file** produced this row's reference offsets |
 | `locus_label` | the citable address (e.g. a tractate folio). R-source rows get theirs from the innermost section header preceding the match in the source file — work / tractate / chapter grade, resolved on **all 226,679** of them |
+| `htr_align_status` | only on the 26,180 rows whose page was searched as an FGP/PGP transcription: `exact` — the matched letters occur verbatim in the HTR page, once (760 rows); `realigned_htr` — alignment score 90 or above, trust it (16,279); `realign_uncertain` — the best window, score shown; the HTR is noisy there, so treat the boundaries as approximate (9,141). The status is decided on the same one-decimal score the row shows, so a displayed 90.0 is always `realigned_htr`. `ambiguous` (occurs twice, no address) and `unalignable` (too short) are possible values and occur 0 times in this file |
+| `htr_page_char_start` / `htr_page_char_end` | where the span sits in the HTR text of that page (`htr_page.htr_text`) |
+| `htr_file_char_start` / `htr_file_char_end` · `htr_align_score` | the same span in `Transcriptions.txt`, and the alignment score (100 for `exact`) |
 
 Two cautions worth reading once:
 
@@ -53,12 +56,23 @@ Two cautions worth reading once:
   Where a source's NFC form differs from its raw form, the row says so
   (`ms_provenance_status='nfc_shift'`) and withholds the file offsets rather
   than giving you an address that is off by a character or two.
-* **Some pages have no address in the corpus file** because their text came
-  from a different source (FGP/PGP). Those rows say so
-  (`ms_provenance_status='offsets_missing'`) rather than guessing: **7,890 of
-  the 519,382 rows here**, 1.5%. (Corpus-wide the figure was 18,982 of 667,411
-  pages, but that whole-corpus population is not what this file contains, so
-  you cannot check it from the file.)
+* **On 7,890 pages the matcher searched a human transcription, not the HTR.**
+  Corpus-wide, 18,982 of 667,411 pages have an FGP or PGP transcription that a
+  gate judged a fuller and more accurate copy of the page than the HTR
+  (alignment score of at least 70 against the HTR; a human text shorter than
+  the HTR must cover at least 80% of it), and that text became the search
+  text. The HTR text of every one of those pages still stands in
+  `Transcriptions.txt`: it was replaced as search text, never deleted. In this
+  file that touches **26,180 of the 519,382 rows (5.0%), on 7,890 pages and
+  5,172 manuscripts**, marked `ms_provenance_status='offsets_missing'`. Their
+  `page_char_*` index the FGP/PGP text, which you do not hold, and their
+  `file_char_*` are NULL. Each of those rows therefore also carries an **HTR
+  address**: the matched span was located in the HTR text of the same page by
+  alignment and recorded in `htr_file_char_start/end`, with `htr_align_status`
+  and `htr_align_score` saying how far to trust it (table below). The HTR text
+  of all 18,982 pages, with its file address, is in `htr_page`, and the viewer
+  shows it on the row ("HTR text of this page"). These are the FGP-found spans
+  re-addressed, not new matches; see "Known limitations".
 
 Every offset in this file was verified by an independent re-derivation: a
 separate checker, written so that it cannot call any of the code that produced
@@ -386,8 +400,11 @@ not are the Sefaria rows whose reference text came from a re-derived stream
 rather than a single file, and they say so (`ref_provenance_status =
 'stream_fallback'`).
 
-The manuscript side needs no lookup: those offsets are positions in
+The manuscript side needs no lookup: `file_char_*` are positions in
 `Transcriptions.txt` itself, and the viewer prints both addresses on every row.
+On the 26,180 rows whose page was searched as an FGP/PGP transcription
+(`ms_provenance_status='offsets_missing'`), read `htr_file_char_*` instead, and
+let `htr_align_status` tell you how far to trust that address.
 
 **Handle the Access file as the more sensitive of the two.** It is the only
 place where the restricted corpora's file names appear next to our matches. It
@@ -425,6 +442,20 @@ does.
   given page lives in the producers' run records, which were not exported here,
   so the witness strip says the weaker, true thing rather than implying a
   search it cannot prove happened.
+
+* **The HTR text of the 18,982 substituted pages was never searched.** The
+  matcher ran on the FGP/PGP text of those pages. The HTR addresses on their
+  rows re-locate the matches that the human text produced; they are not new
+  matches, and a match present only in the HTR (where the human transcription
+  is partial) is not in this file. The substitution gate was audited when it
+  was built: in a constructed case it can pass a human text that preserves as
+  little as about 57% of a page. Measured on the real substitutions against
+  the untouched HTR, no page lost half or more of its content; 209 of the
+  18,982 kept only 50–70% of it (152 where the human text is shorter than the
+  HTR, 57 where it is longer), and 28 of those pages carry 70 rows in this
+  file. A wider screen (coverage, score or fidelity below threshold) flagged
+  595 pages as risky; 147 of them carry 350 rows here. The matcher has not
+  been re-run on the HTR text.
 
 * **The counts beside each sidebar control are evidence-row counts, in card
   grain too.** Card counts would need a `COUNT(DISTINCT card_id)` per axis:

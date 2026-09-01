@@ -261,11 +261,49 @@ def main(argv=None) -> int:
                              "row is in no card or in two" % (got_m, want))
         print("cards     : %d cards / %d members" % (n_c, n_m))
 
+    # ---- the HTR side of the substituted pages (2026-09-01) ----------------
+    # identification_row already carries the per-row htr_* columns when the
+    # review db has them (they are not text columns). htr_page travels WITHOUT
+    # its text: the reader holds Transcriptions.txt, and the address is the
+    # point. Every other column comes along, so a page's two lengths and its
+    # substitution score can be compared in Access.
+    have_htr = src.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+        "AND name='htr_page'").fetchone()[0]
+    if have_htr:
+        cur.execute("CREATE TABLE htr_page ([page_id] TEXT(64), [sys_id] TEXT(32), "
+                    "[search_text_source] TEXT(8), [substitution_score] DOUBLE, "
+                    "[search_text_n_chars] LONG, [htr_n_chars] LONG, "
+                    "[htr_file_char_start] LONG, [htr_file_char_end] LONG, "
+                    "[nfc_ok] LONG, [in_review_set] LONG)")
+        hins = "INSERT INTO htr_page VALUES (?,?,?,?,?,?,?,?,?,?)"
+        hb, n_h = [], 0
+        for r2 in src.execute(
+                "SELECT page_id, sys_id, search_text_source, substitution_score, "
+                "search_text_n_chars, htr_n_chars, htr_file_char_start, "
+                "htr_file_char_end, nfc_ok, in_review_set FROM htr_page"):
+            hb.append(tuple(r2))
+            if len(hb) >= 2000:
+                cur.executemany(hins, hb)
+                n_h += len(hb)
+                hb = []
+        if hb:
+            cur.executemany(hins, hb)
+            n_h += len(hb)
+        cur.execute("CREATE INDEX ix_hp_page ON htr_page ([page_id])")
+        cur.execute("CREATE INDEX ix_hp_sys ON htr_page ([sys_id])")
+        acc.commit()
+        want_h = src.execute("SELECT COUNT(*) FROM htr_page").fetchone()[0]
+        got_h = cur.execute("SELECT COUNT(*) FROM htr_page").fetchone()[0]
+        if got_h != want_h:
+            raise SystemExit("htr_page %d != sqlite %d" % (got_h, want_h))
+        print("htr_page  : %d substituted pages (no text)" % n_h)
+
     cur.execute("CREATE TABLE meta ([meta_key] TEXT(255), [meta_value] LONGTEXT)")
     for k, v in src.execute("SELECT key, value FROM meta WHERE key LIKE 'doc.%' "
                             "OR key LIKE 'rsource_%' OR key LIKE 'card_grain.%' "
-                            "OR key LIKE 'work_registry.%' OR key IN "
-                            "('schema','rows','merged_at')"):
+                            "OR key LIKE 'work_registry.%' OR key LIKE 'htr_realign.%' "
+                            "OR key IN ('schema','rows','merged_at')"):
         cur.execute("INSERT INTO meta VALUES (?,?)", (k, str(v)))
     cur.execute("INSERT INTO meta VALUES (?,?)", (
         "export.note",

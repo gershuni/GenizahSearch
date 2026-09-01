@@ -1,6 +1,11 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-08-25 — the codebase-wide `sys_id` parser divergence reported from the
+> **Last Updated:** 2026-09-01 — one P2 added from the v5 review handoff: the discovery matcher never
+> searched the HTR text of the 18,982 corpus pages whose search text was swapped for an FGP/PGP
+> transcription (a recall gap, not an addressing gap). The addressing half is CLOSED the same day:
+> `scripts/attach_htr_realignment.py` re-located all 26,180 affected review rows in `Transcriptions.txt`
+> (760 verbatim / 16,279 at score ≥ 90 / 9,141 uncertain, every address re-sliced before the write) and
+> stored the HTR text of all 18,982 pages in `htr_page`. Previous header (2026-08-25) — the codebase-wide `sys_id` parser divergence reported from the
 > multi-witness parallels review is CLOSED (entry in the archive). `97` is the LOCAL "My Library"
 > namespace, not an NLI corpus prefix, and the divergence was not latent: the 99-only pattern
 > mis-matched INSIDE a LOCAL id 6.36% of the time, live on the desktop LAB path. One definition now
@@ -72,7 +77,7 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open |
 |----------|------|
 | P1 Critical Bugs | 0 |
-| P2 Medium Bugs | 25 |
+| P2 Medium Bugs | 26 |
 | P3 Low Priority | 11 |
 | Documentation Issues | 2 |
 | Code Quality Debt | 1 |
@@ -80,7 +85,7 @@ Move to "Completed Issues" section at bottom with date
 | Deferred to v7.15+ | 9 |
 | 2026-05-29 audit follow-up | 4 |
 | FGP integration (§4.5) | 3 |
-| **Total open** | **59** |
+| **Total open** | **60** |
 
 > Counts recomputed from the tables on 2026-08-14 by counting rows carrying ❌ / ⏸ / ⏳
 > (template rows in the maintenance protocol excluded). The old "Fixed/Implemented" column
@@ -213,6 +218,7 @@ The verbose pre-2026-05-29 "Last Updated" header log is archived at
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
+| **The discovery matcher never searched the HTR text of the 18,982 corpus pages whose search text was swapped for an FGP/PGP transcription (recall gap)** | `same_work_spike/probe/scripts/mapv2_stage0.py` (the substitution gate, constants at `:92-113`), `same_work_spike/probe/data/fullcorpus_v2.db` + `rsource/data/fullcorpus_gen2.db` (`pages.provenance`), `scripts/attach_htr_realignment.py` (the addressing half, shipped) | ❌ Open (found 2026-09-01 while the owner reviewed the v5 handoff text) | Stage-0 (2026-07-10, owner ruling) replaced the HTR page text with an FGP/PGP transcription on 18,982 of 667,411 pages when it aligned at score ≥ 70 and, if shorter, covered ≥ 80% of the HTR; both discovery runs (base and R-source) then searched that text. The HTR text still stands in `Transcriptions.txt` for every one of them (verified byte-exact for all 18,982). **Two consequences.** (a) *Addressing* — the 26,180 review rows on 7,890 of those pages (5.0% of 519,382; 5,172 manuscripts; 20,901 cards with no other address) had `file_char_*` NULL. **CLOSED 2026-09-01**: `scripts/attach_htr_realignment.py` re-located each matched span in the HTR text of the same page (760 verbatim, 16,279 at score ≥ 90, 9,141 uncertain and labelled so; every window must reproduce the aligner's own score and every address re-slices to it before the write; 300 random addresses re-read from the file independently) and stored the HTR text + address of all 18,982 pages in `htr_page`; the viewer and the Access export carry both. (b) *Recall* — **still open**: a match present only in the HTR (where the human transcription is partial) was never searched for. The gate's own audit (`results/agent_stage0_audit.md`, GATE-LEAKY: span coverage, not matched characters; fix never applied) found a constructed pass at ~57% content preserved; the post-hoc recompute (`results/mapv2_substitution_risk.md`) measured the real damage as: no page losing ≥ 50% of its HTR content, 209 of 18,982 keeping only 50–70% (152 Case-B where the human text is shorter, 57 Case-A where it is longer; 28 of them carry 70 review rows), and 595 pages flagged risky by any of three criteria (147 of them carry 350 review rows). Fix direction: re-run the matcher on the HTR text of the 18,982 pages as a third render-then-merge satellite (`scripts/merge_v5_review_db.py` pattern), dedup page×work pairs already found on the FGP text, and route new candidates through the same gates. Cost from the logged runs: matching is linear in pages (base track-1 197 min and R-source rs0+rs1 311 min over 667,411 pages → under 15 min of matching for 2.8% of the corpus), but the fixed stages (R-source masks 91.5 min, index loads), the novelty LLM gate on genuinely new pairs (~$0.00075/case, cache hits free), the merge/dedup rule, and a Codex review are the real cost — about a day of work. **Do not price it from a `--limit` smoke; a 200-page `--cost-ceiling`-style sample run is the honest estimate and has not been run.** |
 | **A parallels reload restores the RESULTS but not the search CONFIGURATION that produced them** | `web/pages/parallels.py` (`_persist_active_snapshot` / the restore block / the control panel) | ✅ Fixed (2026-08-23, two halves: round 7 reworded the restore notice to condition on the original settings; the follow-up PR persists `search_config` -- the same dispatch captures the fingerprint hashes -- in the tab snapshot and re-applies it to the controls on reload via `_apply_restored_search_config`, validated against each widget's own options so a stale snapshot degrades to defaults instead of crashing) | The tab snapshot stores rows, totals, fingerprint, exclusions and source text -- but no control state. After a reload the page shows the restored rows while the controls sit at build-time defaults (method=letter-level, mode=exact, chunk=5, boundary=full). A user who follows the restore notice ("run the search again for the full list") silently runs a DIFFERENT search. Pre-existing (restore never restored controls), but PR #325 amplified it by changing the default method and adding the notice. Fix direction: persist the same inputs the search fingerprint already enumerates, and apply them to the widgets where the build-time `on_passage_mode_change()` call already runs -- one list of "what defines a search", reused. Owner answered 2026-08-23 ("Merge, then continue"): the configuration is restored. |
 | **Parallels Word export still strips highlight markers while xlsx now renders them** | `web/export_service.py` (`export_parallels_word`) | ❌ Open (found 2026-08-23 by the PR #325 review workflow) | `export_parallels_excel` renders `*span*` as red+bold runs; `export_parallels_word` still calls `remove_highlight_markers`, so the same search exported to the two formats disagrees about what matched. Low severity (no data loss, no wrong data) but a visible inconsistency now that xlsx shows the spans. python-docx supports bold runs, so the fix mirrors the xlsx one. |
 | **Parallels xlsx export has no match highlighting, in either method** | `web/export_service.py` (`export_parallels_excel`) | ✅ Fixed (2026-08-23, PR #325) | The `*term*` markers were stripped on export, so Source Context and Manuscript Match were plain near-identical text for short source texts. Fixed with the D-14 helper both other exporters already use (`shared.export_utils.build_rich_snippet_cell`, red+bold runs) on both columns, both methods; desktop's composition dossier already rendered rich runs (D-03), so this was web-only. The storage compactor now also closes a highlight span cut by the 4000-char cap (an orphaned `*` would have styled the whole tail). The same-day rulings recorded here shipped in PR #325: exports uncapped (5,000-row payload bound), display paged via Load more. |

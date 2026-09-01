@@ -1438,6 +1438,9 @@ const PREVIEW = "__PREVIEW__";
 // scripts/attach_review_cards.py and matching today's review_row and
 // registry). False keeps the tool exactly as it was: no toggle, row grain.
 const CARDS_OK = __CARDS_OK__;
+// true only when htr_page exists AND its per-row stamps agree with their own
+// meta count -- a half-run hides the HTR pane rather than showing a stale one
+const HTR_OK = __HTR_OK__;
 const DOCS = /*__DOCS__*/{};
 const NUMS = /*__NUMS__*/{};
 // The public page's four grouped views, [key, label] in ITS order, injected
@@ -2757,10 +2760,33 @@ function provLine(x){
   if (x.ms_provenance_status === "ok") {
     parts.push(`<span class="pvside"><b>MS</b> <span class="mono">Transcriptions.txt
       · chars ${n(x.file_char_start)}–${n(x.file_char_end)}</span></span>`);
+  } else if (x.ms_provenance_status === "offsets_missing" &&
+             x.page_char_start !== null && x.page_char_start !== undefined) {
+    // A substituted page: the matcher searched a human transcription (FGP/PGP)
+    // of it. When the span was re-aligned onto the HTR text, THAT address is
+    // the one the reader can open; its status and score travel with it. Only
+    // 'offsets_missing' means substituted -- 'nfc_shift' is a different fact
+    // and gets its own line below.
+    const st = x.htr_align_status;
+    const hasFile = st && x.htr_file_char_start !== null && x.htr_file_char_start !== undefined;
+    if (hasFile && (st === "exact" || st === "realigned_htr" || st === "realign_uncertain")) {
+      const how = st === "exact" ? "verbatim"
+        : st === "realigned_htr" ? `re-aligned, score ${n(x.htr_align_score)}`
+        : `best window, score ${n(x.htr_align_score)} — uncertain`;
+      parts.push(`<span class="pvside"><b>MS</b> <span class="mono">Transcriptions.txt
+        · chars ${n(x.htr_file_char_start)}–${n(x.htr_file_char_end)}</span>
+        <span class="${st === "realign_uncertain" ? "weak" : ""}">· HTR, ${how}; the
+        searched text was FGP/PGP</span></span>`);
+    } else {
+      parts.push(`<span class="pvside"><b>MS</b> <span class="mono">searched text (FGP/PGP):
+        chars ${n(x.page_char_start)}–${n(x.page_char_end)}</span>
+        <span class="weak">· no address in Transcriptions.txt${st ? ` (${esc(st)})` : ``}</span></span>`);
+    }
   } else if (x.page_char_start !== null && x.page_char_start !== undefined) {
-    parts.push(`<span class="pvside"><b>MS</b> <span class="mono">this page:
+    // nfc_shift (or any other non-ok status): page offsets only, and say why
+    parts.push(`<span class="pvside"><b>MS</b> <span class="mono">this page (NFC text):
       chars ${n(x.page_char_start)}–${n(x.page_char_end)}</span>
-      <span class="weak">· no corpus-file address</span></span>`);
+      <span class="weak">· file offsets withheld (${esc(x.ms_provenance_status || "?")})</span></span>`);
   }
   const src = x.src;
   const name = src ? (src.file || src.ref_id) : null;
@@ -2778,6 +2804,92 @@ function provLine(x){
     character range of the match inside it. Offsets count characters of the
     NFC-normalized text, 0-based, end exclusive.">${parts.join("")}</div>`;
 }
+// ---- the HTR side of a substituted page -----------------------------------
+// On 18,982 corpus pages the matcher searched a human transcription (FGP/PGP)
+// instead of the HTR; the HTR text still stands in Transcriptions.txt, and
+// scripts/attach_htr_realignment.py located each matched span in it by
+// alignment. The status says how far to trust that address: a low score is
+// shown, never hidden, and 'ambiguous' / 'unalignable' get no address at all.
+function htrAddressRow(x){
+  const st = x.htr_align_status;
+  if (!st) return `<div class="rdrow weak"><span class="rdlab">HTR</span>
+    <span class="rdtxt">not re-aligned onto the HTR text (this file predates that pass)</span></div>`;
+  const sc = x.htr_align_score;
+  const hasFile = x.htr_file_char_start !== null && x.htr_file_char_start !== undefined;
+  const hasPage = x.htr_page_char_start !== null && x.htr_page_char_start !== undefined;
+  const addr = `<span class="mono">Transcriptions.txt · chars ${fmtN(x.htr_file_char_start)}–${fmtN(x.htr_file_char_end)}</span>`;
+  let txt, weak = false;
+  if (!hasFile) {
+    // no file address: say which of the known reasons, never print "?–?"
+    weak = true;
+    if (st === "ambiguous")
+      txt = `the matched letters occur more than once in the HTR page — no single
+        address, on purpose`;
+    else if (st === "unalignable")
+      txt = `the matched span is too short to locate in the HTR text`;
+    else if (hasPage)
+      txt = `HTR page chars ${fmtN(x.htr_page_char_start)}–${fmtN(x.htr_page_char_end)} —
+        file address withheld: this page's raw form differs from its NFC form`;
+    else
+      txt = `no HTR address recorded for this row (status <code>${esc(String(st))}</code>)`;
+  } else if (st === "exact")
+    txt = `${addr} — the matched letters occur verbatim in the HTR page`;
+  else if (st === "realigned_htr")
+    txt = `${addr} — re-aligned onto the HTR text, score ${fmtN(sc)}`;
+  else if (st === "realign_uncertain") { weak = true;
+    txt = `${addr} — best HTR window, score ${fmtN(sc)}: the HTR is noisy here,
+      treat the boundaries as approximate`; }
+  else { weak = true;
+    txt = `${addr} — status <code>${esc(String(st))}</code> is not one this viewer
+      knows; treat the address as unverified`; }
+  const btn = HTR_OK ? ` <button class="fchip" id="htrb-${esc(x.evidence_id)}"
+      onclick="htrPane('${escJs(x.evidence_id)}',this)">HTR text of this page</button>` : ``;
+  return `<div class="rdrow${weak ? ` weak` : ``}"><span class="rdlab">HTR</span>
+    <span class="rdtxt">${txt}${btn}</span></div>
+    <div id="htrp-${esc(x.evidence_id)}" style="display:none"></div>`;
+}
+const HTRP = {};   // page_id -> fetched htr_page payload, once per page
+async function htrPane(id, btn){
+  const box = $("htrp-" + id);
+  if (!box) return;
+  if (box.style.display !== "none") {
+    box.style.display = "none"; btn.classList.remove("here"); return;
+  }
+  const x = LAST.find(r => r.evidence_id === id);
+  if (!x) return;
+  let p = HTRP[x.page_id];
+  if (!p) {
+    btn.textContent = "loading…";
+    try {
+      const r = await fetch("/api/htr_page?page_id=" + encodeURIComponent(x.page_id));
+      p = await r.json();
+    } catch (e) { p = {error: String(e)}; }
+    btn.textContent = "HTR text of this page";
+    if (p && !p.error) HTRP[x.page_id] = p;
+  }
+  if (!p || p.error) {
+    box.innerHTML = `<div class="dnote">HTR text unavailable: ${esc((p && p.error) || "no response")}</div>`;
+    box.style.display = "block"; return;
+  }
+  // the page text is shown EXACTLY as stored -- no display cleaning, because
+  // the row's page offsets index this very string
+  const t = String(p.text || "");
+  let b = t, m = "", a = "";
+  if (x.htr_page_char_start !== null && x.htr_page_char_start !== undefined &&
+      x.htr_page_char_end !== null && x.htr_page_char_end !== undefined) {
+    b = t.slice(0, x.htr_page_char_start);
+    m = t.slice(x.htr_page_char_start, x.htr_page_char_end);
+    a = t.slice(x.htr_page_char_end);
+  }
+  const where = (p.file_start !== null && p.file_start !== undefined)
+    ? ` · Transcriptions.txt chars ${fmtN(p.file_start)}–${fmtN(p.file_end)}`
+    : ` · no file address (NFC shift)`;
+  box.innerHTML = pane("htr", id, `Manuscript — HTR text of this page${where}`, b, m, a, false,
+    `<span class="weak"> the matcher searched a ${esc(String(p.source || "?")).toUpperCase()}
+     transcription of this page instead (substitution score ${esc(String(p.score ?? "?"))});
+     ${m ? "the marked span is where the match re-aligned" : "no span could be marked"}</span>`);
+  box.style.display = "block"; btn.classList.add("here");
+}
 function provBlock(x){
   const id = x.evidence_id;
   const hasMs = x.ms_provenance_status !== undefined && x.ms_provenance_status !== null;
@@ -2794,10 +2906,11 @@ function provBlock(x){
         (this page: ${fmtN(x.page_char_start)}–${fmtN(x.page_char_end)})</span></div>`);
     } else if (x.ms_provenance_status === "offsets_missing") {
       parts.push(`<div class="rdrow weak"><span class="rdlab">Manuscript</span>
-        <span class="rdtxt">no address in the corpus file — this page's text came
-        from another source (FGP/PGP)` +
-        (x.page_char_start != null ? `; within the page: chars ${fmtN(x.page_char_start)}–${fmtN(x.page_char_end)}` : ``) +
+        <span class="rdtxt">the text the matcher searched on this page was a human
+        transcription (FGP/PGP), not the HTR in Transcriptions.txt` +
+        (x.page_char_start != null ? `; within that text: chars ${fmtN(x.page_char_start)}–${fmtN(x.page_char_end)}` : ``) +
         `</span></div>`);
+      parts.push(htrAddressRow(x));
     } else if (x.ms_provenance_status === "nfc_shift") {
       parts.push(`<div class="rdrow weak"><span class="rdlab">Manuscript</span>
         <span class="rdtxt">file offsets withheld: this page's raw bytes differ from
@@ -2836,8 +2949,20 @@ function provBlock(x){
   parts.push(`<div class="dnote">Offsets count characters of the NFC-normalized
     text (not bytes), 0-based, end exclusive. Every one was re-derived
     independently and matched before this file shipped.</div>`);
+  // A substituted page whose span was re-aligned onto the HTR does have a
+  // manuscript-side file address; the chip says so, and says how it got one.
+  const msViaHtr = hasMs && x.ms_provenance_status === "offsets_missing" &&
+    x.htr_file_char_start !== null && x.htr_file_char_start !== undefined &&
+    (x.htr_align_status === "exact" || x.htr_align_status === "realigned_htr");
+  const msHtrUncertain = hasMs && x.ms_provenance_status === "offsets_missing" &&
+    x.htr_align_status === "realign_uncertain";
   const flag = (hasMs && x.ms_provenance_status === "ok" && x.ref_provenance_status === "ok")
-    ? " — file + offsets, both sides" : " — partial (see why)";
+    ? " — file + offsets, both sides"
+    : (msViaHtr && x.ref_provenance_status === "ok")
+      ? " — file + offsets, both sides (MS via HTR re-alignment)"
+      : msHtrUncertain
+        ? " — partial (HTR address uncertain, see why)"
+        : " — partial (see why)";
   return `<div class="readwrap">
     <button class="fchip" id="pv2-${esc(id)}" onclick="toggleProv('${escJs(id)}',this)"
       >Where this came from${flag}</button>
@@ -2862,7 +2987,8 @@ function copyPane(id, kind, btn){
   const x = LAST.find(r => r.evidence_id === id);
   if (!x) return;
   const t = kind === "ms" ? [x.ms_before, x.ms_match, x.ms_after]
-                          : [x.ref_before, x.ref_match, x.ref_after];
+          : kind === "htr" ? [(HTRP[x.page_id] || {}).text]
+                           : [x.ref_before, x.ref_match, x.ref_after];
   const s = t.map(v => String(v ?? "")).join("");
   try { navigator.clipboard.writeText(s); btn.textContent = "copied"; }
   catch (e) { btn.textContent = "copy failed"; }
@@ -3285,12 +3411,14 @@ def build_help_html(docs) -> str:
     return "\n".join(out)
 
 
-def render_page(docs, nums, site, preview_mode, cards_ok=False) -> str:
+def render_page(docs, nums, site, preview_mode, cards_ok=False,
+                htr_ok=False) -> str:
     css = CSS_TOKENS + CSS_DISCOVERY + CSS_PRIVATE
     js = (PAGE_JS
           .replace("__SITE__", site.rstrip("/"))
           .replace("__PREVIEW__", preview_mode)
           .replace("__CARDS_OK__", "true" if cards_ok else "false")
+          .replace("__HTR_OK__", "true" if htr_ok else "false")
           .replace("__SHORT__", str(int(SHORT_MATCH_LETTERS)))
           .replace("/*__DOCS__*/{}", _js_json(docs))
           .replace("/*__NUMS__*/{}", _js_json(nums))
@@ -3830,6 +3958,54 @@ class Handler(BaseHTTPRequestHandler):
             Handler._card_grain = ok
         return Handler._card_grain
 
+    # `htr_page` + the per-row `htr_*` stamps are attached by
+    # scripts/attach_htr_realignment.py. Fail-closed like the card grain: the
+    # feature is on only when the table exists AND the number of stamped rows
+    # equals the count the pass itself recorded -- a half-run or a later row
+    # edit hides the pane rather than serving a stale address.
+    _htr_table = None
+
+    def _has_htr(self, con):
+        if Handler._htr_table is None:
+            ok = bool(self._query(
+                con, "rows.htr_probe",
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='htr_page'").fetchone())
+            if ok:
+                m = {x["k"]: x["v"] for x in self._query(
+                    con, "rows.htr_meta",
+                    "SELECT key AS k, value AS v FROM meta WHERE key="
+                    "'htr_realign.rows'").fetchall()}
+                live = self._query(
+                    con, "rows.htr_rowcount",
+                    "SELECT COUNT(*) AS c FROM review_row WHERE "
+                    "htr_align_status IS NOT NULL").fetchone()["c"]
+                ok = live > 0 and m.get("htr_realign.rows") == str(live)
+            Handler._htr_table = ok
+        return Handler._htr_table
+
+    def _api_htr_page(self, q):
+        """The HTR text of ONE substituted page, exactly as stored: the row's
+        htr_page_char_* index this string, so no display cleaning is applied."""
+        pid = self._one(q, "page_id", "").strip()
+        con = self._conn()
+        try:
+            if not pid or not self._has_htr(con):
+                return self._send({"error": "this file carries no HTR page text"})
+            r = self._query(
+                con, "htr.page",
+                "SELECT page_id, search_text_source AS source, "
+                "substitution_score AS score, htr_text AS text, "
+                "htr_n_chars AS n, htr_file_char_start AS file_start, "
+                "htr_file_char_end AS file_end, nfc_ok FROM htr_page "
+                "WHERE page_id=:p", {"p": pid}).fetchone()
+            if not r:
+                return self._send({"error": "this page was not substituted; its "
+                                   "text is already the one in Transcriptions.txt"})
+            return self._send(dict(r))
+        finally:
+            con.close()
+
     # `reference_witness`/`source_file` exist only in schema-v2 artifacts (the
     # v5 file); a v3 db must keep working with the block saying "not recorded".
     # Same probe-once pattern as `gate_fact`.
@@ -4207,10 +4383,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def _page(self):
         con = self._conn()
-        cards_ok = False
+        cards_ok = htr_ok = False
         try:
             docs, nums = self._read_docs(con), self._read_nums(con)
             cards_ok = self._has_cards(con)
+            htr_ok = self._has_htr(con)
         except QueryFailed:
             # The page must still paint. The help panel says so itself when a
             # definition is missing, and the row endpoint reports the real
@@ -4219,7 +4396,7 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             con.close()
         body = render_page(docs, nums, self.site, self.preview_mode,
-                           cards_ok=cards_ok).encode("utf-8")
+                           cards_ok=cards_ok, htr_ok=htr_ok).encode("utf-8")
         self._send(None, "text/html; charset=utf-8", body)
 
     # -- endpoints ---------------------------------------------------------
@@ -4627,6 +4804,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._api_cards(q)
             if u.path == "/api/export":
                 return self._api_export()
+            if u.path == "/api/htr_page":
+                return self._api_htr_page(q)
         except QueryFailed as e:
             # 200 with the failure IN THE BODY, deliberately. The client reads
             # `d.error` and paints the query name and the SQLite class; a bare
