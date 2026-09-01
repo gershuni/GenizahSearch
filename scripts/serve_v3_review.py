@@ -2084,6 +2084,27 @@ function verdictMix(rows){
 }
 function kwCardHtml(c){
   const rows = c.rows || [];
+  // A CARD MUST EARN ITS FRAME. For 327,058 cards (75.4%) the known work has
+  // exactly one witness and the page has one row from it, so every line a card
+  // would add -- title, shelfmark, pool, verdict, "1 of 1 witness aligned" --
+  // is already on the row beneath it, and the reader sees one box inside
+  // another saying the same thing. Those render as the row alone. The card
+  // stays wherever it says something the row cannot: several rows to
+  // aggregate, or a witness of this work that did NOT align here.
+  if (rows.length === 1 && c.kw_witnesses === 1) {
+    const differs = c.kw_title && c.kw_title !== rows[0].work_title;
+    if (!differs && !c.provisional) return rowHtml(rows[0]);
+    // the two things a bare card can still be needed for
+    const head = [];
+    if (differs)
+      head.push(`<div class="kwnums">known work:
+        <b dir="auto" style="unicode-bidi:isolate">${esc(c.kw_title)}</b></div>`);
+    if (c.provisional)
+      head.push(chip("needs", "provisional identity",
+        "This known work was minted from a routing the owner has not yet " +
+        "ruled on; its name may change."));
+    return `<div class="kwcard">${head.join("")}${rowHtml(rows[0])}</div>`;
+  }
   const mix = v => v === "mixed"
     ? `<b title="This card's evidence rows disagree; neither value is the card's answer.">mixed</b>`
     : esc(v || "");
@@ -2098,16 +2119,23 @@ function kwCardHtml(c){
            "ruled on; its name may change.")
     : ``;
   const author = c.kw_author ? ` · ${esc(c.kw_author)}` : ``;
+  // with one row, the shelfmark/folio/locus line below is the row's own line
+  // repeated a box further out; the identity and the witness count are what
+  // the card contributes
+  const where = rows.length === 1 ? `` : `<div class="kwnums">${esc(c.shelfmark || "")}
+          · folio ${esc(rows.length ? (rows[0].page_num || "?") : "?")}
+          · ${locus}</div>`;
   const head = `<div class="kwhead">
       <div><div class="kwtitle">${esc(c.kw_title || "")}${author}</div>
-        <div class="kwnums">${esc(c.shelfmark || "")} · folio
-          ${esc(rows.length ? (rows[0].page_num || "?") : "?")} · ${locus}</div></div>
+        ${where}</div>
       <div class="kwnums">${num(c.evidence_rows)} evidence
         ${c.evidence_rows === 1 ? "row" : "rows"} ·
         ${num(c.witnesses)} of ${num(c.kw_witnesses)}
         ${c.kw_witnesses === 1 ? "witness" : "witnesses"} aligned</div>
     </div>`;
-  const summary = `<div class="side items-center gap-2 flex-wrap kwnums">
+  // the aggregate line is for AGGREGATES: with a single row it would only
+  // restate that row's own pool/verdict chips, one box further out
+  const summary = rows.length === 1 ? `` : `<div class="side items-center gap-2 flex-wrap kwnums">
       <span>pool: ${mix(c.main_pool)}</span>
       <span>vs catalogue: ${mix(c.novelty_status)}</span>
       <span>relation: ${mix(c.router_verdict)}</span>
