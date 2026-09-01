@@ -67,24 +67,69 @@ class GateError(SystemExit):
 
 
 def _read_csv(path):
+    """Read the edited export.
+
+    The owner edits `work_author` / `work_title` IN PLACE, so an edit is the
+    diff against the `ORIG_*` baseline the exporter wrote: different text is a
+    change, an emptied cell is a drop, an untouched cell is nothing. The older
+    DROP_AUTHOR / NEW_AUTHOR / NEW_TITLE columns are still honoured so a file
+    exported before this change still applies -- but a row that uses BOTH ways
+    is refused rather than resolved.
+    """
     out = {}
     with open(path, encoding="utf-8-sig", newline="") as f:
-        for i, r in enumerate(csv.DictReader(f), start=2):
+        rdr = csv.DictReader(f)
+        cols = set(rdr.fieldnames or ())
+        if "work_id" not in cols:
+            raise GateError(f"{path} has no work_id column -- is it the file "
+                            "scripts/export_work_authors.py writes?")
+        in_place = "ORIG_AUTHOR" in cols or "ORIG_TITLE" in cols
+        for i, r in enumerate(rdr, start=2):
             wid = (r.get("work_id") or "").strip()
             if not wid:
                 continue
             drop = (r.get("DROP_AUTHOR") or "").strip() in TRUTHY
             author = (r.get("NEW_AUTHOR") or "").strip()
             title = (r.get("NEW_TITLE") or "").strip()
-            if not (drop or author or title):
-                continue
+            old_cols = bool(drop or author or title)
+            edit_author = edit_title = None
+            if in_place:
+                cell_a = (r.get("work_author") or "").strip()
+                cell_t = (r.get("work_title") or "").strip()
+                base_a = (r.get("ORIG_AUTHOR") or "").strip()
+                base_t = (r.get("ORIG_TITLE") or "").strip()
+                if cell_a != base_a:
+                    edit_author = cell_a          # "" means: clear the author
+                if cell_t != base_t:
+                    if not cell_t:
+                        raise GateError(
+                            f"line {i} ({wid}): work_title was emptied. A work "
+                            "must keep a title -- correct it instead of "
+                            "clearing it.")
+                    edit_title = cell_t
+            if old_cols and (edit_author is not None or edit_title is not None):
+                raise GateError(
+                    f"line {i} ({wid}): edited in place AND filled the "
+                    "DROP_AUTHOR/NEW_AUTHOR/NEW_TITLE columns -- pick one way")
             if drop and author:
                 raise GateError(f"line {i} ({wid}): DROP_AUTHOR and NEW_AUTHOR "
                                 "both set -- which is it?")
+            if edit_author is not None:
+                drop, author = (edit_author == ""), (edit_author or "")
+            if edit_title is not None:
+                title = edit_title
+            if not (drop or author or title):
+                continue
             out[wid] = dict(drop_author=drop, author=author or None,
                             title=title or None,
                             note=(r.get("NOTE") or "").strip() or None,
-                            seen_author=(r.get("work_author") or "").strip())
+                            # the baseline is what the correction was made
+                            # against; with the old columns, the cell itself is
+                            seen_author=((r.get("ORIG_AUTHOR") or "").strip()
+                                         if in_place
+                                         else (r.get("work_author") or "").strip()),
+                            kw_author=(r.get("kw_author") or "").strip(),
+                            line=i)
     return out
 
 
@@ -103,6 +148,27 @@ def apply(db_path, rulings=None, csv_path=None, say=print):
         if missing:
             raise GateError(f"work_id(s) not in this db: {missing[:10]}")
         if csv_path:
+            # An edit to kw_author cannot work: the identity's author is
+            # DERIVED from its witnesses by the registry. Refuse rather than
+            # ignore -- silence would read as "applied".
+            kw_live = {}
+            if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND "
+                           "name='known_work_member'").fetchone():
+                kw_live = {w: (a or "") for w, a in con.execute(
+                    "SELECT m.work_id, k.author FROM known_work_member m "
+                    "JOIN known_work k ON k.kw_id = m.kw_id")}
+            edited_kw = [(w, r["kw_author"], kw_live.get(w, ""))
+                         for w, r in rulings.items()
+                         if r.get("kw_author") and w in kw_live
+                         and r["kw_author"] != kw_live[w]]
+            if edited_kw:
+                for w, got, now in edited_kw[:10]:
+                    say(f"KW EDIT {w}: file has kw_author {got!r}, db has "
+                        f"{now!r}")
+                raise GateError(
+                    f"{len(edited_kw)} row(s) edited kw_author. The known "
+                    "work's author is re-derived from its witnesses -- correct "
+                    "work_author instead, on every witness of that work.")
             # the correction was made against what the file showed
             stale = [(w, r["seen_author"], live[w][1] or "")
                      for w, r in rulings.items()

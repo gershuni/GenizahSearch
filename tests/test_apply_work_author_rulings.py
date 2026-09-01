@@ -92,58 +92,152 @@ def test_unknown_work_refuses(tmp_path):
               say=lambda *a: None)
 
 
-def _csv(path, rows):
+LEGACY_COLUMNS = ("work_id", "source_corpus", "evidence_rows", "work_title",
+                  "work_author", "author_provenance", "title_provenance",
+                  "kw_id", "kw_title", "kw_author", "kw_author_basis", "FLAG",
+                  "DROP_AUTHOR", "NEW_AUTHOR", "NEW_TITLE", "NOTE")
+
+
+def _csv(path, rows, columns=COLUMNS):
     with open(path, "w", encoding="utf-8-sig", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=COLUMNS)
+        w = csv.DictWriter(f, fieldnames=columns)
         w.writeheader()
         for r in rows:
-            w.writerow({c: r.get(c, "") for c in COLUMNS})
+            w.writerow({c: r.get(c, "") for c in columns})
     return path
 
 
-def test_csv_round_trip(tmp_path):
+def _exported(db, out):
+    export(db, out, say=lambda *a: None)
+    return list(csv.DictReader(open(out, encoding="utf-8-sig")))
+
+
+def test_in_place_edit_changes_and_clears(tmp_path):
+    """The owner edits work_author itself: new text = change, emptied = drop."""
     db = make_db(str(tmp_path / "e.db"))
     out = str(tmp_path / "wa.csv")
-    export(db, out, say=lambda *a: None)
-    rows = list(csv.DictReader(open(out, encoding="utf-8-sig")))
+    rows = _exported(db, out)
     for r in rows:
         if r["work_id"] == "w1":
-            r["DROP_AUTHOR"] = "x"
+            r["work_author"] = ""                     # clear
         if r["work_id"] == "w2":
-            r["NEW_AUTHOR"] = "אנונימי"
+            r["work_author"] = "אנונימי"              # change
     _csv(out, rows)
     assert apply(db, csv_path=out, say=lambda *a: None) == (2, 0)
     got, ruled = state(db)
     assert got["w1"][1] is None and got["w2"][1] == "אנונימי"
+    assert ruled[("w1", "author")][1] is None
     assert ruled[("w2", "author")][1] == "אנונימי"
+    assert got["w3"][1] == "פלוני"                    # untouched row untouched
 
 
-def test_stale_csv_refuses(tmp_path):
-    """A correction made against an author the db no longer carries would be
-    applied blind."""
+def test_in_place_title_edit(tmp_path):
     db = make_db(str(tmp_path / "f.db"))
     out = str(tmp_path / "wa.csv")
-    export(db, out, say=lambda *a: None)
-    rows = list(csv.DictReader(open(out, encoding="utf-8-sig")))
+    rows = _exported(db, out)
+    for r in rows:
+        if r["work_id"] == "w2":
+            r["work_title"] = 'משנת רבי אליעזר (מדרש ל"ב מידות)'
+    _csv(out, rows)
+    assert apply(db, csv_path=out, say=lambda *a: None) == (0, 1)
+    got, ruled = state(db)
+    assert got["w2"][0].endswith('ל"ב מידות)') and got["w2"][3] == "owner_ruling"
+    assert ruled[("w2", "title")][0] == "משנת רבי אליעזר"
+
+
+def test_emptied_title_refuses(tmp_path):
+    """A cleared author means "no author"; a cleared title means nothing."""
+    db = make_db(str(tmp_path / "g.db"))
+    out = str(tmp_path / "wa.csv")
+    rows = _exported(db, out)
+    for r in rows:
+        if r["work_id"] == "w2":
+            r["work_title"] = ""
+    _csv(out, rows)
+    with pytest.raises(GateError, match="must keep a title"):
+        apply(db, csv_path=out, say=lambda *a: None)
+
+
+def test_untouched_file_is_a_no_op(tmp_path):
+    db = make_db(str(tmp_path / "h.db"))
+    out = str(tmp_path / "wa.csv")
+    _csv(out, _exported(db, out))
+    assert apply(db, csv_path=out, say=lambda *a: None) == (0, 0)
+
+
+def test_deleted_rows_are_not_deletions(tmp_path):
+    """Removing a row from the sheet must not remove anything from the db."""
+    db = make_db(str(tmp_path / "i.db"))
+    out = str(tmp_path / "wa.csv")
+    rows = [r for r in _exported(db, out) if r["work_id"] != "w1"]
+    _csv(out, rows)
+    assert apply(db, csv_path=out, say=lambda *a: None) == (0, 0)
+    got, _ = state(db)
+    assert got["w1"][1].startswith("מיוחס")
+
+
+def test_stale_baseline_refuses(tmp_path):
+    """The correction was made against an author the db no longer carries."""
+    db = make_db(str(tmp_path / "j.db"))
+    out = str(tmp_path / "wa.csv")
+    rows = _exported(db, out)
     for r in rows:
         if r["work_id"] == "w1":
-            r["DROP_AUTHOR"] = "x"
+            r["work_author"] = ""
     _csv(out, rows)
     apply(db, rulings={"w1": dict(author="מישהו אחר")}, say=lambda *a: None)
     with pytest.raises(GateError, match="no longer carries"):
         apply(db, csv_path=out, say=lambda *a: None)
 
 
-def test_csv_contradiction_refuses(tmp_path):
-    db = make_db(str(tmp_path / "g.db"))
+def test_editing_kw_author_refuses(tmp_path):
+    """The identity's author is derived; editing it there would do nothing, so
+    the applier says so instead of ignoring the edit."""
+    db = make_db(str(tmp_path / "k.db"))
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE known_work(kw_id TEXT PRIMARY KEY, title TEXT, "
+                "author TEXT, author_basis TEXT)")
+    con.execute("CREATE TABLE known_work_member(kw_id TEXT, work_id TEXT)")
+    con.execute("INSERT INTO known_work VALUES "
+                "('kw1','ספר כלשהו','פלוני','authority')")
+    con.execute("INSERT INTO known_work_member VALUES ('kw1','w3')")
+    con.commit()
+    con.close()
     out = str(tmp_path / "wa.csv")
-    export(db, out, say=lambda *a: None)
-    rows = list(csv.DictReader(open(out, encoding="utf-8-sig")))
+    rows = _exported(db, out)
+    for r in rows:
+        if r["work_id"] == "w3":
+            r["kw_author"] = "אלמוני"
+            r["work_author"] = "אלמוני"      # a real edit, so the row is read
+    _csv(out, rows)
+    with pytest.raises(GateError, match="edited kw_author"):
+        apply(db, csv_path=out, say=lambda *a: None)
+
+
+def test_legacy_columns_still_apply(tmp_path):
+    """A file exported before in-place editing must still work."""
+    db = make_db(str(tmp_path / "l.db"))
+    out = str(tmp_path / "wa.csv")
+    rows = _exported(db, out)
     for r in rows:
         if r["work_id"] == "w1":
-            r["DROP_AUTHOR"], r["NEW_AUTHOR"] = "x", "פלוני"
-    _csv(out, rows)
-    with pytest.raises(GateError, match="which is it"):
+            r["DROP_AUTHOR"] = "x"
+    _csv(out, rows, columns=LEGACY_COLUMNS)
+    assert apply(db, csv_path=out, say=lambda *a: None) == (1, 0)
+    got, _ = state(db)
+    assert got["w1"][1] is None
+
+
+def test_mixing_both_mechanisms_refuses(tmp_path):
+    db = make_db(str(tmp_path / "m.db"))
+    out = str(tmp_path / "wa.csv")
+    rows = _exported(db, out)
+    for r in rows:
+        if r["work_id"] == "w1":
+            r["work_author"] = "פלוני חדש"
+            r["DROP_AUTHOR"] = "x"
+    _csv(out, rows, columns=LEGACY_COLUMNS + ("ORIG_TITLE", "ORIG_AUTHOR"))
+    with pytest.raises(GateError, match="pick one way"):
         apply(db, csv_path=out, say=lambda *a: None)
 
 

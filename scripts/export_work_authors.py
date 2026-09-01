@@ -1,15 +1,21 @@
 # -*- coding: utf-8 -*-
 """Export every work with its title and author, for the owner to correct.
 
-One row per `work_id` in the review db, with the known work it belongs to, the
-provenance of each string, and four EMPTY columns the owner fills in:
+One row per `work_id` in the review db. **Edit `work_author` and `work_title`
+in place**: change the text to correct it, or CLEAR the cell to say the work has
+none. `NOTE` is free text carried into the ruling record. Everything else is
+reference material.
 
-    DROP_AUTHOR   put x / X / 1 / yes to clear the author
-    NEW_AUTHOR    the corrected author string (leave blank to keep)
-    NEW_TITLE     the corrected work title (leave blank to keep)
-    NOTE          free text, carried into the ruling record
+`ORIG_AUTHOR` / `ORIG_TITLE` at the end are the untouched baseline. That is what
+makes in-place editing safe: `scripts/apply_work_author_rulings.py` reads an
+edit as the DIFF between your cell and the baseline, and refuses the file if the
+baseline no longer matches the db -- which would mean you corrected a value some
+other pass has since changed. Do not edit those two columns, and do not edit the
+`kw_*` columns (the identity's author is re-derived from the witnesses; editing
+it there would do nothing, so the applier refuses instead of ignoring you).
 
-`scripts/apply_work_author_rulings.py` reads the edited file back.
+Deleting a whole ROW is not a deletion of anything: the applier acts only on the
+rows present, so a removed row simply goes uncorrected.
 
 The `FLAG` column is a hint, never a decision -- it names the pattern that made
 a row worth a look:
@@ -41,10 +47,12 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_DB = os.path.join(REPO_ROOT, "discovery_data", "discovery-v5-REVIEW.db")
 DEFAULT_OUT = os.path.join(REPO_ROOT, "work_authors.csv")
 
-COLUMNS = ("work_id", "source_corpus", "evidence_rows", "work_title",
-           "work_author", "author_provenance", "title_provenance",
-           "kw_id", "kw_title", "kw_author", "kw_author_basis", "FLAG",
-           "DROP_AUTHOR", "NEW_AUTHOR", "NEW_TITLE", "NOTE")
+# The two EDITABLE columns come first, right after what identifies the row; the
+# baseline and the identity's own strings sit at the end, out of the way.
+EDITABLE = ("work_title", "work_author")
+COLUMNS = ("work_id", "source_corpus", "evidence_rows") + EDITABLE + (
+    "FLAG", "NOTE", "author_provenance", "title_provenance", "kw_id",
+    "kw_title", "kw_author", "kw_author_basis", "ORIG_TITLE", "ORIG_AUTHOR")
 
 _STRIP = re.compile(r"[֑-ׇ׳״\"'()\[\]\s.,־-]")
 # a dating or an attribution note, not a person
@@ -116,13 +124,25 @@ def export(db_path, out_path, say=print):
             "kw_author": (k["a"] if k else "") or "",
             "kw_author_basis": (k["ab"] if k else ""),
             "FLAG": flag_of(r["t"], r["a"]),
-            "DROP_AUTHOR": "", "NEW_AUTHOR": "", "NEW_TITLE": "", "NOTE": ""})
+            # the baseline an edit is measured against
+            "ORIG_TITLE": r["t"] or "", "ORIG_AUTHOR": r["a"] or "",
+            "NOTE": ""})
     con.close()
     # flagged first, then works that have an author at all, then by weight:
     # the rows worth an owner's minutes are at the top of the file
     rows.sort(key=lambda d: (not d["FLAG"], not d["work_author"],
                              -d["evidence_rows"], d["work_id"]))
-    with open(out_path, "w", encoding="utf-8-sig", newline="") as f:
+    try:
+        f = open(out_path, "w", encoding="utf-8-sig", newline="")
+    except PermissionError:
+        # Excel holds an exclusive lock on an open workbook. Overwriting is not
+        # the failure to worry about -- silently clobbering edits in progress
+        # is -- so say which file and stop.
+        raise SystemExit(
+            f"cannot write {out_path}: it is open in another program (Excel "
+            "locks it). Close it, or pass --out with a different filename so "
+            "your edits in progress are left alone.")
+    with f:
         w = csv.DictWriter(f, fieldnames=COLUMNS)
         w.writeheader()
         w.writerows(rows)
