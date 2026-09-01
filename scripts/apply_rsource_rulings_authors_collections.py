@@ -73,6 +73,16 @@ PERSONS = (
 
 
 def derive_author(title):
+    """RETIRED by owner ruling 2026-09-01 -- kept only so the rule it applied
+    stays readable, and so the retirement is auditable.
+
+    Every author it could return is a person-token spelled VERBATIM inside the
+    title, which is exactly why it is retired: measured over this artifact, all
+    37 works it had annotated carried an author already contained in their own
+    title and NONE added anything a reader could not read off the title. The
+    caller no longer stores its result; `scripts/drop_title_derived_authors.py`
+    removed the ones already written.
+    """
     hits = [p for p in PERSONS if p in (title or "")]
     # longest-token containment can double count (מהר״ם מרוטנבורג contains
     # nothing else here, but keep the rule strict): exactly one distinct hit
@@ -104,13 +114,12 @@ def main(argv=None) -> int:
         raise SystemExit("collection raw ids not in artifact: %s" % missing)
 
     retitle = {rid2wid[r]: t for r, t in COLLECTIONS.items()}
+    # No author is derived from a title any more (owner ruling 2026-09-01): the
+    # derivation could only ever return a name the title already spells, so it
+    # stored a redundant attribution and an annotation to explain it. Works
+    # whose author IS an owner ruling get it from
+    # scripts/fix_rsource_author_overrides.py, which names them explicitly.
     authors = {}
-    for wid, title in titles.items():
-        if wid in retitle:
-            continue                      # a collection has no single author
-        a = derive_author(title)
-        if a:
-            authors[wid] = a
 
     # ---- review db ---------------------------------------------------------
     have = {r[1] for r in con.execute("PRAGMA table_info(review_row)")}
@@ -130,7 +139,7 @@ def main(argv=None) -> int:
         con.execute("UPDATE review_row SET work_title=?, "
                     "title_provenance='collection_retitle' WHERE work_id=?",
                     (t, wid))
-    for wid, a in authors.items():
+    for wid, a in authors.items():        # empty by ruling; kept as the seam
         con.execute("UPDATE review_row SET work_author=?, "
                     "author_provenance='from_title' "
                     "WHERE work_id=? AND work_author IS NULL", (a, wid))
@@ -142,8 +151,13 @@ def main(argv=None) -> int:
                  ("rsource_collections.retitled", str(len(retitle))),
                  ("rsource_authors.derived_works", str(n_auth)),
                  ("rsource_authors.method",
-                  "single person-token contained verbatim in the title; "
-                  "marked author_provenance='from_title'"),
+                  "RETIRED (owner ruling 2026-09-01): no author is derived "
+                  "from a title. The rule could only return a name the title "
+                  "already spells, so it added no information; the 37 works it "
+                  "had annotated were cleared by "
+                  "scripts/drop_title_derived_authors.py. Authors that ARE "
+                  "owner rulings are named explicitly in "
+                  "scripts/fix_rsource_author_overrides.py."),
                  ("rsource_rulings.at", time.strftime("%Y-%m-%d %H:%M:%S"))):
         con.execute("INSERT OR REPLACE INTO meta VALUES (?,?)", (k, v))
     con.execute("DROP TABLE IF EXISTS facet_row")   # title/author are facets
