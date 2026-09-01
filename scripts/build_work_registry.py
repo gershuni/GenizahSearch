@@ -895,10 +895,20 @@ def _build(con, inputs_dir, say=print, pins_sha256=None):
     # ---- write ---------------------------------------------------------------
     try:
         con.execute("BEGIN")
+        # The CARD grain (scripts/attach_review_cards.py) is projected FROM this
+        # registry and references known_work, so it is dropped here for two
+        # reasons: FKs are ON, and cards built against the previous identities
+        # would otherwise survive a rebuild that changed them. Its meta rows go
+        # with it, so nothing claims a projection that no longer exists -- the
+        # viewer then hides card mode until the attach script runs again.
+        dropped_cards = bool(con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='card'"
+        ).fetchone())
         # children before parents: FKs are ON
-        for t in ("known_work_member", "known_work_assertion", "work_relation",
-                  "known_work"):
+        for t in ("card_member", "card", "known_work_member",
+                  "known_work_assertion", "work_relation", "known_work"):
             con.execute(f"DROP TABLE IF EXISTS {t}")
+        con.execute("DELETE FROM meta WHERE key LIKE 'card_grain.%'")
         for ddl in DDL:
             con.execute(ddl)
         for anchor in sorted(kws):
@@ -952,6 +962,9 @@ def _build(con, inputs_dir, say=print, pins_sha256=None):
             pass
         raise  # build() closes the connection in its finally
     n_bases = Counter(k["basis"] for k in kws.values())
+    if dropped_cards:
+        say("the card grain was dropped (it projects these identities) -- "
+            "re-run scripts/attach_review_cards.py")
     say(f"known works: {len(kws)} ({dict(n_bases)}); members: {len(members)}; "
         f"relations: {len(fams['shares_material_edges'])}")
     say(f"trusted root (PINS.json sha256): {pins_hash}")

@@ -975,3 +975,30 @@ def test_owner_merge_contract_refuses(world, mutate, want):
     with pytest.raises(GateError) as ei:
         build(db, inputs, say=lambda *a: None)
     assert want in str(ei.value), f"expected {want!r}, got {ei.value}"
+
+
+def test_registry_rebuild_drops_the_card_grain(world):
+    """The card grain projects these identities and references known_work: a
+    registry rebuild must invalidate it, not fail against its foreign keys and
+    not leave cards built from the previous identities behind."""
+    db, inputs = world
+    build(db, inputs, say=lambda *a: None)
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE card(card_id TEXT PRIMARY KEY, kw_id TEXT "
+                "NOT NULL REFERENCES known_work(kw_id))")
+    con.execute("CREATE TABLE card_member(evidence_id TEXT PRIMARY KEY, "
+                "card_id TEXT NOT NULL REFERENCES card(card_id))")
+    kw = con.execute("SELECT kw_id FROM known_work LIMIT 1").fetchone()[0]
+    con.execute("INSERT INTO card VALUES ('c1', ?)", (kw,))
+    con.execute("INSERT INTO card_member VALUES ('e1', 'c1')")
+    con.execute("INSERT INTO meta VALUES ('card_grain.cards', '1')")
+    con.commit()
+    con.close()
+    build(db, inputs, say=lambda *a: None)      # must not raise on the FKs
+    con = sqlite3.connect(db)
+    left = [r[0] for r in con.execute(
+        "SELECT name FROM sqlite_master WHERE name IN ('card','card_member')")]
+    meta = con.execute("SELECT COUNT(*) FROM meta WHERE key LIKE "
+                       "'card_grain.%'").fetchone()[0]
+    con.close()
+    assert left == [] and meta == 0

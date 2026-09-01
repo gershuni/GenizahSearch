@@ -46,6 +46,7 @@ import sqlite3
 import threading
 import unicodedata
 import urllib.parse
+from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 DIVERGENCE_VALUES = ("catalogue_correct", "claim_correct", "unclear")
@@ -958,6 +959,31 @@ button:hover{border-color:var(--primary-600)}
   border-radius:999px;line-height:1;display:flex;align-items:center;
   justify-content:center;color:var(--text-secondary)}
 
+/* --- private E2: the CARD grain -------------------------------------------
+   A card is a QUESTION ("is this page this work?"), so it reads as one block
+   with its evidence indented inside it. Deliberately no new accent colour: the
+   witness strip's states are text, because a colour for "no returned
+   alignment" would read as a verdict on the witness. */
+.gs-discovery .kwcard{background:var(--bg-card);border:1px solid var(--border-light);
+  border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;
+  box-shadow:var(--shadow-sm)}
+.gs-discovery .kwcard>.kwhead{display:flex;flex-wrap:wrap;gap:4px 10px;
+  align-items:baseline;justify-content:space-between}
+.gs-discovery .kwcard .kwtitle{font-size:15px;font-weight:700}
+.gs-discovery .kwcard .kwnums{font-size:12px;color:var(--text-secondary);
+  font-variant-numeric:tabular-nums}
+.gs-discovery .kwcard .wstrip{display:flex;flex-wrap:wrap;gap:6px}
+.gs-discovery .kwcard .wit{font-size:11.5px;line-height:1.45;padding:3px 8px;
+  border-radius:6px;border:1px solid var(--border-light);
+  background:var(--bg-secondary);color:var(--text-secondary)}
+.gs-discovery .kwcard .wit.on{color:var(--text-primary);
+  border-color:var(--border-medium);font-weight:600}
+.gs-discovery .kwcard .wit .sc{opacity:.8}
+.gs-discovery .kwcard .kwev{display:flex;flex-direction:column;gap:8px;
+  padding-inline-start:10px;border-inline-start:2px solid var(--border-light)}
+.gs-discovery .kwcard .kwev>summary{cursor:pointer;font-size:12px;
+  color:var(--text-secondary)}
+
 /* --- private E: the result bar, chip bar, rows, pager --------------------- */
 .gs-discovery .rbar{display:flex;flex-direction:column;gap:8px;
   background:var(--bg-card);border:1px solid var(--border-light);
@@ -1216,6 +1242,10 @@ const DIV_LABELS = {catalogue_correct: "the catalogue is right",
 const NULL_TOKEN = "__null__";
 const SITE = "__SITE__";
 const PREVIEW = "__PREVIEW__";
+// whether THIS db carries a current card projection (built by
+// scripts/attach_review_cards.py and matching today's review_row and
+// registry). False keeps the tool exactly as it was: no toggle, row grain.
+const CARDS_OK = __CARDS_OK__;
 const DOCS = /*__DOCS__*/{};
 const NUMS = /*__NUMS__*/{};
 // The public page's four grouped views, [key, label] in ITS order, injected
@@ -1370,7 +1400,12 @@ const S = {relation:new Set(), novelty:new Set(), pool:new Set(),
            poolreason:"", claim:"", disagree:false,
            domain:"", author:"", work:"", locus:"", locus_from:"", locus_to:"",
            coverage:"", nontiera:false, adjudicated:false,
-           letters:"", graded:"", q:"", view:"all", sort:"work", size:25, off:0};
+           letters:"", graded:"", q:"", view:"all", sort:"work", size:25, off:0,
+           // CARD grain (one question per page x known work) or the raw
+           // EVIDENCE grain (one row per alignment). Cards are the default
+           // when the projection is present; the row grain stays reachable
+           // because an offset or a text pane is per-alignment, not per card.
+           grain:"card"};
 // "" is what clearAxis leaves behind and "all" is what the control ships with;
 // both mean the unfiltered state, and neither is ever sent on the wire.
 const curView = () => S.view || "all";
@@ -1992,6 +2027,83 @@ function novGroupOf(shade){
   return "Aligned";
 }
 
+// ---- the CARD grain ------------------------------------------------------
+// A card states what it knows and REFUSES to average what it does not: a
+// column whose rows disagree reads "mixed" (the builder wrote it that way),
+// and a card whose rows carry different loci shows how many rather than
+// picking one. The witness strip is the honesty surface: a witness with no
+// evidence on this page reads "no returned alignment", never "not applicable"
+// -- that stronger claim is made ONLY where the projection could prove it.
+const WIT_LABEL = {aligned: "aligned here",
+                   no_returned_alignment: "no returned alignment",
+                   not_applicable: "not applicable here"};
+function witHtml(w){
+  const on = w.status === "aligned";
+  const scope = w.scope === "whole" ? "whole work" : w.scope;
+  return `<span class="wit${on ? " on" : ""}"${w.why ? ` title="${esc(w.why)}"` : ``}>
+    ${esc(scope)} <span class="sc">· ${esc(WIT_LABEL[w.status] || w.status)}` +
+    (on ? ` (${num(w.rows_here)})` : ``) + `</span></span>`;
+}
+// the model's answers across a card's rows, summarised WITHOUT a vote: one
+// verdict if they agree, otherwise every verdict with its count
+function verdictMix(rows){
+  const c = {};
+  rows.forEach(r => { const v = r.gate_divergence || r.gate_new_finds;
+                      if (v) c[v] = (c[v] || 0) + 1; });
+  const keys = Object.keys(c);
+  if (!keys.length) return ``;
+  const one = keys.length === 1;
+  return `<span class="dnote" title="An LLM's unverified answers for this ` +
+    `card's evidence rows.">Model: ` +
+    (one ? esc(GATE_SHORT[keys[0]] || keys[0])
+         : "mixed — " + keys.map(k =>
+             `${c[k]}× ${esc(GATE_SHORT[k] || k)}`).join(", ")) +
+    `</span>`;
+}
+function kwCardHtml(c){
+  const rows = c.rows || [];
+  const mix = v => v === "mixed"
+    ? `<b title="This card's evidence rows disagree; neither value is the card's answer.">mixed</b>`
+    : esc(v || "");
+  const locus = c.locus_label
+    ? esc(c.locus_label)
+    : (c.locus_variants > 1
+        ? `<span title="Its evidence rows cite different addresses, so the card states none.">${c.locus_variants} addresses</span>`
+        : `—`);
+  const prov = c.provisional
+    ? chip("needs", "provisional identity",
+           "This known work was minted from a routing the owner has not yet " +
+           "ruled on; its name may change.")
+    : ``;
+  const author = c.kw_author ? ` · ${esc(c.kw_author)}` : ``;
+  const head = `<div class="kwhead">
+      <div><div class="kwtitle">${esc(c.kw_title || "")}${author}</div>
+        <div class="kwnums">${esc(c.shelfmark || "")} · folio
+          ${esc(rows.length ? (rows[0].page_num || "?") : "?")} · ${locus}</div></div>
+      <div class="kwnums">${num(c.evidence_rows)} evidence
+        ${c.evidence_rows === 1 ? "row" : "rows"} ·
+        ${num(c.witnesses)} of ${num(c.kw_witnesses)}
+        ${c.kw_witnesses === 1 ? "witness" : "witnesses"} aligned</div>
+    </div>`;
+  const summary = `<div class="side items-center gap-2 flex-wrap kwnums">
+      <span>pool: ${mix(c.main_pool)}</span>
+      <span>vs catalogue: ${mix(c.novelty_status)}</span>
+      <span>relation: ${mix(c.router_verdict)}</span>
+      <span>corpus: ${esc(c.source_corpora || "")}</span>
+      ${verdictMix(rows)} ${prov}
+    </div>`;
+  const strip = `<div class="wstrip">` +
+    (c.witness_strip || []).map(witHtml).join("") + `</div>`;
+  // the evidence stays one click away: a card is the question, the rows are
+  // the answer's raw material, and each row keeps its own grade control
+  const open = rows.length <= 1 ? " open" : "";
+  const ev = `<details class="kwev"${open}><summary>${num(rows.length)}
+      ${rows.length === 1 ? "evidence row" : "evidence rows"} ·
+      ${num(c.graded_rows || 0)} graded</summary>` +
+    rows.map(rowHtml).join("") + `</details>`;
+  return `<div class="kwcard">${head}${summary}${strip}${ev}</div>`;
+}
+
 function rowHtml(x){
   const id = x.evidence_id;
   // THE THREE-SLOT ASSESSMENT STRIP (Codex 2026-08-31): same three questions
@@ -2155,12 +2267,16 @@ function rowHtml(x){
   // The work-id chip is ALWAYS shown: 43 titles are shared by more than one
   // work_id, so a title alone does not name a work.
   const wid = `<span class="chip mono">${esc(x.work_id)}</span>`;
-  // Never "Unknown author" -- that would be a claim about the work.
+  // Never "Unknown author" -- that would be a claim about the work. And no
+  // provenance annotation beside the name: the only provenance that ever
+  // reached this line was "derived from the title", and an author that is
+  // already spelled inside the title tells a reader nothing the title did not
+  // -- so those authors are no longer stored at all (owner, 2026-09-01;
+  // scripts/drop_title_derived_authors.py). An annotation for a value that
+  // adds nothing is noise twice over.
   const author = x.work_author
-    ? `<div class="dnote" dir="auto" style="unicode-bidi:isolate">${esc(x.work_author)}` +
-      (x.author_provenance === "from_title"
-        ? ` <span class="text-xs" title="Derived verbatim from the work's own title — no new attribution claim.">(מן הכותרת)</span>`
-        : ``) + `</div>`
+    ? `<div class="dnote" dir="auto" style="unicode-bidi:isolate">` +
+      `${esc(x.work_author)}</div>`
     : ``;
   // Both library_code and shelfmark are NULL on 14,349 rows (5.6%); fall back to
   // the sys_id in a monospace chip, never to a blank line.
@@ -2549,19 +2665,45 @@ const SORTS = [["work","Work, then manuscript"],
                ["letters","Most matched letters first"],
                ["coverage","Highest page coverage first"],
                ["pages","Fewest matched pages first"]];
+// the card grain sorts over the card's OWN aggregates: "fewest matched pages"
+// is an identification-level key with no card equivalent, and offering it here
+// would silently fall back to the default sort
+const CARD_SORTS = [["work","Known work, then manuscript"],
+                    ["letters","Most matched letters first"],
+                    ["coverage","Highest page coverage first"],
+                    ["witnesses","Most evidence on the page first"]];
+function sortList(){ return (CARDS_OK && S.grain === "card") ? CARD_SORTS : SORTS; }
+function grainToggle(){
+  if (!CARDS_OK) return ``;
+  return `<span class="dnote">Grain</span>` +
+    chipBtn(S.grain === "card", "Cards", null, `setGrain('card')`,
+      "One card per page × known work: the question asked once, with " +
+      "every witness's evidence beneath it.") +
+    chipBtn(S.grain === "row", "Evidence rows", null, `setGrain('row')`,
+      "One row per alignment — the same page and work appear once per " +
+      "witness of the work.");
+}
 function renderRbar(d){
   // The real pre-LIMIT total, EXACT and never capped. A grading tool's totals
   // must be exact; a capped total reported as exact is a correctness defect.
+  // THREE NAMED NUMBERS in card grain: cards, evidence rows, manuscripts are
+  // different things and are never collapsed into one "total".
+  const head = S.grain === "card"
+    ? `<span>Showing <span class="n">${num((d.cards||[]).length)}</span> of
+       <span class="n">${num(d.total)}</span> cards</span>
+       <span class="dnote">${num(d.evidence_rows)} evidence rows in them</span>
+       <span class="dnote">of ${num(d.grain ? d.grain.cards : 0)} cards over
+       ${num(d.grain ? d.grain.manuscripts : 0)} manuscripts in the file</span>`
+    : `<span>Showing <span class="n">${num((d.rows||[]).length)}</span> of
+       <span class="n">${num(d.total)}</span> rows</span>
+       <span class="dnote">${num(d.identifications)} identifications</span>
+       <span class="dnote">${num(d.graded_here)} of these are graded</span>`;
   $("rbar").innerHTML = `<div class="rbar gs-findings-rbar w-full gap-2">
-    <div class="side items-center gap-2 flex-wrap">
-      <span>Showing <span class="n">${num(d.rows.length)}</span> of
-      <span class="n">${num(d.total)}</span> rows</span>
-      <span class="dnote">${num(d.identifications)} identifications</span>
-      <span class="dnote">${num(d.graded_here)} of these are graded</span>
-    </div>
+    <div class="side items-center gap-2 flex-wrap">${head}</div>
+    <div class="side items-center gap-2 flex-wrap">${grainToggle()}</div>
     <div class="side items-center gap-2 flex-wrap">
       <span class="dnote">Sort by</span>
-      <select onchange="setSort(this.value)">${SORTS.map(([v,lab]) =>
+      <select onchange="setSort(this.value)">${sortList().map(([v,lab]) =>
         `<option value="${v}"${S.sort===v?" selected":""}>${esc(lab)}</option>`).join("")}</select>
       <span class="dnote">Page size</span>
       <select onchange="setSize(this.value)">${[25,50,100].map(n =>
@@ -2569,6 +2711,14 @@ function renderRbar(d){
     </div></div>`;
 }
 function setSort(v){ S.sort = v; apply(); }
+function setGrain(v){
+  if (S.grain === v) return;
+  S.grain = v;
+  // a sort key that does not exist in the other grain would silently fall back
+  if (v === "card" && S.sort === "pages") S.sort = "work";
+  if (v === "row" && S.sort === "witnesses") S.sort = "work";
+  load(0);
+}
 function setSize(v){ S.size = parseInt(v, 10) || 25; apply(); }
 
 // Unlike the public page, the POOL gets a chip -- and so do relation, span rank,
@@ -2651,9 +2801,11 @@ function errBox(e, retry){
 }
 async function load(newOff){
   if (newOff !== undefined) S.off = newOff;
+  const cardGrain = CARDS_OK && S.grain === "card";
+  const ep = cardGrain ? "/api/cards" : "/api/rows";
   let d;
   try {
-    const r = await fetch("/api/rows?" + params({offset: S.off, size: S.size}));
+    const r = await fetch(ep + "?" + params({offset: S.off, size: S.size}));
     d = await r.json();
     if (!r.ok || d.error) throw d.error || {cls:"HTTPError", query:"rows",
                                             msg:"HTTP " + r.status};
@@ -2663,8 +2815,12 @@ async function load(newOff){
     $("count").textContent = "query failed";
     return;
   }
-  total = d.total; shown = d.rows.length; LAST = d.rows;
-  $("count").textContent = `${num(d.total)} rows` +
+  // in card grain the payload's units are CARDS; `LAST` keeps carrying evidence
+  // rows, because everything downstream of it (grading, panes) is per-row
+  const units = cardGrain ? (d.cards || []) : (d.rows || []);
+  total = d.total; shown = units.length;
+  LAST = cardGrain ? units.reduce((a, c) => a.concat(c.rows || []), []) : units;
+  $("count").textContent = `${num(d.total)} ${cardGrain ? "cards" : "rows"}` +
     (d.total ? ` · showing ${num(S.off+1)}-${num(S.off+shown)}` : ``);
   // typeable page number (owner, 2026-08-31)
   $("pageno").innerHTML = d.total
@@ -2677,8 +2833,8 @@ async function load(newOff){
   renderSession(d.graded_total);
   // The empty state keeps the public shape and drops the pool invitation inside
   // it -- there is no second pool to sell here, only a filter to loosen.
-  $("rows").innerHTML = d.rows.length
-    ? d.rows.map(rowHtml).join("")
+  $("rows").innerHTML = units.length
+    ? units.map(cardGrain ? kwCardHtml : rowHtml).join("")
     : `<div class="empty"><div class="glyph">⌕</div><div><b>No results found</b></div>
        <div class="dnote">Loosen a filter — the counts beside each control show
        what is reachable.</div></div>`;
@@ -2755,11 +2911,12 @@ def build_help_html(docs) -> str:
     return "\n".join(out)
 
 
-def render_page(docs, nums, site, preview_mode) -> str:
+def render_page(docs, nums, site, preview_mode, cards_ok=False) -> str:
     css = CSS_TOKENS + CSS_DISCOVERY + CSS_PRIVATE
     js = (PAGE_JS
           .replace("__SITE__", site.rstrip("/"))
           .replace("__PREVIEW__", preview_mode)
+          .replace("__CARDS_OK__", "true" if cards_ok else "false")
           .replace("__SHORT__", str(int(SHORT_MATCH_LETTERS)))
           .replace("/*__DOCS__*/{}", _js_json(docs))
           .replace("/*__NUMS__*/{}", _js_json(nums))
@@ -3161,6 +3318,14 @@ class Handler(BaseHTTPRequestHandler):
                           "OR hg.divergence_correctness = '')")
         return ("WHERE " + " AND ".join(cl) if cl else ""), pr
 
+    @staticmethod
+    def _and(where, *conds):
+        """AND extra conditions onto a `_where` clause that may be EMPTY."""
+        conds = [c for c in conds if c]
+        if not conds:
+            return where
+        return ((where + " AND ") if where else "WHERE ") + " AND ".join(conds)
+
     # -- counting ----------------------------------------------------------
     # An EMPTY STRING is not a grade. The `clear` button writes one, so every
     # graded/ungraded test below has to say `<> ''` as well as `IS NOT NULL`;
@@ -3249,6 +3414,36 @@ class Handler(BaseHTTPRequestHandler):
                 "SELECT 1 FROM sqlite_master WHERE type='table' "
                 "AND name='gate_fact'").fetchone())
         return Handler._gate_table
+
+    # ---- the CARD grain (scripts/attach_review_cards.py) --------------------
+    # One card per (page_id, known_work): the unit of the question "is this page
+    # this work?", with every witness's evidence beneath it. Additive, like
+    # every other satellite -- and FAIL-CLOSED: card mode is offered only when
+    # the projection covers exactly today's review_row AND was built from the
+    # registry now in the file. A stale card table must never be served as
+    # current, so the probe compares both numbers rather than trusting presence.
+    _card_grain = None
+
+    def _has_cards(self, con):
+        if Handler._card_grain is None:
+            ok = bool(self._query(
+                con, "rows.card_probe",
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='card_member'").fetchone())
+            if ok:
+                m = {x["k"]: x["v"] for x in self._query(
+                    con, "rows.card_meta",
+                    "SELECT key AS k, value AS v FROM meta WHERE key IN "
+                    "('card_grain.members','card_grain.registry_pins_sha256',"
+                    "'work_registry.pins_sha256')").fetchall()}
+                live = self._query(con, "rows.card_rowcount",
+                                   "SELECT COUNT(*) AS c FROM review_row"
+                                   ).fetchone()["c"]
+                ok = (m.get("card_grain.members") == str(live)
+                      and m.get("card_grain.registry_pins_sha256")
+                      == m.get("work_registry.pins_sha256"))
+            Handler._card_grain = ok
+        return Handler._card_grain
 
     # `reference_witness`/`source_file` exist only in schema-v2 artifacts (the
     # v5 file); a v3 db must keep working with the block saying "not recorded".
@@ -3627,8 +3822,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def _page(self):
         con = self._conn()
+        cards_ok = False
         try:
             docs, nums = self._read_docs(con), self._read_nums(con)
+            cards_ok = self._has_cards(con)
         except QueryFailed:
             # The page must still paint. The help panel says so itself when a
             # definition is missing, and the row endpoint reports the real
@@ -3636,7 +3833,8 @@ class Handler(BaseHTTPRequestHandler):
             docs, nums = Handler._docs or {}, Handler._nums or {}
         finally:
             con.close()
-        body = render_page(docs, nums, self.site, self.preview_mode).encode("utf-8")
+        body = render_page(docs, nums, self.site, self.preview_mode,
+                           cards_ok=cards_ok).encode("utf-8")
         self._send(None, "text/html; charset=utf-8", body)
 
     # -- endpoints ---------------------------------------------------------
@@ -3753,6 +3951,228 @@ class Handler(BaseHTTPRequestHandler):
         self._send({"total": total, "rows": rows, "identifications": ident,
                     "graded_here": graded_here, "graded_total": graded_total})
 
+    # cards a grader can page through: sorts over the card's OWN aggregates, so
+    # a page turn never scans the fat table
+    CARD_SORT_SQL = {
+        "work": "c.kw_id, c.sys_id, c.card_id",
+        "letters": "c.best_matched_letters DESC, c.card_id",
+        "coverage": "c.best_coverage_ppm DESC, c.card_id",
+        "witnesses": "c.evidence_rows DESC, c.witnesses DESC, c.card_id",
+    }
+
+    def _witness_strip(self, con, cards):
+        """Every witness of the card's known work, aligned here or not.
+
+        Honesty rule. A witness with no evidence on this page reads "no
+        returned alignment" -- the engine ran and returned nothing, which is
+        NOT the same as the witness being irrelevant. The only case where
+        "not applicable" is provable is a division-scoped witness of a
+        container whose rows on THIS page routed to a DIFFERENT division: the
+        prefixes partition that container's rows, so this division demonstrably
+        has none here. Everything else keeps the humbler label.
+        """
+        if not cards:
+            return
+        kws = sorted({c["kw_id"] for c in cards})
+        names = {"k%d" % i: k for i, k in enumerate(kws)}
+        members = defaultdict(list)
+        for x in self._query(
+                con, "cards.members",
+                "SELECT kw_id AS kw, work_id AS w, scope AS s, "
+                "scope_prefix AS p, basis AS b, route_basis AS rb, "
+                "evidence_rows AS n FROM known_work_member WHERE kw_id IN (%s)"
+                % ",".join(":" + n for n in names), names).fetchall():
+            members[x["kw"]].append(dict(work_id=x["w"], scope=x["s"],
+                                         scope_prefix=x["p"], basis=x["b"],
+                                         route_basis=x["rb"], work_rows=x["n"]))
+        for c in cards:
+            here = {}
+            for r in c.get("rows", ()):
+                key = (r.get("card_work_id"), r.get("card_scope"))
+                here[key] = here.get(key, 0) + 1
+            strip = []
+            for m in sorted(members.get(c["kw_id"], ()),
+                            key=lambda m: (m["work_id"], m["scope"])):
+                key = (m["work_id"], m["scope"])
+                d = dict(m, rows_here=here.get(key, 0))
+                if d["rows_here"]:
+                    d["status"] = "aligned"
+                elif m["scope_prefix"] and any(
+                        k[0] == m["work_id"] and k[1] != m["scope"]
+                        for k in here):
+                    d["status"] = "not_applicable"
+                    d["why"] = ("this page's rows of the same container belong "
+                                "to another division")
+                else:
+                    d["status"] = "no_returned_alignment"
+                strip.append(d)
+            c["witness_strip"] = strip
+
+    def _api_cards(self, q):
+        """The card grain: one card per (page_id, known_work).
+
+        A card is returned when ANY of its evidence rows passes the filter --
+        the grader asked to see identifications of that kind, and hiding the
+        card's other witnesses would misrepresent what the page carries. Rows
+        that matched are flagged `matched: true` so the card can say which of
+        its evidence the filter selected.
+        """
+        off = max(0, self._int(self._one(q, "offset", "0"), 0))
+        size = self._int(self._one(q, "size", ""), PAGE_SIZE)
+        if size not in PAGE_SIZES:
+            size = PAGE_SIZE
+        order = self.CARD_SORT_SQL.get(self._one(q, "sort", "work"),
+                                       self.CARD_SORT_SQL["work"])
+        con = self._conn()
+        try:
+            if not self._has_cards(con):
+                self._send({"error": "card grain unavailable",
+                            "detail": "run scripts/attach_review_cards.py "
+                                      "against this db (and rebuild it after "
+                                      "any registry rebuild)"}, status=409)
+                return
+            where, pr = self._where(con, q)
+            join = self._grade_join(q)
+            # addressing ONE card (or one page's cards) -- a grader linking a
+            # colleague to the card they are asking about. Parameter names are
+            # prefixed so they cannot collide with a filter's own bindings, and
+            # conditions are ANDed through `_and` because `_where` returns an
+            # EMPTY string when nothing is filtered.
+            pr = dict(pr)
+            conds = []
+            if self._one(q, "card"):
+                conds.append("c.card_id = :__cid")
+                pr["__cid"] = self._one(q, "card")
+            if self._one(q, "page"):
+                conds.append("c.page_id = :__pid")
+                pr["__pid"] = self._one(q, "page")
+            where = self._and(where, *conds)
+            sel = ("FROM card c JOIN card_member cm ON cm.card_id = c.card_id "
+                   "JOIN facet_row r ON r.evidence_id = cm.evidence_id %s %s"
+                   % (join, where))
+            total = self._query(
+                con, "cards.total",
+                "SELECT COUNT(*) AS c FROM (SELECT c.card_id %s "
+                "GROUP BY c.card_id)" % sel, pr).fetchone()["c"]
+            ids = self._query(
+                con, "cards.page",
+                "SELECT c.card_id AS id %s GROUP BY c.card_id ORDER BY %s "
+                "LIMIT :__lim OFFSET :__off" % (sel, order),
+                dict(pr, __lim=size, __off=off)).fetchall()
+            cids = [x["id"] for x in ids]
+            cards, rows = [], []
+            if cids:
+                names = {"c%d" % i: c for i, c in enumerate(cids)}
+                inlist = ",".join(":" + n for n in names)
+                by_id = {}
+                # the known work's own identity travels WITH the card: the
+                # header asks "is this page <this work>?", and `provisional`
+                # plus the title basis are how the reader knows how firm that
+                # name is (Codex round-3/4: never hide the provisional flag)
+                for x in self._query(
+                        con, "cards.body",
+                        "SELECT c.*, k.title AS kw_title, k.author AS kw_author, "
+                        "k.title_basis AS kw_title_basis, "
+                        "k.author_basis AS kw_author_basis, "
+                        "k.main_witness_work AS kw_main_work, "
+                        "k.main_witness_scope AS kw_main_scope "
+                        "FROM card c JOIN known_work k ON k.kw_id = c.kw_id "
+                        "WHERE c.card_id IN (%s)" % inlist,
+                        names).fetchall():
+                    by_id[x["card_id"]] = {k: x[k] for k in x.keys()}
+                    by_id[x["card_id"]]["rows"] = []
+                # the card's OWN evidence -- every row of it, not only the rows
+                # the filter matched, else a card would misreport its witnesses
+                mem = self._query(
+                    con, "cards.members_rows",
+                    "SELECT cm.card_id AS cid, cm.evidence_id AS e, "
+                    "cm.work_id AS w, cm.scope AS s, cm.scope_prefix AS p, "
+                    "cm.member_basis AS mb, cm.route_basis AS rb "
+                    "FROM card_member cm WHERE cm.card_id IN (%s)" % inlist,
+                    names).fetchall()
+                evs = [x["e"] for x in mem]
+                fat = {}
+                if evs:
+                    enames = {"e%d" % i: e for i, e in enumerate(evs)}
+                    for x in self._query(
+                            con, "cards.rows",
+                            "SELECT r.*, fr.triage AS triage, "
+                            "fr.formula_kind AS formula_kind, "
+                            "fr.gate_divergence AS gate_divergence, "
+                            "fr.gate_new_finds AS gate_new_finds, "
+                            "hg.divergence_correctness AS grade, "
+                            "hg.note AS note FROM review_row r "
+                            "LEFT JOIN facet_row fr "
+                            "ON fr.evidence_id = r.evidence_id "
+                            "LEFT JOIN g.human_grade hg "
+                            "ON hg.evidence_id = r.evidence_id "
+                            "WHERE r.evidence_id IN (%s)"
+                            % ",".join(":" + n for n in enames),
+                            enames).fetchall():
+                        fat[x["evidence_id"]] = x
+                    matched = {x["e"] for x in self._query(
+                        con, "cards.matched",
+                        "SELECT cm.evidence_id AS e FROM card c "
+                        "JOIN card_member cm ON cm.card_id = c.card_id "
+                        "JOIN facet_row r ON r.evidence_id = cm.evidence_id "
+                        "%s %s" % (join, self._and(
+                            where, "cm.card_id IN (%s)" % inlist)),
+                        dict(pr, **names)).fetchall()}
+                    for m in mem:
+                        x = fat.get(m["e"])
+                        if x is None or m["cid"] not in by_id:
+                            continue
+                        d = self._public_row(x)
+                        d["grade"] = d.get("grade") or ""
+                        d["note"] = d.get("note") or ""
+                        d["card_work_id"] = m["w"]
+                        d["card_scope"] = m["s"]
+                        d["card_scope_prefix"] = m["p"]
+                        d["member_basis"] = m["mb"]
+                        d["route_basis"] = m["rb"]
+                        d["matched"] = m["e"] in matched
+                        by_id[m["cid"]]["rows"].append(d)
+                        rows.append(d)
+                    self._attach_gate(con, rows)
+                    self._attach_witness(con, rows)
+                    self._attach_scripture(con, rows)
+                    self._attach_llm_verdicts(con, rows)
+                    self._attach_alias_twin(con, rows)
+                cards = [by_id[c] for c in cids if c in by_id]
+                for c in cards:
+                    c["rows"].sort(key=lambda d: (d["card_work_id"],
+                                                  d["card_scope"],
+                                                  d["evidence_id"]))
+                    c["graded_rows"] = sum(1 for d in c["rows"] if d["grade"])
+                self._witness_strip(con, cards)
+            # THREE NAMED NUMBERS: cards are not evidence rows, and neither is
+            # a manuscript count -- reporting one total for all three is how a
+            # reader ends up quoting the wrong one.
+            nums = {x["k"]: x["v"] for x in self._query(
+                con, "cards.nums",
+                "SELECT key AS k, value AS v FROM meta WHERE key LIKE "
+                "'card_grain.%'").fetchall()}
+            # the SAME join as the card selection, so a card/page filter is
+            # respected here too; one evidence row belongs to exactly one card
+            # (gated at build time), so this count is exact, not inflated
+            ev_total = self._query(
+                con, "cards.ev_total",
+                "SELECT COUNT(*) AS c %s" % sel, pr).fetchone()["c"]
+            graded_total = self._query(
+                con, "cards.graded_total",
+                "SELECT COUNT(*) AS c FROM g.human_grade WHERE "
+                "divergence_correctness IS NOT NULL "
+                "AND divergence_correctness <> ''").fetchone()["c"]
+        finally:
+            con.close()
+        self._send({"total": total, "cards": cards,
+                    "evidence_rows": ev_total,
+                    "graded_total": graded_total,
+                    "grain": {"cards": nums.get("card_grain.cards"),
+                              "evidence_rows": nums.get("card_grain.members"),
+                              "manuscripts": nums.get("card_grain.manuscripts"),
+                              "pages": nums.get("card_grain.pages")}})
+
     # The export is the ONE artifact that leaves this machine -- a teammate
     # forwards the file. Spec 6.2 restricts it to these six fields and no
     # others: identifiers plus the grade. Titles, authors, catalogue titles,
@@ -3810,6 +4230,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._api_facets(q)
             if u.path == "/api/rows":
                 return self._api_rows(q)
+            if u.path == "/api/cards":
+                return self._api_cards(q)
             if u.path == "/api/export":
                 return self._api_export()
         except QueryFailed as e:
