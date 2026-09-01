@@ -51,6 +51,55 @@ RULINGS = {w: dict(drop_author=True,
                         "author")
            for w in _PIRKEI}
 
+# Owner, 2026-09-01: "fix the duplicates" -- one canonical string per person.
+# The winner of each group is the DOMINANT existing spelling (by works, then
+# rows), in the house form "full name + acronym" with gershayim. Where those two
+# pull apart the dominant form wins, because it is what the rest of the db
+# already says; the loser's works are restated, never merged as works.
+#
+# Five groups the report flagged are NOT duplicates and are deliberately absent:
+#   שרירא גאון והאיי גאון      a JOINT attribution (two people), not either alone
+#   דוד בן יהושע הנגיד / יהושע הנגיד   father and son
+#   מנחם בן סרוק / תלמידי מנחם בן סרוק  a person and his students
+#   מיוחס לשלמה אבן גבירול; תרגום...   attribution + translator (sanctioned)
+#   שרירא גאון / האיי גאון              two separate geonim
+_AUTHOR_UNIFY = {
+    # אברהם בן דוד: 1 work carried the short form, 7 the full one
+    "rsdb464ae006fc": "אברהם בן דוד מפושקיירא (ראב״ד)",
+    # זרחיה הלוי: bare name, ASCII acronym, gershayim acronym -> the last
+    "rs06afe1c65595": "זרחיה הלוי (רז״ה)",
+    "w000016": "זרחיה הלוי (רז״ה)",
+    # ישעיה דיטראני: the spaced spelling sat on 1 work, the closed one on 3
+    # (6,332 rows) -- the corpus's own spelling wins
+    "rs74f839653215": "ישעיה דיטראני (רי״ד)",
+    # יהודה הלוי: 3 works bare, 1 with an ASCII acronym
+    "rsbee151fc9b97": "יהודה הלוי (ריה״ל)",
+    "w000194": "יהודה הלוי (ריה״ל)",
+    "w001488": "יהודה הלוי (ריה״ל)",
+    "w000053": "יהודה הלוי (ריה״ל)",
+    # מאיר הלוי אבולעפיה
+    "rs7f507ca27010": "מאיר הלוי אבולעפיה (רמ״ה)",
+    "rs157e95b5ed7f": "מאיר הלוי אבולעפיה (רמ״ה)",
+    "w001522": "מאיר הלוי אבולעפיה (רמ״ה)",
+    # האיי גאון: 84 works say האיי גאון, one said האיי בן שרירא גאון -- the same
+    # person, and the patronymic form is the outlier
+    "w000070": "האיי גאון",
+    # not a duplicate, but the same gershayim rule: an ASCII geresh
+    "w000008": "יונה אבן ג׳נאח",
+    "w000037": "יונה אבן ג׳נאח",
+    "w000196": "יונה אבן ג׳נאח",
+}
+RULINGS.update({w: dict(author=a, note="owner 2026-09-01: one canonical string "
+                                       "per person")
+                for w, a in _AUTHOR_UNIFY.items()})
+
+# Owner, 2026-09-01: the Baraita of 32 middot IS משנת רבי אליעזר. The identity
+# merge itself is an owner_merges entry in the registry inputs; here the
+# canonical witness gets the name the owner used for the work, so the known
+# work's title carries both names a reader might look for.
+RULINGS["w001489"] = dict(title='משנת רבי אליעזר (ברייתא דל״ב מידות)',
+                          note="owner 2026-09-01: the work's other name")
+
 DDL = """CREATE TABLE IF NOT EXISTS work_author_ruling(
   work_id TEXT NOT NULL,
   field TEXT NOT NULL CHECK (field IN ('author','title')),

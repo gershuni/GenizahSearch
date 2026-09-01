@@ -135,9 +135,11 @@ OWNER_AUTHOR_RULINGS = {
     # attribution (the db's only English author string) was wrong.
     "w001151": "יהושע הנגיד",
     # translator-as-author class, the חובות הלבבות pattern: author = composer.
-    "w000194": "יהודה הלוי",           # ספר הכוזרי, תרגום
-    "w001488": "יהודה הלוי",           # ספר הכוזרי, תרגום (sefaria copy)
-    "w000196": "יונה אבן ג'נאח",       # ספר הרקמה, תרגום
+    # restated 2026-09-01 with the owner's "fix the duplicates" ruling: one
+    # canonical string per person, house form name + acronym with gershayim
+    "w000194": "יהודה הלוי (ריה״ל)",    # ספר הכוזרי, תרגום
+    "w001488": "יהודה הלוי (ריה״ל)",    # ספר הכוזרי, תרגום (sefaria copy)
+    "w000196": "יונה אבן ג׳נאח",        # ספר הרקמה, תרגום
     "w000827": "ישועה בן יהודה",       # ספר הישר, תרגום
     "w000830": "יוסף הרואה בן אברהם",  # ספר נעימות, תרגום
 }
