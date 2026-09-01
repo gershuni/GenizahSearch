@@ -285,7 +285,8 @@ def validate_inputs(docs):
     a = docs["author_authority.json"]
     _obj(a, "author_authority", ("fills", "owner_author_rulings",
                                  "owner_title_rulings", "variants"),
-         ("generated", "sanctioned_author_inequality", "source_module",
+         ("generated", "owner_rulings_from_artifact",
+          "sanctioned_author_inequality", "source_module",
           "source_module_sha256", "style", "version"))
     _dct(a["variants"], "author_authority.variants", _s)
     def _fill(v, p):
