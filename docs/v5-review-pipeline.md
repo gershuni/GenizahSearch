@@ -202,6 +202,25 @@ printed edition, matching text typically differs by about 0.4 edits per
 character (orthography, abbreviations, real variants); the thresholds in §4
 are set against that noise.
 
+**A caveat on the folding.** The final-form fold is an orthographic
+normalization, not a model of HTR errors, and it addresses almost none of
+them. Measured on the 26,180 spans in this file where a human transcription
+and the HTR of the same page are aligned (§9; 6.72 million letters): the HTR
+differs from the human reading by 0.128 edits per letter; sofit↔medial swaps
+are 0.4 % of the substitutions; the visually similar final-letter pairs
+ן↔ו, ם↔ס and ך↔ר together are 2.4 %; the medial look-alikes ד↔ר, ו↔י, כ↔ב,
+ה/ח/ת and ג↔נ are 24.5 %; and 56 % of all edits are inserted or dropped
+letters, which no letter class can absorb. The matcher's tolerance for all of
+this comes from its design rather than from the fold: seeding needs only two
+clean 5-grams in a 20-letter band (about half of all 5-grams are clean at
+that error rate), and verification accepts an edit density up to 0.35 (§4),
+inside which a confused letter is an ordinary substitution. Folding the three
+final-letter pairs would move 34 of these 26,180 spans across the 0.35
+boundary; folding every look-alike class, 124. What this cannot measure is
+recall lost at the seed stage on pages never found. A confusion-tolerant
+normalizer would be a versioned change to the alphabet, re-fitting the
+calibration and the accept boundary and re-matching the corpus.
+
 ---
 
 ## 3. The reference side
