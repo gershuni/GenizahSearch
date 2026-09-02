@@ -68,7 +68,13 @@ def _snippet_match_phrase(snippet: str) -> str:
     m = _SNIPPET_MATCH_RE.search(snippet)
     if not m:
         return ''
-    return re.sub(r'\s+', ' ', m.group(1)).strip()
+    # A match spanning a line break carries the UI's line-break sentinel
+    # (SearchEngine.highlight renders '\n' as ' \u2016 ' for the results table).
+    # Source texts have no such character, so leaving it in guarantees the
+    # `must_contain` lookup misses -- on exactly the multi-line hits that most
+    # need it (Codex P2, 2026-09-02). Restore it to a plain space.
+    phrase = m.group(1).replace('\u2016', ' ')
+    return re.sub(r'\s+', ' ', phrase).strip()
 
 
 # ---------------------------------------------------------------------------
@@ -2336,7 +2342,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                             # credit. `switchImageCredit()` looks these attributes up by
                             # `data-role="image-credit"` (Codex P2, 2026-09-02); there is
                             # no link element here, and the helper tolerates its absence.
-                            _adv_credit_nli = ''
+                            _adv_credit_nli = 'הספרייה הלאומית / National Library of Israel'  # non-empty: switchImageCredit() skips a falsy value
                             attribution = ''
                             if is_oxford:
                                 attribution = OXFORD_IMAGE_CREDIT_EN
