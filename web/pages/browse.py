@@ -564,7 +564,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         """
         if not state.highlight_terms or page is None:
             return None
-        current = (getattr(page, 'sys_id', None), getattr(page, 'p_num', None))
+        # volume_ie belongs in the key: multi-volume manuscripts restart p_num in
+        # each volume and the volume selector loads page 1, so (sys_id, p_num) alone
+        # matches another volume's page 1 (Codex P2, 2026-09-02).
+        current = (getattr(page, 'sys_id', None),
+                   getattr(page, 'volume_ie', None) or state.volume_ie,
+                   getattr(page, 'p_num', None))
         if state.highlight_scope is None:
             state.highlight_scope = current      # this folio owns it
             return state.highlight_terms

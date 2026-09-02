@@ -768,7 +768,9 @@ def update_enrichment_sections(state: BrowseState, refs: BrowsePageRefs):
                     # Same folio scoping as browse.py: the phrase applies only
                     # on the folio the deep link arrived for (Codex P2).
                     must_contain=(state.highlight_terms
-                                  if state.highlight_scope in (None, (getattr(page, 'sys_id', None), getattr(page, 'p_num', None)))
+                                  if state.highlight_scope in (None, (getattr(page, 'sys_id', None),
+                                                                       getattr(page, 'volume_ie', None) or state.volume_ie,
+                                                                       getattr(page, 'p_num', None)))
                                   else None),
                 )
 

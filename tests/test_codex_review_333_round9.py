@@ -32,9 +32,10 @@ def _read(path):
 # --------------------------------------------------------------------------
 
 class _Page:
-    def __init__(self, sys_id, p_num):
+    def __init__(self, sys_id, p_num, volume_ie=None):
         self.sys_id = sys_id
         self.p_num = p_num
+        self.volume_ie = volume_ie      # part of the scope key since round 10
 
 
 def _load_scope_helper():
@@ -48,6 +49,7 @@ def _load_scope_helper():
     class _State:
         highlight_terms = None
         highlight_scope = None
+        volume_ie = None                # read by the helper since round 10
 
     ns = {"state": _State}
     exec(body, ns)
@@ -60,7 +62,7 @@ class TestPhraseIsScopedToItsFolio:
         st.highlight_terms = "תקום רבה דיניך"
         st.highlight_scope = None
         assert f(_Page("990053489970205171", 2)) == "תקום רבה דיניך"
-        assert st.highlight_scope == ("990053489970205171", 2)
+        assert st.highlight_scope == ("990053489970205171", None, 2)
 
     def test_another_folio_of_the_same_manuscript_does_not(self):
         f, st = _load_scope_helper()

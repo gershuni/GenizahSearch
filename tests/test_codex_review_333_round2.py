@@ -41,6 +41,7 @@ class _Viewer:
         import desktop.viewers as viewers
         self.current_source = None
         self._last_idx_by_source = {}
+        self._last_switch_landed_at = None   # added in round 10
         self._attr_ext = ""
         self._attr_nli = ""
         self._label_text = None
@@ -98,8 +99,12 @@ class TestCurrentSourceIsInitialized:
 class TestSourceSwitchIsReversible:
     def test_returning_to_oxford_restores_the_folio_just_left(self):
         v = _Viewer()
-        v.current_source = "ext"
         v._last_idx_by_source["ext"] = 53          # folio 27b of the 164-image codex
+        # Round 10 narrowed this: the remembered index applies only while the reader
+        # has not navigated since the switch that recorded it, so the test states
+        # that precondition explicitly (the reader is still where the switch landed).
+        v.current_source = "nli"
+        v._last_switch_landed_at = ("nli", 1)
         idx = v._index_for_source_switch(NLI, 1, OX, "ext")
         assert idx == 53, f"expected the remembered Oxford index, got {idx}"
         assert idx != len(OX) - 1, "the proportional branch would land on the last image"
