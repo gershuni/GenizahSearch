@@ -4191,7 +4191,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         _credit_ox_text = f"{page.shelfmark} · {page.attribution}" if page.shelfmark else page.attribution
                                     else:
                                         _credit_ox_text = page.attribution
-                                    credit_text = _credit_nli_text if (_is_nli_active and page.is_oxford) else (page.attribution or _credit_nli_text)
+                                    # Use the shelfmark-prefixed text for the INITIAL
+                                    # Oxford label too, not only in the data attribute
+                                    # a later fallback reads -- the licence's
+                                    # "[object] ... Image provided by [owner]" form is
+                                    # what should be on screen from the start
+                                    # (Codex P2, 2026-09-02).
+                                    credit_text = (
+                                        _credit_nli_text if (_is_nli_active and page.is_oxford)
+                                        else (_credit_ox_text or _credit_nli_text)
+                                    )
                                     # Route credit link based on the actively viewed source,
                                     # not just the manuscript's native source. If the user
                                     # switched to NLI on an Oxford manuscript, the credit

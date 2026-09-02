@@ -47,6 +47,9 @@ logger = logging.getLogger(__name__)
 # Cache TTL values (configurable via environment variables)
 NLI_CACHE_TTL = int(os.environ.get('NLI_CACHE_TTL', '300'))  # 5 minutes default
 NLI_FAIL_CACHE_TTL = 60  # negative-cache failures for 60s to avoid hammering NLI
+# Rosetta's "no image" placeholder is ~1615 bytes; a real thumbnail is larger.
+# The `nli_image` route has used 2000 since Phase 98 -- one constant for both now.
+_ROSETTA_PLACEHOLDER_MAX_BYTES = 2000
 NLI_DISK_CACHE_TTL = int(os.environ.get('NLI_DISK_CACHE_TTL', str(30 * 24 * 60 * 60)))  # 30 days
 IMAGE_CACHE_TTL = int(os.environ.get('IMAGE_CACHE_TTL', '600'))  # 10 minutes default
 NLI_MAX_CONCURRENT_FETCHES = max(1, int(os.environ.get('NLI_MAX_CONCURRENT_FETCHES', '8')))
@@ -986,7 +989,7 @@ def init_api_routes(app_override=None):
             )
             if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
                 # The "no image" placeholder is ~1615 bytes, real images are larger
-                if len(resp.content) > 2000:
+                if len(resp.content) > _ROSETTA_PLACEHOLDER_MAX_BYTES:
                     _nli_record_success(path='nli_image')
                     return Response(
                         content=resp.content,
@@ -1123,10 +1126,26 @@ def init_api_routes(app_override=None):
                     timeout=(NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT),
                 )
                 ct2 = (r2.headers.get('Content-Type', '') or '').split(';', 1)[0].strip()
-                if r2.status_code == 200 and ct2.startswith('image/') and len(r2.content) > 200:
-                    _nli_record_success(path='_fetch_nli_image_bytes_rosetta_thumb')
-                    logger.info("NLI IIIF unavailable for FL%s; served Rosetta thumbnail (%d bytes)", fl_id, len(r2.content))
-                    return (r2.content, ct2 or 'image/png')
+                if r2.status_code == 200 and ct2.startswith('image/'):
+                    # Rosetta answers 200 with a ~1615-byte "no image" placeholder for
+                    # an FL it cannot deliver. The `nli_image` route has rejected
+                    # anything under this size since Phase 98; the fallback must too,
+                    # or it caches the placeholder and shows it as the manuscript
+                    # (Codex P2, 2026-09-02 -- observed live: one FL of MS heb. g.2/27
+                    # returns exactly 1615 bytes while another returns 21734).
+                    if len(r2.content) > _ROSETTA_PLACEHOLDER_MAX_BYTES:
+                        _nli_record_success(path='_fetch_nli_image_bytes_rosetta_thumb')
+                        logger.info("NLI IIIF unavailable for FL%s; served Rosetta thumbnail (%d bytes)", fl_id, len(r2.content))
+                        return (r2.content, ct2 or 'image/png')
+                    logger.info("Rosetta returned the no-image placeholder for FL%s (%d bytes)", fl_id, len(r2.content))
+                # A Rosetta 429/5xx is a breaker failure exactly as an IIIF one is
+                # (shared/nli_circuit_breaker.py D-06). Without this the loop could
+                # issue an IIIF *and* a Rosetta request for every cached FL id
+                # instead of opening the breaker. 404 does NOT trip it (D-07).
+                elif r2.status_code == 429:
+                    _nli_record_failure(failure_type='429', path='_fetch_nli_image_bytes_rosetta_thumb')
+                elif 500 <= r2.status_code < 600:
+                    _nli_record_failure(failure_type='5xx', path='_fetch_nli_image_bytes_rosetta_thumb')
             except requests.exceptions.Timeout:
                 _nli_record_failure(failure_type='timeout', path='_fetch_nli_image_bytes_rosetta_thumb')
             except requests.exceptions.ConnectionError:
