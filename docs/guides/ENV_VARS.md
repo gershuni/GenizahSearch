@@ -48,6 +48,7 @@ SEARCH_API_RATE_LIMIT=120             # per-IP requests/minute; shared ceiling b
 SEARCH_API_POSTHOG_SAMPLE_N=1         # capture every Nth API request to PostHog
 SEARCH_API_BROWSE_TIMEOUT=1.0         # per-source enrichment timeout (PGP/FJMS/NLI), seconds
 SEARCH_API_BROWSE_CORE_TIMEOUT=2.0    # core BrowsePage fetch timeout, seconds
+SEARCH_API_BROWSE_CORE_WARMUP_TIMEOUT=45.0  # core budget while the browse map is still loading (GenizahService.is_warm() False); the first resolution after start pays an 18 s cold pickle+repair load, so requests in that window WAIT instead of 504ing; normal budget resumes once warm
 SEARCH_API_CORE_TIMEOUT=30.0          # interactive baseline (exact/title/shelfmark/responsa); runs in executor off the event loop -> 504 core_timeout
 SEARCH_API_VARIANTS_TIMEOUT=60        # /api/search variants-mode core timeout (s); heavy tier
 SEARCH_API_FUZZY_TIMEOUT=300          # /api/search fuzzy-mode core timeout (s); heaviest mode
