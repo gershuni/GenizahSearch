@@ -407,9 +407,9 @@ On the 26,180 rows whose page was searched as an FGP/PGP transcription
 let `htr_align_status` tell you how far to trust that address.
 
 **Handle the Access file as the more sensitive of the two.** It is the only
-place where the restricted corpora's file names appear next to our matches. It
-should not be forwarded, and it should not travel further than the database
-does.
+place where the restricted corpora's file names appear next to our matches, and
+every R-source file name carries its provider's name. It should not be
+forwarded, and it should not travel further than the database does.
 
 ---
 
