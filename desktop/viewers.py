@@ -17,6 +17,7 @@ from PyQt6 import sip
 
 from genizah_core import Config, get_logger, tr
 from desktop.image_loader import ImageLoaderThread
+from desktop.widgets import map_matching_image_index
 from shared.synthetic_sys_id import is_synthetic_sys_id
 
 logger = get_logger(__name__)
@@ -728,6 +729,19 @@ class ManuscriptViewerWidget(QWidget):
 
         layout.addWidget(_make_scrollable_row(top_bar))
 
+        # 260902 (debug/oxford-fgp-image-mismatch.md sub-issue A): visible
+        # notice shown when the viewer auto-falls-back from a dead external
+        # source (currently: Oxford's anti-bot challenge) to the NLI image
+        # list. Hidden the rest of the time.
+        self.lbl_fallback_notice = QLabel("")
+        self.lbl_fallback_notice.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_fallback_notice.setWordWrap(True)
+        self.lbl_fallback_notice.setStyleSheet(
+            "font-size: 11px; color: #c0392b; background: #fdecea; padding: 2px; margin: 0px;"
+        )
+        self.lbl_fallback_notice.setVisible(False)
+        layout.addWidget(self.lbl_fallback_notice)
+
         # Image adjustment controls bar
         adj_bar = QHBoxLayout()
         adj_bar.setContentsMargins(5, 2, 5, 2)
@@ -879,6 +893,7 @@ class ManuscriptViewerWidget(QWidget):
         # auto-fallback-to-NLI state. _on_source_changed and the nav
         # block manage the flag after this point.
         self._nli_fallback_active = False
+        self.lbl_fallback_notice.setVisible(False)
 
         # For Oxford: check if target_folio is missing and add dynamic images
         if target_folio is not None and self.images_ext:
@@ -1014,6 +1029,9 @@ class ManuscriptViewerWidget(QWidget):
         self.set_page(initial_idx)
 
     def _on_source_changed(self):
+        old_list = self.active_list
+        old_idx = self.current_idx
+
         data = self.combo_source.currentData()
         if data == "nli":
             self.active_list = self.images_nli
@@ -1026,10 +1044,16 @@ class ManuscriptViewerWidget(QWidget):
         # so clear any auto-fallback-to-NLI state so that the nav block
         # stops trying to restore CUDL on page change.
         self._nli_fallback_active = False
+        self.lbl_fallback_notice.setVisible(False)
 
-        # Try to keep index within bounds
-        if self.current_idx >= len(self.active_list):
-            self.current_idx = 0
+        # 260902 (debug/oxford-fgp-image-mismatch.md sub-issue C): map by
+        # folio side (or relative position when the old entry carries no
+        # recognizable side) rather than reusing the raw index verbatim —
+        # that silently truncated to page 0 whenever the new list is
+        # shorter than the old index, e.g. Oxford's 164-page whole-codex
+        # list at index ~53 (folio 27b/verso) resetting to NLI index 0
+        # (folio 27r/recto) instead of the matching verso image.
+        self.current_idx = map_matching_image_index(old_list, old_idx, self.active_list)
 
         self.set_page(self.current_idx)
 
@@ -1199,12 +1223,78 @@ class ManuscriptViewerWidget(QWidget):
             lambda img, g=gen: self.display_image(img) if g == self._load_generation and not self._closing else None
         )
         self.loader_thread.load_failed.connect(
-            lambda g=gen: None if g != self._load_generation or self._closing else self.scroll_area.set_status_message(tr("No Image"))
+            lambda g=gen: self._on_image_load_failed(g)
         )
         self.loader_thread.start()
 
         # Preload next image
         self._preload(index + 1)
+
+    def _on_image_load_failed(self, gen):
+        """Image download/decode failed for the page requested at
+        generation ``gen``.
+
+        260902 (debug/oxford-fgp-image-mismatch.md sub-issue A): Oxford's
+        image host now fronts an anti-bot challenge that answers HTTP 200
+        with an HTML body instead of JPEG bytes; ``image_loader.py``
+        rejects the non-image Content-Type and reports ``load_failed``
+        exactly like a genuine decode error, so every Oxford page silently
+        showed "No Image" even when the NLI list had a real image for the
+        same folio.
+
+        When the failing source is Oxford and an NLI list is available,
+        auto-fallback to NLI, mapping the index with the same
+        ``map_matching_image_index`` helper sub-issue C uses for manual
+        source switches. Reuses ``_nli_fallback_active`` -- consumption of
+        that flag in ``genizah_app.py``'s CUDL past-coverage restore is
+        gated on ``external_provider == 'cambridge'``, so this Oxford-only
+        use does not interact with it. Falls through to the plain
+        "No Image" message when there's nothing to fall back to, or the
+        fallback was already active (avoid retrying the dead source).
+        """
+        if gen != self._load_generation or self._closing:
+            return
+
+        if (
+            self.external_provider == "oxford"
+            and self.current_source == "ext"
+            and not self._nli_fallback_active
+            and self.images_nli
+        ):
+            new_idx = map_matching_image_index(self.active_list, self.current_idx, self.images_nli)
+            # The Oxford URL that just failed: offered as a link so the reader's own
+            # browser can pass the Bodleian's JS bot-challenge (an in-app fetch cannot).
+            _failed_url = ''
+            if 0 <= self.current_idx < len(self.active_list):
+                _failed_url = str(self.active_list[self.current_idx].get('url') or '')
+
+            # Flip the combo without firing _on_source_changed -- that
+            # handler unconditionally clears _nli_fallback_active, which
+            # would undo the flag we're about to set.
+            self.combo_source.blockSignals(True)
+            for i in range(self.combo_source.count()):
+                if self.combo_source.itemData(i) == "nli":
+                    self.combo_source.setCurrentIndex(i)
+                    break
+            self.combo_source.blockSignals(False)
+
+            self.active_list = self.images_nli
+            self.current_source = "nli"
+            self._nli_fallback_active = True
+            _notice = tr("Oxford image unavailable — showing the NLI image instead")
+            if _failed_url.startswith("https://hebrew.bodleian.ox.ac.uk/"):
+                _notice += (
+                    f' · <a href="{_failed_url}" style="color:#1f5fa8;">'
+                    f'{tr("Open in Bodleian Libraries")}</a>'
+                )
+            self.lbl_fallback_notice.setTextFormat(Qt.TextFormat.RichText)
+            self.lbl_fallback_notice.setOpenExternalLinks(True)
+            self.lbl_fallback_notice.setText(_notice)
+            self.lbl_fallback_notice.setVisible(True)
+            self.set_page(new_idx)
+            return
+
+        self.scroll_area.set_status_message(tr("No Image"))
 
     def display_image(self, image):
         if self._closing:

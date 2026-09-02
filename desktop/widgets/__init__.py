@@ -177,6 +177,62 @@ def _get_folio_side_image_index(meta, folio_num, side):
     return None
 
 
+_SIDE_SUFFIX_RE = re.compile(r'^\d+\s*([abrv])$')
+
+
+def _side_of_label(label):
+    """Return 'r' or 'v' when ``label`` looks like "<folio><a|b|r|v>"
+    (Oxford's own convention -- e.g. "27a"/"27b"), else None.
+
+    Restricted to a trailing-digit-then-single-letter pattern (not a bare
+    ``.endswith()``) so free-text labels like "Binding" or "Cover" are
+    never misread as a side.
+    """
+    m = _SIDE_SUFFIX_RE.match(str(label or '').strip().lower())
+    if not m:
+        return None
+    return 'v' if m.group(1) in ('b', 'v') else 'r'
+
+
+def map_matching_image_index(old_list, old_idx, new_list):
+    """Map an index from one image list to the best-matching index in a
+    different image list, preserving recto/verso side when detectable.
+
+    Used both when the user manually switches image source (Oxford <->
+    NLI combo) and when auto-falling back from a dead external source to
+    NLI (see debug/oxford-fgp-image-mismatch.md sub-issues A & C). The
+    two lists usually have DIFFERENT lengths and no shared join key --
+    Oxford's ``images_ext`` entries carry ``folio_num`` + a labeled side
+    ("27a"/"27b"), while NLI's ``images_nli`` entries carry only
+    ``label``/``fl_id`` in NLI's own (unrelated) labeling convention --
+    so this uses whatever signal is available:
+
+    1. When the OLD entry's label carries a recognizable recto/verso
+       suffix and the NEW list has exactly 2 entries (the common
+       "NLI per-part list = one folio, recto + verso" case), pick index
+       0 for recto / 1 for verso.
+    2. Otherwise, map by relative position (old_idx / len(old_list))
+       scaled onto the new list, clamped to bounds.
+
+    Returns 0 for empty/invalid inputs -- callers must still check that
+    ``new_list`` is non-empty before treating the source switch as valid.
+    """
+    if not new_list:
+        return 0
+    if not old_list or old_idx is None or old_idx < 0 or old_idx >= len(old_list):
+        return 0
+
+    side = _side_of_label(old_list[old_idx].get('label'))
+    if side is not None and len(new_list) == 2:
+        return 1 if side == 'v' else 0
+
+    if len(old_list) <= 1:
+        return 0
+    ratio = old_idx / (len(old_list) - 1)
+    idx = round(ratio * (len(new_list) - 1))
+    return max(0, min(idx, len(new_list) - 1))
+
+
 def _get_initial_image_index(meta, folio_num=None, *, page_num=None):
     """Find the canvas index for a target folio or transcription page.
 

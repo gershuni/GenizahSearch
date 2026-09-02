@@ -163,6 +163,28 @@ class ImageLoaderThread(QThread):
             if self._cancelled:
                 return None
             if resp.status_code == 200:
+                # #A (oxford-fgp-image-mismatch): the Bodleian image host now
+                # fronts an "Anubis" bot-challenge page that answers with
+                # HTTP 200 and Content-Type text/html instead of JPEG bytes.
+                # Treat a non-image Content-Type as an immediate failure
+                # rather than downloading the challenge HTML and letting
+                # QImage.fromData() fail silently later. A missing/unknown
+                # Content-Type is NOT rejected -- some hosts legitimately
+                # omit the header on genuine image responses.
+                content_type = ''
+                try:
+                    content_type = (resp.headers or {}).get('Content-Type', '') or ''
+                except Exception:
+                    content_type = ''
+                content_type = content_type.split(';', 1)[0].strip().lower()
+                if content_type and not content_type.startswith('image/'):
+                    logger.warning(
+                        "Image download returned non-image Content-Type (%s) for %s",
+                        content_type, target_url,
+                    )
+                    if nli:
+                        _nli_record_failure(failure_type='non_image_content_type', path='desktop_image_loader')
+                    return None
                 if nli:
                     _nli_record_success(path='desktop_image_loader')
                 return resp.content
