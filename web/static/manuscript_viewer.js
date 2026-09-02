@@ -129,6 +129,10 @@ async function handleImageError(img, sysId, pageIdx, isOxford, viewerName) {
         img.src = oxfordUrl;
         img.onload = function() {
             console.log('Oxford API image loaded');
+            // The reverse fallback: the page was explicitly showing NLI, that image
+            // failed, and Oxford answered. The footer would otherwise keep crediting
+            // and linking NLI under a Bodleian image (Codex P2, 2026-09-02).
+            switchImageCredit('oxford');
             if (viewerName && window[viewerName] && typeof window[viewerName].init === 'function') window[viewerName].init();
         };
         return;

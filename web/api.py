@@ -1092,8 +1092,13 @@ def init_api_routes(app_override=None):
             # *stream* (attempt B on desktop) is skipped here on purpose: it is a
             # full-resolution TIFF a browser <img> cannot render, and it answered
             # 401 for these FL ids anyway. A small PNG beats "Image not available".
-            if _nli_circuit_is_open():
-                return None
+            # NO breaker re-check here (Codex P2, 2026-09-02). `_try_fl` already
+            # consulted the breaker on entry; the IIIF failure recorded moments ago
+            # can be the one that trips it, and re-checking would then skip the
+            # Rosetta host -- which is still healthy -- in exactly the
+            # IIIF-down/Rosetta-up case this fallback exists for. Work stays bounded:
+            # at most one IIIF attempt plus one Rosetta attempt per FL id, and the
+            # entry check still short-circuits every LATER FL in the loop.
             rosetta_thumb = (
                 "https://rosetta.nli.org.il/delivery/DeliveryManagerServlet"
                 f"?dps_func=thumbnail&dps_pid=FL{fl_id}"
