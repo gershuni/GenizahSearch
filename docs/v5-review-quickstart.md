@@ -1,14 +1,20 @@
 # v5 review artifact — how to open it, and what is new
 
-You have been sent **four things**. The first two are all you need to start
+Everything is in **one folder**. The first two files are all you need to start
 reading; nothing has to be installed beyond Python itself.
 
 | File | Size | What it is |
 |---|---|---|
 | `discovery-v5-REVIEW.db` | ~3.5 GB | The review set: **519,382** candidate identifications — grouped into **433,911 cards**, one per page and work — each with both sides of the match, the manuscript text and the reference text, and **where each side came from**. |
-| `serve_v3_review.py` | ~220 KB | A small local viewer for it. Python standard library only — no `pip install`. |
-| the reference text files | — | The corpora the matches were made against, as you already hold them. |
-| `discovery-v5-INDEX.accdb` | ~0.7 GB | An Access copy of everything except the text: the same rows, cards and identities, **plus the real file name** for each masked source. It is how you turn a match into a position in a file you hold — see "Finding a match inside your own files" below. |
+| `serve_v3_review.py` | ~250 KB | A small local viewer for it. Python standard library only — no `pip install`. |
+| `v5-review-quickstart.md` | — | This file. |
+| `v5-review-pipeline.md` | — | How the matches were made: the algorithms and the whole pipeline, from the corpus files to this database, with every threshold and the measured numbers. Read it when you want to know *why* a row says what it says. |
+| `discovery-v5-INDEX.accdb` | ~1.1 GB | An Access copy of everything except the text: the same rows, cards and identities, **plus the real file name** for each masked source. It is how you turn a match into a position in a file you hold — see "Finding a match inside your own files" below. |
+| `MANIFEST.txt` | — | Size and SHA-256 of every file in the folder, written by the packaging gate. Check the database against it after copying. |
+| `discovery-v5-REVIEW.db.grades.db` | 12 KB | Your grades and notes, kept beside the database by the viewer. Empty until you grade something. |
+
+The reference text files themselves are not in the folder: the matches were made
+against the corpora **as you already hold them**.
 
 ## Run it
 
@@ -383,8 +389,14 @@ empty. Yours is the only signal. Grades save to a separate file
 
 Two of the four reference corpora are restricted, so the review database stores
 **opaque codenames** instead of file names — `RS:10.2.3`, `M:Ytext1000_00` — for
-344 R-source and 882 M-source source files. That covers 260,466 of the 519,382
-rows, and it is deliberate: the names live outside the database.
+344 R-source and 882 M-source source files. Those files are the witnesses of
+**424,701 of the 519,382 rows (81.8%)**, and it is deliberate: the names live
+outside the database. Note that `source_corpus` is the *display* label of the
+work, not the file it is addressed in: 164,235 rows labelled `sefaria` (the
+Bible, Mishnah and Talmud works) point into M-source files, because that is the
+text the matcher indexed; the 68,779 `sefaria`-labelled rows whose witness is a
+Sefaria staging file or a V4 JSON file carry that file's real name in
+`source_file.display_ref`.
 
 The **Access index** you were sent is where they are resolved, because you
 already hold those corpora. Its `source_file` table carries the real base file
@@ -428,7 +440,7 @@ forwarded, and it should not travel further than the database does.
 
 * **Citation-relationship pairs were never model-adjudicated, and the
   shared-scripture flag can miss a short stock passage.** The two LLM passes ran
-  only on pairs that also have a main-pool or unclear row, so all 76,366 pairs
+  only on pairs that also have a main-pool or unclear row, so the 70,456 pairs
   whose evidence is entirely "citation relationship" carry no model verdict at
   all — an absence, not a clean bill. Separately, the scripture flag needs half
   the matched span to be canonical text, so a short quotation of a stock
@@ -467,11 +479,14 @@ forwarded, and it should not travel further than the database does.
   a genuine Genizah transcription that happens to coincide with a restricted
   corpus name; the word occurs naturally in 5 of 667,411 pages. It is a
   coincidence, not a leak, and was accepted as a documented exception.
-* **19 of 354 R-source works sit in over-merged identity groups** (one group has
-  293 members, chained together through shared liturgical and biblical text).
-  Their grouping — and therefore their routing — should be treated with
-  suspicion. Their character offsets are unaffected: those are keyed to the
-  individual file, not the group.
+* **Upstream, 19 of 354 R-source works sit in over-merged version groups** (one
+  group has 293 members, chained together through shared liturgical and
+  biblical text) in the work-id registry the matching run used for its
+  canonical ids. The identity table in this file was built separately, from the
+  pinned census and owner rulings, and does not reproduce that grouping (its
+  largest identity has 40 members); but the R-source routing decisions were
+  made under the upstream ids, so treat them with suspicion. Character offsets
+  are unaffected either way: they are keyed to the individual file.
 * **The R-source rows were not compared against the live site's own claims.**
   Where the live site already identifies a page, this file will not tell you so
   for the R-source half.
