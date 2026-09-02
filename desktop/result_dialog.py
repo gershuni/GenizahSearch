@@ -2574,8 +2574,29 @@ class ResultDialog(QDialog):
 
         # --- Render Text ---
         raw_text = page_data['text']
+        clean_text = raw_text  # BEFORE manual annotation markers (Codex P2, below)
         raw_text = self._apply_manual_highlights_to_text(raw_text, self.current_page_uid)
         pattern_str = self.data.get('highlight_pattern')
+
+        # 260902 (SEED-033 Option A) — Codex P2: derive the search phrase from the
+        # CLEAN page text and `highlight_pattern`, never from `raw_text`. A page
+        # with saved `page_highlights` already carries `*...*` markers from
+        # `_apply_manual_highlights_to_text`, and a `*...*` scan of `raw_text`
+        # could pick the reader's own annotation as the "search hit" -- which
+        # would then steer the shared default-source policy (must_contain) to a
+        # transcription chosen for an unrelated note. None when this page carries
+        # no search hit (e.g. opened from the Browse tab).
+        self._rd_search_match_text = None
+        if pattern_str:
+            try:
+                _mc_flags = re.IGNORECASE
+                if '\\n' in pattern_str or pattern_str.startswith('^') or '^\\' in pattern_str:
+                    _mc_flags |= re.MULTILINE
+                _mc_match = re.search(pattern_str, clean_text, _mc_flags)
+                if _mc_match:
+                    self._rd_search_match_text = _mc_match.group(0)
+            except re.error:
+                pass
         
         if pattern_str:
             try:
@@ -2597,15 +2618,6 @@ class ResultDialog(QDialog):
         # separate from self._rd_original_text (still plain, used elsewhere
         # as clean HTR text for PGP-edition coverage-ratio matching).
         self._rd_original_marked_text = raw_text
-
-        # 260902 (SEED-033 Option A, same debug session): the first literal
-        # search-hit phrase (from the *...*-marked text above), for the
-        # ``must_contain`` reading-view override — prefer whichever source
-        # (PGP/FGP/V0.8) actually CONTAINS what was searched, instead of
-        # silently showing one that never mentions it. None when this page
-        # carries no search-hit markers (e.g. opened from the Browse tab).
-        _rd_match = re.search(r'\*([^*]+)\*', raw_text)
-        self._rd_search_match_text = _rd_match.group(1) if _rd_match else None
 
         # Phase 999.4: route through gutter helper (source_text = raw `raw_text`)
         apply_line_numbered_text(

@@ -692,6 +692,8 @@ def choose_default_source(
       * ``eligible`` — ``True`` → default to ``source``; ``False`` → fall through
                        to the HTR default (PGP/FGP stay selectable in the menu).
       * ``reason``   — ``'must_contain_match'`` / ``'must_contain_v08'`` /
+                       ``'fgp_text_match'`` (coverage pick replaced by the whole-doc
+                       edition that actually overlaps this folio) /
                        ``'pgp_edition'`` / ``'no_fgp_edition'`` / ``'htr_too_short'``
                        / ``'fgp_sufficient'`` / ``'demote_low_coverage'`` /
                        ``'demote_no_text_match'``.
@@ -779,13 +781,30 @@ def choose_default_source(
     # unmeasurable baseline) does not mean it is ABOUT this folio. Foliated /
     # c-numbered rows (a confident per-image alignment) are never subject to
     # this — their coverage baseline is already this folio's own HTR.
+    # Codex P1 (2026-09-02): validate the edition that will actually be DISPLAYED.
+    # An `any(...)` over all whole-doc editions accepted `candidate` whenever some
+    # OTHER edition matched the folio -- and `candidate` was picked purely by
+    # coverage ratio, so the long unrelated row could still be shown while a short
+    # related one satisfied the gate. Score the candidate itself; when it fails,
+    # promote the best-matching whole-doc edition if one clears the floor, and only
+    # demote when none does.
     if _fgp_is_whole_doc(candidate) and len(page_tokens) >= _SIM_MIN_TOKENS:
-        if not any(
-            _fgp_is_whole_doc(ed) and _content_similarity(page_tokens, ed.get("content")) >= _SIM_FLOOR
-            for ed in eds
-        ):
-            return {"source": None, "reason": "demote_no_text_match", "ratio": ratio_out,
-                    "eligible": False, "provider": None, "must_contain_matched": False}
+        if _content_similarity(page_tokens, candidate.get("content")) < _SIM_FLOOR:
+            best_match, best_sim = None, _SIM_FLOOR
+            for ed in eds:
+                if not _fgp_is_whole_doc(ed):
+                    continue
+                sim = _content_similarity(page_tokens, ed.get("content"))
+                if sim >= best_sim:
+                    best_match, best_sim = ed, sim
+            if best_match is None:
+                return {"source": None, "reason": "demote_no_text_match", "ratio": ratio_out,
+                        "eligible": False, "provider": None, "must_contain_matched": False}
+            # A different whole-doc row IS about this folio -- show that one.
+            logger.debug(
+                "FGP default: coverage pick has no folio overlap; switching to the "
+                "best text match (similarity=%.3f)", best_sim)
+            candidate, reason, ratio_out = best_match, "fgp_text_match", None
 
     logger.debug("FGP default coverage: ratio=%s threshold=%.2f -> keep (%s)", ratio_out, threshold, reason)
     return {"source": candidate, "reason": reason, "ratio": ratio_out,

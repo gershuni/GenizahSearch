@@ -872,17 +872,31 @@ class ManuscriptViewerWidget(QWidget):
         self._ktiv_sys_id = None
         return True
 
+    def _apply_attribution_for_source(self):
+        """Show the credit belonging to the image currently displayed.
+
+        Called on load and from every source change (the manual combo switch and
+        the Oxford->NLI auto-fallback). Falls back to the primary credit when NLI's
+        own is unknown, and hides the label when there is nothing to say.
+        """
+        if self.current_source == "nli":
+            attr = getattr(self, '_attr_nli', '') or getattr(self, '_attr_ext', '')
+        else:
+            attr = getattr(self, '_attr_ext', '')
+        self.lbl_attribution.setText(attr)
+        self.lbl_attribution.setVisible(bool(attr))
+
     def load_images(self, meta, initial_idx=0, target_folio=None):
         self.external_provider = self._detect_external_provider(meta)
         self._current_meta = meta  # Store for dynamic image generation
 
-        # Attribution
-        attr = meta.get('attribution')
-        if attr:
-            self.lbl_attribution.setText(attr)
-            self.lbl_attribution.setVisible(True)
-        else:
-            self.lbl_attribution.setVisible(False)
+        # Attribution. Two credits are kept -- the manuscript's primary image
+        # source and NLI's own manifest credit -- so the label can follow the
+        # image actually on screen. A fallback or a manual switch to NLI must not
+        # leave the Bodleian/CUDL credit under an NLI image (Codex P2, 2026-09-02).
+        self._attr_ext = meta.get('attribution') or ''
+        self._attr_nli = meta.get('attribution_nli') or ''
+        self._apply_attribution_for_source()
 
         # meta contains 'images_nli' and 'images_ext'
         # Make copies to avoid modifying the cached meta
@@ -1045,6 +1059,7 @@ class ManuscriptViewerWidget(QWidget):
         # stops trying to restore CUDL on page change.
         self._nli_fallback_active = False
         self.lbl_fallback_notice.setVisible(False)
+        self._apply_attribution_for_source()
 
         # 260902 (debug/oxford-fgp-image-mismatch.md sub-issue C): map by
         # folio side (or relative position when the old entry carries no
@@ -1281,6 +1296,7 @@ class ManuscriptViewerWidget(QWidget):
             self.active_list = self.images_nli
             self.current_source = "nli"
             self._nli_fallback_active = True
+            self._apply_attribution_for_source()
             _notice = tr("Oxford image unavailable — showing the NLI image instead")
             if _failed_url.startswith("https://hebrew.bodleian.ox.ac.uk/"):
                 _notice += (

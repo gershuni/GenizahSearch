@@ -1177,10 +1177,15 @@ class MetadataManager:
         if not current_meta.get('physical_desc'):
             current_meta['physical_desc'] = nli_iiif_data.get('physical_desc', '')
 
+        # `attribution` is the credit for the manuscript's PRIMARY image source
+        # (an external provider when it has one). `attribution_nli` keeps NLI's own
+        # manifest credit no matter which won, so a viewer that falls back to the
+        # NLI image can credit NLI instead of the provider (Codex P2, 2026-09-02).
+        current_meta['attribution_nli'] = nli_iiif_data.get('attribution', '') or ''
         if marc_attribution:
             current_meta['attribution'] = marc_attribution
         elif not current_meta.get('attribution'):
-            current_meta['attribution'] = nli_iiif_data.get('attribution', '')
+            current_meta['attribution'] = current_meta['attribution_nli']
 
         if nli_iiif_data.get('canvas_map'):
             current_meta['canvas_map'] = nli_iiif_data['canvas_map']
