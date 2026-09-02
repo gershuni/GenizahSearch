@@ -2219,6 +2219,13 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 pgp_transcription=pgp_transcription,
                                 all_sources=all_sources,
                                 full_original_text=_fgp_full_htr,
+                                # SEED-033 Option A -- Codex P2 (2026-09-02): the SAME
+                                # phrase the initial `display_text` decision above used.
+                                # Without it the selector's delayed loader re-ran the
+                                # chooser under plain PGP-first precedence and, ~0.1 s
+                                # later, replaced the hit-containing text with a
+                                # transcription that does not contain the hit.
+                                must_contain=_snippet_match_phrase(snippet) or None,
                             )
 
                             create_comment_button(
