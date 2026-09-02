@@ -33,6 +33,10 @@ class BrowseState:
         self.rotation: int = 0
         self.is_fullscreen: bool = False
         self.highlight_terms: Optional[str] = None
+        # (sys_id, p_num) the `?highlight=` phrase arrived for. The SEED-033
+        # `must_contain` override applies on that folio only; None until the
+        # first folio claims it (Codex P2, 2026-09-02).
+        self.highlight_scope: Optional[tuple] = None
         self.page_input_value: int = 1
         self.view_all: bool = False
         self.full_manuscript: List[DocumentPage] = []

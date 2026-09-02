@@ -1150,6 +1150,13 @@ def init_api_routes(app_override=None):
                 _nli_record_failure(failure_type='timeout', path='_fetch_nli_image_bytes_rosetta_thumb')
             except requests.exceptions.ConnectionError:
                 _nli_record_failure(failure_type='connection_error', path='_fetch_nli_image_bytes_rosetta_thumb')
+            except requests.exceptions.RequestException:
+                # TooManyRedirects (the wrapper caps redirects), ChunkedEncodingError,
+                # and the rest. Uncaught they escaped `_fetch_nli_image_bytes`, so
+                # /api/nli_image_by_sysid and the Oxford fallback answered 500 instead
+                # of moving to the next FL id or a normal not-found
+                # (Codex P2, 2026-09-02).
+                _nli_record_failure(failure_type='request_error', path='_fetch_nli_image_bytes_rosetta_thumb')
             return None
 
         if 0 <= page < len(fl_ids):

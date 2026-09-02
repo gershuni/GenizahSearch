@@ -765,7 +765,11 @@ def update_enrichment_sections(state: BrowseState, refs: BrowsePageRefs):
                     full_original_text=getattr(state, 'fgp_full_htr_text', None),
                     # SEED-033 Option A: search-scoped phrase from the
                     # `/browse?highlight=` deep link, when present.
-                    must_contain=state.highlight_terms,
+                    # Same folio scoping as browse.py: the phrase applies only
+                    # on the folio the deep link arrived for (Codex P2).
+                    must_contain=(state.highlight_terms
+                                  if state.highlight_scope in (None, (getattr(page, 'sys_id', None), getattr(page, 'p_num', None)))
+                                  else None),
                 )
 
     # Joins button

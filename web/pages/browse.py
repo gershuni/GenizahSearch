@@ -549,6 +549,27 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         state.highlight_terms = highlight
 
 
+    def _search_scope_phrase(page):
+        """The search phrase, but ONLY on the folio the deep link arrived for.
+
+        `highlight_terms` drives the SEED-033 `must_contain` override. Clearing it
+        on a manuscript change is not enough: paging within the SAME manuscript kept
+        it, so on a structurally unalignable manuscript -- where whole-document FGP
+        sources are offered on every folio -- a later folio could default to the
+        edition containing the PREVIOUS folio's hit (Codex P2, 2026-09-02).
+
+        The first folio rendered after arriving with `?highlight=` claims the phrase;
+        every other folio gets None. The yellow marks are unaffected: they are a
+        plain text search and stay useful while browsing.
+        """
+        if not state.highlight_terms or page is None:
+            return None
+        current = (getattr(page, 'sys_id', None), getattr(page, 'p_num', None))
+        if state.highlight_scope is None:
+            state.highlight_scope = current      # this folio owns it
+            return state.highlight_terms
+        return state.highlight_terms if state.highlight_scope == current else None
+
     def _clear_search_scope_for_new_manuscript(new_sys_id):
         """Drop the search-scoped phrase once the reader leaves the matched MS.
 
@@ -561,6 +582,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         """
         if new_sys_id and state.sys_id and new_sys_id != state.sys_id:
             state.highlight_terms = None
+            state.highlight_scope = None
             _url_state['highlight'] = None
 
 
@@ -4387,7 +4409,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                             # phrase from the `/browse?highlight=`
                                             # deep link, when this page was reached
                                             # from a search hit.
-                                            must_contain=state.highlight_terms,
+                                            must_contain=_search_scope_phrase(page),
                                         )
 
                             # Initial render
