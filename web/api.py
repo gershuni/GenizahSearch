@@ -1077,12 +1077,17 @@ def init_api_routes(app_override=None):
                     _nli_record_failure(failure_type='429', path='_fetch_nli_image_bytes')
                 elif 500 <= resp.status_code < 600:
                     _nli_record_failure(failure_type='5xx', path='_fetch_nli_image_bytes')
+            # Codex P2 (2026-09-02): record the IIIF failure and FALL THROUGH to
+            # Rosetta. Returning here meant an unreachable or TLS-failing IIIF host
+            # produced no image at all, even with Rosetta healthy -- the exact
+            # scenario the fallback below exists for. `SSLError` is a subclass of
+            # ConnectionError, so it lands in the same branch.
             except requests.exceptions.Timeout:
                 _nli_record_failure(failure_type='timeout', path='_fetch_nli_image_bytes')
-                return None
             except requests.exceptions.ConnectionError:
                 _nli_record_failure(failure_type='connection_error', path='_fetch_nli_image_bytes')
-                return None
+            except requests.exceptions.RequestException:
+                _nli_record_failure(failure_type='request_error', path='_fetch_nli_image_bytes')
 
             # 260902 (debug/oxford-fgp-image-mismatch): parity with the desktop
             # loader's Rosetta fallback (desktop/image_loader.py attempt C). NLI's

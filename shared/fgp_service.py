@@ -790,13 +790,27 @@ def choose_default_source(
     # demote when none does.
     if _fgp_is_whole_doc(candidate) and len(page_tokens) >= _SIM_MIN_TOKENS:
         if _content_similarity(page_tokens, candidate.get("content")) < _SIM_FLOOR:
-            best_match, best_sim = None, _SIM_FLOOR
+            # Codex P1 (2026-09-02): the replacement must clear the COVERAGE bar
+            # as well as the similarity floor. `_content_similarity` divides by the
+            # smaller token set, so a one-word excerpt sharing one word with the
+            # folio scores 1.0 -- promoting it here would walk straight past the
+            # low-coverage demotion (SEED-030) this function exists to enforce.
+            # Editions with no reliable baseline stay eligible, same as above.
+            best_match, best_sim, best_match_ratio = None, _SIM_FLOOR, None
             for ed in eds:
                 if not _fgp_is_whole_doc(ed):
                     continue
                 sim = _content_similarity(page_tokens, ed.get("content"))
-                if sim >= best_sim:
-                    best_match, best_sim = ed, sim
+                if sim < best_sim:
+                    continue
+                ed_baseline = _full_htr_len() or folio_htr_len
+                if ed_baseline < _COVERAGE_MIN_HTR_LETTERS:
+                    ed_ratio = None                      # unknown -> keep-eligible
+                else:
+                    ed_ratio = _heb_letter_count(ed.get("content")) / ed_baseline
+                    if ed_ratio < threshold:
+                        continue                          # too partial to default to
+                best_match, best_sim, best_match_ratio = ed, sim, ed_ratio
             if best_match is None:
                 return {"source": None, "reason": "demote_no_text_match", "ratio": ratio_out,
                         "eligible": False, "provider": None, "must_contain_matched": False}
@@ -804,7 +818,7 @@ def choose_default_source(
             logger.debug(
                 "FGP default: coverage pick has no folio overlap; switching to the "
                 "best text match (similarity=%.3f)", best_sim)
-            candidate, reason, ratio_out = best_match, "fgp_text_match", None
+            candidate, reason, ratio_out = best_match, "fgp_text_match", best_match_ratio
 
     logger.debug("FGP default coverage: ratio=%s threshold=%.2f -> keep (%s)", ratio_out, threshold, reason)
     return {"source": candidate, "reason": reason, "ratio": ratio_out,

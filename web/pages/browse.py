@@ -548,6 +548,22 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     if highlight:
         state.highlight_terms = highlight
 
+
+    def _clear_search_scope_for_new_manuscript(new_sys_id):
+        """Drop the search-scoped phrase once the reader leaves the matched MS.
+
+        `highlight_terms` arrives from `/browse?highlight=` and drives BOTH the
+        yellow marks and the SEED-033 `must_contain` default-source override. It
+        used to survive shelfmark and adjacent-manuscript navigation, so a later
+        manuscript could default to whichever transcription happened to contain the
+        previous manuscript's hit (Codex P2, 2026-09-02). `_update_browser_url`
+        already drops it from the URL; this drops it from the state that is read.
+        """
+        if new_sys_id and state.sys_id and new_sys_id != state.sys_id:
+            state.highlight_terms = None
+            _url_state['highlight'] = None
+
+
     def _update_browser_url():
         """Sync the browser URL bar with the current manuscript/page for sharing.
 
@@ -617,6 +633,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
             # If input looks like a sys_id (starts with 99, all digits), load directly
             if _query.isdigit() and _query.startswith('99'):
+                _clear_search_scope_for_new_manuscript(_query)
                 state.sys_id = _query
                 state.current_page = None
                 state.view_joined = False
@@ -649,6 +666,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
             # If exact match or single result, load directly
             if exact_match or len(results) == 1:
+                _clear_search_scope_for_new_manuscript(results[0].sys_id)
                 state.sys_id = results[0].sys_id
                 state.current_page = None  # Reset to avoid using old page number
                 state.view_joined = False  # Exit reading desk if active
@@ -689,6 +707,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             with ui.column().classes('w-full gap-1 max-h-80 overflow-y-auto'):
                 for result in results:
                     async def select_result(r=result):
+                        _clear_search_scope_for_new_manuscript(r.sys_id)
                         state.sys_id = r.sys_id
                         state.shelfmark_query = r.shelfmark  # Update state with selected shelfmark
                         # Update the search input field if available
@@ -969,6 +988,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 lambda: service.get_adjacent_shelfmark(_sys_id, direction)
             )
             if adjacent_sys_id:
+                _clear_search_scope_for_new_manuscript(adjacent_sys_id)
                 state.sys_id = adjacent_sys_id
                 state.view_all = False  # Reset to single page view
                 state.view_joined = False  # Exit reading desk if active
