@@ -2322,20 +2322,33 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 ui.html(img_html, sanitize=False)
                                 ui.run_javascript('setTimeout(() => { if(window.advViewer) window.advViewer.init(); initProgressiveImages(); }, 200);')
 
-                            # Attribution footer
+                            # Attribution footer. The image above can fall back to NLI
+                            # (handleImageError: Oxford proxy -> NLI manifest -> NLI
+                            # proxy), so the credit must be switchable, exactly as on the
+                            # browse page -- otherwise an NLI image keeps the Bodleian
+                            # credit. `switchImageCredit()` looks these attributes up by
+                            # `data-role="image-credit"` (Codex P2, 2026-09-02); there is
+                            # no link element here, and the helper tolerates its absence.
+                            _adv_credit_nli = ''
                             attribution = ''
                             if is_oxford:
                                 attribution = OXFORD_IMAGE_CREDIT_EN
                             elif page and page.attribution:
                                 attribution = page.attribution
                             else:
-                                attribution = 'הספרייה הלאומית / National Library of Israel'
-
+                                attribution = _adv_credit_nli
                             with ui.row().classes('w-full items-center justify-center gap-2 py-2').style(
                                 'background: #2a2a2a; border-radius: 0 0 8px 8px;'
                             ):
                                 ui.icon('photo_library', size='xs').style('color: #888; font-size: 14px;')
-                                ui.label(attribution).classes('text-xs').style('color: #aaa; font-style: italic;')
+                                _adv_credit_lbl = ui.label(attribution).classes('text-xs').style(
+                                    'color: #aaa; font-style: italic;')
+                                if is_oxford:
+                                    _adv_credit_lbl.props(
+                                        'data-role="image-credit" '
+                                        f'data-credit-oxford="{html.escape(attribution, quote=True)}" '
+                                        f'data-credit-nli="{html.escape(_adv_credit_nli, quote=True)}"'
+                                    )
 
             # === Actions Section ===
             with ui.card().classes('w-full p-6').style('border-radius: 16px; background: var(--bg-tertiary);'):
