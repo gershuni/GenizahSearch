@@ -85,6 +85,14 @@ logger = logging.getLogger(__name__)
 # Defaults read on every call so production env-flips take effect without restart.
 DEFAULT_BROWSE_TIMEOUT = 1.0       # D-17, R-01: lowered 2.0 -> 1.0
 DEFAULT_BROWSE_CORE_TIMEOUT = 2.0  # D-17 NEW per R-01
+# 260902: the FIRST core resolution in a fresh process pays the cold browse-map
+# load (18 s measured on the dev box: 133 MB pickle + repair scan; the Tantivy
+# text fetch itself is 30 ms). A request arriving in that window used to burn the
+# 2 s budget and 504 -- and asyncio's cancel does not stop the loading thread, so
+# the next requests queued behind the lock 504'd too, one after another, until
+# the map was in memory. While the provider reports it is not warm yet, the core
+# budget is widened to this value so those requests WAIT for the one-off load.
+DEFAULT_BROWSE_CORE_WARMUP_TIMEOUT = 45.0
 
 def _read_int_env(env_var: str, default: int, *, minimum: int = 1) -> int:
     """Read an int env var at import; fall back to `default` on missing/malformed.
@@ -233,6 +241,24 @@ def _submit_sync(func, *args):
     return _get_browse_executor().submit(func, *args)
 
 
+def _provider_is_warm(service) -> bool:
+    """True unless the provider says its browse map is still cold.
+
+    Providers MAY expose ``is_warm() -> bool`` (web.services.GenizahService does:
+    it reports whether the engine's shared browse map is in memory). A provider
+    without the method, or one whose probe raises, is treated as warm so the
+    normal budget applies -- this hook must never make a request SLOWER to fail
+    than before except in the one cold-start case it exists for.
+    """
+    probe = getattr(service, 'is_warm', None)
+    if probe is None or not callable(probe):
+        return True
+    try:
+        return bool(probe())
+    except Exception:
+        return True
+
+
 # ---------------------------------------------------------------------------
 # Core fetch (R-01: now timed; R-PR-02: uses injected provider for hydration)
 # ---------------------------------------------------------------------------
@@ -262,12 +288,25 @@ async def _fetch_core(
             sys_id, p_num=p_num, volume_ie=volume_ie,
         )
 
+    if not _provider_is_warm(service):
+        warm_budget = _read_timeout(
+            'SEARCH_API_BROWSE_CORE_WARMUP_TIMEOUT', DEFAULT_BROWSE_CORE_WARMUP_TIMEOUT)
+        if warm_budget > timeout:
+            logger.info(
+                'browse core not warm yet (browse map still loading); widening the core '
+                'budget %.1fs -> %.1fs for sys_id=%s', timeout, warm_budget, sys_id)
+            timeout = warm_budget
     try:
         result = await asyncio.wait_for(_run_sync(_sync), timeout=timeout)
     except asyncio.TimeoutError:
-        logger.exception(
-            'core_timeout sys_id=%s p_num=%s volume_ie=%s fl_id=%s',
-            sys_id, p_num, volume_ie, fl_id,
+        # An expected, handled condition (mapped to a 504 below): one WARNING
+        # line, not a traceback. The stack here is always the same two frames
+        # of asyncio.wait_for and carries no diagnostic value; the identifiers
+        # and the budget are what a reader needs.
+        logger.warning(
+            'core_timeout sys_id=%s p_num=%s volume_ie=%s fl_id=%s (budget %.1fs; '
+            'SEARCH_API_BROWSE_CORE_TIMEOUT raises it)',
+            sys_id, p_num, volume_ie, fl_id, timeout,
         )
         raise APIError(
             'core_timeout',
