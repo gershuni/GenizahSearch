@@ -28,6 +28,7 @@ from web.services import (
     is_oxford_manuscript,
 )
 from shared.synthetic_sys_id import is_synthetic_sys_id
+from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
 from shared.refinement import compute_all_terms_filter, enrich_snippet_with_chain_terms
 from genizah_core import SearchEngine, get_library_display
 from web.document_service import (
@@ -36,7 +37,6 @@ from web.document_service import (
 from shared.fgp_service import (
     get_fgp_sources_for_fragment, filter_sources_for_page, displayed_folio_label,
     displayed_fgp_image_number, fgp_needs_full_htr, choose_default_source,
-    group_transcription_sources,
 )
 from web.components.joins_panel import fetch_connected_fragments, create_joins_dialog
 from urllib.parse import quote
@@ -47,6 +47,28 @@ import html
 import asyncio
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# SEED-033 Option A — search-scoped source selection
+# ---------------------------------------------------------------------------
+_SNIPPET_MATCH_RE = re.compile(r'\*([^*]+)\*')
+
+
+def _snippet_match_phrase(snippet: str) -> str:
+    """The first ``*...*``-marked matched phrase in a search ``snippet``,
+    whitespace-collapsed, for the ``/browse?highlight=`` deep-link param.
+
+    Lets the browse page's version chooser prefer whichever source (PGP/FGP
+    edition, or V0.8) actually CONTAINS what the user searched for, instead of
+    silently defaulting to a transcription that never mentions it (SEED-033).
+    Empty when the snippet carries no match markers.
+    """
+    if not snippet or '*' not in snippet:
+        return ''
+    m = _SNIPPET_MATCH_RE.search(snippet)
+    if not m:
+        return ''
+    return re.sub(r'\s+', ' ', m.group(1)).strip()
 
 
 # ---------------------------------------------------------------------------
@@ -695,6 +717,12 @@ def create_result_card(search_state, refs, index, result):
                     _card_browse_url += f'&volume_ie={_card_ie_id}'
                 if _card_p_num:
                     _card_browse_url += f'&page={_card_p_num}'
+                # SEED-033 Option A: carry the matched phrase so the browse
+                # page's version chooser can default to whichever source
+                # actually contains it.
+                _card_phrase = _snippet_match_phrase(snippet)
+                if _card_phrase:
+                    _card_browse_url += f'&highlight={quote(_card_phrase)}'
                 with ui.link(target=_card_browse_url).classes('no-underline'):
                     ui.button(icon='menu_book').props(f'flat round dense size=sm color=green aria-label="{tr("Browse Full Manuscript")}"').tooltip(tr('Browse Full Manuscript'))
 
@@ -1303,7 +1331,7 @@ def open_advanced_dialog(search_state, refs, index, result):
             if term in text:
                 text = text.replace(
                     term,
-                    f'<mark style="background-color: #fef08a; padding: 2px 4px; border-radius: 3px; font-weight: 600;">{term}</mark>'
+                    f'<mark class="highlight-match">{term}</mark>'  # common.css: readable in light AND dark
                 )
         return text.replace('\n', '<br>')
 
@@ -1443,17 +1471,20 @@ def open_advanced_dialog(search_state, refs, index, result):
         # /selected FGP excerpt must not default over the V0.8/HTR — same policy as
         # the browse version chooser).
         if all_sources:
-            _groups = group_transcription_sources(all_sources)
-            if _groups['pgp_editions']:
-                display_text = _groups['pgp_editions'][0].get('content', current_text or '')
+            # RENDER-ONLY (SEED-033 Option A, 2026-09-02): PGP-first, the FGP
+            # coverage/text-match rules and the search-scoped override all live
+            # in ``choose_default_source``. The matched phrase IS known here (the
+            # ``*...*`` snippet markers), so pass it -- this inline reader must
+            # never show a transcription that lacks the hit while the card right
+            # above it highlights that very hit.
+            _dec = choose_default_source(
+                all_sources, current_text or '',
+                full_htr_getter=lambda: _fgp_full_htr,
+                must_contain=_snippet_match_phrase(snippet) or None)
+            if _dec.get('eligible') and _dec.get('source'):
+                display_text = _dec['source'].get('content', current_text or '')
             else:
-                _dec = choose_default_source(
-                    all_sources, current_text or '',
-                    full_htr_getter=lambda: _fgp_full_htr)
-                if _dec.get('eligible') and _dec.get('source'):
-                    display_text = _dec['source'].get('content', current_text or '')
-                else:
-                    display_text = current_text or (snippet.replace('*', '') if snippet else '')
+                display_text = current_text or (snippet.replace('*', '') if snippet else '')
         elif pgp_transcription and pgp_transcription.get('content'):
             display_text = pgp_transcription['content']
         else:
@@ -1526,6 +1557,10 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 browse_url += f'&volume_ie={ie_id}'
                             if current_p_num:
                                 browse_url += f'&page={current_p_num}'
+                            # SEED-033 Option A: carry the matched phrase.
+                            _phrase = _snippet_match_phrase(snippet)
+                            if _phrase:
+                                browse_url += f'&highlight={quote(_phrase)}'
                             # Use ui.link for full page reload to ensure browse page recreates with PGP data
                             with ui.link(target=browse_url).classes('no-underline').tooltip(tr('Browse')):
                                 ui.button(icon='menu_book').props(f'flat round size=sm aria-label="{tr("Browse")}"')
@@ -1666,6 +1701,10 @@ def open_advanced_dialog(search_state, refs, index, result):
                                     browse_url += f'&volume_ie={ie_id}'
                                 if current_p_num:
                                     browse_url += f'&page={current_p_num}'
+                                # SEED-033 Option A: carry the matched phrase.
+                                _phrase = _snippet_match_phrase(snippet)
+                                if _phrase:
+                                    browse_url += f'&highlight={quote(_phrase)}'
                                 with ui.link(target=browse_url).classes('no-underline').tooltip(tr('Browse Full Manuscript')):
                                     ui.button(icon='menu_book').props(f'flat round size=sm color=green aria-label="{tr("Browse Full Manuscript")}"')
 
@@ -2286,7 +2325,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                             # Attribution footer
                             attribution = ''
                             if is_oxford:
-                                attribution = 'From the collections of the Bodleian Libraries, Oxford'
+                                attribution = OXFORD_IMAGE_CREDIT_EN
                             elif page and page.attribution:
                                 attribution = page.attribution
                             else:
@@ -2311,6 +2350,10 @@ def open_advanced_dialog(search_state, refs, index, result):
                             browse_url += f'&volume_ie={ie_id}'
                         if current_p_num:
                             browse_url += f'&page={current_p_num}'
+                        # SEED-033 Option A: carry the matched phrase.
+                        _phrase = _snippet_match_phrase(snippet)
+                        if _phrase:
+                            browse_url += f'&highlight={quote(_phrase)}'
                         # Use ui.link for full page reload to ensure browse page recreates with PGP data
                         with ui.link(target=browse_url).classes('btn-primary no-underline'):
                             ui.icon('menu_book').classes('mr-2')

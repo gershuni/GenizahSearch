@@ -98,6 +98,24 @@ async function fetchFlIdsFromManifest(sysId) {
  * @param {boolean} isOxford - Whether this is an Oxford manuscript
  * @param {string} viewerName - Name of window property for viewer (e.g., 'manuscriptViewer')
  */
+
+/**
+ * 260902: when the fallback chain ends up showing an NLI image on a page whose
+ * native source is another library (Oxford), swap the credit footer to the NLI
+ * credit + link. Server-side (browse.py) renders both variants as data attributes.
+ */
+function switchImageCredit(source) {
+    try {
+        const lbl = document.querySelector('[data-role="image-credit"]');
+        const lnk = document.querySelector('[data-role="image-credit-link"]');
+        if (!lbl) return;
+        const text = source === 'nli' ? lbl.dataset.creditNli : lbl.dataset.creditOxford;
+        const href = source === 'nli' ? (lnk && lnk.dataset.linkNli) : (lnk && lnk.dataset.linkOxford);
+        if (text) lbl.textContent = text;
+        if (lnk && href) lnk.setAttribute('href', href);
+    } catch (e) { /* cosmetic */ }
+}
+
 async function handleImageError(img, sysId, pageIdx, isOxford, viewerName) {
     const currentSrc = img.src || '';
     const isOxfordApiUrl = currentSrc.includes('/api/oxford_image/');
@@ -134,6 +152,7 @@ async function handleImageError(img, sysId, pageIdx, isOxford, viewerName) {
             img.src = newUrl;
             img.onload = function() {
                 console.log('Manifest-based image loaded, initializing viewer');
+                if (isOxford) switchImageCredit('nli');
                 if (viewerName && window[viewerName] && typeof window[viewerName].init === 'function') window[viewerName].init();
             };
             return;
@@ -153,6 +172,7 @@ async function handleImageError(img, sysId, pageIdx, isOxford, viewerName) {
         img.src = proxyUrl;
         img.onload = function() {
             console.log('Server proxy image loaded');
+            if (isOxford) switchImageCredit('nli');
             if (viewerName && window[viewerName] && typeof window[viewerName].init === 'function') window[viewerName].init();
         };
         return;
@@ -163,7 +183,29 @@ async function handleImageError(img, sysId, pageIdx, isOxford, viewerName) {
     img.style.display = 'none';
     const parent = img.parentElement;
     if (parent) {
-        parent.innerHTML = '<div style="text-align: center; color: #888;"><i class="material-icons" style="font-size: 4rem;">image_not_supported</i><p>Image not available</p></div>';
+        // 260902: when the manuscript is at the Bodleian, offer the reader a direct
+        // link to the folio image on the Genizah Fragments site. Their own browser
+        // can pass the site's JS bot-challenge; an <img> cannot. Attributes are
+        // set server-side (browse.py) and HTML-escaped there; textContent/setAttribute
+        // keep them inert here.
+        const direct = img.dataset.oxfordDirect || '';
+        const label = img.dataset.oxfordDirectLabel || 'Open in Bodleian Libraries';
+        const box = document.createElement('div');
+        box.style.cssText = 'text-align: center; color: #888;';
+        box.innerHTML = '<i class="material-icons" style="font-size: 4rem;">image_not_supported</i><p>Image not available</p>';
+        if (direct && /^https:\/\/hebrew\.bodleian\.ox\.ac\.uk\//.test(direct)) {
+            const p = document.createElement('p');
+            const a = document.createElement('a');
+            a.setAttribute('href', direct);
+            a.setAttribute('target', '_blank');
+            a.setAttribute('rel', 'noopener noreferrer');
+            a.style.cssText = 'color: #9ecbff;';
+            a.textContent = label;
+            p.appendChild(a);
+            box.appendChild(p);
+        }
+        parent.innerHTML = '';
+        parent.appendChild(box);
     }
 }
 

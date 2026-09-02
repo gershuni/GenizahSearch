@@ -354,17 +354,23 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
 
             # Attribution cascade
             attribution = ''
+            nli_attribution = ''
             if _sys_id and hasattr(state_mod.meta_mgr, 'nli_cache'):
                 cached_meta = state_mod.meta_mgr.nli_cache.get(_sys_id, {})
                 attribution = cached_meta.get('attribution', '')
+                # The NLI manifest's own credit, kept separately: an Oxford page
+                # that falls back to the NLI image must credit NLI, not the Bodleian.
+                nli_attribution = attribution
             if _library_code in ATTRIBUTION_BY_LIBRARY:
                 lib_attr = _get_library_attribution(_library_code)
                 if lib_attr is not None:
                     attribution = lib_attr
             elif _is_oxford:
-                attribution = 'Bodleian Libraries, University of Oxford \u00b7 CC BY-NC 4.0'
+                attribution = _get_library_attribution('Oxford') or ''
             if attribution:
                 result['attribution'] = attribution
+            if nli_attribution:
+                result['attribution_nli'] = nli_attribution
 
             # Oxford codicological
             if _is_oxford and _sys_id:
@@ -374,6 +380,13 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                         result['oxford_part_id'] = part_id
                         if hasattr(state_mod.meta_mgr.codico_mgr, 'get_part_display_name'):
                             result['oxford_part_display'] = state_mod.meta_mgr.codico_mgr.get_part_display_name(part_id)
+                        # Header badge: "part N" for a numbered Part, else the record's
+                        # own folio ("fol. 27") when the Part is the whole codex.
+                        try:
+                            _sm_for_label = state_mod.meta_mgr.get_meta_for_id(_sys_id)[0]
+                        except Exception:
+                            _sm_for_label = None
+                        result['oxford_part_label'] = state_mod.meta_mgr.codico_mgr.get_part_label(part_id, _sm_for_label)
                         part_meta = state_mod.meta_mgr.get_part_metadata(part_id)
                         if part_meta:
                             ox_meta = {}
@@ -605,9 +618,12 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
         if browse_enrich:
             if browse_enrich.get('attribution'):
                 pg.attribution = browse_enrich['attribution']
+            if browse_enrich.get('attribution_nli'):
+                pg.attribution_nli = browse_enrich['attribution_nli']
             if browse_enrich.get('oxford_part_id'):
                 pg.oxford_part_id = browse_enrich['oxford_part_id']
                 pg.oxford_part_display = browse_enrich.get('oxford_part_display', '')
+                pg.oxford_part_label = browse_enrich.get('oxford_part_label', '')
                 pg.oxford_part_metadata = browse_enrich.get('oxford_part_metadata', {})
             if browse_enrich.get('external_url'):
                 pg.external_url = browse_enrich['external_url']
@@ -744,6 +760,9 @@ def update_enrichment_sections(state: BrowseState, refs: BrowsePageRefs):
                     pgp_transcription=state.pgp_transcription,
                     all_sources=state.all_sources,
                     full_original_text=getattr(state, 'fgp_full_htr_text', None),
+                    # SEED-033 Option A: search-scoped phrase from the
+                    # `/browse?highlight=` deep link, when present.
+                    must_contain=state.highlight_terms,
                 )
 
     # Joins button

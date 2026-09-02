@@ -1753,7 +1753,7 @@ TRANSLATIONS = {
     "Open in Ktiv": "פתח בכתיב",
     "Open in NLI KTIV": "פתח בכתיב NLI",
     "Open in Cambridge Digital Library": "פתח בספריה הדיגיטלית של קיימברידג'",
-    "Open in Bodleian Libraries": "פתח בספריות הבודליאן",
+    "Open in Bodleian Libraries": "פתח בספריות הבודליאנה",
     "External link": "קישור חיצוני",
     "Material": "חומר",
     "Material Type": "סוג חומר",
@@ -4597,6 +4597,22 @@ TRANSLATIONS.update({
     # not "partial", since the HTR baseline is imperfect.
     "shorter than V0.8":
         "קצר מ-V0.8",
+})
+
+# === Oxford Genizah Fragments licence credit (2026-09-02) ===
+TRANSLATIONS.update({
+    "Image provided by the Bodleian Libraries, University of Oxford":
+        "התמונה באדיבות ספריות הבודליאנה, אוניברסיטת אוקספורד",
+})
+
+# === SEED-033 Option A: search-scoped source selection ===
+TRANSLATIONS.update({
+    # Shown (web: as a tooltip on the version indicator; desktop: as a tooltip
+    # on the version combo) when the reading-view default was chosen because
+    # it is the source that actually contains the phrase the user searched
+    # for -- not the usual PGP-first / FGP-coverage order.
+    "showing the version containing your search":
+        "מוצגת הגרסה שמכילה את החיפוש שלך",
 })
 
 # === v8.5.0 What's New — Smarter Default Transcription (SEED-030) ===

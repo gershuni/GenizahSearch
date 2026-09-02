@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from shared.config import Config
 from shared.nli_circuit_breaker import (
+
     is_open as _nli_circuit_is_open,
     record_failure as _nli_record_failure,
     record_success as _nli_record_success,
@@ -28,6 +29,13 @@ from shared.nli_circuit_breaker import (
 from shared.codicological import CodicologicalManager
 from shared.browse_map_utils import normalize_shelfmark, natural_sort_key, _strip_library_prefix
 from shared.sys_id_patterns import ANY_SYS_ID_RE, CORPUS_SYS_ID_RE
+# Credit line for images served from the Bodleian's Genizah Fragments site, in the
+# form its licence requires ("Image provided by [owner]"). Both apps and the web
+# attribution table import this so the wording cannot drift; it is NOT a Creative
+# Commons licence, so never append a CC label to it.
+OXFORD_IMAGE_CREDIT_EN = "Image provided by the Bodleian Libraries, University of Oxford"
+OXFORD_GENIZAH_FRAGMENTS_URL = "https://hebrew.bodleian.ox.ac.uk/"
+
 
 LOGGER = logging.getLogger("genizah." + __name__)
 
@@ -1141,7 +1149,7 @@ class MetadataManager:
                         'thumb_url': img.get('thumb_url', ''),
                         'folio_num': img.get('folio_num')
                     } for img in part_images]
-                    current_meta['attribution'] = "From the collections of the Bodleian Libraries, Oxford"
+                    current_meta['attribution'] = OXFORD_IMAGE_CREDIT_EN
                     current_meta['thumb_url'] = part_images[0].get('thumb_url') or current_meta.get('thumb_url')
 
         # 2b. Fetch NLI IIIF manifest for image FL IDs (crossref FGPImageNumberId != IIIF FL number)

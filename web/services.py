@@ -21,6 +21,7 @@ from genizah_core import (
 from shared.synthetic_sys_id import is_synthetic_sys_id  # noqa: F401  Phase 85 D-06/D-08/D-14: imported as defensive marker for Phase 86 AUDIT-03. Synthetic-aware page-count plumbing flows through web/pages/browse_enrichment.py:250 (Phase B cambridge_images population) — NOT through this file. The plan's pseudo-code expected a dict-with-canvases shape from get_cambridge_manifest_with_bridge, but that function returns a single manifest URL string. See .planning/phases/85-synthetic-fjms-inventory-rows/85-04-AUDIT.md "web/services.py" section for details.
 from web.state import state
 from shared.sys_id_patterns import CORPUS_SYS_ID_PATTERN
+from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
 
 # Library-specific attribution: (english, hebrew) tuples.
 # None = attribution comes from IIIF manifest (don't override).
@@ -33,8 +34,10 @@ ATTRIBUTION_BY_LIBRARY = {
     'JTS': None,        # JTS/Princeton Figgy manifest provides attribution
     'Manchester': ('The University of Manchester Library \u00b7 CC BY-NC-SA 4.0',
                    'The University of Manchester Library \u00b7 CC BY-NC-SA 4.0'),
-    'Oxford': ('Bodleian Libraries, University of Oxford \u00b7 CC BY-NC 4.0',
-               'Bodleian Libraries, University of Oxford \u00b7 CC BY-NC 4.0'),
+    # Oxford's Genizah Fragments licence (2026-09-02): credit form is
+    # "Image provided by [owner]" with a link to the site; it is NOT CC BY-NC.
+    'Oxford': (OXFORD_IMAGE_CREDIT_EN,
+               'התמונה באדיבות ספריות הבודליאנה, אוניברסיטת אוקספורד'),
     'BL': (f'British Library \u00b7 image: {_NLI_EN}',
            f'\u05d4\u05e1\u05e4\u05e8\u05d9\u05d9\u05d4 \u05d4\u05d1\u05e8\u05d9\u05d8\u05d9\u05ea \u00b7 image: {_NLI_HE}'),
     'RNL': (f'National Library of Russia \u00b7 image: {_NLI_EN}',
@@ -103,11 +106,13 @@ class BrowsePage:
     image_url: Optional[str] = None
     internal_index: int = 0
     attribution: str = ''  # Image credit/attribution
+    attribution_nli: str = ''  # NLI/Ktiv credit for the SAME folio, shown when the NLI image is what is displayed (Oxford pages fall back to it)
     is_oxford: bool = False  # Whether this is an Oxford manuscript
     is_cambridge: bool = False # Whether this is a Cambridge manuscript
     external_url: Optional[str] = None # URL to external viewer (Bodleian/CUDL)
     oxford_part_id: Optional[str] = None # Oxford Part ID (e.g. "MS. Heb. d. 29/2")
     oxford_part_display: str = '' # Display name for part (e.g. "heb. d. 29 part 2")
+    oxford_part_label: str = ''  # Header badge text: "part 2" / "fol. 27" / '' (shared codicological.get_part_label)
     oxford_part_metadata: Dict[str, str] = field(default_factory=dict) # Oxford Part metadata
     library_code: str = ''  # Library code (e.g., 'CUL', 'JTS')
     library_name: str = ''  # Full library name for display
@@ -356,6 +361,24 @@ class GenizahService:
         except Exception as e:
             logger.error("Search by shelfmark error: %s", e)
             return [], False
+
+    def is_warm(self) -> bool:
+        """Is the engine's browse map already in memory?
+
+        Consumed by ``shared.browse_service._fetch_core``: while this is False the
+        first page resolution pays the one-off cold load (~20 s measured), so the
+        core budget is widened instead of 504-ing every request in that window.
+        A missing searcher counts as warm -- there is nothing to wait for and the
+        resolver will return None -> 404 quickly.
+        """
+        searcher = getattr(state, 'searcher', None)
+        if searcher is None:
+            return True
+        try:
+            from shared.search_engine import SearchEngine
+            return SearchEngine._shared_browse_map is not None
+        except Exception:
+            return True
 
     def get_browse_page(self, sys_id: str, p_num: Optional[int] = None, direction: int = 0, absolute_index: Optional[int] = None, allow_cross: bool = False, volume_ie: Optional[str] = None) -> Optional[BrowsePage]:
         """Phase A (hot path): Tantivy + csv_bank only. No SQLite/crossref calls.

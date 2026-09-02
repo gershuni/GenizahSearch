@@ -12,6 +12,7 @@ guarded structurally in ``tests/test_fgp_chooser_integration.py``.
 """
 
 import os
+import sqlite3
 
 import pytest
 
@@ -19,7 +20,9 @@ from shared.fgp_service import (
     _COVERAGE_MIN_HTR_LETTERS,
     _DEFAULT_MIN_COVERAGE,
     _heb_letter_count,
+    _normalize_for_contains,
     choose_default_source,
+    fgp_incipit,
     fgp_needs_full_htr,
 )
 
@@ -40,6 +43,13 @@ def _cnum_edition(content, c_number="C62553", **kw):
     # A per-image row keyed by c_number with NO folio label — must be treated as
     # per-image (folio baseline), NOT whole-doc (5.8k such editions exist).
     return _edition(content, c_number=c_number, **kw)
+
+
+def _pgp_edition(content, rel="Digital Edition", **kw):
+    # A PGP source: no 'source'/'is_fgp' marker -> source_provider() == 'pgp'.
+    d = {"doc_relation": rel, "content": content}
+    d.update(kw)
+    return d
 
 
 # ── Normalization (_heb_letter_count) ─────────────────────────────────────────
@@ -230,6 +240,269 @@ class TestWholeDocBaseline:
         assert choose_default_source([partial], _HTR)["eligible"] is False
 
 
+# ── D: text-match demotion for whole-document FGP rows ─────────────────────────
+# (debug/oxford-fgp-image-mismatch.md sub-issue D) A whole-doc row clearing the
+# coverage bar (comprehensive vs. the whole MS, or an unmeasurable "unknown"
+# baseline) is not necessarily ABOUT the displayed folio -- a codex-level
+# catalogue excerpt can be long/comprehensive yet describe a DIFFERENT folio
+# entirely. MS heb. g.2 (sys_id 990053489970205171) is the real case: its
+# longest FGP row (4,281 chars, "Ox, Bold. Heb. g. 2 (2700) [example]...") is
+# a catalogue sample that clears coverage but never mentions folio 27's text.
+
+# The real folio-27 V0.8/HTR text (tantivy index unique_id
+# IE168181472_P000002_FL168181475) -- contains BOTH phrases the real-data pin
+# below checks for absence in every FGP row.
+_FOLIO27_HTR = (
+    "רוצצנו במחש כי קברים הוציאנו מעברותיוו\n"
+    "מודררים ייי פוקח עוזרים . שאפנו והיו\n"
+    "שאופים . ביטה בנפילת רחופים . זוקף\n"
+    "כפופים. תקותינו וסברנו בך סלחנא כדרכ\n"
+    "טובך י צבאות אשרי אדם בוטח כך .\n"
+    "קדושי\n"
+    "שי\n"
+    "תקום רבה\n"
+    "דיניך וכהדרי אלצדקת עיניך ולבך מביט\n"
+    "ועיניך וג במקום אחד\n"
+    "ארפן\n"
+    "אהובים היום נדמו כמלאכים . בקומה זקופה\n"
+    "כמעמד מל . גנונים אגודים במ' . דוברים\n"
+    "קדוש וברוך כמ' הם לובשי לובן כמ'. ובמו\n"
+    "אין אכילה ושתיה כמ' . זימון שינה מפרידים\n"
+    "כמ' חוסן טהרה יש בם במ' טעם שלום"
+)
+
+_FGP_DB = os.path.join("fgp_data", "fgp_transcriptions.db")
+
+
+class TestTextMatchDemotion:
+    def test_whole_doc_no_overlap_is_demoted_even_if_coverage_passes(self):
+        # Long enough to clear coverage against the folio baseline, but shares
+        # NO vocabulary with the actual displayed folio -> demoted.
+        unrelated = _edition("שונה לגמרי טקסט אחר בעליל " * 20)
+        d = choose_default_source([unrelated], _FOLIO27_HTR)
+        assert d["eligible"] is False
+        assert d["reason"] == "demote_no_text_match"
+        assert d["source"] is None
+
+    def test_whole_doc_with_real_overlap_is_not_demoted(self):
+        # A whole-doc row that DOES share the folio's vocabulary (clears the
+        # similarity floor) stays eligible even though it is whole-doc.
+        related = _edition(_FOLIO27_HTR * 3)
+        d = choose_default_source([related], _FOLIO27_HTR)
+        assert d["eligible"] is True
+        assert d["reason"] == "fgp_sufficient"
+
+    def test_foliated_row_exempt_from_text_match_demotion(self):
+        # A confident per-image match (image_side) is NEVER subject to this --
+        # zero regression on the ~5,400 foliated FGP editions: coverage alone
+        # still governs, even with zero vocabulary overlap (e.g. a garbled OCR
+        # page).
+        row = _foliated_edition("שונה לגמרי טקסט אחר בעליל " * 20, image_side="27b")
+        d = choose_default_source([row], _FOLIO27_HTR)
+        assert d["eligible"] is True and d["reason"] == "fgp_sufficient"
+
+    def test_cnumbered_row_exempt_from_text_match_demotion(self):
+        row = _cnum_edition("שונה לגמרי טקסט אחר בעליל " * 20)
+        d = choose_default_source([row], _FOLIO27_HTR)
+        assert d["eligible"] is True and d["reason"] == "fgp_sufficient"
+
+    def test_short_htr_skips_demotion_check(self):
+        # Below _SIM_MIN_TOKENS -- no reliable overlap signal -- fail toward
+        # FGP (never demote on an unmeasurable folio baseline); this is the
+        # SAME "htr_too_short" path D must not touch.
+        unrelated = _edition("שונה לגמרי אחר " * 20)
+        d = choose_default_source([unrelated], "אבג")
+        assert d["eligible"] is True
+        assert d["reason"] == "htr_too_short"
+
+    @pytest.mark.skipif(not os.path.exists(_FGP_DB), reason="fgp_transcriptions.db sidecar absent")
+    def test_real_ms_heb_g2_folio27_case(self):
+        # The exact reported bug (debug/oxford-fgp-image-mismatch.md), pinned
+        # against the REAL sidecar DB + the REAL V0.8 text of the folio the
+        # user's search hit ("תקום רבה דיניך").
+        conn = sqlite3.connect(_FGP_DB)
+        try:
+            rows = conn.execute(
+                "SELECT id, content, doc_relation FROM fgp_transcriptions WHERE sys_id = ?",
+                ("990053489970205171",),
+            ).fetchall()
+        finally:
+            conn.close()
+        assert len(rows) == 10, "MS heb. g.2/27's FGP row count changed -- re-pin the case"
+
+        # Pin the underlying data fact this bug rests on: NONE of the 10 rows
+        # contain either phrase actually on folio 27 (diacritic-stripped
+        # substring check, same normalization choose_default_source uses) --
+        # this is WHY defaulting to any of them is wrong.
+        phrases = ["תקום רבה דיניך", "אהובים היום"]
+        for rid, content, _rel in rows:
+            normalized = _normalize_for_contains(content)
+            for phrase in phrases:
+                assert _normalize_for_contains(phrase) not in normalized, (
+                    f"row {rid} unexpectedly contains {phrase!r} -- "
+                    "re-pin the case, the underlying data changed"
+                )
+
+        sources = [
+            {"source": "fgp", "id": rid, "doc_relation": rel, "content": content}
+            for rid, content, rel in rows
+        ]
+        d = choose_default_source(sources, _FOLIO27_HTR)
+        assert d["reason"] == "demote_no_text_match"
+        assert d["eligible"] is False
+        assert d["source"] is None
+
+
+# ── D2: FGP combo/menu incipit label ────────────────────────────────────────────
+
+
+class TestFgpIncipit:
+    def test_strips_nikud_and_collapses_whitespace(self):
+        assert fgp_incipit("שָׁלוֹם\n\nעוֹלָם") == "שלום עולם"
+
+    def test_short_content_returned_whole_no_ellipsis(self):
+        assert fgp_incipit("אבגד", max_chars=40) == "אבגד"
+
+    def test_truncated_at_max_chars_with_ellipsis(self):
+        content = "א" * 50
+        out = fgp_incipit(content, max_chars=40)
+        assert out == "א" * 40 + "…"
+
+    def test_empty_and_none(self):
+        assert fgp_incipit("") == ""
+        assert fgp_incipit(None) == ""
+
+    def test_distinguishes_two_rows_with_identical_labels(self):
+        # The actual bug (MS heb. g.2): ~10 rows all render the bare "FGP
+        # Transcription" label. The incipit is what makes them tellable apart.
+        a = fgp_incipit("ברכת מזון אֲבָרֵך לְאֵל אֱמוּנָה")
+        b = fgp_incipit("Ox, Bold. Heb. g. 2 (2700) [example]")
+        assert a != b and a and b
+
+
+# ── SEED-033 Option A: search-scoped "must_contain" override ───────────────────
+# (planted in .planning/seeds/SEED-033-pgp-default-masks-matched-transcription.md,
+# ruled into this debug session 2026-09-02) A PGP edition wins UNCONDITIONALLY
+# today, even when it does not contain what the user actually searched for --
+# the reported case: pgpid 37732 (a 73-char Arabic address) beats the 491-char
+# V0.8 text of the SAME folio that DOES contain the searched phrase. When the
+# caller supplies that phrase, prefer whichever source (PGP -> FGP -> V0.8)
+# actually contains it; a miss falls through to today's exact order, unchanged.
+
+# The REAL pgpid-37732 PGP source row (pgp_data/pgp.db, document_sources id
+# 5825) -- Arabic khidma-letter address, does NOT contain the Hebrew phrase.
+_PGP_37732 = _pgp_edition(
+    "\nخدمة تعرض\nعلى مجلس المولا\nالفقيه الجليل\nجمال الدين مجمل\nالنعوت والاوصاف\n",
+    pgpid=37732, id=5825, source_scholar="Alan Elbaum, unpublished editions (2023).",
+    language="Arabic",
+)
+# The REAL V0.8 text of the SAME folio (tantivy unique_id
+# IE61676826_P000002_FL61676829) -- DOES contain "עצים עליו למודה" (twice,
+# duplicated in the source -- a separate, already-documented data defect not
+# in scope here; see SEED-033's "Findings that are NOT this seed").
+_V08_HEBR18_FOLIO2 = (
+    "]\n]\n][\n]\nל\n]\nל\n]\n]\n][\nנ\n]\nⲙ\n][\n]\n]\n]\n[\n][\n[\n\nול\nב\nב\nן\n]\n"
+    "]ה[ מכולה וגלמון\nשמ[ בו רכון זול דנה אתור\nישרא הר צין תאכנה בנות\n]ום אם פי\n"
+    "אב.נה מא בח עבודה\n]ך עצים עליו למודה\nי. אל יחידו בח.. הד[\nלכוזה\nעד[ ] כבן\n"
+    "ומעל ענינים שהו כאקדה\nאת בנו לחופק ↑ ) ליה\nלקח[ זילה אלסלדה\nת [\n]\n]"
+)
+
+_PGP_DB = os.path.join("pgp_data", "pgp.db")
+
+
+class TestMustContainOverride:
+    def test_default_order_unaffected_when_must_contain_absent(self):
+        # Preserves PGP-first EXACTLY when must_contain is not supplied.
+        d = choose_default_source([_PGP_37732], _V08_HEBR18_FOLIO2)
+        assert d["eligible"] is True
+        assert d["reason"] == "pgp_edition"
+        assert d["provider"] == "pgp"
+        assert d["source"] is _PGP_37732
+        assert d["must_contain_matched"] is False
+
+    def test_must_contain_in_v08_overrides_unconditional_pgp(self):
+        # The exact reported bug: PGP wins unconditionally today even though
+        # it does not contain the searched phrase, while V0.8 does.
+        d = choose_default_source(
+            [_PGP_37732], _V08_HEBR18_FOLIO2, must_contain="עצים עליו למודה",
+        )
+        assert d["eligible"] is False
+        assert d["reason"] == "must_contain_v08"
+        assert d["provider"] == "v08"
+        assert d["source"] is None
+        assert d["must_contain_matched"] is True
+
+    def test_must_contain_in_pgp_keeps_pgp(self):
+        d = choose_default_source(
+            [_PGP_37732], _V08_HEBR18_FOLIO2, must_contain="جمال الدين",
+        )
+        assert d["eligible"] is True
+        assert d["reason"] == "must_contain_match"
+        assert d["provider"] == "pgp"
+        assert d["source"] is _PGP_37732
+        assert d["must_contain_matched"] is True
+
+    def test_must_contain_miss_falls_through_to_pgp_first(self):
+        # Matches NEITHER source -> NOT a demotion signal; today's order.
+        d = choose_default_source(
+            [_PGP_37732], _V08_HEBR18_FOLIO2, must_contain="שום דבר שלא קיים כאן",
+        )
+        assert d["eligible"] is True
+        assert d["reason"] == "pgp_edition"
+        assert d["provider"] == "pgp"
+        assert d["must_contain_matched"] is False
+
+    def test_must_contain_prefers_fgp_over_v08_when_no_pgp(self):
+        fgp = _edition("טקסט אחר לגמרי שאינו קשור", id=1)
+        needle_fgp = _edition("זהו הביטוי המבוקש בתוכן ה-FGP", id=2)
+        d = choose_default_source(
+            [fgp, needle_fgp], "טקסט שונה ב-V0.8 שלא מכיל את הביטוי",
+            must_contain="הביטוי המבוקש",
+        )
+        assert d["eligible"] is True
+        assert d["reason"] == "must_contain_match"
+        assert d["provider"] == "fgp"
+        assert d["source"] is needle_fgp
+
+    def test_diacritic_and_whitespace_mismatch_still_matches(self):
+        # strip_search_diacritics + nikud + whitespace normalization on BOTH
+        # sides (SEED-030 rule 1 / SEED-033 Option A spec).
+        pointed = _pgp_edition("שָׁלוֹם\nעוֹלָם", id=9)
+        d = choose_default_source([pointed], "", must_contain="שלום   עולם")
+        assert d["eligible"] is True and d["source"] is pointed
+
+    @pytest.mark.skipif(not os.path.exists(_PGP_DB), reason="pgp.db sidecar absent")
+    def test_real_pgpid_37732_pair(self):
+        # RE-fetches the pinned row from the REAL sidecar (not just the
+        # hardcoded literal above) so a future data refresh cannot silently
+        # invalidate the case without failing this test.
+        conn = sqlite3.connect(_PGP_DB)
+        try:
+            row = conn.execute(
+                "SELECT id, pgpid, source_scholar, doc_relation, language, content "
+                "FROM document_sources WHERE pgpid = ?", (37732,),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row is not None, "pgpid 37732 not found -- re-pin the case"
+        rid, pgpid, scholar, rel, lang, content = row
+        assert "עצים עליו למודה" not in content
+        pgp_source = {
+            "id": rid, "pgpid": pgpid, "source_scholar": scholar,
+            "doc_relation": rel, "language": lang, "content": content,
+        }
+
+        d_before = choose_default_source([pgp_source], _V08_HEBR18_FOLIO2)
+        assert d_before["reason"] == "pgp_edition"  # unconditional PGP-first
+
+        d_after = choose_default_source(
+            [pgp_source], _V08_HEBR18_FOLIO2, must_contain="עצים עליו למודה",
+        )
+        assert d_after["eligible"] is False
+        assert d_after["reason"] == "must_contain_v08"
+        assert d_after["provider"] == "v08"
+
+
 # ── Wiring guards (both apps route through the shared policy) ──────────────────
 # The GUI modules can't be imported headlessly, so guard the wiring by source
 # (the project's static-guard pattern; see tests/test_fgp_chooser_integration.py).
@@ -249,11 +522,29 @@ class TestWiring:
         assert "shorter than V0.8" in src  # demotion hint
         assert "full_original_text" in src  # whole-MS baseline plumbed in
 
+    def test_web_version_selector_honors_v08_must_contain_before_legacy_pgp_fallback(self):
+        # 2026-09-02 live check (Heid. Hebr. 18 fol. 1v, /browse?...&highlight=עצים עליו למודה):
+        # the shared policy returned provider='v08' (V0.8 contains the phrase) but the
+        # renderer fell through to the legacy ``pgp_transcription`` block and re-applied
+        # the Arabic PGP edition under a V0.8 badge. The v08 branch must re-render the
+        # original text and RETURN before that fallback.
+        src = _read("web/components/version_selector.py")
+        v08 = src.index("decision.get('provider') == 'v08'")
+        legacy = src.index("# Fallback to pgp_transcription for backward compatibility")
+        assert v08 < legacy
+        branch = src[v08:legacy]
+        assert "on_version_change(original_text, {'source': 'original'" in branch
+        assert "return" in branch
+
     def test_web_search_results_uses_policy(self):
         # The Advanced/search-result reading view is a SECOND web selector surface.
         src = _read("web/pages/search_results.py")
         assert "choose_default_source" in src
         assert "full_original_text" in src
+        # SEED-033 Option A: the inline reader passes the snippet's matched phrase
+        # and no longer hard-codes PGP-first ahead of the shared helper.
+        assert "must_contain=_snippet_match_phrase(snippet)" in src
+        assert "_groups['pgp_editions'][0].get('content'" not in src
 
     def test_web_browse_passes_full_htr(self):
         assert "fgp_full_htr_text" in _read("web/pages/browse_enrichment.py")
@@ -270,13 +561,17 @@ class TestWiring:
         # the ResultDialog would score against the Browse tab's manuscript.
         src = _read("genizah_app.py")
         for sig in (
-            "def _auto_select_pgp_edition(self, combo, sources=None, htr_text=None, sys_id=None)",
+            "def _auto_select_pgp_edition(self, combo, sources=None, htr_text=None, sys_id=None,",
             "def _populate_pgp_combo(self, combo, sources, pgp_doc, htr_text=None, sys_id=None)",
         ):
             assert sig in src, sig
+        # SEED-033 Option A: the search-scoped override is a real parameter,
+        # not bolted on via **kwargs.
+        assert "must_contain=None)" in src
         # The ResultDialog threads its OWN context through.
         rd = _read("desktop/result_dialog.py")
         assert "sys_id=self.current_sys_id" in rd
+        assert "must_contain=getattr(self, '_rd_search_match_text', None)" in rd
 
     def test_hint_is_translated(self):
         import genizah_translations as t

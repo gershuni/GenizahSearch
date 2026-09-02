@@ -19,7 +19,7 @@ from web.corrections_service import get_pending_corrections_for_page
 from web.supabase_client import get_user_client
 from shared.fgp_service import (
     group_transcription_sources, source_relation_kind, pick_fgp_credit,
-    choose_default_source,
+    choose_default_source, fgp_incipit,
 )
 from typing import Optional, Callable, List, Dict, Any
 
@@ -147,6 +147,7 @@ def create_version_selector(
     pgp_transcription: Optional[Dict[str, Any]] = None,
     all_sources: Optional[List[Dict[str, Any]]] = None,
     full_original_text: Optional[str] = None,
+    must_contain: Optional[str] = None,
 ):
     """Create a version selector dropdown.
 
@@ -163,6 +164,12 @@ def create_version_selector(
             - pgpid: PGP document ID
         all_sources: Optional list of all sources from document_sources table.
             If provided, enables multi-source display with multiple scholars and translations.
+        must_contain: The phrase the user actually searched for, when known (a
+            search-result -> /browse deep link; ordinary browsing omits it).
+            SEED-033 Option A: when set, the default cascade below prefers
+            whichever source (PGP edition -> FGP edition -> V0.8) actually
+            CONTAINS it, so the reading view never silently shows a
+            transcription that does not contain what was searched.
     """
     container = ui.row().classes('items-center gap-2')
 
@@ -194,45 +201,75 @@ def create_version_selector(
         )
 
         async def load_and_apply_latest():
-            """Load versions and apply the latest/default one."""
-            # If multi-source available, use first edition as default
+            """Load versions and apply the latest/default one.
+
+            RENDER-ONLY (no per-surface precedence logic): the single decision
+            of which source — a PGP edition, an FGP edition, or V0.8 — defaults
+            for this folio is made entirely by
+            ``shared.fgp_service.choose_default_source`` (PGP-first
+            unconditionally; then FGP-vs-V0.8 coverage/text-match, SEED-030 +
+            debug/oxford-fgp-image-mismatch sub-issue D; with the optional
+            ``must_contain`` search-scoped override, SEED-033 Option A). This
+            function only renders the returned decision.
+            """
             if all_sources:
-                editions = get_editions(all_sources)
-                if editions:
-                    first_edition = editions[0]
-                    attribution = first_edition.get('source_scholar', 'PGP')
-                    version_label.text = 'PGP'
-                    version_label.style('color: var(--q-positive);')  # Green for verified
+                decision = choose_default_source(
+                    all_sources, original_text,
+                    full_htr_getter=lambda: full_original_text,
+                    must_contain=must_contain,
+                )
+                _note = bool(decision.get('must_contain_matched'))
+                if decision['eligible'] and decision.get('source') is not None:
+                    src = decision['source']
+                    if decision.get('provider') == 'pgp':
+                        attribution = src.get('source_scholar', 'PGP')
+                        version_label.text = 'PGP'
+                        version_label.style('color: var(--q-positive);')  # Green for verified
+                        if _note:
+                            version_label.tooltip(tr('showing the version containing your search'))
+                        if on_version_change:
+                            on_version_change(src.get('content', ''), {
+                                'source': 'pgp',
+                                'attribution': attribution,
+                                'pgp_url': pgp_transcription.get('pgp_url') if pgp_transcription else None,
+                                'pgpid': src.get('pgpid'),
+                                'is_pgp': True,
+                                'is_default': True,
+                                'source_id': src.get('id')
+                            })
+                        return
+                    # provider == 'fgp'
+                    version_label.text = 'FGP'
+                    version_label.style(f'color: {_FGP_COLOR};')
+                    if _note:
+                        version_label.tooltip(tr('showing the version containing your search'))
+                    # Same bilingual credit + translation labelling as the menu
+                    # path, so the initial auto-loaded FGP source shows the same
+                    # metadata it would after the user reselects it (Codex #309 P2).
+                    _attr = src.get('attribution') or src.get('source_scholar', 'FGP')
+                    _credit = pick_fgp_credit(src, get_language()) or _attr
                     if on_version_change:
-                        on_version_change(first_edition.get('content', ''), {
-                            'source': 'pgp',
-                            'attribution': attribution,
-                            'pgp_url': pgp_transcription.get('pgp_url') if pgp_transcription else None,
-                            'pgpid': first_edition.get('pgpid'),
-                            'is_pgp': True,
+                        on_version_change(src.get('content', ''), {
+                            'source': 'fgp',
+                            'attribution': _attr,
+                            'source_credit': _credit,
+                            'is_fgp': True,
+                            'is_translation': source_relation_kind(src) == 'translation',
                             'is_default': True,
-                            'source_id': first_edition.get('id')
+                            'source_id': src.get('id'),
+                            'uid': src.get('uid'),
                         })
                     return
 
-                # No PGP edition — fall back to FGP (additive, PGP-first rule),
-                # UNLESS the FGP edition is a partial/selected excerpt of the
-                # folio: choose_default_source demotes low-coverage FGP below the
-                # V0.8/HTR default so the reader sees the fuller MiDRASH
-                # transcription (SEED-030). The FGP source stays in the menu.
-                fgp_sources = get_fgp_sources(all_sources)
-                if fgp_sources:
-                    _decision = choose_default_source(all_sources, original_text, full_htr_getter=lambda: full_original_text)
-                    if _decision['eligible'] or _decision['reason'] == 'no_fgp_edition':
-                        # Default to the coverage-cleared FGP edition; when there
-                        # is no FGP *edition* (translation-only), preserve the
-                        # prior behavior and default to the first FGP source.
-                        first_fgp = _decision['source'] or fgp_sources[0]
+                if decision['reason'] == 'no_fgp_edition':
+                    # No PGP/FGP EDITION at all — an FGP TRANSLATION-only
+                    # manuscript still defaults to it (choose_default_source
+                    # never weighs translations; preserve that here).
+                    fgp_sources = get_fgp_sources(all_sources)
+                    if fgp_sources:
+                        first_fgp = fgp_sources[0]
                         version_label.text = 'FGP'
                         version_label.style(f'color: {_FGP_COLOR};')
-                        # Same bilingual credit + translation labelling as the menu
-                        # path, so the initial auto-loaded FGP source shows the same
-                        # metadata it would after the user reselects it (Codex #309 P2).
                         _attr = first_fgp.get('attribution') or first_fgp.get('source_scholar', 'FGP')
                         _credit = pick_fgp_credit(first_fgp, get_language()) or _attr
                         if on_version_change:
@@ -247,9 +284,22 @@ def create_version_selector(
                                 'uid': first_fgp.get('uid'),
                             })
                         return
-                    # else: every FGP edition is a low-coverage excerpt of this
-                    # folio → fall through to the HTR/V0.8 default (the FGP rows
-                    # stay selectable in the menu, tagged "shorter than V0.8").
+                elif decision.get('provider') == 'v08':
+                    # must_contain matched V0.8 specifically (SEED-033 Option A):
+                    # the shared policy says the reading view must show V0.8.
+                    # Re-render the original text explicitly and RETURN — the
+                    # legacy ``pgp_transcription`` fallback below would otherwise
+                    # re-apply the PGP edition on top of this decision (the
+                    # 2026-09-02 live check on Heid. Hebr. 18 fol. 1v showed the
+                    # Arabic PGP text under a V0.8 badge for exactly that reason).
+                    version_label.text = 'V0.8'
+                    if _note:
+                        version_label.tooltip(tr('showing the version containing your search'))
+                    if on_version_change:
+                        on_version_change(original_text, {'source': 'original', 'is_default': True})
+                    return
+                # else: demoted (low coverage / no text match) — fall through to
+                # the HTR/V0.8 default below (PGP/FGP stay selectable in the menu).
 
             # Fallback to pgp_transcription for backward compatibility
             if pgp_transcription and pgp_transcription.get('content'):
@@ -447,7 +497,11 @@ def create_version_selector(
                         # coverage (SEED-030), tag it so the reader knows why it is
                         # not the default (phrased "shorter than V0.8" — the HTR
                         # baseline is imperfect, so we do not overclaim "partial").
-                        _fgp_dec = choose_default_source(all_sources, original_text, full_htr_getter=lambda: full_original_text)
+                        # Scored on FGP-only sources (never all_sources) so a PGP
+                        # edition elsewhere on the manuscript can never
+                        # short-circuit this into the unrelated PGP-first decision
+                        # (choose_default_source now ALSO arbitrates PGP).
+                        _fgp_dec = choose_default_source(fgp_sources, original_text, full_htr_getter=lambda: full_original_text)
                         _fgp_demoted = (not _fgp_dec['eligible']
                                         and _fgp_dec['reason'] == 'demote_low_coverage')
                         if len(fgp_sources) > 1 or editions:
@@ -504,6 +558,15 @@ def create_version_selector(
                                         ui.label(credit).classes('text-xs').style(
                                             'color: var(--text-muted);'
                                         )
+                                        # D2: an incipit so multiple FGP rows on
+                                        # one manuscript (MS heb. g.2: ~10
+                                        # identical-looking "FGP Transcription"
+                                        # entries) are tellable apart.
+                                        _fgp_incipit = fgp_incipit(fed.get('content'))
+                                        if _fgp_incipit and len(fgp_sources) > 1:
+                                            ui.label(_fgp_incipit).classes(
+                                                'text-xs'
+                                            ).style('color: var(--text-tertiary);').props('dir="auto"')
                                         # SEED-030: demoted (partial) FGP edition.
                                         if _fgp_demoted and not _is_trans:
                                             ui.label(tr('shorter than V0.8')).classes(

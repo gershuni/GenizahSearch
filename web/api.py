@@ -1081,6 +1081,37 @@ def init_api_routes(app_override=None):
             except requests.exceptions.ConnectionError:
                 _nli_record_failure(failure_type='connection_error', path='_fetch_nli_image_bytes')
                 return None
+
+            # 260902 (debug/oxford-fgp-image-mismatch): parity with the desktop
+            # loader's Rosetta fallback (desktop/image_loader.py attempt C). NLI's
+            # IIIF server intermittently answers 5xx for a whole manuscript
+            # (MS heb. g.2/27: HTTP 500 on all four FL ids at every size) while
+            # Rosetta still serves a thumbnail of the same FL. The Rosetta
+            # *stream* (attempt B on desktop) is skipped here on purpose: it is a
+            # full-resolution TIFF a browser <img> cannot render, and it answered
+            # 401 for these FL ids anyway. A small PNG beats "Image not available".
+            if _nli_circuit_is_open():
+                return None
+            rosetta_thumb = (
+                "https://rosetta.nli.org.il/delivery/DeliveryManagerServlet"
+                f"?dps_func=thumbnail&dps_pid=FL{fl_id}"
+            )
+            try:
+                r2 = requests.get(
+                    rosetta_thumb,
+                    headers=headers,
+                    timeout=(NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT),
+                    verify=True,
+                )
+                ct2 = (r2.headers.get('Content-Type', '') or '').split(';', 1)[0].strip()
+                if r2.status_code == 200 and ct2.startswith('image/') and len(r2.content) > 200:
+                    _nli_record_success(path='_fetch_nli_image_bytes_rosetta_thumb')
+                    logger.info("NLI IIIF unavailable for FL%s; served Rosetta thumbnail (%d bytes)", fl_id, len(r2.content))
+                    return (r2.content, ct2 or 'image/png')
+            except requests.exceptions.Timeout:
+                _nli_record_failure(failure_type='timeout', path='_fetch_nli_image_bytes_rosetta_thumb')
+            except requests.exceptions.ConnectionError:
+                _nli_record_failure(failure_type='connection_error', path='_fetch_nli_image_bytes_rosetta_thumb')
             return None
 
         if 0 <= page < len(fl_ids):
