@@ -10,6 +10,8 @@ from web.state import state
 from web.export_service import get_export_service, encode_filename_for_header
 import requests
 import requests.adapters
+
+from shared.nli_fetch import nli_image_get
 import re
 import os
 import threading
@@ -1097,11 +1099,18 @@ def init_api_routes(app_override=None):
                 f"?dps_func=thumbnail&dps_pid=FL{fl_id}"
             )
             try:
-                r2 = requests.get(
+                # Through the shared NLI wrapper, not a bare requests.get: both
+                # iiif.nli.org.il and rosetta.nli.org.il serve a legacy certificate
+                # chain, and shared/nli_fetch.py owns that host-scoped policy
+                # (verification disabled for those two hosts ONLY, warning
+                # suppressed inside the call). A bare verify=True can raise
+                # SSLError here -- swallowed as a connection failure -- in exactly
+                # the IIIF-down/Rosetta-up case this fallback exists for
+                # (Codex P1, 2026-09-02).
+                r2 = nli_image_get(
                     rosetta_thumb,
                     headers=headers,
                     timeout=(NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT),
-                    verify=True,
                 )
                 ct2 = (r2.headers.get('Content-Type', '') or '').split(';', 1)[0].strip()
                 if r2.status_code == 200 and ct2.startswith('image/') and len(r2.content) > 200:

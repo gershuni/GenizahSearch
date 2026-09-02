@@ -634,6 +634,14 @@ class ManuscriptViewerWidget(QWidget):
         self.images_ext = []
         self.active_list = []
         self.current_idx = 0
+        # Defined here, not first assigned in load_images: the attribution helper
+        # reads it on the very first load (Codex P1, 2026-09-02) -- an unset
+        # attribute raised AttributeError before any image could appear.
+        self.current_source = None
+        # Last index the reader was on in each source, so switching away and back
+        # RETURNS there instead of being re-derived by proportional scaling
+        # (Codex P1: NLI index 1 of 2 scaled to image 163 of Oxford's 164).
+        self._last_idx_by_source = {}
         self._nli_fallback_active = False  # 260421-aln: True when auto-flipped to NLI for a past-CUDL page
         self._load_generation = 0  # increments on each set_page/load_images to reject stale callbacks
         self.loader_thread = None
@@ -872,6 +880,20 @@ class ManuscriptViewerWidget(QWidget):
         self._ktiv_sys_id = None
         return True
 
+    def _index_for_source_switch(self, old_list, old_idx, new_list, new_source):
+        """Index to show in ``new_list`` after switching to ``new_source``.
+
+        Prefers the index the reader was last on IN THAT SOURCE, so switching
+        away and back is reversible; falls back to ``map_matching_image_index``
+        for a source visited for the first time. Codex P1 (2026-09-02): the
+        proportional branch is not invertible -- NLI index 1 of 2 mapped to
+        Oxford image 163 of 164 instead of back to the folio just left.
+        """
+        remembered = self._last_idx_by_source.get(new_source)
+        if remembered is not None and 0 <= remembered < len(new_list):
+            return remembered
+        return map_matching_image_index(old_list, old_idx, new_list)
+
     def _apply_attribution_for_source(self):
         """Show the credit belonging to the image currently displayed.
 
@@ -896,7 +918,10 @@ class ManuscriptViewerWidget(QWidget):
         # leave the Bodleian/CUDL credit under an NLI image (Codex P2, 2026-09-02).
         self._attr_ext = meta.get('attribution') or ''
         self._attr_nli = meta.get('attribution_nli') or ''
-        self._apply_attribution_for_source()
+        # NOT applied here: `current_source` is only decided further down, so the
+        # label is set right after that (Codex P1) -- applying it now would read a
+        # stale source from the previous manuscript.
+        self._last_idx_by_source = {}
 
         # meta contains 'images_nli' and 'images_ext'
         # Make copies to avoid modifying the cached meta
@@ -1039,12 +1064,18 @@ class ManuscriptViewerWidget(QWidget):
             self._ktiv_sys_id = None
             self.btn_ktiv.setVisible(False)
 
+        # The source is decided by now -- credit the image that will be shown.
+        self._apply_attribution_for_source()
+
         # Set Page
         self.set_page(initial_idx)
 
     def _on_source_changed(self):
         old_list = self.active_list
         old_idx = self.current_idx
+        old_source = self.current_source
+        if old_source:
+            self._last_idx_by_source[old_source] = old_idx
 
         data = self.combo_source.currentData()
         if data == "nli":
@@ -1068,7 +1099,8 @@ class ManuscriptViewerWidget(QWidget):
         # shorter than the old index, e.g. Oxford's 164-page whole-codex
         # list at index ~53 (folio 27b/verso) resetting to NLI index 0
         # (folio 27r/recto) instead of the matching verso image.
-        self.current_idx = map_matching_image_index(old_list, old_idx, self.active_list)
+        self.current_idx = self._index_for_source_switch(
+            old_list, old_idx, self.active_list, self.current_source)
 
         self.set_page(self.current_idx)
 
@@ -1276,7 +1308,10 @@ class ManuscriptViewerWidget(QWidget):
             and not self._nli_fallback_active
             and self.images_nli
         ):
-            new_idx = map_matching_image_index(self.active_list, self.current_idx, self.images_nli)
+            if self.current_source:
+                self._last_idx_by_source[self.current_source] = self.current_idx
+            new_idx = self._index_for_source_switch(self.active_list, self.current_idx,
+                                                    self.images_nli, "nli")
             # The Oxford URL that just failed: offered as a link so the reader's own
             # browser can pass the Bodleian's JS bot-challenge (an in-app fetch cannot).
             _failed_url = ''

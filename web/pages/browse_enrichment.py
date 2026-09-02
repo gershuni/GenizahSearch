@@ -358,9 +358,12 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
             if _sys_id and hasattr(state_mod.meta_mgr, 'nli_cache'):
                 cached_meta = state_mod.meta_mgr.nli_cache.get(_sys_id, {})
                 attribution = cached_meta.get('attribution', '')
-                # The NLI manifest's own credit, kept separately: an Oxford page
-                # that falls back to the NLI image must credit NLI, not the Bodleian.
-                nli_attribution = attribution
+                # NLI's OWN manifest credit, which MetadataManager stores separately
+                # from the primary one. Codex P2 (2026-09-02): copying `attribution`
+                # here put the Bodleian credit under the NLI image whenever the
+                # browser's Oxford->NLI fallback fired. Empty when the manuscript has
+                # no NLI manifest; the footer then keeps the primary credit.
+                nli_attribution = cached_meta.get('attribution_nli', '') or ''
             if _library_code in ATTRIBUTION_BY_LIBRARY:
                 lib_attr = _get_library_attribution(_library_code)
                 if lib_attr is not None:
