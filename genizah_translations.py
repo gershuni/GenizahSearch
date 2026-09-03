@@ -5314,3 +5314,12 @@ TRANSLATIONS.update({
     'Building the letter-level index needs about {} GB free on this drive, and there is about {} GB. Free some space and try again.':
         'בניית האינדקס לחיפוש ברמת האות דורשת כ‑{} גיגהבייט פנויים בכונן הזה, וישנם כ‑{} גיגהבייט. פנו מקום ונסו שוב.',
 })
+
+
+# Desktop PGP link buttons (ResultDialog + Browse) and the clickable PGP
+# badge in the search results table. Reuses the existing 'View on PGP'
+# label; only the shared tooltip is new.
+TRANSLATIONS.update({
+    'Open on the Princeton Geniza Project website':
+        'פתיחה באתר של פרויקט הגניזה של פרינסטון',
+})

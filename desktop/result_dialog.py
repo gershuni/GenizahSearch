@@ -203,6 +203,15 @@ class ResultDialog(QDialog):
         self.btn_compact_catalog.clicked.connect(self._show_rd_catalog)
         compact_layout.addWidget(self.btn_compact_catalog)
 
+        # PGP (compact) -- twin of btn_rd_pgp; every conditional button in
+        # this dialog has a compact counterpart, and both are driven by the
+        # single _update_rd_pgp_button() call.
+        self.btn_compact_pgp = QPushButton("PGP")
+        self.btn_compact_pgp.setToolTip(tr("Open on the Princeton Geniza Project website"))
+        self.btn_compact_pgp.setVisible(False)
+        self.btn_compact_pgp.clicked.connect(self.open_pgp_link)
+        compact_layout.addWidget(self.btn_compact_pgp)
+
         # Measurements (compact)
         self.btn_compact_measurements = QPushButton()
         self.btn_compact_measurements.setVisible(False)
@@ -252,6 +261,15 @@ class ResultDialog(QDialog):
         self.btn_external_link = QPushButton(tr("External Website"))
         self.btn_external_link.setVisible(False)
         self.btn_external_link.clicked.connect(self.open_external_link)
+        # Princeton Geniza Project. Hidden until _on_rd_pgp_loaded reports a
+        # url for this manuscript -- most manuscripts have no PGP document,
+        # so this follows btn_external_link rather than btn_img (Ktiv), which
+        # exists for every non-synthetic sys_id.
+        self.btn_rd_pgp = QPushButton(tr("View on PGP"))
+        self.btn_rd_pgp.setToolTip(tr("Open on the Princeton Geniza Project website"))
+        self.btn_rd_pgp.setVisible(False)
+        self.btn_rd_pgp.clicked.connect(self.open_pgp_link)
+        self._rd_pgp_url = None
         self.lbl_info = QLabel(); self.lbl_info.setStyleSheet("font-size: 11px; color: palette(text);"); self.lbl_info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.lbl_meta_loading = QLabel(tr("Loading...")); self.lbl_meta_loading.setStyleSheet("color: orange; font-size: 11px;"); self.lbl_meta_loading.setVisible(False)
 
@@ -265,7 +283,7 @@ class ResultDialog(QDialog):
         self.lbl_rd_printed.setStyleSheet("color: #dc2626; font-weight: bold; font-size: 11px;")
         self.lbl_rd_printed.setVisible(False)
 
-        info_row.addWidget(self.btn_img); info_row.addWidget(self.btn_external_link); info_row.addWidget(self.lbl_info); info_row.addWidget(self.lbl_rd_domains); info_row.addWidget(self.lbl_rd_printed); info_row.addWidget(self.lbl_meta_loading); info_row.addStretch()
+        info_row.addWidget(self.btn_img); info_row.addWidget(self.btn_external_link); info_row.addWidget(self.btn_rd_pgp); info_row.addWidget(self.lbl_info); info_row.addWidget(self.lbl_rd_domains); info_row.addWidget(self.lbl_rd_printed); info_row.addWidget(self.lbl_meta_loading); info_row.addStretch()
 
         # Nav Row (Inside Header)
         nav_row = QHBoxLayout()
@@ -1563,6 +1581,7 @@ class ResultDialog(QDialog):
         # Store PGP data
         self._rd_pgp_sources = sources
         self._rd_pgp_doc = pgp_doc
+        self._update_rd_pgp_button(pgp_doc)
 
         # Handle PGP extended info display:
         # Case 1: Enriched data already built HTML -> append PGP section
@@ -1634,6 +1653,7 @@ class ResultDialog(QDialog):
     def _on_rd_pgp_error(self, sys_id, error_msg):
         """Handle PGP source fetch error -- silently fall back to existing behavior."""
         logger.debug("PGP fetch error for %s: %s", sys_id, error_msg)
+        self._update_rd_pgp_button(None)
 
     def _rd_update_extended_info_with_pgp(self):
         """Rebuild extended info HTML after PGP data arrives late.
@@ -2161,6 +2181,25 @@ class ResultDialog(QDialog):
                 logger.debug("result_dialog: invalid highlight regex %r: %s", pattern_str, _re_exc)
         return text
 
+    def open_pgp_link(self):
+        """Open the current manuscript's Princeton Geniza Project page."""
+        if getattr(self, '_rd_pgp_url', None):
+            QDesktopServices.openUrl(QUrl(self._rd_pgp_url))
+
+    def _update_rd_pgp_button(self, pgp_doc):
+        """Show the PGP buttons only while a PGP url is actually known.
+
+        pgp_url is nullable TEXT in the sidecar, so 'this manuscript is in
+        PGP' does not guarantee 'this manuscript has a PGP url' -- the
+        buttons follow the url, not the document.
+        """
+        url = (pgp_doc or {}).get('pgp_url') or None
+        self._rd_pgp_url = url
+        for _attr in ('btn_rd_pgp', 'btn_compact_pgp'):
+            _btn = getattr(self, _attr, None)
+            if _btn is not None:
+                _btn.setVisible(bool(url))
+
     def open_external_link(self):
         if self.external_url:
             url = self.external_url
@@ -2684,6 +2723,7 @@ class ResultDialog(QDialog):
         # Reset PGP and enriched data flags for new result
         self._rd_pgp_doc = None
         self._rd_pgp_sources = []
+        self._update_rd_pgp_button(None)
         self._rd_enriched_data_loaded = False
         self._rd_fjms_bib = []
         self._rd_marc_bib = []

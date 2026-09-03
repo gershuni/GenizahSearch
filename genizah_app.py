@@ -1449,6 +1449,10 @@ class GenizahGUI(QMainWindow):
         self.list_filter_state = {'active': False, 'mode': 'in', 'lists': 'all'}
         self._pgp_transcription_sys_ids = set()
         self._manual_transcription_sys_ids = set()  # SEED-022: PGP text ∪ FGP (scholarly transcription/translation)
+        # {sys_id: pgp_url} for the rows in _pgp_transcription_sys_ids. Only
+        # a sys_id in HERE gets a clickable badge; presence in the set above
+        # is 'has PGP info', which is not the same as 'has a PGP url'.
+        self._pgp_url_by_sys_id = {}
         self._pgp_badge_worker = None
         self._printed_badge_worker = None
         self._printed_sys_ids = set()
@@ -3328,6 +3332,7 @@ class GenizahGUI(QMainWindow):
         self._browse_versions_cache = {'original': original_text}
         self._browse_pgp_sources = []
         self._browse_pgp_doc = {}
+        self._update_browse_pgp_button(None)
         self._browse_enriched_html = ''
         self.browse_version_combo.blockSignals(True)
         self.browse_version_combo.clear()
@@ -5296,6 +5301,10 @@ class GenizahGUI(QMainWindow):
         self.COL_SNIPPET = 7
         self.COL_SRC = 8
         self.COL_PGP = 9
+        # Where a linked PGP cell keeps its url. Qt.ItemDataRole.UserRole on
+        # the COL_SYS_ID item holds the whole result dict; this is a
+        # different item, so the roles do not collide.
+        self._PGP_URL_ROLE = Qt.ItemDataRole.UserRole
         self.COL_DOMAIN = 10
         self.COL_PRINTED = 11
         self.COL_TRANSCRIPTION = 12  # SEED-022: APPENDED (no index shift) — manual transcription/translation
@@ -5351,12 +5360,13 @@ class GenizahGUI(QMainWindow):
 
         self.results_table.setMouseTracking(True)
         self.results_table.cellEntered.connect(self.on_table_cell_entered)
+        self.results_table.cellClicked.connect(self._on_results_cell_clicked)
         self.results_table.installEventFilter(self)
         self.results_table.viewport().installEventFilter(self)
 
         self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.results_table.setSortingEnabled(True) # Enable sorting
-        self.results_table.doubleClicked.connect(self.show_full_text)
+        self.results_table.doubleClicked.connect(self._on_results_double_clicked)
         self.results_table.itemChanged.connect(self.on_search_result_item_changed)
         self.results_table.verticalScrollBar().valueChanged.connect(self.check_scroll_load)
 
@@ -6050,6 +6060,17 @@ class GenizahGUI(QMainWindow):
 
         self.btn_b_catalog = QPushButton(f"🌐 {tr('View on Ktiv')}"); self.btn_b_catalog.setToolTip(tr("Open in Ktiv Website"))
         self.btn_b_catalog.clicked.connect(self.browse_open_catalog); self.btn_b_catalog.setEnabled(False)
+
+        # Princeton Geniza Project. Unlike Ktiv (which exists for every
+        # non-synthetic sys_id and is merely disabled until one loads), most
+        # manuscripts have no PGP document at all -- so this one is HIDDEN
+        # until _on_browse_pgp_loaded reports a url, following the
+        # btn_b_external_link idiom rather than the Ktiv one.
+        self.btn_b_pgp = QPushButton(f"🌐 {tr('View on PGP')}")
+        self.btn_b_pgp.setToolTip(tr("Open on the Princeton Geniza Project website"))
+        self.btn_b_pgp.setVisible(False)
+        self.btn_b_pgp.clicked.connect(self.browse_open_pgp)
+        self._browse_pgp_url = None
         
         # View All and Save moved to Nav Bar, defined here as class members
         self.btn_b_save = QPushButton(tr("Save")); self.btn_b_save.setToolTip(tr("Save full manuscript to file"))
@@ -6182,6 +6203,7 @@ class GenizahGUI(QMainWindow):
         ext_info_row.addWidget(self.btn_b_catalog_records)
         ext_info_row.addWidget(self.btn_b_measurements)
         ext_info_row.addWidget(self.btn_b_catalog)
+        ext_info_row.addWidget(self.btn_b_pgp)
         ext_info_row.addWidget(self.btn_b_external_link)
         ext_info_row.addStretch()
         ext_info_row.addWidget(self.btn_b_translations)
@@ -7199,6 +7221,7 @@ class GenizahGUI(QMainWindow):
         self.btn_b_measurements.setEnabled(False)
         self._browse_measurements_data = None
         self.btn_b_external_link.setVisible(False)
+        self._update_browse_pgp_button(None)
         self._browse_fjms_bib = []
         self._browse_marc_bib = []
         self._browse_catalog_detail = None
@@ -7548,6 +7571,7 @@ class GenizahGUI(QMainWindow):
         # Store PGP data for later use (page changes)
         self._browse_pgp_sources = sources
         self._browse_pgp_doc = pgp_doc
+        self._update_browse_pgp_button(pgp_doc)
 
         # Update extended info panel with PGP metadata combined with enrichment
         pgp_html = self._build_pgp_extended_info_html(pgp_doc, sys_id=self.current_browse_sid) or ''
@@ -7625,6 +7649,7 @@ class GenizahGUI(QMainWindow):
     def _on_browse_pgp_error(self, sys_id, error_message):
         """Handle PGP source fetch error -- silently fall back to existing behavior."""
         logger.debug("PGP source fetch error for %s: %s", sys_id, error_message)
+        self._update_browse_pgp_button(None)
 
     def _build_pgp_extended_info_html(self, pgp_doc, palette=None, sys_id=None):
         """Build HTML for PGP metadata section in extended info panels.
@@ -19634,6 +19659,7 @@ class GenizahGUI(QMainWindow):
         # 7. Clear printed filter state
         self._printed_sys_ids = set()
         self._manual_transcription_sys_ids = set()  # SEED-022
+        self._pgp_url_by_sys_id = {}
         self._printed_filter_state = 'all'
         if hasattr(self, 'chk_search_header'):
             self.chk_search_header.set_filter_active(self.COL_PRINTED, False)
@@ -19871,13 +19897,8 @@ class GenizahGUI(QMainWindow):
                 self.results_table.setItem(row_idx, self.COL_SRC, src_item)
             else:
                 self.results_table.setItem(row_idx, self.COL_SRC, QTableWidgetItem(source_val))
-            # PGP badge
-            if sid and sid in self._pgp_transcription_sys_ids:
-                pgp_item = QTableWidgetItem("PGP")
-                pgp_item.setForeground(QColor("#27ae60"))
-                self.results_table.setItem(row_idx, self.COL_PGP, pgp_item)
-            else:
-                self.results_table.setItem(row_idx, self.COL_PGP, QTableWidgetItem(""))
+            # PGP badge (clickable when we know this manuscript's PGP url)
+            self._write_pgp_badge_cell(row_idx, sid)
 
             # Domain column
             domain_names = self._result_domain_map.get(sid, [])
@@ -19998,6 +20019,7 @@ class GenizahGUI(QMainWindow):
             self._result_domain_map = {}
             self._printed_sys_ids = set()
             self._manual_transcription_sys_ids = set()  # SEED-022
+            self._pgp_url_by_sys_id = {}
             # Phase 55: Zero-result refinement -- don't commit step (D-14a)
             if self._refine_mode:
                 self._zero_result_refine = True
@@ -20934,22 +20956,89 @@ class GenizahGUI(QMainWindow):
                 tr("Showing {} of {} results").format(visible_count, total)
             )
 
-    def _on_pgp_badges_loaded(self, pgp_sys_ids, manual_sys_ids):
+    def _make_pgp_badge_item(self, sys_id):
+        """Build the PGP cell for one row, as a link when the url is known.
+
+        Both badge write sites -- the initial row render and the async worker
+        slot below -- go through here, so the link can never end up on only
+        one of the two paths (either can be the last writer for a row,
+        depending on whether the worker beats the first paint).
+
+        Returns ``None`` when the manuscript has no PGP info at all; the
+        caller writes an empty cell for that.
+        """
+        if not sys_id or sys_id not in self._pgp_transcription_sys_ids:
+            return None
+        item = QTableWidgetItem("PGP")
+        item.setForeground(QColor("#27ae60"))
+        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        url = (getattr(self, '_pgp_url_by_sys_id', None) or {}).get(sys_id)
+        if url:
+            # Dress ONLY a row we can actually open: underline, the url in
+            # the tooltip, hand cursor on hover (on_table_cell_entered) and
+            # a click that opens it (_on_results_cell_clicked). A PGP row
+            # whose document carries no url keeps the plain badge it has
+            # always had -- an underline we cannot honour would be a lie.
+            font = item.font()
+            font.setUnderline(True)
+            item.setFont(font)
+            item.setData(self._PGP_URL_ROLE, url)
+            item.setToolTip(
+                tr("Open on the Princeton Geniza Project website") + "\n" + str(url)
+            )
+        return item
+
+    def _write_pgp_badge_cell(self, row, sys_id):
+        """Write (or clear) the PGP cell of one results row."""
+        item = self._make_pgp_badge_item(sys_id)
+        self.results_table.setItem(row, self.COL_PGP, item or QTableWidgetItem(""))
+
+    def _pgp_url_for_cell(self, row):
+        """The PGP url a results row links to, or None when it is not a link."""
+        item = self.results_table.item(row, self.COL_PGP)
+        return item.data(self._PGP_URL_ROLE) if item is not None else None
+
+    def _on_results_cell_clicked(self, row, col):
+        """A single click on a linked PGP badge opens the PGP document page.
+
+        Single click, because double-click is already taken by "open this
+        result" for the whole table (_on_results_double_clicked suppresses
+        the dialog on a linked PGP cell so one gesture opens one thing).
+        """
+        if col != self.COL_PGP:
+            return
+        url = self._pgp_url_for_cell(row)
+        if url:
+            QDesktopServices.openUrl(QUrl(str(url)))
+
+    def _on_results_double_clicked(self, index):
+        """Double-click opens the result -- except on a linked PGP badge.
+
+        The first click of the double-click already opened the PGP page, so
+        opening the reading dialog as well would give two windows for one
+        gesture. Every other column behaves exactly as before.
+        """
+        if (index is not None and index.isValid()
+                and index.column() == self.COL_PGP
+                and self._pgp_url_for_cell(index.row())):
+            return
+        self.show_full_text()
+
+    def _on_pgp_badges_loaded(self, pgp_sys_ids, manual_sys_ids, pgp_urls=None):
         """Handle PGP badge worker results - update the PGP + scholarly-transcription
         columns for all rows (SEED-022). pgp_sys_ids = PGP link presence (green "PGP");
-        manual_sys_ids = readable transcription/translation, PGP text ∪ FGP (amber ✓)."""
+        manual_sys_ids = readable transcription/translation, PGP text ∪ FGP (amber ✓);
+        pgp_urls = {sys_id: pgp_url} for the badges that can be clicked. It is
+        keyword-defaulted so a caller still emitting the old two-value shape
+        renders plain (unlinked) badges instead of raising."""
         self._pgp_transcription_sys_ids = pgp_sys_ids
         self._manual_transcription_sys_ids = manual_sys_ids
+        self._pgp_url_by_sys_id = pgp_urls or {}
         for row in range(self.results_table.rowCount()):
             item = self.results_table.item(row, self.COL_SYS_ID)
             if item:
                 sys_id = item.text().strip()
-                if sys_id in pgp_sys_ids:
-                    pgp_item = QTableWidgetItem("PGP")
-                    pgp_item.setForeground(QColor("#27ae60"))
-                    self.results_table.setItem(row, self.COL_PGP, pgp_item)
-                else:
-                    self.results_table.setItem(row, self.COL_PGP, QTableWidgetItem(""))
+                self._write_pgp_badge_cell(row, sys_id)
                 if sys_id in manual_sys_ids:
                     tr_item = QTableWidgetItem("✓")
                     tr_item.setForeground(QColor("#b45309"))
@@ -21161,6 +21250,15 @@ class GenizahGUI(QMainWindow):
             )
         except Exception:
             self._manual_transcription_sys_ids = set()
+        # Same reason for the PGP urls: no badge worker runs on this path, so
+        # without this the tag results would render badges that are not links.
+        try:
+            from shared.document_service import get_pgp_urls_for_sys_ids
+            self._pgp_url_by_sys_id = get_pgp_urls_for_sys_ids(
+                [r['display']['id'] for r in formatted]
+            )
+        except Exception:
+            self._pgp_url_by_sys_id = {}
 
         self.chk_search_header.blockSignals(True)
         self.chk_search_header.setChecked(False)
@@ -21557,6 +21655,14 @@ class GenizahGUI(QMainWindow):
             self._update_search_row_list_indicator(row)
 
     def on_table_cell_entered(self, row, col):
+        # Hand cursor over a PGP badge that is a real link. This runs BEFORE
+        # the same-row early return below, because the pointer moves between
+        # the columns of one row and the cursor has to follow.
+        if col == self.COL_PGP and self._pgp_url_for_cell(row):
+            self.results_table.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+        else:
+            self.results_table.viewport().unsetCursor()
+
         if row == self.hovered_row:
             return
 
@@ -21641,6 +21747,16 @@ class GenizahGUI(QMainWindow):
             index = self.results_table.indexAt(pos)
             if index.isValid():
                 col = index.column()
+                # This branch answers EVERY tooltip request for the results
+                # table (it returns True either way), so a per-item tooltip
+                # is never shown by Qt itself -- the PGP link has to be
+                # served here or it would be invisible.
+                if col == self.COL_PGP:
+                    _pgp_cell = self.results_table.item(index.row(), col)
+                    _pgp_tip = _pgp_cell.toolTip() if _pgp_cell is not None else ''
+                    if _pgp_tip:
+                        QToolTip.showText(event.globalPos(), _pgp_tip)
+                        return True
                 # Skip checkbox and actions columns
                 if col not in (self.COL_CHECKBOX, self.COL_ACTIONS, self.COL_IMG):
                     item = self.results_table.item(index.row(), col)
@@ -28197,6 +28313,23 @@ class GenizahGUI(QMainWindow):
         # Phase 85 D-06: synthetic sys_ids skip the NLI catalog page (no Alma record)
         if self.current_browse_sid and not is_synthetic_sys_id(self.current_browse_sid):
             QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{self.current_browse_sid}"))
+
+    def browse_open_pgp(self):
+        """Open the current manuscript's Princeton Geniza Project page."""
+        if getattr(self, '_browse_pgp_url', None):
+            QDesktopServices.openUrl(QUrl(self._browse_pgp_url))
+
+    def _update_browse_pgp_button(self, pgp_doc):
+        """Show the browse PGP button only while a PGP url is actually known.
+
+        pgp_url is nullable TEXT in the sidecar, so 'this manuscript is in
+        PGP' does not guarantee 'this manuscript has a PGP url' -- the
+        button follows the url, not the document.
+        """
+        url = (pgp_doc or {}).get('pgp_url') or None
+        self._browse_pgp_url = url
+        if hasattr(self, 'btn_b_pgp'):
+            self.btn_b_pgp.setVisible(bool(url))
 
     def _browse_open_external_link(self):
         if hasattr(self, '_browse_external_url') and self._browse_external_url:

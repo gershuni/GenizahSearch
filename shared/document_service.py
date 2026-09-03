@@ -579,6 +579,55 @@ class PgpService:
             logger.error(f"Error batch checking PGP editions: {e}")
             return set()
 
+    def get_pgp_urls_for_sys_ids(self, sys_ids: List[str]) -> Dict[str, str]:
+        """Batch map ``sys_id -> pgp_url`` for the results-table PGP link.
+
+        Companion to :meth:`get_sys_ids_with_transcriptions`, which answers
+        only *whether* a manuscript has PGP info. The desktop PGP badge needs
+        the actual URL to be clickable, and one query for the whole visible
+        page is far cheaper than a lookup per click.
+
+        A sys_id can be linked to SEVERAL PGP documents (a fragment cited by
+        more than one document). The lowest ``pgpid`` wins, so the URL a row
+        links to is stable across searches and process restarts rather than
+        depending on SQLite row order.
+
+        Args:
+            sys_ids: System IDs to look up. An empty list returns ``{}``.
+
+        Returns:
+            ``{sys_id: pgp_url}``, containing ONLY sys_ids whose chosen
+            document has a non-empty ``pgp_url``. ``pgp_url`` is plain
+            nullable TEXT in the sidecar, so a missing URL is possible even
+            when the PGP link exists -- such a sys_id is simply absent here,
+            which is what lets the caller show a plain badge with no link.
+        """
+        if not self._conn or not sys_ids:
+            return {}
+        urls: Dict[str, str] = {}
+        try:
+            batch_size = 500  # stay under the SQLite variable limit (999)
+            for i in range(0, len(sys_ids), batch_size):
+                batch = sys_ids[i:i + batch_size]
+                placeholders = ','.join('?' * len(batch))
+                cursor = self._conn.execute(
+                    "SELECT f.sys_id AS sys_id, d.pgp_url AS pgp_url "
+                    "FROM document_fragments f "
+                    "JOIN documents d ON d.pgpid = f.document_id "
+                    f"WHERE f.sys_id IN ({placeholders}) "
+                    "ORDER BY f.sys_id, d.pgpid",
+                    batch,
+                )
+                for row in cursor:
+                    sid = row['sys_id']
+                    url = row['pgp_url']
+                    if sid and url:
+                        urls.setdefault(sid, url)  # ORDER BY => lowest pgpid
+            return urls
+        except Exception as e:
+            logger.error(f"Error batch fetching PGP urls: {e}")
+            return {}
+
     def get_fragments_by_tag(self, tag: str) -> List[Dict[str, Any]]:
         """
         Get all fragments linked to PGP documents with a specific tag.
@@ -1229,6 +1278,14 @@ def get_all_pgp_link_sys_ids() -> Set[str]:
     link-presence, corpus-wide, for the catalog browse PGP filter."""
     svc = get_pgp_service()
     return svc.get_all_pgp_link_sys_ids()
+
+
+def get_pgp_urls_for_sys_ids(sys_ids: List[str]) -> Dict[str, str]:
+    """Batch ``sys_id -> pgp_url`` for the desktop results-table PGP link.
+    Only sys_ids with a non-empty url are present. See
+    :meth:`PgpService.get_pgp_urls_for_sys_ids`."""
+    svc = get_pgp_service()
+    return svc.get_pgp_urls_for_sys_ids(sys_ids)
 
 
 def get_sys_ids_with_editions(sys_ids: Optional[List[str]] = None) -> Set[str]:
