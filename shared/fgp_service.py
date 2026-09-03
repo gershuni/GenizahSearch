@@ -710,6 +710,16 @@ def choose_default_source(
     eds = groups["fgp_editions"]
     pgp_eds = groups["pgp_editions"]
 
+    folio_htr_len = _heb_letter_count(htr_text)
+    page_tokens = _heb_token_set(htr_text)
+    _full_len_cache: Dict[str, int] = {}
+
+    def _full_htr_len() -> int:
+        if "v" not in _full_len_cache:
+            txt = full_htr_getter() if full_htr_getter else None
+            _full_len_cache["v"] = _heb_letter_count(txt)
+        return _full_len_cache["v"]
+
     # ── SEED-033 Option A: search-scoped override ──────────────────────────
     needle = _normalize_for_contains(must_contain) if must_contain else ""
     if needle:
@@ -717,10 +727,25 @@ def choose_default_source(
             if needle in _normalize_for_contains(ed.get("content")):
                 return {"source": ed, "reason": "must_contain_match", "ratio": None,
                         "eligible": True, "provider": "pgp", "must_contain_matched": True}
+        # An FGP row that contains the phrase must still clear the coverage bar
+        # (Codex P2, 2026-09-02). For an HTR-backed hit the phrase is necessarily
+        # in V0.8 too, and a very short excerpt can contain the same common word,
+        # so returning here unconditionally promoted exactly the partial
+        # transcription ordinary browsing demotes. Below the bar we prefer the
+        # V0.8 text that also contains it.
+        _threshold = _min_coverage()
         for ed in eds:
-            if needle in _normalize_for_contains(ed.get("content")):
-                return {"source": ed, "reason": "must_contain_match", "ratio": None,
-                        "eligible": True, "provider": "fgp", "must_contain_matched": True}
+            if needle not in _normalize_for_contains(ed.get("content")):
+                continue
+            _baseline = (_full_htr_len() or folio_htr_len) if _fgp_is_whole_doc(ed) else folio_htr_len
+            if _baseline >= _COVERAGE_MIN_HTR_LETTERS:
+                _ratio = _heb_letter_count(ed.get("content")) / _baseline
+                if _ratio < _threshold:
+                    continue                      # too partial to default to
+            else:
+                _ratio = None                     # unmeasurable -> keep-eligible
+            return {"source": ed, "reason": "must_contain_match", "ratio": _ratio,
+                    "eligible": True, "provider": "fgp", "must_contain_matched": True}
         if needle in _normalize_for_contains(htr_text):
             return {"source": None, "reason": "must_contain_v08", "ratio": None,
                     "eligible": False, "provider": "v08", "must_contain_matched": True}
@@ -734,16 +759,6 @@ def choose_default_source(
     if not eds:
         return {"source": None, "reason": "no_fgp_edition", "ratio": None,
                 "eligible": False, "provider": None, "must_contain_matched": False}
-
-    folio_htr_len = _heb_letter_count(htr_text)
-    page_tokens = _heb_token_set(htr_text)
-    _full_len_cache: Dict[str, int] = {}
-
-    def _full_htr_len() -> int:
-        if "v" not in _full_len_cache:
-            txt = full_htr_getter() if full_htr_getter else None
-            _full_len_cache["v"] = _heb_letter_count(txt)
-        return _full_len_cache["v"]
 
     # Score each edition against the baseline appropriate to its scope. An edition
     # whose baseline is too short to trust (blank/garbled folio, or a whole-doc row

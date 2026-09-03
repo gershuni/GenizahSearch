@@ -215,9 +215,10 @@ def map_matching_image_index(old_list, old_idx, new_list, anchor_folio=None):
        scaled onto the new list, clamped to bounds.
 
     ``anchor_folio`` (optional): the folio the DESTINATION list was last showing.
-    When given and present in ``new_list``, that folio wins and the current image
-    only selects its recto/verso -- the return path from a list whose labels carry
-    no folio information (NLI's FL-only labels) is otherwise not invertible.
+    Used ONLY when the source list is the position-less two-image case (NLI's
+    per-part list: recto + verso of one folio, FL-only labels), where the return
+    path is otherwise not invertible. When the source list carries folio numbers of
+    its own, the current image wins and the anchor is ignored.
 
     Returns 0 for empty/invalid inputs -- callers must still check that
     ``new_list`` is non-empty before treating the source switch as valid.
@@ -235,8 +236,16 @@ def map_matching_image_index(old_list, old_idx, new_list, anchor_folio=None):
     #    to Oxford image 0 instead of folio 27a. With the anchor we return to that
     #    folio and use the current index only to choose recto/verso
     #    (Codex P2, 2026-09-02).
-    if anchor_folio is not None:
-        if side is None and len(old_list) == 2:
+    # Restricted to the case it exists for: a TWO-image source list whose entries
+    # carry no folio of their own (NLI's per-part FL-only list). There the two
+    # entries are the recto and verso of ONE folio, so the destination folio is the
+    # anchor and the current index only picks the side. When the old list does carry
+    # position information -- both sides exposing whole-codex lists, say -- the
+    # reader's current position is the better signal and the anchor would drag them
+    # back to the folio they left (Codex P2, 2026-09-02).
+    _old_has_position = any(im.get('folio_num') is not None for im in old_list)
+    if anchor_folio is not None and len(old_list) == 2 and not _old_has_position:
+        if side is None:
             side = 'v' if old_idx == 1 else 'r'
         same_folio = [i for i, im in enumerate(new_list)
                       if im.get('folio_num') == anchor_folio]
