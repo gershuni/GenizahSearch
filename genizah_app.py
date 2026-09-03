@@ -5870,44 +5870,24 @@ class GenizahGUI(QMainWindow):
             "QTreeWidget::indicator:indeterminate { border: 1px solid #9b9b9b; background: rgba(255, 255, 255, 0.18); }"
         )
 
-        # Configure columns width
-        header = self.comp_tree.header()
-        header.setSectionsClickable(True)
-        header.sectionClicked.connect(self.on_comp_header_clicked)
-        header.sectionResized.connect(self._refresh_comp_tree_tooltips)
-        header.setSortIndicatorShown(True)
-        header.setSortIndicator(0, Qt.SortOrder.DescendingOrder)
-        header.setSectionResizeMode(self.comp_col_context, QHeaderView.ResizeMode.Interactive)
-        header.setSectionResizeMode(self.comp_col_ms_context, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive) # Shelfmark
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # System ID
-        header.setSectionResizeMode(self.comp_col_printed, QHeaderView.ResizeMode.Fixed) # Printed
-        header.setSectionResizeMode(self.comp_col_witnesses, QHeaderView.ResizeMode.ResizeToContents)
-        # There is no composition header width/visibility persistence to
-        # migrate, so this column's hidden state is set explicitly on
-        # every render. Set once here and never again, it would survive
-        # onto the next single-witness or chunk result.
-        self.comp_tree.setColumnHidden(self.comp_col_witnesses, True)
-
-        self.comp_tree.setColumnWidth(0, 160) # Score - widened
-
-        # Title column (~25 chars)
-        title_width = self.comp_tree.fontMetrics().averageCharWidth() * 25
-        self.comp_tree.setColumnWidth(2, int(title_width))
-        context_width = self.comp_tree.fontMetrics().averageCharWidth() * 35
-        self.comp_tree.setColumnWidth(self.comp_col_context, int(context_width))
-        self.comp_tree.setColumnWidth(self.comp_col_ms_context, int(context_width))
-        self.comp_tree.setColumnWidth(self.comp_col_printed, 55)  # Printed column - narrow fixed
-        # Phase 95 D-12 — Src column setup
-        header.setSectionResizeMode(self.comp_col_src, QHeaderView.ResizeMode.Fixed)
-        self.comp_tree.setColumnWidth(self.comp_col_src, 60)  # narrow fixed, mirrors Printed width
-        header.setStretchLastSection(False)
-
         self.comp_tree.itemDoubleClicked.connect(self.on_comp_item_double_clicked)
         self.comp_tree.itemExpanded.connect(self._on_comp_item_expanded)
         self.comp_tree.itemCollapsed.connect(self._on_comp_item_collapsed)
 
-        # Use CheckBoxHeader for tree
+        # Use CheckBoxHeader for tree.
+        #
+        # ORDER MATTERS, and it used to be wrong. QTreeWidget.setHeader()
+        # DESTROYS the outgoing header and resets the incoming one: every
+        # column width returns to Qt's 100 px default, every resize mode
+        # returns to Interactive, setColumnHidden is cleared, and QTreeView
+        # re-derives sectionsClickable/setSortIndicatorShown from
+        # isSortingEnabled() -- which is False here, so the header became
+        # UNCLICKABLE. Any signal connected to the outgoing header dies with
+        # it. Configuring the tree before this call therefore threw all of it
+        # away (measured 2026-09-03), which is why Printed/Src sat at 100 px
+        # instead of 55/60 and why on_comp_header_clicked never fired. The
+        # header is installed FIRST and everything is configured on the header
+        # the user actually sees.
         self.chk_comp_header = CheckBoxHeader(
             self.comp_tree,
             filter_columns=[self.comp_col_library, self.comp_col_shelfmark, self.comp_col_title, self.comp_col_context, self.comp_col_ms_context, self.comp_col_printed, self.comp_col_src],
@@ -5916,15 +5896,7 @@ class GenizahGUI(QMainWindow):
         self.chk_comp_header.toggled.connect(self.on_comp_header_toggled)
         self.comp_tree.setHeader(self.chk_comp_header)
         self._update_comp_filter_indicators()
-        comp_header = self.comp_tree.header()
-        comp_header.setSectionResizeMode(self.comp_col_context, QHeaderView.ResizeMode.Interactive)
-        comp_header.setSectionResizeMode(self.comp_col_ms_context, QHeaderView.ResizeMode.Stretch)
-        comp_header.setSectionResizeMode(self.comp_col_library, QHeaderView.ResizeMode.Interactive) # Library
-        comp_header.setSectionResizeMode(self.comp_col_shelfmark, QHeaderView.ResizeMode.Interactive) # Shelfmark
-        comp_header.setSectionResizeMode(self.comp_col_sysid, QHeaderView.ResizeMode.ResizeToContents) # System ID
-        comp_header.setSectionResizeMode(self.comp_col_printed, QHeaderView.ResizeMode.Fixed) # Printed
-        comp_header.setSectionResizeMode(self.comp_col_src, QHeaderView.ResizeMode.Fixed)  # Phase 95 D-12 Src
-        comp_header.setStretchLastSection(False)
+        self._configure_comp_tree_header()
 
         rl.addWidget(self.comp_tree)
         
@@ -25691,12 +25663,71 @@ class GenizahGUI(QMainWindow):
         all_items.extend(known or [])
         return all_items
 
+    #: Composition columns that re-sort the tree when their header is clicked,
+    #: mapped to the COMP_SORT_MODES entry each one selects. Keyed by the
+    #: comp_col_* attributes, NOT by literal indices: this map used to read
+    #: {0: score, 1: shelfmark, 2: title, 3: system_id}, which was the column
+    #: order from BEFORE Library was inserted at index 1, so every entry but
+    #: Score named the column to its left. Library is absent on purpose --
+    #: COMP_SORT_MODES has no library mode.
+    def _comp_sort_mode_for_column(self, section):
+        return {
+            0: "score",
+            self.comp_col_shelfmark: "shelfmark",
+            self.comp_col_title: "title",
+            self.comp_col_sysid: "system_id",
+            self.comp_col_witnesses: "witnesses",
+        }.get(section)
+
+    def _configure_comp_tree_header(self):
+        """Configure the LIVE composition header.
+
+        Must run AFTER ``comp_tree.setHeader(...)`` -- see the comment at the
+        construction site. Everything this sets was previously applied to the
+        header that ``setHeader`` then destroyed.
+        """
+        header = self.comp_tree.header()
+        header.setSectionsClickable(True)
+        header.sectionClicked.connect(self.on_comp_header_clicked)
+        header.sectionResized.connect(self._refresh_comp_tree_tooltips)
+        header.setSortIndicatorShown(True)
+        header.setSortIndicator(0, Qt.SortOrder.DescendingOrder)
+        header.setStretchLastSection(False)
+
+        # EVERY column is user-resizable (owner request, 2026-09-03). System ID
+        # was ResizeToContents, MS Context was Stretch and Printed/Src were
+        # Fixed, none of which can be dragged. The widths below carry the
+        # intent those modes encoded -- System ID wide enough for a sys_id, MS
+        # Context wide enough to be the reading column, Printed/Src narrow --
+        # as DEFAULTS the reader can now override.
+        for col in range(self.comp_tree.columnCount()):
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+
+        char_w = self.comp_tree.fontMetrics().averageCharWidth()
+        for col, width in (
+            (0, 160),                                   # Score
+            (self.comp_col_library, char_w * 14),
+            (self.comp_col_shelfmark, char_w * 18),
+            (self.comp_col_title, char_w * 25),
+            (self.comp_col_sysid, char_w * 16),
+            (self.comp_col_context, char_w * 35),
+            (self.comp_col_ms_context, char_w * 45),    # was the Stretch column
+            (self.comp_col_printed, 55),
+            (self.comp_col_src, 60),
+            (self.comp_col_witnesses, char_w * 10),
+        ):
+            self.comp_tree.setColumnWidth(col, int(width))
+
+        # Starting state only; display_comp_results re-decides this on EVERY
+        # render, because there is no composition header visibility
+        # persistence and a column shown for a fused run must not survive onto
+        # the next single-witness or chunk result.
+        self.comp_tree.setColumnHidden(self.comp_col_witnesses, True)
+
     def on_comp_header_clicked(self, section):
-        if section not in (0, 1, 2, 3, self.comp_col_witnesses):
+        new_mode = self._comp_sort_mode_for_column(section)
+        if new_mode is None:
             return
-        mode_map = {0: "score", 1: "shelfmark", 2: "title", 3: "system_id",
-                    self.comp_col_witnesses: "witnesses"}
-        new_mode = mode_map.get(section, "score")
         if new_mode == self.comp_sort_mode:
             self.comp_sort_reverse = not self.comp_sort_reverse
         else:

@@ -274,6 +274,11 @@
 
 ## 8. Completed Issues (Archive)
 
+### Desktop — My Library remove-folder tests (2026-08-16, fixed 2026-09-03)
+
+| **Two My Library desktop tests fail at HEAD: `reload_local_indexes` is never called after a folder is removed** | `tests/test_my_library_tab.py::test_reload_local_indexes_called_after_remove_folder`, `::test_delete_then_search_no_local_hits` | ✅ Fixed (2026-09-03) | Found incidentally while running the main-job suite selection during the V4 deploy-record work; **not caused by it** — reproduced identically with the working tree stashed to HEAD, and identically again with discovery forced unavailable, so neither the code changes nor the newly staged sidecar is implicated. Both assert `reload_local_indexes` is called; the mock records no call. If the product path matches the test, removing a folder leaves the LOCAL index loaded and a subsequent search still returns hits from the removed folder — the second test's name says exactly that. **Not yet diagnosed**: nobody has established whether the desktop behaviour regressed or the tests drifted, and that is the first question. Unrelated: the batch run also hit a `0xC0000409` in this file, which does NOT reproduce in isolation (8/8 clean) — that is the accumulated-Qt-state crash the `gui` marker already documents, not a third defect. **Resolution (2026-09-03): TEST DRIFT, not a product regression.** `_on_remove_folder_clicked` has built a QMessageBox INSTANCE and gated on `mb.exec()` since 6d75ac58 (the localized-buttons change); it has not called the static `QMessageBox.question` since. Both tests still patched `.question`, so the confirm dialog fell through to `tests/conftest.py`'s autouse `_no_blocking_modal_exec` fixture, which answers Cancel — the removal never ran and `reload_local_indexes` was never reached. Fixed by patching `QMessageBox.exec` instead. Proven red at HEAD and green with the fix in the same session; the product path was never broken, so no LOCAL index was ever left loaded after a folder removal. |
+
+
 
 *Move verified-complete items here with completion date*
 

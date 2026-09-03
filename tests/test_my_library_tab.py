@@ -223,8 +223,14 @@ def test_reload_local_indexes_called_after_remove_folder():
 
     from PyQt6.QtWidgets import QMessageBox as _QMB
 
+    # `_on_remove_folder_clicked` builds a QMessageBox INSTANCE and gates on
+    # `mb.exec()` -- it has not used the static `QMessageBox.question` since
+    # 6d75ac58 (localized buttons). Patching `.question` therefore left the
+    # confirm dialog to tests/conftest.py's autouse `_no_blocking_modal_exec`
+    # fixture, which answers Cancel, so the removal never ran and this
+    # assertion failed at HEAD for reasons unrelated to the product.
     with mock.patch(
-        "desktop.my_library_tab.QMessageBox.question",
+        "desktop.my_library_tab.QMessageBox.exec",
         return_value=_QMB.StandardButton.Yes,
     ):
         tab._on_remove_folder_clicked()
@@ -323,8 +329,14 @@ def test_delete_then_search_no_local_hits():
     tab._folder_list.setCurrentRow(0)
     mock_searcher.reload_local_indexes.reset_mock()
 
+    # `_on_remove_folder_clicked` builds a QMessageBox INSTANCE and gates on
+    # `mb.exec()` -- it has not used the static `QMessageBox.question` since
+    # 6d75ac58 (localized buttons). Patching `.question` therefore left the
+    # confirm dialog to tests/conftest.py's autouse `_no_blocking_modal_exec`
+    # fixture, which answers Cancel, so the removal never ran and this
+    # assertion failed at HEAD for reasons unrelated to the product.
     with mock.patch(
-        "desktop.my_library_tab.QMessageBox.question",
+        "desktop.my_library_tab.QMessageBox.exec",
         return_value=_QMB.StandardButton.Yes,
     ):
         tab._on_remove_folder_clicked()
