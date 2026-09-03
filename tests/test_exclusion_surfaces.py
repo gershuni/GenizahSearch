@@ -23,13 +23,18 @@ bound onto a lightweight stub and the labels are trivial fakes.
 import ast
 import io
 import os
+from types import MethodType
 
 import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt6.QtWidgets import QApplication, QLabel
+
 from genizah_app import GenizahGUI
 from shared.exclusion_service import ExclusionSource
+
+_APP = QApplication.instance() or QApplication([])
 
 pytestmark = pytest.mark.gui  # imports genizah_app, which imports PyQt6
 
@@ -389,3 +394,73 @@ def test_the_composition_restore_runs_after_the_search_restore():
     reg = s.index("self.exclusion_sources = deserialize_sources(reg['exclusion_sources'])")
     comp = s.index("self.comp_exclusion_sources = list(")
     assert reg < comp
+
+
+# ---------------------------------------------------------------------------
+# The status label when there are exclusions but no SOURCE (Codex P2, PR #334)
+# ---------------------------------------------------------------------------
+#
+# set_excluded_entries -- the results-table "exclude this and work on it in
+# Composition" action -- fills raw/sys_ids and builds no ExclusionSource. A
+# restore then called _update_exclusion_display, which blanked the label while
+# the manuscripts stayed excluded: results silently filtered, nothing on screen
+# saying so.
+
+class _LabelHarness:
+    _EXCLUSION_ATTRS = GenizahGUI._EXCLUSION_ATTRS
+    _EXCLUSION_LABELS = GenizahGUI._EXCLUSION_LABELS
+
+    def __init__(self):
+        self.lbl_main_exclude_status = QLabel()
+        self.lbl_exclude_status = QLabel()
+        for surface in ("search", "composition"):
+            for field, attr in self._EXCLUSION_ATTRS[surface].items():
+                setattr(self, attr, [] if field in ("sources", "raw") else set())
+        for name in ("_excl_get", "_excl_set", "_update_exclusion_display"):
+            setattr(self, name, MethodType(getattr(GenizahGUI, name), self))
+
+
+@pytest.fixture
+def labels():
+    return _LabelHarness()
+
+
+@pytest.mark.parametrize("surface,lbl_attr", [
+    ("search", "lbl_main_exclude_status"),
+    ("composition", "lbl_exclude_status"),
+])
+def test_raw_entries_with_no_source_still_report_a_count(labels, surface, lbl_attr):
+    labels._excl_set(surface, 'raw', ['T-S 1.1', 'T-S 1.2'])
+    labels._update_exclusion_display(surface)
+    assert labels._excl_get(surface, 'sources') == []
+    assert "2" in getattr(labels, lbl_attr).text(), (
+        "manuscripts are excluded; a blank label says they are not"
+    )
+
+
+@pytest.mark.parametrize("surface,lbl_attr", [
+    ("search", "lbl_main_exclude_status"),
+    ("composition", "lbl_exclude_status"),
+])
+def test_no_sources_and_no_raw_entries_clears_the_label(labels, surface, lbl_attr):
+    getattr(labels, lbl_attr).setText("stale")
+    labels._update_exclusion_display(surface)
+    assert getattr(labels, lbl_attr).text() == ""
+
+
+def test_the_label_fallback_still_writes_only_its_own_surface(labels):
+    labels._excl_set('composition', 'raw', ['T-S 1.1'])
+    labels._update_exclusion_display('composition')
+    assert labels.lbl_main_exclude_status.text() == "", (
+        "the raw fallback must not re-couple the two labels"
+    )
+
+
+def test_the_search_restore_no_longer_hand_rolls_the_fallback():
+    """One fallback, in the shared helper, or the surfaces drift again."""
+    s = _method_source("_restore_session")
+    assert "self.lbl_main_exclude_status.setText(" not in s, (
+        "the restore must go through _update_exclusion_display"
+    )
+    assert "self._update_exclusion_display('search')" in s
+    assert "self._update_exclusion_display('composition')" in s

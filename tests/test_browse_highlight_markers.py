@@ -157,12 +157,31 @@ def test_stale_marked_text_degrades_to_plain_rather_than_showing_a_wrong_page(br
     assert browse._browse_original_display_text() == PAGE
 
 
-def test_page_text_containing_a_literal_asterisk_degrades_to_plain(browse):
-    starred = "SHALOM * OLAM"
-    browse.browse_original_page_text = starred
-    browse.browse_original_marked_text = starred
-    # marked.replace('*','') != plain, so the guard rejects it -- safe direction.
-    assert browse._browse_original_display_text() == starred
+def test_page_text_containing_a_literal_asterisk_keeps_its_highlight(browse):
+    """Codex P2, PR #334 -- this used to degrade to plain, losing the highlight.
+
+    mark_pattern_hits neutralizes the page's own asterisk to a space as it
+    inserts markers, so the guard compares marker-stripped against
+    asterisk-neutralized. Anything else rejects a perfectly good marked copy.
+    """
+    from desktop.widgets import mark_pattern_hits
+
+    plain = "SHALOM * OLAM AMAR"
+    marked = mark_pattern_hits(plain, "AMAR")
+    assert marked == "SHALOM   OLAM *AMAR*"
+    browse.browse_original_page_text = plain
+    browse.browse_original_marked_text = marked
+    assert browse._browse_original_display_text() == marked
+
+
+def test_a_marked_copy_of_a_DIFFERENT_starred_page_is_still_rejected(browse):
+    """Neutralizing must not weaken the staleness guard into accepting anything."""
+    from desktop.widgets import mark_pattern_hits
+
+    browse.browse_original_page_text = "SHALOM * OLAM AMAR"
+    browse.browse_original_marked_text = mark_pattern_hits(
+        "A DIFFERENT * PAGE AMAR", "AMAR")
+    assert browse._browse_original_display_text() == "SHALOM * OLAM AMAR"
 
 
 def test_missing_companion_returns_plain_not_none(browse):
@@ -190,3 +209,62 @@ def test_every_v08_fallback_goes_through_the_accessor():
     src = inspect.getsource(GenizahGUI._browse_load_version)
     assert "_browse_display_version_text(self.browse_original_page_text)" not in src
     assert src.count("_browse_original_display_text()") == 4
+
+
+# ---------------------------------------------------------------------------
+# Literal asterisks in the source text (Codex P2, PR #334)
+# ---------------------------------------------------------------------------
+#
+# `*` is the marker. A page carrying one of its own -- a copied footnote
+# marker; shared/search_engine.mark_word_highlights fixed the same thing for
+# xlsx export in Codex round 6 on PR #325 -- would otherwise pair up with an
+# inserted marker and bold the wrong span, strand a stray asterisk, or be
+# mistaken for already-marked text and never highlighted at all.
+
+def test_a_literal_asterisk_is_neutralized_before_markers_go_in():
+    from desktop.widgets import mark_pattern_hits
+
+    out = mark_pattern_hits("note* here FIND me", "FIND")
+    assert out == "note  here *FIND* me", (
+        "the page's own asterisk must become a space -- length-preserving, so "
+        "nothing downstream shifts -- leaving every remaining * a real marker"
+    )
+    assert out.count("*") == 2
+
+
+def test_marker_pairs_stay_correct_with_a_literal_asterisk():
+    from desktop.widgets import mark_pattern_hits, markers_to_bold_html
+
+    html = markers_to_bold_html(mark_pattern_hits("a* b FIND c", "FIND"))
+    assert html == "a  b <b style='color:red;'>FIND</b> c"
+    assert "*" not in html, "no stray asterisk may survive into the render"
+
+
+def test_text_is_untouched_when_nothing_matched():
+    """Only text we actually mark gets neutralized."""
+    from desktop.widgets import mark_pattern_hits
+
+    assert mark_pattern_hits("keep my * exactly", "NOPE") == "keep my * exactly"
+    assert mark_pattern_hits("keep my * exactly", "") == "keep my * exactly"
+    assert mark_pattern_hits("keep my * exactly", "[") == "keep my * exactly"
+
+
+def test_marker_probe_ignores_a_literal_asterisk():
+    from desktop.widgets import text_has_pattern_markers
+
+    # two literal asterisks, but the text between them is not the search term
+    assert text_has_pattern_markers("see *note 4* below", "FIND") is False
+    assert text_has_pattern_markers("see *FIND* below", "FIND") is True
+    assert text_has_pattern_markers("no markers here", "FIND") is False
+    assert text_has_pattern_markers("", "FIND") is False
+    assert text_has_pattern_markers("*FIND*", "") is False
+    assert text_has_pattern_markers("*FIND*", "[") is False
+
+
+def test_a_page_with_a_literal_asterisk_still_gets_highlighted():
+    """The whole point: the guard must not mistake source text for markers."""
+    from desktop.widgets import mark_pattern_hits, text_has_pattern_markers
+
+    page = "footnote* and the term FIND appears"
+    assert text_has_pattern_markers(page, "FIND") is False
+    assert "*FIND*" in mark_pattern_hits(page, "FIND")

@@ -20,6 +20,7 @@ from corrections_ui import (
     CommentDialog, CommentsViewerDialog, CorrectionsViewerDialog, JoinsDialog,
 )
 from desktop.widgets import (
+    text_has_pattern_markers,
     _format_add_to_list_label,
     apply_find_highlight, mark_pattern_hits, markers_to_bold_html,
     _get_folio_number_from_shelfmark,
@@ -1535,10 +1536,15 @@ class ResultDialog(QDialog):
         pattern (opened from Browse rather than a search), or when the pattern
         does not match this text -- so it is safe on PGP/FGP editions and on
         translations in another language.
+
+        "Already marked" is decided by text_has_pattern_markers, not by the
+        presence of an asterisk: an edition carrying a literal one of its own
+        would otherwise be taken for marked text and never highlighted
+        (Codex P2, PR #334).
         """
-        if not text or '*' in text:
-            return text
         pattern_str = (getattr(self, 'data', None) or {}).get('highlight_pattern')
+        if not text or text_has_pattern_markers(text, pattern_str):
+            return text
         return mark_pattern_hits(text, pattern_str)
 
     def _rd_display_text(self, text):

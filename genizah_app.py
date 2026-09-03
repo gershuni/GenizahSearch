@@ -51,6 +51,7 @@ from shared.search_engine import PHASE_LOCAL_SEARCH
 from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
 from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, PuzzleMetaLoaderThread, FilterCountWorker, RefinementReplayThread
 from desktop.widgets import (
+    text_has_pattern_markers,
     ActionsHoverWidget, _format_add_to_list_label,
     apply_find_highlight, markers_to_bold_html, mark_pattern_hits,
     _get_folio_number_from_shelfmark,
@@ -2979,10 +2980,15 @@ class GenizahGUI(QMainWindow):
         the text is already marked, when this browse view did not arrive from
         a search (`browse_highlight_pattern` is None), or when the pattern
         does not match -- so it is safe on PGP/FGP editions and translations.
+
+        "Already marked" is decided by text_has_pattern_markers, not by the
+        presence of an asterisk: a page carrying a literal one of its own
+        would otherwise be taken for marked text and never highlighted.
         """
-        if not text or '*' in text:
+        pattern = getattr(self, 'browse_highlight_pattern', None)
+        if not text or text_has_pattern_markers(text, pattern):
             return text
-        return mark_pattern_hits(text, getattr(self, 'browse_highlight_pattern', None))
+        return mark_pattern_hits(text, pattern)
 
     def _browse_original_display_text(self):
         """The V0.8 text to re-render, WITH its search-hit markers when we have them.
@@ -2992,12 +2998,18 @@ class GenizahGUI(QMainWindow):
         alongside it. The equality guard makes this self-correcting: if the
         plain text was refreshed from somewhere the marked copy didn't follow
         (``_check_document_community_status`` also writes it), we fall back to
-        plain rather than render a stale page. A page whose own text contains a
-        literal ``*`` also degrades to plain, which is the safe direction.
+        plain rather than render a stale page.
+
+        The comparison strips markers from one side and neutralizes literal
+        asterisks on the other, because that is exactly what
+        ``mark_pattern_hits`` does when it marks: every ``*`` in the marked
+        copy is a marker, and each ``*`` the page owned is now a space. A
+        page with a literal asterisk therefore keeps its highlight instead
+        of degrading to plain (Codex P2, PR #334).
         """
         marked = getattr(self, 'browse_original_marked_text', None)
         plain = getattr(self, 'browse_original_page_text', '') or ''
-        if marked and marked.replace('*', '') == plain:
+        if marked and marked.replace('*', '') == plain.replace('*', ' '):
             return marked
         return plain
 
@@ -24785,7 +24797,17 @@ class GenizahGUI(QMainWindow):
             return
         sources = self._excl_get(surface, 'sources')
         if not sources:
-            lbl.setText("")
+            # No SOURCES is not the same as no exclusions:
+            # set_excluded_entries -- the results-table "exclude this and
+            # work on it in Composition" action -- fills raw/sys_ids and
+            # builds no source at all. Restoring such a session called this
+            # and blanked the label while the manuscripts stayed excluded,
+            # so the Composition tab filtered results while reporting none
+            # (Codex P2, PR #334). The regular-search restore carried this
+            # fallback inline; it belongs here, where both surfaces and
+            # every caller get it.
+            raw = self._excl_get(surface, 'raw')
+            lbl.setText(tr("Excluded: {}").format(len(raw)) if raw else "")
             return
         total = sum(len(s.sys_ids) for s in sources)
         if len(sources) == 1:
@@ -29685,13 +29707,10 @@ class GenizahGUI(QMainWindow):
             self.filter_enabled_sources = set(reg.get('filter_enabled_sources', []))
 
             # Update exclusion status label (SEARCH surface -- the
-            # composition block below restores and labels its own)
-            if self.exclusion_sources:
-                self._update_exclusion_display('search')
-            elif self.excluded_raw_entries:
-                self.lbl_main_exclude_status.setText(
-                    tr("Excluded: {}").format(len(self.excluded_raw_entries))
-                )
+            # composition block below restores and labels its own). The
+            # raw-entry fallback now lives inside _update_exclusion_display,
+            # so both surfaces get it.
+            self._update_exclusion_display('search')
 
             # Restore regular search results
             if reg.get('results'):
