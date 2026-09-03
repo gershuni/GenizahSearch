@@ -1410,10 +1410,24 @@ class GenizahGUI(QMainWindow):
         self.comp_has_grouped_results = False
         self.comp_known = []
         self.pending_recursive_search = False
+        # Exclude Manuscripts is PER SURFACE (owner request 2026-09-03).
+        # Until then there was ONE list: both the Search tab's
+        # btn_main_exclude and the Composition tab's btn_exclude opened the
+        # same dialog over the same attributes, so excluding a manuscript on
+        # one surface silently excluded it on the other -- and each tab's
+        # own status label was written with the other's count.
+        # The Search tab KEEPS the historical un-prefixed names so the saved
+        # session schema and every existing reader stay valid; Composition
+        # gets the parallel comp_ set. Route through _excl_get/_excl_set
+        # rather than touching either group directly.
         self.excluded_raw_entries = []
         self.excluded_sys_ids = set()
         self.excluded_shelfmarks = set()
         self.exclusion_sources: list = []  # list of ExclusionSource objects (Phase 56)
+        self.comp_excluded_raw_entries = []
+        self.comp_excluded_sys_ids = set()
+        self.comp_excluded_shelfmarks = set()
+        self.comp_exclusion_sources: list = []
         # Pre-search filter state (Phase 45-03)
         self.pre_search_filters = {}  # dict: domain, author, work, date_from, date_to, material_exclude
         self.pre_search_restrict_sys_ids = None  # computed set or None
@@ -5141,7 +5155,8 @@ class GenizahGUI(QMainWindow):
         self.btn_main_exclude = QPushButton(tr("Exclude Manuscripts"))
         self.btn_main_exclude.setToolTip(tr("Exclude specific manuscripts by shelfmark or system ID"))
         self.btn_main_exclude.setStyleSheet("padding: 2px 8px;")
-        self.btn_main_exclude.clicked.connect(self.open_exclude_dialog)
+        self.btn_main_exclude.clicked.connect(
+            lambda: self.open_exclude_dialog('search'))
         
         self.lbl_main_exclude_status = QLabel("")
         self.lbl_main_exclude_status.setStyleSheet("color: #8e44ad; font-weight: bold; font-size: 11px;")
@@ -5479,7 +5494,9 @@ class GenizahGUI(QMainWindow):
         top_row.addWidget(btn_load)
 
         # 1. Exclude & Filter (Moved to top row)
-        btn_exclude = QPushButton(tr("Exclude Manuscripts")); btn_exclude.clicked.connect(self.open_exclude_dialog)
+        btn_exclude = QPushButton(tr("Exclude Manuscripts"))
+        btn_exclude.clicked.connect(
+            lambda: self.open_exclude_dialog('composition'))
         btn_filter_text = QPushButton(tr("Filter Text")); btn_filter_text.clicked.connect(self.open_filter_dialog)
         self.lbl_exclude_status = QLabel("")
         self.lbl_exclude_status.setStyleSheet("color: #8e44ad; font-weight: bold;")
@@ -19645,11 +19662,9 @@ class GenizahGUI(QMainWindow):
         if hasattr(self, '_update_search_within_btn'):
             self._update_search_within_btn()
 
-        # 10. Clear manuscript exclusions (shared with composition)
-        self.excluded_sys_ids = set()
-        self.excluded_shelfmarks = set()
-        self.excluded_raw_entries = []
-        self.exclusion_sources = []
+        # 10. Clear this surface's manuscript exclusions ONLY. Before the
+        # 2026-09-03 split this also wiped the Composition tab's list.
+        self._clear_exclusions('search')
 
         # 11. Clear list filter state
         self.list_filter_state = {'active': False, 'mode': 'in', 'lists': 'all'}
@@ -22747,11 +22762,11 @@ class GenizahGUI(QMainWindow):
         # ------------------------------------------------------
 
         if sys_id:
-            entries = list(self.excluded_raw_entries)
+            entries = list(self._excl_get('composition', 'raw'))
             # Add only if not already present
             if sys_id not in entries:
                 entries.append(sys_id)
-                self.set_excluded_entries("\n".join(entries))
+                self.set_excluded_entries("\n".join(entries), 'composition')
                 
         self._set_active_tab(self.composition_tab)
         self.comp_text_area.setFocus()
@@ -24406,34 +24421,94 @@ class GenizahGUI(QMainWindow):
         if path:
             with open(path, 'r', encoding='utf-8') as f: self.comp_text_area.setPlainText(f.read())
 
-    def open_exclude_dialog(self):
+    #: Attribute names holding each surface's Exclude-Manuscripts list.
+    #: 'search' keeps the historical names (saved-session schema, existing
+    #: readers); 'composition' is the parallel set added 2026-09-03 when the
+    #: two surfaces stopped sharing one list.
+    _EXCLUSION_ATTRS = {
+        'search': {
+            'sources': 'exclusion_sources',
+            'sys_ids': 'excluded_sys_ids',
+            'shelfmarks': 'excluded_shelfmarks',
+            'raw': 'excluded_raw_entries',
+        },
+        'composition': {
+            'sources': 'comp_exclusion_sources',
+            'sys_ids': 'comp_excluded_sys_ids',
+            'shelfmarks': 'comp_excluded_shelfmarks',
+            'raw': 'comp_excluded_raw_entries',
+        },
+    }
+
+    #: Which status label each surface owns. Before the split both were
+    #: written with the same text, which is what hid the sharing.
+    _EXCLUSION_LABELS = {
+        'search': 'lbl_main_exclude_status',
+        'composition': 'lbl_exclude_status',
+    }
+
+    def _excl_get(self, surface, field):
+        """One field of one surface's exclusion list."""
+        return getattr(self, self._EXCLUSION_ATTRS[surface][field])
+
+    def _excl_set(self, surface, field, value):
+        setattr(self, self._EXCLUSION_ATTRS[surface][field], value)
+
+    def _clear_exclusions(self, surface):
+        """Empty ONE surface's exclusion list, leaving the other alone."""
+        self._excl_set(surface, 'sources', [])
+        self._excl_set(surface, 'sys_ids', set())
+        self._excl_set(surface, 'shelfmarks', set())
+        self._excl_set(surface, 'raw', [])
+        self._update_exclusion_display(surface)
+
+    def open_exclude_dialog(self, surface='search'):
+        """Edit ONE surface's exclusion list.
+
+        `surface` is bound at the two connect sites with a lambda, because
+        QPushButton.clicked delivers a bool that would otherwise land here
+        as the surface name.
+        """
         self._ensure_shelf_map()
         dlg = ExcludeDialog(
             self,
-            existing_entries=self.excluded_raw_entries,
+            existing_entries=self._excl_get(surface, 'raw'),
             lists_mgr=getattr(self, 'lists_mgr', None),
             shelf_map=getattr(self, '_shelf_to_sys', None),
-            exclusion_sources=self.exclusion_sources,
+            exclusion_sources=self._excl_get(surface, 'sources'),
         )
         if dlg.exec():
             new_sources = dlg.get_exclusion_sources()
             # Replace all sources with what the dialog editor contains (may be empty = clear all)
-            self.exclusion_sources = new_sources
-            self.excluded_sys_ids = compute_excluded_ids(self.exclusion_sources)
+            self._excl_set(surface, 'sources', new_sources)
+            sys_ids = compute_excluded_ids(new_sources)
+            self._excl_set(surface, 'sys_ids', sys_ids)
             all_unresolved = []
-            for s in self.exclusion_sources:
+            for s in new_sources:
                 all_unresolved.extend(s.unresolved)
-            self.excluded_shelfmarks = {normalize_shelfmark(u) for u in all_unresolved if u}
+            self._excl_set(
+                surface, 'shelfmarks',
+                {normalize_shelfmark(u) for u in all_unresolved if u})
             # Also update legacy raw entries for backward compat
-            self.excluded_raw_entries = sorted(self.excluded_sys_ids) if self.excluded_sys_ids else []
-            self._update_exclusion_display()
-            # Re-render results with exclusions applied
-            self._rerender_with_exclusions()
+            self._excl_set(surface, 'raw',
+                           sorted(sys_ids) if sys_ids else [])
+            self._update_exclusion_display(surface)
+            # Re-render results with exclusions applied. Only the Search
+            # tab has a live re-render; the composition tree re-applies its
+            # exclusions on the next display_comp_results, as it always has.
+            if surface == 'search':
+                self._rerender_with_exclusions()
             self._schedule_session_save()
 
-    def set_excluded_entries(self, entries_text: str):
+    def set_excluded_entries(self, entries_text: str, surface='composition'):
+        """Replace one surface's exclusion list from newline-separated text.
+
+        Defaults to 'composition': the only caller is the results-table
+        "exclude this and work on it in Composition" action, which switches
+        to the composition tab immediately afterwards.
+        """
         entries = [e.strip() for e in entries_text.splitlines() if e.strip()]
-        self.excluded_raw_entries = entries
+        self._excl_set(surface, 'raw', entries)
 
         sys_ids = set()
         shelves = set()
@@ -24447,9 +24522,11 @@ class GenizahGUI(QMainWindow):
                 if norm:
                     shelves.add(norm)
 
-        self.excluded_sys_ids = sys_ids
-        self.excluded_shelfmarks = shelves
-        self.lbl_exclude_status.setText(tr("Excluded: {}").format(len(entries)))
+        self._excl_set(surface, 'sys_ids', sys_ids)
+        self._excl_set(surface, 'shelfmarks', shelves)
+        _lbl = getattr(self, self._EXCLUSION_LABELS[surface], None)
+        if _lbl is not None:
+            _lbl.setText(tr("Excluded: {}").format(len(entries)))
         self._schedule_session_save()
 
     def _normalize_shelfmark(self, shelfmark: str) -> str:
@@ -24484,30 +24561,38 @@ class GenizahGUI(QMainWindow):
                 f"{visible} / {total} {tr('Results')} ({hidden_count} {tr('excluded')})"
             )
 
-    def _update_exclusion_display(self):
-        """Update exclusion status labels with per-source breakdown (D-07)."""
-        if not self.exclusion_sources:
-            self.lbl_exclude_status.setText("")
-            if hasattr(self, 'lbl_main_exclude_status'):
-                self.lbl_main_exclude_status.setText("")
+    def _update_exclusion_display(self, surface='search'):
+        """Update ONE surface's exclusion status label (D-07 breakdown).
+
+        This used to write the SAME text into both labels, which is what made
+        the shared list invisible: excluding on the Search tab silently
+        relabelled the Composition tab too.
+        """
+        lbl = getattr(self, self._EXCLUSION_LABELS[surface], None)
+        if lbl is None:
             return
-        total = sum(len(s.sys_ids) for s in self.exclusion_sources)
-        if len(self.exclusion_sources) == 1:
-            src = self.exclusion_sources[0]
+        sources = self._excl_get(surface, 'sources')
+        if not sources:
+            lbl.setText("")
+            return
+        total = sum(len(s.sys_ids) for s in sources)
+        if len(sources) == 1:
+            src = sources[0]
             status_text = tr("Excluded: {}").format(f"{total} ({src.label})")
         else:
-            parts = [f"{len(s.sys_ids)} {s.label}" for s in self.exclusion_sources]
+            parts = [f"{len(s.sys_ids)} {s.label}" for s in sources]
             status_text = tr("Excluded: {}").format(f"{total} ({', '.join(parts)})")
-        self.lbl_exclude_status.setText(status_text)
-        if hasattr(self, 'lbl_main_exclude_status'):
-            self.lbl_main_exclude_status.setText(status_text)
+        lbl.setText(status_text)
 
-    def _remove_exclusion_source(self, source_id: str):
+    def _remove_exclusion_source(self, source_id: str, surface='search'):
         """Remove a single exclusion source by source_id (D-06 per-source clear)."""
-        self.exclusion_sources = [s for s in self.exclusion_sources if s.source_id != source_id]
-        self.excluded_sys_ids = compute_excluded_ids(self.exclusion_sources)
-        self._update_exclusion_display()
-        self._rerender_with_exclusions()
+        sources = [s for s in self._excl_get(surface, 'sources')
+                   if s.source_id != source_id]
+        self._excl_set(surface, 'sources', sources)
+        self._excl_set(surface, 'sys_ids', compute_excluded_ids(sources))
+        self._update_exclusion_display(surface)
+        if surface == 'search':
+            self._rerender_with_exclusions()
         self._schedule_session_save()
 
     def _ensure_shelf_map(self):
@@ -24646,20 +24731,23 @@ class GenizahGUI(QMainWindow):
             pass
 
     def _item_matches_exclusion(self, item):
+        # COMPOSITION surface only -- this predicate is reached solely from
+        # _apply_manual_exclusions, which the composition render path calls.
+        _excluded_ids = self._excl_get('composition', 'sys_ids')
         # For Part items, check all folios in the Part
         item_type = item.get('type', '')
         if item_type == 'part':
             # Check sys_id field directly
             direct_sid = item.get('sys_id')
-            if direct_sid and direct_sid in self.excluded_sys_ids:
+            if direct_sid and direct_sid in _excluded_ids:
                 return True
             # Check all folios in the Part
             for folio_sid in item.get('folios', []):
-                if folio_sid in self.excluded_sys_ids:
+                if folio_sid in _excluded_ids:
                     return True
 
         sys_id, _ = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
-        if sys_id and sys_id in self.excluded_sys_ids:
+        if sys_id and sys_id in _excluded_ids:
             return True
 
         if sys_id and sys_id not in self.meta_mgr.nli_cache:
@@ -24667,12 +24755,13 @@ class GenizahGUI(QMainWindow):
 
         _, _, shelf, _ = self._get_meta_for_header(item.get('raw_header', ''))
         norm_shelf = self._normalize_shelfmark(shelf)
-        if norm_shelf and norm_shelf in self.excluded_shelfmarks:
+        if norm_shelf and norm_shelf in self._excl_get('composition', 'shelfmarks'):
             return True
         return False
 
     def _apply_manual_exclusions(self, main, appx):
-        if not (self.excluded_sys_ids or self.excluded_shelfmarks):
+        if not (self._excl_get('composition', 'sys_ids')
+                or self._excl_get('composition', 'shelfmarks')):
             return main, appx, []
 
         known = []
@@ -24877,12 +24966,9 @@ class GenizahGUI(QMainWindow):
         self._witness_notify('')
         self._refresh_witness_panel()
 
-        # 7. Clear manuscript exclusions (shared with search)
-        self.excluded_raw_entries = []
-        self.excluded_sys_ids = set()
-        self.excluded_shelfmarks = set()
-        self.exclusion_sources = []
-        self.lbl_exclude_status.setText("")
+        # 7. Clear this surface's manuscript exclusions ONLY. Before the
+        # 2026-09-03 split this also wiped the Search tab's list.
+        self._clear_exclusions('composition')
 
         # 8. Clear composition domain exclusions
         self._comp_domain_exclusions = set()
@@ -25041,7 +25127,7 @@ class GenizahGUI(QMainWindow):
         if mode == 'variants' and hasattr(self, 'comp_variant_slider') and self.var_mgr:
             self.var_mgr.set_variant_level(self.comp_variant_slider.value())
 
-        excluded_ids = self.excluded_raw_entries
+        excluded_ids = self._excl_get('composition', 'raw')
 
         # Get boundary search parameters from UI
         boundary_mode = self.boundary_mode_combo.currentData() if hasattr(self, 'boundary_mode_combo') else 'full'
@@ -25149,8 +25235,9 @@ class GenizahGUI(QMainWindow):
             # Robustness: Pass resolved System IDs if available, to catch items excluded by shelfmark
             # where the user didn't explicitly type the ID.
             final_excluded_ids = excluded_ids
-            if self.excluded_sys_ids:
-                final_excluded_ids = list(self.excluded_sys_ids)
+            if self._excl_get('composition', 'sys_ids'):
+                final_excluded_ids = list(
+                    self._excl_get('composition', 'sys_ids'))
 
             deep = self.chk_lab_deep_comp.isChecked()
             limit = self.lab_engine.settings.lab_scan_limit
@@ -29163,8 +29250,14 @@ class GenizahGUI(QMainWindow):
                     'printed_filter': getattr(self, '_comp_printed_filter_state', 'all'),
                     'local_filter_composition': getattr(self, '_local_filter_state_composition', 'all'),
                     'local_filter_parallels': getattr(self, '_local_filter_state_parallels', 'all'),
-                    'excluded_sys_ids': sorted(getattr(self, 'excluded_sys_ids', set())),
-                    'excluded_shelfmarks': sorted(getattr(self, 'excluded_shelfmarks', set())),
+                    # The COMPOSITION tab's own exclusion list since the
+                    # 2026-09-03 per-surface split. These keys previously
+                    # held the shared list and were written but never read
+                    # back -- the composition restore block below now does.
+                    'excluded_sys_ids': sorted(getattr(self, 'comp_excluded_sys_ids', set())),
+                    'excluded_shelfmarks': sorted(getattr(self, 'comp_excluded_shelfmarks', set())),
+                    'excluded_raw_entries': getattr(self, 'comp_excluded_raw_entries', []),
+                    'exclusion_sources': serialize_sources(getattr(self, 'comp_exclusion_sources', [])),
                     'sort_mode': getattr(self, 'comp_sort_mode', 'score'),
                     'sort_reverse': getattr(self, 'comp_sort_reverse', True),
                     'flat_mode': self.chk_comp_flat.isChecked() if hasattr(self, 'chk_comp_flat') else False,
@@ -29362,11 +29455,12 @@ class GenizahGUI(QMainWindow):
             self.filter_sources = reg.get('filter_sources', {})
             self.filter_enabled_sources = set(reg.get('filter_enabled_sources', []))
 
-            # Update exclusion status label
+            # Update exclusion status label (SEARCH surface -- the
+            # composition block below restores and labels its own)
             if self.exclusion_sources:
-                self._update_exclusion_display()
+                self._update_exclusion_display('search')
             elif self.excluded_raw_entries:
-                self.lbl_exclude_status.setText(
+                self.lbl_main_exclude_status.setText(
                     tr("Excluded: {}").format(len(self.excluded_raw_entries))
                 )
 
@@ -29419,6 +29513,33 @@ class GenizahGUI(QMainWindow):
             # `absent_method=None`: a session with no stored method has no
             # preference to honour, so the letter-level default stands.
             self._restore_comp_passage_preferences(comp, absent_method=None)
+
+            # Exclude Manuscripts, composition surface. Sessions written
+            # before the 2026-09-03 split stored ONE shared list; those
+            # carry no 'exclusion_sources' under composition_search, so we
+            # fall back to the regular-search block's list. Migrating it
+            # into BOTH surfaces reproduces the old behaviour exactly on
+            # the first load after upgrading -- the two only diverge once
+            # the user edits one of them.
+            if comp.get('exclusion_sources') or comp.get('excluded_raw_entries'):
+                self.comp_exclusion_sources = deserialize_sources(
+                    comp.get('exclusion_sources') or [])
+                self.comp_excluded_raw_entries = comp.get('excluded_raw_entries', [])
+                self.comp_excluded_shelfmarks = set(comp.get('excluded_shelfmarks', []))
+                self.comp_excluded_sys_ids = (
+                    compute_excluded_ids(self.comp_exclusion_sources)
+                    if self.comp_exclusion_sources
+                    else set(comp.get('excluded_sys_ids', [])))
+            else:
+                self.comp_exclusion_sources = list(
+                    getattr(self, 'exclusion_sources', []) or [])
+                self.comp_excluded_sys_ids = set(
+                    getattr(self, 'excluded_sys_ids', set()) or set())
+                self.comp_excluded_shelfmarks = set(
+                    getattr(self, 'excluded_shelfmarks', set()) or set())
+                self.comp_excluded_raw_entries = list(
+                    getattr(self, 'excluded_raw_entries', []) or [])
+            self._update_exclusion_display('composition')
 
             self._comp_domain_exclusions = set(comp.get('domain_exclusions', []))
             self._comp_printed_filter_state = comp.get('printed_filter', 'all')
