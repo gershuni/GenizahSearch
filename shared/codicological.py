@@ -245,11 +245,22 @@ class CodicologicalManager:
             if match:
                 letter, volume, part_num = match.groups()
                 return f"heb. {letter}. {volume} part {part_num}"
-            return f"{part_id} part"
+            # A Part ID with no "/N" is the whole codex (e.g. "MS. Heb. g. 2"):
+            # there is no part number to show, so never append a bare " part"
+            # (it rendered as "[part ]" on web / "[part]" on desktop, 2026-09-02).
+            return part_id
         return part_id
 
-    def get_part_label(self, part_id):
-        """Return a short Part label suitable for shelfmark suffixes (e.g., "part 23")."""
+    def get_part_label(self, part_id, shelfmark=None):
+        """Return a short label for the shelfmark suffix badge, or "".
+
+        * Part ID with a part number ("MS. Heb. d. 29/2", "MS. Heb. d. 25/C")
+          -> "part 2" / "part C".
+        * Part ID that is the whole codex ("MS. Heb. g. 2") -> the record's own
+          folio inside it, taken from ``shelfmark`` ("MS heb. g.2/27" -> "fol. 27"),
+          because that number is what positions the images and the FGP rows.
+          No parseable folio -> "" (callers render nothing) -- never a bare "part".
+        """
         if not part_id:
             return ""
 
@@ -257,7 +268,10 @@ class CodicologicalManager:
         if match:
             return f"part {match.group(1)}"
 
-        return "part"
+        folio = self._get_folio_number(shelfmark) if shelfmark else 0
+        if folio:
+            return f"fol. {folio}"
+        return ""
 
     def is_part_id(self, identifier):
         """Check if an identifier is a Part ID (vs a regular shelfmark)."""

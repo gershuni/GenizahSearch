@@ -48,6 +48,7 @@ if _CORE_IMPORT_ERROR:
     else:
         raise _CORE_IMPORT_ERROR
 from shared.search_engine import PHASE_LOCAL_SEARCH
+from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
 from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, PuzzleMetaLoaderThread, FilterCountWorker, RefinementReplayThread
 from desktop.widgets import (
     ActionsHoverWidget, _format_add_to_list_label,
@@ -3107,16 +3108,20 @@ class GenizahGUI(QMainWindow):
 
         # === FGP Group (distinct from PGP; FGP-07) ===
         if fgp_sources:
-            from shared.fgp_service import pick_fgp_credit, choose_default_source
+            from shared.fgp_service import pick_fgp_credit, choose_default_source, fgp_incipit
             # Live read (CURRENT_LANG flips at runtime on language switch — the
             # module-level import binds a stale snapshot; see the lines-button site).
             from genizah_core import CURRENT_LANG as _fgp_lang
             # SEED-030: if the FGP edition is demoted below V0.8 for low folio
             # coverage, tag it in the combo so the reader knows why V0.8 is the
-            # default (parity with the web menu hint).
+            # default (parity with the web menu hint). Scored on FGP-only
+            # sources (never the full merged ``sources``) so a PGP edition
+            # elsewhere in the manuscript can never short-circuit this into
+            # the unrelated PGP-first decision (choose_default_source now
+            # ALSO arbitrates PGP -- this tag is FGP-vs-V0.8 only).
             _sid = sys_id
             _fgp_dec = choose_default_source(
-                sources,
+                fgp_sources,
                 htr_text or '',
                 full_htr_getter=lambda: self._browse_full_htr_text(_sid),
             )
@@ -3143,6 +3148,12 @@ class GenizahGUI(QMainWindow):
                     label = f"  {tr('FGP Transcription')}"
                     if _fgp_demoted:
                         label = f"{label} · {tr('shorter than V0.8')}"
+                # D2: an incipit so ~10 identical-looking "FGP Transcription"
+                # entries on one manuscript (MS heb. g.2) are tellable apart.
+                # The credit stays in the tooltip below (not repeated here).
+                _incipit = fgp_incipit(fsrc.get('content'))
+                if _incipit:
+                    label = f"{label} — {_incipit}"
                 _credit = pick_fgp_credit(fsrc, _fgp_lang)
                 # No folio suffix: the combo is filtered to the displayed image's
                 # folio, so the folio only routes placement (it's not shown).
@@ -3189,63 +3200,70 @@ class GenizahGUI(QMainWindow):
                 self._browse_full_htr_cached = ''
         return self._browse_full_htr_cached
 
-    def _auto_select_pgp_edition(self, combo, sources=None, htr_text=None, sys_id=None):
-        """Find the first edition item and set it as current.
+    def _auto_select_pgp_edition(self, combo, sources=None, htr_text=None, sys_id=None,
+                                  must_contain=None):
+        """Select the combo item matching the shared default-source policy.
 
-        PGP-first (the recommended default). Falls back to the first FGP edition
-        when no PGP edition exists — UNLESS that FGP edition is a partial/selected
-        excerpt of the folio, in which case it is demoted below V0.8/HTR so the
-        reader sees the fuller MiDRASH transcription (SEED-030); the FGP row stays
-        selectable in the combo. Full FGP editions still default (FGP-07).
+        RENDER-ONLY (no per-surface precedence logic): the single decision of
+        which source — a PGP edition, an FGP edition, or V0.8 — defaults for
+        this folio is made entirely by ``shared.fgp_service.choose_default_source``
+        (PGP-first unconditionally; then FGP-vs-V0.8 coverage/text-match,
+        SEED-030 + sub-issue D; with an optional ``must_contain`` search-scoped
+        override, SEED-033 Option A). This method only locates the matching
+        combo item and selects it — parity with the web ``version_selector``.
 
-        ``sources`` / ``htr_text`` / ``sys_id`` are the CALLER's context for the
-        coverage check (Browse tab vs ResultDialog each pass their own — never
-        read ``self.browse_*`` here). Omitted → no coverage demotion (old behavior).
+        ``sources`` / ``htr_text`` / ``sys_id`` are the CALLER's context (Browse
+        tab vs ResultDialog each pass their own — never read ``self.browse_*``
+        here). ``must_contain`` is the phrase the user actually searched for,
+        when known (the ResultDialog passes it; ordinary Browse-tab navigation
+        omits it — PGP-first stays the rule there). When the default was chosen
+        BECAUSE of ``must_contain``, a tooltip on ``combo`` notes it.
 
         Returns:
-            The item data dict if an edition was selected, None otherwise.
+            The item data dict of the selected source, or None when V0.8 defaults.
         """
-        # PGP edition always wins.
-        for i in range(combo.count()):
-            data = combo.itemData(i)
-            if data and data.get('source') == 'pgp_edition':
-                combo.setCurrentIndex(i)
-                return data
-
-        # No PGP edition — weigh FGP against V0.8/HTR by folio coverage (shared
-        # policy, parity with web version_selector).
         from shared.fgp_service import choose_default_source
         _sid = sys_id
         decision = choose_default_source(
             sources,
             htr_text or '',
             full_htr_getter=lambda: self._browse_full_htr_text(_sid),
+            must_contain=must_contain,
         )
-        if not decision['eligible'] and decision['reason'] == 'demote_low_coverage':
-            # Partial FGP → default to V0.8: select it so the combo reflects the
-            # displayed text (the caller leaves V0.8 shown). FGP stays in the list.
+        combo.setToolTip(
+            tr('showing the version containing your search')
+            if decision.get('must_contain_matched') else ''
+        )
+
+        if decision['eligible'] and decision.get('source') is not None:
+            # Select the SAME source the shared policy chose (parity with web)
+            # by source_id; fall back to the first item of that provider's kind.
+            target = 'pgp_edition' if decision.get('provider') == 'pgp' else 'fgp_edition'
+            chosen_id = decision['source'].get('id')
+            first_idx = None
+            for i in range(combo.count()):
+                data = combo.itemData(i)
+                if data and data.get('source') == target:
+                    if first_idx is None:
+                        first_idx = i
+                    if chosen_id is not None and data.get('source_id') == chosen_id:
+                        combo.setCurrentIndex(i)
+                        return data
+            if first_idx is not None:
+                combo.setCurrentIndex(first_idx)
+                return combo.itemData(first_idx)
+            return None
+
+        # Not eligible for a default — fall through to V0.8, EXCEPT the passive
+        # "no PGP edition and no FGP edition at all" case (may still be an
+        # FGP-translation-only manuscript; old behavior leaves the combo where
+        # it already is rather than force V0.8 over a translation).
+        if decision['reason'] != 'no_fgp_edition':
             for i in range(combo.count()):
                 data = combo.itemData(i)
                 if data and data.get('source') == 'original':
                     combo.setCurrentIndex(i)
                     break
-            return None
-
-        # Select the SAME edition the shared policy chose (best-of-multiple parity
-        # with web) by source_id; fall back to the first FGP edition item.
-        chosen_id = (decision.get('source') or {}).get('id')
-        first_fgp_idx = None
-        for i in range(combo.count()):
-            data = combo.itemData(i)
-            if data and data.get('source') == 'fgp_edition':
-                if first_fgp_idx is None:
-                    first_fgp_idx = i
-                if chosen_id is not None and data.get('source_id') == chosen_id:
-                    combo.setCurrentIndex(i)
-                    return data
-        if first_fgp_idx is not None:
-            combo.setCurrentIndex(first_fgp_idx)
-            return combo.itemData(first_fgp_idx)
         return None
 
     def _check_document_community_status(self):
@@ -27524,7 +27542,7 @@ class GenizahGUI(QMainWindow):
                 'images_ext': images_ext,
                 'oxford_part_id': part_id,
                 'oxford_part_metadata': part_meta,  # Include for dynamic image generation
-                'attribution': "From the collections of the Bodleian Libraries, Oxford",
+                'attribution': tr(OXFORD_IMAGE_CREDIT_EN),
             }, initial_idx=image_idx, target_folio=folio_num)
 
         # Load text for the selected folio

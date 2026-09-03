@@ -1,6 +1,6 @@
 ---
 id: SEED-033
-status: awaiting-decision
+status: "ruled: Option A, implemented 2026-09-02 (debug/oxford-fgp-image-mismatch)"
 planted: 2026-08-12
 planted_during: post-v8.5.2 (Phase 136 discovery work active)
 trigger_when: owner rules between Design Options A / B / C below — no code until then
@@ -9,6 +9,19 @@ apps: both (web `version_selector` + desktop `_auto_select_pgp_edition`) + share
 origin: owner bug report 2026-08-12 — search "עצים עליו למודה" showed a snippet the
   browse page never displays
 related_memory: project_fgp_default_vs_midrash_coverage, reference_local_data_real_paths
+ruling: |
+  2026-09-02T07:40Z, via AskUserQuestion (orchestrator-dispatched, recorded in
+  .planning/debug/oxford-fgp-image-mismatch.md owner_rulings): "Yes, include
+  Option A in this session" — search-scoped must-contain default; PGP-first
+  stays for cold browsing. Implemented the same session: `must_contain`
+  parameter on `shared/fgp_service.py::choose_default_source`, both call sites
+  (`web/components/version_selector.py`, `genizah_app.py::_auto_select_pgp_edition`)
+  are render-only wrappers, `web/pages/search_results.py`'s four browse-link
+  sites now pass `&highlight=<matched phrase>`, desktop passes the ResultDialog's
+  own matched text. Real-data pin: pgpid 37732 / Heid. Hebr. 18 folio 1v (see
+  `tests/test_fgp_default_coverage.py::TestMustContainOverride`). Option B
+  (extend the coverage gate to PGP) remains NOT implemented — out of scope for
+  this ruling.
 ---
 
 # SEED-033: the PGP default masks the transcription the search actually matched

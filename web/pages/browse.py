@@ -200,9 +200,15 @@ VIEWER_STYLES = '''
     /* Highlight search terms */
     .highlight-term {
         background-color: #fef08a;
+        color: #1f2937;            /* explicit: the page text is white in dark mode */
         padding: 2px 4px;
         border-radius: 3px;
         font-weight: 600;
+    }
+    [data-theme="dark"] .highlight-term {
+        /* same treatment as .highlight-match on the search page (common.css) */
+        background: linear-gradient(120deg, #854d0e 0%, #a16207 100%);
+        color: #ffffff;
     }
 
     /* Metadata header */
@@ -542,6 +548,49 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     if highlight:
         state.highlight_terms = highlight
 
+
+    def _search_scope_phrase(page):
+        """The search phrase, but ONLY on the folio the deep link arrived for.
+
+        `highlight_terms` drives the SEED-033 `must_contain` override. Clearing it
+        on a manuscript change is not enough: paging within the SAME manuscript kept
+        it, so on a structurally unalignable manuscript -- where whole-document FGP
+        sources are offered on every folio -- a later folio could default to the
+        edition containing the PREVIOUS folio's hit (Codex P2, 2026-09-02).
+
+        The first folio rendered after arriving with `?highlight=` claims the phrase;
+        every other folio gets None. The yellow marks are unaffected: they are a
+        plain text search and stay useful while browsing.
+        """
+        if not state.highlight_terms or page is None:
+            return None
+        # volume_ie belongs in the key: multi-volume manuscripts restart p_num in
+        # each volume and the volume selector loads page 1, so (sys_id, p_num) alone
+        # matches another volume's page 1 (Codex P2, 2026-09-02).
+        current = (getattr(page, 'sys_id', None),
+                   getattr(page, 'volume_ie', None) or state.volume_ie,
+                   getattr(page, 'p_num', None))
+        if state.highlight_scope is None:
+            state.highlight_scope = current      # this folio owns it
+            return state.highlight_terms
+        return state.highlight_terms if state.highlight_scope == current else None
+
+    def _clear_search_scope_for_new_manuscript(new_sys_id):
+        """Drop the search-scoped phrase once the reader leaves the matched MS.
+
+        `highlight_terms` arrives from `/browse?highlight=` and drives BOTH the
+        yellow marks and the SEED-033 `must_contain` default-source override. It
+        used to survive shelfmark and adjacent-manuscript navigation, so a later
+        manuscript could default to whichever transcription happened to contain the
+        previous manuscript's hit (Codex P2, 2026-09-02). `_update_browser_url`
+        already drops it from the URL; this drops it from the state that is read.
+        """
+        if new_sys_id and state.sys_id and new_sys_id != state.sys_id:
+            state.highlight_terms = None
+            state.highlight_scope = None
+            _url_state['highlight'] = None
+
+
     def _update_browser_url():
         """Sync the browser URL bar with the current manuscript/page for sharing.
 
@@ -611,6 +660,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
             # If input looks like a sys_id (starts with 99, all digits), load directly
             if _query.isdigit() and _query.startswith('99'):
+                _clear_search_scope_for_new_manuscript(_query)
                 state.sys_id = _query
                 state.current_page = None
                 state.view_joined = False
@@ -643,6 +693,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
             # If exact match or single result, load directly
             if exact_match or len(results) == 1:
+                _clear_search_scope_for_new_manuscript(results[0].sys_id)
                 state.sys_id = results[0].sys_id
                 state.current_page = None  # Reset to avoid using old page number
                 state.view_joined = False  # Exit reading desk if active
@@ -683,6 +734,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             with ui.column().classes('w-full gap-1 max-h-80 overflow-y-auto'):
                 for result in results:
                     async def select_result(r=result):
+                        _clear_search_scope_for_new_manuscript(r.sys_id)
                         state.sys_id = r.sys_id
                         state.shelfmark_query = r.shelfmark  # Update state with selected shelfmark
                         # Update the search input field if available
@@ -963,6 +1015,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 lambda: service.get_adjacent_shelfmark(_sys_id, direction)
             )
             if adjacent_sys_id:
+                _clear_search_scope_for_new_manuscript(adjacent_sys_id)
                 state.sys_id = adjacent_sys_id
                 state.view_all = False  # Reset to single page view
                 state.view_joined = False  # Exit reading desk if active
@@ -1715,24 +1768,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             display_shelfmark = f"{page.library_name}, {display_shelfmark}"
                         h2(display_shelfmark, classes='text-xl font-bold', style='color: #ffffff !important; text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);')
 
-                        # Oxford Part Label (e.g. [part 6])
-                        if page.oxford_part_display:
-                            # Extract just the "part X" portion if possible, or show full
-                            # Logic: if shelfmark contains the first part, show only suffix.
-                            # But simple display is fine.
-                            # User requested: [part 6] immediately after shelfmark
-                            # Let's extract "part X" from "heb. d. 29 part 2"
-                            part_suffix = page.oxford_part_display
-                            if "part" in part_suffix:
-                                part_suffix = part_suffix.split("part")[-1].strip()
-                                part_label = f"[part {part_suffix}]"
-                            else:
-                                part_label = f"[{page.oxford_part_display}]"
-
-                            ui.label(part_label).classes(
+                        # Oxford Part badge (e.g. [part 6], or [fol. 27] when the Part is the
+                        # whole codex). Computed once by the shared codicological helper in
+                        # browse_enrichment -- never re-derived here by splitting on "part".
+                        if page.oxford_part_label:
+                            ui.label(f"[{page.oxford_part_label}]").classes(
                                 'text-lg font-bold'
                             ).style(
-                                'color: #3b82f6 !important; ' # Blue color as seen in screenshot (approx)
+                                'color: #3b82f6 !important; '
                                 'text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);'
                             )
 
@@ -4060,6 +4103,17 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 'background: #1a1a1a; border-radius: 8px 8px 0 0;'
                             ):
                                 ui.label(tr('Manuscript Image')).classes('text-white font-semibold')
+                                # 260902: direct link to the current folio side on the Genizah Fragments site.
+                                # The Bodleian fronts images with a JS bot-challenge that an <img> or a server
+                                # fetch cannot pass, but the reader's own browser can -- and the Oxford licence
+                                # asks for a link to the site as the source in any case. `is_oxford`, `page_idx`
+                                # and `page` come from the enclosing page-render scope (same as the <img> below).
+                                _ox_direct_link = ''
+                                if is_oxford and page.sys_id:
+                                    from web.services import get_oxford_direct_image_url as _ox_direct_url
+                                    _ox_direct_link = _ox_direct_url(page.shelfmark, page_idx, folio_offset=max(0, (page.volume_suffix or 1) - 1)) or ''
+                                    if _ox_direct_link:
+                                        ui.link(tr('Open in Bodleian Libraries'), _ox_direct_link, new_tab=True).classes('text-xs').style('color: #9ecbff;').props('data-role="oxford-direct-link"')
                                 with ui.row().classes('gap-1'):
                                     ui.button(icon='remove', on_click=zoom_out).props(f'flat round size=sm text-color=white aria-label="{tr("Zoom out")}" data-action="zoom-out"').tooltip(tr('Zoom out'))
                                     ui.label(f'{int(state.zoom_level * 100)}%').classes('zoom-level-label text-white text-sm px-2')
@@ -4129,6 +4183,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     if '/api/nli_image_by_sysid/' in safe_img_url:
                                         _sep = '&' if '?' in safe_img_url else '?'
                                         _thumb_url = f"{safe_img_url}{_sep}width=400"
+                                    _ox_direct_attr = html_module.escape(_ox_direct_link, quote=True)
+                                    _ox_direct_label = html_module.escape(tr('Open in Bodleian Libraries'), quote=True)
                                     img_html = f'''
                                     <img
                                         src="{_thumb_url}"
@@ -4136,6 +4192,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         class="zoomable-image"
                                         style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;"
                                         draggable="false"
+                                        data-oxford-direct="{_ox_direct_attr}"
+                                        data-oxford-direct-label="{_ox_direct_label}"
                                         onload="if(window.manuscriptViewer) window.manuscriptViewer.init()"
                                         onerror="handleImageError(this, '{safe_sys_id}', {page_idx}, {is_oxford_js}, 'manuscriptViewer')"
                                     />
@@ -4144,12 +4202,32 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     ui.run_javascript('if(window.manuscriptViewer) setTimeout(() => window.manuscriptViewer.init(), 100); initProgressiveImages();')
 
                             # === Image Credit/Attribution Footer ===
-                            if page.attribution:
+                            if page.attribution or page.attribution_nli:
                                 with ui.row().classes('w-full items-center justify-center gap-2 py-2').style(
                                     'background: #2a2a2a; border-radius: 0 0 8px 8px; border-top: 1px solid #333;'
                                 ):
                                     ui.icon('photo_library', size='xs').style('color: #888; font-size: 14px;')
-                                    credit_text = page.attribution
+                                    # Oxford licence form: "[object], Image provided by [owner]" with a
+                                    # link to the Genizah Fragments site. When the NLI image is what is
+                                    # on screen (manual switch, or the JS fallback chain after the
+                                    # Bodleian/NLI-IIIF failures), the credit must be NLI's instead.
+                                    _credit_nli_text = page.attribution_nli or (
+                                        'הספרייה הלאומית' if get_language() == 'he'
+                                        else 'National Library of Israel')
+                                    if page.is_oxford and page.attribution:
+                                        _credit_ox_text = f"{page.shelfmark} · {page.attribution}" if page.shelfmark else page.attribution
+                                    else:
+                                        _credit_ox_text = page.attribution
+                                    # Use the shelfmark-prefixed text for the INITIAL
+                                    # Oxford label too, not only in the data attribute
+                                    # a later fallback reads -- the licence's
+                                    # "[object] ... Image provided by [owner]" form is
+                                    # what should be on screen from the start
+                                    # (Codex P2, 2026-09-02).
+                                    credit_text = (
+                                        _credit_nli_text if (_is_nli_active and page.is_oxford)
+                                        else (_credit_ox_text or _credit_nli_text)
+                                    )
                                     # Route credit link based on the actively viewed source,
                                     # not just the manuscript's native source. If the user
                                     # switched to NLI on an Oxford manuscript, the credit
@@ -4164,7 +4242,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     if _is_nli_active:
                                         credit_link = _nli_credit_url
                                     elif _is_oxford_active or (page.is_oxford and state.active_source != 'nli'):
-                                        credit_link = 'https://digital.bodleian.ox.ac.uk/'
+                                        # Licence: link to the Genizah Fragments site as the source.
+                                        credit_link = _ox_direct_link or page.external_url or 'https://hebrew.bodleian.ox.ac.uk/'
                                     elif _is_manchester_active or page.external_provider == 'manchester':
                                         credit_link = 'https://luna.manchester.ac.uk/'
                                     elif _is_cambridge_active or page.is_cambridge:
@@ -4175,9 +4254,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         credit_link = 'https://searcharchives.bl.uk/'
                                     else:
                                         credit_link = _nli_credit_url
-                                    with ui.link(target=credit_link, new_tab=True).style('text-decoration: none;'):
+                                    _credit_ox_link = _ox_direct_link or page.external_url or 'https://hebrew.bodleian.ox.ac.uk/'
+                                    with ui.link(target=credit_link, new_tab=True).style('text-decoration: none;').props(
+                                        f'data-role="image-credit-link" data-link-oxford="{html_module.escape(_credit_ox_link, quote=True)}" '
+                                        f'data-link-nli="{html_module.escape(_nli_credit_url, quote=True)}"'
+                                    ):
                                         ui.label(credit_text).classes('text-xs').style(
                                             'color: #aaa; font-style: italic;'
+                                        ).props(
+                                            f'data-role="image-credit" data-credit-oxford="{html_module.escape(_credit_ox_text, quote=True)}" '
+                                            f'data-credit-nli="{html_module.escape(_credit_nli_text, quote=True)}"'
                                         )
 
                     # === RIGHT PANEL: Transcription ===
@@ -4324,6 +4410,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                             pgp_transcription=state.pgp_transcription,
                                             all_sources=state.all_sources,
                                             full_original_text=getattr(state, 'fgp_full_htr_text', None),
+                                            # SEED-033 Option A: the search-scoped
+                                            # phrase from the `/browse?highlight=`
+                                            # deep link, when this page was reached
+                                            # from a search hit.
+                                            must_contain=_search_scope_phrase(page),
                                         )
 
                             # Initial render

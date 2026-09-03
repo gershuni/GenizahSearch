@@ -1158,7 +1158,19 @@ class ResultDialog(QDialog):
         # Store original text
         original_text = self.text_ms.toPlainText()
         self._rd_original_text = original_text
-        self._rd_versions_cache = {'original': original_text}
+        # 260902 (debug/oxford-fgp-image-mismatch.md sub-issue B): the
+        # version cache's 'original' entry is what actually gets redisplayed
+        # when the user switches back to "V0.8" -- _rd_load_version_content's
+        # cache-hit branch fires for {'source': 'original'} because this key
+        # is always seeded here. Seed it with the *...*-marked text load_page
+        # captured just before _htmlify consumed the markers, not with
+        # original_text (toPlainText() strips the highlight), so the switch
+        # keeps the search-hit highlighted. Falls back to original_text when
+        # load_page hasn't run yet (defensive; should not happen in practice).
+        original_marked_text = getattr(self, '_rd_original_marked_text', None)
+        self._rd_versions_cache = {
+            'original': original_marked_text if original_marked_text is not None else original_text
+        }
 
         # Force fresh server availability check (500ms timeout) to prevent UI freeze
         if not client.is_server_available(force_check=True):
@@ -1428,7 +1440,15 @@ class ResultDialog(QDialog):
         if source == "original":
             # Restore RTL direction for V0.8 text
             self.text_ms.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-            if hasattr(self, '_rd_original_text'):
+            # 260902 (sub-issue B): defensive symmetry with the cache-hit
+            # branch above -- prefer the *...*-marked text over the plain
+            # _rd_original_text so a highlight isn't lost here either, on
+            # the rare path where this branch (rather than the cache-hit
+            # branch) ends up handling the switch back to "V0.8".
+            marked = getattr(self, '_rd_original_marked_text', None)
+            if marked is not None:
+                self._rd_display_text(marked)
+            elif hasattr(self, '_rd_original_text'):
                 self._rd_display_text(self._rd_original_text)
         elif source in ("pgp_edition", "fgp_edition"):
             prefix = 'fgp' if source == 'fgp_edition' else 'pgp'
@@ -1560,11 +1580,15 @@ class ResultDialog(QDialog):
             if current_text:
                 self._rd_original_text = current_text
 
-            # Auto-select first PGP edition and display it (dialog's own context)
+            # Auto-select first PGP edition and display it (dialog's own context).
+            # must_contain: the search-hit phrase for THIS page (SEED-033 Option
+            # A) — None on a page with no search-hit markers (e.g. reached via
+            # manuscript nav rather than a matched search).
             edition_data = parent._auto_select_pgp_edition(
                 self.rd_version_combo, sources=sources,
                 htr_text=getattr(self, '_rd_original_text', None) or self.text_ms.toPlainText(),
-                sys_id=self.current_sys_id)
+                sys_id=self.current_sys_id,
+                must_contain=getattr(self, '_rd_search_match_text', None))
             if edition_data:
                 content = edition_data.get('content', '')
                 if content:
@@ -2550,8 +2574,29 @@ class ResultDialog(QDialog):
 
         # --- Render Text ---
         raw_text = page_data['text']
+        clean_text = raw_text  # BEFORE manual annotation markers (Codex P2, below)
         raw_text = self._apply_manual_highlights_to_text(raw_text, self.current_page_uid)
         pattern_str = self.data.get('highlight_pattern')
+
+        # 260902 (SEED-033 Option A) — Codex P2: derive the search phrase from the
+        # CLEAN page text and `highlight_pattern`, never from `raw_text`. A page
+        # with saved `page_highlights` already carries `*...*` markers from
+        # `_apply_manual_highlights_to_text`, and a `*...*` scan of `raw_text`
+        # could pick the reader's own annotation as the "search hit" -- which
+        # would then steer the shared default-source policy (must_contain) to a
+        # transcription chosen for an unrelated note. None when this page carries
+        # no search hit (e.g. opened from the Browse tab).
+        self._rd_search_match_text = None
+        if pattern_str:
+            try:
+                _mc_flags = re.IGNORECASE
+                if '\\n' in pattern_str or pattern_str.startswith('^') or '^\\' in pattern_str:
+                    _mc_flags |= re.MULTILINE
+                _mc_match = re.search(pattern_str, clean_text, _mc_flags)
+                if _mc_match:
+                    self._rd_search_match_text = _mc_match.group(0)
+            except re.error:
+                pass
         
         if pattern_str:
             try:
@@ -2563,6 +2608,16 @@ class ResultDialog(QDialog):
                 raw_text = highlighted_text
             except re.error as _re_exc:
                 logger.debug("result_dialog: invalid highlight regex %r: %s", pattern_str, _re_exc)
+
+        # 260902 (debug/oxford-fgp-image-mismatch.md sub-issue B): remember the
+        # *...*-marked raw text (BEFORE _htmlify below converts the markers
+        # into <b> tags and the literal '*' characters vanish) so that
+        # switching the Version combo back to "V0.8" can re-render with the
+        # search-hit highlight intact instead of the highlight-stripped
+        # toPlainText() snapshot _rd_load_versions() used to take. Kept
+        # separate from self._rd_original_text (still plain, used elsewhere
+        # as clean HTR text for PGP-edition coverage-ratio matching).
+        self._rd_original_marked_text = raw_text
 
         # Phase 999.4: route through gutter helper (source_text = raw `raw_text`)
         apply_line_numbered_text(
@@ -3295,7 +3350,10 @@ class ResultDialog(QDialog):
                 shelf = f"{library} | {shelf}"
             # Add Part info to shelfmark if available
             if oxford_part_id:
-                part_label = self.meta_mgr.codico_mgr.get_part_label(oxford_part_id)
+                # Pass the raw shelfmark so a whole-codex Part ID ("MS. Heb. g. 2")
+                # labels the record's folio ("fol. 27") instead of a bare "[part]".
+                part_label = self.meta_mgr.codico_mgr.get_part_label(
+                    oxford_part_id, meta.get('shelfmark'))
                 if part_label:
                     shelf = f"{shelf} [{part_label}]"
             self.lbl_shelf.setText(shelf)

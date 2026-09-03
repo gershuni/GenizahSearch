@@ -52,6 +52,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
+from shared.text_normalize import strip_search_diacritics
 from shared.thread_local_db import ThreadLocalConnection
 
 logger = logging.getLogger(__name__)
@@ -525,6 +526,32 @@ def _heb_token_set(text: Optional[str]) -> Set[str]:
     return set(_HEBWORD_RE.findall(_NIKUD_RE.sub("", text)))
 
 
+# ── Search-scoped "must contain" override (SEED-033 Option A) ──────────────
+# Unlike ``_heb_token_set`` (an unordered word-overlap fingerprint used for
+# FGP-vs-HTR alignment), a "does this source contain the searched phrase"
+# check needs ORDERED text, so a set is unusable — this is a plain substring
+# test on normalized text. Normalizes with the SAME rule SEED-030 uses for
+# symmetric comparison (``strip_search_diacritics``: geresh/gershayim/quote
+# variants), plus nikud (a pointed FGP/PGP edition vs an unpointed search
+# phrase must still match) and whitespace (a phrase spanning a line break in
+# one source must still match a single-line rendering in another).
+_WS_RE = re.compile(r"\s+")
+
+
+def _normalize_for_contains(text: Optional[str]) -> str:
+    """Diacritic/whitespace-normalized text for a ``must_contain`` substring
+    check — strips nikud, folds geresh/gershayim/quote variants via
+    :func:`shared.text_normalize.strip_search_diacritics`, and collapses
+    whitespace, so a search phrase and a transcription that differ only in
+    vocalization, quote style, or line breaks still match. Order-preserving
+    (unlike :func:`_heb_token_set`) — this is a substring test, not overlap."""
+    if not text:
+        return ""
+    t = _NIKUD_RE.sub("", text)
+    t = strip_search_diacritics(t)
+    return _WS_RE.sub(" ", t).strip()
+
+
 # ── FGP-vs-HTR default-coverage policy (SEED-030) ──────────────────────────────
 # The reading-view default cascade (web ``version_selector.load_and_apply_latest``
 # + desktop ``_auto_select_pgp_edition``) auto-selects an FGP source over the
@@ -600,17 +627,34 @@ def choose_default_source(
     sources: Optional[List[Dict[str, Any]]],
     htr_text: Optional[str],
     full_htr_getter: Optional[Callable[[], Optional[str]]] = None,
+    must_contain: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Decide whether an FGP edition should be the reading-view default for a
-    folio, or be demoted below the V0.8/HTR ("MiDRASH") transcription (SEED-030).
+    """Decide the reading-view default source for a folio: a PGP edition, an
+    FGP edition, or a fall-through to the V0.8/HTR ("MiDRASH") transcription.
 
     PURE and side-effect-free so the web ``version_selector`` and the desktop
-    ``_auto_select_pgp_edition`` share ONE policy (and it is unit-testable without
-    a GUI or the sidecar DB). Does NOT touch the PGP-first rule — callers still
-    prefer a PGP edition; this governs only the FGP-vs-HTR fallback.
+    ``_auto_select_pgp_edition``/``_populate_pgp_combo`` share ONE policy (and
+    it is unit-testable without a GUI or the sidecar DB) — callers RENDER the
+    returned decision only, they do not re-implement precedence.
 
-    Coverage = FGP edition's displayed base-Hebrew-letter count ÷ the HTR letter
-    count of the RIGHT baseline. The baseline depends on the edition's scope:
+    ``must_contain`` (SEED-033 Option A) — when the caller supplies the phrase
+    the user actually searched for, prefer the first source (PGP edition, then
+    FGP edition, then V0.8) whose text CONTAINS it (substring, normalized via
+    :func:`_normalize_for_contains` on both sides — nikud/diacritics/whitespace
+    insensitive), so the reading view never silently shows a transcription that
+    does not contain what was searched. A miss (the phrase is in none of them,
+    e.g. it matched a translation or a different source entirely) is NOT a
+    demotion signal — falls through to today's exact default order below,
+    unaffected. Omitted/empty → today's order, unconditionally.
+
+    Default order (``must_contain`` absent or matched nothing) — unconditional
+    PGP-first, preserved exactly as both apps enforced it before this ever
+    lived in one place: any PGP edition wins outright (``reason='pgp_edition'``);
+    only when NONE exists does FGP-vs-HTR coverage arbitration below run.
+
+    FGP-vs-HTR coverage (SEED-030) — coverage = FGP edition's displayed
+    base-Hebrew-letter count ÷ the HTR letter count of the RIGHT baseline. The
+    baseline depends on the edition's scope:
       * **Foliated** row (``_fgp_match_folio`` → a folio): the DISPLAYED folio's
         HTR (``htr_text``) — the row IS that folio's transcription.
       * **Whole-document** row (no per-image folio): the WHOLE-manuscript HTR,
@@ -621,25 +665,53 @@ def choose_default_source(
         it. When no getter is supplied, whole-doc rows fall back to the folio
         baseline (degraded — callers SHOULD pass a getter; see fgp_needs_full_htr).
 
-    Only FGP EDITIONS are weighed — translations are a different language than the
-    Hebrew HTR, so a length ratio is meaningless and they are never demoted. The
-    displayed text is the whole-row ``content`` (no display path narrows FGP
-    ``content`` to a sub-section), NOT ``get_fgp_section_for_page`` (whose page_num
-    is a recto/verso 1/2 flag, not the global displayed page).
+    Text-match demotion (D, MS heb. g.2 case) — a whole-doc row clearing the
+    coverage bar (comprehensive relative to the whole MS, or an unmeasurable
+    "unknown" baseline) still is not necessarily ABOUT the displayed folio: a
+    codex-level catalogue excerpt can be long/comprehensive yet describe a
+    *different* folio entirely. So before defaulting to a whole-doc candidate,
+    at least one whole-doc edition must clear the SAME word-overlap floor
+    ``_select_fgp_editions_by_similarity`` uses (``_SIM_FLOOR``, via
+    ``_content_similarity``) against the displayed folio's ``htr_text`` — else
+    demote (``reason='demote_no_text_match'``). Skipped when ``htr_text`` is too
+    short to trust (fewer than ``_SIM_MIN_TOKENS`` tokens — fail toward FGP, same
+    philosophy as ``htr_too_short``) or when the candidate is a **foliated /
+    c-numbered** row (a confident per-image alignment already means "about this
+    folio" — zero regression on the ~5,400 foliated FGP editions).
 
-    Returns ``{source, reason, ratio, eligible}``:
-      * ``source``   — the FGP edition dict to default to, or ``None`` to demote.
+    Only FGP EDITIONS are weighed for coverage/text-match — translations are a
+    different language than the Hebrew HTR, so a length ratio is meaningless and
+    they are never demoted. The displayed text is the whole-row ``content`` (no
+    display path narrows FGP ``content`` to a sub-section), NOT
+    ``get_fgp_section_for_page`` (whose page_num is a recto/verso 1/2 flag, not
+    the global displayed page).
+
+    Returns ``{source, reason, ratio, eligible, provider, must_contain_matched}``:
+      * ``source``   — the source dict to default to, or ``None`` to fall through
+                       to V0.8.
       * ``eligible`` — ``True`` → default to ``source``; ``False`` → fall through
-                       to the HTR default (FGP stays selectable in the menu).
-      * ``reason``   — ``'no_fgp_edition'`` / ``'htr_too_short'`` /
-                       ``'fgp_sufficient'`` / ``'demote_low_coverage'``.
+                       to the HTR default (PGP/FGP stay selectable in the menu).
+      * ``reason``   — ``'must_contain_match'`` / ``'must_contain_v08'`` /
+                       ``'fgp_text_match'`` (coverage pick replaced by the whole-doc
+                       edition that actually overlaps this folio) /
+                       ``'pgp_edition'`` / ``'no_fgp_edition'`` / ``'htr_too_short'``
+                       / ``'fgp_sufficient'`` / ``'demote_low_coverage'`` /
+                       ``'demote_no_text_match'``.
       * ``ratio``    — FGP/HTR letter ratio, or ``None`` when not computed.
+      * ``provider`` — ``'pgp'`` / ``'fgp'`` / ``'v08'`` (V0.8, ``source`` is
+                       ``None``) / ``None`` (no source anywhere — no PGP/FGP
+                       edition exists at all).
+      * ``must_contain_matched`` — ``True`` only when ``must_contain`` was
+                       supplied AND the returned decision was chosen because of
+                       it (lets callers show a "showing the version containing
+                       your search" note without re-deriving the reason).
     """
-    eds = group_transcription_sources(sources)["fgp_editions"]
-    if not eds:
-        return {"source": None, "reason": "no_fgp_edition", "ratio": None, "eligible": False}
+    groups = group_transcription_sources(sources)
+    eds = groups["fgp_editions"]
+    pgp_eds = groups["pgp_editions"]
 
     folio_htr_len = _heb_letter_count(htr_text)
+    page_tokens = _heb_token_set(htr_text)
     _full_len_cache: Dict[str, int] = {}
 
     def _full_htr_len() -> int:
@@ -647,6 +719,46 @@ def choose_default_source(
             txt = full_htr_getter() if full_htr_getter else None
             _full_len_cache["v"] = _heb_letter_count(txt)
         return _full_len_cache["v"]
+
+    # ── SEED-033 Option A: search-scoped override ──────────────────────────
+    needle = _normalize_for_contains(must_contain) if must_contain else ""
+    if needle:
+        for ed in pgp_eds:
+            if needle in _normalize_for_contains(ed.get("content")):
+                return {"source": ed, "reason": "must_contain_match", "ratio": None,
+                        "eligible": True, "provider": "pgp", "must_contain_matched": True}
+        # An FGP row that contains the phrase must still clear the coverage bar
+        # (Codex P2, 2026-09-02). For an HTR-backed hit the phrase is necessarily
+        # in V0.8 too, and a very short excerpt can contain the same common word,
+        # so returning here unconditionally promoted exactly the partial
+        # transcription ordinary browsing demotes. Below the bar we prefer the
+        # V0.8 text that also contains it.
+        _threshold = _min_coverage()
+        for ed in eds:
+            if needle not in _normalize_for_contains(ed.get("content")):
+                continue
+            _baseline = (_full_htr_len() or folio_htr_len) if _fgp_is_whole_doc(ed) else folio_htr_len
+            if _baseline >= _COVERAGE_MIN_HTR_LETTERS:
+                _ratio = _heb_letter_count(ed.get("content")) / _baseline
+                if _ratio < _threshold:
+                    continue                      # too partial to default to
+            else:
+                _ratio = None                     # unmeasurable -> keep-eligible
+            return {"source": ed, "reason": "must_contain_match", "ratio": _ratio,
+                    "eligible": True, "provider": "fgp", "must_contain_matched": True}
+        if needle in _normalize_for_contains(htr_text):
+            return {"source": None, "reason": "must_contain_v08", "ratio": None,
+                    "eligible": False, "provider": "v08", "must_contain_matched": True}
+        # Matched nothing -> NOT a demotion signal; fall through unchanged below.
+
+    # ── PGP-first (unconditional; the rule both apps always enforced) ──────
+    if pgp_eds:
+        return {"source": pgp_eds[0], "reason": "pgp_edition", "ratio": None,
+                "eligible": True, "provider": "pgp", "must_contain_matched": False}
+
+    if not eds:
+        return {"source": None, "reason": "no_fgp_edition", "ratio": None,
+                "eligible": False, "provider": None, "must_contain_matched": False}
 
     # Score each edition against the baseline appropriate to its scope. An edition
     # whose baseline is too short to trust (blank/garbled folio, or a whole-doc row
@@ -668,14 +780,64 @@ def choose_default_source(
 
     threshold = _min_coverage()
     if best_known is not None and best_ratio >= threshold:
-        logger.debug("FGP default coverage: ratio=%.3f threshold=%.2f -> keep", best_ratio, threshold)
-        return {"source": best_known, "reason": "fgp_sufficient", "ratio": best_ratio, "eligible": True}
-    if unknown_ed is not None:
+        candidate, reason, ratio_out = best_known, "fgp_sufficient", best_ratio
+    elif unknown_ed is not None:
         # No measurable edition cleared the bar, but at least one has no reliable
         # baseline → keep it rather than demote on an unknown.
-        return {"source": unknown_ed, "reason": "htr_too_short", "ratio": None, "eligible": True}
-    logger.debug("FGP default coverage: ratio=%.3f threshold=%.2f -> demote", best_ratio, threshold)
-    return {"source": None, "reason": "demote_low_coverage", "ratio": best_ratio, "eligible": False}
+        candidate, reason, ratio_out = unknown_ed, "htr_too_short", None
+    else:
+        logger.debug("FGP default coverage: ratio=%.3f threshold=%.2f -> demote", best_ratio, threshold)
+        return {"source": None, "reason": "demote_low_coverage", "ratio": best_ratio,
+                "eligible": False, "provider": None, "must_contain_matched": False}
+
+    # ── (D) text-match demotion for whole-document FGP rows ────────────────
+    # A whole-doc row shows the SAME content on every folio of the manuscript,
+    # so clearing the coverage bar (comprehensive vs. the whole MS, or an
+    # unmeasurable baseline) does not mean it is ABOUT this folio. Foliated /
+    # c-numbered rows (a confident per-image alignment) are never subject to
+    # this — their coverage baseline is already this folio's own HTR.
+    # Codex P1 (2026-09-02): validate the edition that will actually be DISPLAYED.
+    # An `any(...)` over all whole-doc editions accepted `candidate` whenever some
+    # OTHER edition matched the folio -- and `candidate` was picked purely by
+    # coverage ratio, so the long unrelated row could still be shown while a short
+    # related one satisfied the gate. Score the candidate itself; when it fails,
+    # promote the best-matching whole-doc edition if one clears the floor, and only
+    # demote when none does.
+    if _fgp_is_whole_doc(candidate) and len(page_tokens) >= _SIM_MIN_TOKENS:
+        if _content_similarity(page_tokens, candidate.get("content")) < _SIM_FLOOR:
+            # Codex P1 (2026-09-02): the replacement must clear the COVERAGE bar
+            # as well as the similarity floor. `_content_similarity` divides by the
+            # smaller token set, so a one-word excerpt sharing one word with the
+            # folio scores 1.0 -- promoting it here would walk straight past the
+            # low-coverage demotion (SEED-030) this function exists to enforce.
+            # Editions with no reliable baseline stay eligible, same as above.
+            best_match, best_sim, best_match_ratio = None, _SIM_FLOOR, None
+            for ed in eds:
+                if not _fgp_is_whole_doc(ed):
+                    continue
+                sim = _content_similarity(page_tokens, ed.get("content"))
+                if sim < best_sim:
+                    continue
+                ed_baseline = _full_htr_len() or folio_htr_len
+                if ed_baseline < _COVERAGE_MIN_HTR_LETTERS:
+                    ed_ratio = None                      # unknown -> keep-eligible
+                else:
+                    ed_ratio = _heb_letter_count(ed.get("content")) / ed_baseline
+                    if ed_ratio < threshold:
+                        continue                          # too partial to default to
+                best_match, best_sim, best_match_ratio = ed, sim, ed_ratio
+            if best_match is None:
+                return {"source": None, "reason": "demote_no_text_match", "ratio": ratio_out,
+                        "eligible": False, "provider": None, "must_contain_matched": False}
+            # A different whole-doc row IS about this folio -- show that one.
+            logger.debug(
+                "FGP default: coverage pick has no folio overlap; switching to the "
+                "best text match (similarity=%.3f)", best_sim)
+            candidate, reason, ratio_out = best_match, "fgp_text_match", best_match_ratio
+
+    logger.debug("FGP default coverage: ratio=%s threshold=%.2f -> keep (%s)", ratio_out, threshold, reason)
+    return {"source": candidate, "reason": reason, "ratio": ratio_out,
+            "eligible": True, "provider": "fgp", "must_contain_matched": False}
 
 
 def _content_similarity(page_tokens: Set[str], content: Optional[str]) -> float:
@@ -978,6 +1140,25 @@ def pick_fgp_credit(src: Dict[str, Any], lang: str = "en") -> Optional[str]:
     if str(lang or "").lower().startswith("he"):
         return he or en or legacy
     return en or he or legacy
+
+
+def fgp_incipit(content: Optional[str], max_chars: int = 40) -> str:
+    """First ~``max_chars`` characters of ``content`` (nikud stripped,
+    whitespace collapsed to one line) — a distinguishing snippet for an FGP
+    combo/menu label (D2). Multiple FGP rows on one manuscript otherwise all
+    render as the bare "FGP Transcription" and are untellable apart (see
+    MS heb. g.2, ~10 identical-looking entries). Empty when ``content`` has no
+    text. An ellipsis marks truncation; a shorter-than-``max_chars`` content is
+    returned in full with no ellipsis."""
+    if not content:
+        return ""
+    text = _NIKUD_RE.sub("", content)
+    text = _WS_RE.sub(" ", text).strip()
+    if not text:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars].rstrip() + "…"
 
 
 class FgpService:

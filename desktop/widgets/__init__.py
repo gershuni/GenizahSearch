@@ -177,6 +177,93 @@ def _get_folio_side_image_index(meta, folio_num, side):
     return None
 
 
+_SIDE_SUFFIX_RE = re.compile(r'^\d+\s*([abrv])$')
+
+
+def _side_of_label(label):
+    """Return 'r' or 'v' when ``label`` looks like "<folio><a|b|r|v>"
+    (Oxford's own convention -- e.g. "27a"/"27b"), else None.
+
+    Restricted to a trailing-digit-then-single-letter pattern (not a bare
+    ``.endswith()``) so free-text labels like "Binding" or "Cover" are
+    never misread as a side.
+    """
+    m = _SIDE_SUFFIX_RE.match(str(label or '').strip().lower())
+    if not m:
+        return None
+    return 'v' if m.group(1) in ('b', 'v') else 'r'
+
+
+def map_matching_image_index(old_list, old_idx, new_list, anchor_folio=None):
+    """Map an index from one image list to the best-matching index in a
+    different image list, preserving recto/verso side when detectable.
+
+    Used both when the user manually switches image source (Oxford <->
+    NLI combo) and when auto-falling back from a dead external source to
+    NLI (see debug/oxford-fgp-image-mismatch.md sub-issues A & C). The
+    two lists usually have DIFFERENT lengths and no shared join key --
+    Oxford's ``images_ext`` entries carry ``folio_num`` + a labeled side
+    ("27a"/"27b"), while NLI's ``images_nli`` entries carry only
+    ``label``/``fl_id`` in NLI's own (unrelated) labeling convention --
+    so this uses whatever signal is available:
+
+    1. When the OLD entry's label carries a recognizable recto/verso
+       suffix and the NEW list has exactly 2 entries (the common
+       "NLI per-part list = one folio, recto + verso" case), pick index
+       0 for recto / 1 for verso.
+    2. Otherwise, map by relative position (old_idx / len(old_list))
+       scaled onto the new list, clamped to bounds.
+
+    ``anchor_folio`` (optional): the folio the DESTINATION list was last showing.
+    Used ONLY when the source list is the position-less two-image case (NLI's
+    per-part list: recto + verso of one folio, FL-only labels), where the return
+    path is otherwise not invertible. When the source list carries folio numbers of
+    its own, the current image wins and the anchor is ignored.
+
+    Returns 0 for empty/invalid inputs -- callers must still check that
+    ``new_list`` is non-empty before treating the source switch as valid.
+    """
+    if not new_list:
+        return 0
+    if not old_list or old_idx is None or old_idx < 0 or old_idx >= len(old_list):
+        return 0
+
+    side = _side_of_label(old_list[old_idx].get('label'))
+
+    # 0. `anchor_folio`: the folio the DESTINATION list was last showing. NLI's
+    #    per-part list carries only FL labels, so leaving it has no side or folio
+    #    signal of its own and the proportional branch below would map NLI index 0
+    #    to Oxford image 0 instead of folio 27a. With the anchor we return to that
+    #    folio and use the current index only to choose recto/verso
+    #    (Codex P2, 2026-09-02).
+    # Restricted to the case it exists for: a TWO-image source list whose entries
+    # carry no folio of their own (NLI's per-part FL-only list). There the two
+    # entries are the recto and verso of ONE folio, so the destination folio is the
+    # anchor and the current index only picks the side. When the old list does carry
+    # position information -- both sides exposing whole-codex lists, say -- the
+    # reader's current position is the better signal and the anchor would drag them
+    # back to the folio they left (Codex P2, 2026-09-02).
+    _old_has_position = any(im.get('folio_num') is not None for im in old_list)
+    if anchor_folio is not None and len(old_list) == 2 and not _old_has_position:
+        if side is None:
+            side = 'v' if old_idx == 1 else 'r'
+        same_folio = [i for i, im in enumerate(new_list)
+                      if im.get('folio_num') == anchor_folio]
+        if same_folio:
+            if side == 'v' and len(same_folio) > 1:
+                return same_folio[1]
+            return same_folio[0]
+
+    if side is not None and len(new_list) == 2:
+        return 1 if side == 'v' else 0
+
+    if len(old_list) <= 1:
+        return 0
+    ratio = old_idx / (len(old_list) - 1)
+    idx = round(ratio * (len(new_list) - 1))
+    return max(0, min(idx, len(new_list) - 1))
+
+
 def _get_initial_image_index(meta, folio_num=None, *, page_num=None):
     """Find the canvas index for a target folio or transcription page.
 

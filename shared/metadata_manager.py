@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from shared.config import Config
 from shared.nli_circuit_breaker import (
+
     is_open as _nli_circuit_is_open,
     record_failure as _nli_record_failure,
     record_success as _nli_record_success,
@@ -28,6 +29,13 @@ from shared.nli_circuit_breaker import (
 from shared.codicological import CodicologicalManager
 from shared.browse_map_utils import normalize_shelfmark, natural_sort_key, _strip_library_prefix
 from shared.sys_id_patterns import ANY_SYS_ID_RE, CORPUS_SYS_ID_RE
+# Credit line for images served from the Bodleian's Genizah Fragments site, in the
+# form its licence requires ("Image provided by [owner]"). Both apps and the web
+# attribution table import this so the wording cannot drift; it is NOT a Creative
+# Commons licence, so never append a CC label to it.
+OXFORD_IMAGE_CREDIT_EN = "Image provided by the Bodleian Libraries, University of Oxford"
+OXFORD_GENIZAH_FRAGMENTS_URL = "https://hebrew.bodleian.ox.ac.uk/"
+
 
 LOGGER = logging.getLogger("genizah." + __name__)
 
@@ -1141,7 +1149,7 @@ class MetadataManager:
                         'thumb_url': img.get('thumb_url', ''),
                         'folio_num': img.get('folio_num')
                     } for img in part_images]
-                    current_meta['attribution'] = "From the collections of the Bodleian Libraries, Oxford"
+                    current_meta['attribution'] = OXFORD_IMAGE_CREDIT_EN
                     current_meta['thumb_url'] = part_images[0].get('thumb_url') or current_meta.get('thumb_url')
 
         # 2b. Fetch NLI IIIF manifest for image FL IDs (crossref FGPImageNumberId != IIIF FL number)
@@ -1169,10 +1177,20 @@ class MetadataManager:
         if not current_meta.get('physical_desc'):
             current_meta['physical_desc'] = nli_iiif_data.get('physical_desc', '')
 
+        # `attribution` is the credit for the manuscript's PRIMARY image source
+        # (an external provider when it has one). `attribution_nli` keeps NLI's own
+        # manifest credit no matter which won, so a viewer that falls back to the
+        # NLI image can credit NLI instead of the provider (Codex P2, 2026-09-02).
+        # A refresh whose manifest timed out or came back empty must not erase a
+        # credit an earlier run already cached: enrich_metadata mutates the cached
+        # dict in place and is re-run for cached manuscripts (Codex P2, round 15).
+        _nli_attr = nli_iiif_data.get('attribution', '') or ''
+        if _nli_attr or 'attribution_nli' not in current_meta:
+            current_meta['attribution_nli'] = _nli_attr
         if marc_attribution:
             current_meta['attribution'] = marc_attribution
         elif not current_meta.get('attribution'):
-            current_meta['attribution'] = nli_iiif_data.get('attribution', '')
+            current_meta['attribution'] = current_meta['attribution_nli']
 
         if nli_iiif_data.get('canvas_map'):
             current_meta['canvas_map'] = nli_iiif_data['canvas_map']

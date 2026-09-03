@@ -6,6 +6,52 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ## Unreleased - 2026-09-01
 
+### Fixed — Oxford viewer, transcription default, credits (web + desktop, 2026-09-02)
+
+Started from one report (search "תקום רבה דיניך" → MS heb. g.2/27: no image, an
+unrelated FGP transcription, no highlight). Session record:
+`.planning/debug/oxford-fgp-image-mismatch.md`.
+
+- **Oxford images no longer die silently.** The Bodleian's Genizah Fragments host
+  now answers every image URL with an HTTP 200 bot-challenge page instead of JPEG
+  bytes. The desktop loader rejects a non-image Content-Type and auto-falls back
+  to the NLI image list for the same folio side, with a notice and a clickable
+  link to the folio on the Bodleian site; the web page offers the same link in the
+  image header and in the "Image not available" placeholder. No challenge bypass
+  was implemented — the site licence frames use as "on or through the website".
+- **Web NLI proxy falls back to NLI's Rosetta thumbnail** when the IIIF image
+  server fails (it answered HTTP 500 for every FL id of this manuscript), matching
+  the desktop's existing fallback.
+- **Search-hit highlight survives switching versions** on desktop: the cached
+  V0.8 text kept a post-render plain-text snapshot; it now keeps the marked text.
+- **Switching image source keeps the folio side** (recto/verso mapping instead of
+  resetting to the first image when the lists differ in length).
+- **The default transcription can no longer be an unrelated excerpt.** Whole-document
+  FGP rows that share no vocabulary with the displayed folio (word-overlap floor) are
+  demoted below V0.8, and every FGP menu entry carries an incipit so ten look-alike
+  rows are tellable apart (MS heb. g.2 ships the same 10 catalogue excerpts under all
+  82 of its parts — upstream data).
+- **SEED-033 Option A.** When a reader arrives from a search, the reading view
+  defaults to whichever source (PGP, FGP, V0.8) actually contains the matched
+  phrase; PGP-first stays the rule for cold browsing. One shared policy
+  (`shared/fgp_service.py::choose_default_source`), both apps render-only.
+- **Oxford part badge** shows `[fol. 27]` for a folio inside a whole-codex part
+  instead of an empty `[part ]`.
+- **Oxford credit** now uses the licence wording, "Image provided by the Bodleian
+  Libraries, University of Oxford" (EN/HE), on every surface; the erroneous
+  "CC BY-NC 4.0" label is gone; the web footer links to the folio on the Genizah
+  Fragments site and switches to the NLI credit when the NLI image is what is shown.
+- **Dark-mode highlights are readable** on the browse page and the search page's
+  inline reader.
+- **`/api/browse` no longer 504s in bursts after a restart.** The first page
+  resolution pays an 18 s cold browse-map load; while the map is still loading the
+  core budget widens (`SEARCH_API_BROWSE_CORE_WARMUP_TIMEOUT`, default 45 s), and a
+  core timeout logs one warning line instead of a traceback.
+- **Tests:** six new files (image-source fallback, highlight persistence, part
+  label, Rosetta fallback, credit + dark highlight, browse core warm-up) plus 18 new
+  cases in `tests/test_fgp_default_coverage.py`; every fix has a test that fails
+  without it.
+
 ### Fixed — crawler-triggered `/browse` outage (web, 2026-08-31)
 
 - **Anonymous browse requests no longer rewrite the shared recent-history

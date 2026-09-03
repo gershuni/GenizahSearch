@@ -28,6 +28,7 @@ from web.services import (
     is_oxford_manuscript,
 )
 from shared.synthetic_sys_id import is_synthetic_sys_id
+from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
 from shared.refinement import compute_all_terms_filter, enrich_snippet_with_chain_terms
 from genizah_core import SearchEngine, get_library_display
 from web.document_service import (
@@ -36,7 +37,6 @@ from web.document_service import (
 from shared.fgp_service import (
     get_fgp_sources_for_fragment, filter_sources_for_page, displayed_folio_label,
     displayed_fgp_image_number, fgp_needs_full_htr, choose_default_source,
-    group_transcription_sources,
 )
 from web.components.joins_panel import fetch_connected_fragments, create_joins_dialog
 from urllib.parse import quote
@@ -48,6 +48,55 @@ import asyncio
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# SEED-033 Option A — search-scoped source selection
+# ---------------------------------------------------------------------------
+_SNIPPET_MATCH_RE = re.compile(r'\*([^*]+)\*')
+
+
+def _snippet_match_phrase(snippet: str) -> str:
+    """The first ``*...*``-marked matched phrase in a search ``snippet``,
+    whitespace-collapsed, for the ``/browse?highlight=`` deep-link param.
+
+    Lets the browse page's version chooser prefer whichever source (PGP/FGP
+    edition, or V0.8) actually CONTAINS what the user searched for, instead of
+    silently defaulting to a transcription that never mentions it (SEED-033).
+    Empty when the snippet carries no match markers.
+    """
+    if not snippet or '*' not in snippet:
+        return ''
+    m = _SNIPPET_MATCH_RE.search(snippet)
+    if not m:
+        return ''
+    # A match spanning a line break carries the UI's line-break sentinel
+    # (SearchEngine.highlight renders '\n' as ' \u2016 ' for the results table).
+    # Source texts have no such character, so leaving it in guarantees the
+    # `must_contain` lookup misses -- on exactly the multi-line hits that most
+    # need it (Codex P2, 2026-09-02). Restore it to a plain space.
+    phrase = m.group(1).replace('\u2016', ' ')
+    return re.sub(r'\s+', ' ', phrase).strip()
+
+
+
+def _hit_scope_phrase(snippet, adv_state, page):
+    """The snippet's matched phrase, but only on the page the hit belongs to.
+
+    Advanced View's Next/Previous re-renders the SAME search result, so ``snippet``
+    still describes the original hit page. Passing its phrase on every folio let a
+    whole-document source containing the old hit become the default on an unrelated
+    one (Codex P2, 2026-09-02). The first page rendered for a result claims the
+    scope; any other page gets None.
+    """
+    phrase = _snippet_match_phrase(snippet)
+    if not phrase or page is None:
+        return None
+    current = (getattr(page, 'sys_id', None),
+               getattr(adv_state, 'volume_ie', None),
+               getattr(page, 'p_num', None))
+    if getattr(adv_state, 'hit_scope', None) is None:
+        adv_state.hit_scope = current
+        return phrase
+    return phrase if adv_state.hit_scope == current else None
 
 # ---------------------------------------------------------------------------
 # Bidi isolation (Finding #15)
@@ -695,6 +744,12 @@ def create_result_card(search_state, refs, index, result):
                     _card_browse_url += f'&volume_ie={_card_ie_id}'
                 if _card_p_num:
                     _card_browse_url += f'&page={_card_p_num}'
+                # SEED-033 Option A: carry the matched phrase so the browse
+                # page's version chooser can default to whichever source
+                # actually contains it.
+                _card_phrase = _snippet_match_phrase(snippet)
+                if _card_phrase:
+                    _card_browse_url += f'&highlight={quote(_card_phrase)}'
                 with ui.link(target=_card_browse_url).classes('no-underline'):
                     ui.button(icon='menu_book').props(f'flat round dense size=sm color=green aria-label="{tr("Browse Full Manuscript")}"').tooltip(tr('Browse Full Manuscript'))
 
@@ -993,9 +1048,11 @@ def open_advanced_dialog(search_state, refs, index, result):
     adv_state = AdvancedViewState()
     if standalone:
         adv_state.current_result_idx = 0
+        adv_state.hit_scope = None
         adv_state.results = [result]
     else:
         adv_state.current_result_idx = index
+        adv_state.hit_scope = None
         adv_state.results = search_state.displayed_results
 
     with ui.dialog().props('maximized') as dialog:
@@ -1060,6 +1117,8 @@ def open_advanced_dialog(search_state, refs, index, result):
         new_idx = adv_state.current_result_idx + direction
         if 0 <= new_idx < len(adv_state.results):
             adv_state.current_result_idx = new_idx
+            # A different hit owns a different page: let it claim the scope (Codex P2).
+            adv_state.hit_scope = None
             load_result(new_idx)
 
     def load_result(idx: int):
@@ -1303,7 +1362,7 @@ def open_advanced_dialog(search_state, refs, index, result):
             if term in text:
                 text = text.replace(
                     term,
-                    f'<mark style="background-color: #fef08a; padding: 2px 4px; border-radius: 3px; font-weight: 600;">{term}</mark>'
+                    f'<mark class="highlight-match">{term}</mark>'  # common.css: readable in light AND dark
                 )
         return text.replace('\n', '<br>')
 
@@ -1443,17 +1502,20 @@ def open_advanced_dialog(search_state, refs, index, result):
         # /selected FGP excerpt must not default over the V0.8/HTR — same policy as
         # the browse version chooser).
         if all_sources:
-            _groups = group_transcription_sources(all_sources)
-            if _groups['pgp_editions']:
-                display_text = _groups['pgp_editions'][0].get('content', current_text or '')
+            # RENDER-ONLY (SEED-033 Option A, 2026-09-02): PGP-first, the FGP
+            # coverage/text-match rules and the search-scoped override all live
+            # in ``choose_default_source``. The matched phrase IS known here (the
+            # ``*...*`` snippet markers), so pass it -- this inline reader must
+            # never show a transcription that lacks the hit while the card right
+            # above it highlights that very hit.
+            _dec = choose_default_source(
+                all_sources, current_text or '',
+                full_htr_getter=lambda: _fgp_full_htr,
+                must_contain=_hit_scope_phrase(snippet, adv_state, page))
+            if _dec.get('eligible') and _dec.get('source'):
+                display_text = _dec['source'].get('content', current_text or '')
             else:
-                _dec = choose_default_source(
-                    all_sources, current_text or '',
-                    full_htr_getter=lambda: _fgp_full_htr)
-                if _dec.get('eligible') and _dec.get('source'):
-                    display_text = _dec['source'].get('content', current_text or '')
-                else:
-                    display_text = current_text or (snippet.replace('*', '') if snippet else '')
+                display_text = current_text or (snippet.replace('*', '') if snippet else '')
         elif pgp_transcription and pgp_transcription.get('content'):
             display_text = pgp_transcription['content']
         else:
@@ -1526,6 +1588,10 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 browse_url += f'&volume_ie={ie_id}'
                             if current_p_num:
                                 browse_url += f'&page={current_p_num}'
+                            # SEED-033 Option A: carry the matched phrase.
+                            _phrase = _snippet_match_phrase(snippet)
+                            if _phrase:
+                                browse_url += f'&highlight={quote(_phrase)}'
                             # Use ui.link for full page reload to ensure browse page recreates with PGP data
                             with ui.link(target=browse_url).classes('no-underline').tooltip(tr('Browse')):
                                 ui.button(icon='menu_book').props(f'flat round size=sm aria-label="{tr("Browse")}"')
@@ -1666,6 +1732,10 @@ def open_advanced_dialog(search_state, refs, index, result):
                                     browse_url += f'&volume_ie={ie_id}'
                                 if current_p_num:
                                     browse_url += f'&page={current_p_num}'
+                                # SEED-033 Option A: carry the matched phrase.
+                                _phrase = _snippet_match_phrase(snippet)
+                                if _phrase:
+                                    browse_url += f'&highlight={quote(_phrase)}'
                                 with ui.link(target=browse_url).classes('no-underline').tooltip(tr('Browse Full Manuscript')):
                                     ui.button(icon='menu_book').props(f'flat round size=sm color=green aria-label="{tr("Browse Full Manuscript")}"')
 
@@ -2180,6 +2250,13 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 pgp_transcription=pgp_transcription,
                                 all_sources=all_sources,
                                 full_original_text=_fgp_full_htr,
+                                # SEED-033 Option A -- Codex P2 (2026-09-02): the SAME
+                                # phrase the initial `display_text` decision above used.
+                                # Without it the selector's delayed loader re-ran the
+                                # chooser under plain PGP-first precedence and, ~0.1 s
+                                # later, replaced the hit-containing text with a
+                                # transcription that does not contain the hit.
+                                must_contain=_hit_scope_phrase(snippet, adv_state, page),
                             )
 
                             create_comment_button(
@@ -2283,20 +2360,33 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 ui.html(img_html, sanitize=False)
                                 ui.run_javascript('setTimeout(() => { if(window.advViewer) window.advViewer.init(); initProgressiveImages(); }, 200);')
 
-                            # Attribution footer
+                            # Attribution footer. The image above can fall back to NLI
+                            # (handleImageError: Oxford proxy -> NLI manifest -> NLI
+                            # proxy), so the credit must be switchable, exactly as on the
+                            # browse page -- otherwise an NLI image keeps the Bodleian
+                            # credit. `switchImageCredit()` looks these attributes up by
+                            # `data-role="image-credit"` (Codex P2, 2026-09-02); there is
+                            # no link element here, and the helper tolerates its absence.
+                            _adv_credit_nli = 'הספרייה הלאומית / National Library of Israel'  # non-empty: switchImageCredit() skips a falsy value
                             attribution = ''
                             if is_oxford:
-                                attribution = 'From the collections of the Bodleian Libraries, Oxford'
+                                attribution = OXFORD_IMAGE_CREDIT_EN
                             elif page and page.attribution:
                                 attribution = page.attribution
                             else:
-                                attribution = 'הספרייה הלאומית / National Library of Israel'
-
+                                attribution = _adv_credit_nli
                             with ui.row().classes('w-full items-center justify-center gap-2 py-2').style(
                                 'background: #2a2a2a; border-radius: 0 0 8px 8px;'
                             ):
                                 ui.icon('photo_library', size='xs').style('color: #888; font-size: 14px;')
-                                ui.label(attribution).classes('text-xs').style('color: #aaa; font-style: italic;')
+                                _adv_credit_lbl = ui.label(attribution).classes('text-xs').style(
+                                    'color: #aaa; font-style: italic;')
+                                if is_oxford:
+                                    _adv_credit_lbl.props(
+                                        'data-role="image-credit" '
+                                        f'data-credit-oxford="{html.escape(attribution, quote=True)}" '
+                                        f'data-credit-nli="{html.escape(_adv_credit_nli, quote=True)}"'
+                                    )
 
             # === Actions Section ===
             with ui.card().classes('w-full p-6').style('border-radius: 16px; background: var(--bg-tertiary);'):
@@ -2311,6 +2401,10 @@ def open_advanced_dialog(search_state, refs, index, result):
                             browse_url += f'&volume_ie={ie_id}'
                         if current_p_num:
                             browse_url += f'&page={current_p_num}'
+                        # SEED-033 Option A: carry the matched phrase.
+                        _phrase = _snippet_match_phrase(snippet)
+                        if _phrase:
+                            browse_url += f'&highlight={quote(_phrase)}'
                         # Use ui.link for full page reload to ensure browse page recreates with PGP data
                         with ui.link(target=browse_url).classes('btn-primary no-underline'):
                             ui.icon('menu_book').classes('mr-2')

@@ -10,6 +10,8 @@ from web.state import state
 from web.export_service import get_export_service, encode_filename_for_header
 import requests
 import requests.adapters
+
+from shared.nli_fetch import nli_image_get
 import re
 import os
 import threading
@@ -45,6 +47,9 @@ logger = logging.getLogger(__name__)
 # Cache TTL values (configurable via environment variables)
 NLI_CACHE_TTL = int(os.environ.get('NLI_CACHE_TTL', '300'))  # 5 minutes default
 NLI_FAIL_CACHE_TTL = 60  # negative-cache failures for 60s to avoid hammering NLI
+# Rosetta's "no image" placeholder is ~1615 bytes; a real thumbnail is larger.
+# The `nli_image` route has used 2000 since Phase 98 -- one constant for both now.
+_ROSETTA_PLACEHOLDER_MAX_BYTES = 2000
 NLI_DISK_CACHE_TTL = int(os.environ.get('NLI_DISK_CACHE_TTL', str(30 * 24 * 60 * 60)))  # 30 days
 IMAGE_CACHE_TTL = int(os.environ.get('IMAGE_CACHE_TTL', '600'))  # 10 minutes default
 NLI_MAX_CONCURRENT_FETCHES = max(1, int(os.environ.get('NLI_MAX_CONCURRENT_FETCHES', '8')))
@@ -984,7 +989,7 @@ def init_api_routes(app_override=None):
             )
             if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
                 # The "no image" placeholder is ~1615 bytes, real images are larger
-                if len(resp.content) > 2000:
+                if len(resp.content) > _ROSETTA_PLACEHOLDER_MAX_BYTES:
                     _nli_record_success(path='nli_image')
                     return Response(
                         content=resp.content,
@@ -1075,12 +1080,83 @@ def init_api_routes(app_override=None):
                     _nli_record_failure(failure_type='429', path='_fetch_nli_image_bytes')
                 elif 500 <= resp.status_code < 600:
                     _nli_record_failure(failure_type='5xx', path='_fetch_nli_image_bytes')
+            # Codex P2 (2026-09-02): record the IIIF failure and FALL THROUGH to
+            # Rosetta. Returning here meant an unreachable or TLS-failing IIIF host
+            # produced no image at all, even with Rosetta healthy -- the exact
+            # scenario the fallback below exists for. `SSLError` is a subclass of
+            # ConnectionError, so it lands in the same branch.
             except requests.exceptions.Timeout:
                 _nli_record_failure(failure_type='timeout', path='_fetch_nli_image_bytes')
-                return None
             except requests.exceptions.ConnectionError:
                 _nli_record_failure(failure_type='connection_error', path='_fetch_nli_image_bytes')
-                return None
+            except requests.exceptions.RequestException:
+                _nli_record_failure(failure_type='request_error', path='_fetch_nli_image_bytes')
+
+            # 260902 (debug/oxford-fgp-image-mismatch): parity with the desktop
+            # loader's Rosetta fallback (desktop/image_loader.py attempt C). NLI's
+            # IIIF server intermittently answers 5xx for a whole manuscript
+            # (MS heb. g.2/27: HTTP 500 on all four FL ids at every size) while
+            # Rosetta still serves a thumbnail of the same FL. The Rosetta
+            # *stream* (attempt B on desktop) is skipped here on purpose: it is a
+            # full-resolution TIFF a browser <img> cannot render, and it answered
+            # 401 for these FL ids anyway. A small PNG beats "Image not available".
+            # NO breaker re-check here (Codex P2, 2026-09-02). `_try_fl` already
+            # consulted the breaker on entry; the IIIF failure recorded moments ago
+            # can be the one that trips it, and re-checking would then skip the
+            # Rosetta host -- which is still healthy -- in exactly the
+            # IIIF-down/Rosetta-up case this fallback exists for. Work stays bounded:
+            # at most one IIIF attempt plus one Rosetta attempt per FL id, and the
+            # entry check still short-circuits every LATER FL in the loop.
+            rosetta_thumb = (
+                "https://rosetta.nli.org.il/delivery/DeliveryManagerServlet"
+                f"?dps_func=thumbnail&dps_pid=FL{fl_id}"
+            )
+            try:
+                # Through the shared NLI wrapper, not a bare requests.get: both
+                # iiif.nli.org.il and rosetta.nli.org.il serve a legacy certificate
+                # chain, and shared/nli_fetch.py owns that host-scoped policy
+                # (verification disabled for those two hosts ONLY, warning
+                # suppressed inside the call). A bare verify=True can raise
+                # SSLError here -- swallowed as a connection failure -- in exactly
+                # the IIIF-down/Rosetta-up case this fallback exists for
+                # (Codex P1, 2026-09-02).
+                r2 = nli_image_get(
+                    rosetta_thumb,
+                    headers=headers,
+                    timeout=(NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT),
+                )
+                ct2 = (r2.headers.get('Content-Type', '') or '').split(';', 1)[0].strip()
+                if r2.status_code == 200 and ct2.startswith('image/'):
+                    # Rosetta answers 200 with a ~1615-byte "no image" placeholder for
+                    # an FL it cannot deliver. The `nli_image` route has rejected
+                    # anything under this size since Phase 98; the fallback must too,
+                    # or it caches the placeholder and shows it as the manuscript
+                    # (Codex P2, 2026-09-02 -- observed live: one FL of MS heb. g.2/27
+                    # returns exactly 1615 bytes while another returns 21734).
+                    if len(r2.content) > _ROSETTA_PLACEHOLDER_MAX_BYTES:
+                        _nli_record_success(path='_fetch_nli_image_bytes_rosetta_thumb')
+                        logger.info("NLI IIIF unavailable for FL%s; served Rosetta thumbnail (%d bytes)", fl_id, len(r2.content))
+                        return (r2.content, ct2 or 'image/png')
+                    logger.info("Rosetta returned the no-image placeholder for FL%s (%d bytes)", fl_id, len(r2.content))
+                # A Rosetta 429/5xx is a breaker failure exactly as an IIIF one is
+                # (shared/nli_circuit_breaker.py D-06). Without this the loop could
+                # issue an IIIF *and* a Rosetta request for every cached FL id
+                # instead of opening the breaker. 404 does NOT trip it (D-07).
+                elif r2.status_code == 429:
+                    _nli_record_failure(failure_type='429', path='_fetch_nli_image_bytes_rosetta_thumb')
+                elif 500 <= r2.status_code < 600:
+                    _nli_record_failure(failure_type='5xx', path='_fetch_nli_image_bytes_rosetta_thumb')
+            except requests.exceptions.Timeout:
+                _nli_record_failure(failure_type='timeout', path='_fetch_nli_image_bytes_rosetta_thumb')
+            except requests.exceptions.ConnectionError:
+                _nli_record_failure(failure_type='connection_error', path='_fetch_nli_image_bytes_rosetta_thumb')
+            except requests.exceptions.RequestException:
+                # TooManyRedirects (the wrapper caps redirects), ChunkedEncodingError,
+                # and the rest. Uncaught they escaped `_fetch_nli_image_bytes`, so
+                # /api/nli_image_by_sysid and the Oxford fallback answered 500 instead
+                # of moving to the next FL id or a normal not-found
+                # (Codex P2, 2026-09-02).
+                _nli_record_failure(failure_type='request_error', path='_fetch_nli_image_bytes_rosetta_thumb')
             return None
 
         if 0 <= page < len(fl_ids):

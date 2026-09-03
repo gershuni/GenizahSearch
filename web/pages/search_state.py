@@ -144,6 +144,11 @@ class AdvancedViewState:
         self.current_fl_id: Optional[str] = None
         self.total_pages: int = 1
         self.current_page: Optional[BrowsePage] = None
+        # (sys_id, volume_ie, p_num) the search hit belongs to. Next/Previous
+        # re-renders the SAME result object, so `snippet` keeps pointing at the
+        # original hit page; the SEED-033 `must_contain` phrase must apply only
+        # while that page is displayed (Codex P2, 2026-09-02).
+        self.hit_scope: Optional[tuple] = None
         self.show_image_panel: bool = True
         self.zoom_level: float = 1.0
         self.rotation: int = 0
