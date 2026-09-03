@@ -488,6 +488,16 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                             result['is_cambridge'] = True
                         result['external_url'] = cached_url
 
+                # Same ordering problem for the NLI credit (Codex P2, 2026-09-02):
+                # the attribution block above runs BEFORE `enrich_metadata` populates
+                # `attribution_nli`, so on a first, uncached load the value was empty
+                # and the Oxford->NLI fallback fell back to the generic credit instead
+                # of the manifest's own. Read it back here, where the cache is warm.
+                if not result.get('attribution_nli') and hasattr(state_mod.meta_mgr, 'nli_cache'):
+                    _cached_attr = state_mod.meta_mgr.nli_cache.get(_sys_id, {})
+                    if _cached_attr.get('attribution_nli'):
+                        result['attribution_nli'] = _cached_attr['attribution_nli']
+
             return result
 
         try:
