@@ -337,11 +337,50 @@ def test_the_regular_snapshot_still_stores_the_search_list():
 def test_an_old_single_list_session_migrates_into_both_surfaces():
     """Sessions written before the split carry no composition exclusion keys."""
     s = _method_source("_restore_session")
-    assert "comp.get('exclusion_sources') or comp.get('excluded_raw_entries')" in s
+    assert "self._comp_snapshot_has_own_exclusions(comp)" in s
     assert "self.comp_exclusion_sources = list(" in s
     assert "getattr(self, 'exclusion_sources', []) or [])" in s, (
         "the fallback must copy the restored SEARCH list into composition"
     )
+
+
+# The legacy/post-split decision, exercised directly. Codex P1 on PR #334: the
+# first version tested the VALUES, so a composition list the user had
+# deliberately emptied ([] in a post-split snapshot) was read as legacy and the
+# Search list was copied back over it -- re-coupling the surfaces the split had
+# just separated, silently, on the next restart.
+
+def test_a_post_split_snapshot_with_an_empty_list_is_not_treated_as_legacy():
+    empty_but_deliberate = {
+        'excluded_sys_ids': [],
+        'excluded_shelfmarks': [],
+        'excluded_raw_entries': [],
+        'exclusion_sources': [],
+    }
+    assert GenizahGUI._comp_snapshot_has_own_exclusions(empty_but_deliberate) is True, (
+        "an intentionally empty composition list must survive a restart; "
+        "migrating the Search list over it re-couples the two surfaces"
+    )
+
+
+def test_a_pre_split_snapshot_is_treated_as_legacy():
+    """Before the split, composition_search stored only these two keys."""
+    legacy = {'excluded_sys_ids': ['s1'], 'excluded_shelfmarks': ['T-S 1.1']}
+    assert GenizahGUI._comp_snapshot_has_own_exclusions(legacy) is False
+
+
+@pytest.mark.parametrize("comp", [
+    {'exclusion_sources': []},
+    {'excluded_raw_entries': []},
+    {'exclusion_sources': [], 'excluded_raw_entries': []},
+    {'exclusion_sources': [{'id': 'x'}]},
+])
+def test_either_key_alone_marks_a_post_split_snapshot(comp):
+    assert GenizahGUI._comp_snapshot_has_own_exclusions(comp) is True
+
+
+def test_an_empty_snapshot_is_legacy():
+    assert GenizahGUI._comp_snapshot_has_own_exclusions({}) is False
 
 
 def test_the_composition_restore_runs_after_the_search_restore():

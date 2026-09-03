@@ -24592,6 +24592,22 @@ class GenizahGUI(QMainWindow):
         self._excl_set(surface, 'raw', [])
         self._update_exclusion_display(surface)
 
+    @staticmethod
+    def _comp_snapshot_has_own_exclusions(comp):
+        """Does this composition snapshot carry its OWN exclusion list?
+
+        KEY PRESENCE, never truthiness (Codex P1, PR #334). Every snapshot
+        written since the 2026-09-03 per-surface split writes both keys
+        unconditionally, so a composition list the user deliberately left
+        EMPTY serialises as []. Testing the values would read that as a
+        pre-split session and copy the Search list into Composition --
+        silently re-coupling the two surfaces across a restart, which is
+        exactly what the split was for. Pre-split snapshots stored only
+        'excluded_sys_ids' and 'excluded_shelfmarks' under
+        composition_search, so the two new keys are the discriminator.
+        """
+        return 'exclusion_sources' in comp or 'excluded_raw_entries' in comp
+
     def open_exclude_dialog(self, surface='search'):
         """Edit ONE surface's exclusion list.
 
@@ -29668,7 +29684,10 @@ class GenizahGUI(QMainWindow):
             # into BOTH surfaces reproduces the old behaviour exactly on
             # the first load after upgrading -- the two only diverge once
             # the user edits one of them.
-            if comp.get('exclusion_sources') or comp.get('excluded_raw_entries'):
+            #
+            # _comp_snapshot_has_own_exclusions tests KEY PRESENCE, not
+            # truthiness -- see its docstring (Codex P1, PR #334).
+            if self._comp_snapshot_has_own_exclusions(comp):
                 self.comp_exclusion_sources = deserialize_sources(
                     comp.get('exclusion_sources') or [])
                 self.comp_excluded_raw_entries = comp.get('excluded_raw_entries', [])
