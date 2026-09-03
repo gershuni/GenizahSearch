@@ -21,7 +21,8 @@ from corrections_ui import (
 )
 from desktop.widgets import (
     _format_add_to_list_label,
-    apply_find_highlight, _get_folio_number_from_shelfmark,
+    apply_find_highlight, mark_pattern_hits, markers_to_bold_html,
+    _get_folio_number_from_shelfmark,
     _get_folio_image_index,
 )
 from desktop.widgets.line_number_text_edit import (
@@ -1148,14 +1149,11 @@ class ResultDialog(QDialog):
     def _rd_load_versions(self):
         """Load versions for current document page."""
         parent = self._app
-        if not parent or not hasattr(parent, 'corrections_client'):
-            return
 
-        doc_id = self.current_sys_id
-        page_num = self.current_p_num or 1
-        client = parent.corrections_client
-
-        # Store original text
+        # Seed BEFORE the early return below. This used to sit after it, so an
+        # app with no corrections_client left `_rd_versions_cache` empty and a
+        # later switch back to "V0.8" fell through to the plain
+        # `_rd_original_text` (260903).
         original_text = self.text_ms.toPlainText()
         self._rd_original_text = original_text
         # 260902 (debug/oxford-fgp-image-mismatch.md sub-issue B): the
@@ -1171,6 +1169,13 @@ class ResultDialog(QDialog):
         self._rd_versions_cache = {
             'original': original_marked_text if original_marked_text is not None else original_text
         }
+
+        if not parent or not hasattr(parent, 'corrections_client'):
+            return
+
+        doc_id = self.current_sys_id
+        page_num = self.current_p_num or 1
+        client = parent.corrections_client
 
         # Force fresh server availability check (500ms timeout) to prevent UI freeze
         if not client.is_server_available(force_check=True):
@@ -1494,9 +1499,34 @@ class ResultDialog(QDialog):
                 except Exception as e:
                     logger.debug("Error loading version: %s", e)
 
+    def _mark_search_hits(self, text):
+        """Re-derive the `*...*` search-hit markers from `highlight_pattern`.
+
+        260903. Every re-render of the manuscript pane goes through here, so
+        the highlight can no longer be lost by whichever text snapshot happened
+        to win. Before this, keeping the highlight depended on a *marked* copy
+        having been captured earlier and still being reachable, and several
+        branches did not satisfy that -- most visibly
+        `_rd_load_version_content`'s `original` fallback, which renders the
+        deliberately-plain `_rd_original_text` whenever the versions cache was
+        never seeded (`_rd_load_versions` returns before seeding when the app
+        has no `corrections_client`, and `load_page` can return before setting
+        `_rd_original_marked_text` at all).
+
+        A no-op when the text is already marked, when the result carries no
+        pattern (opened from Browse rather than a search), or when the pattern
+        does not match this text -- so it is safe on PGP/FGP editions and on
+        translations in another language.
+        """
+        if not text or '*' in text:
+            return text
+        pattern_str = (getattr(self, 'data', None) or {}).get('highlight_pattern')
+        return mark_pattern_hits(text, pattern_str)
+
     def _rd_display_text(self, text):
         """Display text in the manuscript viewer."""
         if text:
+            text = self._mark_search_hits(text)
             # Phase 999.4: route through gutter helper (source_text = raw `text`)
             apply_line_numbered_text(
                 self.text_ms, self._htmlify(text), source_text=text, is_html=True,
@@ -1509,7 +1539,12 @@ class ResultDialog(QDialog):
         direction = 'rtl' if is_rtl else 'ltr'
         layout_dir = Qt.LayoutDirection.RightToLeft if is_rtl else Qt.LayoutDirection.LeftToRight
         self.text_ms.setLayoutDirection(layout_dir)
+        # SEED-033 picks the source that CONTAINS the searched phrase, and then
+        # this path rendered it with no highlighting whatsoever. Mark it the
+        # same way V0.8 is marked (no-op when the phrase isn't in this edition).
+        text = self._mark_search_hits(text)
         html_text = text.replace('\n', '<br>')
+        html_text = markers_to_bold_html(html_text)
         # Phase 999.4: route through gutter helper (source_text = raw `text`)
         apply_line_numbered_text(
             self.text_ms,

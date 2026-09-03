@@ -52,7 +52,7 @@ from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
 from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, PuzzleMetaLoaderThread, FilterCountWorker, RefinementReplayThread
 from desktop.widgets import (
     ActionsHoverWidget, _format_add_to_list_label,
-    apply_find_highlight, markers_to_bold_html,
+    apply_find_highlight, markers_to_bold_html, mark_pattern_hits,
     _get_folio_number_from_shelfmark,
     _get_folio_image_index, _get_folio_side_image_index,
     _get_initial_image_index,
@@ -2950,6 +2950,18 @@ class GenizahGUI(QMainWindow):
                 logger.debug("Error loading version content: %s", e)
                 self._browse_display_version_text(self._browse_original_display_text())
 
+    def _browse_mark_search_hits(self, text):
+        """Re-derive the `*...*` search-hit markers from `browse_highlight_pattern`.
+
+        The Browse-tab twin of `ResultDialog._mark_search_hits`. A no-op when
+        the text is already marked, when this browse view did not arrive from
+        a search (`browse_highlight_pattern` is None), or when the pattern
+        does not match -- so it is safe on PGP/FGP editions and translations.
+        """
+        if not text or '*' in text:
+            return text
+        return mark_pattern_hits(text, getattr(self, 'browse_highlight_pattern', None))
+
     def _browse_original_display_text(self):
         """The V0.8 text to re-render, WITH its search-hit markers when we have them.
 
@@ -2972,6 +2984,7 @@ class GenizahGUI(QMainWindow):
         if not text:
             return
         # Apply RTL formatting like browse_render_page does
+        text = self._browse_mark_search_hits(text)
         browse_html_text = text.replace('\n', '<br>')
         # 260903: same `*…*` → red bold the browse page render applies, so a
         # V0.8 switch-back keeps the search hit visible. AFTER newline→<br>.
@@ -8547,7 +8560,12 @@ class GenizahGUI(QMainWindow):
         direction = 'rtl' if is_rtl else 'ltr'
         layout_dir = Qt.LayoutDirection.RightToLeft if is_rtl else Qt.LayoutDirection.LeftToRight
         self.browse_text.setLayoutDirection(layout_dir)
+        # SEED-033 picks the source that CONTAINS the searched phrase, and
+        # then this path rendered it with no highlighting at all. Mark it the
+        # same way the page render does (no-op when the phrase isn't here).
+        text = self._browse_mark_search_hits(text)
         browse_html_text = text.replace('\n', '<br>')
+        browse_html_text = markers_to_bold_html(browse_html_text)
         # Phase 999.4: route through gutter helper (source_text = raw `text`)
         apply_line_numbered_text(
             self.browse_text,
@@ -16881,14 +16899,38 @@ class GenizahGUI(QMainWindow):
     # Reach up, precision down, which is why it is an explicit button with the
     # trade-off written beside it and never folded into the search itself.
 
+    def _auto_expand_settings(self):
+        """``(rounds, top_k)`` for auto-expand, readable at any time.
+
+        The two spin boxes live INSIDE the Witnesses dialog and are destroyed
+        with it, so they exist only while it is open. `_comp_auto_rounds_pref`
+        / `_comp_auto_topk_pref` are the durable values the dialog writes back
+        on close, and are the source of truth here.
+
+        Reading the widgets unconditionally had two failure modes, both live:
+        `AttributeError` when the dialog had NEVER been opened — the normal
+        case for "Full Recursive Search" in letter-level mode, which reaches
+        `_run_auto_expand` without going through the dialog at all — and
+        `RuntimeError` ("wrapped C/C++ object ... has been deleted") once it
+        had been opened and closed. Reported by owner UAT 2026-09-03.
+        """
+        rounds = getattr(self, '_comp_auto_rounds_pref', 3)
+        top_k = getattr(self, '_comp_auto_topk_pref', 5)
+        if getattr(self, '_witness_dialog', None) is not None:
+            try:
+                rounds = self.spin_comp_auto_rounds.value()
+                top_k = self.spin_comp_auto_topk.value()
+            except (AttributeError, RuntimeError):
+                pass  # dialog is going away; the prefs above still stand
+        return int(rounds), int(top_k)
+
     def _run_auto_expand(self):
         if self.is_comp_running or getattr(self, '_auto_expand_left', 0):
             return
         if not self._has_comp_results():
             self._witness_notify(tr("Run a letter-level search first."))
             return
-        self._auto_expand_left = int(self.spin_comp_auto_rounds.value())
-        self._auto_expand_topk = int(self.spin_comp_auto_topk.value())
+        self._auto_expand_left, self._auto_expand_topk = self._auto_expand_settings()
         self._auto_expand_round = 0
         self._advance_auto_expand()
 

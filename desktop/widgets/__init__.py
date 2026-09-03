@@ -47,6 +47,30 @@ def _format_add_to_list_label(in_list=False):
 _HIGHLIGHT_MARKER_RE = re.compile(r'\*(.*?)\*')
 
 
+def mark_pattern_hits(text, pattern_str):
+    """Wrap every ``pattern_str`` match in ``text`` with ``*...*`` markers.
+
+    The one implementation of the flag heuristic the render paths had each
+    open-coded: ``re.MULTILINE`` is added when the pattern carries an explicit
+    newline or anchors, because those patterns are written against a whole
+    multi-line page. (``MULTILINE`` only affects ``^``/``$``; a search pattern
+    still spans a line break through its ``[^\\w...]+`` word separator, which
+    matches ``\\n`` like any other non-word character.)
+
+    Returns ``text`` unchanged when there is no pattern, the pattern does not
+    compile, or nothing matched -- so a caller can always use the result.
+    """
+    if not text or not pattern_str:
+        return text
+    flags = re.IGNORECASE
+    if '\\n' in pattern_str or pattern_str.startswith('^') or '^\\' in pattern_str:
+        flags |= re.MULTILINE
+    try:
+        return re.compile(pattern_str, flags).sub(r'*\g<0>*', text)
+    except re.error:
+        return text
+
+
 def markers_to_bold_html(html_text, color='red'):
     """Turn `*...*` search-hit markers into red bold.
 

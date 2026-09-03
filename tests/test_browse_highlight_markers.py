@@ -60,7 +60,10 @@ class _BrowseHarness:
     def __init__(self):
         self.browse_text = QTextBrowser()
         self.browse_find_input = type("_I", (), {"text": staticmethod(lambda: "")})()
-        for name in ("_browse_display_version_text", "_browse_original_display_text"):
+        self.browse_highlight_pattern = None
+        for name in ("_browse_display_version_text",
+                     "_browse_original_display_text",
+                     "_browse_mark_search_hits"):
             setattr(self, name, MethodType(getattr(GenizahGUI, name), self))
 
 
