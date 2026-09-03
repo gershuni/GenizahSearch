@@ -46,7 +46,12 @@ class _Viewer:
         self._attr_nli = ""
         self._label_text = None
         self._label_visible = None
+        # round 13: the credit is decided from the ACTIVE ENTRY, so the stub needs
+        # a list, an index, and the per-entry helper the applier calls.
+        self.active_list = []
+        self.current_idx = 0
         self._index_for_source_switch = viewers.ManuscriptViewerWidget._index_for_source_switch.__get__(self)
+        self._showing_nli_image = viewers.ManuscriptViewerWidget._showing_nli_image.__get__(self)
         self._apply = viewers.ManuscriptViewerWidget._apply_attribution_for_source.__get__(self)
 
     # minimal QLabel stand-in

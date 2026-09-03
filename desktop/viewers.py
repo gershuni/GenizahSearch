@@ -913,15 +913,39 @@ class ManuscriptViewerWidget(QWidget):
         anchor = getattr(self, '_last_folio_by_source', {}).get(new_source)
         return map_matching_image_index(old_list, old_idx, new_list, anchor_folio=anchor)
 
+    def _showing_nli_image(self):
+        """Is the image on screen an NLI one?
+
+        Not the same question as "is the NLI list active": when CUDL has no canvas
+        for a page, `_resolve_cambridge_page_or_fallback` appends a synthetic entry
+        marked ``is_nli_fallback`` to ``images_ext``, so the external list can be
+        active while an NLI URL is displayed (Codex P2, 2026-09-02). Decide from the
+        ACTIVE ENTRY first, then from the containing list.
+        """
+        try:
+            entry = self.active_list[self.current_idx]
+        except (IndexError, TypeError):
+            entry = None
+        if isinstance(entry, dict) and entry.get('is_nli_fallback'):
+            return True
+        return self.current_source == "nli"
+
     def _apply_attribution_for_source(self):
         """Show the credit belonging to the image currently displayed.
 
-        Called on load and from every source change (the manual combo switch and
-        the Oxford->NLI auto-fallback). Falls back to the primary credit when NLI's
-        own is unknown, and hides the label when there is nothing to say.
+        Called on load, from every source change (the manual combo switch, the
+        Oxford->NLI auto-fallback, and the programmatic CUDL-coverage switches in
+        ``genizah_app``), and whenever the displayed page changes -- a synthetic NLI
+        entry inside the external list changes the answer per page. Falls back to
+        the primary credit when NLI's own is unknown, and hides the label when there
+        is nothing to say.
         """
-        if self.current_source == "nli":
-            attr = getattr(self, '_attr_nli', '') or getattr(self, '_attr_ext', '')
+        if self._showing_nli_image():
+            # Never fall back to the EXTERNAL credit under an NLI image -- that is
+            # the misattribution this helper exists to prevent. When NLI's own
+            # credit is unknown, say NLI generically.
+            attr = getattr(self, '_attr_nli', '') or tr(
+                'From the collections of the National Library of Israel')
         else:
             attr = getattr(self, '_attr_ext', '')
         self.lbl_attribution.setText(attr)
@@ -1245,6 +1269,11 @@ class ManuscriptViewerWidget(QWidget):
 
         self.current_idx = index
         self._load_generation += 1  # Invalidate any in-flight callbacks immediately
+
+        # The credit is per-IMAGE, not per-list: `images_ext` may hold a synthetic
+        # NLI entry, and genizah_app's CUDL-coverage switches assign `current_source`
+        # then call set_page directly (Codex P2, 2026-09-02).
+        self._apply_attribution_for_source()
 
         # Update status text immediately for responsiveness
         self.scroll_area.set_status_message(tr("Loading..."))

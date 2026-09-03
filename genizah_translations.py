@@ -4599,6 +4599,12 @@ TRANSLATIONS.update({
         "קצר מ-V0.8",
 })
 
+# === Generic NLI image credit (2026-09-02) ===
+TRANSLATIONS.update({
+    "From the collections of the National Library of Israel":
+        "מאוספי הספרייה הלאומית",
+})
+
 # === Oxford Genizah Fragments licence credit (2026-09-02) ===
 TRANSLATIONS.update({
     "Image provided by the Bodleian Libraries, University of Oxford":
