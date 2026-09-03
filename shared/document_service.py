@@ -76,6 +76,38 @@ def _row_to_dict(row: sqlite3.Row, json_columns: tuple = ()) -> dict:
     return d
 
 
+def select_pgp_page_entry(entries, page_num=None):
+    """Pick the PGP fragment link that belongs to a given page.
+
+    ``entries`` is an ordered sequence of mappings carrying a
+    ``page_info`` key -- rows of ``document_fragments`` for one sys_id, or
+    anything shaped like them. Returns the chosen entry, or ``None`` when
+    there is nothing to choose from.
+
+    The rule: with a page number AND more than one candidate, the first
+    entry whose ``page_info`` is exactly 'recto' (page 1) or 'verso'
+    (anything else) wins; otherwise the first entry does. Note that
+    'recto and verso' -- 768 rows in the live sidecar -- deliberately
+    matches NEITHER, which is the behaviour every existing caller of
+    get_document_for_fragment already has.
+
+    Extracted so the desktop results-table PGP badge resolves the SAME
+    document the reading dialog opens for that row (Codex P2, PR #334).
+    144 manuscripts in the live sidecar have both a recto-tagged and a
+    verso-tagged document, and the lowest pgpid is not reliably the recto,
+    so 'pick one per manuscript' sends verso rows to the wrong page.
+    """
+    entries = list(entries or [])
+    if not entries:
+        return None
+    if page_num and len(entries) > 1:
+        target_page = 'recto' if page_num == 1 else 'verso'
+        for entry in entries:
+            if entry['page_info'] == target_page:
+                return entry
+    return entries[0]
+
+
 class PgpService:
     """Service for accessing PGP document data from the SQLite sidecar."""
 
@@ -162,9 +194,15 @@ class PgpService:
             return None
 
         try:
-            # Step 1: Find all fragment links for this sys_id
+            # Step 1: Find all fragment links for this sys_id.
+            # ORDER BY document_id: the 'first fragment' fallback below was
+            # relying on unspecified SQLite row order, so which document a
+            # multi-document fragment resolved to was not guaranteed to be
+            # stable -- and the desktop badge's batch query (ordered by
+            # pgpid) could disagree with it. Same rule, same order, both.
             cursor = self._conn.execute(
-                "SELECT document_id, page_info FROM document_fragments WHERE sys_id = ?",
+                "SELECT document_id, page_info FROM document_fragments "
+                "WHERE sys_id = ? ORDER BY document_id",
                 (sys_id,)
             )
             frags = cursor.fetchall()
@@ -172,22 +210,10 @@ class PgpService:
             if not frags:
                 return None
 
-            # If page_num specified, try to find matching page_info
-            # page_num 1 = recto, page_num 2 = verso
-            pgpid = None
-            matched_page_info = None
-            if page_num and len(frags) > 1:
-                target_page = 'recto' if page_num == 1 else 'verso'
-                for f in frags:
-                    if f['page_info'] == target_page:
-                        pgpid = f['document_id']
-                        matched_page_info = f['page_info']
-                        break
-
-            # Fallback to first result if no page match or page_num not specified
-            if not pgpid:
-                pgpid = frags[0]['document_id']
-                matched_page_info = frags[0]['page_info']
+            # One rule, shared with the desktop badge's batch path.
+            chosen = select_pgp_page_entry(frags, page_num)
+            pgpid = chosen['document_id'] if chosen else None
+            matched_page_info = chosen['page_info'] if chosen else None
 
             if not pgpid:
                 return None
@@ -579,39 +605,43 @@ class PgpService:
             logger.error(f"Error batch checking PGP editions: {e}")
             return set()
 
-    def get_pgp_urls_for_sys_ids(self, sys_ids: List[str]) -> Dict[str, str]:
-        """Batch map ``sys_id -> pgp_url`` for the results-table PGP link.
+    def get_pgp_page_urls_for_sys_ids(
+        self, sys_ids: List[str]
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Batch every PGP page candidate for each sys_id, ordered by pgpid.
 
         Companion to :meth:`get_sys_ids_with_transcriptions`, which answers
-        only *whether* a manuscript has PGP info. The desktop PGP badge needs
-        the actual URL to be clickable, and one query for the whole visible
-        page is far cheaper than a lookup per click.
+        only *whether* a manuscript has PGP info. The desktop badge needs a
+        real url to be clickable, and one query for the whole visible page
+        is far cheaper than a lookup per click.
 
-        A sys_id can be linked to SEVERAL PGP documents (a fragment cited by
-        more than one document). The lowest ``pgpid`` wins, so the URL a row
-        links to is stable across searches and process restarts rather than
-        depending on SQLite row order.
+        Returns the CANDIDATES rather than one url per manuscript, because
+        a manuscript can be linked to several documents and which one a
+        given results row means depends on that row's page. Hand the list
+        to :func:`select_pgp_page_entry` with the row's page number -- the
+        same rule :meth:`get_document_for_fragment` applies.
 
         Args:
             sys_ids: System IDs to look up. An empty list returns ``{}``.
 
         Returns:
-            ``{sys_id: pgp_url}``, containing ONLY sys_ids whose chosen
-            document has a non-empty ``pgp_url``. ``pgp_url`` is plain
-            nullable TEXT in the sidecar, so a missing URL is possible even
-            when the PGP link exists -- such a sys_id is simply absent here,
-            which is what lets the caller show a plain badge with no link.
+            ``{sys_id: [{'page_info': ..., 'pgp_url': ...}, ...]}`` ordered
+            by pgpid, containing ONLY documents with a non-empty
+            ``pgp_url``; a sys_id with no such document is absent entirely,
+            which is what lets the caller render a plain, unlinked badge.
+            ``pgp_url`` is nullable TEXT in the sidecar, so this can happen.
         """
         if not self._conn or not sys_ids:
             return {}
-        urls: Dict[str, str] = {}
+        pages: Dict[str, List[Dict[str, Any]]] = {}
         try:
             batch_size = 500  # stay under the SQLite variable limit (999)
             for i in range(0, len(sys_ids), batch_size):
                 batch = sys_ids[i:i + batch_size]
                 placeholders = ','.join('?' * len(batch))
                 cursor = self._conn.execute(
-                    "SELECT f.sys_id AS sys_id, d.pgp_url AS pgp_url "
+                    "SELECT f.sys_id AS sys_id, f.page_info AS page_info, "
+                    "d.pgp_url AS pgp_url "
                     "FROM document_fragments f "
                     "JOIN documents d ON d.pgpid = f.document_id "
                     f"WHERE f.sys_id IN ({placeholders}) "
@@ -622,22 +652,23 @@ class PgpService:
                     sid = row['sys_id']
                     url = row['pgp_url']
                     if sid and url:
-                        urls.setdefault(sid, url)  # ORDER BY => lowest pgpid
-            return urls
+                        pages.setdefault(sid, []).append({
+                            'page_info': row['page_info'],
+                            'pgp_url': url,
+                        })
+            return pages
         except Exception as e:
-            logger.error(f"Error batch fetching PGP urls: {e}")
+            logger.error(f"Error batch fetching PGP page urls: {e}")
             return {}
 
     def get_pgp_urls_for_pgpids(self, pgpids: List[int]) -> Dict[int, str]:
         """Batch map ``pgpid -> pgp_url``.
 
-        The pgpid-keyed companion to :meth:`get_pgp_urls_for_sys_ids`. Use
-        this wherever a row stands for one SPECIFIC PGP document rather
-        than for a manuscript -- a PGP-tag hit, for instance, whose snippet
-        is that document's transcription. A manuscript can be linked to
-        several documents, and the sys_id-keyed map resolves that by taking
-        the lowest pgpid, which is the wrong answer when the row already
-        names its document.
+        For rows that name one SPECIFIC PGP document rather than a
+        manuscript -- a PGP-tag hit, whose snippet is that document's
+        transcription. Stronger than resolving by page
+        (:meth:`get_pgp_page_urls_for_sys_ids` +
+        :func:`select_pgp_page_entry`), and needs no page at all.
 
         Returns:
             ``{pgpid: pgp_url}`` for the pgpids with a non-empty url; the
@@ -1316,12 +1347,12 @@ def get_all_pgp_link_sys_ids() -> Set[str]:
     return svc.get_all_pgp_link_sys_ids()
 
 
-def get_pgp_urls_for_sys_ids(sys_ids: List[str]) -> Dict[str, str]:
-    """Batch ``sys_id -> pgp_url`` for the desktop results-table PGP link.
-    Only sys_ids with a non-empty url are present. See
-    :meth:`PgpService.get_pgp_urls_for_sys_ids`."""
+def get_pgp_page_urls_for_sys_ids(sys_ids: List[str]) -> Dict[str, List[Dict[str, Any]]]:
+    """Batch every PGP page candidate per sys_id, for the desktop badge.
+    Pair with :func:`select_pgp_page_entry`. See
+    :meth:`PgpService.get_pgp_page_urls_for_sys_ids`."""
     svc = get_pgp_service()
-    return svc.get_pgp_urls_for_sys_ids(sys_ids)
+    return svc.get_pgp_page_urls_for_sys_ids(sys_ids)
 
 
 def get_pgp_urls_for_pgpids(pgpids: List[int]) -> Dict[int, str]:

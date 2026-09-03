@@ -92,6 +92,7 @@ from shared_export_utils import sanitize_text_for_excel as shared_sanitize_excel
 from shared_export_utils import coerce_img_page_cell
 from shared.reading_desk_model import ReadingDeskEntry, ReadingDeskState
 from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter
+from shared.document_service import select_pgp_page_entry
 from shared.exclusion_service import (
     ExclusionSource, compute_excluded_ids,
     serialize_sources, deserialize_sources,
@@ -1449,10 +1450,13 @@ class GenizahGUI(QMainWindow):
         self.list_filter_state = {'active': False, 'mode': 'in', 'lists': 'all'}
         self._pgp_transcription_sys_ids = set()
         self._manual_transcription_sys_ids = set()  # SEED-022: PGP text ∪ FGP (scholarly transcription/translation)
-        # {sys_id: pgp_url} for the rows in _pgp_transcription_sys_ids. Only
-        # a sys_id in HERE gets a clickable badge; presence in the set above
-        # is 'has PGP info', which is not the same as 'has a PGP url'.
-        self._pgp_url_by_sys_id = {}
+        # {sys_id: [{page_info, pgp_url}, ...]} for the rows in
+        # _pgp_transcription_sys_ids, ordered by pgpid. Only a sys_id in
+        # HERE gets a clickable badge; presence in the set above is 'has
+        # PGP info', which is not the same as 'has a PGP url'. The
+        # CANDIDATES are kept rather than one url per manuscript because
+        # which document a row means depends on that row's page.
+        self._pgp_pages_by_sys_id = {}
         self._pgp_badge_worker = None
         self._printed_badge_worker = None
         self._printed_sys_ids = set()
@@ -19668,7 +19672,7 @@ class GenizahGUI(QMainWindow):
         # 7. Clear printed filter state
         self._printed_sys_ids = set()
         self._manual_transcription_sys_ids = set()  # SEED-022
-        self._pgp_url_by_sys_id = {}
+        self._pgp_pages_by_sys_id = {}
         self._printed_filter_state = 'all'
         if hasattr(self, 'chk_search_header'):
             self.chk_search_header.set_filter_active(self.COL_PRINTED, False)
@@ -20028,7 +20032,7 @@ class GenizahGUI(QMainWindow):
             self._result_domain_map = {}
             self._printed_sys_ids = set()
             self._manual_transcription_sys_ids = set()  # SEED-022
-            self._pgp_url_by_sys_id = {}
+            self._pgp_pages_by_sys_id = {}
             # Phase 55: Zero-result refinement -- don't commit step (D-14a)
             if self._refine_mode:
                 self._zero_result_refine = True
@@ -20965,26 +20969,52 @@ class GenizahGUI(QMainWindow):
                 tr("Showing {} of {} results").format(visible_count, total)
             )
 
+    def _result_page_num(self, res):
+        """The 1-based page a results row is showing, or None.
+
+        Same order the reading dialog uses (result_dialog.load_result_by_index):
+        the parsed header first, then display['img'], which holds the page
+        number -- not a URL -- for both Genizah and LOCAL hits.
+        """
+        if not isinstance(res, dict):
+            return None
+        raw_header = res.get('raw_header') or ''
+        if raw_header and self.meta_mgr:
+            try:
+                parsed = self.meta_mgr.parse_full_id_components(raw_header)
+                return int(parsed['p_num'])
+            except (AttributeError, KeyError, TypeError, ValueError):
+                pass
+        try:
+            return int((res.get('display') or {}).get('img'))
+        except (AttributeError, TypeError, ValueError):
+            return None
+
     def _pgp_url_for_row(self, row, sys_id):
         """The PGP url THIS row should open.
 
-        A row that stands for one SPECIFIC PGP document carries its own
-        url, and that wins. A PGP-tag hit is such a row: its snippet is
-        one document's transcription or description, a manuscript can be
-        linked to several documents, and the same sys_id can occupy more
-        than one row of the same tag search. Falling back to the
-        per-manuscript map there would send every one of those rows to
-        the lowest-pgpid document -- possibly one that does not even
-        carry the tag being searched (Codex P2, PR #334).
+        Two kinds of row, two answers, neither of them 'one url per
+        manuscript' -- a manuscript can be linked to several PGP
+        documents (1,845 of 34,171 are; one to 104).
 
-        An ordinary search hit names a manuscript page, not a PGP
-        document, so it has no url of its own and the map is correct.
+        1. A row that NAMES its document carries its own url and wins. A
+           PGP-tag hit is such a row: its snippet is that document's
+           transcription, and the same sys_id can occupy several rows of
+           one tag search, which no per-manuscript answer can tell apart.
+        2. An ordinary search hit names a manuscript PAGE, so it resolves
+           by page, through the same select_pgp_page_entry rule that
+           get_document_for_fragment applies -- otherwise a verso hit on
+           one of the 144 manuscripts with separate recto and verso
+           documents opens the recto, disagreeing with the reading dialog
+           opened from the very same row (Codex P2, PR #334).
         """
         sid_item = self.results_table.item(row, self.COL_SYS_ID)
         res = sid_item.data(Qt.ItemDataRole.UserRole) if sid_item is not None else None
         if isinstance(res, dict) and res.get('pgp_url'):
             return res['pgp_url']
-        return (getattr(self, '_pgp_url_by_sys_id', None) or {}).get(sys_id)
+        entries = (getattr(self, '_pgp_pages_by_sys_id', None) or {}).get(sys_id)
+        chosen = select_pgp_page_entry(entries, self._result_page_num(res))
+        return chosen['pgp_url'] if chosen else None
 
     def _make_pgp_badge_item(self, sys_id, url=None):
         """Build the PGP cell for one row, as a link when the url is known.
@@ -21053,16 +21083,17 @@ class GenizahGUI(QMainWindow):
             return
         self.show_full_text()
 
-    def _on_pgp_badges_loaded(self, pgp_sys_ids, manual_sys_ids, pgp_urls=None):
+    def _on_pgp_badges_loaded(self, pgp_sys_ids, manual_sys_ids, pgp_pages=None):
         """Handle PGP badge worker results - update the PGP + scholarly-transcription
         columns for all rows (SEED-022). pgp_sys_ids = PGP link presence (green "PGP");
         manual_sys_ids = readable transcription/translation, PGP text ∪ FGP (amber ✓);
-        pgp_urls = {sys_id: pgp_url} for the badges that can be clicked. It is
-        keyword-defaulted so a caller still emitting the old two-value shape
-        renders plain (unlinked) badges instead of raising."""
+        pgp_pages = {sys_id: [{page_info, pgp_url}, ...]} for the badges that
+        can be clicked, ordered by pgpid. Keyword-defaulted so a caller still
+        emitting the old two-value shape renders plain (unlinked) badges
+        instead of raising."""
         self._pgp_transcription_sys_ids = pgp_sys_ids
         self._manual_transcription_sys_ids = manual_sys_ids
-        self._pgp_url_by_sys_id = pgp_urls or {}
+        self._pgp_pages_by_sys_id = pgp_pages or {}
         for row in range(self.results_table.rowCount()):
             item = self.results_table.item(row, self.COL_SYS_ID)
             if item:
@@ -21286,12 +21317,12 @@ class GenizahGUI(QMainWindow):
             self._manual_transcription_sys_ids = set()
         # Same reason for the PGP urls: no badge worker runs on this path,
         # so without this the tag results would render badges that are
-        # not links. Resolved BY PGPID, not by sys_id: each row is one
-        # specific tagged document (see the 'pgpid' note above), and the
-        # per-manuscript map cannot tell two rows of the same manuscript
-        # apart. The map is left empty here so there is exactly one
-        # source of truth for a tag row's link.
-        self._pgp_url_by_sys_id = {}
+        # not links. Resolved BY PGPID: each row is one specific tagged
+        # document (see the 'pgpid' note above), which is a stronger
+        # answer than resolving by page and needs no page at all. The
+        # page map is left empty so there is exactly one source of truth
+        # for a tag row's link.
+        self._pgp_pages_by_sys_id = {}
         try:
             from shared.document_service import get_pgp_urls_for_pgpids
             _tag_urls = get_pgp_urls_for_pgpids(

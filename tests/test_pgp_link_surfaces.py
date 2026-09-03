@@ -48,10 +48,15 @@ def _build_pgp_db(path, documents, fragments):
     """Minimal pgp.db with just the two tables the url query joins."""
     conn = sqlite3.connect(path)
     conn.execute("CREATE TABLE documents (pgpid INTEGER PRIMARY KEY, pgp_url TEXT)")
-    conn.execute("CREATE TABLE document_fragments (sys_id TEXT, document_id INTEGER)")
+    conn.execute(
+        "CREATE TABLE document_fragments "
+        "(sys_id TEXT, document_id INTEGER, page_info TEXT)"
+    )
     conn.executemany("INSERT INTO documents (pgpid, pgp_url) VALUES (?, ?)", documents)
     conn.executemany(
-        "INSERT INTO document_fragments (sys_id, document_id) VALUES (?, ?)", fragments
+        "INSERT INTO document_fragments (sys_id, document_id, page_info) "
+        "VALUES (?, ?, ?)",
+        [(f + (None,))[:3] for f in fragments],
     )
     conn.commit()
     conn.close()
@@ -59,7 +64,7 @@ def _build_pgp_db(path, documents, fragments):
 
 @pytest.fixture
 def pgp_urls_fn(tmp_path):
-    """The real PgpService.get_pgp_urls_for_sys_ids bound to a temp sidecar."""
+    """The real PgpService.get_pgp_page_urls_for_sys_ids bound to a temp sidecar."""
     from shared.document_service import PgpService
 
     db = tmp_path / "pgp.db"
@@ -84,13 +89,13 @@ def pgp_urls_fn(tmp_path):
     conn.row_factory = sqlite3.Row
     svc = PgpService.__new__(PgpService)
     svc._conn = conn
-    yield svc.get_pgp_urls_for_sys_ids
+    yield svc.get_pgp_page_urls_for_sys_ids
     conn.close()
 
 
 def test_urls_returns_only_sys_ids_with_a_real_url(pgp_urls_fn):
     got = pgp_urls_fn(["plain", "empty", "null", "absent"])
-    assert got == {"plain": PGP_URL}, (
+    assert got == {"plain": [{"page_info": None, "pgp_url": PGP_URL}]}, (
         "an empty or NULL pgp_url must be ABSENT, not mapped to '' -- the caller "
         "uses membership to decide whether to render a link"
     )
@@ -98,8 +103,8 @@ def test_urls_returns_only_sys_ids_with_a_real_url(pgp_urls_fn):
 
 def test_urls_picks_the_lowest_pgpid_when_a_sys_id_has_several_documents(pgp_urls_fn):
     got = pgp_urls_fn(["shared"])
-    assert got["shared"] == OTHER_URL, (
-        "the link a row opens must not depend on SQLite row order"
+    assert [e["pgp_url"] for e in got["shared"]] == [OTHER_URL, PGP_URL], (
+        "candidates must come back in pgpid order, not SQLite row order"
     )
     # Deterministic across repeated calls, not just once.
     assert pgp_urls_fn(["shared"]) == got
@@ -113,7 +118,7 @@ def test_urls_chunks_past_the_sqlite_variable_limit(pgp_urls_fn):
     # 1200 ids > the 999 SQLite variable limit; a single un-chunked IN() would
     # raise sqlite3.OperationalError and the method would return {}.
     ids = [f"filler{i}" for i in range(1200)] + ["plain"]
-    assert pgp_urls_fn(ids) == {"plain": PGP_URL}
+    assert pgp_urls_fn(ids) == {"plain": [{"page_info": None, "pgp_url": PGP_URL}]}
 
 
 def test_urls_no_connection_returns_empty():
@@ -121,7 +126,7 @@ def test_urls_no_connection_returns_empty():
 
     svc = PgpService.__new__(PgpService)
     svc._conn = None
-    assert svc.get_pgp_urls_for_sys_ids(["plain"]) == {}
+    assert svc.get_pgp_page_urls_for_sys_ids(["plain"]) == {}
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +149,7 @@ def _run_badge_worker(monkeypatch, link_ids, manual_ids, urls,
             raise RuntimeError("pgp.db unavailable")
         return dict(urls)
 
-    monkeypatch.setattr(ds, "get_pgp_urls_for_sys_ids", _urls)
+    monkeypatch.setattr(ds, "get_pgp_page_urls_for_sys_ids", _urls)
 
     captured = {}
     w = PGPBadgeWorker(["a", "b"])
@@ -154,9 +159,10 @@ def _run_badge_worker(monkeypatch, link_ids, manual_ids, urls,
 
 
 def test_worker_emits_the_url_map(monkeypatch):
-    got = _run_badge_worker(monkeypatch, {"a"}, {"a"}, {"a": PGP_URL})
+    pages = {"a": [{"page_info": None, "pgp_url": PGP_URL}]}
+    got = _run_badge_worker(monkeypatch, {"a"}, {"a"}, pages)
     assert got["pgp"] == {"a"}
-    assert got["urls"] == {"a": PGP_URL}
+    assert got["urls"] == pages
 
 
 def test_worker_url_failure_leaves_the_badges_intact(monkeypatch):
@@ -176,7 +182,7 @@ def test_worker_skips_the_url_query_when_no_row_has_pgp(monkeypatch):
     monkeypatch.setattr(ds, "get_sys_ids_with_transcriptions", lambda ids: set())
     monkeypatch.setattr(ts, "get_sys_ids_with_manual_transcriptions",
                         lambda ids: set())
-    monkeypatch.setattr(ds, "get_pgp_urls_for_sys_ids",
+    monkeypatch.setattr(ds, "get_pgp_page_urls_for_sys_ids",
                         lambda ids: calls.append(ids) or {})
     captured = {}
     w = PGPBadgeWorker(["a"])
@@ -195,7 +201,8 @@ def test_worker_still_feeds_a_two_argument_slot(monkeypatch):
     monkeypatch.setattr(ds, "get_sys_ids_with_transcriptions", lambda ids: {"a"})
     monkeypatch.setattr(ts, "get_sys_ids_with_manual_transcriptions",
                         lambda ids: set())
-    monkeypatch.setattr(ds, "get_pgp_urls_for_sys_ids", lambda ids: {"a": PGP_URL})
+    monkeypatch.setattr(ds, "get_pgp_page_urls_for_sys_ids",
+                        lambda ids: {"a": [{"page_info": None, "pgp_url": PGP_URL}]})
     seen = {}
     w = PGPBadgeWorker(["a"])
     w.finished.connect(lambda pgp, manual: seen.update(n=len(pgp)))
@@ -220,13 +227,14 @@ class _ResultsHarness:
         self.results_table.setColumnCount(13)
         self._pgp_transcription_sys_ids = set()
         self._manual_transcription_sys_ids = set()
-        self._pgp_url_by_sys_id = {}
+        self._pgp_pages_by_sys_id = {}
+        self.meta_mgr = None  # rows here carry display['img'], not a raw header
         self.opened = []
         self.full_text_calls = 0
 
         for name in (
             "_make_pgp_badge_item", "_write_pgp_badge_cell", "_pgp_url_for_cell",
-            "_pgp_url_for_row",
+            "_pgp_url_for_row", "_result_page_num",
             "_on_results_cell_clicked", "_on_results_double_clicked",
             "_on_pgp_badges_loaded",
         ):
@@ -262,7 +270,7 @@ def test_badge_with_a_url_is_dressed_as_a_link(results):
     # _pgp_url_for_row (a row may name its own PGP document).
     results.add_row(0, "s1")
     results._pgp_transcription_sys_ids = {"s1"}
-    results._pgp_url_by_sys_id = {"s1": PGP_URL}
+    results._pgp_pages_by_sys_id = {"s1": [{"page_info": None, "pgp_url": PGP_URL}]}
     results._write_pgp_badge_cell(0, "s1")
     item = results.results_table.item(0, results.COL_PGP)
     assert item.text() == "PGP"
@@ -276,7 +284,7 @@ def test_badge_with_a_url_is_dressed_as_a_link(results):
 def test_badge_without_a_url_stays_a_plain_badge(results):
     """"has PGP info" is NOT "has a PGP url" -- no underline we cannot honour."""
     results._pgp_transcription_sys_ids = {"s1"}
-    results._pgp_url_by_sys_id = {}
+    results._pgp_pages_by_sys_id = {}
     item = results._make_pgp_badge_item("s1")
     assert item.text() == "PGP"
     assert item.font().underline() is False
@@ -303,7 +311,7 @@ def test_write_cell_clears_the_cell_for_a_non_pgp_row(results):
 def test_clicking_a_linked_badge_opens_the_pgp_page(results):
     results.add_row(0, "s1")
     results._pgp_transcription_sys_ids = {"s1"}
-    results._pgp_url_by_sys_id = {"s1": PGP_URL}
+    results._pgp_pages_by_sys_id = {"s1": [{"page_info": None, "pgp_url": PGP_URL}]}
     results._write_pgp_badge_cell(0, "s1")
     results._on_results_cell_clicked(0, results.COL_PGP)
     assert results.opened == [PGP_URL]
@@ -320,7 +328,7 @@ def test_clicking_an_unlinked_badge_opens_nothing(results):
 def test_clicking_another_column_opens_nothing(results):
     results.add_row(0, "s1")
     results._pgp_transcription_sys_ids = {"s1"}
-    results._pgp_url_by_sys_id = {"s1": PGP_URL}
+    results._pgp_pages_by_sys_id = {"s1": [{"page_info": None, "pgp_url": PGP_URL}]}
     results._write_pgp_badge_cell(0, "s1")
     results._on_results_cell_clicked(0, results.COL_SYS_ID)
     assert results.opened == []
@@ -329,7 +337,7 @@ def test_clicking_another_column_opens_nothing(results):
 def test_double_click_on_a_linked_badge_does_not_also_open_the_dialog(results):
     results.add_row(0, "s1")
     results._pgp_transcription_sys_ids = {"s1"}
-    results._pgp_url_by_sys_id = {"s1": PGP_URL}
+    results._pgp_pages_by_sys_id = {"s1": [{"page_info": None, "pgp_url": PGP_URL}]}
     results._write_pgp_badge_cell(0, "s1")
     index = results.results_table.model().index(0, results.COL_PGP)
     results._on_results_double_clicked(index)
@@ -341,7 +349,7 @@ def test_double_click_on_a_linked_badge_does_not_also_open_the_dialog(results):
 def test_double_click_elsewhere_still_opens_the_dialog(results):
     results.add_row(0, "s1")
     results._pgp_transcription_sys_ids = {"s1"}
-    results._pgp_url_by_sys_id = {"s1": PGP_URL}
+    results._pgp_pages_by_sys_id = {"s1": [{"page_info": None, "pgp_url": PGP_URL}]}
     results._write_pgp_badge_cell(0, "s1")
     index = results.results_table.model().index(0, results.COL_SYS_ID)
     results._on_results_double_clicked(index)
@@ -361,8 +369,9 @@ def test_double_click_on_an_unlinked_pgp_cell_still_opens_the_dialog(results):
 def test_badges_loaded_slot_stores_the_urls_and_links_the_rows(results):
     results.add_row(0, "s1")
     results.add_row(1, "s2")
-    results._on_pgp_badges_loaded({"s1", "s2"}, set(), {"s1": PGP_URL})
-    assert results._pgp_url_by_sys_id == {"s1": PGP_URL}
+    pages = {"s1": [{"page_info": None, "pgp_url": PGP_URL}]}
+    results._on_pgp_badges_loaded({"s1", "s2"}, set(), pages)
+    assert results._pgp_pages_by_sys_id == pages
     assert results.results_table.item(0, results.COL_PGP).font().underline() is True
     assert results.results_table.item(1, results.COL_PGP).font().underline() is False
     assert results.results_table.item(1, results.COL_PGP).text() == "PGP"
@@ -370,9 +379,9 @@ def test_badges_loaded_slot_stores_the_urls_and_links_the_rows(results):
 
 def test_badges_loaded_slot_tolerates_the_old_two_argument_call(results):
     results.add_row(0, "s1")
-    results._pgp_url_by_sys_id = {"s1": PGP_URL}
+    results._pgp_pages_by_sys_id = {"s1": [{"page_info": None, "pgp_url": PGP_URL}]}
     results._on_pgp_badges_loaded({"s1"}, set())
-    assert results._pgp_url_by_sys_id == {}, "a stale url must not survive"
+    assert results._pgp_pages_by_sys_id == {}, "a stale url must not survive"
     assert results.results_table.item(0, results.COL_PGP).font().underline() is False
 
 
@@ -660,7 +669,7 @@ def test_a_rows_own_url_beats_the_per_manuscript_map(results):
     """The tag row names its document; the map only knows the manuscript."""
     results.add_row(0, "s1", {"pgpid": 38608, "pgp_url": TAG_DOC_URL})
     results._pgp_transcription_sys_ids = {"s1"}
-    results._pgp_url_by_sys_id = {"s1": PGP_URL}  # the lowest-pgpid answer
+    results._pgp_pages_by_sys_id = {"s1": [{"page_info": None, "pgp_url": PGP_URL}]}  # the lowest-pgpid answer
     assert results._pgp_url_for_row(0, "s1") == TAG_DOC_URL
     results._write_pgp_badge_cell(0, "s1")
     results._on_results_cell_clicked(0, results.COL_PGP)
@@ -673,7 +682,7 @@ def test_two_rows_of_one_manuscript_link_to_their_own_documents(results):
     results.add_row(0, "s1", {"pgpid": 38608, "pgp_url": TAG_DOC_URL})
     results.add_row(1, "s1", {"pgpid": 38607, "pgp_url": other})
     results._pgp_transcription_sys_ids = {"s1"}
-    results._pgp_url_by_sys_id = {}
+    results._pgp_pages_by_sys_id = {}
     results._write_pgp_badge_cell(0, "s1")
     results._write_pgp_badge_cell(1, "s1")
     results._on_results_cell_clicked(0, results.COL_PGP)
@@ -685,13 +694,13 @@ def test_an_ordinary_search_row_still_uses_the_map(results):
     """A search hit names a manuscript page, not a PGP document."""
     results.add_row(0, "s1", {"display": {"id": "s1"}, "snippet": "x"})
     results._pgp_transcription_sys_ids = {"s1"}
-    results._pgp_url_by_sys_id = {"s1": PGP_URL}
+    results._pgp_pages_by_sys_id = {"s1": [{"page_info": None, "pgp_url": PGP_URL}]}
     assert results._pgp_url_for_row(0, "s1") == PGP_URL
 
 
 def test_url_for_row_survives_a_row_with_no_sys_id_item(results):
     results.results_table.setRowCount(1)
-    results._pgp_url_by_sys_id = {"s1": PGP_URL}
+    results._pgp_pages_by_sys_id = {"s1": [{"page_info": None, "pgp_url": PGP_URL}]}
     assert results._pgp_url_for_row(0, "s1") == PGP_URL
     assert results._pgp_url_for_row(0, "absent") is None
 
@@ -703,10 +712,155 @@ def test_the_tag_path_resolves_urls_by_pgpid_not_by_sys_id():
     tag_body = src[src.index("def _on_tag_search_results"):
                    src.index("def _on_tag_search_results") + 8000]
     assert "get_pgp_urls_for_pgpids" in tag_body
-    assert "get_pgp_urls_for_sys_ids" not in tag_body, (
+    assert "get_pgp_page_urls_for_sys_ids" not in tag_body, (
         "the per-manuscript map cannot tell two rows of one manuscript apart"
     )
     assert "'pgpid': r.get('pgpid')" in tag_body, (
         "each formatted row must record the document it came from"
     )
     assert calls, "sanity: the function was found"
+
+
+# ---------------------------------------------------------------------------
+# 9. An ordinary row resolves by its PAGE
+# ---------------------------------------------------------------------------
+#
+# Codex P2, round 3. 144 manuscripts in the live sidecar have both a
+# recto-tagged and a verso-tagged PGP document, and the lowest pgpid is not
+# reliably the recto -- so "one url per manuscript" sent verso hits to the
+# recto document, disagreeing with the reading dialog opened from that very row.
+
+RECTO_URL = "https://geniza.princeton.edu/documents/5378/"
+VERSO_URL = "https://geniza.princeton.edu/documents/5393/"
+# ordered by pgpid: the recto document has the LOWER id, as in the real data
+RV_PAGES = [
+    {"page_info": "recto", "pgp_url": RECTO_URL},
+    {"page_info": "verso", "pgp_url": VERSO_URL},
+]
+
+
+@pytest.mark.parametrize("page_num,expected", [
+    (1, RECTO_URL),
+    (2, VERSO_URL),
+    (3, VERSO_URL),      # anything past recto is treated as verso
+    (None, RECTO_URL),   # no page -> first candidate
+])
+def test_the_shared_rule_picks_by_page(page_num, expected):
+    from shared.document_service import select_pgp_page_entry
+
+    assert select_pgp_page_entry(RV_PAGES, page_num)["pgp_url"] == expected
+
+
+def test_the_shared_rule_is_a_no_op_with_one_candidate():
+    from shared.document_service import select_pgp_page_entry
+
+    one = [{"page_info": "recto", "pgp_url": RECTO_URL}]
+    assert select_pgp_page_entry(one, 2)["pgp_url"] == RECTO_URL
+    assert select_pgp_page_entry([], 1) is None
+    assert select_pgp_page_entry(None, 1) is None
+
+
+def test_the_shared_rule_leaves_recto_and_verso_unmatched():
+    """768 rows read 'recto and verso'; matching them would CHANGE web behaviour."""
+    from shared.document_service import select_pgp_page_entry
+
+    both = [
+        {"page_info": "recto and verso", "pgp_url": RECTO_URL},
+        {"page_info": "verso", "pgp_url": VERSO_URL},
+    ]
+    assert select_pgp_page_entry(both, 2)["pgp_url"] == VERSO_URL
+    # page 1 finds no exact 'recto' -> first candidate, exactly as before
+    assert select_pgp_page_entry(both, 1)["pgp_url"] == RECTO_URL
+
+
+def test_get_document_for_fragment_uses_the_same_rule():
+    """One rule, or the badge and the reading dialog drift apart again."""
+    src = _read("shared/document_service.py")
+    body = src[src.index("def get_document_for_fragment(self"):]
+    body = body[:body.index("    def get_fragments_for_document")]
+    assert "select_pgp_page_entry(frags, page_num)" in body
+    assert "target_page = " not in body, "the rule must not be re-implemented here"
+
+
+def test_get_document_for_fragment_resolves_in_a_defined_order(tmp_path):
+    """The fallback must not depend on SQLite row order.
+
+    Behavioural, not a source-text check: an earlier version of this test
+    asserted "ORDER BY document_id" appeared in the method's source, and the
+    phrase also appears in the comment explaining it -- so deleting the clause
+    from the SQL left the test green.
+    """
+    from shared.document_service import PgpService
+
+    db = tmp_path / "pgp.db"
+    # Inserted HIGHEST pgpid first, so rowid order is the opposite of pgpid order.
+    _build_pgp_db(
+        str(db),
+        documents=[(900, VERSO_URL), (100, RECTO_URL)],
+        fragments=[("s1", 900, None), ("s1", 100, None)],
+    )
+    conn = sqlite3.connect(str(db), check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    svc = PgpService.__new__(PgpService)
+    svc._conn = conn
+    try:
+        doc = svc.get_document_for_fragment("s1")
+        assert doc["pgpid"] == 100, (
+            "with no page to go on, the lowest pgpid must win -- otherwise this "
+            "disagrees with the badge's pgpid-ordered batch query for the same row"
+        )
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("page_img,expected", [(1, RECTO_URL), (2, VERSO_URL)])
+def test_a_verso_row_opens_the_verso_document(results, page_img, expected):
+    results.add_row(0, "s1", {"display": {"id": "s1", "img": page_img}})
+    results._pgp_transcription_sys_ids = {"s1"}
+    results._pgp_pages_by_sys_id = {"s1": RV_PAGES}
+    results._write_pgp_badge_cell(0, "s1")
+    results._on_results_cell_clicked(0, results.COL_PGP)
+    assert results.opened == [expected]
+    assert expected in results.results_table.item(0, results.COL_PGP).toolTip(), (
+        "the tooltip must name the url the click will actually open"
+    )
+
+
+def test_a_row_with_no_page_falls_back_to_the_first_candidate(results):
+    results.add_row(0, "s1", {"display": {"id": "s1", "img": ""}})
+    results._pgp_transcription_sys_ids = {"s1"}
+    results._pgp_pages_by_sys_id = {"s1": RV_PAGES}
+    assert results._pgp_url_for_row(0, "s1") == RECTO_URL
+
+
+@pytest.mark.parametrize("res,expected", [
+    ({"display": {"img": 2}}, 2),
+    ({"display": {"img": "2"}}, 2),
+    ({"display": {"img": ""}}, None),
+    ({"display": {}}, None),
+    ({}, None),
+    (None, None),
+    ("not a dict", None),
+])
+def test_result_page_num_reads_the_row_safely(results, res, expected):
+    assert results._result_page_num(res) == expected
+
+
+def test_result_page_num_prefers_the_parsed_header(results):
+    class _Meta:
+        def parse_full_id_components(self, header):
+            return {"p_num": 2}
+
+    results.meta_mgr = _Meta()
+    assert results._result_page_num(
+        {"raw_header": "hdr", "display": {"img": 1}}
+    ) == 2, "the header is the canonical page for a Genizah hit"
+
+
+def test_result_page_num_survives_a_meta_manager_that_raises(results):
+    class _Meta:
+        def parse_full_id_components(self, header):
+            raise ValueError("bad header")
+
+    results.meta_mgr = _Meta()
+    assert results._result_page_num({"raw_header": "x", "display": {"img": 2}}) == 2

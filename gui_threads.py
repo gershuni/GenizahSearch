@@ -1205,10 +1205,12 @@ class PGPBadgeWorker(QThread):
         FGP_TRANSCRIPTIONS_ENABLED flag (no web-only override on desktop).
     These are DIFFERENT predicates (link vs readable text), not a duplicate query.
 
-      * pgp_urls    -- {sys_id: pgp_url} for the SAME manuscripts as
-        pgp_link_ids, so the green badge can be a real clickable link
-        instead of only a presence marker. A sys_id whose PGP document
-        has no url is absent from the map, NOT mapped to ''.
+      * pgp_pages   -- {sys_id: [{page_info, pgp_url}, ...]} for the SAME
+        manuscripts as pgp_link_ids, so the green badge can be a real
+        clickable link instead of only a presence marker. Every page
+        candidate is carried, not one url per manuscript, because which
+        document a results row means depends on that row's page. A
+        sys_id with no url at all is absent, NOT mapped to [].
 
     The third argument was APPENDED: PyQt truncates surplus signal
     arguments for Python callables, so slots written against the old
@@ -1239,14 +1241,14 @@ class PGPBadgeWorker(QThread):
         # link. Asking only about pgp_link_ids keeps the IN() list as small
         # as the badge set, and a failure here must leave the badges intact
         # -- they simply render without a link.
-        pgp_urls: dict = {}
+        pgp_pages: dict = {}
         if pgp_link_ids:
             try:
-                from shared.document_service import get_pgp_urls_for_sys_ids
-                pgp_urls = get_pgp_urls_for_sys_ids(sorted(pgp_link_ids))
+                from shared.document_service import get_pgp_page_urls_for_sys_ids
+                pgp_pages = get_pgp_page_urls_for_sys_ids(sorted(pgp_link_ids))
             except Exception as e:
                 logger.error("PGPBadgeWorker PGP-url error: %s", e)
-        self.finished.emit(pgp_link_ids, manual_ids, pgp_urls)
+        self.finished.emit(pgp_link_ids, manual_ids, pgp_pages)
 
 
 class PrintedBadgeWorker(QThread):
