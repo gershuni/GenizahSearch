@@ -226,6 +226,7 @@ class _ResultsHarness:
 
         for name in (
             "_make_pgp_badge_item", "_write_pgp_badge_cell", "_pgp_url_for_cell",
+            "_pgp_url_for_row",
             "_on_results_cell_clicked", "_on_results_double_clicked",
             "_on_pgp_badges_loaded",
         ):
@@ -238,9 +239,12 @@ class _ResultsHarness:
     def _apply_results_table_filters(self):
         return None
 
-    def add_row(self, row, sys_id):
+    def add_row(self, row, sys_id, res=None):
         self.results_table.setRowCount(max(self.results_table.rowCount(), row + 1))
-        self.results_table.setItem(row, self.COL_SYS_ID, QTableWidgetItem(sys_id))
+        item = QTableWidgetItem(sys_id)
+        if res is not None:
+            item.setData(Qt.ItemDataRole.UserRole, res)
+        self.results_table.setItem(row, self.COL_SYS_ID, item)
 
 
 @pytest.fixture
@@ -254,9 +258,13 @@ def results(monkeypatch):
 
 
 def test_badge_with_a_url_is_dressed_as_a_link(results):
+    # Through the writer, which is what resolves a row's url -- see
+    # _pgp_url_for_row (a row may name its own PGP document).
+    results.add_row(0, "s1")
     results._pgp_transcription_sys_ids = {"s1"}
     results._pgp_url_by_sys_id = {"s1": PGP_URL}
-    item = results._make_pgp_badge_item("s1")
+    results._write_pgp_badge_cell(0, "s1")
+    item = results.results_table.item(0, results.COL_PGP)
     assert item.text() == "PGP"
     assert item.foreground().color() == QColor("#27ae60")
     assert item.font().underline() is True
@@ -601,3 +609,104 @@ def test_result_dialog_local_page_drops_the_stale_link():
     assert "_update_rd_pgp_button" in _self_calls_in(
         "desktop/result_dialog.py", "load_local_page"
     )
+
+
+# ---------------------------------------------------------------------------
+# 8. A row that names its OWN PGP document links to that document
+# ---------------------------------------------------------------------------
+#
+# Codex P2 on PR #334. A PGP-tag hit stands for one specific tagged document --
+# the snippet IS that document's transcription -- and 1,845 of 34,171 linked
+# manuscripts have more than one PGP document (one has 104). Resolving those
+# rows through the per-manuscript map sends them all to the lowest pgpid,
+# which may not even carry the tag that was searched.
+
+TAG_DOC_URL = "https://geniza.princeton.edu/documents/38608/"
+
+
+def test_pgpid_urls_returns_only_real_urls(tmp_path):
+    from shared.document_service import PgpService
+
+    db = tmp_path / "pgp.db"
+    _build_pgp_db(
+        str(db),
+        documents=[(1, PGP_URL), (2, ""), (3, None), (4, TAG_DOC_URL)],
+        fragments=[],
+    )
+    conn = sqlite3.connect(str(db), check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    svc = PgpService.__new__(PgpService)
+    svc._conn = conn
+    try:
+        assert svc.get_pgp_urls_for_pgpids([1, 2, 3, 4, 99]) == {
+            1: PGP_URL, 4: TAG_DOC_URL,
+        }
+        assert svc.get_pgp_urls_for_pgpids([]) == {}
+        # past the 999-variable limit -- an un-chunked IN() would raise
+        assert svc.get_pgp_urls_for_pgpids(list(range(100, 1400)) + [1]) == {1: PGP_URL}
+    finally:
+        conn.close()
+
+
+def test_pgpid_urls_no_connection_returns_empty():
+    from shared.document_service import PgpService
+
+    svc = PgpService.__new__(PgpService)
+    svc._conn = None
+    assert svc.get_pgp_urls_for_pgpids([1]) == {}
+
+
+def test_a_rows_own_url_beats_the_per_manuscript_map(results):
+    """The tag row names its document; the map only knows the manuscript."""
+    results.add_row(0, "s1", {"pgpid": 38608, "pgp_url": TAG_DOC_URL})
+    results._pgp_transcription_sys_ids = {"s1"}
+    results._pgp_url_by_sys_id = {"s1": PGP_URL}  # the lowest-pgpid answer
+    assert results._pgp_url_for_row(0, "s1") == TAG_DOC_URL
+    results._write_pgp_badge_cell(0, "s1")
+    results._on_results_cell_clicked(0, results.COL_PGP)
+    assert results.opened == [TAG_DOC_URL]
+
+
+def test_two_rows_of_one_manuscript_link_to_their_own_documents(results):
+    """The exact case the per-manuscript map cannot express."""
+    other = "https://geniza.princeton.edu/documents/38607/"
+    results.add_row(0, "s1", {"pgpid": 38608, "pgp_url": TAG_DOC_URL})
+    results.add_row(1, "s1", {"pgpid": 38607, "pgp_url": other})
+    results._pgp_transcription_sys_ids = {"s1"}
+    results._pgp_url_by_sys_id = {}
+    results._write_pgp_badge_cell(0, "s1")
+    results._write_pgp_badge_cell(1, "s1")
+    results._on_results_cell_clicked(0, results.COL_PGP)
+    results._on_results_cell_clicked(1, results.COL_PGP)
+    assert results.opened == [TAG_DOC_URL, other]
+
+
+def test_an_ordinary_search_row_still_uses_the_map(results):
+    """A search hit names a manuscript page, not a PGP document."""
+    results.add_row(0, "s1", {"display": {"id": "s1"}, "snippet": "x"})
+    results._pgp_transcription_sys_ids = {"s1"}
+    results._pgp_url_by_sys_id = {"s1": PGP_URL}
+    assert results._pgp_url_for_row(0, "s1") == PGP_URL
+
+
+def test_url_for_row_survives_a_row_with_no_sys_id_item(results):
+    results.results_table.setRowCount(1)
+    results._pgp_url_by_sys_id = {"s1": PGP_URL}
+    assert results._pgp_url_for_row(0, "s1") == PGP_URL
+    assert results._pgp_url_for_row(0, "absent") is None
+
+
+def test_the_tag_path_resolves_urls_by_pgpid_not_by_sys_id():
+    """One source of truth for a tag row's link."""
+    calls = _self_calls_in("genizah_app.py", "_on_tag_search_results")
+    src = _read("genizah_app.py")
+    tag_body = src[src.index("def _on_tag_search_results"):
+                   src.index("def _on_tag_search_results") + 8000]
+    assert "get_pgp_urls_for_pgpids" in tag_body
+    assert "get_pgp_urls_for_sys_ids" not in tag_body, (
+        "the per-manuscript map cannot tell two rows of one manuscript apart"
+    )
+    assert "'pgpid': r.get('pgpid')" in tag_body, (
+        "each formatted row must record the document it came from"
+    )
+    assert calls, "sanity: the function was found"

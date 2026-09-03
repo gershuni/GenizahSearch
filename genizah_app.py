@@ -20965,7 +20965,28 @@ class GenizahGUI(QMainWindow):
                 tr("Showing {} of {} results").format(visible_count, total)
             )
 
-    def _make_pgp_badge_item(self, sys_id):
+    def _pgp_url_for_row(self, row, sys_id):
+        """The PGP url THIS row should open.
+
+        A row that stands for one SPECIFIC PGP document carries its own
+        url, and that wins. A PGP-tag hit is such a row: its snippet is
+        one document's transcription or description, a manuscript can be
+        linked to several documents, and the same sys_id can occupy more
+        than one row of the same tag search. Falling back to the
+        per-manuscript map there would send every one of those rows to
+        the lowest-pgpid document -- possibly one that does not even
+        carry the tag being searched (Codex P2, PR #334).
+
+        An ordinary search hit names a manuscript page, not a PGP
+        document, so it has no url of its own and the map is correct.
+        """
+        sid_item = self.results_table.item(row, self.COL_SYS_ID)
+        res = sid_item.data(Qt.ItemDataRole.UserRole) if sid_item is not None else None
+        if isinstance(res, dict) and res.get('pgp_url'):
+            return res['pgp_url']
+        return (getattr(self, '_pgp_url_by_sys_id', None) or {}).get(sys_id)
+
+    def _make_pgp_badge_item(self, sys_id, url=None):
         """Build the PGP cell for one row, as a link when the url is known.
 
         Both badge write sites -- the initial row render and the async worker
@@ -20981,7 +21002,6 @@ class GenizahGUI(QMainWindow):
         item = QTableWidgetItem("PGP")
         item.setForeground(QColor("#27ae60"))
         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-        url = (getattr(self, '_pgp_url_by_sys_id', None) or {}).get(sys_id)
         if url:
             # Dress ONLY a row we can actually open: underline, the url in
             # the tooltip, hand cursor on hover (on_table_cell_entered) and
@@ -20999,7 +21019,7 @@ class GenizahGUI(QMainWindow):
 
     def _write_pgp_badge_cell(self, row, sys_id):
         """Write (or clear) the PGP cell of one results row."""
-        item = self._make_pgp_badge_item(sys_id)
+        item = self._make_pgp_badge_item(sys_id, self._pgp_url_for_row(row, sys_id))
         self.results_table.setItem(row, self.COL_PGP, item or QTableWidgetItem(""))
 
     def _pgp_url_for_cell(self, row):
@@ -21244,6 +21264,11 @@ class GenizahGUI(QMainWindow):
                 },
                 'snippet': snippet,
                 'raw_header': '',
+                # The PGP document THIS row came from. The snippet above
+                # is its transcription/description, so the badge must
+                # link to it and not to whichever document the
+                # per-manuscript map would pick.
+                'pgpid': r.get('pgpid'),
             })
 
         # Mark all as PGP
@@ -21259,15 +21284,25 @@ class GenizahGUI(QMainWindow):
             )
         except Exception:
             self._manual_transcription_sys_ids = set()
-        # Same reason for the PGP urls: no badge worker runs on this path, so
-        # without this the tag results would render badges that are not links.
+        # Same reason for the PGP urls: no badge worker runs on this path,
+        # so without this the tag results would render badges that are
+        # not links. Resolved BY PGPID, not by sys_id: each row is one
+        # specific tagged document (see the 'pgpid' note above), and the
+        # per-manuscript map cannot tell two rows of the same manuscript
+        # apart. The map is left empty here so there is exactly one
+        # source of truth for a tag row's link.
+        self._pgp_url_by_sys_id = {}
         try:
-            from shared.document_service import get_pgp_urls_for_sys_ids
-            self._pgp_url_by_sys_id = get_pgp_urls_for_sys_ids(
-                [r['display']['id'] for r in formatted]
+            from shared.document_service import get_pgp_urls_for_pgpids
+            _tag_urls = get_pgp_urls_for_pgpids(
+                sorted({r['pgpid'] for r in formatted if r.get('pgpid')})
             )
+            for _row in formatted:
+                _u = _tag_urls.get(_row.get('pgpid'))
+                if _u:
+                    _row['pgp_url'] = _u
         except Exception:
-            self._pgp_url_by_sys_id = {}
+            pass
 
         self.chk_search_header.blockSignals(True)
         self.chk_search_header.setChecked(False)

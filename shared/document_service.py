@@ -628,6 +628,42 @@ class PgpService:
             logger.error(f"Error batch fetching PGP urls: {e}")
             return {}
 
+    def get_pgp_urls_for_pgpids(self, pgpids: List[int]) -> Dict[int, str]:
+        """Batch map ``pgpid -> pgp_url``.
+
+        The pgpid-keyed companion to :meth:`get_pgp_urls_for_sys_ids`. Use
+        this wherever a row stands for one SPECIFIC PGP document rather
+        than for a manuscript -- a PGP-tag hit, for instance, whose snippet
+        is that document's transcription. A manuscript can be linked to
+        several documents, and the sys_id-keyed map resolves that by taking
+        the lowest pgpid, which is the wrong answer when the row already
+        names its document.
+
+        Returns:
+            ``{pgpid: pgp_url}`` for the pgpids with a non-empty url; the
+            others are absent, never mapped to ''.
+        """
+        if not self._conn or not pgpids:
+            return {}
+        urls: Dict[int, str] = {}
+        try:
+            batch_size = 500  # stay under the SQLite variable limit (999)
+            for i in range(0, len(pgpids), batch_size):
+                batch = pgpids[i:i + batch_size]
+                placeholders = ','.join('?' * len(batch))
+                cursor = self._conn.execute(
+                    "SELECT pgpid, pgp_url FROM documents "
+                    f"WHERE pgpid IN ({placeholders})",
+                    batch,
+                )
+                for row in cursor:
+                    if row['pgpid'] is not None and row['pgp_url']:
+                        urls[row['pgpid']] = row['pgp_url']
+            return urls
+        except Exception as e:
+            logger.error(f"Error batch fetching PGP urls by pgpid: {e}")
+            return {}
+
     def get_fragments_by_tag(self, tag: str) -> List[Dict[str, Any]]:
         """
         Get all fragments linked to PGP documents with a specific tag.
@@ -1286,6 +1322,13 @@ def get_pgp_urls_for_sys_ids(sys_ids: List[str]) -> Dict[str, str]:
     :meth:`PgpService.get_pgp_urls_for_sys_ids`."""
     svc = get_pgp_service()
     return svc.get_pgp_urls_for_sys_ids(sys_ids)
+
+
+def get_pgp_urls_for_pgpids(pgpids: List[int]) -> Dict[int, str]:
+    """Batch ``pgpid -> pgp_url`` for rows that name their own PGP document.
+    See :meth:`PgpService.get_pgp_urls_for_pgpids`."""
+    svc = get_pgp_service()
+    return svc.get_pgp_urls_for_pgpids(pgpids)
 
 
 def get_sys_ids_with_editions(sys_ids: Optional[List[str]] = None) -> Set[str]:
