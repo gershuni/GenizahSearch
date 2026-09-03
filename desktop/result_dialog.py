@@ -2644,6 +2644,22 @@ class ResultDialog(QDialog):
             except re.error as _re_exc:
                 logger.debug("result_dialog: invalid highlight regex %r: %s", pattern_str, _re_exc)
 
+        # Diagnostic, deliberately at WARNING and deliberately narrow: the
+        # results-table snippet is built from the SAME regex, so if the snippet
+        # carries `*...*` markers and this page render produced none, the two
+        # disagree and the reader sees a hit in the table but not in the pane
+        # (owner UAT 2026-09-03, an Oxford manuscript, while ordinary searches
+        # highlight fine). Silent in every healthy case, including a dialog
+        # opened from Browse, which has no snippet markers to begin with.
+        _snippet = (self.data or {}).get('snippet') or ''
+        if '*' in _snippet and '*' not in raw_text:
+            logger.warning(
+                "result_dialog: snippet is highlighted but the page render is not "
+                "-- sys_id=%s p_num=%s pattern=%r page_len=%d",
+                getattr(self, 'current_sys_id', None),
+                getattr(self, 'current_p_num', None),
+                pattern_str, len(raw_text))
+
         # 260902 (debug/oxford-fgp-image-mismatch.md sub-issue B): remember the
         # *...*-marked raw text (BEFORE _htmlify below converts the markers
         # into <b> tags and the literal '*' characters vanish) so that

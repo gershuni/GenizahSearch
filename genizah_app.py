@@ -26729,23 +26729,51 @@ class GenizahGUI(QMainWindow):
     # ========== Batched Tree Loading for Performance ==========
     def _start_batched_tree_load(self, parent_node, items, batch_size=50):
         """Start loading items into tree in batches to prevent UI freeze."""
+        # Every chain carries the generation it was started for.
+        # `comp_tree.clear()` -- a new search, a re-sort, a filter re-render --
+        # DELETES parent_node's C++ object while this Python wrapper survives,
+        # so a batch scheduled before the clear called
+        # QTreeWidgetItem(<deleted parent>) and raised RuntimeError, once per
+        # chain still in flight (owner UAT 2026-09-03, four tracebacks from
+        # four overlapping renders). A stale chain must also NOT run the
+        # cleanup below, or it would re-enable painting and clear
+        # comp_tree_updating in the middle of the chain that superseded it.
+        self._batch_generation = getattr(self, '_batch_generation', 0) + 1
         self._batch_queue = list(items)  # Copy to avoid mutation issues
         self._batch_parent = parent_node
         self._batch_size = batch_size
         self._batch_index = 0
         # Start first batch immediately
-        self._process_tree_batch()
+        self._process_tree_batch(self._batch_generation)
 
-    def _process_tree_batch(self):
+    def _batch_parent_is_alive(self):
+        """False once Qt has deleted the parent item under us."""
+        parent = getattr(self, '_batch_parent', None)
+        if parent is None:
+            return False
+        try:
+            return parent.treeWidget() is not None
+        except RuntimeError:
+            return False  # wrapped C/C++ object already deleted
+
+    def _finish_batched_tree_load(self):
+        """Release the queue and hand the tree back to the user."""
+        self._batch_queue = None
+        self._batch_parent = None
+        self.comp_tree.setUpdatesEnabled(True)
+        self.comp_tree_updating = False  # Re-enable itemChanged signal
+        self._update_comp_filter_indicators()
+        self._apply_comp_tree_filters()
+
+    def _process_tree_batch(self, generation=None):
         """Process one batch of items and schedule next batch."""
-        if not hasattr(self, '_batch_queue') or self._batch_index >= len(self._batch_queue):
-            # Done loading - cleanup
-            self._batch_queue = None
-            self._batch_parent = None
-            self.comp_tree.setUpdatesEnabled(True)
-            self.comp_tree_updating = False  # Re-enable itemChanged signal
-            self._update_comp_filter_indicators()
-            self._apply_comp_tree_filters()
+        if (generation is not None
+                and generation != getattr(self, '_batch_generation', None)):
+            return  # superseded; the newer chain owns the tree now
+        if (not getattr(self, '_batch_queue', None)
+                or self._batch_index >= len(self._batch_queue)
+                or not self._batch_parent_is_alive()):
+            self._finish_batched_tree_load()
             return
 
         # Process batch
@@ -26760,7 +26788,18 @@ class GenizahGUI(QMainWindow):
 
         # Schedule next batch with small delay to let UI breathe
         if self._batch_index < len(self._batch_queue):
-            QTimer.singleShot(0, self._process_tree_batch)
+            _gen = self._batch_generation
+            QTimer.singleShot(0, lambda: self._process_tree_batch(_gen))
+        else:
+            # The LAST batch used to schedule nothing, so the completion
+            # branch at the top of this method was never re-entered and its
+            # cleanup never ran -- despite the caller's comment promising
+            # "this will call filters when done". Live consequences, both
+            # fixed by finishing here: comp_tree_updating stayed True, so
+            # on_comp_tree_item_changed returned immediately and ticking a
+            # check box in the composition results did nothing; and the
+            # column filters were never re-applied to the new rows.
+            self._finish_batched_tree_load()
 
     def _trigger_lazy_metadata_fetch(self):
         """Starts background fetching for items that are currently displayed but missing data."""
