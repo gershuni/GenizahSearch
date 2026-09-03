@@ -125,4 +125,5 @@ class TestDesktopCreditFollowsTheDisplayedImage:
 
     def test_metadata_manager_preserves_the_nli_credit(self):
         src = _read("shared/metadata_manager.py")
-        assert "current_meta['attribution_nli'] = nli_iiif_data.get('attribution', '')" in src
+        assert "_nli_attr = nli_iiif_data.get('attribution', '')" in src
+        assert "current_meta['attribution_nli'] = _nli_attr" in src

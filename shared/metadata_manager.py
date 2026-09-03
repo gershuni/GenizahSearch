@@ -1181,7 +1181,12 @@ class MetadataManager:
         # (an external provider when it has one). `attribution_nli` keeps NLI's own
         # manifest credit no matter which won, so a viewer that falls back to the
         # NLI image can credit NLI instead of the provider (Codex P2, 2026-09-02).
-        current_meta['attribution_nli'] = nli_iiif_data.get('attribution', '') or ''
+        # A refresh whose manifest timed out or came back empty must not erase a
+        # credit an earlier run already cached: enrich_metadata mutates the cached
+        # dict in place and is re-run for cached manuscripts (Codex P2, round 15).
+        _nli_attr = nli_iiif_data.get('attribution', '') or ''
+        if _nli_attr or 'attribution_nli' not in current_meta:
+            current_meta['attribution_nli'] = _nli_attr
         if marc_attribution:
             current_meta['attribution'] = marc_attribution
         elif not current_meta.get('attribution'):
