@@ -6842,6 +6842,7 @@ class GenizahGUI(QMainWindow):
         # Reset stale UI immediately (before async enrichment returns)
         self.btn_b_external_link.setVisible(False)
         self._browse_external_url = None
+        self._update_browse_pgp_button(None)
         # Disconnect old worker's slot (stored reference, not bare method)
         if hasattr(self, 'enrich_browse_worker') and self.enrich_browse_worker is not None:
             if hasattr(self, '_browse_enrich_slot') and self._browse_enrich_slot is not None:
@@ -7649,7 +7650,11 @@ class GenizahGUI(QMainWindow):
     def _on_browse_pgp_error(self, sys_id, error_message):
         """Handle PGP source fetch error -- silently fall back to existing behavior."""
         logger.debug("PGP source fetch error for %s: %s", sys_id, error_message)
-        self._update_browse_pgp_button(None)
+        # Stale-request guard, matching _on_browse_pgp_loaded: an error
+        # queued by an abandoned worker must not hide the button for the
+        # manuscript the user has since moved to.
+        if sys_id == self.current_browse_sid:
+            self._update_browse_pgp_button(None)
 
     def _build_pgp_extended_info_html(self, pgp_doc, palette=None, sys_id=None):
         """Build HTML for PGP metadata section in extended info panels.
@@ -8628,6 +8633,10 @@ class GenizahGUI(QMainWindow):
         # cheaply when there is nothing, and _on_browse_pgp_loaded no-ops on empty.
         if not self.current_browse_sid:
             return
+        # The page we are leaving may have had a PGP url and the one we
+        # are loading may not (or may have a different document), so the
+        # link goes away NOW, not when the worker replies.
+        self._update_browse_pgp_button(None)
         # Disconnect old worker signals first
         if self._browse_pgp_worker is not None:
             try:
@@ -22630,6 +22639,11 @@ class GenizahGUI(QMainWindow):
         import html as _html_mod
         if not self.searcher:
             return
+        # A LOCAL file has no PGP document. Unlike the Genizah-only
+        # buttons below (which this path merely DISABLES), the PGP link
+        # is hidden outright -- a disabled link to the previously viewed
+        # manuscript would still be visible and still be wrong.
+        self._update_browse_pgp_button(None)
         page_data = self.searcher.get_local_browse_page(
             sys_id, p_num=p_num, next_prev=0
         )
@@ -30400,6 +30414,13 @@ class GenizahGUI(QMainWindow):
                     self.browse_shelf_input.setText(shelf)
                 self._set_last_browse_field("sys")
                 self.browse_load_page()
+                # Moving within a Part changes the sys_id, so the PGP
+                # state belongs to the folio we just left. This is the
+                # same refresh the page-turn and folio-combo paths do;
+                # it also un-freezes the extended-info panel and the
+                # version combo, which were stale here for the same
+                # reason.
+                self._browse_refresh_pgp_for_page()
                 # Update images to show current folio's pages
                 self._update_part_image_for_folio(new_idx)
                 return

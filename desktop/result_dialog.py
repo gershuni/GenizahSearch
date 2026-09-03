@@ -1653,7 +1653,9 @@ class ResultDialog(QDialog):
     def _on_rd_pgp_error(self, sys_id, error_msg):
         """Handle PGP source fetch error -- silently fall back to existing behavior."""
         logger.debug("PGP fetch error for %s: %s", sys_id, error_msg)
-        self._update_rd_pgp_button(None)
+        # Stale-request guard, matching _on_rd_pgp_loaded above.
+        if sys_id == self.current_sys_id:
+            self._update_rd_pgp_button(None)
 
     def _rd_update_extended_info_with_pgp(self):
         """Rebuild extended info HTML after PGP data arrives late.
@@ -2801,6 +2803,10 @@ class ResultDialog(QDialog):
         """
         if not self.current_sys_id:
             return
+        # A LOCAL file has no PGP document, and this path returns before
+        # load_page's reset block, so the button has to be dropped here
+        # or it keeps pointing at the previous Genizah result.
+        self._update_rd_pgp_button(None)
 
         # Fetch the page dict from the engine primitive (plan 96-03).
         if target is not None:

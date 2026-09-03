@@ -377,8 +377,10 @@ class _BrowseHarness:
         self.btn_b_pgp = QPushButton()
         self.btn_b_pgp.setVisible(False)
         self._browse_pgp_url = None
+        self.current_browse_sid = "sysA"
         self.opened = []
-        for name in ("_update_browse_pgp_button", "browse_open_pgp"):
+        for name in ("_update_browse_pgp_button", "browse_open_pgp",
+                     "_on_browse_pgp_error"):
             setattr(self, name, MethodType(getattr(GenizahGUI, name), self))
 
 
@@ -428,8 +430,10 @@ class _RDHarness:
         self.btn_compact_pgp = QPushButton()
         self.btn_compact_pgp.setVisible(False)
         self._rd_pgp_url = None
+        self.current_sys_id = "sysA"
         self.opened = []
-        for name in ("_update_rd_pgp_button", "open_pgp_link"):
+        for name in ("_update_rd_pgp_button", "open_pgp_link",
+                     "_on_rd_pgp_error"):
             setattr(self, name, MethodType(getattr(ResultDialog, name), self))
 
 
@@ -516,3 +520,84 @@ def test_the_new_tooltip_string_is_translated():
     he = t.TRANSLATIONS["Open on the Princeton Geniza Project website"]
     assert he and he != "Open on the Princeton Geniza Project website"
     assert any("֐" <= ch <= "׿" for ch in he)
+
+
+def test_browse_error_from_an_abandoned_worker_leaves_the_button_alone(browse):
+    """A late error for a manuscript the user has left must not hide the current one."""
+    browse.current_browse_sid = "sysB"
+    browse._update_browse_pgp_button({"pgp_url": PGP_URL})
+    browse._on_browse_pgp_error("sysA", "boom")
+    assert browse.btn_b_pgp.isVisible() is True
+    assert browse._browse_pgp_url == PGP_URL
+
+
+def test_browse_error_for_the_current_manuscript_hides_the_button(browse):
+    browse.current_browse_sid = "sysB"
+    browse._update_browse_pgp_button({"pgp_url": PGP_URL})
+    browse._on_browse_pgp_error("sysB", "boom")
+    assert browse.btn_b_pgp.isVisible() is False
+
+
+def test_rd_error_from_an_abandoned_worker_leaves_the_button_alone(rd):
+    rd.current_sys_id = "sysB"
+    rd._update_rd_pgp_button({"pgp_url": PGP_URL})
+    rd._on_rd_pgp_error("sysA", "boom")
+    assert rd.btn_rd_pgp.isVisible() is True
+
+
+def test_rd_error_for_the_current_result_hides_the_button(rd):
+    rd.current_sys_id = "sysB"
+    rd._update_rd_pgp_button({"pgp_url": PGP_URL})
+    rd._on_rd_pgp_error("sysB", "boom")
+    assert rd.btn_rd_pgp.isVisible() is False
+
+
+# ---------------------------------------------------------------------------
+# 7. Every navigation path that changes what is on screen must drop the link
+# ---------------------------------------------------------------------------
+#
+# These are AST gates, not substring searches: a call has to be REACHABLE
+# inside the named function body, so a mention in a comment or docstring
+# cannot green them. They cover paths whose behaviour needs a fully built
+# GenizahGUI (a real index, a real manuscript) to exercise directly.
+
+def _self_calls_in(path, func_name):
+    """Names of self.X(...) calls anywhere inside the named function."""
+    import ast
+
+    with open(path, "r", encoding="utf-8") as fh:
+        tree = ast.parse(fh.read())
+    found = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))                 and node.name == func_name:
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Call)                         and isinstance(sub.func, ast.Attribute)                         and isinstance(sub.func.value, ast.Name)                         and sub.func.value.id == "self":
+                    found.add(sub.func.attr)
+    assert found, f"{func_name} not found in {path}"
+    return found
+
+
+@pytest.mark.parametrize("func", [
+    "_start_browse_enrichment",      # cross-manuscript load
+    "_browse_refresh_pgp_for_page",  # page turn / folio combo
+    "_open_local_browse_page",       # LOCAL "My Library" file
+])
+def test_browse_navigation_paths_drop_the_stale_link(func):
+    assert "_update_browse_pgp_button" in _self_calls_in("genizah_app.py", func), (
+        f"{func} changes what is displayed; leaving the PGP button up means it "
+        f"keeps opening the previous manuscript"
+    )
+
+
+def test_in_part_folio_navigation_refreshes_pgp():
+    """Moving between Oxford Part folios changes the sys_id, not just the page."""
+    assert "_browse_refresh_pgp_for_page" in _self_calls_in(
+        "genizah_app.py", "navigate_manuscript"
+    )
+
+
+def test_result_dialog_local_page_drops_the_stale_link():
+    """load_page returns into load_local_page BEFORE its own reset block runs."""
+    assert "_update_rd_pgp_button" in _self_calls_in(
+        "desktop/result_dialog.py", "load_local_page"
+    )
