@@ -41,6 +41,30 @@ def _format_add_to_list_label(in_list=False):
     return f"{star} {tr('List')}"
 
 
+#: Search-hit markers. A `*...*` pair is placed around every regex match by the
+#: render paths (browse_render_page, ResultDialog.load_page, ...) BEFORE the text
+#: becomes HTML.
+_HIGHLIGHT_MARKER_RE = re.compile(r'\*(.*?)\*')
+
+
+def markers_to_bold_html(html_text, color='red'):
+    """Turn `*...*` search-hit markers into red bold.
+
+    Call this on text that has ALREADY had its newlines turned into ``<br>``.
+    The regex's ``.`` never matches a literal newline, so a hit that spans a
+    line break -- which ``highlight_pattern`` regularly produces, e.g.
+    ``אמר\\s*\\n?\\s*רבי`` -- only pairs up once the newline is a ``<br>``.
+
+    Mirrors ``ResultDialog._htmlify`` step 3 exactly; the desktop Browse tab
+    had no equivalent at all, so its search hits rendered as literal asterisks
+    (found 2026-09-03).
+    """
+    if not html_text:
+        return html_text
+    return _HIGHLIGHT_MARKER_RE.sub(
+        f"<b style='color:{color};'>\\1</b>", html_text)
+
+
 def apply_find_highlight(text_browser, query):
     if not text_browser:
         return

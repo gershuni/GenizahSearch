@@ -52,7 +52,8 @@ from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
 from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, PuzzleMetaLoaderThread, FilterCountWorker, RefinementReplayThread
 from desktop.widgets import (
     ActionsHoverWidget, _format_add_to_list_label,
-    apply_find_highlight, _get_folio_number_from_shelfmark,
+    apply_find_highlight, markers_to_bold_html,
+    _get_folio_number_from_shelfmark,
     _get_folio_image_index, _get_folio_side_image_index,
     _get_initial_image_index,
     ShelfmarkCompleter,
@@ -2916,8 +2917,9 @@ class GenizahGUI(QMainWindow):
         elif source == "original":
             # Show original V0.8 text and restore RTL direction
             self.browse_text.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-            if hasattr(self, 'browse_original_page_text') and self.browse_original_page_text:
-                self._browse_display_version_text(self.browse_original_page_text)
+            _v08 = self._browse_original_display_text()
+            if _v08:
+                self._browse_display_version_text(_v08)
         elif source == "correction":
             # Correction content is stored directly in version_data
             content = version_data.get('corrected_text', '')
@@ -2929,8 +2931,7 @@ class GenizahGUI(QMainWindow):
                 self.browse_text.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
                 self._browse_display_version_text(content)
             else:
-                if hasattr(self, 'browse_original_page_text'):
-                    self._browse_display_version_text(self.browse_original_page_text)
+                self._browse_display_version_text(self._browse_original_display_text())
         elif version_id:
             # Quick server availability check (500ms timeout) to prevent UI freeze
             if not self.corrections_client.is_server_available():
@@ -2944,12 +2945,27 @@ class GenizahGUI(QMainWindow):
                     self._browse_display_version_text(content)
                 else:
                     # Fall back to original if no content
-                    if hasattr(self, 'browse_original_page_text'):
-                        self._browse_display_version_text(self.browse_original_page_text)
+                    self._browse_display_version_text(self._browse_original_display_text())
             except Exception as e:
                 logger.debug("Error loading version content: %s", e)
-                if hasattr(self, 'browse_original_page_text'):
-                    self._browse_display_version_text(self.browse_original_page_text)
+                self._browse_display_version_text(self._browse_original_display_text())
+
+    def _browse_original_display_text(self):
+        """The V0.8 text to re-render, WITH its search-hit markers when we have them.
+
+        ``browse_original_page_text`` is deliberately the PLAIN page text — the
+        FGP/PGP coverage checks match against it — so the marked copy lives
+        alongside it. The equality guard makes this self-correcting: if the
+        plain text was refreshed from somewhere the marked copy didn't follow
+        (``_check_document_community_status`` also writes it), we fall back to
+        plain rather than render a stale page. A page whose own text contains a
+        literal ``*`` also degrades to plain, which is the safe direction.
+        """
+        marked = getattr(self, 'browse_original_marked_text', None)
+        plain = getattr(self, 'browse_original_page_text', '') or ''
+        if marked and marked.replace('*', '') == plain:
+            return marked
+        return plain
 
     def _browse_display_version_text(self, text):
         """Display version text in the browse text area."""
@@ -2957,6 +2973,9 @@ class GenizahGUI(QMainWindow):
             return
         # Apply RTL formatting like browse_render_page does
         browse_html_text = text.replace('\n', '<br>')
+        # 260903: same `*…*` → red bold the browse page render applies, so a
+        # V0.8 switch-back keeps the search hit visible. AFTER newline→<br>.
+        browse_html_text = markers_to_bold_html(browse_html_text)
         # Phase 999.4: route through gutter helper (source_text = raw `text`)
         apply_line_numbered_text(
             self.browse_text,
@@ -27688,7 +27707,19 @@ class GenizahGUI(QMainWindow):
                 page_text = regex.sub(r'*\g<0>*', page_text)
             except Exception:
                 pass  # UI element update optional; continue rendering
+        # 260903: remember the `*…*`-MARKED page text (the plain
+        # browse_original_page_text above is captured before marking and is
+        # still what the FGP/PGP coverage checks need). Without this, switching
+        # the version selector back to V0.8 re-rendered an unmarked snapshot and
+        # lost the search hit — the Browse-side twin of the ResultDialog
+        # sub-issue B fix (_rd_original_marked_text, 2026-09-02).
+        self.browse_original_marked_text = page_text
         browse_html_text = page_text.replace('\n', '<br>')
+        # 260903: `*…*` → red bold. The browse path had NO marker conversion at
+        # all, so a search hit reached the reader as literal asterisks
+        # (`וכן *אמר / רבי* יהודה`). Must run AFTER the newline→<br> above so a
+        # hit spanning a line break still pairs.
+        browse_html_text = markers_to_bold_html(browse_html_text)
         # Phase 999.4: route through gutter helper. source_text is page_text
         # (with potential `*` highlight markers — count is unaffected since
         # markers don't introduce or remove `\n`).
