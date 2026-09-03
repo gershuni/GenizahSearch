@@ -624,12 +624,17 @@ class PgpService:
         Args:
             sys_ids: System IDs to look up. An empty list returns ``{}``.
 
+        EVERY linked document is returned, including one whose ``pgp_url``
+        is empty -- filtering those out HERE would hide a candidate from
+        the page selection that follows, and the row would then fall back
+        to a different page's document instead of correctly offering no
+        link at all (Codex P2, PR #334). Decide link availability from the
+        CHOSEN entry, after selecting.
+
         Returns:
             ``{sys_id: [{'page_info': ..., 'pgp_url': ...}, ...]}`` ordered
-            by pgpid, containing ONLY documents with a non-empty
-            ``pgp_url``; a sys_id with no such document is absent entirely,
-            which is what lets the caller render a plain, unlinked badge.
-            ``pgp_url`` is nullable TEXT in the sidecar, so this can happen.
+            by pgpid. ``pgp_url`` is nullable TEXT in the sidecar, so an
+            entry's url may be ``None`` or ``''``.
         """
         if not self._conn or not sys_ids:
             return {}
@@ -650,11 +655,10 @@ class PgpService:
                 )
                 for row in cursor:
                     sid = row['sys_id']
-                    url = row['pgp_url']
-                    if sid and url:
+                    if sid:
                         pages.setdefault(sid, []).append({
                             'page_info': row['page_info'],
-                            'pgp_url': url,
+                            'pgp_url': row['pgp_url'],
                         })
             return pages
         except Exception as e:

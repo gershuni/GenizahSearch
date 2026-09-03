@@ -61,9 +61,11 @@ class _BrowseHarness:
         self.browse_text = QTextBrowser()
         self.browse_find_input = type("_I", (), {"text": staticmethod(lambda: "")})()
         self.browse_highlight_pattern = None
+        self.browse_highlight_data = []
         for name in ("_browse_display_version_text",
                      "_browse_original_display_text",
-                     "_browse_mark_search_hits"):
+                     "_browse_mark_search_hits",
+                     "_browse_markers_are_ours"):
             setattr(self, name, MethodType(getattr(GenizahGUI, name), self))
 
 
@@ -109,6 +111,7 @@ def test_empty_input_is_returned_unchanged():
 # --------------------------------------------------------------------------
 
 def test_version_text_render_shows_bold_not_literal_asterisks(browse):
+    browse.browse_highlight_pattern = PATTERN   # marked text implies a search
     browse._browse_display_version_text(_mark(PAGE))
     shown = browse.browse_text.toPlainText()
     assert "*" not in shown, f"literal markers leaked to the reader: {shown!r}"
@@ -139,6 +142,7 @@ def test_browse_render_page_converts_markers():
 def test_v08_switch_back_keeps_the_search_hit(browse):
     browse.browse_original_page_text = PAGE           # plain, as captured today
     browse.browse_original_marked_text = _mark(PAGE)  # the new companion
+    browse.browse_highlight_pattern = PATTERN         # a switch-back follows a search
     browse._browse_display_version_text(browse._browse_original_display_text())
     assert _is_bold_red(browse.browse_text)
 
@@ -196,7 +200,8 @@ def test_no_page_text_at_all_returns_empty_string(browse):
 def test_browse_render_page_captures_the_marked_text_after_marking():
     src = inspect.getsource(GenizahGUI.browse_render_page)
     plain_capture = src.index("self.browse_original_page_text = pd['text']")
-    pattern_sub = src.index("regex.sub(r'*\\g<0>*', page_text)")
+    pattern_sub = src.index(
+        "page_text = mark_pattern_hits(page_text, self.browse_highlight_pattern)")
     marked_capture = src.index("self.browse_original_marked_text = page_text")
     assert plain_capture < pattern_sub < marked_capture, (
         "browse_original_marked_text must be captured AFTER the highlight "
@@ -268,3 +273,45 @@ def test_a_page_with_a_literal_asterisk_still_gets_highlighted():
     page = "footnote* and the term FIND appears"
     assert text_has_pattern_markers(page, "FIND") is False
     assert "*FIND*" in mark_pattern_hits(page, "FIND")
+
+
+# ---------------------------------------------------------------------------
+# Outside a search, an asterisk is the page's own (Codex P2, PR #334 round 5)
+# ---------------------------------------------------------------------------
+#
+# The Browse render paths converted every `*...*` pair unconditionally, so an
+# editorial `*note*` in a PGP edition -- 9 of 7,112 transcriptions carry a
+# pair -- had its stars deleted and its word shown as a red search hit that
+# nobody searched for.
+
+STARRED = "SHALOM *note* OLAM"
+
+
+def test_an_editorial_note_is_not_bolded_outside_a_search(browse):
+    browse.browse_highlight_pattern = None
+    browse.browse_highlight_data = []
+    browse._browse_display_version_text(STARRED)
+    shown = browse.browse_text.toPlainText()
+    assert not _is_bold_red(browse.browse_text), (
+        "nothing inserted these asterisks; they are source text"
+    )
+    assert "*note*" in shown, "the page's own stars must survive to the reader"
+
+
+def test_the_predicate_is_a_search_context_test(browse):
+    browse.browse_highlight_pattern = None
+    browse.browse_highlight_data = []
+    assert browse._browse_markers_are_ours(_mark(PAGE)) is False
+    assert browse._browse_markers_are_ours("no stars at all") is False
+    assert browse._browse_markers_are_ours("") is False
+
+    browse.browse_highlight_pattern = PATTERN
+    assert browse._browse_markers_are_ours(_mark(PAGE)) is True
+    assert browse._browse_markers_are_ours("no stars at all") is False, (
+        "no asterisk, nothing to convert -- the context alone is not enough"
+    )
+
+    # span markers carry no pattern of their own, so the data list must count
+    browse.browse_highlight_pattern = None
+    browse.browse_highlight_data = [{"uid": "u", "span": [0, 4]}]
+    assert browse._browse_markers_are_ours("*ABCD* rest") is True

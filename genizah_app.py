@@ -2973,6 +2973,34 @@ class GenizahGUI(QMainWindow):
                 logger.debug("Error loading version content: %s", e)
                 self._browse_display_version_text(self._browse_original_display_text())
 
+    def _browse_markers_are_ours(self, text):
+        """Are the asterisks in ``text`` search markers, or the page's own?
+
+        Nothing inserts a marker outside a search, so outside one every ``*``
+        is source text -- an editorial ``*note*``, say, which 9 of 7,112 PGP
+        transcriptions carry. Converting those would delete the stars and
+        show the word as a red hit nobody searched for (Codex P2, PR #334).
+
+        Deliberately a CONTEXT test, not an attempt to tell inserted markers
+        from source characters. Marked text reaches a render three ways --
+        freshly marked here, the stored marked copy on a V0.8 switch-back,
+        and span markers from ``_apply_browse_highlights`` that no pattern
+        would match -- and a finer test false-negatived on the legitimate
+        ones, silently dropping real highlights. Since nothing inserts a
+        marker outside a search, the search context answers it without ever
+        rejecting a genuine marker.
+
+        Residue, narrow and logged in docs/OPEN_ISSUES.md: INSIDE a search,
+        a page carrying a literal ``*`` pair but no hit of its own still has
+        that pair bolded. Closing it properly means marking with a sentinel
+        that cannot occur in source text, which is a change to the ``*``
+        marker contract shared with the search engine and the exporters.
+        """
+        if not text or '*' not in text:
+            return False
+        return bool(getattr(self, 'browse_highlight_pattern', None)
+                    or getattr(self, 'browse_highlight_data', None))
+
     def _browse_mark_search_hits(self, text):
         """Re-derive the `*...*` search-hit markers from `browse_highlight_pattern`.
 
@@ -3022,7 +3050,10 @@ class GenizahGUI(QMainWindow):
         browse_html_text = text.replace('\n', '<br>')
         # 260903: same `*…*` → red bold the browse page render applies, so a
         # V0.8 switch-back keeps the search hit visible. AFTER newline→<br>.
-        browse_html_text = markers_to_bold_html(browse_html_text)
+        # Bold asterisks ONLY where they can be search markers -- see
+        # _browse_markers_are_ours. Outside a search they are the page's own.
+        if self._browse_markers_are_ours(text):
+            browse_html_text = markers_to_bold_html(browse_html_text)
         # Phase 999.4: route through gutter helper (source_text = raw `text`)
         apply_line_numbered_text(
             self.browse_text,
@@ -8628,7 +8659,10 @@ class GenizahGUI(QMainWindow):
         # same way the page render does (no-op when the phrase isn't here).
         text = self._browse_mark_search_hits(text)
         browse_html_text = text.replace('\n', '<br>')
-        browse_html_text = markers_to_bold_html(browse_html_text)
+        # Bold asterisks ONLY where they can be search markers -- see
+        # _browse_markers_are_ours. Outside a search they are the page's own.
+        if self._browse_markers_are_ours(text):
+            browse_html_text = markers_to_bold_html(browse_html_text)
         # Phase 999.4: route through gutter helper (source_text = raw `text`)
         apply_line_numbered_text(
             self.browse_text,
@@ -21026,7 +21060,11 @@ class GenizahGUI(QMainWindow):
             return res['pgp_url']
         entries = (getattr(self, '_pgp_pages_by_sys_id', None) or {}).get(sys_id)
         chosen = select_pgp_page_entry(entries, self._result_page_num(res))
-        return chosen['pgp_url'] if chosen else None
+        # Link availability is decided AFTER selection: the document this
+        # row's page resolves to may simply have no url, and the honest
+        # answer is then no link -- not a link to some other page's
+        # document (Codex P2, PR #334).
+        return (chosen or {}).get('pgp_url') or None
 
     def _make_pgp_badge_item(self, sys_id, url=None):
         """Build the PGP cell for one row, as a link when the url is known.
@@ -28100,15 +28138,11 @@ class GenizahGUI(QMainWindow):
         # page when switching back from an FGP transcription).
         self.browse_original_page_text = pd['text']
         page_text = self._apply_browse_highlights(page_text, pd.get('uid'))
-        if self.browse_highlight_pattern:
-            try:
-                flags = re.IGNORECASE
-                if '\\n' in self.browse_highlight_pattern or self.browse_highlight_pattern.startswith('^') or '^\\' in self.browse_highlight_pattern:
-                    flags |= re.MULTILINE
-                regex = re.compile(self.browse_highlight_pattern, flags)
-                page_text = regex.sub(r'*\g<0>*', page_text)
-            except Exception:
-                pass  # UI element update optional; continue rendering
+        # Was an inline copy of mark_pattern_hits -- including its pre-fix
+        # form, which inserted markers WITHOUT neutralizing the page's own
+        # asterisks. One implementation now, so the round-4 fix reaches
+        # this path too.
+        page_text = mark_pattern_hits(page_text, self.browse_highlight_pattern)
         # 260903: remember the `*…*`-MARKED page text (the plain
         # browse_original_page_text above is captured before marking and is
         # still what the FGP/PGP coverage checks need). Without this, switching
@@ -28121,7 +28155,10 @@ class GenizahGUI(QMainWindow):
         # all, so a search hit reached the reader as literal asterisks
         # (`וכן *אמר / רבי* יהודה`). Must run AFTER the newline→<br> above so a
         # hit spanning a line break still pairs.
-        browse_html_text = markers_to_bold_html(browse_html_text)
+        # Bold asterisks ONLY where they can be search markers -- see
+        # _browse_markers_are_ours. Outside a search they are the page's own.
+        if self._browse_markers_are_ours(page_text):
+            browse_html_text = markers_to_bold_html(browse_html_text)
         # Phase 999.4: route through gutter helper. source_text is page_text
         # (with potential `*` highlight markers — count is unaffected since
         # markers don't introduce or remove `\n`).

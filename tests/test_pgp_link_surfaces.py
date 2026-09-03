@@ -93,12 +93,39 @@ def pgp_urls_fn(tmp_path):
     conn.close()
 
 
-def test_urls_returns_only_sys_ids_with_a_real_url(pgp_urls_fn):
+def test_candidates_keep_their_null_urls_for_the_page_selection(pgp_urls_fn):
+    """Codex P2, PR #334 -- filtering here hid a candidate from page selection.
+
+    A recto document with no url and a verso document with one: drop the recto
+    candidate and the recto ROW falls back to the verso document. The honest
+    answer is no link, which only the selector can give -- so every linked
+    document comes back and link availability is decided afterwards.
+    """
     got = pgp_urls_fn(["plain", "empty", "null", "absent"])
-    assert got == {"plain": [{"page_info": None, "pgp_url": PGP_URL}]}, (
-        "an empty or NULL pgp_url must be ABSENT, not mapped to '' -- the caller "
-        "uses membership to decide whether to render a link"
+    assert got == {
+        "plain": [{"page_info": None, "pgp_url": PGP_URL}],
+        "empty": [{"page_info": None, "pgp_url": ""}],
+        "null": [{"page_info": None, "pgp_url": None}],
+    }
+    assert "absent" not in got, "a sys_id with no linked document at all is absent"
+
+
+def test_a_page_whose_document_has_no_url_offers_no_link(results):
+    """Not a link to the OTHER page's document."""
+    results.add_row(0, "s1", {"display": {"id": "s1", "img": 1}})
+    results.add_row(1, "s1", {"display": {"id": "s1", "img": 2}})
+    results._pgp_transcription_sys_ids = {"s1"}
+    results._pgp_pages_by_sys_id = {"s1": [
+        {"page_info": "recto", "pgp_url": None},
+        {"page_info": "verso", "pgp_url": VERSO_URL},
+    ]}
+    assert results._pgp_url_for_row(0, "s1") is None, (
+        "the recto document has no url; linking to the verso one would open a "
+        "different page than the row shows"
     )
+    assert results._pgp_url_for_row(1, "s1") == VERSO_URL
+    results._write_pgp_badge_cell(0, "s1")
+    assert results.results_table.item(0, results.COL_PGP).font().underline() is False
 
 
 def test_urls_picks_the_lowest_pgpid_when_a_sys_id_has_several_documents(pgp_urls_fn):

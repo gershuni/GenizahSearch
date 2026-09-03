@@ -1568,7 +1568,14 @@ class ResultDialog(QDialog):
         # same way V0.8 is marked (no-op when the phrase isn't in this edition).
         text = self._mark_search_hits(text)
         html_text = text.replace('\n', '<br>')
-        html_text = markers_to_bold_html(html_text)
+        # Bold asterisks ONLY where they can be search markers: this dialog
+        # was opened from a search iff the result carries a pattern. Outside
+        # one, an edition's own `*note*` is source text, and converting it
+        # would delete the stars and show the word as a red hit nobody
+        # searched for (Codex P2, PR #334). The Browse twin is
+        # GenizahGUI._browse_markers_are_ours, which documents the residue.
+        if '*' in text and (getattr(self, 'data', None) or {}).get('highlight_pattern'):
+            html_text = markers_to_bold_html(html_text)
         # Phase 999.4: route through gutter helper (source_text = raw `text`)
         apply_line_numbered_text(
             self.text_ms,

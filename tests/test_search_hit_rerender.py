@@ -170,7 +170,8 @@ class _BrowseHarness:
         self.browse_text = QTextBrowser()
         self.browse_highlight_pattern = pattern
         self.browse_find_input = type("_I", (), {"text": staticmethod(lambda: "")})()
-        for name in ("_browse_mark_search_hits", "_browse_display_version_text",
+        for name in ("_browse_mark_search_hits", "_browse_markers_are_ours",
+                     "_browse_display_version_text",
                      "_browse_display_pgp_text"):
             setattr(self, name, MethodType(getattr(GenizahGUI, name), self))
 
@@ -194,3 +195,38 @@ def test_browse_without_a_search_pattern_renders_plain():
     b._browse_display_version_text(PAGE)
     assert not _is_red(b.browse_text)
     assert "תקום רבה" in b.browse_text.toPlainText()
+
+
+def test_a_pgp_edition_note_is_not_bolded_outside_a_search():
+    """Codex P2, PR #334 round 5 -- an editorial `*note*` is source text.
+
+    9 of 7,112 PGP transcriptions carry a literal asterisk pair. Converting it
+    deleted the stars and showed the word as a red hit nobody searched for.
+    """
+    b = _BrowseHarness(pattern=None)
+    b._browse_display_pgp_text("SHALOM *note* OLAM")
+    assert not _is_red(b.browse_text)
+    assert "*note*" in b.browse_text.toPlainText(), (
+        "the edition's own stars must survive to the reader"
+    )
+
+
+def test_a_version_note_is_not_bolded_outside_a_search():
+    b = _BrowseHarness(pattern=None)
+    b._browse_display_version_text("SHALOM *note* OLAM")
+    assert not _is_red(b.browse_text)
+    assert "*note*" in b.browse_text.toPlainText()
+
+
+def test_an_rd_edition_note_is_not_bolded_outside_a_search():
+    """The ResultDialog twin of the Browse case (Codex P2, PR #334 round 5).
+
+    Opened from Browse rather than a search, so nothing inserted a marker --
+    the edition's own `*note*` is source text and must reach the reader intact.
+    """
+    d = _DialogHarness(pattern=None)
+    d._rd_display_pgp_text("SHALOM *note* OLAM", is_rtl=True)
+    assert not _is_red(d.text_ms)
+    assert "*note*" in d.text_ms.toPlainText(), (
+        "the edition's own stars must survive to the reader"
+    )
