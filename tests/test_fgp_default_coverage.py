@@ -543,7 +543,9 @@ class TestWiring:
         assert "full_original_text" in src
         # SEED-033 Option A: the inline reader passes the snippet's matched phrase
         # and no longer hard-codes PGP-first ahead of the shared helper.
-        assert "must_contain=_snippet_match_phrase(snippet)" in src
+        # round 11: the phrase now goes through the page-scoping helper
+        assert "must_contain=_hit_scope_phrase(snippet, adv_state, page)" in src
+        assert "_snippet_match_phrase(" in src   # still the extractor underneath
         assert "_groups['pgp_editions'][0].get('content'" not in src
 
     def test_web_browse_passes_full_htr(self):

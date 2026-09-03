@@ -77,6 +77,27 @@ def _snippet_match_phrase(snippet: str) -> str:
     return re.sub(r'\s+', ' ', phrase).strip()
 
 
+
+def _hit_scope_phrase(snippet, adv_state, page):
+    """The snippet's matched phrase, but only on the page the hit belongs to.
+
+    Advanced View's Next/Previous re-renders the SAME search result, so ``snippet``
+    still describes the original hit page. Passing its phrase on every folio let a
+    whole-document source containing the old hit become the default on an unrelated
+    one (Codex P2, 2026-09-02). The first page rendered for a result claims the
+    scope; any other page gets None.
+    """
+    phrase = _snippet_match_phrase(snippet)
+    if not phrase or page is None:
+        return None
+    current = (getattr(page, 'sys_id', None),
+               getattr(adv_state, 'volume_ie', None),
+               getattr(page, 'p_num', None))
+    if getattr(adv_state, 'hit_scope', None) is None:
+        adv_state.hit_scope = current
+        return phrase
+    return phrase if adv_state.hit_scope == current else None
+
 # ---------------------------------------------------------------------------
 # Bidi isolation (Finding #15)
 # ---------------------------------------------------------------------------
@@ -1027,9 +1048,11 @@ def open_advanced_dialog(search_state, refs, index, result):
     adv_state = AdvancedViewState()
     if standalone:
         adv_state.current_result_idx = 0
+        adv_state.hit_scope = None
         adv_state.results = [result]
     else:
         adv_state.current_result_idx = index
+        adv_state.hit_scope = None
         adv_state.results = search_state.displayed_results
 
     with ui.dialog().props('maximized') as dialog:
@@ -1094,6 +1117,8 @@ def open_advanced_dialog(search_state, refs, index, result):
         new_idx = adv_state.current_result_idx + direction
         if 0 <= new_idx < len(adv_state.results):
             adv_state.current_result_idx = new_idx
+            # A different hit owns a different page: let it claim the scope (Codex P2).
+            adv_state.hit_scope = None
             load_result(new_idx)
 
     def load_result(idx: int):
@@ -1486,7 +1511,7 @@ def open_advanced_dialog(search_state, refs, index, result):
             _dec = choose_default_source(
                 all_sources, current_text or '',
                 full_htr_getter=lambda: _fgp_full_htr,
-                must_contain=_snippet_match_phrase(snippet) or None)
+                must_contain=_hit_scope_phrase(snippet, adv_state, page))
             if _dec.get('eligible') and _dec.get('source'):
                 display_text = _dec['source'].get('content', current_text or '')
             else:
@@ -2231,7 +2256,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 # chooser under plain PGP-first precedence and, ~0.1 s
                                 # later, replaced the hit-containing text with a
                                 # transcription that does not contain the hit.
-                                must_contain=_snippet_match_phrase(snippet) or None,
+                                must_contain=_hit_scope_phrase(snippet, adv_state, page),
                             )
 
                             create_comment_button(

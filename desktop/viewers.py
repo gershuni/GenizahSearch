@@ -646,6 +646,9 @@ class ManuscriptViewerWidget(QWidget):
         # navigated away from it, switching back may restore the remembered index;
         # any navigation invalidates it (Codex P2, 2026-09-02).
         self._last_switch_landed_at = None
+        # folio_num each source was last showing, so the return path can go back
+        # to that folio rather than a proportional guess (Codex P2, 2026-09-02).
+        self._last_folio_by_source = {}
         self._nli_fallback_active = False  # 260421-aln: True when auto-flipped to NLI for a past-CUDL page
         self._load_generation = 0  # increments on each set_page/load_images to reject stale callbacks
         self.loader_thread = None
@@ -884,6 +887,14 @@ class ManuscriptViewerWidget(QWidget):
         self._ktiv_sys_id = None
         return True
 
+    def _remember_folio(self, source, image_list, idx):
+        """Remember which folio ``source`` was showing, for the return path."""
+        if not image_list or idx is None or not (0 <= idx < len(image_list)):
+            return
+        folio = image_list[idx].get('folio_num')
+        if folio is not None:
+            self._last_folio_by_source[source] = folio
+
     def _index_for_source_switch(self, old_list, old_idx, new_list, new_source):
         """Index to show in ``new_list`` after switching to ``new_source``.
 
@@ -899,7 +910,8 @@ class ManuscriptViewerWidget(QWidget):
         unmoved = getattr(self, '_last_switch_landed_at', None) == (self.current_source, old_idx)
         if unmoved and remembered is not None and 0 <= remembered < len(new_list):
             return remembered
-        return map_matching_image_index(old_list, old_idx, new_list)
+        anchor = getattr(self, '_last_folio_by_source', {}).get(new_source)
+        return map_matching_image_index(old_list, old_idx, new_list, anchor_folio=anchor)
 
     def _apply_attribution_for_source(self):
         """Show the credit belonging to the image currently displayed.
@@ -930,6 +942,7 @@ class ManuscriptViewerWidget(QWidget):
         # stale source from the previous manuscript.
         self._last_idx_by_source = {}
         self._last_switch_landed_at = None
+        self._last_folio_by_source = {}
 
         # meta contains 'images_nli' and 'images_ext'
         # Make copies to avoid modifying the cached meta
@@ -1084,6 +1097,7 @@ class ManuscriptViewerWidget(QWidget):
         old_source = self.current_source
         if old_source:
             self._last_idx_by_source[old_source] = old_idx
+            self._remember_folio(old_source, old_list, old_idx)
 
         data = self.combo_source.currentData()
         if data == "nli":
@@ -1319,6 +1333,7 @@ class ManuscriptViewerWidget(QWidget):
         ):
             if self.current_source:
                 self._last_idx_by_source[self.current_source] = self.current_idx
+                self._remember_folio(self.current_source, self.active_list, self.current_idx)
             new_idx = self._index_for_source_switch(self.active_list, self.current_idx,
                                                     self.images_nli, "nli")
             self._last_switch_landed_at = ("nli", new_idx)

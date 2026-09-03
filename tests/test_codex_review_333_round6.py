@@ -42,11 +42,12 @@ class TestAdvancedSelectorAgreesWithTheInitialRender:
         # the initial display_text decision
         first = body.index("choose_default_source(")
         first_call = body[first:first + 600]
-        assert "must_contain=_snippet_match_phrase(snippet)" in first_call
+        # round 11 wrapped the extraction in a page-scoping helper
+        assert "must_contain=_hit_scope_phrase(snippet, adv_state, page)" in first_call
         # the selector call
         i = body.index("create_version_selector(")
         call = body[i:i + 1200]
-        assert "must_contain=_snippet_match_phrase(snippet)" in call
+        assert "must_contain=_hit_scope_phrase(snippet, adv_state, page)" in call
 
     def test_no_selector_call_in_this_module_omits_the_phrase(self):
         src = _read(SRC)

@@ -194,7 +194,7 @@ def _side_of_label(label):
     return 'v' if m.group(1) in ('b', 'v') else 'r'
 
 
-def map_matching_image_index(old_list, old_idx, new_list):
+def map_matching_image_index(old_list, old_idx, new_list, anchor_folio=None):
     """Map an index from one image list to the best-matching index in a
     different image list, preserving recto/verso side when detectable.
 
@@ -214,6 +214,11 @@ def map_matching_image_index(old_list, old_idx, new_list):
     2. Otherwise, map by relative position (old_idx / len(old_list))
        scaled onto the new list, clamped to bounds.
 
+    ``anchor_folio`` (optional): the folio the DESTINATION list was last showing.
+    When given and present in ``new_list``, that folio wins and the current image
+    only selects its recto/verso -- the return path from a list whose labels carry
+    no folio information (NLI's FL-only labels) is otherwise not invertible.
+
     Returns 0 for empty/invalid inputs -- callers must still check that
     ``new_list`` is non-empty before treating the source switch as valid.
     """
@@ -223,6 +228,23 @@ def map_matching_image_index(old_list, old_idx, new_list):
         return 0
 
     side = _side_of_label(old_list[old_idx].get('label'))
+
+    # 0. `anchor_folio`: the folio the DESTINATION list was last showing. NLI's
+    #    per-part list carries only FL labels, so leaving it has no side or folio
+    #    signal of its own and the proportional branch below would map NLI index 0
+    #    to Oxford image 0 instead of folio 27a. With the anchor we return to that
+    #    folio and use the current index only to choose recto/verso
+    #    (Codex P2, 2026-09-02).
+    if anchor_folio is not None:
+        if side is None and len(old_list) == 2:
+            side = 'v' if old_idx == 1 else 'r'
+        same_folio = [i for i, im in enumerate(new_list)
+                      if im.get('folio_num') == anchor_folio]
+        if same_folio:
+            if side == 'v' and len(same_folio) > 1:
+                return same_folio[1]
+            return same_folio[0]
+
     if side is not None and len(new_list) == 2:
         return 1 if side == 'v' else 0
 
