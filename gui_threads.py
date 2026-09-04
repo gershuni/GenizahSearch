@@ -1196,7 +1196,7 @@ class PGPSourceWorker(QThread):
 class PGPBadgeWorker(QThread):
     """Batch check badge sets for the results table (SEED-022).
 
-    Emits TWO sets:
+    Emits TWO sets AND a url map:
       * pgp_link_ids  -- sys_ids present in PGP (document_fragments link presence;
         feeds the unchanged green "PGP" badge = "has PGP info", ~34K corpus-wide).
       * manual_ids    -- sys_ids with readable manual transcription/translation
@@ -1204,8 +1204,19 @@ class PGPBadgeWorker(QThread):
         "scholarly transcription" column, ~7.3K). FGP honors the shared
         FGP_TRANSCRIPTIONS_ENABLED flag (no web-only override on desktop).
     These are DIFFERENT predicates (link vs readable text), not a duplicate query.
+
+      * pgp_pages   -- {sys_id: [{page_info, pgp_url}, ...]} for the SAME
+        manuscripts as pgp_link_ids, so the green badge can be a real
+        clickable link instead of only a presence marker. Every page
+        candidate is carried, not one url per manuscript, because which
+        document a results row means depends on that row's page. A
+        sys_id with no url at all is absent, NOT mapped to [].
+
+    The third argument was APPENDED: PyQt truncates surplus signal
+    arguments for Python callables, so slots written against the old
+    (set, set) shape keep working unchanged.
     """
-    finished = pyqtSignal(set, set)
+    finished = pyqtSignal(set, set, dict)
 
     def __init__(self, sys_ids: list, parent=None):
         super().__init__(parent)
@@ -1226,7 +1237,18 @@ class PGPBadgeWorker(QThread):
             manual_ids = get_sys_ids_with_manual_transcriptions(self.sys_ids)
         except Exception as e:
             logger.error("PGPBadgeWorker manual-transcription error: %s", e)
-        self.finished.emit(pgp_link_ids, manual_ids)
+        # Third isolated query: urls for the manuscripts that HAVE a PGP
+        # link. Asking only about pgp_link_ids keeps the IN() list as small
+        # as the badge set, and a failure here must leave the badges intact
+        # -- they simply render without a link.
+        pgp_pages: dict = {}
+        if pgp_link_ids:
+            try:
+                from shared.document_service import get_pgp_page_urls_for_sys_ids
+                pgp_pages = get_pgp_page_urls_for_sys_ids(sorted(pgp_link_ids))
+            except Exception as e:
+                logger.error("PGPBadgeWorker PGP-url error: %s", e)
+        self.finished.emit(pgp_link_ids, manual_ids, pgp_pages)
 
 
 class PrintedBadgeWorker(QThread):

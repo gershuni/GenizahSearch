@@ -20,8 +20,10 @@ from corrections_ui import (
     CommentDialog, CommentsViewerDialog, CorrectionsViewerDialog, JoinsDialog,
 )
 from desktop.widgets import (
+    text_has_pattern_markers,
     _format_add_to_list_label,
-    apply_find_highlight, _get_folio_number_from_shelfmark,
+    apply_find_highlight, mark_pattern_hits, markers_to_bold_html,
+    _get_folio_number_from_shelfmark,
     _get_folio_image_index,
 )
 from desktop.widgets.line_number_text_edit import (
@@ -202,6 +204,15 @@ class ResultDialog(QDialog):
         self.btn_compact_catalog.clicked.connect(self._show_rd_catalog)
         compact_layout.addWidget(self.btn_compact_catalog)
 
+        # PGP (compact) -- twin of btn_rd_pgp; every conditional button in
+        # this dialog has a compact counterpart, and both are driven by the
+        # single _update_rd_pgp_button() call.
+        self.btn_compact_pgp = QPushButton("PGP")
+        self.btn_compact_pgp.setToolTip(tr("Open on the Princeton Geniza Project website"))
+        self.btn_compact_pgp.setVisible(False)
+        self.btn_compact_pgp.clicked.connect(self.open_pgp_link)
+        compact_layout.addWidget(self.btn_compact_pgp)
+
         # Measurements (compact)
         self.btn_compact_measurements = QPushButton()
         self.btn_compact_measurements.setVisible(False)
@@ -251,6 +262,15 @@ class ResultDialog(QDialog):
         self.btn_external_link = QPushButton(tr("External Website"))
         self.btn_external_link.setVisible(False)
         self.btn_external_link.clicked.connect(self.open_external_link)
+        # Princeton Geniza Project. Hidden until _on_rd_pgp_loaded reports a
+        # url for this manuscript -- most manuscripts have no PGP document,
+        # so this follows btn_external_link rather than btn_img (Ktiv), which
+        # exists for every non-synthetic sys_id.
+        self.btn_rd_pgp = QPushButton(tr("View on PGP"))
+        self.btn_rd_pgp.setToolTip(tr("Open on the Princeton Geniza Project website"))
+        self.btn_rd_pgp.setVisible(False)
+        self.btn_rd_pgp.clicked.connect(self.open_pgp_link)
+        self._rd_pgp_url = None
         self.lbl_info = QLabel(); self.lbl_info.setStyleSheet("font-size: 11px; color: palette(text);"); self.lbl_info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.lbl_meta_loading = QLabel(tr("Loading...")); self.lbl_meta_loading.setStyleSheet("color: orange; font-size: 11px;"); self.lbl_meta_loading.setVisible(False)
 
@@ -264,7 +284,7 @@ class ResultDialog(QDialog):
         self.lbl_rd_printed.setStyleSheet("color: #dc2626; font-weight: bold; font-size: 11px;")
         self.lbl_rd_printed.setVisible(False)
 
-        info_row.addWidget(self.btn_img); info_row.addWidget(self.btn_external_link); info_row.addWidget(self.lbl_info); info_row.addWidget(self.lbl_rd_domains); info_row.addWidget(self.lbl_rd_printed); info_row.addWidget(self.lbl_meta_loading); info_row.addStretch()
+        info_row.addWidget(self.btn_img); info_row.addWidget(self.btn_external_link); info_row.addWidget(self.btn_rd_pgp); info_row.addWidget(self.lbl_info); info_row.addWidget(self.lbl_rd_domains); info_row.addWidget(self.lbl_rd_printed); info_row.addWidget(self.lbl_meta_loading); info_row.addStretch()
 
         # Nav Row (Inside Header)
         nav_row = QHBoxLayout()
@@ -1148,14 +1168,11 @@ class ResultDialog(QDialog):
     def _rd_load_versions(self):
         """Load versions for current document page."""
         parent = self._app
-        if not parent or not hasattr(parent, 'corrections_client'):
-            return
 
-        doc_id = self.current_sys_id
-        page_num = self.current_p_num or 1
-        client = parent.corrections_client
-
-        # Store original text
+        # Seed BEFORE the early return below. This used to sit after it, so an
+        # app with no corrections_client left `_rd_versions_cache` empty and a
+        # later switch back to "V0.8" fell through to the plain
+        # `_rd_original_text` (260903).
         original_text = self.text_ms.toPlainText()
         self._rd_original_text = original_text
         # 260902 (debug/oxford-fgp-image-mismatch.md sub-issue B): the
@@ -1171,6 +1188,13 @@ class ResultDialog(QDialog):
         self._rd_versions_cache = {
             'original': original_marked_text if original_marked_text is not None else original_text
         }
+
+        if not parent or not hasattr(parent, 'corrections_client'):
+            return
+
+        doc_id = self.current_sys_id
+        page_num = self.current_p_num or 1
+        client = parent.corrections_client
 
         # Force fresh server availability check (500ms timeout) to prevent UI freeze
         if not client.is_server_available(force_check=True):
@@ -1494,9 +1518,39 @@ class ResultDialog(QDialog):
                 except Exception as e:
                     logger.debug("Error loading version: %s", e)
 
+    def _mark_search_hits(self, text):
+        """Re-derive the `*...*` search-hit markers from `highlight_pattern`.
+
+        260903. Every re-render of the manuscript pane goes through here, so
+        the highlight can no longer be lost by whichever text snapshot happened
+        to win. Before this, keeping the highlight depended on a *marked* copy
+        having been captured earlier and still being reachable, and several
+        branches did not satisfy that -- most visibly
+        `_rd_load_version_content`'s `original` fallback, which renders the
+        deliberately-plain `_rd_original_text` whenever the versions cache was
+        never seeded (`_rd_load_versions` returns before seeding when the app
+        has no `corrections_client`, and `load_page` can return before setting
+        `_rd_original_marked_text` at all).
+
+        A no-op when the text is already marked, when the result carries no
+        pattern (opened from Browse rather than a search), or when the pattern
+        does not match this text -- so it is safe on PGP/FGP editions and on
+        translations in another language.
+
+        "Already marked" is decided by text_has_pattern_markers, not by the
+        presence of an asterisk: an edition carrying a literal one of its own
+        would otherwise be taken for marked text and never highlighted
+        (Codex P2, PR #334).
+        """
+        pattern_str = (getattr(self, 'data', None) or {}).get('highlight_pattern')
+        if not text or text_has_pattern_markers(text, pattern_str):
+            return text
+        return mark_pattern_hits(text, pattern_str)
+
     def _rd_display_text(self, text):
         """Display text in the manuscript viewer."""
         if text:
+            text = self._mark_search_hits(text)
             # Phase 999.4: route through gutter helper (source_text = raw `text`)
             apply_line_numbered_text(
                 self.text_ms, self._htmlify(text), source_text=text, is_html=True,
@@ -1509,7 +1563,19 @@ class ResultDialog(QDialog):
         direction = 'rtl' if is_rtl else 'ltr'
         layout_dir = Qt.LayoutDirection.RightToLeft if is_rtl else Qt.LayoutDirection.LeftToRight
         self.text_ms.setLayoutDirection(layout_dir)
+        # SEED-033 picks the source that CONTAINS the searched phrase, and then
+        # this path rendered it with no highlighting whatsoever. Mark it the
+        # same way V0.8 is marked (no-op when the phrase isn't in this edition).
+        text = self._mark_search_hits(text)
         html_text = text.replace('\n', '<br>')
+        # Bold asterisks ONLY where they can be search markers: this dialog
+        # was opened from a search iff the result carries a pattern. Outside
+        # one, an edition's own `*note*` is source text, and converting it
+        # would delete the stars and show the word as a red hit nobody
+        # searched for (Codex P2, PR #334). The Browse twin is
+        # GenizahGUI._browse_markers_are_ours, which documents the residue.
+        if '*' in text and (getattr(self, 'data', None) or {}).get('highlight_pattern'):
+            html_text = markers_to_bold_html(html_text)
         # Phase 999.4: route through gutter helper (source_text = raw `text`)
         apply_line_numbered_text(
             self.text_ms,
@@ -1528,6 +1594,7 @@ class ResultDialog(QDialog):
         # Store PGP data
         self._rd_pgp_sources = sources
         self._rd_pgp_doc = pgp_doc
+        self._update_rd_pgp_button(pgp_doc)
 
         # Handle PGP extended info display:
         # Case 1: Enriched data already built HTML -> append PGP section
@@ -1599,6 +1666,9 @@ class ResultDialog(QDialog):
     def _on_rd_pgp_error(self, sys_id, error_msg):
         """Handle PGP source fetch error -- silently fall back to existing behavior."""
         logger.debug("PGP fetch error for %s: %s", sys_id, error_msg)
+        # Stale-request guard, matching _on_rd_pgp_loaded above.
+        if sys_id == self.current_sys_id:
+            self._update_rd_pgp_button(None)
 
     def _rd_update_extended_info_with_pgp(self):
         """Rebuild extended info HTML after PGP data arrives late.
@@ -2126,6 +2196,25 @@ class ResultDialog(QDialog):
                 logger.debug("result_dialog: invalid highlight regex %r: %s", pattern_str, _re_exc)
         return text
 
+    def open_pgp_link(self):
+        """Open the current manuscript's Princeton Geniza Project page."""
+        if getattr(self, '_rd_pgp_url', None):
+            QDesktopServices.openUrl(QUrl(self._rd_pgp_url))
+
+    def _update_rd_pgp_button(self, pgp_doc):
+        """Show the PGP buttons only while a PGP url is actually known.
+
+        pgp_url is nullable TEXT in the sidecar, so 'this manuscript is in
+        PGP' does not guarantee 'this manuscript has a PGP url' -- the
+        buttons follow the url, not the document.
+        """
+        url = (pgp_doc or {}).get('pgp_url') or None
+        self._rd_pgp_url = url
+        for _attr in ('btn_rd_pgp', 'btn_compact_pgp'):
+            _btn = getattr(self, _attr, None)
+            if _btn is not None:
+                _btn.setVisible(bool(url))
+
     def open_external_link(self):
         if self.external_url:
             url = self.external_url
@@ -2609,6 +2698,22 @@ class ResultDialog(QDialog):
             except re.error as _re_exc:
                 logger.debug("result_dialog: invalid highlight regex %r: %s", pattern_str, _re_exc)
 
+        # Diagnostic, deliberately at WARNING and deliberately narrow: the
+        # results-table snippet is built from the SAME regex, so if the snippet
+        # carries `*...*` markers and this page render produced none, the two
+        # disagree and the reader sees a hit in the table but not in the pane
+        # (owner UAT 2026-09-03, an Oxford manuscript, while ordinary searches
+        # highlight fine). Silent in every healthy case, including a dialog
+        # opened from Browse, which has no snippet markers to begin with.
+        _snippet = (self.data or {}).get('snippet') or ''
+        if '*' in _snippet and '*' not in raw_text:
+            logger.warning(
+                "result_dialog: snippet is highlighted but the page render is not "
+                "-- sys_id=%s p_num=%s pattern=%r page_len=%d",
+                getattr(self, 'current_sys_id', None),
+                getattr(self, 'current_p_num', None),
+                pattern_str, len(raw_text))
+
         # 260902 (debug/oxford-fgp-image-mismatch.md sub-issue B): remember the
         # *...*-marked raw text (BEFORE _htmlify below converts the markers
         # into <b> tags and the literal '*' characters vanish) so that
@@ -2633,6 +2738,7 @@ class ResultDialog(QDialog):
         # Reset PGP and enriched data flags for new result
         self._rd_pgp_doc = None
         self._rd_pgp_sources = []
+        self._update_rd_pgp_button(None)
         self._rd_enriched_data_loaded = False
         self._rd_fjms_bib = []
         self._rd_marc_bib = []
@@ -2710,6 +2816,10 @@ class ResultDialog(QDialog):
         """
         if not self.current_sys_id:
             return
+        # A LOCAL file has no PGP document, and this path returns before
+        # load_page's reset block, so the button has to be dropped here
+        # or it keeps pointing at the previous Genizah result.
+        self._update_rd_pgp_button(None)
 
         # Fetch the page dict from the engine primitive (plan 96-03).
         if target is not None:

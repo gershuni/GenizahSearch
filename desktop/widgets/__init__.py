@@ -41,6 +41,85 @@ def _format_add_to_list_label(in_list=False):
     return f"{star} {tr('List')}"
 
 
+#: Search-hit markers. A `*...*` pair is placed around every regex match by the
+#: render paths (browse_render_page, ResultDialog.load_page, ...) BEFORE the text
+#: becomes HTML.
+_HIGHLIGHT_MARKER_RE = re.compile(r'\*(.*?)\*')
+
+
+def mark_pattern_hits(text, pattern_str):
+    """Wrap every ``pattern_str`` match in ``text`` with ``*...*`` markers.
+
+    The one implementation of the flag heuristic the render paths had each
+    open-coded: ``re.MULTILINE`` is added when the pattern carries an explicit
+    newline or anchors, because those patterns are written against a whole
+    multi-line page. (``MULTILINE`` only affects ``^``/``$``; a search pattern
+    still spans a line break through its ``[^\\w...]+`` word separator, which
+    matches ``\\n`` like any other non-word character.)
+
+    Literal asterisks in the source text are neutralized to spaces FIRST.
+    ``*`` is the marker, so a page that contains one of its own -- a copied
+    footnote marker, say -- would otherwise pair up with an inserted marker
+    and bold the wrong span, or strand a stray asterisk in the render. This
+    is the rule ``shared/search_engine.mark_word_highlights`` already
+    follows (Codex round 6 on PR #325, for the same reason in xlsx export);
+    ``.replace`` is length-preserving, so nothing downstream shifts.
+
+    Returns ``text`` unchanged -- literal asterisks and all -- when there is
+    no pattern, the pattern does not compile, or nothing matched. Text is
+    only ever neutralized when a marker is actually being inserted into it,
+    so a page with no hit is displayed exactly as it is stored.
+    """
+    if not text or not pattern_str:
+        return text
+    flags = re.IGNORECASE
+    if '\\n' in pattern_str or pattern_str.startswith('^') or '^\\' in pattern_str:
+        flags |= re.MULTILINE
+    try:
+        marked, hits = re.compile(pattern_str, flags).subn(
+            r'*\g<0>*', text.replace('*', ' '))
+    except re.error:
+        return text
+    return marked if hits else text
+
+
+def text_has_pattern_markers(text, pattern_str):
+    """Does ``text`` already carry markers this pattern put there?
+
+    A bare ``'*' in text`` cannot answer that: a page holding a literal
+    asterisk of its own would be mistaken for marked text and skipped,
+    losing the highlight entirely. A marker pair whose CONTENT the search
+    pattern matches end-to-end is our own work; anything else is source
+    text (Codex P2, PR #334).
+    """
+    if not text or not pattern_str:
+        return False
+    try:
+        rx = re.compile(pattern_str, re.IGNORECASE | re.DOTALL)
+    except re.error:
+        return False
+    return any(rx.fullmatch(m.group(1))
+               for m in _HIGHLIGHT_MARKER_RE.finditer(text))
+
+
+def markers_to_bold_html(html_text, color='red'):
+    """Turn `*...*` search-hit markers into red bold.
+
+    Call this on text that has ALREADY had its newlines turned into ``<br>``.
+    The regex's ``.`` never matches a literal newline, so a hit that spans a
+    line break -- which ``highlight_pattern`` regularly produces, e.g.
+    ``אמר\\s*\\n?\\s*רבי`` -- only pairs up once the newline is a ``<br>``.
+
+    Mirrors ``ResultDialog._htmlify`` step 3 exactly; the desktop Browse tab
+    had no equivalent at all, so its search hits rendered as literal asterisks
+    (found 2026-09-03).
+    """
+    if not html_text:
+        return html_text
+    return _HIGHLIGHT_MARKER_RE.sub(
+        f"<b style='color:{color};'>\\1</b>", html_text)
+
+
 def apply_find_highlight(text_browser, query):
     if not text_browser:
         return

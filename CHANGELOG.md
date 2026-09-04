@@ -72,6 +72,68 @@ unrelated FGP transcription, no highlight). Session record:
   connected-fragments fetch remains tracked in `docs/OPEN_ISSUES.md` and is not
   claimed as fixed here.
 
+### Added — Princeton Geniza Project links on three desktop surfaces (desktop, 2026-09-03)
+
+The web app offers a PGP link wherever a manuscript has one; on the desktop the
+only route was an anchor buried in the extended-info panel.
+
+- **Reading dialog and Browse toolbar** each gained a `View on PGP` button — the
+  reading dialog also on its compact bar, so compact mode does not lose the link.
+- **The green `PGP` badge in the search results table is now a real link**:
+  underlined, hand cursor on hover, the URL in its tooltip, opened by a single
+  click. Double-click still opens the result everywhere else, but is suppressed
+  on a linked badge so one gesture opens one thing.
+- **Shown only where a link actually exists.** `pgp_url` is nullable in the
+  sidecar, so "this manuscript is in PGP" is not "this manuscript has a PGP
+  URL"; the buttons stay hidden without one and such a row keeps its plain,
+  un-underlined badge.
+- **Each row links to the document it actually shows.** A manuscript can be
+  linked to several PGP documents (1,845 of 34,171 are; one to 104). A PGP-tag
+  hit links to its own tagged document; an ordinary hit resolves by the row's
+  page, through the same rule `get_document_for_fragment` uses — so a verso hit
+  on the 144 manuscripts with separate recto and verso documents no longer opens
+  the recto one. That page-selection rule now exists in exactly one place.
+
+### Fixed — desktop defects from two owner UAT rounds (desktop, 2026-09-03)
+
+- **Composition tree header lost every setting to `setHeader()`.**
+  `QTreeWidget.setHeader()` destroys the outgoing header and resets the incoming
+  one, and the tree configured its header first — so column widths, resize modes,
+  the Witnesses hidden state, the sort indicator and the `sectionClicked`
+  connection were all discarded, meaning **header-click sorting never fired at
+  all**. Its sort map also still used pre-Library column indices. Every column is
+  now user-resizable and sorting is live.
+- **Browse showed search hits as literal asterisks.** The tab had no `*…*` → bold
+  conversion anywhere, and its V0.8 snapshot was captured before marking, so a
+  version switch-back dropped the highlight.
+- **Highlights now survive every re-render**: both display helpers re-derive the
+  markers from the search pattern instead of depending on a marked copy having
+  been captured earlier, and the PGP-edition pane applies them at all for the
+  first time.
+- **"Full Recursive Search" crashed in letter-level mode** on a spin box owned by
+  the Witnesses dialog, which that path never opens.
+- **The composition tree crashed on a mid-load clear** (a deleted
+  `QTreeWidgetItem`), and — found in passing — its batched load never reached its
+  completion branch, so checkboxes stayed inert and filters were never re-applied.
+- **Search and Composition now have independent Exclude Manuscripts lists.** They
+  had silently shared one; both status labels were written with the same text and
+  each tab's "New" wiped the other's list. The composition session snapshot's
+  exclusion keys were also written but never read back. An exclusion added without
+  a source (the results-table "exclude and compose" action) no longer restores
+  with a blank label while still filtering.
+- **An editorial `*note*` is no longer rendered as a red search hit.** Highlight
+  markers are inserted only after neutralizing a page's own asterisks, and the
+  render paths convert them only inside a search — 17 of 7,112 PGP transcriptions
+  contain a literal `*`. Two residues of the in-band `*` marker contract are
+  tracked in `docs/OPEN_ISSUES.md`.
+
+Six navigation paths that would have shown a stale PGP link were found by an
+audit and fixed before release, and the PR closed six further defects across five
+Codex review rounds. Still open and tracked, not regressions from this work:
+Focus Search remains one scope shared by both tabs, Lab Mode composition ignores
+it entirely, and a stale badge worker can blank the PGP column of a tag-results
+table.
+
 ## [9.1.0] - 2026-08-27
 
 ### Desktop — Several Witnesses of One Work

@@ -51,8 +51,10 @@ from shared.search_engine import PHASE_LOCAL_SEARCH
 from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
 from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, PuzzleMetaLoaderThread, FilterCountWorker, RefinementReplayThread
 from desktop.widgets import (
+    text_has_pattern_markers,
     ActionsHoverWidget, _format_add_to_list_label,
-    apply_find_highlight, _get_folio_number_from_shelfmark,
+    apply_find_highlight, markers_to_bold_html, mark_pattern_hits,
+    _get_folio_number_from_shelfmark,
     _get_folio_image_index, _get_folio_side_image_index,
     _get_initial_image_index,
     ShelfmarkCompleter,
@@ -91,6 +93,7 @@ from shared_export_utils import sanitize_text_for_excel as shared_sanitize_excel
 from shared_export_utils import coerce_img_page_cell
 from shared.reading_desk_model import ReadingDeskEntry, ReadingDeskState
 from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter
+from shared.document_service import select_pgp_page_entry
 from shared.exclusion_service import (
     ExclusionSource, compute_excluded_ids,
     serialize_sources, deserialize_sources,
@@ -1409,10 +1412,24 @@ class GenizahGUI(QMainWindow):
         self.comp_has_grouped_results = False
         self.comp_known = []
         self.pending_recursive_search = False
+        # Exclude Manuscripts is PER SURFACE (owner request 2026-09-03).
+        # Until then there was ONE list: both the Search tab's
+        # btn_main_exclude and the Composition tab's btn_exclude opened the
+        # same dialog over the same attributes, so excluding a manuscript on
+        # one surface silently excluded it on the other -- and each tab's
+        # own status label was written with the other's count.
+        # The Search tab KEEPS the historical un-prefixed names so the saved
+        # session schema and every existing reader stay valid; Composition
+        # gets the parallel comp_ set. Route through _excl_get/_excl_set
+        # rather than touching either group directly.
         self.excluded_raw_entries = []
         self.excluded_sys_ids = set()
         self.excluded_shelfmarks = set()
         self.exclusion_sources: list = []  # list of ExclusionSource objects (Phase 56)
+        self.comp_excluded_raw_entries = []
+        self.comp_excluded_sys_ids = set()
+        self.comp_excluded_shelfmarks = set()
+        self.comp_exclusion_sources: list = []
         # Pre-search filter state (Phase 45-03)
         self.pre_search_filters = {}  # dict: domain, author, work, date_from, date_to, material_exclude
         self.pre_search_restrict_sys_ids = None  # computed set or None
@@ -1434,6 +1451,13 @@ class GenizahGUI(QMainWindow):
         self.list_filter_state = {'active': False, 'mode': 'in', 'lists': 'all'}
         self._pgp_transcription_sys_ids = set()
         self._manual_transcription_sys_ids = set()  # SEED-022: PGP text ∪ FGP (scholarly transcription/translation)
+        # {sys_id: [{page_info, pgp_url}, ...]} for the rows in
+        # _pgp_transcription_sys_ids, ordered by pgpid. Only a sys_id in
+        # HERE gets a clickable badge; presence in the set above is 'has
+        # PGP info', which is not the same as 'has a PGP url'. The
+        # CANDIDATES are kept rather than one url per manuscript because
+        # which document a row means depends on that row's page.
+        self._pgp_pages_by_sys_id = {}
         self._pgp_badge_worker = None
         self._printed_badge_worker = None
         self._printed_sys_ids = set()
@@ -2916,8 +2940,9 @@ class GenizahGUI(QMainWindow):
         elif source == "original":
             # Show original V0.8 text and restore RTL direction
             self.browse_text.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-            if hasattr(self, 'browse_original_page_text') and self.browse_original_page_text:
-                self._browse_display_version_text(self.browse_original_page_text)
+            _v08 = self._browse_original_display_text()
+            if _v08:
+                self._browse_display_version_text(_v08)
         elif source == "correction":
             # Correction content is stored directly in version_data
             content = version_data.get('corrected_text', '')
@@ -2929,8 +2954,7 @@ class GenizahGUI(QMainWindow):
                 self.browse_text.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
                 self._browse_display_version_text(content)
             else:
-                if hasattr(self, 'browse_original_page_text'):
-                    self._browse_display_version_text(self.browse_original_page_text)
+                self._browse_display_version_text(self._browse_original_display_text())
         elif version_id:
             # Quick server availability check (500ms timeout) to prevent UI freeze
             if not self.corrections_client.is_server_available():
@@ -2944,19 +2968,92 @@ class GenizahGUI(QMainWindow):
                     self._browse_display_version_text(content)
                 else:
                     # Fall back to original if no content
-                    if hasattr(self, 'browse_original_page_text'):
-                        self._browse_display_version_text(self.browse_original_page_text)
+                    self._browse_display_version_text(self._browse_original_display_text())
             except Exception as e:
                 logger.debug("Error loading version content: %s", e)
-                if hasattr(self, 'browse_original_page_text'):
-                    self._browse_display_version_text(self.browse_original_page_text)
+                self._browse_display_version_text(self._browse_original_display_text())
+
+    def _browse_markers_are_ours(self, text):
+        """Are the asterisks in ``text`` search markers, or the page's own?
+
+        Nothing inserts a marker outside a search, so outside one every ``*``
+        is source text -- an editorial ``*note*``, say, which 9 of 7,112 PGP
+        transcriptions carry. Converting those would delete the stars and
+        show the word as a red hit nobody searched for (Codex P2, PR #334).
+
+        Deliberately a CONTEXT test, not an attempt to tell inserted markers
+        from source characters. Marked text reaches a render three ways --
+        freshly marked here, the stored marked copy on a V0.8 switch-back,
+        and span markers from ``_apply_browse_highlights`` that no pattern
+        would match -- and a finer test false-negatived on the legitimate
+        ones, silently dropping real highlights. Since nothing inserts a
+        marker outside a search, the search context answers it without ever
+        rejecting a genuine marker.
+
+        Residue, narrow and logged in docs/OPEN_ISSUES.md: INSIDE a search,
+        a page carrying a literal ``*`` pair but no hit of its own still has
+        that pair bolded. Closing it properly means marking with a sentinel
+        that cannot occur in source text, which is a change to the ``*``
+        marker contract shared with the search engine and the exporters.
+        """
+        if not text or '*' not in text:
+            return False
+        return bool(getattr(self, 'browse_highlight_pattern', None)
+                    or getattr(self, 'browse_highlight_data', None))
+
+    def _browse_mark_search_hits(self, text):
+        """Re-derive the `*...*` search-hit markers from `browse_highlight_pattern`.
+
+        The Browse-tab twin of `ResultDialog._mark_search_hits`. A no-op when
+        the text is already marked, when this browse view did not arrive from
+        a search (`browse_highlight_pattern` is None), or when the pattern
+        does not match -- so it is safe on PGP/FGP editions and translations.
+
+        "Already marked" is decided by text_has_pattern_markers, not by the
+        presence of an asterisk: a page carrying a literal one of its own
+        would otherwise be taken for marked text and never highlighted.
+        """
+        pattern = getattr(self, 'browse_highlight_pattern', None)
+        if not text or text_has_pattern_markers(text, pattern):
+            return text
+        return mark_pattern_hits(text, pattern)
+
+    def _browse_original_display_text(self):
+        """The V0.8 text to re-render, WITH its search-hit markers when we have them.
+
+        ``browse_original_page_text`` is deliberately the PLAIN page text — the
+        FGP/PGP coverage checks match against it — so the marked copy lives
+        alongside it. The equality guard makes this self-correcting: if the
+        plain text was refreshed from somewhere the marked copy didn't follow
+        (``_check_document_community_status`` also writes it), we fall back to
+        plain rather than render a stale page.
+
+        The comparison strips markers from one side and neutralizes literal
+        asterisks on the other, because that is exactly what
+        ``mark_pattern_hits`` does when it marks: every ``*`` in the marked
+        copy is a marker, and each ``*`` the page owned is now a space. A
+        page with a literal asterisk therefore keeps its highlight instead
+        of degrading to plain (Codex P2, PR #334).
+        """
+        marked = getattr(self, 'browse_original_marked_text', None)
+        plain = getattr(self, 'browse_original_page_text', '') or ''
+        if marked and marked.replace('*', '') == plain.replace('*', ' '):
+            return marked
+        return plain
 
     def _browse_display_version_text(self, text):
         """Display version text in the browse text area."""
         if not text:
             return
         # Apply RTL formatting like browse_render_page does
+        text = self._browse_mark_search_hits(text)
         browse_html_text = text.replace('\n', '<br>')
+        # 260903: same `*…*` → red bold the browse page render applies, so a
+        # V0.8 switch-back keeps the search hit visible. AFTER newline→<br>.
+        # Bold asterisks ONLY where they can be search markers -- see
+        # _browse_markers_are_ours. Outside a search they are the page's own.
+        if self._browse_markers_are_ours(text):
+            browse_html_text = markers_to_bold_html(browse_html_text)
         # Phase 999.4: route through gutter helper (source_text = raw `text`)
         apply_line_numbered_text(
             self.browse_text,
@@ -3282,6 +3379,7 @@ class GenizahGUI(QMainWindow):
         self._browse_versions_cache = {'original': original_text}
         self._browse_pgp_sources = []
         self._browse_pgp_doc = {}
+        self._update_browse_pgp_button(None)
         self._browse_enriched_html = ''
         self.browse_version_combo.blockSignals(True)
         self.browse_version_combo.clear()
@@ -5109,7 +5207,8 @@ class GenizahGUI(QMainWindow):
         self.btn_main_exclude = QPushButton(tr("Exclude Manuscripts"))
         self.btn_main_exclude.setToolTip(tr("Exclude specific manuscripts by shelfmark or system ID"))
         self.btn_main_exclude.setStyleSheet("padding: 2px 8px;")
-        self.btn_main_exclude.clicked.connect(self.open_exclude_dialog)
+        self.btn_main_exclude.clicked.connect(
+            lambda: self.open_exclude_dialog('search'))
         
         self.lbl_main_exclude_status = QLabel("")
         self.lbl_main_exclude_status.setStyleSheet("color: #8e44ad; font-weight: bold; font-size: 11px;")
@@ -5249,6 +5348,10 @@ class GenizahGUI(QMainWindow):
         self.COL_SNIPPET = 7
         self.COL_SRC = 8
         self.COL_PGP = 9
+        # Where a linked PGP cell keeps its url. Qt.ItemDataRole.UserRole on
+        # the COL_SYS_ID item holds the whole result dict; this is a
+        # different item, so the roles do not collide.
+        self._PGP_URL_ROLE = Qt.ItemDataRole.UserRole
         self.COL_DOMAIN = 10
         self.COL_PRINTED = 11
         self.COL_TRANSCRIPTION = 12  # SEED-022: APPENDED (no index shift) — manual transcription/translation
@@ -5304,12 +5407,13 @@ class GenizahGUI(QMainWindow):
 
         self.results_table.setMouseTracking(True)
         self.results_table.cellEntered.connect(self.on_table_cell_entered)
+        self.results_table.cellClicked.connect(self._on_results_cell_clicked)
         self.results_table.installEventFilter(self)
         self.results_table.viewport().installEventFilter(self)
 
         self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.results_table.setSortingEnabled(True) # Enable sorting
-        self.results_table.doubleClicked.connect(self.show_full_text)
+        self.results_table.doubleClicked.connect(self._on_results_double_clicked)
         self.results_table.itemChanged.connect(self.on_search_result_item_changed)
         self.results_table.verticalScrollBar().valueChanged.connect(self.check_scroll_load)
 
@@ -5447,7 +5551,9 @@ class GenizahGUI(QMainWindow):
         top_row.addWidget(btn_load)
 
         # 1. Exclude & Filter (Moved to top row)
-        btn_exclude = QPushButton(tr("Exclude Manuscripts")); btn_exclude.clicked.connect(self.open_exclude_dialog)
+        btn_exclude = QPushButton(tr("Exclude Manuscripts"))
+        btn_exclude.clicked.connect(
+            lambda: self.open_exclude_dialog('composition'))
         btn_filter_text = QPushButton(tr("Filter Text")); btn_filter_text.clicked.connect(self.open_filter_dialog)
         self.lbl_exclude_status = QLabel("")
         self.lbl_exclude_status.setStyleSheet("color: #8e44ad; font-weight: bold;")
@@ -5870,44 +5976,24 @@ class GenizahGUI(QMainWindow):
             "QTreeWidget::indicator:indeterminate { border: 1px solid #9b9b9b; background: rgba(255, 255, 255, 0.18); }"
         )
 
-        # Configure columns width
-        header = self.comp_tree.header()
-        header.setSectionsClickable(True)
-        header.sectionClicked.connect(self.on_comp_header_clicked)
-        header.sectionResized.connect(self._refresh_comp_tree_tooltips)
-        header.setSortIndicatorShown(True)
-        header.setSortIndicator(0, Qt.SortOrder.DescendingOrder)
-        header.setSectionResizeMode(self.comp_col_context, QHeaderView.ResizeMode.Interactive)
-        header.setSectionResizeMode(self.comp_col_ms_context, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive) # Shelfmark
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # System ID
-        header.setSectionResizeMode(self.comp_col_printed, QHeaderView.ResizeMode.Fixed) # Printed
-        header.setSectionResizeMode(self.comp_col_witnesses, QHeaderView.ResizeMode.ResizeToContents)
-        # There is no composition header width/visibility persistence to
-        # migrate, so this column's hidden state is set explicitly on
-        # every render. Set once here and never again, it would survive
-        # onto the next single-witness or chunk result.
-        self.comp_tree.setColumnHidden(self.comp_col_witnesses, True)
-
-        self.comp_tree.setColumnWidth(0, 160) # Score - widened
-
-        # Title column (~25 chars)
-        title_width = self.comp_tree.fontMetrics().averageCharWidth() * 25
-        self.comp_tree.setColumnWidth(2, int(title_width))
-        context_width = self.comp_tree.fontMetrics().averageCharWidth() * 35
-        self.comp_tree.setColumnWidth(self.comp_col_context, int(context_width))
-        self.comp_tree.setColumnWidth(self.comp_col_ms_context, int(context_width))
-        self.comp_tree.setColumnWidth(self.comp_col_printed, 55)  # Printed column - narrow fixed
-        # Phase 95 D-12 — Src column setup
-        header.setSectionResizeMode(self.comp_col_src, QHeaderView.ResizeMode.Fixed)
-        self.comp_tree.setColumnWidth(self.comp_col_src, 60)  # narrow fixed, mirrors Printed width
-        header.setStretchLastSection(False)
-
         self.comp_tree.itemDoubleClicked.connect(self.on_comp_item_double_clicked)
         self.comp_tree.itemExpanded.connect(self._on_comp_item_expanded)
         self.comp_tree.itemCollapsed.connect(self._on_comp_item_collapsed)
 
-        # Use CheckBoxHeader for tree
+        # Use CheckBoxHeader for tree.
+        #
+        # ORDER MATTERS, and it used to be wrong. QTreeWidget.setHeader()
+        # DESTROYS the outgoing header and resets the incoming one: every
+        # column width returns to Qt's 100 px default, every resize mode
+        # returns to Interactive, setColumnHidden is cleared, and QTreeView
+        # re-derives sectionsClickable/setSortIndicatorShown from
+        # isSortingEnabled() -- which is False here, so the header became
+        # UNCLICKABLE. Any signal connected to the outgoing header dies with
+        # it. Configuring the tree before this call therefore threw all of it
+        # away (measured 2026-09-03), which is why Printed/Src sat at 100 px
+        # instead of 55/60 and why on_comp_header_clicked never fired. The
+        # header is installed FIRST and everything is configured on the header
+        # the user actually sees.
         self.chk_comp_header = CheckBoxHeader(
             self.comp_tree,
             filter_columns=[self.comp_col_library, self.comp_col_shelfmark, self.comp_col_title, self.comp_col_context, self.comp_col_ms_context, self.comp_col_printed, self.comp_col_src],
@@ -5916,15 +6002,7 @@ class GenizahGUI(QMainWindow):
         self.chk_comp_header.toggled.connect(self.on_comp_header_toggled)
         self.comp_tree.setHeader(self.chk_comp_header)
         self._update_comp_filter_indicators()
-        comp_header = self.comp_tree.header()
-        comp_header.setSectionResizeMode(self.comp_col_context, QHeaderView.ResizeMode.Interactive)
-        comp_header.setSectionResizeMode(self.comp_col_ms_context, QHeaderView.ResizeMode.Stretch)
-        comp_header.setSectionResizeMode(self.comp_col_library, QHeaderView.ResizeMode.Interactive) # Library
-        comp_header.setSectionResizeMode(self.comp_col_shelfmark, QHeaderView.ResizeMode.Interactive) # Shelfmark
-        comp_header.setSectionResizeMode(self.comp_col_sysid, QHeaderView.ResizeMode.ResizeToContents) # System ID
-        comp_header.setSectionResizeMode(self.comp_col_printed, QHeaderView.ResizeMode.Fixed) # Printed
-        comp_header.setSectionResizeMode(self.comp_col_src, QHeaderView.ResizeMode.Fixed)  # Phase 95 D-12 Src
-        comp_header.setStretchLastSection(False)
+        self._configure_comp_tree_header()
 
         rl.addWidget(self.comp_tree)
         
@@ -6029,6 +6107,17 @@ class GenizahGUI(QMainWindow):
 
         self.btn_b_catalog = QPushButton(f"🌐 {tr('View on Ktiv')}"); self.btn_b_catalog.setToolTip(tr("Open in Ktiv Website"))
         self.btn_b_catalog.clicked.connect(self.browse_open_catalog); self.btn_b_catalog.setEnabled(False)
+
+        # Princeton Geniza Project. Unlike Ktiv (which exists for every
+        # non-synthetic sys_id and is merely disabled until one loads), most
+        # manuscripts have no PGP document at all -- so this one is HIDDEN
+        # until _on_browse_pgp_loaded reports a url, following the
+        # btn_b_external_link idiom rather than the Ktiv one.
+        self.btn_b_pgp = QPushButton(f"🌐 {tr('View on PGP')}")
+        self.btn_b_pgp.setToolTip(tr("Open on the Princeton Geniza Project website"))
+        self.btn_b_pgp.setVisible(False)
+        self.btn_b_pgp.clicked.connect(self.browse_open_pgp)
+        self._browse_pgp_url = None
         
         # View All and Save moved to Nav Bar, defined here as class members
         self.btn_b_save = QPushButton(tr("Save")); self.btn_b_save.setToolTip(tr("Save full manuscript to file"))
@@ -6161,6 +6250,7 @@ class GenizahGUI(QMainWindow):
         ext_info_row.addWidget(self.btn_b_catalog_records)
         ext_info_row.addWidget(self.btn_b_measurements)
         ext_info_row.addWidget(self.btn_b_catalog)
+        ext_info_row.addWidget(self.btn_b_pgp)
         ext_info_row.addWidget(self.btn_b_external_link)
         ext_info_row.addStretch()
         ext_info_row.addWidget(self.btn_b_translations)
@@ -6799,6 +6889,7 @@ class GenizahGUI(QMainWindow):
         # Reset stale UI immediately (before async enrichment returns)
         self.btn_b_external_link.setVisible(False)
         self._browse_external_url = None
+        self._update_browse_pgp_button(None)
         # Disconnect old worker's slot (stored reference, not bare method)
         if hasattr(self, 'enrich_browse_worker') and self.enrich_browse_worker is not None:
             if hasattr(self, '_browse_enrich_slot') and self._browse_enrich_slot is not None:
@@ -7178,6 +7269,7 @@ class GenizahGUI(QMainWindow):
         self.btn_b_measurements.setEnabled(False)
         self._browse_measurements_data = None
         self.btn_b_external_link.setVisible(False)
+        self._update_browse_pgp_button(None)
         self._browse_fjms_bib = []
         self._browse_marc_bib = []
         self._browse_catalog_detail = None
@@ -7527,6 +7619,7 @@ class GenizahGUI(QMainWindow):
         # Store PGP data for later use (page changes)
         self._browse_pgp_sources = sources
         self._browse_pgp_doc = pgp_doc
+        self._update_browse_pgp_button(pgp_doc)
 
         # Update extended info panel with PGP metadata combined with enrichment
         pgp_html = self._build_pgp_extended_info_html(pgp_doc, sys_id=self.current_browse_sid) or ''
@@ -7604,6 +7697,11 @@ class GenizahGUI(QMainWindow):
     def _on_browse_pgp_error(self, sys_id, error_message):
         """Handle PGP source fetch error -- silently fall back to existing behavior."""
         logger.debug("PGP source fetch error for %s: %s", sys_id, error_message)
+        # Stale-request guard, matching _on_browse_pgp_loaded: an error
+        # queued by an abandoned worker must not hide the button for the
+        # manuscript the user has since moved to.
+        if sys_id == self.current_browse_sid:
+            self._update_browse_pgp_button(None)
 
     def _build_pgp_extended_info_html(self, pgp_doc, palette=None, sys_id=None):
         """Build HTML for PGP metadata section in extended info panels.
@@ -8556,7 +8654,15 @@ class GenizahGUI(QMainWindow):
         direction = 'rtl' if is_rtl else 'ltr'
         layout_dir = Qt.LayoutDirection.RightToLeft if is_rtl else Qt.LayoutDirection.LeftToRight
         self.browse_text.setLayoutDirection(layout_dir)
+        # SEED-033 picks the source that CONTAINS the searched phrase, and
+        # then this path rendered it with no highlighting at all. Mark it the
+        # same way the page render does (no-op when the phrase isn't here).
+        text = self._browse_mark_search_hits(text)
         browse_html_text = text.replace('\n', '<br>')
+        # Bold asterisks ONLY where they can be search markers -- see
+        # _browse_markers_are_ours. Outside a search they are the page's own.
+        if self._browse_markers_are_ours(text):
+            browse_html_text = markers_to_bold_html(browse_html_text)
         # Phase 999.4: route through gutter helper (source_text = raw `text`)
         apply_line_numbered_text(
             self.browse_text,
@@ -8577,6 +8683,10 @@ class GenizahGUI(QMainWindow):
         # cheaply when there is nothing, and _on_browse_pgp_loaded no-ops on empty.
         if not self.current_browse_sid:
             return
+        # The page we are leaving may have had a PGP url and the one we
+        # are loading may not (or may have a different document), so the
+        # link goes away NOW, not when the worker replies.
+        self._update_browse_pgp_button(None)
         # Disconnect old worker signals first
         if self._browse_pgp_worker is not None:
             try:
@@ -16890,14 +17000,38 @@ class GenizahGUI(QMainWindow):
     # Reach up, precision down, which is why it is an explicit button with the
     # trade-off written beside it and never folded into the search itself.
 
+    def _auto_expand_settings(self):
+        """``(rounds, top_k)`` for auto-expand, readable at any time.
+
+        The two spin boxes live INSIDE the Witnesses dialog and are destroyed
+        with it, so they exist only while it is open. `_comp_auto_rounds_pref`
+        / `_comp_auto_topk_pref` are the durable values the dialog writes back
+        on close, and are the source of truth here.
+
+        Reading the widgets unconditionally had two failure modes, both live:
+        `AttributeError` when the dialog had NEVER been opened — the normal
+        case for "Full Recursive Search" in letter-level mode, which reaches
+        `_run_auto_expand` without going through the dialog at all — and
+        `RuntimeError` ("wrapped C/C++ object ... has been deleted") once it
+        had been opened and closed. Reported by owner UAT 2026-09-03.
+        """
+        rounds = getattr(self, '_comp_auto_rounds_pref', 3)
+        top_k = getattr(self, '_comp_auto_topk_pref', 5)
+        if getattr(self, '_witness_dialog', None) is not None:
+            try:
+                rounds = self.spin_comp_auto_rounds.value()
+                top_k = self.spin_comp_auto_topk.value()
+            except (AttributeError, RuntimeError):
+                pass  # dialog is going away; the prefs above still stand
+        return int(rounds), int(top_k)
+
     def _run_auto_expand(self):
         if self.is_comp_running or getattr(self, '_auto_expand_left', 0):
             return
         if not self._has_comp_results():
             self._witness_notify(tr("Run a letter-level search first."))
             return
-        self._auto_expand_left = int(self.spin_comp_auto_rounds.value())
-        self._auto_expand_topk = int(self.spin_comp_auto_topk.value())
+        self._auto_expand_left, self._auto_expand_topk = self._auto_expand_settings()
         self._auto_expand_round = 0
         self._advance_auto_expand()
 
@@ -19584,6 +19718,7 @@ class GenizahGUI(QMainWindow):
         # 7. Clear printed filter state
         self._printed_sys_ids = set()
         self._manual_transcription_sys_ids = set()  # SEED-022
+        self._pgp_pages_by_sys_id = {}
         self._printed_filter_state = 'all'
         if hasattr(self, 'chk_search_header'):
             self.chk_search_header.set_filter_active(self.COL_PRINTED, False)
@@ -19612,11 +19747,9 @@ class GenizahGUI(QMainWindow):
         if hasattr(self, '_update_search_within_btn'):
             self._update_search_within_btn()
 
-        # 10. Clear manuscript exclusions (shared with composition)
-        self.excluded_sys_ids = set()
-        self.excluded_shelfmarks = set()
-        self.excluded_raw_entries = []
-        self.exclusion_sources = []
+        # 10. Clear this surface's manuscript exclusions ONLY. Before the
+        # 2026-09-03 split this also wiped the Composition tab's list.
+        self._clear_exclusions('search')
 
         # 11. Clear list filter state
         self.list_filter_state = {'active': False, 'mode': 'in', 'lists': 'all'}
@@ -19823,13 +19956,8 @@ class GenizahGUI(QMainWindow):
                 self.results_table.setItem(row_idx, self.COL_SRC, src_item)
             else:
                 self.results_table.setItem(row_idx, self.COL_SRC, QTableWidgetItem(source_val))
-            # PGP badge
-            if sid and sid in self._pgp_transcription_sys_ids:
-                pgp_item = QTableWidgetItem("PGP")
-                pgp_item.setForeground(QColor("#27ae60"))
-                self.results_table.setItem(row_idx, self.COL_PGP, pgp_item)
-            else:
-                self.results_table.setItem(row_idx, self.COL_PGP, QTableWidgetItem(""))
+            # PGP badge (clickable when we know this manuscript's PGP url)
+            self._write_pgp_badge_cell(row_idx, sid)
 
             # Domain column
             domain_names = self._result_domain_map.get(sid, [])
@@ -19950,6 +20078,7 @@ class GenizahGUI(QMainWindow):
             self._result_domain_map = {}
             self._printed_sys_ids = set()
             self._manual_transcription_sys_ids = set()  # SEED-022
+            self._pgp_pages_by_sys_id = {}
             # Phase 55: Zero-result refinement -- don't commit step (D-14a)
             if self._refine_mode:
                 self._zero_result_refine = True
@@ -20886,22 +21015,140 @@ class GenizahGUI(QMainWindow):
                 tr("Showing {} of {} results").format(visible_count, total)
             )
 
-    def _on_pgp_badges_loaded(self, pgp_sys_ids, manual_sys_ids):
+    def _result_page_num(self, res):
+        """The 1-based page a results row is showing, or None.
+
+        Same order the reading dialog uses (result_dialog.load_result_by_index):
+        the parsed header first, then display['img'], which holds the page
+        number -- not a URL -- for both Genizah and LOCAL hits.
+        """
+        if not isinstance(res, dict):
+            return None
+        raw_header = res.get('raw_header') or ''
+        if raw_header and self.meta_mgr:
+            try:
+                parsed = self.meta_mgr.parse_full_id_components(raw_header)
+                return int(parsed['p_num'])
+            except (AttributeError, KeyError, TypeError, ValueError):
+                pass
+        try:
+            return int((res.get('display') or {}).get('img'))
+        except (AttributeError, TypeError, ValueError):
+            return None
+
+    def _pgp_url_for_row(self, row, sys_id):
+        """The PGP url THIS row should open.
+
+        Two kinds of row, two answers, neither of them 'one url per
+        manuscript' -- a manuscript can be linked to several PGP
+        documents (1,845 of 34,171 are; one to 104).
+
+        1. A row that NAMES its document carries its own url and wins. A
+           PGP-tag hit is such a row: its snippet is that document's
+           transcription, and the same sys_id can occupy several rows of
+           one tag search, which no per-manuscript answer can tell apart.
+        2. An ordinary search hit names a manuscript PAGE, so it resolves
+           by page, through the same select_pgp_page_entry rule that
+           get_document_for_fragment applies -- otherwise a verso hit on
+           one of the 144 manuscripts with separate recto and verso
+           documents opens the recto, disagreeing with the reading dialog
+           opened from the very same row (Codex P2, PR #334).
+        """
+        sid_item = self.results_table.item(row, self.COL_SYS_ID)
+        res = sid_item.data(Qt.ItemDataRole.UserRole) if sid_item is not None else None
+        if isinstance(res, dict) and res.get('pgp_url'):
+            return res['pgp_url']
+        entries = (getattr(self, '_pgp_pages_by_sys_id', None) or {}).get(sys_id)
+        chosen = select_pgp_page_entry(entries, self._result_page_num(res))
+        # Link availability is decided AFTER selection: the document this
+        # row's page resolves to may simply have no url, and the honest
+        # answer is then no link -- not a link to some other page's
+        # document (Codex P2, PR #334).
+        return (chosen or {}).get('pgp_url') or None
+
+    def _make_pgp_badge_item(self, sys_id, url=None):
+        """Build the PGP cell for one row, as a link when the url is known.
+
+        Both badge write sites -- the initial row render and the async worker
+        slot below -- go through here, so the link can never end up on only
+        one of the two paths (either can be the last writer for a row,
+        depending on whether the worker beats the first paint).
+
+        Returns ``None`` when the manuscript has no PGP info at all; the
+        caller writes an empty cell for that.
+        """
+        if not sys_id or sys_id not in self._pgp_transcription_sys_ids:
+            return None
+        item = QTableWidgetItem("PGP")
+        item.setForeground(QColor("#27ae60"))
+        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        if url:
+            # Dress ONLY a row we can actually open: underline, the url in
+            # the tooltip, hand cursor on hover (on_table_cell_entered) and
+            # a click that opens it (_on_results_cell_clicked). A PGP row
+            # whose document carries no url keeps the plain badge it has
+            # always had -- an underline we cannot honour would be a lie.
+            font = item.font()
+            font.setUnderline(True)
+            item.setFont(font)
+            item.setData(self._PGP_URL_ROLE, url)
+            item.setToolTip(
+                tr("Open on the Princeton Geniza Project website") + "\n" + str(url)
+            )
+        return item
+
+    def _write_pgp_badge_cell(self, row, sys_id):
+        """Write (or clear) the PGP cell of one results row."""
+        item = self._make_pgp_badge_item(sys_id, self._pgp_url_for_row(row, sys_id))
+        self.results_table.setItem(row, self.COL_PGP, item or QTableWidgetItem(""))
+
+    def _pgp_url_for_cell(self, row):
+        """The PGP url a results row links to, or None when it is not a link."""
+        item = self.results_table.item(row, self.COL_PGP)
+        return item.data(self._PGP_URL_ROLE) if item is not None else None
+
+    def _on_results_cell_clicked(self, row, col):
+        """A single click on a linked PGP badge opens the PGP document page.
+
+        Single click, because double-click is already taken by "open this
+        result" for the whole table (_on_results_double_clicked suppresses
+        the dialog on a linked PGP cell so one gesture opens one thing).
+        """
+        if col != self.COL_PGP:
+            return
+        url = self._pgp_url_for_cell(row)
+        if url:
+            QDesktopServices.openUrl(QUrl(str(url)))
+
+    def _on_results_double_clicked(self, index):
+        """Double-click opens the result -- except on a linked PGP badge.
+
+        The first click of the double-click already opened the PGP page, so
+        opening the reading dialog as well would give two windows for one
+        gesture. Every other column behaves exactly as before.
+        """
+        if (index is not None and index.isValid()
+                and index.column() == self.COL_PGP
+                and self._pgp_url_for_cell(index.row())):
+            return
+        self.show_full_text()
+
+    def _on_pgp_badges_loaded(self, pgp_sys_ids, manual_sys_ids, pgp_pages=None):
         """Handle PGP badge worker results - update the PGP + scholarly-transcription
         columns for all rows (SEED-022). pgp_sys_ids = PGP link presence (green "PGP");
-        manual_sys_ids = readable transcription/translation, PGP text ∪ FGP (amber ✓)."""
+        manual_sys_ids = readable transcription/translation, PGP text ∪ FGP (amber ✓);
+        pgp_pages = {sys_id: [{page_info, pgp_url}, ...]} for the badges that
+        can be clicked, ordered by pgpid. Keyword-defaulted so a caller still
+        emitting the old two-value shape renders plain (unlinked) badges
+        instead of raising."""
         self._pgp_transcription_sys_ids = pgp_sys_ids
         self._manual_transcription_sys_ids = manual_sys_ids
+        self._pgp_pages_by_sys_id = pgp_pages or {}
         for row in range(self.results_table.rowCount()):
             item = self.results_table.item(row, self.COL_SYS_ID)
             if item:
                 sys_id = item.text().strip()
-                if sys_id in pgp_sys_ids:
-                    pgp_item = QTableWidgetItem("PGP")
-                    pgp_item.setForeground(QColor("#27ae60"))
-                    self.results_table.setItem(row, self.COL_PGP, pgp_item)
-                else:
-                    self.results_table.setItem(row, self.COL_PGP, QTableWidgetItem(""))
+                self._write_pgp_badge_cell(row, sys_id)
                 if sys_id in manual_sys_ids:
                     tr_item = QTableWidgetItem("✓")
                     tr_item.setForeground(QColor("#b45309"))
@@ -21098,6 +21345,11 @@ class GenizahGUI(QMainWindow):
                 },
                 'snippet': snippet,
                 'raw_header': '',
+                # The PGP document THIS row came from. The snippet above
+                # is its transcription/description, so the badge must
+                # link to it and not to whichever document the
+                # per-manuscript map would pick.
+                'pgpid': r.get('pgpid'),
             })
 
         # Mark all as PGP
@@ -21113,6 +21365,25 @@ class GenizahGUI(QMainWindow):
             )
         except Exception:
             self._manual_transcription_sys_ids = set()
+        # Same reason for the PGP urls: no badge worker runs on this path,
+        # so without this the tag results would render badges that are
+        # not links. Resolved BY PGPID: each row is one specific tagged
+        # document (see the 'pgpid' note above), which is a stronger
+        # answer than resolving by page and needs no page at all. The
+        # page map is left empty so there is exactly one source of truth
+        # for a tag row's link.
+        self._pgp_pages_by_sys_id = {}
+        try:
+            from shared.document_service import get_pgp_urls_for_pgpids
+            _tag_urls = get_pgp_urls_for_pgpids(
+                sorted({r['pgpid'] for r in formatted if r.get('pgpid')})
+            )
+            for _row in formatted:
+                _u = _tag_urls.get(_row.get('pgpid'))
+                if _u:
+                    _row['pgp_url'] = _u
+        except Exception:
+            pass
 
         self.chk_search_header.blockSignals(True)
         self.chk_search_header.setChecked(False)
@@ -21509,6 +21780,14 @@ class GenizahGUI(QMainWindow):
             self._update_search_row_list_indicator(row)
 
     def on_table_cell_entered(self, row, col):
+        # Hand cursor over a PGP badge that is a real link. This runs BEFORE
+        # the same-row early return below, because the pointer moves between
+        # the columns of one row and the cursor has to follow.
+        if col == self.COL_PGP and self._pgp_url_for_cell(row):
+            self.results_table.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+        else:
+            self.results_table.viewport().unsetCursor()
+
         if row == self.hovered_row:
             return
 
@@ -21593,6 +21872,16 @@ class GenizahGUI(QMainWindow):
             index = self.results_table.indexAt(pos)
             if index.isValid():
                 col = index.column()
+                # This branch answers EVERY tooltip request for the results
+                # table (it returns True either way), so a per-item tooltip
+                # is never shown by Qt itself -- the PGP link has to be
+                # served here or it would be invisible.
+                if col == self.COL_PGP:
+                    _pgp_cell = self.results_table.item(index.row(), col)
+                    _pgp_tip = _pgp_cell.toolTip() if _pgp_cell is not None else ''
+                    if _pgp_tip:
+                        QToolTip.showText(event.globalPos(), _pgp_tip)
+                        return True
                 # Skip checkbox and actions columns
                 if col not in (self.COL_CHECKBOX, self.COL_ACTIONS, self.COL_IMG):
                     item = self.results_table.item(index.row(), col)
@@ -22466,6 +22755,11 @@ class GenizahGUI(QMainWindow):
         import html as _html_mod
         if not self.searcher:
             return
+        # A LOCAL file has no PGP document. Unlike the Genizah-only
+        # buttons below (which this path merely DISABLES), the PGP link
+        # is hidden outright -- a disabled link to the previously viewed
+        # manuscript would still be visible and still be wrong.
+        self._update_browse_pgp_button(None)
         page_data = self.searcher.get_local_browse_page(
             sys_id, p_num=p_num, next_prev=0
         )
@@ -22714,11 +23008,11 @@ class GenizahGUI(QMainWindow):
         # ------------------------------------------------------
 
         if sys_id:
-            entries = list(self.excluded_raw_entries)
+            entries = list(self._excl_get('composition', 'raw'))
             # Add only if not already present
             if sys_id not in entries:
                 entries.append(sys_id)
-                self.set_excluded_entries("\n".join(entries))
+                self.set_excluded_entries("\n".join(entries), 'composition')
                 
         self._set_active_tab(self.composition_tab)
         self.comp_text_area.setFocus()
@@ -24373,34 +24667,110 @@ class GenizahGUI(QMainWindow):
         if path:
             with open(path, 'r', encoding='utf-8') as f: self.comp_text_area.setPlainText(f.read())
 
-    def open_exclude_dialog(self):
+    #: Attribute names holding each surface's Exclude-Manuscripts list.
+    #: 'search' keeps the historical names (saved-session schema, existing
+    #: readers); 'composition' is the parallel set added 2026-09-03 when the
+    #: two surfaces stopped sharing one list.
+    _EXCLUSION_ATTRS = {
+        'search': {
+            'sources': 'exclusion_sources',
+            'sys_ids': 'excluded_sys_ids',
+            'shelfmarks': 'excluded_shelfmarks',
+            'raw': 'excluded_raw_entries',
+        },
+        'composition': {
+            'sources': 'comp_exclusion_sources',
+            'sys_ids': 'comp_excluded_sys_ids',
+            'shelfmarks': 'comp_excluded_shelfmarks',
+            'raw': 'comp_excluded_raw_entries',
+        },
+    }
+
+    #: Which status label each surface owns. Before the split both were
+    #: written with the same text, which is what hid the sharing.
+    _EXCLUSION_LABELS = {
+        'search': 'lbl_main_exclude_status',
+        'composition': 'lbl_exclude_status',
+    }
+
+    def _excl_get(self, surface, field):
+        """One field of one surface's exclusion list."""
+        return getattr(self, self._EXCLUSION_ATTRS[surface][field])
+
+    def _excl_set(self, surface, field, value):
+        setattr(self, self._EXCLUSION_ATTRS[surface][field], value)
+
+    def _clear_exclusions(self, surface):
+        """Empty ONE surface's exclusion list, leaving the other alone."""
+        self._excl_set(surface, 'sources', [])
+        self._excl_set(surface, 'sys_ids', set())
+        self._excl_set(surface, 'shelfmarks', set())
+        self._excl_set(surface, 'raw', [])
+        self._update_exclusion_display(surface)
+
+    @staticmethod
+    def _comp_snapshot_has_own_exclusions(comp):
+        """Does this composition snapshot carry its OWN exclusion list?
+
+        KEY PRESENCE, never truthiness (Codex P1, PR #334). Every snapshot
+        written since the 2026-09-03 per-surface split writes both keys
+        unconditionally, so a composition list the user deliberately left
+        EMPTY serialises as []. Testing the values would read that as a
+        pre-split session and copy the Search list into Composition --
+        silently re-coupling the two surfaces across a restart, which is
+        exactly what the split was for. Pre-split snapshots stored only
+        'excluded_sys_ids' and 'excluded_shelfmarks' under
+        composition_search, so the two new keys are the discriminator.
+        """
+        return 'exclusion_sources' in comp or 'excluded_raw_entries' in comp
+
+    def open_exclude_dialog(self, surface='search'):
+        """Edit ONE surface's exclusion list.
+
+        `surface` is bound at the two connect sites with a lambda, because
+        QPushButton.clicked delivers a bool that would otherwise land here
+        as the surface name.
+        """
         self._ensure_shelf_map()
         dlg = ExcludeDialog(
             self,
-            existing_entries=self.excluded_raw_entries,
+            existing_entries=self._excl_get(surface, 'raw'),
             lists_mgr=getattr(self, 'lists_mgr', None),
             shelf_map=getattr(self, '_shelf_to_sys', None),
-            exclusion_sources=self.exclusion_sources,
+            exclusion_sources=self._excl_get(surface, 'sources'),
         )
         if dlg.exec():
             new_sources = dlg.get_exclusion_sources()
             # Replace all sources with what the dialog editor contains (may be empty = clear all)
-            self.exclusion_sources = new_sources
-            self.excluded_sys_ids = compute_excluded_ids(self.exclusion_sources)
+            self._excl_set(surface, 'sources', new_sources)
+            sys_ids = compute_excluded_ids(new_sources)
+            self._excl_set(surface, 'sys_ids', sys_ids)
             all_unresolved = []
-            for s in self.exclusion_sources:
+            for s in new_sources:
                 all_unresolved.extend(s.unresolved)
-            self.excluded_shelfmarks = {normalize_shelfmark(u) for u in all_unresolved if u}
+            self._excl_set(
+                surface, 'shelfmarks',
+                {normalize_shelfmark(u) for u in all_unresolved if u})
             # Also update legacy raw entries for backward compat
-            self.excluded_raw_entries = sorted(self.excluded_sys_ids) if self.excluded_sys_ids else []
-            self._update_exclusion_display()
-            # Re-render results with exclusions applied
-            self._rerender_with_exclusions()
+            self._excl_set(surface, 'raw',
+                           sorted(sys_ids) if sys_ids else [])
+            self._update_exclusion_display(surface)
+            # Re-render results with exclusions applied. Only the Search
+            # tab has a live re-render; the composition tree re-applies its
+            # exclusions on the next display_comp_results, as it always has.
+            if surface == 'search':
+                self._rerender_with_exclusions()
             self._schedule_session_save()
 
-    def set_excluded_entries(self, entries_text: str):
+    def set_excluded_entries(self, entries_text: str, surface='composition'):
+        """Replace one surface's exclusion list from newline-separated text.
+
+        Defaults to 'composition': the only caller is the results-table
+        "exclude this and work on it in Composition" action, which switches
+        to the composition tab immediately afterwards.
+        """
         entries = [e.strip() for e in entries_text.splitlines() if e.strip()]
-        self.excluded_raw_entries = entries
+        self._excl_set(surface, 'raw', entries)
 
         sys_ids = set()
         shelves = set()
@@ -24414,9 +24784,11 @@ class GenizahGUI(QMainWindow):
                 if norm:
                     shelves.add(norm)
 
-        self.excluded_sys_ids = sys_ids
-        self.excluded_shelfmarks = shelves
-        self.lbl_exclude_status.setText(tr("Excluded: {}").format(len(entries)))
+        self._excl_set(surface, 'sys_ids', sys_ids)
+        self._excl_set(surface, 'shelfmarks', shelves)
+        _lbl = getattr(self, self._EXCLUSION_LABELS[surface], None)
+        if _lbl is not None:
+            _lbl.setText(tr("Excluded: {}").format(len(entries)))
         self._schedule_session_save()
 
     def _normalize_shelfmark(self, shelfmark: str) -> str:
@@ -24451,30 +24823,48 @@ class GenizahGUI(QMainWindow):
                 f"{visible} / {total} {tr('Results')} ({hidden_count} {tr('excluded')})"
             )
 
-    def _update_exclusion_display(self):
-        """Update exclusion status labels with per-source breakdown (D-07)."""
-        if not self.exclusion_sources:
-            self.lbl_exclude_status.setText("")
-            if hasattr(self, 'lbl_main_exclude_status'):
-                self.lbl_main_exclude_status.setText("")
+    def _update_exclusion_display(self, surface='search'):
+        """Update ONE surface's exclusion status label (D-07 breakdown).
+
+        This used to write the SAME text into both labels, which is what made
+        the shared list invisible: excluding on the Search tab silently
+        relabelled the Composition tab too.
+        """
+        lbl = getattr(self, self._EXCLUSION_LABELS[surface], None)
+        if lbl is None:
             return
-        total = sum(len(s.sys_ids) for s in self.exclusion_sources)
-        if len(self.exclusion_sources) == 1:
-            src = self.exclusion_sources[0]
+        sources = self._excl_get(surface, 'sources')
+        if not sources:
+            # No SOURCES is not the same as no exclusions:
+            # set_excluded_entries -- the results-table "exclude this and
+            # work on it in Composition" action -- fills raw/sys_ids and
+            # builds no source at all. Restoring such a session called this
+            # and blanked the label while the manuscripts stayed excluded,
+            # so the Composition tab filtered results while reporting none
+            # (Codex P2, PR #334). The regular-search restore carried this
+            # fallback inline; it belongs here, where both surfaces and
+            # every caller get it.
+            raw = self._excl_get(surface, 'raw')
+            lbl.setText(tr("Excluded: {}").format(len(raw)) if raw else "")
+            return
+        total = sum(len(s.sys_ids) for s in sources)
+        if len(sources) == 1:
+            src = sources[0]
             status_text = tr("Excluded: {}").format(f"{total} ({src.label})")
         else:
-            parts = [f"{len(s.sys_ids)} {s.label}" for s in self.exclusion_sources]
+            parts = [f"{len(s.sys_ids)} {s.label}" for s in sources]
             status_text = tr("Excluded: {}").format(f"{total} ({', '.join(parts)})")
-        self.lbl_exclude_status.setText(status_text)
-        if hasattr(self, 'lbl_main_exclude_status'):
-            self.lbl_main_exclude_status.setText(status_text)
+        lbl.setText(status_text)
 
-    def _remove_exclusion_source(self, source_id: str):
+    def _remove_exclusion_source(self, source_id: str, surface='search'):
         """Remove a single exclusion source by source_id (D-06 per-source clear)."""
-        self.exclusion_sources = [s for s in self.exclusion_sources if s.source_id != source_id]
-        self.excluded_sys_ids = compute_excluded_ids(self.exclusion_sources)
-        self._update_exclusion_display()
-        self._rerender_with_exclusions()
+        sources = [s for s in self._excl_get(surface, 'sources')
+                   if s.source_id != source_id]
+        self._excl_set(surface, 'sources', sources)
+        self._excl_set(surface, 'sys_ids', compute_excluded_ids(sources))
+        self._update_exclusion_display(surface)
+        if surface == 'search':
+            self._rerender_with_exclusions()
         self._schedule_session_save()
 
     def _ensure_shelf_map(self):
@@ -24613,20 +25003,23 @@ class GenizahGUI(QMainWindow):
             pass
 
     def _item_matches_exclusion(self, item):
+        # COMPOSITION surface only -- this predicate is reached solely from
+        # _apply_manual_exclusions, which the composition render path calls.
+        _excluded_ids = self._excl_get('composition', 'sys_ids')
         # For Part items, check all folios in the Part
         item_type = item.get('type', '')
         if item_type == 'part':
             # Check sys_id field directly
             direct_sid = item.get('sys_id')
-            if direct_sid and direct_sid in self.excluded_sys_ids:
+            if direct_sid and direct_sid in _excluded_ids:
                 return True
             # Check all folios in the Part
             for folio_sid in item.get('folios', []):
-                if folio_sid in self.excluded_sys_ids:
+                if folio_sid in _excluded_ids:
                     return True
 
         sys_id, _ = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
-        if sys_id and sys_id in self.excluded_sys_ids:
+        if sys_id and sys_id in _excluded_ids:
             return True
 
         if sys_id and sys_id not in self.meta_mgr.nli_cache:
@@ -24634,12 +25027,13 @@ class GenizahGUI(QMainWindow):
 
         _, _, shelf, _ = self._get_meta_for_header(item.get('raw_header', ''))
         norm_shelf = self._normalize_shelfmark(shelf)
-        if norm_shelf and norm_shelf in self.excluded_shelfmarks:
+        if norm_shelf and norm_shelf in self._excl_get('composition', 'shelfmarks'):
             return True
         return False
 
     def _apply_manual_exclusions(self, main, appx):
-        if not (self.excluded_sys_ids or self.excluded_shelfmarks):
+        if not (self._excl_get('composition', 'sys_ids')
+                or self._excl_get('composition', 'shelfmarks')):
             return main, appx, []
 
         known = []
@@ -24844,12 +25238,9 @@ class GenizahGUI(QMainWindow):
         self._witness_notify('')
         self._refresh_witness_panel()
 
-        # 7. Clear manuscript exclusions (shared with search)
-        self.excluded_raw_entries = []
-        self.excluded_sys_ids = set()
-        self.excluded_shelfmarks = set()
-        self.exclusion_sources = []
-        self.lbl_exclude_status.setText("")
+        # 7. Clear this surface's manuscript exclusions ONLY. Before the
+        # 2026-09-03 split this also wiped the Search tab's list.
+        self._clear_exclusions('composition')
 
         # 8. Clear composition domain exclusions
         self._comp_domain_exclusions = set()
@@ -25008,7 +25399,7 @@ class GenizahGUI(QMainWindow):
         if mode == 'variants' and hasattr(self, 'comp_variant_slider') and self.var_mgr:
             self.var_mgr.set_variant_level(self.comp_variant_slider.value())
 
-        excluded_ids = self.excluded_raw_entries
+        excluded_ids = self._excl_get('composition', 'raw')
 
         # Get boundary search parameters from UI
         boundary_mode = self.boundary_mode_combo.currentData() if hasattr(self, 'boundary_mode_combo') else 'full'
@@ -25116,8 +25507,9 @@ class GenizahGUI(QMainWindow):
             # Robustness: Pass resolved System IDs if available, to catch items excluded by shelfmark
             # where the user didn't explicitly type the ID.
             final_excluded_ids = excluded_ids
-            if self.excluded_sys_ids:
-                final_excluded_ids = list(self.excluded_sys_ids)
+            if self._excl_get('composition', 'sys_ids'):
+                final_excluded_ids = list(
+                    self._excl_get('composition', 'sys_ids'))
 
             deep = self.chk_lab_deep_comp.isChecked()
             limit = self.lab_engine.settings.lab_scan_limit
@@ -25691,12 +26083,71 @@ class GenizahGUI(QMainWindow):
         all_items.extend(known or [])
         return all_items
 
+    #: Composition columns that re-sort the tree when their header is clicked,
+    #: mapped to the COMP_SORT_MODES entry each one selects. Keyed by the
+    #: comp_col_* attributes, NOT by literal indices: this map used to read
+    #: {0: score, 1: shelfmark, 2: title, 3: system_id}, which was the column
+    #: order from BEFORE Library was inserted at index 1, so every entry but
+    #: Score named the column to its left. Library is absent on purpose --
+    #: COMP_SORT_MODES has no library mode.
+    def _comp_sort_mode_for_column(self, section):
+        return {
+            0: "score",
+            self.comp_col_shelfmark: "shelfmark",
+            self.comp_col_title: "title",
+            self.comp_col_sysid: "system_id",
+            self.comp_col_witnesses: "witnesses",
+        }.get(section)
+
+    def _configure_comp_tree_header(self):
+        """Configure the LIVE composition header.
+
+        Must run AFTER ``comp_tree.setHeader(...)`` -- see the comment at the
+        construction site. Everything this sets was previously applied to the
+        header that ``setHeader`` then destroyed.
+        """
+        header = self.comp_tree.header()
+        header.setSectionsClickable(True)
+        header.sectionClicked.connect(self.on_comp_header_clicked)
+        header.sectionResized.connect(self._refresh_comp_tree_tooltips)
+        header.setSortIndicatorShown(True)
+        header.setSortIndicator(0, Qt.SortOrder.DescendingOrder)
+        header.setStretchLastSection(False)
+
+        # EVERY column is user-resizable (owner request, 2026-09-03). System ID
+        # was ResizeToContents, MS Context was Stretch and Printed/Src were
+        # Fixed, none of which can be dragged. The widths below carry the
+        # intent those modes encoded -- System ID wide enough for a sys_id, MS
+        # Context wide enough to be the reading column, Printed/Src narrow --
+        # as DEFAULTS the reader can now override.
+        for col in range(self.comp_tree.columnCount()):
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+
+        char_w = self.comp_tree.fontMetrics().averageCharWidth()
+        for col, width in (
+            (0, 160),                                   # Score
+            (self.comp_col_library, char_w * 14),
+            (self.comp_col_shelfmark, char_w * 18),
+            (self.comp_col_title, char_w * 25),
+            (self.comp_col_sysid, char_w * 16),
+            (self.comp_col_context, char_w * 35),
+            (self.comp_col_ms_context, char_w * 45),    # was the Stretch column
+            (self.comp_col_printed, 55),
+            (self.comp_col_src, 60),
+            (self.comp_col_witnesses, char_w * 10),
+        ):
+            self.comp_tree.setColumnWidth(col, int(width))
+
+        # Starting state only; display_comp_results re-decides this on EVERY
+        # render, because there is no composition header visibility
+        # persistence and a column shown for a fused run must not survive onto
+        # the next single-witness or chunk result.
+        self.comp_tree.setColumnHidden(self.comp_col_witnesses, True)
+
     def on_comp_header_clicked(self, section):
-        if section not in (0, 1, 2, 3, self.comp_col_witnesses):
+        new_mode = self._comp_sort_mode_for_column(section)
+        if new_mode is None:
             return
-        mode_map = {0: "score", 1: "shelfmark", 2: "title", 3: "system_id",
-                    self.comp_col_witnesses: "witnesses"}
-        new_mode = mode_map.get(section, "score")
         if new_mode == self.comp_sort_mode:
             self.comp_sort_reverse = not self.comp_sort_reverse
         else:
@@ -26637,23 +27088,51 @@ class GenizahGUI(QMainWindow):
     # ========== Batched Tree Loading for Performance ==========
     def _start_batched_tree_load(self, parent_node, items, batch_size=50):
         """Start loading items into tree in batches to prevent UI freeze."""
+        # Every chain carries the generation it was started for.
+        # `comp_tree.clear()` -- a new search, a re-sort, a filter re-render --
+        # DELETES parent_node's C++ object while this Python wrapper survives,
+        # so a batch scheduled before the clear called
+        # QTreeWidgetItem(<deleted parent>) and raised RuntimeError, once per
+        # chain still in flight (owner UAT 2026-09-03, four tracebacks from
+        # four overlapping renders). A stale chain must also NOT run the
+        # cleanup below, or it would re-enable painting and clear
+        # comp_tree_updating in the middle of the chain that superseded it.
+        self._batch_generation = getattr(self, '_batch_generation', 0) + 1
         self._batch_queue = list(items)  # Copy to avoid mutation issues
         self._batch_parent = parent_node
         self._batch_size = batch_size
         self._batch_index = 0
         # Start first batch immediately
-        self._process_tree_batch()
+        self._process_tree_batch(self._batch_generation)
 
-    def _process_tree_batch(self):
+    def _batch_parent_is_alive(self):
+        """False once Qt has deleted the parent item under us."""
+        parent = getattr(self, '_batch_parent', None)
+        if parent is None:
+            return False
+        try:
+            return parent.treeWidget() is not None
+        except RuntimeError:
+            return False  # wrapped C/C++ object already deleted
+
+    def _finish_batched_tree_load(self):
+        """Release the queue and hand the tree back to the user."""
+        self._batch_queue = None
+        self._batch_parent = None
+        self.comp_tree.setUpdatesEnabled(True)
+        self.comp_tree_updating = False  # Re-enable itemChanged signal
+        self._update_comp_filter_indicators()
+        self._apply_comp_tree_filters()
+
+    def _process_tree_batch(self, generation=None):
         """Process one batch of items and schedule next batch."""
-        if not hasattr(self, '_batch_queue') or self._batch_index >= len(self._batch_queue):
-            # Done loading - cleanup
-            self._batch_queue = None
-            self._batch_parent = None
-            self.comp_tree.setUpdatesEnabled(True)
-            self.comp_tree_updating = False  # Re-enable itemChanged signal
-            self._update_comp_filter_indicators()
-            self._apply_comp_tree_filters()
+        if (generation is not None
+                and generation != getattr(self, '_batch_generation', None)):
+            return  # superseded; the newer chain owns the tree now
+        if (not getattr(self, '_batch_queue', None)
+                or self._batch_index >= len(self._batch_queue)
+                or not self._batch_parent_is_alive()):
+            self._finish_batched_tree_load()
             return
 
         # Process batch
@@ -26668,7 +27147,18 @@ class GenizahGUI(QMainWindow):
 
         # Schedule next batch with small delay to let UI breathe
         if self._batch_index < len(self._batch_queue):
-            QTimer.singleShot(0, self._process_tree_batch)
+            _gen = self._batch_generation
+            QTimer.singleShot(0, lambda: self._process_tree_batch(_gen))
+        else:
+            # The LAST batch used to schedule nothing, so the completion
+            # branch at the top of this method was never re-entered and its
+            # cleanup never ran -- despite the caller's comment promising
+            # "this will call filters when done". Live consequences, both
+            # fixed by finishing here: comp_tree_updating stayed True, so
+            # on_comp_tree_item_changed returned immediately and ticking a
+            # check box in the composition results did nothing; and the
+            # column filters were never re-applied to the new rows.
+            self._finish_batched_tree_load()
 
     def _trigger_lazy_metadata_fetch(self):
         """Starts background fetching for items that are currently displayed but missing data."""
@@ -27648,16 +28138,27 @@ class GenizahGUI(QMainWindow):
         # page when switching back from an FGP transcription).
         self.browse_original_page_text = pd['text']
         page_text = self._apply_browse_highlights(page_text, pd.get('uid'))
-        if self.browse_highlight_pattern:
-            try:
-                flags = re.IGNORECASE
-                if '\\n' in self.browse_highlight_pattern or self.browse_highlight_pattern.startswith('^') or '^\\' in self.browse_highlight_pattern:
-                    flags |= re.MULTILINE
-                regex = re.compile(self.browse_highlight_pattern, flags)
-                page_text = regex.sub(r'*\g<0>*', page_text)
-            except Exception:
-                pass  # UI element update optional; continue rendering
+        # Was an inline copy of mark_pattern_hits -- including its pre-fix
+        # form, which inserted markers WITHOUT neutralizing the page's own
+        # asterisks. One implementation now, so the round-4 fix reaches
+        # this path too.
+        page_text = mark_pattern_hits(page_text, self.browse_highlight_pattern)
+        # 260903: remember the `*…*`-MARKED page text (the plain
+        # browse_original_page_text above is captured before marking and is
+        # still what the FGP/PGP coverage checks need). Without this, switching
+        # the version selector back to V0.8 re-rendered an unmarked snapshot and
+        # lost the search hit — the Browse-side twin of the ResultDialog
+        # sub-issue B fix (_rd_original_marked_text, 2026-09-02).
+        self.browse_original_marked_text = page_text
         browse_html_text = page_text.replace('\n', '<br>')
+        # 260903: `*…*` → red bold. The browse path had NO marker conversion at
+        # all, so a search hit reached the reader as literal asterisks
+        # (`וכן *אמר / רבי* יהודה`). Must run AFTER the newline→<br> above so a
+        # hit spanning a line break still pairs.
+        # Bold asterisks ONLY where they can be search markers -- see
+        # _browse_markers_are_ours. Outside a search they are the page's own.
+        if self._browse_markers_are_ours(page_text):
+            browse_html_text = markers_to_bold_html(browse_html_text)
         # Phase 999.4: route through gutter helper. source_text is page_text
         # (with potential `*` highlight markers — count is unaffected since
         # markers don't introduce or remove `\n`).
@@ -27967,6 +28468,23 @@ class GenizahGUI(QMainWindow):
         # Phase 85 D-06: synthetic sys_ids skip the NLI catalog page (no Alma record)
         if self.current_browse_sid and not is_synthetic_sys_id(self.current_browse_sid):
             QDesktopServices.openUrl(QUrl(f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{self.current_browse_sid}"))
+
+    def browse_open_pgp(self):
+        """Open the current manuscript's Princeton Geniza Project page."""
+        if getattr(self, '_browse_pgp_url', None):
+            QDesktopServices.openUrl(QUrl(self._browse_pgp_url))
+
+    def _update_browse_pgp_button(self, pgp_doc):
+        """Show the browse PGP button only while a PGP url is actually known.
+
+        pgp_url is nullable TEXT in the sidecar, so 'this manuscript is in
+        PGP' does not guarantee 'this manuscript has a PGP url' -- the
+        button follows the url, not the document.
+        """
+        url = (pgp_doc or {}).get('pgp_url') or None
+        self._browse_pgp_url = url
+        if hasattr(self, 'btn_b_pgp'):
+            self.btn_b_pgp.setVisible(bool(url))
 
     def _browse_open_external_link(self):
         if hasattr(self, '_browse_external_url') and self._browse_external_url:
@@ -29020,8 +29538,14 @@ class GenizahGUI(QMainWindow):
                     'printed_filter': getattr(self, '_comp_printed_filter_state', 'all'),
                     'local_filter_composition': getattr(self, '_local_filter_state_composition', 'all'),
                     'local_filter_parallels': getattr(self, '_local_filter_state_parallels', 'all'),
-                    'excluded_sys_ids': sorted(getattr(self, 'excluded_sys_ids', set())),
-                    'excluded_shelfmarks': sorted(getattr(self, 'excluded_shelfmarks', set())),
+                    # The COMPOSITION tab's own exclusion list since the
+                    # 2026-09-03 per-surface split. These keys previously
+                    # held the shared list and were written but never read
+                    # back -- the composition restore block below now does.
+                    'excluded_sys_ids': sorted(getattr(self, 'comp_excluded_sys_ids', set())),
+                    'excluded_shelfmarks': sorted(getattr(self, 'comp_excluded_shelfmarks', set())),
+                    'excluded_raw_entries': getattr(self, 'comp_excluded_raw_entries', []),
+                    'exclusion_sources': serialize_sources(getattr(self, 'comp_exclusion_sources', [])),
                     'sort_mode': getattr(self, 'comp_sort_mode', 'score'),
                     'sort_reverse': getattr(self, 'comp_sort_reverse', True),
                     'flat_mode': self.chk_comp_flat.isChecked() if hasattr(self, 'chk_comp_flat') else False,
@@ -29219,13 +29743,11 @@ class GenizahGUI(QMainWindow):
             self.filter_sources = reg.get('filter_sources', {})
             self.filter_enabled_sources = set(reg.get('filter_enabled_sources', []))
 
-            # Update exclusion status label
-            if self.exclusion_sources:
-                self._update_exclusion_display()
-            elif self.excluded_raw_entries:
-                self.lbl_exclude_status.setText(
-                    tr("Excluded: {}").format(len(self.excluded_raw_entries))
-                )
+            # Update exclusion status label (SEARCH surface -- the
+            # composition block below restores and labels its own). The
+            # raw-entry fallback now lives inside _update_exclusion_display,
+            # so both surfaces get it.
+            self._update_exclusion_display('search')
 
             # Restore regular search results
             if reg.get('results'):
@@ -29276,6 +29798,36 @@ class GenizahGUI(QMainWindow):
             # `absent_method=None`: a session with no stored method has no
             # preference to honour, so the letter-level default stands.
             self._restore_comp_passage_preferences(comp, absent_method=None)
+
+            # Exclude Manuscripts, composition surface. Sessions written
+            # before the 2026-09-03 split stored ONE shared list; those
+            # carry no 'exclusion_sources' under composition_search, so we
+            # fall back to the regular-search block's list. Migrating it
+            # into BOTH surfaces reproduces the old behaviour exactly on
+            # the first load after upgrading -- the two only diverge once
+            # the user edits one of them.
+            #
+            # _comp_snapshot_has_own_exclusions tests KEY PRESENCE, not
+            # truthiness -- see its docstring (Codex P1, PR #334).
+            if self._comp_snapshot_has_own_exclusions(comp):
+                self.comp_exclusion_sources = deserialize_sources(
+                    comp.get('exclusion_sources') or [])
+                self.comp_excluded_raw_entries = comp.get('excluded_raw_entries', [])
+                self.comp_excluded_shelfmarks = set(comp.get('excluded_shelfmarks', []))
+                self.comp_excluded_sys_ids = (
+                    compute_excluded_ids(self.comp_exclusion_sources)
+                    if self.comp_exclusion_sources
+                    else set(comp.get('excluded_sys_ids', [])))
+            else:
+                self.comp_exclusion_sources = list(
+                    getattr(self, 'exclusion_sources', []) or [])
+                self.comp_excluded_sys_ids = set(
+                    getattr(self, 'excluded_sys_ids', set()) or set())
+                self.comp_excluded_shelfmarks = set(
+                    getattr(self, 'excluded_shelfmarks', set()) or set())
+                self.comp_excluded_raw_entries = list(
+                    getattr(self, 'excluded_raw_entries', []) or [])
+            self._update_exclusion_display('composition')
 
             self._comp_domain_exclusions = set(comp.get('domain_exclusions', []))
             self._comp_printed_filter_state = comp.get('printed_filter', 'all')
@@ -30003,6 +30555,13 @@ class GenizahGUI(QMainWindow):
                     self.browse_shelf_input.setText(shelf)
                 self._set_last_browse_field("sys")
                 self.browse_load_page()
+                # Moving within a Part changes the sys_id, so the PGP
+                # state belongs to the folio we just left. This is the
+                # same refresh the page-turn and folio-combo paths do;
+                # it also un-freezes the extended-info panel and the
+                # version combo, which were stale here for the same
+                # reason.
+                self._browse_refresh_pgp_for_page()
                 # Update images to show current folio's pages
                 self._update_part_image_for_folio(new_idx)
                 return

@@ -119,6 +119,11 @@ class _RD:
     _rd_load_versions = RD._rd_load_versions
     _rd_load_version_content = RD._rd_load_version_content
     _rd_display_text = RD._rd_display_text
+    # 260903: _rd_display_text now re-derives the *...* markers from the
+    # result's own highlight_pattern, so the stub must carry the method.
+    # These stubs set no `self.data`, hence no pattern, hence the
+    # re-derivation is inert here and every expectation below still holds.
+    _mark_search_hits = RD._mark_search_hits
     _htmlify = RD._htmlify
 
     def __init__(self, *, server_available=False):
