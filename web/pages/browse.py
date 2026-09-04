@@ -21,6 +21,9 @@ from urllib.parse import quote
 from shared.fgp_service import (
     source_provider, source_relation_kind,
 )
+from shared.transcription_credits import resolve_transcription_credit
+from shared.export_utils import GENIZAHSEARCH_URL
+from web.citation_chip import browse_page_citation, retrieved_today, set_page_citation
 
 logger = logging.getLogger(__name__)
 
@@ -523,6 +526,48 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
     # Track metadata panel visibility
     show_metadata = {'value': False}
+
+    # "Print all manuscript pages" is a two-step: switch to Full Manuscript
+    # View, then print. `toggle_view_all` REBUILDS the content tree, which
+    # destroys the menu item that was clicked -- so the print cannot be fired
+    # from the click handler after awaiting it. This flag carries the intent
+    # across the rebuild; the Full Manuscript View branch fires the print once
+    # it has actually rendered, and clears the flag so a later manual switch to
+    # that view does not print by itself.
+    print_pending = {'value': False}
+
+    def _update_citation_chip(version_info=None):
+        """Give the layout's "How to cite" chip this page's own citation.
+
+        The chip lives in `create_layout`, which runs BEFORE this page body, so
+        it already exists by the time we call this. It defaults to the SITE
+        citation (what most readers want, per the owner); this ADDS the
+        folio-specific one above it.
+
+        Wrapped, and never fatal: a citation is the least important thing on
+        this page, and `set_page_citation` is itself a no-op when the client is
+        gone. This guard is for the metadata lookups below it, not for the set.
+        """
+        try:
+            page = state.current_page
+            if page is None:
+                return
+            _sm = page.shelfmark or ''
+            _url = None
+            if _sm:
+                _url = f'{GENIZAHSEARCH_URL}/browse?shelfmark={quote(_sm)}'
+            elif page.sys_id:
+                _url = f'{GENIZAHSEARCH_URL}/browse?sys_id={quote(str(page.sys_id))}'
+            set_page_citation(browse_page_citation(
+                version_info,
+                lang=get_language(),
+                library=page.library_name,
+                shelfmark=_sm or (f'ID: {page.sys_id}' if page.sys_id else None),
+                folio=page.folio_label,
+                page_url=_url,
+            ))
+        except Exception:                                        # noqa: BLE001
+            logger.debug('citation chip update skipped', exc_info=True)
 
     # UI component references
     content_container = None
@@ -1267,13 +1312,42 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             library_name = get_library_display(library_code, short=False, lang=get_language())
 
         # Prepare export data
+        #
+        # The last six keys are for the SOURCE-AWARE credit (2026-09-04). The
+        # docx used to print an unconditional English MiDRASH citation whatever
+        # transcription the reader exported, which is wrong the moment they are
+        # looking at a Princeton or Friedberg edition.
+        #
+        # `version_info` comes out of `enrichment_refs`, not from a local: it is
+        # written by `handle_version_change` ~3400 lines below, in a sibling
+        # closure this function cannot see into. `enrichment_refs` is the dict
+        # both reach and it is cleared on navigation, so a stale manuscript's
+        # source can never be attached to a new one's export.
+        #
+        # `.get`, not `[...]`: on a manuscript with no alternative sources
+        # `on_version_change` is never called at all, so the key is simply
+        # absent -- and absent means the plain HTR text, which is exactly what
+        # `resolve_transcription_credit(None, ...)` credits.
+        _folio = state.current_page.folio_label
+        _sm = state.current_page.shelfmark or ''
+        if _sm:
+            _page_url = f'{GENIZAHSEARCH_URL}/browse?shelfmark={quote(_sm)}'
+        elif state.sys_id:
+            _page_url = f'{GENIZAHSEARCH_URL}/browse?sys_id={quote(str(state.sys_id))}'
+        else:
+            _page_url = None
         export_data = {
             'shelfmark': state.current_page.shelfmark,
             'title': state.current_page.title,
             'sys_id': state.sys_id,
             'view_all': state.view_all,
             'library_code': library_code,
-            'library_name': library_name
+            'library_name': library_name,
+            'lang': get_language(),
+            'version_info': enrichment_refs.get('current_version_info'),
+            'folio_label': _folio,
+            'page_url': _page_url,
+            'retrieved_on': retrieved_today(),
         }
 
         if state.view_all and state.full_manuscript:
@@ -1749,7 +1823,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     await notes_refresh_ref['refresh']()
 
             # === Compact Metadata Header ===
-            with ui.card().classes('w-full p-3 mb-3').style(
+            # `print-hide`: this card carries the library name, the shelfmark
+            # and the title, but its green gradient is an INLINE `!important`
+            # style that no stylesheet rule can override, and most printers
+            # drop background graphics — so on paper it would be white text on
+            # nothing. The print sheet rebuilds this masthead as plain text
+            # instead; see the `.print-only` block in the transcription panel.
+            with ui.card().classes('w-full p-3 mb-3 browse-header-card print-hide').style(
                 'background: linear-gradient(135deg, #15803d 0%, #166534 100%) !important; '
                 'border: none;'
             ):
@@ -2621,13 +2701,35 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             icon='description',
                             on_click=export_browse_data
                         ).props('flat dense color=green')
+                        # Print / Save as PDF (owner, 2026-09-04).
+                        #
+                        # `window.print()`, not a server-side renderer: the
+                        # browser's own print dialog already offers "Save as
+                        # PDF" on every platform we ship to, it needs no
+                        # dependency, and it prints exactly the transcription
+                        # the reader is looking at — including whichever
+                        # version they picked in the version selector, which a
+                        # server-side render would have to reconstruct.
+                        #
+                        # What makes it usable is the `@media print` block in
+                        # common.css: it strips the chrome, kills Quasar's
+                        # layout offsets, and un-scrolls the transcription's
+                        # scroll area so the whole page prints rather than the
+                        # one screenful that happened to be in view.
+                        ui.button(
+                            tr('Print / Save as PDF'),
+                            icon='print',
+                            on_click=lambda: ui.run_javascript('window.print()')
+                        ).props('flat dense color=green')
 
             # === Main Content ===
             if state.view_all:
                 # Show all pages
                 with ui.card().classes('w-full').style('min-height: 60vh;'):
-                    # Header
-                    with ui.row().classes('w-full items-center justify-between p-4 border-b').style('background: var(--bg-tertiary);'):
+                    # Header -- `print-hide`: a view title and a "back" button
+                    # are navigation, and the printed sheet gets its own
+                    # masthead below instead.
+                    with ui.row().classes('w-full items-center justify-between p-4 border-b print-hide').style('background: var(--bg-tertiary);'):
                         with ui.row().classes('items-center gap-2'):
                             # Changed to H2
                             h2(tr('Full Manuscript View'), classes='font-bold text-lg')
@@ -2639,6 +2741,65 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             icon='arrow_forward' if is_rtl() else 'arrow_back',
                             on_click=toggle_view_all
                         ).props('flat dense color=green')
+
+                    # Print-only masthead for the ALL-PAGES sheet.
+                    #
+                    # The single-page view has its own (in the transcription
+                    # panel); this branch is a separate render and had none, so
+                    # an all-pages print carried no shelfmark and no credit at
+                    # all -- the worst of the two, since it is the sheet most
+                    # likely to leave the building.
+                    #
+                    # The credit is unconditionally the HTR one, and that is
+                    # correct rather than a shortcut: Full Manuscript View
+                    # renders `doc_page.text` for every folio and offers no
+                    # per-page version selector, so what prints here IS the
+                    # automatic transcription on every page. If FMV ever gains
+                    # a version chooser, this has to be revisited -- and
+                    # `test_the_all_pages_sheet_credits_the_automatic_transcription`
+                    # is the test that will say so.
+                    _fmv_shelfmark = page.shelfmark or f"ID: {page.sys_id}"
+                    if page.library_name:
+                        _fmv_shelfmark = f"{page.library_name}, {_fmv_shelfmark}"
+                    _fmv_credit = resolve_transcription_credit(None, lang=get_language())
+                    # Same reasoning as the masthead above: FMV has no per-page
+                    # version chooser, so the citation is the HTR one.
+                    _update_citation_chip(None)
+                    with ui.element('div').classes('print-only').style(
+                        'margin-bottom: 12px;'
+                    ):
+                        _fmv_title_html = ''
+                        if page.title:
+                            _fmv_title_html = (
+                                f'<div style="font-size: 10pt; margin-top: 2px;">'
+                                f'{html_module.escape(page.title)}</div>'
+                            )
+                        _fmv_rows = [
+                            f'<div style="font-weight: 600;">'
+                            f'{html_module.escape(_fmv_credit.heading)}</div>',
+                            f'<div style="margin-top: 3px;">'
+                            f'{html_module.escape(tr("When publishing material from this site, please cite:"))}'
+                            f'</div>',
+                        ]
+                        _fmv_rows += [
+                            f'<div>{html_module.escape(_l)}</div>'
+                            for _l in _fmv_credit.citation_lines
+                        ]
+                        _fmv_rows += [
+                            f'<div style="margin-top: 3px;">{html_module.escape(_l)}</div>'
+                            for _l in _fmv_credit.site_lines
+                        ]
+                        ui.html(
+                            f'<div style="font-size: 13pt; font-weight: 700;">'
+                            f'{html_module.escape(_fmv_shelfmark)}</div>'
+                            f'{_fmv_title_html}'
+                            f'<div style="font-size: 10pt; margin-top: 2px;">'
+                            f'{len(state.full_manuscript)} {html_module.escape(tr("pages"))}</div>'
+                            '<div style="font-size: 7.5pt; margin-top: 6px; '
+                            'padding-top: 6px; border-top: 1px solid #000; '
+                            'line-height: 1.45;">' + ''.join(_fmv_rows) + '</div>',
+                            sanitize=False,
+                        )
 
                     # All pages in scroll area
                     with ui.scroll_area().classes('w-full').style('height: 70vh; padding: 24px;'):
@@ -2681,6 +2842,21 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 ui.html(_fmv_html, sanitize=False)
                             else:
                                 ui.label(tr('No text available')).classes('italic').style('color: var(--text-muted);')
+
+                    # Fire the deferred print, if we got here from the print
+                    # menu's "all manuscript pages".
+                    #
+                    # Cleared FIRST, unconditionally: without that, a reader who
+                    # later switched to this view by hand would get a print
+                    # dialog they never asked for.
+                    #
+                    # The small JS delay lets the browser lay the pages out
+                    # before the dialog freezes the page. It can be short
+                    # because this branch renders TEXT ONLY -- no images to wait
+                    # on, unlike the single-page view.
+                    if print_pending['value']:
+                        print_pending['value'] = False
+                        ui.run_javascript('setTimeout(() => window.print(), 300)')
             elif state.view_joined:
                 # === V3 Reading Desk: Dual-Pane Synchronized View ===
                 # Left pane: stacked images with per-image zoom/rotate/drag
@@ -3684,7 +3860,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         '''
                         await ui.run_javascript(js)
 
-                with ui.card().classes('w-full mb-2').style('background: var(--bg-tertiary);'):
+                # `print-hide`: source chips, external links and page controls
+                # are navigation, not content. The folio label they sit beside
+                # is reproduced by the print-only masthead instead.
+                with ui.card().classes('w-full mb-2 print-hide').style('background: var(--bg-tertiary);'):
                     with ui.row().classes('w-full items-center flex-wrap gap-2 px-3 py-2'):
                         # -- Left group: folio label, page count, version badge, source chips --
                         with ui.row().classes('items-center gap-2'):
@@ -3932,6 +4111,65 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 on_click=toggle_view_all
                             ).props(f'flat dense color=green size=sm aria-label="{tr("Hide Full Manuscript") if state.view_all else tr("Show Full Manuscript")}"')
 
+                            # Print / Save as PDF -- ON THE ALWAYS-VISIBLE TOOLBAR.
+                            #
+                            # It was first put beside "Export Word" in the
+                            # Export group, which lives inside the metadata
+                            # panel -- and that panel is COLLAPSED by default
+                            # (`show_metadata` starts False), so the reader had
+                            # to click "Show Metadata" before the button existed
+                            # at all. The owner reported it as missing, which it
+                            # effectively was.
+                            #
+                            # Worth recording how that shipped: printing was
+                            # verified by driving `window.print()` directly to a
+                            # real PDF, which proves the STYLESHEET and bypasses
+                            # the button entirely. A working feature behind an
+                            # unreachable control is not a working feature.
+                            #
+                            # Icon-only with a tooltip, matching the star and
+                            # image buttons either side of it. `print-hide` so
+                            # the control never prints itself.
+                            async def _print_all_pages():
+                                """Print every folio of this manuscript.
+
+                                Two steps, and they cannot be collapsed into
+                                one: Full Manuscript View is a SEPARATE render
+                                branch, so the all-pages text does not exist in
+                                the DOM until `toggle_view_all` has run -- and
+                                that call rebuilds the content tree, destroying
+                                this very menu item. So the intent is parked on
+                                `print_pending` and the print is fired by the
+                                FMV branch once it has rendered.
+
+                                Already in that view: print straight away.
+                                """
+                                if state.view_all:
+                                    ui.run_javascript('window.print()')
+                                    return
+                                print_pending['value'] = True
+                                await toggle_view_all()
+
+                            with ui.button(icon='print').props(
+                                f'flat round dense aria-label="{tr("Print / Save as PDF")}"'
+                            ).classes('text-green-700 print-hide').tooltip(tr('Print / Save as PDF')):
+                                # A menu on the button itself (owner's choice,
+                                # 2026-09-04) rather than a second toolbar
+                                # control -- the row is already crowded enough
+                                # to wrap at 1280px.
+                                with ui.menu().props('auto-close'):
+                                    ui.menu_item(
+                                        tr('Print this page'),
+                                        on_click=lambda: ui.run_javascript('window.print()'),
+                                    ).classes('text-sm')
+                                    _all_label = tr('Print all manuscript pages')
+                                    if page.total_pages and page.total_pages > 1:
+                                        _all_label = f'{_all_label} ({page.total_pages})'
+                                    ui.menu_item(
+                                        _all_label,
+                                        on_click=_print_all_pages,
+                                    ).classes('text-sm')
+
                             # Add page to list (star button)
                             from web.state import state as app_state
                             from web.components import get_star_icon
@@ -4099,7 +4337,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         )
                         with image_panel_ref['container']:
                             # Image header with zoom controls
-                            with ui.row().classes('w-full items-center justify-between p-3').style(
+                            with ui.row().classes('w-full items-center justify-between p-3 print-hide').style(
                                 'background: #1a1a1a; border-radius: 8px 8px 0 0;'
                             ):
                                 ui.label(tr('Manuscript Image')).classes('text-white font-semibold')
@@ -4134,7 +4372,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     ui.button(icon='fullscreen', on_click=toggle_image_fullscreen).props(f'flat round size=sm text-color=white aria-label="{tr("Fullscreen Image")}" data-action="fullscreen"').tooltip(tr('Fullscreen Image'))
 
                             # Image adjustment controls row
-                            with ui.row().classes('w-full items-center gap-2 px-3 py-1').style(
+                            with ui.row().classes('w-full items-center gap-2 px-3 py-1 print-hide').style(
                                 'background: #1a1a1a; border-top: 1px solid #333;'
                             ):
                                 ui.icon('brightness_6').classes('text-white text-sm').tooltip(tr('Brightness'))
@@ -4202,8 +4440,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     ui.run_javascript('if(window.manuscriptViewer) setTimeout(() => window.manuscriptViewer.init(), 100); initProgressiveImages();')
 
                             # === Image Credit/Attribution Footer ===
+                            # `browse-image-credit` is a print hook. This strip is NOT
+                            # `print-hide`: the image licences require the credit to
+                            # travel with the image, so a printed sheet that carries
+                            # the plate must carry the attribution too. common.css
+                            # recolours it to black on white for print instead --
+                            # possible here, unlike the green header card, because
+                            # this inline background is not `!important`.
                             if page.attribution or page.attribution_nli:
-                                with ui.row().classes('w-full items-center justify-center gap-2 py-2').style(
+                                with ui.row().classes('w-full items-center justify-center gap-2 py-2 browse-image-credit').style(
                                     'background: #2a2a2a; border-radius: 0 0 8px 8px; border-top: 1px solid #333;'
                                 ):
                                     ui.icon('photo_library', size='xs').style('color: #888; font-size: 14px;')
@@ -4328,6 +4573,137 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 ui.label(tr('Loading...')).classes('mt-2 font-bold').style('color: var(--text-tertiary);')
                         else:
                             # === VIEW MODE ===
+
+                            # Print-only masthead (owner, 2026-09-04).
+                            #
+                            # `.print-only` is display:none on screen and block
+                            # under @media print, so this costs the reader
+                            # nothing and only exists on paper.
+                            #
+                            # It restates the shelfmark, the folio and the
+                            # citation because print HIDES the chrome each of
+                            # them lives in on screen. The shelfmark is in the
+                            # green header card, the folio label sits in the
+                            # badges bar beside source chips and external links,
+                            # and the citation is in the app footer. A sheet that
+                            # leaves the building must still say WHICH manuscript
+                            # it is and WHAT to cite.
+                            #
+                            # Rebuilding the header rather than restyling it is
+                            # deliberate. That card's green gradient is an INLINE
+                            # `!important` style, and an inline `!important`
+                            # cannot be overridden from a stylesheet at any
+                            # specificity — verified in the browser, where the
+                            # print rule lost. Most printers drop background
+                            # graphics by default, so leaving it in place prints
+                            # white text on nothing. The card is `print-hide`;
+                            # this is what replaces it.
+                            _print_folio = (
+                                f"{tr('Folio')} {page.folio_label}" if page.folio_label
+                                else f"{tr('Page')} {page.p_num}"
+                            )
+                            _print_shelfmark = page.shelfmark or f"ID: {page.sys_id}"
+                            if page.library_name:
+                                _print_shelfmark = f"{page.library_name}, {_print_shelfmark}"
+                            with ui.element('div').classes('print-only').style(
+                                'margin-bottom: 12px;'
+                            ):
+                                _print_title_html = ''
+                                if page.title:
+                                    _print_title_html = (
+                                        f'<div style="font-size: 10pt; margin-top: 2px;">'
+                                        f'{html_module.escape(page.title)}</div>'
+                                    )
+                                ui.html(
+                                    f'<div style="font-size: 13pt; font-weight: 700;">'
+                                    f'{html_module.escape(_print_shelfmark)}</div>'
+                                    f'{_print_title_html}'
+                                    f'<div style="font-size: 10pt; margin-top: 2px;">'
+                                    f'{html_module.escape(_print_folio)}</div>',
+                                    sanitize=False,
+                                )
+                                # THE CREDIT IS A SEPARATE, LIVE ELEMENT.
+                                #
+                                # It cannot be baked into the masthead above,
+                                # for two reasons that only showed up on a real
+                                # read of the version-selector contract:
+                                #
+                                # 1. This block renders SYNCHRONOUSLY at page
+                                #    build, and the default source is decided
+                                #    ~100ms later and asynchronously, by
+                                #    `shared.fgp_service.choose_default_source`.
+                                #    Whatever is written here is written before
+                                #    anyone knows what will be on screen.
+                                # 2. The reader can switch versions afterwards.
+                                #
+                                # So it is seeded with the HTR credit and
+                                # re-rendered from `handle_version_change`.
+                                # Seeding with HTR is not a placeholder: on a
+                                # manuscript with no alternative sources at all
+                                # — the common case — `on_version_change` is
+                                # NEVER called, and the plain V0.8 text on
+                                # screen genuinely is the MiDRASH transcription.
+                                _print_credit_html = ui.html('', sanitize=False)
+
+                                def _render_print_credit(version_info=None):
+                                    """Redraw everything that depends on WHICH transcription is shown.
+
+                                    The one seam for it, deliberately: the
+                                    printed sheet, the "How to cite" chip and the
+                                    Word export must never disagree about who
+                                    made the text, and three separate hooks into
+                                    `handle_version_change` would be three
+                                    chances to drift.
+
+                                    The mapping itself lives in
+                                    `shared/transcription_credits.py` — shared,
+                                    so the Word export takes the same decision,
+                                    and because a fifth hand-copy of the MiDRASH
+                                    citation is exactly what
+                                    `shared/export_utils` exists to prevent.
+                                    """
+                                    # (a) The Word export reads this. `version_info`
+                                    # is a closure local here and
+                                    # `export_browse_data` is a sibling closure
+                                    # ~3400 lines earlier with no line of sight to
+                                    # it; `enrichment_refs` is the dict both can
+                                    # reach, already used for
+                                    # 'version_container'/'version_change_handler'
+                                    # and cleared on navigation.
+                                    enrichment_refs['current_version_info'] = version_info
+                                    # (b) The citation chip.
+                                    _update_citation_chip(version_info)
+                                    credit = resolve_transcription_credit(
+                                        version_info, lang=get_language())
+                                    _rows = [
+                                        f'<div style="font-weight: 600;">'
+                                        f'{html_module.escape(credit.heading)}</div>'
+                                    ]
+                                    if credit.citation_lines:
+                                        _rows.append(
+                                            f'<div style="margin-top: 3px;">'
+                                            f'{html_module.escape(tr("When publishing material from this site, please cite:"))}'
+                                            f'</div>'
+                                        )
+                                        _rows.extend(
+                                            f'<div>{html_module.escape(_line)}</div>'
+                                            for _line in credit.citation_lines
+                                        )
+                                    _rows.extend(
+                                        f'<div style="margin-top: 3px;">'
+                                        f'{html_module.escape(_line)}</div>'
+                                        for _line in credit.site_lines
+                                    )
+                                    _print_credit_html.content = (
+                                        '<div style="font-size: 7.5pt; margin-top: 6px; '
+                                        'padding-top: 6px; border-top: 1px solid #000; '
+                                        'line-height: 1.45;">'
+                                        + ''.join(_rows) +
+                                        '</div>'
+                                    )
+
+                                _render_print_credit()
+
                             # Text content container
                             text_container = ui.column().classes('w-full h-full')
                             current_text = {'value': page.text}
@@ -4365,6 +4741,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 """Handle version selection - update displayed text."""
                                 current_text['value'] = new_text
                                 render_text_content(new_text)
+                                # The printed credit follows the DISPLAYED text.
+                                # Before this, the sheet credited MiDRASH for an
+                                # FGP or PGP edition or a reader's own
+                                # correction -- crediting the wrong people for
+                                # someone else's scholarship. Unconditional and
+                                # ahead of the notify branches below, because it
+                                # must also cover the sources those branches
+                                # forgot ('fgp' and 'pending' have no branch).
+                                _render_print_credit(version_info)
                                 source = version_info.get('source', 'unknown')
                                 author = version_info.get('author', '')
 
@@ -4388,7 +4773,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                             # Version selector placeholder (populated by enrichment Phase B)
                             if page.text:
-                                version_row = ui.row().classes('items-center p-2 border-b')
+                                version_row = ui.row().classes('items-center p-2 border-b print-hide')
                                 enrichment_refs['version_container'] = version_row
                                 enrichment_refs['version_change_handler'] = handle_version_change
 
@@ -4718,10 +5103,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         # Page title
         # Changed to H1
         if not embedded:
-            h1(tr('Browse Manuscripts'), classes='text-3xl font-bold mb-6 text-center text-green-800')
+            h1(tr('Browse Manuscripts'), classes='text-3xl font-bold mb-6 text-center text-green-800 print-hide')
 
         # Shelfmark Search Box - Simple and Working
-        with ui.card().classes('w-full p-4 mb-6').style('background: var(--bg-tertiary); border: 1px solid var(--border-light);') as _search_card:
+        # `print-hide`: a lookup form is furniture, not part of the sheet.
+        with ui.card().classes('w-full p-4 mb-6 print-hide').style('background: var(--bg-tertiary); border: 1px solid var(--border-light);') as _search_card:
             with ui.row().classes('w-full gap-4 items-center'):
                 # Search icon
                 ui.icon('search', size='md').classes('text-green-600')

@@ -654,33 +654,42 @@ body {
     margin-top: auto;
 }
 
-/* Global Citation Footer */
-.citation-footer {
-    background: var(--primary-50, #eff6ff) !important;
-    border-top: 1px solid var(--primary-200, #bfdbfe) !important;
-    color: var(--primary-800, #1e40af) !important;
-    min-height: auto !important;
-    padding: 0 !important;
+/* The "How to cite" chip -- replaces the global citation FOOTER (owner,
+   2026-09-04). Small, floating, always visible, bottom-start where the footer
+   band used to be. z-index is set inline at 2000, matching the footer it
+   replaces: above page content, and below Quasar's dialogs at 6000 so a dialog
+   is never covered by a citation chip. */
+.citation-chip-btn.q-btn {
+    background: var(--bg-tertiary) !important;
+    color: var(--text-secondary) !important;
+    border: 1px solid var(--border-light);
+    border-radius: 999px;
+    padding: 2px 12px 2px 8px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.14);
+    font-size: 11px;
+    min-height: 32px;
+    opacity: 0.9;
+    transition: opacity 0.15s ease, box-shadow 0.15s ease;
 }
-.citation-footer a {
-    color: var(--primary-700, #1d4ed8) !important;
+.citation-chip-btn.q-btn:hover,
+.citation-chip-btn.q-btn:focus-visible {
+    opacity: 1;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
 }
-.citation-footer a:hover {
-    text-decoration: underline !important;
+.citation-chip-label {
+    font-size: 11px;
+    margin-inline-start: 4px;
+    white-space: nowrap;
 }
-[data-theme="dark"] .citation-footer {
-    background: var(--primary-900, #1e3a5f) !important;
-    border-top-color: var(--primary-700, #1e40af) !important;
-    color: var(--primary-200, #bfdbfe) !important;
+.citation-chip-panel {
+    background: var(--bg-secondary, #fff);
 }
-[data-theme="dark"] .citation-footer a {
-    color: var(--primary-300, #93c5fd) !important;
-}
-
-/* Citation compact/full transitions */
-.citation-compact { display: none; }
-.citation-full, .citation-compact {
-    transition: opacity 0.3s ease;
+/* On a narrow screen the label is the first thing to go -- the quote icon and
+   its aria-label still name the control. Mirrors what the footer did with
+   `.citation-hebrew-label`, which went with it. */
+@media (max-width: 480px) {
+    .citation-chip-label { display: none; }
+    .citation-chip-btn.q-btn { padding: 2px 8px; }
 }
 
 /* Progressive image loading spinner */
@@ -707,13 +716,6 @@ body {
 }
 @keyframes img-spin {
     to { transform: rotate(360deg); }
-}
-
-/* Hide Hebrew label on mobile */
-@media (max-width: 768px) {
-    .citation-hebrew-label {
-        display: none !important;
-    }
 }
 
 .theme-switcher {
@@ -2023,3 +2025,251 @@ body {
     color: var(--text-secondary);
     font-size: 10px;
 }
+/* end discovery
+   ------------------------------------------------------------------------
+   The discovery block's CLOSING marker, added 2026-09-04.
+
+   `tests/test_discovery_display_strings.discovery_css_block()` used to slice
+   from the opening `/* discovery` comment to END OF FILE, which was accurate
+   only while discovery happened to be the last thing in this stylesheet. The
+   moment anything was appended below it, those rules were attributed to the
+   discovery block and its "every selector is scoped under .gs-discovery" gate
+   failed on rules that have nothing to do with discovery.
+
+   The gate is right and worth keeping -- the sketch class names it guards
+   (`.row`, `.chip`, `.mode`, `.c`) really are too generic for a global
+   stylesheet loaded beside Quasar. It just needed a bounded block. Anything
+   below this line is OUTSIDE discovery; add new site-wide rules here, not
+   above.
+   ------------------------------------------------------------------------ */
+
+/* ==========================================================================
+   Dismiss controls  (owner, 2026-09-04: "האיקס לסגירה לא ברור")
+   ==========================================================================
+   Every dismiss X on the site was `flat dense size=xs` plus `opacity-50`,
+   which produced a ~20px, half-transparent glyph that readers did not
+   recognise as a button. This gives them a real 36px hit area (above the
+   24px WCAG 2.2 target-size minimum), full opacity, and a ring on hover so
+   the affordance is visible before the pointer arrives. */
+.dismiss-btn.q-btn {
+    min-width: 36px;
+    min-height: 36px;
+    opacity: 0.85;
+    transition: opacity 0.15s ease, background-color 0.15s ease,
+                box-shadow 0.15s ease;
+}
+.dismiss-btn.q-btn:hover,
+.dismiss-btn.q-btn:focus-visible {
+    opacity: 1;
+    background: var(--bg-hover, rgba(0, 0, 0, 0.06));
+    box-shadow: inset 0 0 0 1px var(--border-light, rgba(0, 0, 0, 0.2));
+}
+
+/* "What's New" header button + unread dot.
+   Deliberately NOT `.help-btn-header`, which is display:none under 768px.
+   This site skews mobile; hiding the announcement from most of its readers
+   would be a regression, not a tidy-up. */
+.whats-new-btn-header.q-btn {
+    position: relative;
+}
+.whats-new-dot {
+    position: absolute;
+    top: 6px;
+    inset-inline-end: 6px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #10b981;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
+    pointer-events: none;
+}
+
+/* ==========================================================================
+   Print / "Save as PDF"
+   ==========================================================================
+   Owner request, 2026-09-04, scoped to the Browse reading view: a scholar
+   wants the transcription on paper (or as a PDF via the browser's own print
+   dialog), not a screenshot of an app.
+
+   Three things have to happen, and only the first is obvious:
+
+   1. The app chrome goes away — header, drawer, footer, dialogs, toasts and
+      every toolbar tagged `.print-hide`.
+   2. Quasar's LAYOUT OFFSETS go away with it. `.q-layout` pads the page by
+      the header/drawer sizes with inline styles, so hiding the header alone
+      leaves a 64px band and a 280px indent on every printed sheet.
+   3. Every `.q-scrollarea` is un-scrolled. The transcription lives inside one
+      with an explicit `calc(60vh - 80px)` height; left as-is, a print stops
+      at whatever happened to be scrolled into view — which is the failure
+      that makes most "print" buttons useless. */
+@media print {
+    .q-header,
+    .q-drawer,
+    .q-drawer-container,
+    .q-drawer__backdrop,
+    .q-footer,
+    .q-dialog,
+    .q-notifications,
+    .q-tooltip,
+    .nicegui-error-popup,
+    .page-loading-bar,
+    /* Every Quasar menu, not just the What's New one. The print options
+       themselves now live in a `ui.menu` hung off the printer button, and a
+       menu left open when the dialog opens would land on the sheet. Menus are
+       transient chrome by definition; none of them belongs on paper. */
+    .q-menu,
+    .print-hide {
+        display: none !important;
+    }
+
+    /* (2) Quasar writes these offsets inline, so they need !important. */
+    .q-layout,
+    .q-page-container,
+    .q-page,
+    .main-content,
+    .nicegui-content {
+        padding: 0 !important;
+        margin: 0 !important;
+        min-height: 0 !important;
+        max-width: none !important;
+    }
+
+    html, body {
+        background: #fff !important;
+        color: #000 !important;
+        height: auto !important;
+        overflow: visible !important;
+    }
+
+    /* (3) Un-scroll everything. All four selectors are load-bearing: Quasar
+       nests container/content inside the scroll area and each carries its own
+       height or transform. */
+    .q-scrollarea,
+    .q-scrollarea__container,
+    .q-scrollarea__content {
+        height: auto !important;
+        max-height: none !important;
+        min-height: 0 !important;
+        overflow: visible !important;
+        position: static !important;
+        transform: none !important;
+        /* THE one that actually mattered. Quasar sets `contain: strict` on
+           .q-scrollarea, and `strict` includes SIZE containment: the box sizes
+           itself as if it had no contents at all. Measured on /browse with
+           every other property above already applied — the scroll area still
+           computed to 40px (its 20px padding, twice) while the transcription
+           inside it was 2644px, so the sheet printed the padding and threw the
+           text away. Height rules cannot win against size containment; only
+           removing the containment can. */
+        contain: none !important;
+    }
+    .q-scrollarea__thumb,
+    .q-scrollarea__bar {
+        display: none !important;
+    }
+
+    /* Cards print as plain blocks: no shadows, no dark fills, no page-break
+       through the middle of a line of transcription. */
+    .q-card {
+        box-shadow: none !important;
+        border: none !important;
+        background: #fff !important;
+        break-inside: auto;
+    }
+
+    /* Browse: the two panels stack instead of sharing a printed row, and the
+       image is released from its fixed-height pan/zoom container. Without the
+       transform reset the printed image inherits whatever zoom and rotation
+       the reader left on screen. */
+    .viewer-panels {
+        display: block !important;
+        min-height: 0 !important;
+    }
+    .viewer-panels > .q-card {
+        flex: none !important;
+        min-height: 0 !important;
+        width: 100% !important;
+        /* NOT `break-inside: avoid`. The transcription card is several pages
+           long, so a browser cannot honour it and instead starts the card on a
+           fresh sheet -- which left the bottom half of page 1 blank under the
+           plate and pushed the masthead onto page 2. Only the PLATE needs to
+           stay whole, and that is asked for on `.image-container` below. */
+        break-inside: auto;
+    }
+    .image-container {
+        break-inside: avoid;
+        height: auto !important;
+        max-height: 45vh !important;
+        overflow: hidden !important;
+        background: #fff !important;
+    }
+    .image-container img.zoomable-image {
+        transform: none !important;
+        filter: none !important;
+        max-width: 100% !important;
+        max-height: 45vh !important;
+        height: auto !important;
+        width: auto !important;
+        object-fit: contain !important;
+    }
+
+    /* THE HEIGHT CHAIN. Un-scrolling `.q-scrollarea` is not enough on its
+       own: the transcription's ancestors pin it. Measured on /browse before
+       this rule — the scroll area computed to 40px tall while its own content
+       was 2644px, and `document.body.scrollHeight` was 763px, so a print
+       produced ONE page with the text clipped away. Three constraints stack:
+       the panel card's `min-height: 60vh` + `display:flex`, Tailwind's
+       `h-full` on the text container, and the scroll area's inline
+       `calc(60vh - 80px)`. All three have to go. */
+    .viewer-panels .h-full,
+    .viewer-panels .q-card,
+    .viewer-panels .nicegui-column,
+    .viewer-panels .nicegui-row {
+        height: auto !important;
+        max-height: none !important;
+        min-height: 0 !important;
+    }
+    .viewer-panels {
+        display: block !important;
+        height: auto !important;
+    }
+
+    /* The image credit strip stays — the licences require the attribution to
+       travel with the plate — but inverted to black on white. Its dark inline
+       background is overridable because, unlike the header card's gradient, it
+       carries no `!important`. */
+    .browse-image-credit {
+        background: #fff !important;
+        border-top: 1px solid #000 !important;
+        padding: 4px 0 0 0 !important;
+    }
+    .browse-image-credit * {
+        color: #000 !important;
+        font-size: 7.5pt !important;
+    }
+
+    /* The printed sheet needs its own masthead: on screen the folio label and
+       the citation are in chrome that print correctly removes. `.print-only`
+       is display:none everywhere else. */
+    .print-only { display: block !important; }
+
+    a[href]::after { content: none !important; }
+    a { color: #000 !important; text-decoration: none !important; }
+
+    /* Never strand one line of a transcription on a sheet of its own. An
+       all-pages print of T-S Ar.50.74 put a single line number on a third
+       page with nothing beside it. Standard typographic minimum, and it costs
+       nothing when the text happens to fit. */
+    p, div, li {
+        orphans: 2;
+        widows: 2;
+    }
+
+    @page {
+        margin: 14mm 12mm;
+    }
+}
+
+/* Print-sheet furniture is hidden on screen. Kept OUTSIDE the media query so
+   the rule applies whether or not the print block is reached. */
+.print-only { display: none; }

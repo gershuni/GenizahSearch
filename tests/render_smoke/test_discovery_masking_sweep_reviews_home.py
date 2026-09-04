@@ -377,22 +377,30 @@ def _review_outbound_write(seed: Optional[str] = None) -> List[str]:
 
 def _render_home_surface(seed: Optional[str] = None,
                          count: Any = 694) -> Dict[str, Any]:
-    """The real homepage with discovery READY, and the deferred count driven.
+    """The real homepage with discovery READY.
 
-    THE ONE ARTIFACT VALUE. `web/pages/home.py` reads the discovery artifact in
-    exactly one place (`_fill_discovery_count`, the only
-    `get_launch_stats_enveloped` call in the module) and renders exactly one
-    value from it: `meta.work_total`, behind
-    `isinstance(total, int) and total > 0`. Everything else on the promotion is
-    static copy through `tr()`. So the honest claim about this surface is not
-    "no restricted string was found in it" but "no artifact string can reach
-    it", and `test_the_home_promotion_refuses_a_non_integer_total` is what
-    holds that claim up.
+    NO ARTIFACT VALUE REACHES THIS SURFACE ANY MORE, and that is the claim these
+    tests now hold up.
 
-    `count` is separated from `seed` for that reason: `seed` exercises the
-    guard (a string total must be refused), while an integer `count` proves the
-    capture actually reaches the deferred fill. Collapsing them would leave a
-    capture that renders nothing and a control that cannot tell why.
+    Until 2026-09-04 the homepage read the discovery artifact in exactly one
+    place -- `_fill_discovery_count`, the only `get_launch_stats_enveloped` call
+    in `web/pages/home.py` -- and rendered one value from it, `meta.work_total`,
+    behind `isinstance(total, int) and total > 0`. The honest claim then was "one
+    artifact value reaches this surface and is guarded".
+
+    The owner removed the two big promotion cards that day ("we are past the
+    promotional phase") and `_fill_discovery_count` went with them. So the claim
+    is now stronger and simpler: the homepage does not read the artifact, so
+    nothing from it can reach the page whatever the artifact contains. That is
+    asserted, not assumed -- `invoked` below records whether the read was called
+    at all, and `test_the_home_reads_no_artifact_value_at_all` fails if it ever
+    is.
+
+    `seed` and `count` are KEPT rather than deleted: the patched read still
+    returns them, so if a future edit reintroduces a read, these tests
+    immediately have a needle to catch it with. A capture helper that stopped
+    offering a poisoned value would have to be rebuilt at exactly the moment it
+    was needed.
     """
     tp._ensure_sim()
     from nicegui import core, ui
@@ -404,7 +412,13 @@ def _render_home_surface(seed: Optional[str] = None,
     holder: Dict[str, Any] = {}
     patch = _Patch()
 
+    invoked: List[str] = []
+
     async def _launch(*_a, **_k):
+        # Records the call. The homepage is expected NEVER to make it since the
+        # promotion cards were removed; `test_the_home_reads_no_artifact_value_
+        # at_all` is what turns that expectation into a failure if it changes.
+        invoked.append("get_launch_stats_enveloped")
         return {
             "status": "ok",
             "meta": {"work_total": seed if seed is not None else count},
@@ -451,7 +465,8 @@ def _render_home_surface(seed: Optional[str] = None,
                 markers.append(f"mark={mark}")
     finally:
         client.delete()
-    return {"texts": texts, "hrefs": hrefs, "markers": markers}
+    return {"texts": texts, "hrefs": hrefs, "markers": markers,
+            "artifact_reads": list(invoked)}
 
 
 # ===========================================================================
@@ -583,10 +598,16 @@ def test_the_outbound_write_class_holds_the_payload_the_boundary_received(
 
 
 #: Every homepage entry point gated on the discovery predicate. Derived from
-#: the markers the page sets, so a fifth entry point added later shows up here
+#: the markers the page sets, so a further entry point added later shows up here
 #: as a capture that no longer contains it rather than as silence.
-HOME_DISCOVERY_MARKERS = ("home-chip-computed", "discovery-announcement",
-                          "home-carousel-computed", "computed-tool-card")
+#:
+#: `discovery-announcement` was the fourth until 2026-09-04, when the owner
+#: removed the two big promotion cards ("we are past the promotional phase").
+#: The surface is NOT withdrawn -- these three remain, each still gated on the
+#: same availability predicate: the capability chip, the carousel slide and the
+#: Research Tools card.
+HOME_DISCOVERY_MARKERS = ("home-chip-computed", "home-carousel-computed",
+                          "computed-tool-card")
 
 
 def test_the_home_capture_contains_every_discovery_entry_point(clean_capture):
@@ -608,50 +629,61 @@ def test_the_home_capture_contains_every_discovery_entry_point(clean_capture):
         "nothing about it")
 
 
-def test_the_home_capture_holds_the_DEFERRED_count_not_the_first_paint(
-        clean_capture):
-    """The count arrives from a background task after first paint. A capture
-    that stopped at first paint would scan a card that had not yet met the
-    artifact."""
-    body = (clean_capture["dir"] / CLASS_FILES[CLASS_HOME]).read_text(
-        encoding="utf-8")
-    assert "694" in body, (
-        "the deferred work-total count never landed: the capture caught the "
-        "count-free first paint only, and the one artifact-derived value on "
-        "this surface was therefore never scanned")
+def test_the_home_reads_no_artifact_value_at_all(clean_capture):
+    """THE SAFETY PROPERTY for this surface, and it is now an ABSENCE.
 
+    Replaces `test_the_home_capture_holds_the_DEFERRED_count_not_the_first_paint`
+    and `test_the_home_promotion_refuses_a_non_integer_total`, both of which
+    asserted the promotion card rendered and its int guard held. The card was
+    removed on 2026-09-04 and `_fill_discovery_count` went with it, so those
+    tests were asserting a surface that no longer exists.
 
-def test_the_home_promotion_refuses_a_non_integer_total():
-    """THE SAFETY PROPERTY for this surface, and the reason it has no seeded
-    leak control.
+    What replaces them is stronger. The old claim was "one artifact value
+    reaches this page and is guarded by `isinstance(total, int)`". The claim now
+    is "no artifact value reaches this page", which needs no guard to hold and
+    cannot be defeated by a guard being wrong.
 
-    The homepage renders exactly one artifact value and guards it with
-    `isinstance(total, int) and total > 0`. So a restricted STRING cannot reach
-    the page through the read at all. That is a stronger statement than a clean
-    scan, and it is asserted rather than assumed: a string total must leave the
-    count-free sentence standing, while an integer must replace it.
+    Proven three ways, because an absence is exactly the kind of claim that
+    passes vacuously:
+      1. the patched read is never CALLED;
+      2. a restricted needle handed to that read appears nowhere in the capture;
+      3. an INTEGER handed to it appears nowhere either -- the control. Without
+         (3) this test would still pass if the capture rendered nothing at all,
+         which is the trap the previous version of this suite fell into.
     """
-    refused = _render_home_surface(seed=_needle())
+    del clean_capture  # this test builds its own poisoned surfaces
+
+    poisoned = _render_home_surface(seed=_needle())
+    assert poisoned["artifact_reads"] == [], (
+        "the homepage read the discovery artifact: %r. It stopped doing so when "
+        "the promotion cards were removed; if a read is back, this surface needs "
+        "a guard again and a leak control to go with it."
+        % (poisoned["artifact_reads"],))
+
     joined = "\n".join(str(line) for line in
-                       refused["texts"] + refused["markers"])
-    assert "mark=discovery-announcement" in joined, (
-        "the promotion did not render at all, so this proves nothing about the "
-        "guard")
-    # Reduced to a bool BEFORE the assert: pytest rewrites assertions and
-    # prints the operands of a failing one, so `assert _needle() not in joined`
-    # would put the restricted value into the CI log on the one run where it
-    # matters. The same reason `test_no_assertion_in_this_module_can_ECHO_the_
-    # needle` exists.
+                        poisoned["texts"] + poisoned["markers"])
+    # Reduced to a bool BEFORE the assert: pytest prints the operands of a
+    # failing assertion, so `assert _needle() not in joined` would put the
+    # restricted value into the CI log on the one run where it matters.
     leaked = _needle() in joined
     assert not leaked, (
-        "a NON-INTEGER work_total reached the homepage. The int guard in "
-        "`_fill_discovery_count` is the only thing standing between the "
-        "artifact and this surface, and it did not hold.")
+        "a restricted value from the discovery artifact reached the homepage "
+        "even though the page makes no artifact read -- so it arrived by some "
+        "route this sweep does not model.")
 
+    # (3) THE CONTROL. An integer total must not appear either, and the surface
+    # must actually have rendered -- otherwise the two assertions above are
+    # statements about an empty page.
     reachable = _render_home_surface(count=8675309)
-    assert "8,675,309" in "\n".join(reachable["texts"]), (
-        "an integer total did NOT render, so the assertion above passed only "
-        "because nothing renders -- the guard is untested either way")
+    assert reachable["artifact_reads"] == []
+    rendered = "\n".join(str(line) for line in
+                         reachable["texts"] + reachable["markers"])
+    assert "mark=home-chip-computed" in rendered, (
+        "the homepage's discovery entry points did not render, so this test "
+        "proves nothing about what does or does not reach them")
+    assert "8,675,309" not in rendered and "8675309" not in rendered, (
+        "an artifact integer rendered on the homepage; the page is reading the "
+        "artifact again")
 
 
 def test_the_copy_export_inventory_now_includes_the_reviews_module():

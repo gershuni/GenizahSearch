@@ -56,6 +56,52 @@ MIDRASH_CREDIT_LINES: Tuple[str, ...] = (
     MIDRASH_CITATION_LINE,
 )
 
+#: The same citation as ONE inline clause, for a one-sentence page citation a
+#: reader pastes into a bibliography (the "How to cite this page" chip, owner
+#: 2026-09-04). The three rows above are right for a credits SHEET, where they
+#: have their own space; run together in a sentence they repeat the DOI twice
+#: and list seventeen authors mid-clause.
+#:
+#: The "et al." is not a new liberty with the citation: `MIDRASH_DATA_SOURCE_LINE`
+#: directly above has said "(Stoekl Ben Ezra et al., 2025)" since it was written,
+#: so the abbreviated form is already what this project publishes. The DOI and
+#: the year survive intact, which is what the never-translate rule above is
+#: protecting. Anything that has ROOM for the full author list should still use
+#: `MIDRASH_CREDIT_LINES`.
+MIDRASH_INLINE_CITATION: str = (
+    "MiDRASH Automatic Transcriptions, Stoekl Ben Ezra, D. et al., 2025, "
+    "Zenodo. https://doi.org/10.5281/zenodo.17734473"
+)
+
+
+# ============================================================================
+# The site's own credit -- ONE canonical copy, for the same reason
+# ============================================================================
+#
+# Moved here from `shared/export_dossier.py` on 2026-09-04, when the printed
+# reading sheet needed to credit the site and would otherwise have declared a
+# fifth site-URL constant. The site name is copy-pasted as a bare literal in
+# dozens of places and the URL had four separately-named constants; this is the
+# import point for anything that CREDITS the site, and it lives beside the
+# MiDRASH lines because a credit block wants both and neither should drag in a
+# database connection.
+#
+# `export_dossier` re-exports both so its existing callers are untouched.
+GENIZAHSEARCH_URL: str = "https://genizahsearch.com"
+
+#: The site's own name, per UI language. Hebrew readers get the Hebrew name the
+#: export workbook's link row already uses; the Latin brand is kept for English.
+_SITE_NAME_BY_LANG = {
+    'en': "Dicta Genizah Search",
+    'he': "אתר הגניזה של דיקטה",
+}
+
+
+def site_name(lang: str = 'en') -> str:
+    """The site's display name for ``lang`` ('he' or anything else = English)."""
+    return _SITE_NAME_BY_LANG.get('he' if str(lang or '').lower().startswith('he') else 'en',
+                                  _SITE_NAME_BY_LANG['en'])
+
 
 # ============================================================================
 # Text Sanitization for Excel

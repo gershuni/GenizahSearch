@@ -6,6 +6,71 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ## Unreleased - 2026-09-01
 
+### Changed — Homepage calm, honest hero wording, and a printable reading view (web, 2026-09-04)
+
+Three owner reports, all about the first thirty seconds a visitor spends on the site.
+
+- **One dismissible strip on arrival, not four overlays.** A first visit to `/` opened
+  a blocking MiDRASH-citation modal, a "What's New" toast, an OCR-caveat toast and the
+  citation footer — simultaneously, with the modal and the footer saying the same thing.
+  The modal is gone; the reasoning it carried (why citations matter to the MiDRASH team,
+  which the footer never said) now lives at `/about#citing-midrash`, and the footer's
+  "please cite:" label links there. The citation requirement, the full citation and the
+  copy button are unchanged.
+- **"What's New" is a header button with an unread dot** instead of a card floating over
+  the page that deleted itself after 30 seconds. The news is now still there when you go
+  looking for it. It is visible on phones — the neighbouring Help button is hidden below
+  768px, and this site's readers are mostly on phones.
+- **The OCR caveat is a line in the hero,** not a toast with its own close button. It is a
+  standing caveat about every result on the site, so it should read the same on the
+  hundredth visit as on the first.
+- **Dismiss buttons look like buttons.** Every X was a ~20px half-transparent glyph; they
+  are now 36px with a hover ring.
+- **The homepage search box says what it does.** "Search manuscripts…" read as "search
+  *for* a manuscript", so people typed shelfmarks into what is a full-text search over the
+  MiDRASH transcriptions. It now reads "Type a word or phrase to search the manuscripts…".
+- **Print / Save as PDF on the reading view.** A new button beside "Export Word" on
+  `/browse`, backed by the site's first print stylesheet: the app chrome comes off, the
+  whole transcription prints rather than the one screenful that happened to be scrolled
+  into view, and the sheet carries its own masthead — library, shelfmark, title, folio and
+  the citation — because all of those live in chrome that printing removes. The image
+  credit stays with the plate, as the licences require.
+- **Homepage spacing tightened** by about 6% of page height; no section was removed.
+- **The printed sheet credits whoever actually made the text on it.** The site and its
+  address appear on every sheet. MiDRASH is cited when you print the automatic
+  transcription — and only then; print an FGP or Princeton Geniza Project edition, a
+  translation, or a community correction and the sheet credits those people instead.
+  It follows the version you have chosen, so switching versions changes the credit.
+  Labels follow the interface language; the scholarly citations themselves stay as
+  published, which is how a citation has to be quoted.
+- **Print this page, or the whole manuscript.** The printer icon on the reading-view
+  toolbar opens a short menu: print the folio you are on, or every folio of the
+  manuscript in one go. The all-pages sheet carries its own heading — library,
+  shelfmark, title, page count and the citation.
+- **Notes and comments no longer print.** They are working notes around a document,
+  not part of it.
+- **A "How to cite" chip replaces the citation strip at the foot of every page.** It is
+  small, always there, and opens to a ready-made citation you can copy — the site, its
+  address, the date you looked, and the Zenodo citation for the MiDRASH transcriptions.
+  On a manuscript page it also offers a citation for that folio specifically: library,
+  shelfmark, folio, and whoever made the transcription you are reading. In Hebrew or
+  English, following the interface.
+- **Word exports credit the transcription you exported.** Export a Princeton or
+  Friedberg edition, a translation or a community correction and the document credits
+  those people, with the date of retrieval. Search-result and parallels exports are
+  unchanged.
+- **Dates in citations read as dates** — "Sept. 4, 2026" in English, "4 בספטמבר, 2026"
+  in Hebrew — rather than the numeric form.
+
+### Fixed — 165 dead entries in the Hebrew translation table (2026-09-04)
+
+The translation table declared 141 keys more than once. Python keeps the last value
+and discards the rest in silence, so for 43 of those keys the site was showing a
+Hebrew string nobody had chosen, and the entry a translator had edited was dead
+code. The shadowed entries are gone and the values that were already winning are
+unchanged, so nothing on screen moves. A new test refuses any future duplicate.
+
+
 ### Fixed — Oxford viewer, transcription default, credits (web + desktop, 2026-09-02)
 
 Started from one report (search "תקום רבה דיניך" → MS heb. g.2/27: no image, an

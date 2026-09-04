@@ -319,6 +319,68 @@ def add_highlighted_hebrew_paragraph(doc: Document, text: str) -> None:
     set_paragraph_rtl(p)
 
 
+def add_word_source_credits(
+    doc: Document,
+    *,
+    lang: str = 'en',
+    version_info=None,
+    library=None,
+    shelfmark=None,
+    folio=None,
+    page_url=None,
+    retrieved_on=None,
+) -> None:
+    """Credit the transcription that was actually exported, bilingually.
+
+    A SIBLING of `add_word_credits`, not a change to it. That function has three
+    callers -- the browse export, the search-results export and the parallels
+    export -- and the other two have no "what is on screen" concept at all: they
+    list many manuscripts, so an unconditional MiDRASH credit is the correct
+    thing for them and must keep printing byte-for-byte as it does today.
+    `CREDITS_TEXT` is also asserted directly by
+    `tests/test_export_service.py::TestCreditsText`. Widening the shared
+    function would have put a per-page notion into two exports that cannot have
+    one, for no gain.
+
+    Used ONLY by `export_browse_word`, which does export the manuscript's own
+    transcription text -- the owner's condition for fixing this at all
+    (2026-09-04: "If Word export is referring to ms text so yes fix it too").
+
+    The citation comes from `shared/transcription_credits`, the same decision
+    the printed sheet and the "How to cite" chip take, so an exported document
+    cannot credit someone different from the screen it came off.
+    """
+    from shared.transcription_credits import page_citation, resolve_transcription_credit
+
+    citation = page_citation(
+        version_info,
+        lang=lang,
+        library=library,
+        shelfmark=shelfmark,
+        folio=folio,
+        page_url=page_url,
+        retrieved_on=retrieved_on,
+    )
+    credit = resolve_transcription_credit(version_info, lang=lang)
+
+    doc.add_page_break()
+    doc.add_heading('Credits', 1)
+
+    # The one-sentence citation first -- it is the thing a reader pastes.
+    citation_p = doc.add_paragraph()
+    citation_run = citation_p.add_run(citation.text)
+    citation_run.italic = True
+
+    # Then the fuller rows for whoever wants them. For MiDRASH this is the
+    # canonical three-line form with the complete author list, which the
+    # one-sentence version abbreviates to "et al." -- a document has room for
+    # the full list where a pasteable sentence does not.
+    doc.add_paragraph()
+    doc.add_paragraph(credit.heading)
+    for line in credit.citation_lines:
+        doc.add_paragraph(line)
+
+
 def add_word_credits(doc: Document) -> None:
     """Add standard credits section to a Word document."""
     doc.add_page_break()
@@ -1307,7 +1369,24 @@ class ExportService:
             doc.add_heading(f"Page {browse_data.get('p_num', '?')}", 2)
             add_hebrew_paragraph(doc, browse_data['text'])
 
-        add_word_credits(doc)
+        # Source-aware credit (2026-09-04). NOT `add_word_credits`, which is
+        # unconditionally MiDRASH and in English -- see `add_word_source_credits`.
+        #
+        # `version_info` is None for a Full Manuscript View export by design:
+        # FMV renders every folio's stored text with no per-page version
+        # chooser, so the automatic transcription IS what was exported. The
+        # browse page sends None for that path deliberately, not by omission.
+        add_word_source_credits(
+            doc,
+            lang=browse_data.get('lang') or 'en',
+            version_info=(None if browse_data.get('view_all')
+                          else browse_data.get('version_info')),
+            library=browse_data.get('library_name'),
+            shelfmark=browse_data.get('shelfmark'),
+            folio=browse_data.get('folio_label'),
+            page_url=browse_data.get('page_url'),
+            retrieved_on=browse_data.get('retrieved_on'),
+        )
 
         # Filename: use shelfmark
         filename = make_safe_filename(shelfmark, default="manuscript") + ".docx"
