@@ -497,6 +497,126 @@ def test_the_chip_registry_is_cleaned_up_on_disconnect():
     case.
     """
     code = _code_only(CHIP)
-    assert 'app.on_disconnect' in code, (
+    assert 'client.on_disconnect' in code, (
         'nothing removes a registry entry when its client disconnects')
     assert '_forget' in code
+
+    # PER-CLIENT, never app-wide. `app.on_disconnect` appends to ONE global
+    # list that fires for EVERY disconnect, so a per-render handler there meant
+    # the first reader to close a tab forgot the chips of every other reader
+    # still on the site -- their citations then silently stopped following the
+    # page. That shipped, in the fix for the leak this test was written for; it
+    # is worse than the leak, because a leak wastes memory and this served
+    # wrong citations. The global list grew forever too, so the leak had only
+    # moved.
+    assert 'app.on_disconnect' not in code, (
+        'cleanup is registered application-wide: one reader disconnecting '
+        'unregisters every other live citation chip')
+
+
+# ---------------------------------------------------------------------------
+# Reviews 2-4: seven more, all verified real
+# ---------------------------------------------------------------------------
+
+def test_a_metadata_only_record_gets_no_citation():
+    """P1. A synthetic inventory id is served by `get_metadata_only_browse_page`
+    with `text=''`: an image and a catalogue entry, and NO transcription.
+
+    The chip guard rejected only `None`, so those pages offered a citation
+    crediting MiDRASH for a transcription that does not exist.
+    """
+    code = _code_only(BROWSE)
+    body = code.split('def _update_citation_chip', 1)[1].split('\n    def ', 1)[0]
+    assert "if not (page.text or '').strip():" in body, (
+        'a page with no transcription still produces a page citation')
+    assert body.index("if not (page.text or '').strip():") < body.index(
+        'set_page_citation(browse_page_citation('), (
+        'the empty-text check runs after the citation is built')
+
+
+def test_the_chip_is_cleared_when_the_manuscript_goes_away():
+    """P2. A search with no matches sets `current_page = None` and rebuilds the
+    view, but the layout-owned chip kept the PREVIOUS manuscript's citation --
+    so a reader could copy a citation for a folio no longer on screen."""
+    body = _code_only(BROWSE).split('def _update_citation_chip', 1)[1] \
+                             .split('\n    def ', 1)[0]
+    # BOTH guards, matched on their own conditions. A first version asserted
+    # only that `set_page_citation(None)` appeared before `_sm =`, which the
+    # EMPTY-TEXT guard satisfies on its own -- so deleting the page-is-None
+    # guard left it green. Found by mutation.
+    assert 'if page is None:' in body
+    none_guard = body.split('if page is None:', 1)[1].split('return', 1)[0]
+    assert 'set_page_citation(None)' in none_guard, (
+        'the stale citation survives when the page disappears: %r' % none_guard)
+
+
+def test_the_citation_url_names_the_folio_it_cites():
+    """P2. The URL carried only the shelfmark, so a citation naming "folio 2v"
+    opened the manuscript at 1r -- and was ambiguous on a multi-volume record.
+
+    Same three parameters `_update_browser_url` uses, because that IS this app's
+    durable locator; a citation must not invent a second one that drifts.
+    """
+    code = _code_only(BROWSE)
+    body = code.split('def _citation_page_url', 1)[1].split('\n    def ', 1)[0]
+    for param in ("'sys_id'", "'page'", "'volume_ie'"):
+        assert param in body, 'the citation URL omits %s' % param
+    # And BOTH consumers use it, so the chip and the .docx cannot disagree.
+    # CALL sites, not raw occurrences: `def _citation_page_url():` contains the
+    # string too, so counting occurrences let one caller be deleted and still
+    # read as two. Found by mutation.
+    calls = (code.count('_citation_page_url()')
+             - code.count('def _citation_page_url()'))
+    assert calls >= 2, (
+        'the citation URL has %d caller(s); the chip and the .docx must both '
+        'use it, or a citation copied off the screen and one printed in the '
+        'document can point at different folios' % calls)
+
+
+def test_the_all_pages_export_does_not_name_one_folio():
+    """P2. `folio_label` kept the folio selected before entering Full Manuscript
+    View, so a .docx containing every page described itself as one folio."""
+    code = _code_only(BROWSE)
+    assert "'folio_label': None if state.view_all else _folio," in code, (
+        'the all-pages export still names a single folio')
+
+
+def test_print_this_page_is_disabled_where_it_would_lie():
+    """P2 x2. In Full Manuscript View the DOM holds every folio, so "this page"
+    printed the whole manuscript. In edit mode the masthead, credit and rendered
+    text are built by the VIEW branch only, so what printed was the editor --
+    unsaved draft text with no shelfmark and no attribution on the sheet."""
+    code = _code_only(BROWSE)
+    assert '_no_single = (state.view_all' in code
+    assert 'or state.edit_mode' in code
+    assert 'or state.edit_loading)' in code
+    assert "_single.props('disable')" in code, (
+        'the entry is computed as unavailable but still clickable')
+
+
+def test_a_failed_full_manuscript_toggle_clears_the_print_intent():
+    """P2. `toggle_view_all` swallows a failed fetch and leaves `view_all`
+    false, but `print_pending` stayed true -- so the NEXT time the reader opened
+    Full Manuscript View, deliberately and much later, a print dialog appeared
+    that nobody had asked for."""
+    code = _code_only(BROWSE)
+    body = code.split('async def _print_all_pages', 1)[1].split('with ui.button', 1)[0]
+    assert 'await toggle_view_all()' in body
+    assert 'if not state.view_all:' in body, (
+        'a failed toggle leaves the print intent set: %r' % body)
+    assert "print_pending['value'] = False" in body
+
+
+def test_an_english_translation_is_not_exported_as_rtl_hebrew():
+    """P2. `add_hebrew_paragraph` sets `w:bidi`/`w:rtl` and right-aligns.
+
+    Correct while the export always carried the Hebrew transcription; since it
+    started shipping the DISPLAYED text, an English translation went through it
+    too and came out right-aligned RTL.
+    """
+    body = _code_only(REPO / 'web' / 'export_service.py') \
+        .split('def export_browse_word', 1)[1].split('\ndef ', 1)[0]
+    assert "_language.lower() == 'english'" in body, (
+        'the export direction ignores the translation language')
+    assert 'doc.add_paragraph(browse_data[' in body, (
+        'there is no non-RTL path for an English translation')

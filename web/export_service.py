@@ -1398,7 +1398,23 @@ class ExportService:
                     add_hebrew_paragraph(doc, page_data['text'])
         elif browse_data.get('text'):
             doc.add_heading(f"Page {browse_data.get('p_num', '?')}", 2)
-            add_hebrew_paragraph(doc, browse_data['text'])
+            # DIRECTION FOLLOWS THE TEXT, not the document.
+            #
+            # `add_hebrew_paragraph` sets `w:bidi` and `w:rtl` and right-aligns,
+            # which was right while this export always carried the Hebrew
+            # transcription. Since it started shipping the DISPLAYED text, an
+            # English translation went through it too and came out as
+            # right-aligned RTL English.
+            #
+            # The version selector already knows: `language` rides in
+            # `version_info` for both PGP and FGP translations, and the web
+            # reading view makes the same call (`is_rtl = language != 'English'`).
+            _vi = browse_data.get('version_info') or {}
+            _language = str(_vi.get('language') or '').strip()
+            if _language and _language.lower() == 'english':
+                doc.add_paragraph(browse_data['text'])
+            else:
+                add_hebrew_paragraph(doc, browse_data['text'])
 
         # Source-aware credit (2026-09-04). NOT `add_word_credits`, which is
         # unconditionally MiDRASH and in English -- see `add_word_source_credits`.

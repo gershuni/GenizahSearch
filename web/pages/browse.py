@@ -536,6 +536,34 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     # that view does not print by itself.
     print_pending = {'value': False}
 
+    def _citation_page_url():
+        """The durable locator for the folio ON SCREEN, not just the manuscript.
+
+        A citation that names "folio 2v" and links to a URL opening at folio 1r
+        sends the reader somewhere the citation does not describe. The shelfmark
+        alone did exactly that, and on a multi-volume manuscript it is ambiguous
+        as well.
+
+        Same three parameters `_update_browser_url` already puts in the address
+        bar -- `sys_id`, `page`, `volume_ie` -- because that IS this app's
+        durable locator, and a citation must not invent a second one that drifts
+        from it.
+        """
+        from urllib.parse import urlencode
+
+        page = state.current_page
+        if page is None:
+            return None
+        if not state.sys_id:
+            return (f'{GENIZAHSEARCH_URL}/browse?shelfmark={quote(page.shelfmark)}'
+                    if page.shelfmark else None)
+        params = {'sys_id': state.sys_id}
+        if page.p_num and page.p_num > 0:
+            params['page'] = page.p_num
+        if state.volume_ie:
+            params['volume_ie'] = state.volume_ie
+        return f'{GENIZAHSEARCH_URL}/browse?{urlencode(params)}'
+
     def _update_citation_chip(version_info=None):
         """Give the layout's "How to cite" chip this page's own citation.
 
@@ -551,20 +579,25 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         try:
             page = state.current_page
             if page is None:
+                set_page_citation(None)
+                return
+
+            # A METADATA-ONLY record (a synthetic inventory id, served by
+            # `get_metadata_only_browse_page`) carries `text=''`: there is an
+            # image and a catalogue entry, and no transcription at all. Offering
+            # a citation there credits MiDRASH for a transcription that does not
+            # exist. Rejecting only `None` let those through.
+            if not (page.text or '').strip():
+                set_page_citation(None)
                 return
             _sm = page.shelfmark or ''
-            _url = None
-            if _sm:
-                _url = f'{GENIZAHSEARCH_URL}/browse?shelfmark={quote(_sm)}'
-            elif page.sys_id:
-                _url = f'{GENIZAHSEARCH_URL}/browse?sys_id={quote(str(page.sys_id))}'
             set_page_citation(browse_page_citation(
                 version_info,
                 lang=get_language(),
                 library=page.library_name,
                 shelfmark=_sm or (f'ID: {page.sys_id}' if page.sys_id else None),
                 folio=page.folio_label,
-                page_url=_url,
+                page_url=_citation_page_url(),
             ))
         except Exception:                                        # noqa: BLE001
             logger.debug('citation chip update skipped', exc_info=True)
@@ -1328,14 +1361,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         # `on_version_change` is never called at all, so the key is simply
         # absent -- and absent means the plain HTR text, which is exactly what
         # `resolve_transcription_credit(None, ...)` credits.
+        # The locator comes from `_citation_page_url()`, the ONE builder the chip
+        # also uses, so a citation copied off the screen and one printed in the
+        # .docx cannot point at different folios.
         _folio = state.current_page.folio_label
-        _sm = state.current_page.shelfmark or ''
-        if _sm:
-            _page_url = f'{GENIZAHSEARCH_URL}/browse?shelfmark={quote(_sm)}'
-        elif state.sys_id:
-            _page_url = f'{GENIZAHSEARCH_URL}/browse?sys_id={quote(str(state.sys_id))}'
-        else:
-            _page_url = None
         export_data = {
             'shelfmark': state.current_page.shelfmark,
             'title': state.current_page.title,
@@ -1350,8 +1379,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             # single-page branch below pairs this with the displayed text.
             'version_info': (None if state.view_all
                              else enrichment_refs.get('current_version_info')),
-            'folio_label': _folio,
-            'page_url': _page_url,
+            # FULL MANUSCRIPT VIEW contains every folio, so naming the one
+            # that happened to be selected before entering it describes the
+            # document as something it is not -- the same reason `version_info`
+            # is dropped just above.
+            'folio_label': None if state.view_all else _folio,
+            'page_url': _citation_page_url(),
             'retrieved_on': retrieved_today(),
         }
 
@@ -4168,6 +4201,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     return
                                 print_pending['value'] = True
                                 await toggle_view_all()
+                                # `toggle_view_all` swallows a failed fetch and
+                                # leaves `view_all` false. Without this the
+                                # intent SURVIVED, and the next time the reader
+                                # opened Full Manuscript View -- deliberately,
+                                # much later -- the render branch consumed the
+                                # stale flag and threw up a print dialog nobody
+                                # had asked for.
+                                if not state.view_all:
+                                    print_pending['value'] = False
 
                             with ui.button(icon='print').props(
                                 f'flat round dense aria-label="{tr("Print / Save as PDF")}"'
@@ -4177,10 +4219,35 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 # control -- the row is already crowded enough
                                 # to wrap at 1280px.
                                 with ui.menu().props('auto-close'):
-                                    ui.menu_item(
+                                    # DISABLED in Full Manuscript View and in
+                                    # edit mode, for two different reasons.
+                                    #
+                                    # In FMV the DOM holds every folio, so
+                                    # "this page" printed the entire manuscript
+                                    # -- indistinguishable from the entry below
+                                    # it, and a large job nobody asked for.
+                                    #
+                                    # In edit mode the masthead, the source
+                                    # credit and the rendered transcription are
+                                    # built by the VIEW branch only, so what
+                                    # printed was the editor: a textarea of
+                                    # unsaved draft text, with no shelfmark and
+                                    # no credit on the sheet. A printed page
+                                    # carrying manuscript text and no
+                                    # attribution is the defect this whole
+                                    # change set exists to remove.
+                                    _no_single = (state.view_all
+                                                  or state.edit_mode
+                                                  or state.edit_loading)
+                                    _single = ui.menu_item(
                                         tr('Print this page'),
-                                        on_click=lambda: ui.run_javascript('window.print()'),
+                                        on_click=(None if _no_single
+                                                  else (lambda: ui.run_javascript('window.print()'))),
                                     ).classes('text-sm')
+                                    if _no_single:
+                                        _single.props('disable').tooltip(
+                                            tr('Leave Full Manuscript View or '
+                                               'finish editing to print one page'))
                                     _all_label = tr('Print all manuscript pages')
                                     if page.total_pages and page.total_pages > 1:
                                         _all_label = f'{_all_label} ({page.total_pages})'

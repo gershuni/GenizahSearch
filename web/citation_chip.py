@@ -54,7 +54,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional
 
-from nicegui import app, ui
+from nicegui import ui
 
 from shared.transcription_credits import PageCitation, page_citation, site_citation
 from web.client_guard import client_gone
@@ -218,19 +218,26 @@ def render_citation_chip(*, lang: str = 'en') -> None:
 
         _UPDATERS[client_id] = _repaint
 
-        # Drop the entry when the connection goes, not when someone next tries
-        # to use it. `_forget` on a failed update is a backstop for a dead
-        # LAYOUT; it never fires for a reader who simply closed the tab, since
-        # nothing asks that client for a citation again -- so on a long-running
-        # server ordinary traffic accumulated one closure per visit, each
-        # holding a whole obsolete UI tree.
+        # Drop the entry when THIS client's connection goes, not when someone
+        # next tries to use it. `_forget` on a failed update is a backstop for a
+        # dead LAYOUT; it never fires for a reader who simply closed the tab,
+        # since nothing asks that client for a citation again -- so on a
+        # long-running server ordinary traffic accumulated one closure per
+        # visit, each holding a whole obsolete UI tree.
+        #
+        # `client.on_disconnect`, NOT `app.on_disconnect`. The app-level hook
+        # appends to ONE global list that fires for EVERY disconnect, so a
+        # per-render handler there meant the first reader to close a tab forgot
+        # the chips of every other reader still on the site -- their citations
+        # then silently stopped following the page. That is worse than the leak
+        # it replaced: a leak wastes memory, this served wrong citations. The
+        # global list also grew forever, so the leak had merely moved.
         try:
-            app.on_disconnect(lambda c, _id=client_id: _forget(_id))
+            client.on_disconnect(lambda *_a, _id=client_id: _forget(_id))
         except Exception:                                        # noqa: BLE001
-            # An older NiceGUI without the hook, or a context that forbids
-            # registering one. The failed-update backstop still applies; this
-            # is a leak, not a correctness problem, and must not take the chip
-            # down.
+            # An older NiceGUI without the per-client hook. The failed-update
+            # backstop still applies; that is a leak, not a wrong citation, and
+            # must not take the chip down.
             logger.debug('could not register citation chip cleanup',
                          exc_info=True)
 
