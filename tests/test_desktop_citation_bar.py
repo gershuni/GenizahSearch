@@ -351,11 +351,14 @@ def test_no_metadata_manager_yields_no_page_citation_rather_than_a_crash():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize('lang', ['en', 'he'])
-def test_the_strip_names_this_site_as_well_as_midrash(lang):
+def test_the_site_citation_names_this_site_as_well_as_midrash(lang):
     """The old bar credited MiDRASH and never mentioned Dicta or the address.
 
-    The site citation is what the strip now shows, on every tab: it is true
-    everywhere, and it names both parties.
+    RENAMED from `test_the_strip_names_...`: it calls `site_citation` directly,
+    so it tests the shared formatter and says nothing about what the strip
+    displays. Replacing the strip's text with a literal left it green (Codex
+    review, confirmed by mutation). The strip's own wiring is asserted in
+    `test_the_strip_is_built_from_the_site_citation_with_no_date` below.
     """
     text = site_citation(lang=lang).text
     assert 'genizahsearch.com' in text
@@ -364,18 +367,44 @@ def test_the_strip_names_this_site_as_well_as_midrash(lang):
             else 'דיקטה' in text)
 
 
-def test_the_strip_carries_no_date_but_a_copied_citation_does():
-    """The bar is built once and the app may stay open for days.
+def test_the_site_citation_omits_a_date_unless_one_is_passed():
+    """RENAMED, for the same reason as the test above: this is the formatter.
 
-    A retrieval date painted at startup would be quietly wrong by the next
-    morning, so the visible strip omits it and the COPIED string is stamped when
-    it is copied. This is the property that lets the strip never be repainted.
+    `site_citation` must not invent a date -- the module never reads the clock,
+    the surface decides. What the STRIP does with that is asserted below.
     """
     on_screen = site_citation(lang='en').text
     copied = site_citation(lang='en', retrieved_on='2026-09-04').text
     assert 'Sept. 4, 2026' in copied
     assert '2026' not in on_screen.replace('2025', ''), (
-        'the strip carries a date, which goes stale in a long-running session')
+        'site_citation invented a date nobody passed it')
+
+
+def test_the_strip_is_built_from_the_site_citation_with_no_date():
+    """THE TWO CLAIMS THE RENAMED TESTS ABOVE DO NOT MAKE.
+
+    Both of those call `site_citation` directly, so a strip showing a literal
+    string, or a strip stamped with a start-up date, left them green -- found by
+    the Codex review and confirmed by running both mutations.
+
+    Why the date matters: the bar is built ONCE, at start-up, and the app may
+    stay open for days. A date painted then is quietly wrong by the next
+    morning, and it is the reason the strip can be built once and never
+    repainted. The copied string is stamped at copy time instead.
+    """
+    src = APP.read_text(encoding='utf-8')
+    bar = src[src.index('def _create_citation_bar'):
+              src.index('def _copy_citation_text')]
+    line = [ln for ln in bar.splitlines()
+            if 'cit_lbl = ' in ln and not ln.lstrip().startswith('#')]
+    assert len(line) == 1, 'expected one strip-label assignment, got %r' % line
+    assignment = line[0]
+    assert 'self._site_citation_text()' in assignment, (
+        'the strip is not built from the site citation: %r' % assignment)
+    for stamp in ('retrieved_on', '_citation_stamp'):
+        assert stamp not in assignment, (
+            'the strip is stamped with a date at build time, which is stale by '
+            'the next morning: %r' % assignment)
 
 
 def test_the_strip_elides_visibly_and_never_hands_out_the_cut_string():

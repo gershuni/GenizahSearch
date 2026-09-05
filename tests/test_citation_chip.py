@@ -435,8 +435,62 @@ def test_the_chip_registry_is_per_client_not_per_user():
 
 
 def test_chip_updates_are_guarded():
-    """This codebase has a history of `parent_slot has been deleted`; a citation
-    is never worth taking a surface down for."""
-    src = CHIP.read_text(encoding='utf-8')
-    assert 'client_gone' in src
-    assert 'RuntimeError' in src
+    """A dead layout must not take a page down, and must be forgotten.
+
+    This codebase has a history of `parent_slot has been deleted`; a citation is
+    never worth raising over. Previously this asserted that the strings
+    `client_gone` and `RuntimeError` appeared somewhere in the module -- which
+    the IMPORT line alone satisfies, so deleting the guard and keeping the
+    import left it green (Codex review). It now runs the real function.
+    """
+    from unittest import mock
+
+    from web import citation_chip as chip
+
+    class _Client:
+        id = 'test-client-guarded'
+
+    calls = []
+
+    def _raises(_citation):
+        calls.append('called')
+        raise RuntimeError('parent_slot has been deleted')
+
+    chip._UPDATERS[_Client.id] = _raises
+    try:
+        with mock.patch.object(chip.ui, 'context',
+                               mock.Mock(client=_Client())):
+            # Must not raise: the surface survives a dead chip.
+            chip.set_page_citation(None)
+        assert calls == ['called'], 'the updater was never invoked'
+        assert _Client.id not in chip._UPDATERS, (
+            'a client whose layout is gone was left in the registry, so every '
+            'later update retries it forever')
+    finally:
+        chip._UPDATERS.pop(_Client.id, None)
+
+
+def test_a_live_chip_still_receives_its_citation():
+    """THE CONTROL for the guard above.
+
+    A `set_page_citation` that swallowed everything -- or never called the
+    updater at all -- would satisfy "does not raise" perfectly.
+    """
+    from unittest import mock
+
+    from web import citation_chip as chip
+
+    class _Client:
+        id = 'test-client-live'
+
+    received = []
+    chip._UPDATERS[_Client.id] = received.append
+    try:
+        with mock.patch.object(chip.ui, 'context',
+                               mock.Mock(client=_Client())):
+            chip.set_page_citation(None)
+        assert received == [None]
+        assert _Client.id in chip._UPDATERS, (
+            'a healthy client was dropped from the registry')
+    finally:
+        chip._UPDATERS.pop(_Client.id, None)

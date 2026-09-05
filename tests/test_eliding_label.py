@@ -118,10 +118,31 @@ def test_setText_replaces_the_full_string_not_the_elided_one():
     assert label.full_text == LONG
 
 
-def test_it_survives_a_zero_width_and_an_empty_string():
-    """Called before the first layout pass, and on a cleared label."""
-    label = ElidingLabel(LONG)          # never resized: width() is 0
+def test_a_zero_width_label_shows_the_WHOLE_string_not_an_ellipsis():
+    """Before the first layout pass there is nothing to elide against.
+
+    The branch must show the full string, not a placeholder: the label is
+    painted at least once at that width in a real window, and a bar that
+    flashed "..." on start-up would look broken. The first version of this test
+    checked only `full_text` and never read `text()`, so a branch returning a
+    bare ellipsis left it green -- Codex review, confirmed by mutation.
+    """
+    # Resized to zero EXPLICITLY. A freshly-constructed unparented QLabel is
+    # 640px wide, not 0 -- Qt's default -- so "just constructed" does not reach
+    # this branch, and the first version of this test asserted it did. The
+    # branch is still real: a layout can assign a child no width at all.
+    label = ElidingLabel(LONG)
+    label.resize(0, 20)
+    label.show()
+    assert label.width() == 0, 'the fixture is no longer zero-width'
     assert label.full_text == LONG
+    assert label.text() == LONG, (
+        'the zero-width branch displays %r rather than the whole string'
+        % label.text())
+
+
+def test_clearing_it_clears_both_the_display_and_the_stored_string():
+    label = _narrow()
     label.setText('')
     assert label.full_text == ''
     assert label.text() == ''

@@ -138,10 +138,38 @@ def test_the_date_is_localized_in_the_docx_too():
 
 
 def test_the_credit_is_localized():
+    """Hebrew ANYWHERE in the document is not evidence of a Hebrew CREDIT.
+
+    The first version searched the whole .docx, which already carries Hebrew
+    manuscript text from the fixture -- so forcing the credit to English left it
+    green. Confirmed by mutation. It now asserts on strings only the credit
+    produces, in each direction.
+    """
     he = _export(lang='he')
-    assert re.search(r'[֐-׿]', he), 'no Hebrew in a Hebrew-language export'
+    assert 'נצפה בתאריך' in he, (
+        'the retrieval clause is not in Hebrew in a Hebrew-language export')
+    assert 'על בסיס' in he, (
+        'the "using" connector is not in Hebrew')
+    assert 'retrieved' not in he.lower(), (
+        'the English retrieval clause is in a Hebrew export')
+
     en = _export(lang='en')
     assert 'retrieved' in en.lower()
+    assert 'נצפה בתאריך' not in en, (
+        'the Hebrew retrieval clause is in an English export')
+
+    # AND the SOURCE clause, which is a different code path. The two assertions
+    # above come from `page_citation`'s own labels; forcing `_source_clause` to
+    # English left them green, because for the automatic transcription that
+    # clause is the MiDRASH citation, which is English in both languages. A
+    # provider name is the only part of the sentence that changes here.
+    he_pgp = _export(lang='he', version_info={
+        'source': 'pgp', 'attribution': 'S. D. Goitein'})
+    assert 'מהדורת פרויקט הגניזה של פרינסטון' in he_pgp, (
+        'the provider is named in English inside a Hebrew export')
+    en_pgp = _export(lang='en', version_info={
+        'source': 'pgp', 'attribution': 'S. D. Goitein'})
+    assert 'Princeton Geniza Project' in en_pgp
 
 
 def test_the_document_carries_the_full_author_list_EXACTLY_ONCE():

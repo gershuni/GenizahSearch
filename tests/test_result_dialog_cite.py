@@ -30,7 +30,7 @@ APP = REPO / 'genizah_app.py'
 RD = REPO / 'desktop' / 'result_dialog.py'
 
 
-def _load(name: str, src: Path = APP):
+def _load(name: str, src: Path = APP, extra: dict = None):
     tree = ast.parse(src.read_text(encoding='utf-8'))
     found = [n for n in ast.walk(tree)
              if isinstance(n, ast.FunctionDef) and n.name == name]
@@ -39,7 +39,7 @@ def _load(name: str, src: Path = APP):
     fn.decorator_list = []
     module = ast.Module(body=[fn], type_ignores=[])
     ast.fix_missing_locations(module)
-    ns: dict = {}
+    ns: dict = dict(extra or {})
     exec(compile(module, str(src), 'exec'), ns)                  # noqa: S102
     return ns[name]
 
@@ -221,6 +221,63 @@ def test_a_local_scan_gets_no_page_citation():
         'LOCAL results are not excluded, so a reader\'s own scan would be cited '
         'as a corpus manuscript')
     assert 'is_synthetic_sys_id(sid)' in body
+
+
+def test_the_shelfmark_actually_reaches_the_citation():
+    """READING `nli_cache` is not the same as USING what it returns.
+
+    The source test below proves the right SOURCE is read. It does not prove
+    the value survives: keeping the read and then setting `shelfmark = None`
+    left it green (Codex review, confirmed by mutation). So this runs the real
+    method and reads the citation it produces.
+    """
+    fn = _load('_rd_page_citation', src=RD, extra={
+        'get_library_display': lambda code, short=False: 'Cambridge University Library',
+        'is_synthetic_sys_id': lambda sid: False,
+    })
+
+    class _Combo:
+        @staticmethod
+        def currentData():
+            return {'source': 'original'}
+
+    class _Spin:
+        @staticmethod
+        def maximum():
+            return 2
+
+    class _Meta:
+        nli_cache = {'99001': {'shelfmark': 'T-S Ar.50.74'}}
+
+        @staticmethod
+        def get_library_for_id(_sid):
+            return 'CUL'
+
+    class _App:
+        @staticmethod
+        def _credit_version_info(data, pgp_url=None):
+            return None
+
+        @staticmethod
+        def _citation_lang():
+            return 'en'
+
+    dialog = _Stub()
+    dialog.current_sys_id = '99001'
+    dialog.meta_mgr = _Meta()
+    dialog.rd_version_combo = _Combo()
+    dialog.spin_page = _Spin()
+    dialog._rd_pgp_url = None
+    dialog._app = _App()
+    dialog._rd_displayed_image_keys = lambda _total: ('1r', '')
+
+    citation = fn(dialog, retrieved_on='2026-09-05')
+    assert citation is not None
+    assert 'T-S Ar.50.74' in citation.text, (
+        'the shelfmark read from nli_cache never reached the citation: %r'
+        % citation.text)
+    assert 'Cambridge University Library' in citation.text
+    assert 'folio 1r' in citation.text
 
 
 def test_the_shelfmark_comes_from_the_same_source_as_the_browse_tab():
