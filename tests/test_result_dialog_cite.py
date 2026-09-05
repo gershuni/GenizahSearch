@@ -22,7 +22,6 @@ widget test takes. What IS covered without Qt, and is where the real risk sits:
 from __future__ import annotations
 
 import ast
-import re
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -161,17 +160,39 @@ def test_there_is_still_only_one_vocabulary_translation():
 # 2. The buttons
 # ---------------------------------------------------------------------------
 
-def test_the_cite_button_is_on_the_toolbar_with_both_citations():
-    rd = RD.read_text(encoding='utf-8')
-    assert 'self.btn_cite = QToolButton()' in rd
-    assert 'community_row.addWidget(self.btn_cite)' in rd, (
+def test_the_cite_button_is_a_single_cite_this_page_action():
+    """REPLACES a test asserting a two-entry menu (owner, 2026-09-06:
+    "Make the single 'cite this page' also the button in ResultDialog like
+    Browse Tab").
+
+    THE CONSEQUENCE, recorded because it is not obvious: this dialog is
+    application-modal, so the citation bar behind it is inert -- citing the
+    APPLICATION now means closing the dialog first. That is the owner's call;
+    the alternative was the only cite control in the app behaving differently
+    from its twin.
+    """
+    code = _code_only(RD)
+    assert 'self.btn_cite = QToolButton()' in code
+    assert 'community_row.addWidget(self.btn_cite)' in code, (
         'the cite button is not on the dialog toolbar')
-    assert re.search(r'_rd_act_cite_page\.triggered\.connect\('
-                     r'self\._rd_copy_page_citation\)', rd)
-    assert re.search(r'_rd_act_cite_site\.triggered\.connect\('
-                     r'self\._rd_copy_site_citation\)', rd)
-    assert 'self.rd_cite_menu.aboutToShow.connect' in rd, (
-        'the page entry is not re-evaluated when the menu opens')
+    assert 'self.btn_cite.clicked.connect(self._rd_copy_page_citation)' in code, (
+        'the button does not cite THIS PAGE')
+    assert 'rd_cite_menu' not in code, (
+        'the two-entry menu is back; the button is meant to be one action')
+    assert '_rd_copy_site_citation' not in code, (
+        'the dialog still offers the application citation')
+
+
+def test_it_says_so_when_there_is_no_page_to_cite():
+    """Rather than quietly copying a different citation.
+
+    The handler used to fall back to the application citation. The reader asked
+    for this folio; substituting another without a word is the silent swap this
+    work exists to remove, and they would paste it believing it names the page.
+    """
+    body = _method(_code_only(RD), '_rd_copy_page_citation')
+    assert 'QMessageBox.information' in body
+    assert '_rd_copy_site_citation' not in body
 
 
 def test_it_survives_compact_mode():
@@ -190,9 +211,9 @@ def test_it_survives_compact_mode():
     assert 'self.btn_compact_cite = QToolButton()' in rd, (
         'no compact twin: the cite button disappears in compact mode')
     assert 'compact_layout.addWidget(self.btn_compact_cite)' in rd
-    assert 'self.btn_compact_cite.setMenu(self.rd_cite_menu)' in rd, (
-        'the compact twin has its own menu instead of sharing one, so the two '
-        'can drift')
+    assert 'self.btn_compact_cite.clicked.connect(self._rd_copy_page_citation)' in rd, (
+        'the compact twin is not wired to the same single action as its full-'
+        'header counterpart, so the two can drift')
 
 
 def test_the_message_box_is_parented_to_the_dialog():
@@ -261,6 +282,10 @@ def test_the_shelfmark_actually_reaches_the_citation():
         @staticmethod
         def _citation_lang():
             return 'en'
+
+        @staticmethod
+        def _software_clause():
+            return 'Dicta Genizah Search Pro V9.1.0'
 
     dialog = _Stub()
     dialog.current_sys_id = '99001'

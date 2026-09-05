@@ -533,3 +533,104 @@ def test_the_cite_sync_does_not_consult_the_tab_gate():
     assert '_browse_page_citation' not in body, (
         'the enable check consults the tab-gated citation, so the button is '
         'disabled whenever the manuscript loads while another tab is in front')
+
+
+# ---------------------------------------------------------------------------
+# 4. The desktop cites SOFTWARE, not a website (owner, 2026-09-05)
+# ---------------------------------------------------------------------------
+
+def test_the_desktop_does_not_cite_the_website():
+    """THE DEFECT the owner reported.
+
+    Both desktop citations named the site, its address and a retrieval date --
+    all three false for a reader who never opened a browser. A reader working in
+    the desktop application ran a PROGRAM, and what identifies a program is its
+    version.
+    """
+    from shared.export_utils import desktop_software_clause
+    from shared.transcription_credits import site_citation
+
+    for lang in ('en', 'he'):
+        text = site_citation(lang=lang,
+                             software=desktop_software_clause('9.1.0')).text
+        assert 'genizahsearch.com' not in text, (
+            'the desktop citation points at a website the reader never visited')
+        assert 'retrieved' not in text.lower()
+        assert 'נצפה בתאריך' not in text, 'the desktop citation carries a date'
+        assert 'Dicta Genizah Search Pro V9.1.0' in text
+        # The MiDRASH credit is unaffected -- it is about the TEXT, not the app.
+        assert 'MiDRASH' in text
+
+
+def test_the_product_name_is_the_same_in_both_languages():
+    """Not a missing translation -- the established convention for this product.
+
+    The window title, the export credit header and the Hebrew consent dialog all
+    keep the Latin name. The WEB site name translates because it describes a
+    website; a product name does not.
+    """
+    from shared.export_utils import DESKTOP_APP_NAME, desktop_software_clause
+    from shared.transcription_credits import site_citation
+
+    assert DESKTOP_APP_NAME == 'Dicta Genizah Search Pro'
+    clause = desktop_software_clause('9.1.0')
+    he = site_citation(lang='he', software=clause).text
+    en = site_citation(lang='en', software=clause).text
+    assert DESKTOP_APP_NAME in he and DESKTOP_APP_NAME in en
+    # ...and the Hebrew WEB site name must not appear on a desktop citation.
+    assert 'אתר הגניזה של דיקטה' not in he, (
+        'the desktop citation calls itself the website, in Hebrew')
+
+
+def test_the_web_citation_is_unchanged():
+    """The CONTROL. `software` is opt-in; a change that made every citation a
+    software citation would satisfy the two tests above and break the site."""
+    from shared.transcription_credits import site_citation
+
+    text = site_citation(lang='en', retrieved_on='2026-09-05').text
+    assert 'genizahsearch.com' in text
+    assert 'retrieved Sept. 5, 2026' in text
+    assert 'Dicta Genizah Search Pro' not in text, (
+        'the WEB citation now names the desktop product')
+
+
+def test_a_version_is_required_for_the_clause_to_carry_one():
+    """The owner asked for the version specifically. A blank one must degrade to
+    the bare name rather than printing a dangling "V"."""
+    from shared.export_utils import desktop_software_clause
+
+    assert desktop_software_clause('9.1.0') == 'Dicta Genizah Search Pro V9.1.0'
+    assert desktop_software_clause('') == 'Dicta Genizah Search Pro'
+    assert desktop_software_clause(None) == 'Dicta Genizah Search Pro'
+
+
+def test_the_desktop_reads_the_real_app_version():
+    """A hardcoded version would go stale at the next release and nothing would
+    say so -- the citation would name a version the reader is not running."""
+    from version import APP_VERSION
+
+    body = _code_only(APP).split('def _software_clause', 1)[1] \
+                          .split('\n    def ', 1)[0]
+    assert 'APP_VERSION' in body, (
+        'the software clause does not read the real version')
+    assert APP_VERSION not in body, (
+        'the version is hardcoded into the clause instead of read from version.py')
+
+
+def test_both_desktop_citation_paths_pass_the_software_clause():
+    """The bar, the Browse toolbar and the ResultDialog all cite the app.
+
+    A path that missed it would silently fall back to the WEB form -- naming a
+    site and a date -- which is the defect, not an error.
+    """
+    code = _code_only(APP)
+    for name in ('_site_citation_text', '_browse_page_citation'):
+        body = code.split('def %s' % name, 1)[1].split('\n    def ', 1)[0]
+        assert 'software=self._software_clause()' in body, (
+            '%s does not pass the software clause, so it cites the website'
+            % name)
+
+    rd = _code_only(REPO / 'desktop' / 'result_dialog.py')
+    body = rd.split('def _rd_page_citation', 1)[1].split('\n    def ', 1)[0]
+    assert 'software=self._app._software_clause()' in body, (
+        'the ResultDialog citation still names the website')

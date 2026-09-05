@@ -115,6 +115,7 @@ _LABELS_EN: Dict[str, str] = {
     'cite': "When publishing material from this site, please cite:",
     'how_to_cite': "How to cite this page",
     'how_to_cite_site': "How to cite this site",
+    'how_to_cite_app': "How to cite this application",
     'using': "using",
     # SENTENCE forms of the provider names. The `*_heading` values above are
     # standalone LABELS for the print sheet and carry a colon ("Transcription:
@@ -152,6 +153,7 @@ _LABELS_HE: Dict[str, str] = {
     'cite': "בכל פרסום של החומר המוצג כאן, אנא צטטו את:",
     'how_to_cite': "כיצד לצטט דף זה",
     'how_to_cite_site': "כיצד לצטט את האתר",
+    'how_to_cite_app': "כיצד לצטט את התוכנה",
     # "על בסיס" (owner, 2026-09-04), not "על פי". The clause names the
     # transcription a page RESTS ON, which is a statement about provenance;
     # "על פי" reads as conformity to an authority, which is a different claim.
@@ -557,6 +559,7 @@ def page_citation(
     folio: Optional[str] = None,
     page_url: Optional[str] = None,
     retrieved_on=None,
+    software: Optional[str] = None,
 ) -> PageCitation:
     """The "how to cite this page" sentence.
 
@@ -569,6 +572,22 @@ def page_citation(
     fastidiousness -- an accessed-date is a property of the READER's visit, so
     only the request that served them knows it, and a pure function is testable.
     """
+    # A citation is EITHER a resource citation (a site, an address, a date it
+    # was fetched) or a software citation (a program and its version). Passing
+    # both is not a caller being generous, it is a caller that has not decided
+    # what it is citing -- and the result would claim to be two kinds of thing.
+    #
+    # Enforced rather than silently resolved, because the silent resolution is
+    # what made the guard at the desktop call site untestable: `software` won,
+    # so passing a URL alongside it changed nothing and a mutation removing that
+    # call-site guard survived.
+    if software and (page_url or retrieved_on):
+        raise ValueError(
+            'a software citation names a version, not a fetched address: '
+            'pass software= OR page_url=/retrieved_on=, never both '
+            '(got software=%r, page_url=%r, retrieved_on=%r)'
+            % (software, page_url, retrieved_on))
+
     labels = _labels(lang)
     clauses = []
 
@@ -576,14 +595,28 @@ def page_citation(
     if ms:
         clauses.append(ms)
 
-    # WHERE it was read. The page URL already carries the domain, so the site
-    # name is not repeated as a bare address beside it.
-    site = site_name(lang)
-    where = '%s, %s' % (site, page_url) if page_url else site
-    stamp = _format_retrieved(retrieved_on, lang)
-    if stamp:
-        where = '%s (%s)' % (where, labels['retrieved_on_inline'].format(date=stamp))
-    clauses.append(where)
+    # WHERE it was read.
+    #
+    # `software` is the DESKTOP form and replaces the whole clause: a reader
+    # working in the desktop app never visited a URL on a date, so a site name,
+    # an address and a retrieval date would all three be false. What identifies
+    # a running program is its version, which is what that clause carries.
+    # `retrieved_on` and `page_url` are ignored rather than merged -- offering
+    # both a version and a fetch date would invite one caller to pass both and
+    # produce a citation that claims to be two kinds of thing at once.
+    #
+    # Otherwise the WEB form: the page URL already carries the domain, so the
+    # site name is not repeated as a bare address beside it.
+    if software:
+        clauses.append(software)
+    else:
+        site = site_name(lang)
+        where = '%s, %s' % (site, page_url) if page_url else site
+        stamp = _format_retrieved(retrieved_on, lang)
+        if stamp:
+            where = '%s (%s)' % (
+                where, labels['retrieved_on_inline'].format(date=stamp))
+        clauses.append(where)
 
     text = '. '.join(clauses)
     source = _source_clause(version_info, lang)
@@ -601,7 +634,8 @@ def page_citation(
     )
 
 
-def site_citation(*, lang: str = 'en', retrieved_on=None) -> PageCitation:
+def site_citation(*, lang: str = 'en', retrieved_on=None,
+                  software: Optional[str] = None) -> PageCitation:
     """How to cite the SITE as a whole -- the regular chip on every page.
 
     Owner, 2026-09-04: "most people will want to cite the website usage as a
@@ -618,10 +652,14 @@ def site_citation(*, lang: str = 'en', retrieved_on=None) -> PageCitation:
     that there is no manuscript clause, the URL is the site root, and the
     heading says "site" rather than "page".
     """
+    # `software` makes this "how to cite the APP", the desktop's equivalent of
+    # citing the site as a whole -- so the site URL is not attached either.
     citation = page_citation(
-        None, lang=lang, page_url=GENIZAHSEARCH_URL, retrieved_on=retrieved_on)
+        None, lang=lang,
+        page_url=None if software else GENIZAHSEARCH_URL,
+        retrieved_on=retrieved_on, software=software)
     return PageCitation(
-        heading=_labels(lang)['how_to_cite_site'],
+        heading=_labels(lang)['how_to_cite_app' if software else 'how_to_cite_site'],
         text=citation.text,
         credits_midrash=citation.credits_midrash,
         kind=citation.kind,

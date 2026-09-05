@@ -108,6 +108,29 @@ _SITE_NAME_BY_LANG = {
 }
 
 
+#: The DESKTOP product name, and it is deliberately the same in both UI
+#: languages. This is the established convention for this product, not a
+#: missing translation: the window title (`genizah_app.py`), the export credit
+#: header and the Hebrew consent dialog all keep the Latin name. The WEB site
+#: name translates because it describes a website; a product name does not.
+DESKTOP_APP_NAME: str = "Dicta Genizah Search Pro"
+
+
+def desktop_software_clause(version: str) -> str:
+    """The "where this came from" clause for the DESKTOP app.
+
+    A software citation, not a resource citation: a reader working in the
+    desktop application never visited a URL on a date, so a retrieval date
+    describes a fetch that did not happen. What identifies a running program is
+    its version, which is why the caller must supply one.
+
+    `V` capitalised to match the window title, which is where a reader will go
+    looking to check which version they have.
+    """
+    version = str(version or '').strip()
+    return '%s V%s' % (DESKTOP_APP_NAME, version) if version else DESKTOP_APP_NAME
+
+
 def site_name(lang: str = 'en') -> str:
     """The site's display name for ``lang`` ('he' or anything else = English)."""
     return _SITE_NAME_BY_LANG.get('he' if str(lang or '').lower().startswith('he') else 'en',

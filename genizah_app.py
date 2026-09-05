@@ -15404,13 +15404,14 @@ class GenizahGUI(QMainWindow):
         combo = getattr(self, 'browse_version_combo', None)
         version_data = combo.currentData() if combo is not None else None
 
+        del retrieved_on          # software citation: a version, not a date
         return page_citation(
             self._credit_version_info(version_data),
             lang=self._citation_lang(),
             library=library,
             shelfmark=shelfmark,
             folio=self._displayed_folio_label_for_pgp() or None,
-            retrieved_on=retrieved_on,
+            software=self._software_clause(),
         )
 
     def _sync_browse_cite_button(self):
@@ -15439,11 +15440,27 @@ class GenizahGUI(QMainWindow):
             citable = bool(sid)
         btn.setEnabled(citable)
 
+    def _software_clause(self):
+        """"Dicta Genizah Search Pro V<version>" -- what this app IS.
+
+        The desktop cites SOFTWARE, not a website. Until 2026-09-05 both desktop
+        citations named the site and its address and stamped a retrieval date,
+        all three of which are false for a reader who never opened a browser.
+        """
+        from shared.export_utils import desktop_software_clause
+        return desktop_software_clause(APP_VERSION)
+
     def _site_citation_text(self, *, retrieved_on=None):
-        """How to cite the site as a whole. Names Dicta, the address and MiDRASH."""
+        """How to cite the APPLICATION as a whole -- names it, its version, MiDRASH.
+
+        `retrieved_on` is accepted and ignored: a version identifies a program,
+        a date identifies a fetch, and this is the former. Kept in the signature
+        so the desktop and web surfaces stay call-compatible.
+        """
+        del retrieved_on
         from shared.transcription_credits import site_citation
         return site_citation(lang=self._citation_lang(),
-                             retrieved_on=retrieved_on).text
+                             software=self._software_clause()).text
 
     @staticmethod
     def _citation_stamp():
@@ -15529,7 +15546,7 @@ class GenizahGUI(QMainWindow):
         # toolbar (`btn_b_cite`, beside Save), where it cannot be reached from
         # anywhere that has no page.
         btn = QPushButton(tr("Copy Citation"))
-        btn.setToolTip(tr("Citation for the site"))
+        btn.setToolTip(tr("Citation for this application"))
         btn.setFixedHeight(22)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setStyleSheet(f"""

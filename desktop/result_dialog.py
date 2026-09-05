@@ -232,10 +232,10 @@ class ResultDialog(QDialog):
         # Cite (compact) - twin of btn_cite; menu attached once rd_cite_menu exists
         self.btn_compact_cite = QToolButton()
         self.btn_compact_cite.setText("\u201c\u201d")
-        self.btn_compact_cite.setToolTip(tr("How to cite"))
+        self.btn_compact_cite.setToolTip(tr("Cite this page"))
         self.btn_compact_cite.setFixedSize(40, 32)
         self.btn_compact_cite.setStyleSheet("background-color: #6b7280; color: white; border-radius: 4px;")
-        self.btn_compact_cite.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.btn_compact_cite.clicked.connect(self._rd_copy_page_citation)
         compact_layout.addWidget(self.btn_compact_cite)
 
         # Translation toggle (compact)
@@ -508,24 +508,21 @@ class ResultDialog(QDialog):
         self.btn_joins.setMenu(self.rd_joins_menu)
         community_row.addWidget(self.btn_joins)
 
-        # Cite button with dropdown. Two entries -- this folio, or the site --
-        # neither chosen for the reader, matching the main window's citation
-        # bar. InstantPopup rather than the Joins button's MenuButtonPopup:
-        # there is no single "default" citation to fire on a bare click, which
-        # is exactly the ambiguity the main-window bar was redesigned to remove.
+        # ONE button, "Cite this page", matching the Browse tab's `btn_b_cite`
+        # (owner, 2026-09-06). It replaced a two-entry menu that also offered
+        # the application citation.
+        #
+        # THE CONSEQUENCE, since it is not obvious: this dialog is
+        # application-modal, so the citation bar behind it is inert -- citing
+        # the application now means closing the dialog first. One Escape away,
+        # and the owner's call; the alternative was the only cite control in
+        # the app that behaved differently from its twin.
         self.btn_cite = QToolButton()
         self.btn_cite.setText("\u201c\u201d")
-        self.btn_cite.setToolTip(tr("How to cite"))
+        self.btn_cite.setToolTip(tr("Cite this page"))
         self.btn_cite.setFixedSize(40, 32)
         self.btn_cite.setStyleSheet("background-color: #6b7280; color: white; border-radius: 4px;")
-        self.btn_cite.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.rd_cite_menu = QMenu(self)
-        self._rd_act_cite_page = self.rd_cite_menu.addAction(tr("Citation for this page"))
-        self._rd_act_cite_page.triggered.connect(self._rd_copy_page_citation)
-        self._rd_act_cite_site = self.rd_cite_menu.addAction(tr("Citation for the site"))
-        self._rd_act_cite_site.triggered.connect(self._rd_copy_site_citation)
-        self.rd_cite_menu.aboutToShow.connect(self._rd_on_cite_menu_show)
-        self.btn_cite.setMenu(self.rd_cite_menu)
+        self.btn_cite.clicked.connect(self._rd_copy_page_citation)
         community_row.addWidget(self.btn_cite)
 
         community_row.addStretch()
@@ -553,15 +550,15 @@ class ResultDialog(QDialog):
 
         # Set compact joins button menu (now that rd_joins_menu is created)
         self.btn_compact_joins.setMenu(self.rd_joins_menu)
-        # ...and the compact Cite button, sharing the SAME menu object.
+        # The compact Cite twin needs no menu now that the button is a single
+        # action -- it is wired straight to the same handler where it is built.
         #
-        # `_toggle_compact_mode` hides `header_widget` wholesale, so a button
-        # only in `community_row` vanishes in compact mode. Joins, PGP and
-        # Catalog have compact twins; Edit, Comment and Corrections do not.
-        # A citation belongs with the first group: this dialog is modal, so it
-        # is the ONLY route to a citation while it is open, and losing it to a
-        # layout toggle would be a hole rather than a trim.
-        self.btn_compact_cite.setMenu(self.rd_cite_menu)
+        # It still has to EXIST: `_toggle_compact_mode` hides `header_widget`
+        # wholesale, so a button only in `community_row` vanishes in compact
+        # mode. Joins, PGP and Catalog have compact twins; Edit, Comment and
+        # Corrections do not. A citation belongs with the first group, because
+        # this dialog is modal and losing the control to a layout toggle would
+        # be a hole rather than a trim.
         
         # --- SPLIT VIEW (Manuscript | Source | External) ---
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -2670,13 +2667,14 @@ class ResultDialog(QDialog):
         version_info = self._app._credit_version_info(
             version_data, pgp_url=getattr(self, '_rd_pgp_url', None))
 
+        del retrieved_on          # software citation: a version, not a date
         return page_citation(
             version_info,
             lang=self._app._citation_lang(),
             library=library,
             shelfmark=shelfmark,
             folio=folio or None,
-            retrieved_on=retrieved_on,
+            software=self._app._software_clause(),
         )
 
     def _rd_copy_citation(self, text):
@@ -2688,26 +2686,22 @@ class ResultDialog(QDialog):
                                 tr("Citation copied to clipboard!"))
 
     def _rd_copy_page_citation(self):
-        citation = self._rd_page_citation(
-            retrieved_on=self._app._citation_stamp())
+        """Cite the folio this dialog is showing.
+
+        Says so when there is nothing to cite -- a LOCAL document, or a result
+        with no manuscript -- rather than quietly copying the application
+        citation instead. The reader asked for this folio; handing them a
+        different citation without a word is the silent substitution this work
+        exists to remove, and they would paste it believing it names the page.
+        """
+        citation = self._rd_page_citation()
         if citation is None:
-            self._rd_copy_site_citation()
+            QMessageBox.information(
+                self, tr("Citation"),
+                tr("There is no manuscript page to cite. Use Copy Citation at "
+                   "the bottom of the window to cite the site."))
             return
         self._rd_copy_citation(citation.text)
-
-    def _rd_copy_site_citation(self):
-        self._rd_copy_citation(
-            self._app._site_citation_text(
-                retrieved_on=self._app._citation_stamp()))
-
-    def _rd_on_cite_menu_show(self):
-        try:
-            self._rd_act_cite_page.setEnabled(
-                self._rd_page_citation() is not None)
-        except Exception:                                        # noqa: BLE001
-            # Never take the menu down over a citation: the site entry is
-            # always valid, and withholding the page one is the right failure.
-            self._rd_act_cite_page.setEnabled(False)
 
     def load_page(self, offset=0, target=None):
         if not self.current_sys_id: return

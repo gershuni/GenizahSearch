@@ -295,6 +295,10 @@ def test_a_corpus_document_still_gets_one():
         def _displayed_folio_label_for_pgp():
             return '1r'
 
+        @staticmethod
+        def _software_clause():
+            return 'Dicta Genizah Search Pro V9.1.0'
+
     citation = fn(_Stub(), retrieved_on='2026-09-05')
     assert citation is not None
     assert 'T-S Ar.50.74' in citation.text
@@ -350,6 +354,10 @@ def _browse_stub(active_tab, sid='99001'):
         @staticmethod
         def _displayed_folio_label_for_pgp():
             return '1r'
+
+        @staticmethod
+        def _software_clause():
+            return 'Dicta Genizah Search Pro V9.1.0'
 
     stub = _Stub()
     stub.browse_tab = browse_tab
