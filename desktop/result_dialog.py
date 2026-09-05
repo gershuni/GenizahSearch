@@ -4,7 +4,7 @@ import re
 import threading
 
 from PyQt6.QtWidgets import (
-    QComboBox, QDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
+    QApplication, QComboBox, QDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
     QMenu, QMessageBox, QPushButton, QSpinBox, QSplitter, QStyle,
     QTextBrowser, QToolButton, QVBoxLayout, QWidget,
 )
@@ -228,6 +228,15 @@ class ResultDialog(QDialog):
         self.btn_compact_joins.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self.btn_compact_joins.clicked.connect(self._rd_view_joins)
         compact_layout.addWidget(self.btn_compact_joins)
+
+        # Cite (compact) - twin of btn_cite; menu attached once rd_cite_menu exists
+        self.btn_compact_cite = QToolButton()
+        self.btn_compact_cite.setText("\u201c\u201d")
+        self.btn_compact_cite.setToolTip(tr("How to cite"))
+        self.btn_compact_cite.setFixedSize(40, 32)
+        self.btn_compact_cite.setStyleSheet("background-color: #6b7280; color: white; border-radius: 4px;")
+        self.btn_compact_cite.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        compact_layout.addWidget(self.btn_compact_cite)
 
         # Translation toggle (compact)
         self.btn_compact_translations = QPushButton()
@@ -499,6 +508,26 @@ class ResultDialog(QDialog):
         self.btn_joins.setMenu(self.rd_joins_menu)
         community_row.addWidget(self.btn_joins)
 
+        # Cite button with dropdown. Two entries -- this folio, or the site --
+        # neither chosen for the reader, matching the main window's citation
+        # bar. InstantPopup rather than the Joins button's MenuButtonPopup:
+        # there is no single "default" citation to fire on a bare click, which
+        # is exactly the ambiguity the main-window bar was redesigned to remove.
+        self.btn_cite = QToolButton()
+        self.btn_cite.setText("\u201c\u201d")
+        self.btn_cite.setToolTip(tr("How to cite"))
+        self.btn_cite.setFixedSize(40, 32)
+        self.btn_cite.setStyleSheet("background-color: #6b7280; color: white; border-radius: 4px;")
+        self.btn_cite.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.rd_cite_menu = QMenu(self)
+        self._rd_act_cite_page = self.rd_cite_menu.addAction(tr("Citation for this page"))
+        self._rd_act_cite_page.triggered.connect(self._rd_copy_page_citation)
+        self._rd_act_cite_site = self.rd_cite_menu.addAction(tr("Citation for the site"))
+        self._rd_act_cite_site.triggered.connect(self._rd_copy_site_citation)
+        self.rd_cite_menu.aboutToShow.connect(self._rd_on_cite_menu_show)
+        self.btn_cite.setMenu(self.rd_cite_menu)
+        community_row.addWidget(self.btn_cite)
+
         community_row.addStretch()
 
         self.txt_extended_info = QTextBrowser()
@@ -524,6 +553,15 @@ class ResultDialog(QDialog):
 
         # Set compact joins button menu (now that rd_joins_menu is created)
         self.btn_compact_joins.setMenu(self.rd_joins_menu)
+        # ...and the compact Cite button, sharing the SAME menu object.
+        #
+        # `_toggle_compact_mode` hides `header_widget` wholesale, so a button
+        # only in `community_row` vanishes in compact mode. Joins, PGP and
+        # Catalog have compact twins; Edit, Comment and Corrections do not.
+        # A citation belongs with the first group: this dialog is modal, so it
+        # is the ONLY route to a citation while it is open, and losing it to a
+        # layout toggle would be a hole rather than a trim.
+        self.btn_compact_cite.setMenu(self.rd_cite_menu)
         
         # --- SPLIT VIEW (Manuscript | Source | External) ---
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -2578,6 +2616,98 @@ class ResultDialog(QDialog):
             folio_label_for_displayed_page(imgs, p, total_pages),
             fgp_image_number_for_displayed_page(imgs, p, total_pages),
         )
+
+    # ---- Citation ------------------------------------------------------
+    #
+    # This dialog is application-modal (`.exec()`, no modality override), so
+    # while it is open the main window's citation bar is inert -- a reader
+    # looking at a folio here has no other route to a citation.
+
+    def _rd_page_citation(self, *, retrieved_on=None):
+        """How to cite the folio this dialog is showing, or None.
+
+        Derived from live widget state at CALL time, like the main window's
+        equivalent, so nothing can go stale between a version change and a
+        click.
+
+        Shelfmark and library are read from `meta_mgr.nli_cache` -- the SAME
+        source the Browse tab uses -- and deliberately NOT from `self.lbl_shelf`,
+        which is an already-formatted "Library | Shelfmark" string built by a
+        different path. Reusing that label would print the library twice and
+        could make one manuscript cite differently here than on the Browse tab.
+        """
+        from shared.transcription_credits import page_citation
+        from shared.local_sys_id import is_local_sys_id as _is_local
+
+        sid = getattr(self, 'current_sys_id', None)
+        meta_mgr = getattr(self, 'meta_mgr', None)
+        if not sid or meta_mgr is None:
+            return None
+
+        # A LOCAL ("97") sys_id is the reader's OWN scan in My Library. Nobody
+        # in this citation transcribed it, and it has no corpus library or
+        # shelfmark, so there is no honest page citation to give. The site
+        # citation stays available.
+        if _is_local(sid) or is_synthetic_sys_id(sid):
+            return None
+
+        meta = meta_mgr.nli_cache.get(sid, {}) or {}
+        shelfmark = meta.get('shelfmark')
+        if not shelfmark or shelfmark == 'Unknown':
+            shelfmark = None
+
+        library_code = meta_mgr.get_library_for_id(sid)
+        library = (get_library_display(library_code, short=False)
+                   if library_code else None)
+
+        folio, _img = self._rd_displayed_image_keys(self.spin_page.maximum())
+
+        version_data = self.rd_version_combo.currentData() \
+            if getattr(self, 'rd_version_combo', None) is not None else None
+        # The parent owns the ONE combo-vocabulary translation; `pgp_url` is
+        # passed because it is per-surface and the parent's default is the
+        # Browse tab's.
+        version_info = self._app._credit_version_info(
+            version_data, pgp_url=getattr(self, '_rd_pgp_url', None))
+
+        return page_citation(
+            version_info,
+            lang=self._app._citation_lang(),
+            library=library,
+            shelfmark=shelfmark,
+            folio=folio or None,
+            retrieved_on=retrieved_on,
+        )
+
+    def _rd_copy_citation(self, text):
+        # Parented to THIS dialog, not the main window: the dialog is
+        # application-modal, so a message box parented to the parent would be
+        # blocked behind it.
+        QApplication.clipboard().setText(text)
+        QMessageBox.information(self, tr("Copied"),
+                                tr("Citation copied to clipboard!"))
+
+    def _rd_copy_page_citation(self):
+        citation = self._rd_page_citation(
+            retrieved_on=self._app._citation_stamp())
+        if citation is None:
+            self._rd_copy_site_citation()
+            return
+        self._rd_copy_citation(citation.text)
+
+    def _rd_copy_site_citation(self):
+        self._rd_copy_citation(
+            self._app._site_citation_text(
+                retrieved_on=self._app._citation_stamp()))
+
+    def _rd_on_cite_menu_show(self):
+        try:
+            self._rd_act_cite_page.setEnabled(
+                self._rd_page_citation() is not None)
+        except Exception:                                        # noqa: BLE001
+            # Never take the menu down over a citation: the site entry is
+            # always valid, and withholding the page one is the right failure.
+            self._rd_act_cite_page.setEnabled(False)
 
     def load_page(self, offset=0, target=None):
         if not self.current_sys_id: return

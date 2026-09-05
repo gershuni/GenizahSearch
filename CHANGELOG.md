@@ -14,9 +14,9 @@ Three owner reports, all about the first thirty seconds a visitor spends on the 
   a blocking MiDRASH-citation modal, a "What's New" toast, an OCR-caveat toast and the
   citation footer — simultaneously, with the modal and the footer saying the same thing.
   The modal is gone; the reasoning it carried (why citations matter to the MiDRASH team,
-  which the footer never said) now lives at `/about#citing-midrash`, and the footer's
-  "please cite:" label links there. The citation requirement, the full citation and the
-  copy button are unchanged.
+  which the strip never said) now lives at `/about#citing-midrash`, linked from the
+  "How to cite" chip that replaced that strip later in the same release. The citation
+  requirement, the full citation and the copy button are all in the chip.
 - **"What's New" is a header button with an unread dot** instead of a card floating over
   the page that deleted itself after 30 seconds. The news is now still there when you go
   looking for it. It is visible on phones — the neighbouring Help button is hidden below
@@ -61,6 +61,38 @@ Three owner reports, all about the first thirty seconds a visitor spends on the 
   unchanged.
 - **Dates in citations read as dates** — "Sept. 4, 2026" in English, "4 בספטמבר, 2026"
   in Hebrew — rather than the numeric form.
+
+### Changed — citations name every author, and the result window can cite (2026-09-05)
+
+- **The citation you copy now lists all seventeen MiDRASH authors,** not "Stoekl Ben
+  Ezra et al." A citation you paste into a bibliography should be the one you can
+  publish. Where a Word export used to print that list twice — once in the sentence,
+  once in the rows below it — it now prints it once.
+- **The desktop citation bar shows an ellipsis when the citation does not fit.** It
+  used to simply stop, so a citation cut off mid-author-list looked complete. The
+  full text is on the tooltip and on the Copy button, which were never affected.
+- **A Cite button in the desktop result window.** That window opens on top of
+  everything else, which meant the citation bar along the bottom could not be reached
+  while you were reading a folio in it. The button offers the same two citations: this
+  page, or the site.
+
+### Fixed — the desktop citation bar credited the wrong people (desktop, 2026-09-04)
+
+The bar along the bottom of the desktop app showed one fixed citation — the MiDRASH
+automatic transcriptions — on every tab, and "Copy Citation" gave you that. But the
+Browse tab prefers a Princeton or Friedberg edition whenever one exists, so most of
+the time you were reading an edition by a named scholar while the bar credited a
+machine transcription for it.
+
+It now follows what is on screen. The bar itself carries the citation for the site as
+a whole — which names Dicta Genizah Search, the address, and the MiDRASH dataset — and
+"Copy Citation" offers two: this folio, or the site. The folio citation names the
+library, the shelfmark, the folio and whoever made the transcription you are actually
+reading, with the date you read it. In Hebrew or English, following the interface; the
+bar had been English-only regardless of language.
+
+Both citations come from the same code the website uses, so a citation copied in the
+desktop app and one copied on the site cannot disagree about who is owed credit.
 
 ### Fixed — 165 dead entries in the Hebrew translation table (2026-09-04)
 

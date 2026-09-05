@@ -348,6 +348,11 @@ TRANSLATIONS = {
     "Copy": "העתק",
     "Copy Image": "העתק תמונה",
     "Copy Citation": "העתק ציטוט",
+    # The citation bar's menu (genizah_app.py::_create_citation_bar). Two
+    # citations, because a reader who worked across many manuscripts wants the
+    # site and a reader on a folio wants the folio -- same split as the web chip.
+    "Citation for this page": "ציטוט לדף זה",
+    "Citation for the site": "ציטוט לאתר כולו",
     "Citation copied to clipboard!": "הציטוט הועתק ללוח!",
     "Missing Key": "מפתח חסר",
     "Please configure your AI Provider & Key in Settings.": "אנא הגדר ספק AI ומפתח בהגדרות.",

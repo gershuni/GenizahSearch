@@ -319,6 +319,24 @@ def add_highlighted_hebrew_paragraph(doc: Document, text: str) -> None:
     set_paragraph_rtl(p)
 
 
+def _row_text(line: str) -> str:
+    """A credit row's content, without its label.
+
+    Sheet rows are written "Citation: <the citation>" / "Dataset: <url>", while
+    the one-sentence form has no labels. Comparing the raw rows against the
+    sentence would therefore never match, and the duplicate-author-list filter
+    in `add_word_source_credits` would silently do nothing.
+
+    Splits on the FIRST colon only, and only when what follows is non-empty --
+    a row that is itself a bare URL ("https://doi.org/...") must not be cut at
+    the scheme's colon.
+    """
+    head, sep, tail = line.partition(': ')
+    if sep and tail.strip() and '//' not in head:
+        return tail.strip()
+    return line.strip()
+
+
 def add_word_source_credits(
     doc: Document,
     *,
@@ -371,14 +389,27 @@ def add_word_source_credits(
     citation_run = citation_p.add_run(citation.text)
     citation_run.italic = True
 
-    # Then the fuller rows for whoever wants them. For MiDRASH this is the
-    # canonical three-line form with the complete author list, which the
-    # one-sentence version abbreviates to "et al." -- a document has room for
-    # the full list where a pasteable sentence does not.
-    doc.add_paragraph()
-    doc.add_paragraph(credit.heading)
-    for line in credit.citation_lines:
-        doc.add_paragraph(line)
+    # Then the fuller rows for whoever wants them -- EXCEPT any row the
+    # sentence above already contains.
+    #
+    # This used to print them all, on the reasoning that the sentence
+    # abbreviated to "et al." and a document has room for the full list. Since
+    # 2026-09-05 the sentence carries the complete seventeen names (owner's
+    # ruling), so printing the rows unfiltered put the same author list twice on
+    # one page, back to back -- which is the "too much duplicacy" the citation
+    # was collapsed into one sentence to fix in the first place.
+    #
+    # Filtered by CONTAINMENT rather than by naming the MiDRASH row: the rows
+    # are per-provider and the sentence is assembled from the same credit, so
+    # "already said above" is the actual property, and it keeps holding if
+    # either side changes.
+    rows = [line for line in credit.citation_lines
+            if _row_text(line) not in citation.text]
+    if rows:
+        doc.add_paragraph()
+        doc.add_paragraph(credit.heading)
+        for line in rows:
+            doc.add_paragraph(line)
 
 
 def add_word_credits(doc: Document) -> None:

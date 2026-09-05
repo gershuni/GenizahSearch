@@ -144,13 +144,69 @@ def test_the_credit_is_localized():
     assert 'retrieved' in en.lower()
 
 
-def test_the_document_keeps_the_full_author_list_somewhere():
-    """A pasteable sentence abbreviates to "et al."; a DOCUMENT has room for the
-    full citation, so the rows are printed under it."""
+def test_the_document_carries_the_full_author_list_EXACTLY_ONCE():
+    """The sentence now carries the seventeen names, and so does the row below.
+
+    This function printed the one-sentence citation and then every row of
+    `credit.citation_lines`, on the explicit reasoning (its own comment) that
+    the sentence abbreviated to "et al." and a document has room for the full
+    list. Since the owner's 2026-09-05 ruling the sentence IS the full list, so
+    printing the rows unfiltered put the same seventeen names on one page twice,
+    back to back -- the "too much duplicacy" the citation was collapsed into one
+    sentence to fix.
+
+    Counted on a mid-list name, not on the whole string: the two renderings
+    differ in punctuation and prefix, so comparing the full citation would miss
+    a near-duplicate that a reader would still see as the same list twice.
+    """
     text = _export()
-    assert 'Olszowy-Schlanger' in text, (
-        'the docx dropped the full MiDRASH author list; the sentence abbreviates '
-        'it, so the rows below must carry it')
+    assert text.count('Olszowy-Schlanger') == 1, (
+        'the MiDRASH author list appears %d times in one .docx; the sentence '
+        'and the rows beneath it are both printing it'
+        % text.count('Olszowy-Schlanger'))
+    # And it is genuinely THERE -- a filter that dropped both would also give 0
+    # and must not read as success.
+    assert 'Stoekl Ben Ezra' in text
+
+
+def test_the_row_the_sentence_does_NOT_carry_is_still_printed():
+    """THE CONTROL for the de-duplication above, aimed at the one row it can lose.
+
+    A first version of this control exported a PGP edition and asserted the
+    scholar and the source URL were present. It passed against `rows = []` --
+    because for PGP the SENTENCE already names both, so the assertion was
+    satisfied by text the filter never touches. A control that cannot fail is
+    not a control; mutation testing is what showed it.
+
+    The discriminating row is MiDRASH's "Data Source:" line. Of the three rows
+    for the automatic transcription, two ARE now inside the sentence (the DOI
+    and the full author list) and are correctly dropped; this one is not, so it
+    is the only thing standing between "de-duplicate" and "delete the block".
+    """
+    text = _export(version_info=None)
+    assert 'Data Source:' in text, (
+        'the credits block lost the one row the sentence does not carry -- the '
+        'filter is deleting rows rather than de-duplicating them')
+
+    # And the redundant ones really are gone: the sentence has the DOI, so a
+    # bare "Dataset: <doi>" row beneath it would be the duplication again.
+    assert 'Dataset: https://doi.org/' not in text
+    assert 'Citation: Stoekl Ben Ezra' not in text
+
+
+def test_a_pgp_export_carries_the_scholar_and_the_url():
+    """For a non-MiDRASH source every row IS inside the sentence, so the block
+    disappears entirely -- and nothing is lost, which is what this pins.
+
+    Worth stating because "the Credits block vanished" looks like a bug in a
+    diff. It is the filter working: the sentence says everything the rows said.
+    """
+    text = _export(version_info={'source': 'pgp',
+                                 'attribution': 'Friedman, M. A.',
+                                 'pgp_url': 'https://geniza.princeton.edu/x'})
+    assert 'Friedman, M. A.' in text
+    assert 'geniza.princeton.edu/x' in text
+    assert 'MiDRASH' not in text
 
 
 # ---------------------------------------------------------------------------

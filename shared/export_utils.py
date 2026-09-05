@@ -58,19 +58,30 @@ MIDRASH_CREDIT_LINES: Tuple[str, ...] = (
 
 #: The same citation as ONE inline clause, for a one-sentence page citation a
 #: reader pastes into a bibliography (the "How to cite this page" chip, owner
-#: 2026-09-04). The three rows above are right for a credits SHEET, where they
-#: have their own space; run together in a sentence they repeat the DOI twice
-#: and list seventeen authors mid-clause.
+#: 2026-09-04). The three rows above are right for a credits SHEET, where each
+#: has its own line and its own label; this is the same citation as one
+#: unlabelled clause.
 #:
-#: The "et al." is not a new liberty with the citation: `MIDRASH_DATA_SOURCE_LINE`
-#: directly above has said "(Stoekl Ben Ezra et al., 2025)" since it was written,
-#: so the abbreviated form is already what this project publishes. The DOI and
-#: the year survive intact, which is what the never-translate rule above is
-#: protecting. Anything that has ROOM for the full author list should still use
-#: `MIDRASH_CREDIT_LINES`.
+#: FULL AUTHOR LIST, by the owner's decision of 2026-09-05, who supplied this
+#: exact string. It had been abbreviated to "Stoekl Ben Ezra, D. et al." on the
+#: reasoning that a pasteable sentence has no room for seventeen names and the
+#: fuller rows sit underneath it on the sheet and in the .docx. The owner's
+#: ruling is that the thing a reader COPIES has to be the thing they can
+#: publish -- and someone copying from the chip is not reading the rows.
+#:
+#: Consequences, all handled at the surfaces rather than here: the Word export
+#: now skips a row already contained in the sentence (it printed the seventeen
+#: names twice), the desktop citation strip elides visibly instead of clipping
+#: in silence, and the web chip panel has an explicit height bound. Note that
+#: this is NOT `MIDRASH_CITATION_LINE` with the prefix removed -- that one is a
+#: labelled sheet row ("Citation: ..."), this is a sentence clause.
 MIDRASH_INLINE_CITATION: str = (
-    "MiDRASH Automatic Transcriptions, Stoekl Ben Ezra, D. et al., 2025, "
-    "Zenodo. https://doi.org/10.5281/zenodo.17734473"
+    "Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., "
+    "Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., "
+    "Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., "
+    "Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). "
+    "MiDRASH Automatic Transcriptions. Zenodo. "
+    "https://doi.org/10.5281/zenodo.17734473"
 )
 
 

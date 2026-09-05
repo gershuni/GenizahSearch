@@ -176,15 +176,43 @@ def test_the_automatic_transcription_cites_midrash_inline(lang):
     assert 'doi.org/10.5281/zenodo.17734473' in text
 
 
-def test_the_inline_form_is_used_not_the_full_author_list():
-    """A pasteable sentence uses the "et al." form -- which this project already
-    publishes in `MIDRASH_DATA_SOURCE_LINE` -- while anything with ROOM for the
-    seventeen names (the print sheet, the docx) keeps the full rows."""
+def test_the_sentence_carries_the_full_author_list():
+    """REVERSES an earlier decision in this same session, on the owner's ruling.
+
+    The sentence used to abbreviate to "Stoekl Ben Ezra, D. et al.", on the
+    reasoning that the print sheet and the .docx carry the full rows underneath.
+    The owner's call (2026-09-05, supplying the exact string) is that the thing
+    a reader COPIES has to be the thing they can publish -- and someone copying
+    from the chip is not reading the rows.
+
+    Asserted on the first and last names plus the DOI rather than on
+    `MIDRASH_INLINE_CITATION` wholesale, so that a truncation in the middle --
+    the failure mode a fixed-width surface actually produces -- cannot pass.
+    """
     text = _page('htr').text
-    assert 'et al.' in text
+    assert 'et al.' not in text, (
+        'the sentence still abbreviates the author list')
+    assert 'Stoekl Ben Ezra, D., Bambaci, L.' in text
+    assert 'Olszowy-Schlanger, J., & Gila, Y. (2025)' in text, (
+        'the author list is cut short before its final names')
+    assert 'MiDRASH Automatic Transcriptions. Zenodo.' in text
+    assert 'https://doi.org/10.5281/zenodo.17734473' in text, (
+        'the DOI is missing -- it is the part of a citation a reader most needs')
+
+
+def test_the_full_citation_is_NOT_the_sheet_row_with_its_label_removed():
+    """Two constants, deliberately, and they are not interchangeable.
+
+    `MIDRASH_CITATION_LINE` is a LABELLED sheet row ("Citation: ..."), and
+    reusing it in prose is how an earlier round of this work produced
+    "\u05e2\u05dc \u05d1\u05e1\u05d9\u05e1 \u05ea\u05e2\u05ea\u05d5\u05e7: \u05e4\u05e8\u05d5\u05d9\u05e7\u05d8..." -- a label read as a sentence. The inline
+    form carries the same names with no label, and this pins that they stay
+    separate rather than one being defined from the other.
+    """
+    text = _page('htr').text
     assert MIDRASH_CITATION_LINE not in text, (
-        'the sentence carries the full 17-author citation; that belongs on a '
-        'sheet, not in a clause')
+        'the labelled sheet row is being used as a sentence clause')
+    assert 'Citation:' not in text
 
 
 @pytest.mark.parametrize('lang', LANGS)

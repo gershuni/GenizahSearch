@@ -682,6 +682,20 @@ body {
     white-space: nowrap;
 }
 .citation-chip-panel {
+  /* The full 17-author MiDRASH citation (owner, 2026-09-05) takes a site
+     citation from ~3 rendered lines to ~6, and a manuscript page shows TWO
+     citations. Nothing here bounded the panel before -- it relied on Quasar's
+     own default `.q-menu` viewport clamp, which is real but undocumented and
+     untested in this repo. On a short viewport (a phone in landscape, or the
+     chip opened near the foot of a long page) that is the difference between a
+     panel that scrolls and one that runs off the screen. */
+     The outer `max()` is a FLOOR, and it is not theoretical: measuring this
+     panel in a hidden browser pane returned `innerHeight: 0`, so `70vh`
+     computed to 0px and the clamp collapsed the panel to nothing. Any context
+     where viewport units resolve to zero would otherwise hide the citation
+     entirely -- a bound that can reach 0 is worse than no bound. */
+  max-height: max(12rem, min(70vh, 32rem));
+  overflow-y: auto;
     background: var(--bg-secondary, #fff);
 }
 /* On a narrow screen the label is the first thing to go -- the quote icon and

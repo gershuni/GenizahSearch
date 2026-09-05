@@ -79,7 +79,8 @@ from desktop.vs_cache import DesktopVSCache, VSFetchThread, VSDownloadThread  # 
 from desktop.my_library_tab import MyLibraryTab  # Phase 95 — 7th tab
 from desktop.pdf_page_renderer import PdfRenderWorker  # Phase 100 D-07
 from desktop.pdf_image_controller import PdfImageController  # Phase 100 D-07b
-from desktop.ui_widgets import ShelfmarkTableWidgetItem, CheckBoxHeader, HiddenScrollArea, ListsTreeWidget
+from desktop.ui_widgets import (ShelfmarkTableWidgetItem, CheckBoxHeader, HiddenScrollArea,
+                                ListsTreeWidget, ElidingLabel)
 from desktop.settings_dialogs import SettingsDialog, SearchSettingsDialog, HelpDialog, TabularQueryBuilderDialog, LabScoringDialog
 from desktop import passage_lifecycle  # Phase 146: letter-level (passage) search
 from desktop import passage_witnesses  # multi-witness state machine (pure)
@@ -15197,8 +15198,204 @@ class GenizahGUI(QMainWindow):
             self.settings_dialog.accept()
             self.toggle_language(new_lang)
 
+    def _citation_lang(self):
+        """The reader's language, in the form the shared credit module wants.
+
+        Read live rather than cached: `CURRENT_LANG` is a module global that the
+        language switch rewrites. A desktop language change requires a restart
+        (`toggle_language`), so this cannot flip under a live widget -- but
+        reading it live costs nothing and does not depend on that staying true.
+        """
+        return 'he' if CURRENT_LANG == 'he' else 'en'
+
+    def _credit_version_info(self, version_data, pgp_url=None):
+        """Translate a version-combo item into the shared module's `version_info`.
+
+        THE TWO VOCABULARIES DO NOT MATCH. They were built independently:
+        `_populate_pgp_combo` says `pgp_edition` / `fgp_translation` /
+        `correction`, while `shared/transcription_credits` (written against the
+        web `version_selector`) says `pgp` / `translation` / `user`. Desktop also
+        calls the scholar `scholar` where the module reads `attribution`. This is
+        the ONLY place that mapping lives; anything else needing it should call
+        here rather than re-deriving it.
+
+        Returns None for the automatic transcription (`original`), for the
+        non-selectable `header` rows, and for anything unrecognised -- which the
+        module credits to MiDRASH. That is the correct default, not a
+        resignation: every other combo path renders the V0.8/HTR text, and a
+        missing attribution is a licence problem where a redundant one is not.
+
+        ``pgp_url`` exists so the RESULT DIALOG can share this translation
+        rather than fork it. The PGP url is per-document and is held in a
+        different attribute on each surface (`_browse_pgp_url` here,
+        `_rd_pgp_url` there); reading `self._browse_pgp_url` unconditionally
+        meant `parent._credit_version_info(data)` from the dialog would attach
+        the Browse tab's url to the dialog's manuscript. Defaults to the Browse
+        tab's, so existing callers are unchanged.
+        """
+        from shared.transcription_credits import HTR_SOURCES
+
+        data = version_data or {}
+        source = data.get('source')
+
+        # `header` rows are the non-selectable group captions. Everything in
+        # HTR_SOURCES ('original', 'V0.8', 'V0.7', None, '') is the automatic
+        # transcription, which the module credits to MiDRASH when handed None.
+        #
+        # ASKED, not copied: `V0.7` is a real combo item (the V0.7 versions
+        # added around line 3420) and an earlier cut of this method listed the
+        # HTR sources by hand and omitted it. It still reached the right credit,
+        # via the fall-through at the end -- which is exactly the kind of
+        # accidental correctness that stops being correct when someone adds a
+        # provider. Reading the module's own tuple means the two halves cannot
+        # disagree about what counts as the automatic text.
+        if source == 'header' or source in HTR_SOURCES:
+            return None
+
+        # Per-DOCUMENT, not per-item: `_populate_pgp_combo` does not thread the
+        # PGP URL into each edition's item data, it is fetched once per surface.
+        url = pgp_url if pgp_url is not None else getattr(self, '_browse_pgp_url', None)
+
+        if source == 'pgp_edition':
+            return {
+                'source': 'pgp',
+                'attribution': data.get('scholar'),
+                'pgp_url': url,
+            }
+
+        if source == 'fgp_edition':
+            return {
+                'source': 'fgp',
+                # Already language-picked by `pick_fgp_credit` at the combo call
+                # site; the module documents that it will not re-pick.
+                'source_credit': data.get('source_credit'),
+                'attribution': data.get('attribution'),
+            }
+
+        if source in ('pgp_translation', 'fgp_translation'):
+            info = {
+                'source': 'translation',
+                'language': data.get('language'),
+            }
+            if source == 'fgp_translation':
+                info['attribution'] = (data.get('source_credit')
+                                       or data.get('attribution')
+                                       or data.get('scholar'))
+            else:
+                info['attribution'] = data.get('scholar')
+                info['pgp_url'] = url
+            return info
+
+        if source == 'user':
+            # A community-submitted VERSION: a whole alternative transcription
+            # by a named contributor, fetched separately from corrections and
+            # added around line 3440. Credited to that person AND to MiDRASH,
+            # which is what the module does for KIND_USER -- these are edits OF
+            # the automatic transcription, so the CC-BY obligation survives.
+            #
+            # Named explicitly even though 'user' is already the module's own
+            # literal: passing through by coincidence is not the same as being
+            # handled, and `user_name` has to be renamed to `author` regardless.
+            return {'source': 'user', 'author': data.get('user_name')}
+
+        if source == 'correction':
+            # `approved` is the only status the community has actually accepted.
+            # draft / pending / rejected are all unapproved and the citation has
+            # to say so -- the module has a separate heading for that, and
+            # printing an unreviewed edit as an accepted one would be the same
+            # class of false claim this whole change exists to remove.
+            return {
+                'source': 'user' if data.get('status') == 'approved' else 'pending',
+                'author': data.get('user_name'),
+            }
+
+        return None
+
+    def _browse_page_citation(self, *, retrieved_on=None):
+        """How to cite the manuscript page on the Browse tab, or None.
+
+        Derived from live widget state AT CALL TIME, and deliberately not
+        cached -- see `_create_citation_bar` for why.
+
+        No page URL: the desktop app has no browse URL of its own, and inventing
+        a `genizahsearch.com/browse?...` link it never checked would be a claim
+        rather than a locator. The library, shelfmark and folio ARE the locator,
+        and the module falls back to naming the site without an address.
+        """
+        from shared.transcription_credits import page_citation
+
+        sid = getattr(self, 'current_browse_sid', None)
+        meta_mgr = getattr(self, 'meta_mgr', None)
+        if not sid or meta_mgr is None:
+            # `meta_mgr` starts as None (line ~1377) and is only assigned
+            # conditionally, so a start-up where metadata never loaded leaves it
+            # None -- and this runs inside `menu.aboutToShow`, where raising
+            # would break the menu instead of surfacing anywhere useful. Without
+            # a library and shelfmark there is no page citation to give, and the
+            # caller renders None as a disabled entry with the site citation
+            # still working.
+            return None
+
+        meta = meta_mgr.nli_cache.get(sid, {}) or {}
+        shelfmark = meta.get('shelfmark')
+        if not shelfmark or shelfmark == 'Unknown':
+            shelfmark = None
+
+        library_code = meta_mgr.get_library_for_id(sid)
+        library = (get_library_display(library_code, short=False)
+                   if library_code else None)
+
+        combo = getattr(self, 'browse_version_combo', None)
+        version_data = combo.currentData() if combo is not None else None
+
+        return page_citation(
+            self._credit_version_info(version_data),
+            lang=self._citation_lang(),
+            library=library,
+            shelfmark=shelfmark,
+            folio=self._displayed_folio_label_for_pgp() or None,
+            retrieved_on=retrieved_on,
+        )
+
+    def _site_citation_text(self, *, retrieved_on=None):
+        """How to cite the site as a whole. Names Dicta, the address and MiDRASH."""
+        from shared.transcription_credits import site_citation
+        return site_citation(lang=self._citation_lang(),
+                             retrieved_on=retrieved_on).text
+
+    @staticmethod
+    def _citation_stamp():
+        """Today, ISO, for an "accessed" clause. Stamped when a citation is COPIED."""
+        import datetime as _dt
+        return _dt.date.today().isoformat()
+
     def _create_citation_bar(self):
-        """Create the persistent citation bar at the bottom of the main window."""
+        """The persistent citation bar at the bottom of the main window.
+
+        SOURCE-AWARE since 2026-09-04. Until then this bar showed one hardcoded
+        MiDRASH citation on every tab regardless of what was displayed -- and
+        `_auto_select_pgp_edition` is PGP-FIRST unconditionally, so a reader on
+        the Browse tab was usually looking at a Princeton or Friedberg edition
+        while the bar credited MiDRASH for it, and "Copy Citation" handed them
+        that. It is the same defect the web printed sheet and citation footer
+        had, and it is fixed from the same shared decision so the two apps
+        cannot drift.
+
+        WHY THE VISIBLE STRIP IS THE *SITE* CITATION, AND THE PAGE CITATION IS
+        BEHIND THE BUTTON. This bar is built once, at startup, and sits above
+        every tab. What is displayed changes on at least six paths -- combo
+        change, PGP auto-select, community-version default, page navigation, a
+        new manuscript, View All -- and three of them deliberately BLOCK the
+        combo's signals, so `currentIndexChanged` is not a reliable hook. Wiring
+        a repaint into all six would put a WRONG citation on screen the first
+        time one was missed, which is the failure this change exists to remove.
+        So the strip carries the site citation -- true on every tab, naming
+        Dicta and MiDRASH both -- and the page-specific citation is computed at
+        CLICK time from live widget state, where going stale is impossible.
+
+        The strip carries NO retrieval date for the same reason: the app may
+        stay open for days. The COPIED string is stamped when it is copied.
+        """
         pal = QApplication.palette()
         is_dark = pal.color(QPalette.ColorRole.Window).lightness() < 128
         muted = '#999' if is_dark else '#777'
@@ -15221,15 +15418,37 @@ class GenizahGUI(QMainWindow):
         h.setContentsMargins(12, 0, 8, 0)
         h.setSpacing(8)
 
-        cit_lbl = QLabel(SettingsDialog.FULL_CITATION)
+        # Selectable: the strip is the site citation, and a reader who wants it
+        # should be able to take it straight off the screen without a menu.
+        cit_lbl = ElidingLabel(self._site_citation_text())
         cit_lbl.setStyleSheet(f"color: {muted}; font-size: 10px; border: none; background: transparent;")
+        # NOT selectable: `ElidingLabel` rewrites `text()` to the elided form on
+        # every resize, so a mouse selection would hand the reader "...Kurar
+        # Barakat, B., Gogaw…" and look like a citation. The copy button gives
+        # the whole thing; a partial one that LOOKS complete is the failure this
+        # bar exists to prevent.
+        #
+        # The strip is one fixed 30px line and the citation is ~428 characters
+        # since the owner asked for the full author list, so it cannot all fit
+        # at any ordinary window width. Eliding makes that visible rather than
+        # silent -- a plain QLabel just stops painting, with no "..." to say so.
+        # The tooltip carries the whole string.
+        cit_lbl.setToolTip(cit_lbl.full_text)
         h.addWidget(cit_lbl, 1)
 
-        btn = QPushButton(tr("Copy Citation"))
+        # A MENU, not a single button whose meaning changes with the tab. Both
+        # citations are offered and neither is chosen for the reader -- the same
+        # rule the web chip follows, for the same reason: someone who worked
+        # across forty manuscripts wants the site, someone reading a folio wants
+        # the folio, and guessing wrong makes them edit the result.
+        btn = QToolButton()
+        btn.setText(tr("Copy Citation"))
         btn.setFixedHeight(22)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         btn.setStyleSheet(f"""
-            QPushButton {{
+            QToolButton {{
                 background-color: {btn_bg};
                 color: {txt_color};
                 font-size: 10px;
@@ -15237,16 +15456,54 @@ class GenizahGUI(QMainWindow):
                 border-radius: 3px;
                 border: 1px solid {bar_border};
             }}
-            QPushButton:hover {{ background-color: {btn_hover}; }}
+            QToolButton:hover {{ background-color: {btn_hover}; }}
         """)
-        btn.clicked.connect(self.copy_citation)
+        menu = QMenu(btn)
+        act_page = menu.addAction(tr("Citation for this page"))
+        act_page.triggered.connect(self.copy_page_citation)
+        act_site = menu.addAction(tr("Citation for the site"))
+        act_site.triggered.connect(self.copy_site_citation)
+
+        def _sync_menu():
+            # Recomputed every time the menu opens, so the page entry is enabled
+            # exactly when there IS a manuscript page to cite. Nothing caches
+            # this -- see the method docstring above.
+            #
+            # Belt and braces around a Qt slot: `_browse_page_citation` guards
+            # the state it knows about, but an unraisable exception here would
+            # take the whole menu down and with it the site citation, which is
+            # always available. Degrading to "no page entry" is the right
+            # failure -- it withholds a citation rather than showing a wrong one.
+            try:
+                act_page.setEnabled(self._browse_page_citation() is not None)
+            except Exception:                                    # noqa: BLE001
+                logger.debug('page citation unavailable', exc_info=True)
+                act_page.setEnabled(False)
+
+        menu.aboutToShow.connect(_sync_menu)
+        btn.setMenu(menu)
         h.addWidget(btn)
         return bar
 
-    def copy_citation(self):
-        citation = "Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). MiDRASH Automatic Transcriptions. Zenodo. https://doi.org/10.5281/zenodo.17734473"
-        QApplication.clipboard().setText(citation)
-        QMessageBox.information(self, tr("Copied"), tr("Citation copied to clipboard!"))
+    def _copy_citation_text(self, text):
+        QApplication.clipboard().setText(text)
+        QMessageBox.information(self, tr("Copied"),
+                                tr("Citation copied to clipboard!"))
+
+    def copy_page_citation(self):
+        """Cite the manuscript page on screen, crediting whoever transcribed it."""
+        citation = self._browse_page_citation(retrieved_on=self._citation_stamp())
+        if citation is None:
+            # The menu entry is disabled in this state; this is the belt-and-
+            # braces path for a programmatic call.
+            self.copy_site_citation()
+            return
+        self._copy_citation_text(citation.text)
+
+    def copy_site_citation(self):
+        """Cite the site as a whole -- Dicta, the address, and MiDRASH."""
+        self._copy_citation_text(
+            self._site_citation_text(retrieved_on=self._citation_stamp()))
 
     def _show_citation_reminder(self):
         """Show a one-time citation reminder dialog on first launch."""
