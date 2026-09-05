@@ -282,6 +282,28 @@ def resolve_transcription_credit(
 
     # --- FGP: the one provider with a real bilingual per-source credit. -----
     if source == KIND_FGP:
+        # An FGP TRANSLATION is not a transcription. `version_selector` sends
+        # `source='fgp'` with `is_translation=True` for those, and ignoring the
+        # flag made the sheet, the chip and the .docx all call translated text
+        # "Transcription: Friedberg Genizah Project" -- a false statement about
+        # what the reader is looking at, separate from who made it.
+        #
+        # Credited to FGP either way; only the KIND and the heading change, so
+        # the translation heading is used and the language named when known.
+        if info.get('is_translation'):
+            credit = (info.get('source_credit')
+                      or info.get('attribution')
+                      or FGP_ATTRIBUTION)
+            language = _language_name(str(info.get('language') or ''), lang)
+            heading = (labels['translation_heading_lang'].format(language=language)
+                       if language else labels['translation_heading'])
+            return TranscriptionCredit(
+                kind=KIND_TRANSLATION,
+                heading=heading,
+                citation_lines=[str(credit)],
+                site_lines=_site_lines(lang),
+            )
+
         # `source_credit` is already language-picked by
         # `shared.fgp_service.pick_fgp_credit(src, get_language())` at the
         # version_selector call site. Re-picking here would need the raw source

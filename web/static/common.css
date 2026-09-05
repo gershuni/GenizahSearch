@@ -688,7 +688,8 @@ body {
      own default `.q-menu` viewport clamp, which is real but undocumented and
      untested in this repo. On a short viewport (a phone in landscape, or the
      chip opened near the foot of a long page) that is the difference between a
-     panel that scrolls and one that runs off the screen. */
+     panel that scrolls and one that runs off the screen.
+
      The outer `max()` is a FLOOR, and it is not theoretical: measuring this
      panel in a hidden browser pane returned `innerHeight: 0`, so `70vh`
      computed to 0px and the clamp collapsed the panel to nothing. Any context

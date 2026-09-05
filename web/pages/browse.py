@@ -1344,7 +1344,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             'library_code': library_code,
             'library_name': library_name,
             'lang': get_language(),
-            'version_info': enrichment_refs.get('current_version_info'),
+            # FULL MANUSCRIPT VIEW sends no source: that branch has no
+            # per-page version chooser, so every folio's stored text is what is
+            # exported and MiDRASH is the correct unconditional credit. The
+            # single-page branch below pairs this with the displayed text.
+            'version_info': (None if state.view_all
+                             else enrichment_refs.get('current_version_info')),
             'folio_label': _folio,
             'page_url': _page_url,
             'retrieved_on': retrieved_today(),
@@ -1361,9 +1366,23 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 for p in state.full_manuscript
             ]
         else:
-            # Export current page
+            # Export current page.
+            #
+            # The DISPLAYED text, not `state.current_page.text`, which is always
+            # the automatic transcription. `version_info` a few lines above and
+            # this text are written together by `handle_version_change`; taking
+            # one from the version selector and the other from the page state
+            # put MiDRASH's transcription in a document credited to whichever
+            # scholar was selected.
+            #
+            # Falls back to the page text when no alternative version has been
+            # chosen -- which is the same condition under which `version_info`
+            # is absent, so the pair stays consistent in that case too.
             export_data['p_num'] = state.current_page.p_num
-            export_data['text'] = state.current_page.text
+            export_data['text'] = (
+                enrichment_refs.get('current_version_text')
+                if enrichment_refs.get('current_version_info') is not None
+                else state.current_page.text)
 
         # Store in session storage (safe_user_set absorbs prune-race AssertionError)
         safe_user_set('browse_export_data', export_data)
@@ -4740,6 +4759,17 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             def handle_version_change(new_text: str, version_info: dict):
                                 """Handle version selection - update displayed text."""
                                 current_text['value'] = new_text
+                                # The DISPLAYED text goes into `enrichment_refs`
+                                # beside the source it came from, because the
+                                # Word export reads the source from there and
+                                # read the TEXT from `state.current_page.text`
+                                # -- the automatic transcription -- so a .docx
+                                # exported while a Princeton edition was on
+                                # screen contained MiDRASH's text credited to
+                                # Goitein. Writing both here means they cannot
+                                # separate: the export takes the pair or
+                                # neither.
+                                enrichment_refs['current_version_text'] = new_text
                                 render_text_content(new_text)
                                 # The printed credit follows the DISPLAYED text.
                                 # Before this, the sheet credited MiDRASH for an

@@ -54,7 +54,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional
 
-from nicegui import ui
+from nicegui import app, ui
 
 from shared.transcription_credits import PageCitation, page_citation, site_citation
 from web.client_guard import client_gone
@@ -217,6 +217,23 @@ def render_citation_chip(*, lang: str = 'en') -> None:
             panel.update()
 
         _UPDATERS[client_id] = _repaint
+
+        # Drop the entry when the connection goes, not when someone next tries
+        # to use it. `_forget` on a failed update is a backstop for a dead
+        # LAYOUT; it never fires for a reader who simply closed the tab, since
+        # nothing asks that client for a citation again -- so on a long-running
+        # server ordinary traffic accumulated one closure per visit, each
+        # holding a whole obsolete UI tree.
+        try:
+            app.on_disconnect(lambda c, _id=client_id: _forget(_id))
+        except Exception:                                        # noqa: BLE001
+            # An older NiceGUI without the hook, or a context that forbids
+            # registering one. The failed-update backstop still applies; this
+            # is a leak, not a correctness problem, and must not take the chip
+            # down.
+            logger.debug('could not register citation chip cleanup',
+                         exc_info=True)
+
         _repaint(None)
 
 

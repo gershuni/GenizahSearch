@@ -15208,7 +15208,7 @@ class GenizahGUI(QMainWindow):
         """
         return 'he' if CURRENT_LANG == 'he' else 'en'
 
-    def _credit_version_info(self, version_data, pgp_url=None):
+    def _credit_version_info(self, version_data, pgp_url=...):
         """Translate a version-combo item into the shared module's `version_info`.
 
         THE TWO VOCABULARIES DO NOT MATCH. They were built independently:
@@ -15254,7 +15254,15 @@ class GenizahGUI(QMainWindow):
 
         # Per-DOCUMENT, not per-item: `_populate_pgp_combo` does not thread the
         # PGP URL into each edition's item data, it is fetched once per surface.
-        url = pgp_url if pgp_url is not None else getattr(self, '_browse_pgp_url', None)
+        #
+        # SENTINEL, not None. The ResultDialog always passes its own
+        # `_rd_pgp_url`, which is None for a manuscript with no PGP record --
+        # and `pgp_url is not None` treated that identically to an omitted
+        # argument, so the dialog's citation silently linked to whatever the
+        # BROWSE TAB last had open. An explicit None must mean "this surface
+        # has no url", which is a different statement from "I did not say".
+        url = (getattr(self, '_browse_pgp_url', None)
+               if pgp_url is ... else pgp_url)
 
         if source == 'pgp_edition':
             return {
@@ -15324,8 +15332,23 @@ class GenizahGUI(QMainWindow):
         """
         from shared.transcription_credits import page_citation
 
+        # BOTH imported locally. `is_synthetic_sys_id` is imported at module
+        # level inside a try/except, so its name is not guaranteed to exist --
+        # and a guard that can raise NameError is not a guard.
+        from shared.local_sys_id import is_local_sys_id as _is_local
+        from shared.synthetic_sys_id import is_synthetic_sys_id as _is_synthetic
+
         sid = getattr(self, 'current_browse_sid', None)
         meta_mgr = getattr(self, 'meta_mgr', None)
+
+        # A LOCAL ("97") sys_id is the reader's OWN scan in My Library, and the
+        # Browse panel supports those. Nobody in this citation transcribed it
+        # and it has no corpus library or shelfmark, so there is no honest page
+        # citation to give -- the same rule `_rd_page_citation` applies, which
+        # this half was missing.
+        if sid and (_is_local(sid) or _is_synthetic(sid)):
+            return None
+
         if not sid or meta_mgr is None:
             # `meta_mgr` starts as None (line ~1377) and is only assigned
             # conditionally, so a start-up where metadata never loaded leaves it
