@@ -352,6 +352,12 @@ TRANSLATIONS = {
     # citations, because a reader who worked across many manuscripts wants the
     # site and a reader on a folio wants the folio -- same split as the web chip.
     "Citation for this page": "ציטוט לדף זה",
+    # The Browse toolbar's own cite button (owner, 2026-09-05): the page
+    # citation lives on the surface that HAS a page, not on the window-wide bar.
+    "Cite this page": "צטט דף זה",
+    "Copy a citation for the folio on screen": "העתק ציטוט לדף שעל המסך",
+    "There is no manuscript page to cite. Use Copy Citation at the bottom of the window to cite the site.":
+        "אין דף כתב-יד לצטט. השתמשו בהעתק ציטוט בתחתית החלון כדי לצטט את האתר.",
     "Citation for the site": "ציטוט לאתר כולו",
     "Citation copied to clipboard!": "הציטוט הועתק ללוח!",
     "Missing Key": "מפתח חסר",

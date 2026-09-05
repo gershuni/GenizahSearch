@@ -53,6 +53,13 @@ def _code_only(path: Path) -> str:
                      for i, ln in enumerate(src.splitlines()))
 
 
+def _method(code: str, name: str) -> str:
+    """One method's body, from its def to the next def at method indentation."""
+    parts = code.split('def %s' % name, 1)
+    assert len(parts) == 2, 'no def %s' % name
+    return parts[1].split('\n    def ', 1)[0]
+
+
 def _load(name: str, src: Path, extra: dict = None):
     tree = ast.parse(src.read_text(encoding='utf-8'))
     found = [n for n in ast.walk(tree)
@@ -291,6 +298,106 @@ def test_a_corpus_document_still_gets_one():
     citation = fn(_Stub(), retrieved_on='2026-09-05')
     assert citation is not None
     assert 'T-S Ar.50.74' in citation.text
+
+
+# ---------------------------------------------------------------------------
+# The citation bar offered "this page" on every tab (owner, 2026-09-05)
+# ---------------------------------------------------------------------------
+
+class _BrowseTab:
+    """Stands in for the Browse tab widget."""
+
+
+class _SearchTab:
+    """Stands in for any other tab."""
+
+
+def _browse_stub(active_tab, sid='99001'):
+    browse_tab = _BrowseTab()
+
+    class _Tabs:
+        def __init__(self, current):
+            self._current = current
+
+        def currentWidget(self):
+            return self._current
+
+    class _Combo:
+        @staticmethod
+        def currentData():
+            return {'source': 'original'}
+
+    class _Meta:
+        nli_cache = {'99001': {'shelfmark': 'T-S Ar.50.74'}}
+
+        @staticmethod
+        def get_library_for_id(_sid):
+            return 'CUL'
+
+    class _Stub:
+        current_browse_sid = sid
+        meta_mgr = _Meta()
+        browse_version_combo = _Combo()
+
+        @staticmethod
+        def _credit_version_info(_data):
+            return None
+
+        @staticmethod
+        def _citation_lang():
+            return 'en'
+
+        @staticmethod
+        def _displayed_folio_label_for_pgp():
+            return '1r'
+
+    stub = _Stub()
+    stub.browse_tab = browse_tab
+    stub.tabs = _Tabs(browse_tab if active_tab == 'browse' else _SearchTab())
+    return stub
+
+
+def _browse_citation():
+    return _load('_browse_page_citation', APP, extra={
+        'get_library_display': lambda code, short=False: 'Cambridge University Library',
+    })
+
+
+def test_no_page_citation_while_another_tab_is_on_screen():
+    """THE DEFECT the owner reported.
+
+    The bar spans the whole window and `current_browse_sid` stays set after the
+    reader leaves Browse, so on the Search tab "Citation for this page" copied a
+    citation for a folio nobody was looking at -- naming a library, a shelfmark
+    and a scholar for a page that was not displayed.
+    """
+    assert _browse_citation()(_browse_stub('search'),
+                              retrieved_on='2026-09-05') is None, (
+        'a citation was offered for the Browse tab\'s manuscript while a '
+        'different tab was on screen')
+
+
+def test_the_page_citation_returns_on_the_browse_tab():
+    """The CONTROL. A gate that refused everywhere would pass the test above,
+    and would silently remove the feature."""
+    citation = _browse_citation()(_browse_stub('browse'),
+                                  retrieved_on='2026-09-05')
+    assert citation is not None
+    assert 'T-S Ar.50.74' in citation.text
+
+
+def test_the_tab_gate_is_not_keyed_on_an_index_or_a_label():
+    """Widget identity, not position or text.
+
+    `_on_tab_changed` carries a hardcoded 0-6 index map that would mis-point the
+    moment a tab is inserted, and `tabText()` is translated -- that file says so
+    itself. Either would make this gate wrong in a way no test data would show.
+    """
+    body = _method(_code_only(APP), '_browse_page_citation')
+    assert 'currentWidget()' in body
+    assert 'is not browse_tab' in body
+    assert 'currentIndex' not in body, 'the gate is keyed on a tab index'
+    assert 'tabText' not in body, 'the gate is keyed on translated tab text'
 
 
 # ---------------------------------------------------------------------------

@@ -28,7 +28,6 @@ the one attribute it touches (`_browse_pgp_url`).
 from __future__ import annotations
 
 import ast
-import re
 from pathlib import Path
 
 import pytest
@@ -51,6 +50,31 @@ APP = REPO / 'genizah_app.py'
 # ---------------------------------------------------------------------------
 # Lifting the real function out of a 25,000-line Qt module
 # ---------------------------------------------------------------------------
+
+def _code_only(path: Path) -> str:
+    """Source with comments and docstrings blanked.
+
+    Source assertions in this file have twice been satisfied by the very prose
+    explaining the rule they check.
+    """
+    import io as _io
+    import tokenize as _tok
+
+    src = path.read_text(encoding='utf-8')
+    drop = set()
+    prev = None
+    for tok in _tok.generate_tokens(_io.StringIO(src).readline):
+        if tok.type == _tok.COMMENT:
+            drop.update(range(tok.start[0], tok.end[0] + 1))
+        elif tok.type == _tok.STRING and (
+                prev is None or prev.type in (_tok.INDENT, _tok.NEWLINE,
+                                              _tok.NL, _tok.DEDENT)):
+            drop.update(range(tok.start[0], tok.end[0] + 1))
+        if tok.type not in (_tok.NL, _tok.COMMENT):
+            prev = tok
+    return '\n'.join('' if i + 1 in drop else ln
+                     for i, ln in enumerate(src.splitlines()))
+
 
 def _load_method(name: str, **attrs):
     """Return `genizah_app`'s method `name` as a plain callable, plus a stub self.
@@ -434,20 +458,78 @@ def test_the_strip_elides_visibly_and_never_hands_out_the_cut_string():
         'selection yields a citation that is cut but looks whole')
 
 
-def test_the_bar_offers_both_citations_and_chooses_neither():
-    """Two menu entries, each wired to its own copy handler.
+def test_the_bar_cites_the_SITE_and_offers_no_page_citation():
+    """THE SPLIT (owner, 2026-09-05).
 
-    A single button whose meaning changes with the active tab was the other
-    option and is worse: the reader cannot tell which citation they are about to
-    get, which is how the original defect went unnoticed.
+    REPLACES a test asserting the bar carried a two-entry menu. That design was
+    wrong for a reason the owner spotted: this bar spans the whole window, so a
+    "Citation for this page" entry on it was offered on the Search tab, on
+    Personal Lists, on Community -- for a folio the reader had left.
+
+    Gating the entry on the active tab would have worked. Moving it is better:
+    "Cite this page" now lives on the Browse tab's own toolbar, where it cannot
+    be reached from a surface that has no page. A control that only exists where
+    its subject exists cannot describe the wrong thing.
     """
     src = APP.read_text(encoding='utf-8')
-    for handler in ('def copy_page_citation', 'def copy_site_citation'):
-        assert handler in src, handler
-    assert re.search(r'act_page\.triggered\.connect\(self\.copy_page_citation\)',
-                     src), 'the page entry is not wired to the page handler'
-    assert re.search(r'act_site\.triggered\.connect\(self\.copy_site_citation\)',
-                     src), 'the site entry is not wired to the site handler'
-    assert 'menu.aboutToShow.connect' in src, (
-        'the page entry is not re-evaluated when the menu opens, so its enabled '
-        'state can disagree with what is on screen')
+    bar = src[src.index('def _create_citation_bar'):
+              src.index('def _copy_citation_text')]
+
+    assert 'self.copy_site_citation' in bar, (
+        'the bar no longer copies the site citation')
+    assert 'copy_page_citation' not in bar, (
+        'the bar offers a page citation again -- it is visible on every tab, so '
+        'that is an offer to cite a folio the reader is not looking at')
+    assert 'Citation for this page' not in bar
+
+
+def test_cite_this_page_is_on_the_browse_toolbar():
+    """Its other half: the page citation exists, on the surface that has a page."""
+    code = _code_only(APP)
+    assert 'self.btn_b_cite = QPushButton(' in code, (
+        'the Browse toolbar has no cite button, so the page citation removed '
+        'from the bar has nowhere to live')
+    assert 'nav_bar.addWidget(self.btn_b_cite)' in code, (
+        'the cite button is not on the Browse toolbar')
+    assert 'self.btn_b_cite.clicked.connect(self.copy_page_citation)' in code
+    assert 'self.btn_b_cite.setEnabled(False)' in code, (
+        'the cite button starts enabled, before any manuscript is loaded')
+
+
+def test_the_cite_button_is_disabled_for_a_readers_own_scan():
+    """A LOCAL "97" document is savable but not citable.
+
+    `_sync_browse_cite_button` runs wherever `btn_b_save` is enabled, because
+    "there is something to save" and "there is something to cite" are the same
+    condition with that one exception.
+    """
+    fn, stub = _load_method('_sync_browse_cite_button')
+
+    class _Btn:
+        enabled = None
+
+        def setEnabled(self, value):
+            self.enabled = value
+
+    for sid, expected in (('99001', True),                     # corpus
+                          ('970012345601234567', False),       # LOCAL
+                          (None, False)):                      # nothing loaded
+        stub.btn_b_cite = _Btn()
+        stub.current_browse_sid = sid
+        fn(stub)
+        assert stub.btn_b_cite.enabled is expected, (
+            'sys_id %r gave enabled=%r' % (sid, stub.btn_b_cite.enabled))
+
+
+def test_the_cite_sync_does_not_consult_the_tab_gate():
+    """It must not call `_browse_page_citation`.
+
+    That method refuses whenever another tab is in front -- which is the
+    ordinary state while a manuscript is still loading from a search result, so
+    consulting it here would leave the button disabled on arrival.
+    """
+    body = _code_only(APP).split('def _sync_browse_cite_button', 1)[1] \
+                          .split('\n    def ', 1)[0]
+    assert '_browse_page_citation' not in body, (
+        'the enable check consults the tab-gated citation, so the button is '
+        'disabled whenever the manuscript loads while another tab is in front')

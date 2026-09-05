@@ -6124,6 +6124,15 @@ class GenizahGUI(QMainWindow):
         self.btn_b_save = QPushButton(tr("Save")); self.btn_b_save.setToolTip(tr("Save full manuscript to file"))
         self.btn_b_save.clicked.connect(self.browse_save_full); self.btn_b_save.setEnabled(False)
         
+        # "Cite this page" belongs HERE, not on the window-wide citation bar:
+        # this toolbar exists only on the Browse tab, so the offer cannot be
+        # made from a tab that has no page (owner, 2026-09-05). Disabled until a
+        # manuscript is loaded, like its neighbours.
+        self.btn_b_cite = QPushButton(tr("Cite this page"))
+        self.btn_b_cite.setToolTip(tr("Copy a citation for the folio on screen"))
+        self.btn_b_cite.clicked.connect(self.copy_page_citation)
+        self.btn_b_cite.setEnabled(False)
+
         self.btn_b_all = QPushButton(tr("View All"))
         self.btn_b_all.setCheckable(True)
         self.btn_b_all.clicked.connect(self.toggle_browse_view_all)
@@ -6357,6 +6366,7 @@ class GenizahGUI(QMainWindow):
         nav_bar.addWidget(self.combo_browse_volume)
         nav_bar.addWidget(self.btn_b_all)
         nav_bar.addWidget(self.btn_b_save)
+        nav_bar.addWidget(self.btn_b_cite)
         nav_bar.addWidget(self.btn_b_toggle_img)
 
         # Phase 95 D-28 — "Open file" button for LOCAL browse hits.
@@ -7439,6 +7449,7 @@ class GenizahGUI(QMainWindow):
         # 3. Enable buttons
         self.btn_b_catalog.setEnabled(True)
         self.btn_b_save.setEnabled(True)
+        self._sync_browse_cite_button()
         self.btn_b_all.setEnabled(True)
         self.btn_find_parallels.setEnabled(True)
         self.btn_browse_add_to_list.setEnabled(True)
@@ -15338,6 +15349,28 @@ class GenizahGUI(QMainWindow):
         from shared.local_sys_id import is_local_sys_id as _is_local
         from shared.synthetic_sys_id import is_synthetic_sys_id as _is_synthetic
 
+        # ONLY WHILE THE BROWSE TAB IS THE ONE ON SCREEN.
+        #
+        # This bar spans the whole window, and `current_browse_sid` stays set
+        # after the reader leaves Browse -- so on the Search tab "Citation for
+        # this page" copied a citation for a folio nobody was looking at,
+        # naming a library, a shelfmark and a scholar for a page that was not
+        # displayed. "This page" has to mean the page in front of the reader.
+        #
+        # Compared by WIDGET IDENTITY. The tab-index map in `_on_tab_changed`
+        # is hardcoded 0-6 and would mis-point the moment a tab is inserted,
+        # and `tabText()` is translated -- that file says so itself. The widget
+        # cannot drift.
+        tabs = getattr(self, 'tabs', None)
+        browse_tab = getattr(self, 'browse_tab', None)
+        if tabs is not None and browse_tab is not None:
+            try:
+                if tabs.currentWidget() is not browse_tab:
+                    return None
+            except RuntimeError:
+                # The C++ side is gone (teardown). No page to cite.
+                return None
+
         sid = getattr(self, 'current_browse_sid', None)
         meta_mgr = getattr(self, 'meta_mgr', None)
 
@@ -15379,6 +15412,32 @@ class GenizahGUI(QMainWindow):
             folio=self._displayed_folio_label_for_pgp() or None,
             retrieved_on=retrieved_on,
         )
+
+    def _sync_browse_cite_button(self):
+        """Enable "Cite this page" exactly when there is a page worth citing.
+
+        Called wherever `btn_b_save` is enabled -- the three paths by which a
+        manuscript becomes displayed -- because "there is something to save"
+        and "there is something to cite" are the same condition, with one
+        exception: a LOCAL ("97") document is the reader's OWN scan, which is
+        savable but not citable (nobody in the citation transcribed it).
+
+        Deliberately does NOT consult `_browse_page_citation`, whose tab gate
+        would disable the button whenever a manuscript is loaded while another
+        tab is in front -- which happens on the ordinary path of opening a
+        result and switching to Browse.
+        """
+        btn = getattr(self, 'btn_b_cite', None)
+        if btn is None:
+            return
+        sid = getattr(self, 'current_browse_sid', None)
+        try:
+            from shared.local_sys_id import is_local_sys_id as _is_local
+            from shared.synthetic_sys_id import is_synthetic_sys_id as _is_syn
+            citable = bool(sid) and not (_is_local(sid) or _is_syn(sid))
+        except Exception:                                        # noqa: BLE001
+            citable = bool(sid)
+        btn.setEnabled(citable)
 
     def _site_citation_text(self, *, retrieved_on=None):
         """How to cite the site as a whole. Names Dicta, the address and MiDRASH."""
@@ -15459,19 +15518,22 @@ class GenizahGUI(QMainWindow):
         cit_lbl.setToolTip(cit_lbl.full_text)
         h.addWidget(cit_lbl, 1)
 
-        # A MENU, not a single button whose meaning changes with the tab. Both
-        # citations are offered and neither is chosen for the reader -- the same
-        # rule the web chip follows, for the same reason: someone who worked
-        # across forty manuscripts wants the site, someone reading a folio wants
-        # the folio, and guessing wrong makes them edit the result.
-        btn = QToolButton()
-        btn.setText(tr("Copy Citation"))
+        # ONE button, and it cites the SITE. There is deliberately no "this
+        # page" entry here (owner, 2026-09-05: "the bar will cite generally, and
+        # citing 'this page' will be always in toolbar").
+        #
+        # The bar spans the whole window, so a page entry on it was offered on
+        # the Search tab, on Personal Lists, on Community -- for a folio the
+        # reader had left. Gating that on the active tab worked, but placement
+        # is the better fix: "Cite this page" now lives on the Browse tab's own
+        # toolbar (`btn_b_cite`, beside Save), where it cannot be reached from
+        # anywhere that has no page.
+        btn = QPushButton(tr("Copy Citation"))
+        btn.setToolTip(tr("Citation for the site"))
         btn.setFixedHeight(22)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         btn.setStyleSheet(f"""
-            QToolButton {{
+            QPushButton {{
                 background-color: {btn_bg};
                 color: {txt_color};
                 font-size: 10px;
@@ -15479,32 +15541,9 @@ class GenizahGUI(QMainWindow):
                 border-radius: 3px;
                 border: 1px solid {bar_border};
             }}
-            QToolButton:hover {{ background-color: {btn_hover}; }}
+            QPushButton:hover {{ background-color: {btn_hover}; }}
         """)
-        menu = QMenu(btn)
-        act_page = menu.addAction(tr("Citation for this page"))
-        act_page.triggered.connect(self.copy_page_citation)
-        act_site = menu.addAction(tr("Citation for the site"))
-        act_site.triggered.connect(self.copy_site_citation)
-
-        def _sync_menu():
-            # Recomputed every time the menu opens, so the page entry is enabled
-            # exactly when there IS a manuscript page to cite. Nothing caches
-            # this -- see the method docstring above.
-            #
-            # Belt and braces around a Qt slot: `_browse_page_citation` guards
-            # the state it knows about, but an unraisable exception here would
-            # take the whole menu down and with it the site citation, which is
-            # always available. Degrading to "no page entry" is the right
-            # failure -- it withholds a citation rather than showing a wrong one.
-            try:
-                act_page.setEnabled(self._browse_page_citation() is not None)
-            except Exception:                                    # noqa: BLE001
-                logger.debug('page citation unavailable', exc_info=True)
-                act_page.setEnabled(False)
-
-        menu.aboutToShow.connect(_sync_menu)
-        btn.setMenu(menu)
+        btn.clicked.connect(self.copy_site_citation)
         h.addWidget(btn)
         return bar
 
@@ -15514,12 +15553,23 @@ class GenizahGUI(QMainWindow):
                                 tr("Citation copied to clipboard!"))
 
     def copy_page_citation(self):
-        """Cite the manuscript page on screen, crediting whoever transcribed it."""
+        """Cite the manuscript page on screen, crediting whoever transcribed it.
+
+        Wired to `btn_b_cite` on the Browse toolbar, which is disabled until a
+        manuscript is loaded -- so `None` here means a LOCAL document, or a
+        state the button should not have been clickable in.
+
+        It SAYS SO rather than quietly copying the site citation instead. The
+        reader asked for this folio; handing them a different citation without a
+        word is the same class of silent substitution this work exists to
+        remove, and they would paste it believing it names the page.
+        """
         citation = self._browse_page_citation(retrieved_on=self._citation_stamp())
         if citation is None:
-            # The menu entry is disabled in this state; this is the belt-and-
-            # braces path for a programmatic call.
-            self.copy_site_citation()
+            QMessageBox.information(
+                self, tr("Citation"),
+                tr("There is no manuscript page to cite. Use Copy Citation at "
+                   "the bottom of the window to cite the site."))
             return
         self._copy_citation_text(citation.text)
 
@@ -28321,6 +28371,7 @@ class GenizahGUI(QMainWindow):
         # Enable controls
         self.btn_b_catalog.setEnabled(True)
         self.btn_b_save.setEnabled(True)
+        self._sync_browse_cite_button()
         self.btn_b_toggle_img.setEnabled(True)
         self.btn_find_parallels.setEnabled(True)
         self.btn_browse_add_to_list.setEnabled(True)
@@ -28406,6 +28457,7 @@ class GenizahGUI(QMainWindow):
         self.btn_find_parallels.setEnabled(True)
         self.btn_browse_add_to_list.setEnabled(True)
         self.btn_b_save.setEnabled(True)
+        self._sync_browse_cite_button()
         self.btn_b_all.setEnabled(True)
         if self.current_browse_sid:
             self.btn_b_catalog.setEnabled(True)
