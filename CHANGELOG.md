@@ -4,22 +4,35 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
-## [9.2.0] - 2026-09-06 — Citations that name the right people
+## [9.2.0] - 2026-09-06 — Citations, Princeton links, and a round of repairs
 
-This release is about attribution. The apps show MiDRASH automatic
-transcriptions alongside Princeton and Friedberg editions, translations and
-community corrections — and several surfaces credited MiDRASH for all of them.
-One shared decision now drives the printed sheet, the citation chip, Word
-exports, the desktop citation bar and the new Cite buttons, so a citation
-copied from the screen, printed on paper or exported to .docx cannot disagree
-about who is owed credit.
+Three strands, and the release is mostly the third.
+
+**Attribution.** The apps show MiDRASH automatic transcriptions alongside
+Princeton and Friedberg editions, translations and community corrections — and
+several surfaces credited MiDRASH for all of them. One shared decision now
+drives the printed sheet, the "How to cite" chip, Word exports, the desktop
+citation bar and the new Cite buttons, so a citation copied from the screen,
+printed on paper or exported to .docx cannot disagree about who made the text.
+
+**Reaching Princeton.** PGP links now appear in the desktop reading dialog, on
+the Browse toolbar, and as a real link on the `PGP` badge in the results table —
+shown only where a link actually exists, since that column is nullable.
+
+**Repairs.** The Search and Composition Search tabs no longer share one Exclude
+Manuscripts list; composition header sorting works again (it had never fired);
+two composition crashes are fixed; Oxford images no longer fail silently; and a
+crawler can no longer take `/browse` down.
 
 ### New Features
 
+- **Princeton Geniza Project links on three desktop surfaces** — the reading
+  dialog, the Browse toolbar, and the `PGP` badge in the results table.
 - **"How to cite" chip** on every web page — the site citation by default, plus a
   folio-specific one on a manuscript, ready to paste.
 - **Print / Save as PDF** on the web reading view: this folio, or the whole manuscript.
 - **"Cite this page"** on the desktop Browse toolbar and in the result window.
+- **Separate Exclude Manuscripts lists** for the Search and Composition Search tabs.
 
 ### Improvements
 
@@ -32,9 +45,25 @@ about who is owed credit.
 - Dates read as dates — "Sept. 6, 2026" / "6 בספטמבר, 2026".
 - Calmer homepage: one dismissible strip instead of four overlays, clearer buttons,
   and a search box that says what it searches.
+- Bodleian (Oxford) images carry a prominent link to their site, and the credit
+  uses the licence wording.
 
 ### Bug Fixes
 
+- **The Search and Composition Search tabs silently shared one exclusion list** —
+  each "New" wiped the other's.
+- **Composition header-click sorting never fired at all**: `setHeader()` discarded
+  every width, resize mode, hidden state and signal connection.
+- **The composition tree crashed on a mid-load clear**, and **"Full Recursive
+  Search" crashed in letter-level mode**.
+- **Browse showed search hits as literal asterisks**, and lost them on a V0.8
+  switch-back; an editorial `*note*` is no longer rendered as a red hit.
+- **Oxford images died silently**; the NLI proxy now falls back to a Rosetta
+  thumbnail.
+- **A crawler could take `/browse` down** — anonymous requests rewrote the shared
+  recent-history, and notes/version reads blocked every concurrent request.
+- **`/api/browse` no longer 504s in bursts** after a restart.
+- **The default transcription could be an unrelated excerpt.**
 - Word exports contained the automatic transcription while crediting the selected
   scholar.
 - An FGP translation was labelled a transcription.
@@ -47,7 +76,7 @@ about who is owed credit.
 - 165 dead entries in the Hebrew translation table; for 43 keys the site showed a
   string nobody had chosen.
 
-### Earlier notes from this cycle
+### The detailed notes behind the summary above
 
 ### Changed — Homepage calm, honest hero wording, and a printable reading view (web, 2026-09-04)
 

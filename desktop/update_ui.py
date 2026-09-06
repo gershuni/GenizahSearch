@@ -154,8 +154,7 @@ class WhatsNewBar(QFrame):
         # the Browse tab shows by default -- so the bar says what it now does
         # rather than announcing a button alone.
         self.lbl_msg.setText(tr(
-            "New: a \"Cite this page\" button, and citations that credit "
-            "whoever actually made the transcription"))
+            "New: a \"Cite this page\" button, prominent PGP links, and fixes to composition search and Oxford image links"))
         self.show()
 
     def on_learn_more(self):
@@ -293,13 +292,11 @@ class WhatsNewDialog(QDialog):
         # Princeton/Friedberg fix. What is left is the control and the reason
         # for it, which is the part a reader acts on.
         items = [
-            tr(
-                "A \"Cite this page\" button, on the Browse toolbar and in the result "
-                "window."),
-            tr(
-                "The citation names whoever made the transcription you are reading — "
-                "MiDRASH, Princeton, Friedberg, a translator, or a community "
-                "correction."),
+            tr("Prominent links to the Princeton Geniza Project (PGP) - in the search result window, on the Browse tab, and on the PGP badge in the results table."),
+            tr("A new \"Cite this page\" button, naming whoever made the transcription - MiDRASH, Princeton, Friedberg, a translator, or a community correction."),
+            tr("The citation bar at the foot of the app now also credits the application version."),
+            tr("The Search tab and the Composition Search tab now have separate exclusion lists (until now they shared one)."),
+            tr("Assorted composition-search bug fixes, and Bodleian (Oxford) images now carry a prominent link to their site."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)

@@ -182,18 +182,37 @@ def test_each_entry_is_gated_on_its_own_predicate():
     _run(witnesses_down, passage_on=True, witnesses_on=False)
 
 
-def test_no_index_means_no_toast_at_all():
-    """The empty-list guard is REACHABLE now, and load-bearing.
+def test_a_box_without_the_index_announces_only_what_it_actually_has():
+    """RE-AIMED, not deleted (2026-09-06). Read the history before changing it.
 
-    While the list opened with the unconditionally-registered `/start`, the
-    toast always had something to say and that guard was a formality. Both
-    entries are gated now, so a box whose index did not open advertises
-    nothing — which is right, because on that box there is nothing new to
-    announce.
+    This asserted that a box whose passage index did not open draws NO toast at
+    all, and its docstring recorded why that mattered: while the list opened
+    with an unconditionally-registered entry the `bool(_new_surfaces)` guard
+    "was a formality", and gating every entry is what made it load-bearing.
+
+    The owner's v9.2.0 entry is ungated -- the print view and the citation
+    button are on for every reader on every deployment, so there is no flag to
+    hang it on. The empty list is therefore unreachable again, and a test whose
+    precondition cannot occur is not a test.
+
+    What survives is the half that still catches a real mistake: with the
+    passage flags OFF, the toast must not name the gated surfaces. Asserted as
+    presence-plus-contents rather than absence, because absence also passes
+    whenever rendering simply breaks.
     """
     async def driver(user):
         await user.open('/search')
-        assert _banner(_elements(user)) is None
+        elements = _elements(user)
+        assert _banner(elements) is not None, (
+            'no toast at all -- the always-available entry is missing, or the '
+            'page did not render')
+        # `_texts` already returns a STRING; joining it splits every character.
+        text = _texts(elements)
+        assert 'citation button' in text, (
+            'the toast does not name the always-available entry: %r' % text[:400])
+        assert 'Letter-level' not in text, (
+            'a GATED surface is advertised on a box whose index never opened')
+        assert 'textual witnesses' not in text
 
     _run(driver, passage_on=False, witnesses_on=False)
 
@@ -319,12 +338,23 @@ def test_an_unread_announcement_carries_a_dot():
     _run(driver)
 
 
-def test_nothing_is_announced_when_there_is_nothing_to_announce():
-    """The control is gated on the CONTENT, so a box with no index draws no
-    button — not an empty button that opens an empty panel."""
+def test_the_button_is_drawn_because_there_IS_something_to_announce():
+    """The companion to the test above, and the CONTROL for it.
+
+    It previously asserted the header button is absent on a box with no index.
+    Since the v9.2.0 entry is ungated there is always something to announce, so
+    the button is always drawn -- and this now pins that it is drawn WITH its
+    unread dot, which is what makes it findable at all.
+
+    Without this, the rewritten test above could pass on a page that rendered a
+    toast container and no control to open it.
+    """
     async def driver(user):
         await user.open('/')
-        assert not _by_class(_elements(user), 'whats-new-btn-header')
-        assert not _by_class(_elements(user), 'whats-new-dot')
+        elements = _elements(user)
+        assert _by_class(elements, 'whats-new-btn-header'), (
+            'no What\'s New button, though an always-available entry exists')
+        assert _by_class(elements, 'whats-new-dot'), (
+            'the button has no unread dot, so a first-time reader has no cue')
 
     _run(driver, passage_on=False, witnesses_on=False)

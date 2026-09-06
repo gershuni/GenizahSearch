@@ -317,7 +317,13 @@ every session's context.
 
 ### Releases
 
-- **v9.2.0 — Citations that name the right people (2026-09-06)** — one shared decision
+- **v9.2.0 — Citations, Princeton links, and a round of repairs (2026-09-06)** — NOTE the
+  span: this tag covers 67 commits, including PR #333 and PR #334, not one branch.
+  Desktop gained **PGP links on three surfaces** and **separate Exclude Manuscripts
+  lists** for Search vs Composition Search (they shared one); composition header-click
+  sorting had NEVER fired (`setHeader()` discards every width, mode and signal), two
+  composition crashes fixed, Browse showed hits as literal asterisks, Oxford images died
+  silently, and a crawler could take `/browse` down. On citations: one shared decision
   (`shared/transcription_credits.py`) drives the printed sheet, the web "How to cite" chip,
   Word exports, the desktop citation bar and the new Cite buttons, so a citation copied from
   the screen, printed, or exported cannot disagree about who made the text. MiDRASH is cited

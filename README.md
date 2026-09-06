@@ -10,17 +10,22 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ## What's New in Version 9.2.0?
 
-**Citations that name the right people.** Every citation now credits whoever
-actually made the text on your screen: the MiDRASH automatic transcription, a
-Princeton or Friedberg edition, a translation, or a community correction. A
-"How to cite" chip sits on every page of the site, the reading view prints
-properly, and the desktop app cites itself and its version rather than the
-website.
+**Citations, Princeton links, and a round of repairs.** Citations now credit
+whoever actually made the text on your screen — the MiDRASH automatic
+transcription, a Princeton or Friedberg edition, a translation, or a community
+correction — and the desktop app cites itself and its version rather than the
+website. The desktop also reaches Princeton directly, and a long list of
+defects is fixed.
 
+- Princeton Geniza Project links in the desktop reading dialog, on the Browse
+  toolbar, and on the `PGP` badge in the results table
 - "How to cite" chip on every web page, and Cite buttons in the desktop app
 - Print / Save as PDF from the reading view — one folio or the whole manuscript
-- The full MiDRASH author list in pasteable citations
-- A calmer homepage
+- Separate Exclude Manuscripts lists for the Search and Composition Search tabs
+  (they had silently shared one)
+- Fixed: composition header sorting, two composition crashes, search hits shown
+  as literal asterisks, Oxford images failing silently, and a crawler that could
+  take browsing down
 
 ## What's New in Version 9.1.0?
 

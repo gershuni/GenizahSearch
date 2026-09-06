@@ -358,14 +358,20 @@ TRANSLATIONS = {
     # v9.2.0 What's New (owner-approved wording, 2026-09-06). The desktop bar
     # and dialog are read in Hebrew by Hebrew users; `tr()` falls back to the
     # KEY, so a missing entry here is silent English rather than an error.
-    "New: a \"Cite this page\" button, and citations that credit whoever actually made the transcription":
-        "חדש: כפתור \"צטט דף זה\", וציטוטים שנותנים קרדיט למי שבאמת יצר את התעתוק.",
-    "A \"Cite this page\" button, on the Browse toolbar and in the result window.":
-        "כפתור \"צטט דף זה\", בסרגל הכלים של העיון ובחלון התוצאה.",
-    "The citation names whoever made the transcription you are reading — MiDRASH, Princeton, Friedberg, a translator, or a community correction.":
-        "הציטוט מזכיר את מי שיצר את התעתוק שאתם קוראים — מדרש, פרינסטון, פרידברג, מתרגם או תיקון קהילתי.",
-    "A \"How to cite\" chip on every page, printing from the reading view, and citations that credit whoever made the transcription you are reading":
-        "תווית \"כיצד לצטט\" בכל עמוד, הדפסה מתצוגת הקריאה, וציטוטים שנותנים קרדיט למי שיצר את התעתוק שאתם קוראים",
+    "New: a \"Cite this page\" button, prominent PGP links, and fixes to composition search and Oxford image links":
+        "חדש: כפתור \"צטט דף זה\", קישורים ל-PGP במיקום בולט, ותיקונים בחיפוש חיבורים ובקישורים לתמונות אוקספורד",
+    "Prominent links to the Princeton Geniza Project (PGP) - in the search result window, on the Browse tab, and on the PGP badge in the results table.":
+        "קישורים בולטים לפרויקט הגניזה של פרינסטון (PGP) — בחלונית תוצאות החיפוש ובטאב העיון, וכן בתגית PGP בטבלת התוצאות",
+    "A new \"Cite this page\" button, naming whoever made the transcription - MiDRASH, Princeton, Friedberg, a translator, or a community correction.":
+        "נוסף כפתור \"צטט דף זה\", המזכיר את מי שיצר את התעתוק — מדרש, פרינסטון, פרידברג, מתרגם או תיקון קהילתי",
+    "The citation bar at the foot of the app now also credits the application version.":
+        "באנר הציטוט בתחתית התוכנה מכיל כעת גם קרדיט לגרסת התוכנה",
+    "The Search tab and the Composition Search tab now have separate exclusion lists (until now they shared one).":
+        "לשונית החיפוש ולשונית חיפוש החיבורים קיבלו רשימות החרגה נפרדות (עד כה הן חלקו רשימה אחת)",
+    "Assorted composition-search bug fixes, and Bodleian (Oxford) images now carry a prominent link to their site.":
+        "תיקוני באגים שונים בחיפוש חיבורים, ותמונות ספריות הבודליאנה באוקספורד קיבלו קישור בולט לאתר",
+    "New: a print-view button, and a prominent citation button - for the site as a whole and for each page.":
+        "חדש: לחצן תצוגת הדפסה, וכפתור ציטוט בולט לאתר כולו ולכל דף בנפרד",
     # The desktop cites SOFTWARE, not a website: a reader here never
     # visited an address on a date. The product NAME stays Latin in both
     # languages, as it does in the window title and the export header.

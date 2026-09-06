@@ -735,7 +735,7 @@ from version import APP_VERSION
 # Names the CONTENT wave, not a release: the seen flag is stored per browser
 # as this exact string, so it must change whenever the announcement does, and
 # "9.0.0" was already spent on the 2026-08-16 web release.
-WHATS_NEW_VERSION = "9.2.0-citations"
+WHATS_NEW_VERSION = "9.2.0-citations-and-print"
 APP_PORT = int(os.environ.get('GENIZAH_PORT', 8081))
 
 # Initialize API routes (Image Proxy, Export)
@@ -1678,13 +1678,25 @@ def create_layout():
             (tr("Get the most from the parallels search by entering several "
                 "textual witnesses"), _parallels_demo_target))
 
-    # v9.2.0 — NOT flag-gated, unlike the two above: the citation chip and the
-    # printable reading view are on for everyone, so this entry is always
-    # present and the What's New button is always offered.
+    # v9.2.0, and it is UNGATED -- the owner's decision, and the only honest
+    # shape for it: the print view and the citation button are on for every
+    # reader on every deployment, so there is no flag to hang it on.
+    #
+    # WHAT THAT COSTS, stated because it undoes something deliberate.
+    # `tests/render_smoke/test_whats_new_banner.py` records that while this
+    # list opened with an unconditionally-registered entry the
+    # `bool(_new_surfaces)` guard below "was a formality", and that gating
+    # every entry is what made it load-bearing. This entry makes it a formality
+    # again: the list can no longer be empty by any route a reader can reach.
+    #
+    # So the guard was not left untested, it was given a different thing to
+    # prove. The substantive half of the old property -- do not advertise a
+    # GATED surface whose flag is off -- is still real and still tested; what
+    # is gone is only the "nothing at all to announce" case, which no longer
+    # occurs. See the two rewritten tests in that file.
     _new_surfaces.append(
-        (tr('A "How to cite" chip on every page, printing from the reading '
-            'view, and citations that credit whoever made the transcription '
-            'you are reading'), '/browse'))
+        (tr("New: a print-view button, and a prominent citation button - for "
+            "the site as a whole and for each page."), '/browse'))
 
     _show_whats_new = bool(_new_surfaces) and current_page not in _WHATS_NEW_SUPPRESSED_ON
     _whats_new_unseen = safe_user_get('whats_new_dismissed') != WHATS_NEW_VERSION
