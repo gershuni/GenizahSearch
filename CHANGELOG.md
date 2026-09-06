@@ -4,7 +4,50 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
-## Unreleased - 2026-09-01
+## [9.2.0] - 2026-09-06 — Citations that name the right people
+
+This release is about attribution. The apps show MiDRASH automatic
+transcriptions alongside Princeton and Friedberg editions, translations and
+community corrections — and several surfaces credited MiDRASH for all of them.
+One shared decision now drives the printed sheet, the citation chip, Word
+exports, the desktop citation bar and the new Cite buttons, so a citation
+copied from the screen, printed on paper or exported to .docx cannot disagree
+about who is owed credit.
+
+### New Features
+
+- **"How to cite" chip** on every web page — the site citation by default, plus a
+  folio-specific one on a manuscript, ready to paste.
+- **Print / Save as PDF** on the web reading view: this folio, or the whole manuscript.
+- **"Cite this page"** on the desktop Browse toolbar and in the result window.
+
+### Improvements
+
+- Citations name **whoever made the text you are reading** — MiDRASH for the
+  automatic transcription, otherwise Princeton, Friedberg, the translator or the
+  community corrector.
+- Citations carry the **full MiDRASH author list**, not "et al.".
+- The desktop cites **Dicta Genizah Search Pro** and its version, not the website:
+  a reader running a program never fetched an address on a date.
+- Dates read as dates — "Sept. 6, 2026" / "6 בספטמבר, 2026".
+- Calmer homepage: one dismissible strip instead of four overlays, clearer buttons,
+  and a search box that says what it searches.
+
+### Bug Fixes
+
+- Word exports contained the automatic transcription while crediting the selected
+  scholar.
+- An FGP translation was labelled a transcription.
+- The desktop credited MiDRASH for Princeton and Friedberg editions — the usual
+  case, since those are what the Browse tab prefers by default.
+- Citation links opened the manuscript at its first folio rather than the cited one.
+- "Print this page" printed the whole manuscript in Full Manuscript View, and the
+  editor while editing.
+- A page with no transcription at all was still offered a citation crediting MiDRASH.
+- 165 dead entries in the Hebrew translation table; for 43 keys the site showed a
+  string nobody had chosen.
+
+### Earlier notes from this cycle
 
 ### Changed — Homepage calm, honest hero wording, and a printable reading view (web, 2026-09-04)
 

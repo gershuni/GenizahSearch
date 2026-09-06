@@ -148,9 +148,14 @@ class WhatsNewBar(QFrame):
         # not an oversight -- but note what it is NOT: the v9.0.0 text this
         # replaces said "Chunk search stays the default", and leaving that
         # in place would have asserted the opposite of what now happens.
+        # v9.2.0: the bar names the new control and the reason for it. The
+        # citation change is a correctness fix as much as a feature -- the app
+        # credited MiDRASH for Princeton and Friedberg editions, which are what
+        # the Browse tab shows by default -- so the bar says what it now does
+        # rather than announcing a button alone.
         self.lbl_msg.setText(tr(
-            "New in Composition Search! Search using several witnesses of "
-            "the same work"))
+            "New: a \"Cite this page\" button, and citations that credit "
+            "whoever actually made the transcription"))
         self.show()
 
     def on_learn_more(self):
@@ -283,18 +288,18 @@ class WhatsNewDialog(QDialog):
         layout.addWidget(title)
 
         is_heb = CURRENT_LANG == 'he'
+        # v9.2.0. The owner cut the last three of a five-bullet draft
+        # (2026-09-06): the version line, the full author list and the
+        # Princeton/Friedberg fix. What is left is the control and the reason
+        # for it, which is the part a reader acts on.
         items = [
             tr(
-                "Several witnesses of one work: letter-level search can now be given more "
-                "than one copy of the text you are looking for. Paste them one at a time, "
-                "load a whole file split on blank lines, or promote manuscripts straight "
-                "from your own results. Each is searched on its own and the results are "
-                "merged into one list."),
+                "A \"Cite this page\" button, on the Browse toolbar and in the result "
+                "window."),
             tr(
-                "The manuscript viewer now highlights letter-level matches in the page "
-                "text — they used to open unmarked — and new Prev / Next "
-                "Manuscript buttons skip the remaining pages of a manuscript you have "
-                "already read."),
+                "The citation names whoever made the transcription you are reading — "
+                "MiDRASH, Princeton, Friedberg, a translator, or a community "
+                "correction."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)

@@ -735,7 +735,7 @@ from version import APP_VERSION
 # Names the CONTENT wave, not a release: the seen flag is stored per browser
 # as this exact string, so it must change whenever the announcement does, and
 # "9.0.0" was already spent on the 2026-08-16 web release.
-WHATS_NEW_VERSION = "9.0.0-letter-level"
+WHATS_NEW_VERSION = "9.2.0-citations"
 APP_PORT = int(os.environ.get('GENIZAH_PORT', 8081))
 
 # Initialize API routes (Image Proxy, Export)
@@ -1677,6 +1677,14 @@ def create_layout():
         _new_surfaces.append(
             (tr("Get the most from the parallels search by entering several "
                 "textual witnesses"), _parallels_demo_target))
+
+    # v9.2.0 — NOT flag-gated, unlike the two above: the citation chip and the
+    # printable reading view are on for everyone, so this entry is always
+    # present and the What's New button is always offered.
+    _new_surfaces.append(
+        (tr('A "How to cite" chip on every page, printing from the reading '
+            'view, and citations that credit whoever made the transcription '
+            'you are reading'), '/browse'))
 
     _show_whats_new = bool(_new_surfaces) and current_page not in _WHATS_NEW_SUPPRESSED_ON
     _whats_new_unseen = safe_user_get('whats_new_dismissed') != WHATS_NEW_VERSION

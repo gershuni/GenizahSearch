@@ -355,6 +355,17 @@ TRANSLATIONS = {
     # The Browse toolbar's own cite button (owner, 2026-09-05): the page
     # citation lives on the surface that HAS a page, not on the window-wide bar.
     "Cite this page": "צטט דף זה",
+    # v9.2.0 What's New (owner-approved wording, 2026-09-06). The desktop bar
+    # and dialog are read in Hebrew by Hebrew users; `tr()` falls back to the
+    # KEY, so a missing entry here is silent English rather than an error.
+    "New: a \"Cite this page\" button, and citations that credit whoever actually made the transcription":
+        "חדש: כפתור \"צטט דף זה\", וציטוטים שנותנים קרדיט למי שבאמת יצר את התעתוק.",
+    "A \"Cite this page\" button, on the Browse toolbar and in the result window.":
+        "כפתור \"צטט דף זה\", בסרגל הכלים של העיון ובחלון התוצאה.",
+    "The citation names whoever made the transcription you are reading — MiDRASH, Princeton, Friedberg, a translator, or a community correction.":
+        "הציטוט מזכיר את מי שיצר את התעתוק שאתם קוראים — מדרש, פרינסטון, פרידברג, מתרגם או תיקון קהילתי.",
+    "A \"How to cite\" chip on every page, printing from the reading view, and citations that credit whoever made the transcription you are reading":
+        "תווית \"כיצד לצטט\" בכל עמוד, הדפסה מתצוגת הקריאה, וציטוטים שנותנים קרדיט למי שיצר את התעתוק שאתם קוראים",
     # The desktop cites SOFTWARE, not a website: a reader here never
     # visited an address on a date. The product NAME stays Latin in both
     # languages, as it does in the window title and the export header.

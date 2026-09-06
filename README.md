@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 9.1.0
+# Dicta Genizah Search Pro 9.2.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -7,6 +7,20 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 > **Web Access:** [genizahsearch.com](https://genizahsearch.com) (אתר הגניזה של דיקטה) - Search, browse, and collaborate from any browser
 
 ---
+
+## What's New in Version 9.2.0?
+
+**Citations that name the right people.** Every citation now credits whoever
+actually made the text on your screen: the MiDRASH automatic transcription, a
+Princeton or Friedberg edition, a translation, or a community correction. A
+"How to cite" chip sits on every page of the site, the reading view prints
+properly, and the desktop app cites itself and its version rather than the
+website.
+
+- "How to cite" chip on every web page, and Cite buttons in the desktop app
+- Print / Save as PDF from the reading view — one folio or the whole manuscript
+- The full MiDRASH author list in pasteable citations
+- A calmer homepage
 
 ## What's New in Version 9.1.0?
 
@@ -610,7 +624,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Dicta Geniza
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V9.1.0_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V9.2.0_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 
