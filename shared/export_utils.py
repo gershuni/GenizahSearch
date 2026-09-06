@@ -56,6 +56,86 @@ MIDRASH_CREDIT_LINES: Tuple[str, ...] = (
     MIDRASH_CITATION_LINE,
 )
 
+#: The same citation as ONE inline clause, for a one-sentence page citation a
+#: reader pastes into a bibliography (the "How to cite this page" chip, owner
+#: 2026-09-04). The three rows above are right for a credits SHEET, where each
+#: has its own line and its own label; this is the same citation as one
+#: unlabelled clause.
+#:
+#: FULL AUTHOR LIST, by the owner's decision of 2026-09-05, who supplied this
+#: exact string. It had been abbreviated to "Stoekl Ben Ezra, D. et al." on the
+#: reasoning that a pasteable sentence has no room for seventeen names and the
+#: fuller rows sit underneath it on the sheet and in the .docx. The owner's
+#: ruling is that the thing a reader COPIES has to be the thing they can
+#: publish -- and someone copying from the chip is not reading the rows.
+#:
+#: Consequences, all handled at the surfaces rather than here: the Word export
+#: now skips a row already contained in the sentence (it printed the seventeen
+#: names twice), the desktop citation strip elides visibly instead of clipping
+#: in silence, and the web chip panel has an explicit height bound. Note that
+#: this is NOT `MIDRASH_CITATION_LINE` with the prefix removed -- that one is a
+#: labelled sheet row ("Citation: ..."), this is a sentence clause.
+MIDRASH_INLINE_CITATION: str = (
+    "Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., "
+    "Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., "
+    "Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., "
+    "Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). "
+    "MiDRASH Automatic Transcriptions. Zenodo. "
+    "https://doi.org/10.5281/zenodo.17734473"
+)
+
+
+# ============================================================================
+# The site's own credit -- ONE canonical copy, for the same reason
+# ============================================================================
+#
+# Moved here from `shared/export_dossier.py` on 2026-09-04, when the printed
+# reading sheet needed to credit the site and would otherwise have declared a
+# fifth site-URL constant. The site name is copy-pasted as a bare literal in
+# dozens of places and the URL had four separately-named constants; this is the
+# import point for anything that CREDITS the site, and it lives beside the
+# MiDRASH lines because a credit block wants both and neither should drag in a
+# database connection.
+#
+# `export_dossier` re-exports both so its existing callers are untouched.
+GENIZAHSEARCH_URL: str = "https://genizahsearch.com"
+
+#: The site's own name, per UI language. Hebrew readers get the Hebrew name the
+#: export workbook's link row already uses; the Latin brand is kept for English.
+_SITE_NAME_BY_LANG = {
+    'en': "Dicta Genizah Search",
+    'he': "אתר הגניזה של דיקטה",
+}
+
+
+#: The DESKTOP product name, and it is deliberately the same in both UI
+#: languages. This is the established convention for this product, not a
+#: missing translation: the window title (`genizah_app.py`), the export credit
+#: header and the Hebrew consent dialog all keep the Latin name. The WEB site
+#: name translates because it describes a website; a product name does not.
+DESKTOP_APP_NAME: str = "Dicta Genizah Search Pro"
+
+
+def desktop_software_clause(version: str) -> str:
+    """The "where this came from" clause for the DESKTOP app.
+
+    A software citation, not a resource citation: a reader working in the
+    desktop application never visited a URL on a date, so a retrieval date
+    describes a fetch that did not happen. What identifies a running program is
+    its version, which is why the caller must supply one.
+
+    `V` capitalised to match the window title, which is where a reader will go
+    looking to check which version they have.
+    """
+    version = str(version or '').strip()
+    return '%s V%s' % (DESKTOP_APP_NAME, version) if version else DESKTOP_APP_NAME
+
+
+def site_name(lang: str = 'en') -> str:
+    """The site's display name for ``lang`` ('he' or anything else = English)."""
+    return _SITE_NAME_BY_LANG.get('he' if str(lang or '').lower().startswith('he') else 'en',
+                                  _SITE_NAME_BY_LANG['en'])
+
 
 # ============================================================================
 # Text Sanitization for Excel

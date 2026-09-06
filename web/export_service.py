@@ -319,6 +319,99 @@ def add_highlighted_hebrew_paragraph(doc: Document, text: str) -> None:
     set_paragraph_rtl(p)
 
 
+def _row_text(line: str) -> str:
+    """A credit row's content, without its label.
+
+    Sheet rows are written "Citation: <the citation>" / "Dataset: <url>", while
+    the one-sentence form has no labels. Comparing the raw rows against the
+    sentence would therefore never match, and the duplicate-author-list filter
+    in `add_word_source_credits` would silently do nothing.
+
+    Splits on the FIRST colon only, and only when what follows is non-empty --
+    a row that is itself a bare URL ("https://doi.org/...") must not be cut at
+    the scheme's colon.
+    """
+    head, sep, tail = line.partition(': ')
+    if sep and tail.strip() and '//' not in head:
+        return tail.strip()
+    return line.strip()
+
+
+def add_word_source_credits(
+    doc: Document,
+    *,
+    lang: str = 'en',
+    version_info=None,
+    library=None,
+    shelfmark=None,
+    folio=None,
+    page_url=None,
+    retrieved_on=None,
+) -> None:
+    """Credit the transcription that was actually exported, bilingually.
+
+    A SIBLING of `add_word_credits`, not a change to it. That function has three
+    callers -- the browse export, the search-results export and the parallels
+    export -- and the other two have no "what is on screen" concept at all: they
+    list many manuscripts, so an unconditional MiDRASH credit is the correct
+    thing for them and must keep printing byte-for-byte as it does today.
+    `CREDITS_TEXT` is also asserted directly by
+    `tests/test_export_service.py::TestCreditsText`. Widening the shared
+    function would have put a per-page notion into two exports that cannot have
+    one, for no gain.
+
+    Used ONLY by `export_browse_word`, which does export the manuscript's own
+    transcription text -- the owner's condition for fixing this at all
+    (2026-09-04: "If Word export is referring to ms text so yes fix it too").
+
+    The citation comes from `shared/transcription_credits`, the same decision
+    the printed sheet and the "How to cite" chip take, so an exported document
+    cannot credit someone different from the screen it came off.
+    """
+    from shared.transcription_credits import page_citation, resolve_transcription_credit
+
+    citation = page_citation(
+        version_info,
+        lang=lang,
+        library=library,
+        shelfmark=shelfmark,
+        folio=folio,
+        page_url=page_url,
+        retrieved_on=retrieved_on,
+    )
+    credit = resolve_transcription_credit(version_info, lang=lang)
+
+    doc.add_page_break()
+    doc.add_heading('Credits', 1)
+
+    # The one-sentence citation first -- it is the thing a reader pastes.
+    citation_p = doc.add_paragraph()
+    citation_run = citation_p.add_run(citation.text)
+    citation_run.italic = True
+
+    # Then the fuller rows for whoever wants them -- EXCEPT any row the
+    # sentence above already contains.
+    #
+    # This used to print them all, on the reasoning that the sentence
+    # abbreviated to "et al." and a document has room for the full list. Since
+    # 2026-09-05 the sentence carries the complete seventeen names (owner's
+    # ruling), so printing the rows unfiltered put the same author list twice on
+    # one page, back to back -- which is the "too much duplicacy" the citation
+    # was collapsed into one sentence to fix in the first place.
+    #
+    # Filtered by CONTAINMENT rather than by naming the MiDRASH row: the rows
+    # are per-provider and the sentence is assembled from the same credit, so
+    # "already said above" is the actual property, and it keeps holding if
+    # either side changes.
+    rows = [line for line in credit.citation_lines
+            if _row_text(line) not in citation.text]
+    if rows:
+        doc.add_paragraph()
+        doc.add_paragraph(credit.heading)
+        for line in rows:
+            doc.add_paragraph(line)
+
+
 def add_word_credits(doc: Document) -> None:
     """Add standard credits section to a Word document."""
     doc.add_page_break()
@@ -1305,9 +1398,42 @@ class ExportService:
                     add_hebrew_paragraph(doc, page_data['text'])
         elif browse_data.get('text'):
             doc.add_heading(f"Page {browse_data.get('p_num', '?')}", 2)
-            add_hebrew_paragraph(doc, browse_data['text'])
+            # DIRECTION FOLLOWS THE TEXT, not the document.
+            #
+            # `add_hebrew_paragraph` sets `w:bidi` and `w:rtl` and right-aligns,
+            # which was right while this export always carried the Hebrew
+            # transcription. Since it started shipping the DISPLAYED text, an
+            # English translation went through it too and came out as
+            # right-aligned RTL English.
+            #
+            # The version selector already knows: `language` rides in
+            # `version_info` for both PGP and FGP translations, and the web
+            # reading view makes the same call (`is_rtl = language != 'English'`).
+            _vi = browse_data.get('version_info') or {}
+            _language = str(_vi.get('language') or '').strip()
+            if _language and _language.lower() == 'english':
+                doc.add_paragraph(browse_data['text'])
+            else:
+                add_hebrew_paragraph(doc, browse_data['text'])
 
-        add_word_credits(doc)
+        # Source-aware credit (2026-09-04). NOT `add_word_credits`, which is
+        # unconditionally MiDRASH and in English -- see `add_word_source_credits`.
+        #
+        # `version_info` is None for a Full Manuscript View export by design:
+        # FMV renders every folio's stored text with no per-page version
+        # chooser, so the automatic transcription IS what was exported. The
+        # browse page sends None for that path deliberately, not by omission.
+        add_word_source_credits(
+            doc,
+            lang=browse_data.get('lang') or 'en',
+            version_info=(None if browse_data.get('view_all')
+                          else browse_data.get('version_info')),
+            library=browse_data.get('library_name'),
+            shelfmark=browse_data.get('shelfmark'),
+            folio=browse_data.get('folio_label'),
+            page_url=browse_data.get('page_url'),
+            retrieved_on=browse_data.get('retrieved_on'),
+        )
 
         # Filename: use shelfmark
         filename = make_safe_filename(shelfmark, default="manuscript") + ".docx"

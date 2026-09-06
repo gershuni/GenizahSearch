@@ -34,53 +34,28 @@ def create_page():
     _discovery_ready = discovery_available()
     _atlas_ready = atlas_preview_available()
 
-    with ui.column().classes('w-full max-w-7xl mx-auto gap-3 fade-in'):
+    with ui.column().classes('w-full max-w-7xl mx-auto gap-2 fade-in'):
 
-        # === OCR Disclaimer Banner (dismissible, compact single-line) ===
-        # 2026-05-12 Codex 3rd-pass HIGH: safe_user_get so prune races on
-        # / don't 500 the homepage.
-        from web.safe_storage import safe_user_get as _safe_get, safe_user_set as _safe_set
-        if not _safe_get('ocr_disclaimer_dismissed', False):
-            banner_dir = 'rtl' if is_rtl() else 'ltr'
-            # Fixed-position toast (out of document flow) so show/auto-dismiss
-            # never reflow content (CLS). Stacked above the global What's New toast.
-            with ui.element('div').classes('px-4 py-2 flex items-center gap-3').style(
-                f'position: fixed; bottom: 74px; left: 50%; transform: translateX(-50%); '
-                f'z-index: 2000; max-width: 90vw; background: var(--bg-tertiary); '
-                f'border: 1px solid var(--border-light); border-radius: 8px; '
-                f'box-shadow: 0 4px 16px rgba(0,0,0,0.18); direction: {banner_dir};'
-            ) as ocr_banner:
-                ui.icon('psychology').classes('text-base').style('color: var(--primary-600);')
-                ui.label(tr('Computer-read manuscripts; expect some reading errors!')).classes('text-xs flex-1').style('color: var(--text-secondary);')
-                ui.link(tr('Learn more →'), '/about').classes('text-xs').style('color: var(--primary-600); text-decoration: none;')
-                def dismiss_banner():
-                    # Explicit user dismiss (X button): persist unconditionally.
-                    _safe_set('ocr_disclaimer_dismissed', True)
-                    try:
-                        ocr_banner.delete()
-                    except Exception:
-                        pass  # Already dismissed / parent slot gone
-                ui.button(icon='close', on_click=dismiss_banner).props(f'flat dense round size=xs aria-label="{tr("Dismiss")}"')
-                # asyncio.call_later instead of ui.timer: ui.timer binds to the
-                # banner slot and raises RuntimeError if the user navigates away
-                # before the auto-dismiss fires.
-                def _auto_dismiss_ocr():
-                    # Persist the dismissed flag only if the banner is still alive
-                    # and we actually hide it. If the user left /home before 30s,
-                    # .delete() raises and we must not mark the disclaimer as seen
-                    # Otherwise navigating away inside 30s permanently hides it.
-                    try:
-                        ocr_banner.delete()
-                    except Exception:
-                        return
-                    _safe_set('ocr_disclaimer_dismissed', True)
-                try:
-                    asyncio.get_event_loop().call_later(30.0, _auto_dismiss_ocr)
-                except RuntimeError:
-                    pass
+        # The OCR caveat used to be a FIXED-POSITION TOAST here, with its own
+        # close button and a 30-second self-destruct. It is now an inline line
+        # inside the hero (see below), for two reasons:
+        #
+        # 1. It was one of four overlays a first visit stacked on this page
+        #    (this, the What's New toast, the citation footer, and a blocking
+        #    citation modal) — the "עומס / too many popups" the owner reported
+        #    on 2026-09-04. Removing it removes an overlay AND a close button.
+        # 2. A toast that deletes itself after 30 seconds, permanently, is the
+        #    wrong shape for this particular sentence. "These transcriptions
+        #    were read by a machine and contain errors" is not news to be
+        #    dismissed; it is a standing caveat about every result on the site,
+        #    and it should be legible on the hundredth visit as on the first.
+        #
+        # Consequence, stated plainly: `ocr_disclaimer_dismissed` is no longer
+        # read or written, and the caveat can no longer be dismissed. That is
+        # deliberate — it costs one line of the hero and no page area at all.
 
         # === Hero Section (compact) ===
-        with ui.element('div').classes('w-full px-6 py-3').style(
+        with ui.element('div').classes('w-full px-5 py-2').style(
             'background: var(--bg-tertiary); border: 1px solid var(--border-light); border-radius: 8px;'
         ):
             with ui.row().classes('w-full items-center justify-between gap-4 flex-wrap'):
@@ -109,6 +84,16 @@ def create_page():
                     ui.label(tr('Search MiDRASH transcriptions across 255,000+ manuscripts: text, variants, parallels, joins, and images')).classes(
                         'text-sm'
                     ).style('color: var(--text-secondary);')
+                    # The OCR caveat, inline — replaces the fixed toast that
+                    # used to float over this page (see the note at the top of
+                    # create_page). Muted, one line, always present.
+                    with ui.row().classes('items-center gap-1 flex-wrap'):
+                        ui.icon('psychology').classes('text-sm').style('color: var(--text-muted);')
+                        ui.label(tr('Computer-read manuscripts; expect some reading errors!')).classes(
+                            'text-xs'
+                        ).style('color: var(--text-muted);')
+                        ui.link(tr('Learn more →'), '/about').classes('text-xs').style(
+                            'color: var(--primary-600); text-decoration: none;')
 
                 # Inline stats. `flex-wrap` so the two stats stack rather than
                 # overflow once they have a narrow line to themselves.
@@ -143,7 +128,7 @@ def create_page():
                     mini_stat('star', get_list_count, tr('Lists'))
 
         # === Hero Search Bar ===
-        with ui.element('div').classes('w-full px-6 py-4 mt-2').style(
+        with ui.element('div').classes('w-full px-5 py-3 mt-1').style(
             'background: var(--bg-tertiary); border: 1px solid var(--border-light); border-radius: 8px;'
         ):
             with ui.row().classes('w-full justify-center'):
@@ -155,8 +140,16 @@ def create_page():
                         if val.strip():
                             ui.navigate.to(f'/search?q={val}')
 
+                    # NOT "Search manuscripts..." (owner, 2026-09-04: "הכיתוב
+                    # search manuscripts מבלבל"). That phrasing reads as "search
+                    # FOR manuscripts", so a first-time reader types a shelfmark
+                    # — and this box does not do that: it runs a full-text query
+                    # over the MiDRASH transcriptions and hands the string to
+                    # `/search?q=`. The wording now names the input (a word or a
+                    # phrase) and the target (the manuscripts), which is what the
+                    # `/search` page's own box has always said.
                     hero_search = ui.input(
-                        placeholder=tr('Search manuscripts...')
+                        placeholder=tr('Type a word or phrase to search the manuscripts...')
                     ).classes('flex-grow hero-search-input').props('outlined rounded dense').style(
                         'font-size: 1.1rem;'
                     ).on('keydown.enter', lambda: _navigate_search())
@@ -190,7 +183,7 @@ def create_page():
                     ui.label(tr("What's on this website? Start here to explore the Cairo Genizah"))
 
         # === Capability Chips (clickable) ===
-        with ui.row().classes('w-full justify-center gap-2 flex-wrap mt-2 px-2'):
+        with ui.row().classes('w-full justify-center gap-2 flex-wrap mt-1 px-2'):
             _chips = [
                 ('text_fields', tr('Free Text Search'), '/search', None),
                 ('spellcheck', tr('Spelling Variants'), '/search?mode=variants', None),
@@ -223,139 +216,41 @@ def create_page():
                     ui.icon(icon_name).classes('text-sm').style('color: var(--primary-600);')
                     ui.label(label).classes('text-xs').style('color: var(--text-secondary);')
 
-        # === Beta announcements — the two banners SIDE BY SIDE (owner, 2026-08-04) ===
-        # Computed Identifications first, then the atlas. Each keeps its OWN
-        # availability gate, so when only one is live it simply fills the row —
-        # which is why the gates stay inside rather than around the row.
-        #
-        # `items-stretch` + `flex-1` makes both cards the same height whatever
-        # the text length, and `min-w` forces a clean stack on a phone instead of
-        # two unreadable columns. The inner layout is a COLUMN (not the earlier
-        # icon-beside-text row) because at half width the button was wrapping
-        # under the text anyway.
-        _ann_dir = 'rtl' if is_rtl() else 'ltr'
-
-        #: The count-free blurb, and the template that carries the figure. The
-        #: count is the number of DISTINCT WORKS matched -- `meta.work_total`,
-        #: the same figure the findings page headline shows.
+        #: The count-free blurb. Still live after the promo cards were removed:
+        #: the carousel slide and the Research Tools card both render it. Its
+        #: COUNTED variant went with the cards, and with it the homepage's only
+        #: read of the discovery artifact.
+        #:
+        #: DELIBERATELY CLAIM-FREE: no precision percentage, no interval, no
+        #: accuracy rate. MATCH-framing ("has matched"), never assertion-framing.
         _DISCOVERY_BLURB_PLAIN = (
             'Software has matched Genizah fragments to works we already know. '
             'Use it to look for new witnesses to a text you study — and judge '
             'each match yourself.')
-        _DISCOVERY_BLURB_COUNTED = (
-            'Software has matched Genizah fragments to {count} works we already '
-            'know. Use it to look for new witnesses to a text you study — and '
-            'judge each match yourself.')
 
-        def _fill_discovery_count(label) -> None:
-            """Replace the blurb with its counted form, once the figure is read.
-
-            DEFERRED, never inline: `create_page` is SYNCHRONOUS and the launch
-            read is async over a 393 MB sidecar, so computing it here would put
-            a query on the single uvicorn event loop -- stalling every concurrent
-            request, including static files, while burning no CPU. The homepage
-            already defers its own corpus stats exactly this way.
-
-            The card renders the count-FREE sentence first and gains the figure a
-            moment later, so a slow or failed read costs the reader a number and
-            never the card: `{count}` is a size, not the claim.
-            """
-            async def _deferred():
-                try:
-                    from web.discovery import get_launch_stats_enveloped
-                    envelope = await get_launch_stats_enveloped()
-                    if envelope.get('status') != 'ok':
-                        return
-                    total = envelope.get('meta', {}).get('work_total')
-                    if not isinstance(total, int) or total <= 0:
-                        return      # never print a zero, a None or a "many"
-                    label.text = tr(_DISCOVERY_BLURB_COUNTED).format(
-                        count=f'{total:,}')
-                except Exception:
-                    pass            # the count is an ENRICHMENT; keep the card
-            asyncio.ensure_future(_deferred())
-
-        def _announcement_card(*, mark, route, gradient, shadow, chip_color,
-                               icon, title, blurb, cta, cta_text_color,
-                               on_blurb=None):
-            with ui.element('div').classes(
-                'flex-1 min-w-[280px] rounded-xl overflow-hidden cursor-pointer '
-                'hover:shadow-2xl transition-all'
-            ).props('role=button tabindex=0').style(
-                f'background: {gradient}; box-shadow: {shadow};'
-            ).on('click', lambda: ui.navigate.to(route)
-                 ).on('keydown.enter', lambda: ui.navigate.to(route)
-                      ).on('keydown.space', lambda: ui.navigate.to(route)).mark(mark):
-                with ui.column().classes('w-full gap-2 px-5 py-4 h-full').style(
-                    f'direction: {_ann_dir};'
-                ):
-                    with ui.row().classes('items-center gap-2 flex-wrap'):
-                        ui.icon(icon).classes('text-3xl text-white')
-                        ui.label(tr('New')).classes(
-                            'px-2 py-0.5 rounded-full text-xs font-bold'
-                        ).style(
-                            f'background: rgba(255,255,255,0.92); color: {chip_color}; '
-                            'letter-spacing: 0.05em;'
-                        )
-                        ui.label(tr('Beta')).classes(
-                            'px-2 py-0.5 rounded-full text-xs font-semibold'
-                        ).style('background: rgba(255,255,255,0.20); color: white;')
-                    h2(tr(title), classes='text-xl font-bold text-white', style='margin: 0;')
-                    _blurb_label = ui.label(tr(blurb)).classes(
-                        'text-sm text-white/90 flex-grow')
-                    if on_blurb is not None:
-                        on_blurb(_blurb_label)
-                    ui.button(tr(cta), icon=icon).props(
-                        f'unelevated color=white text-color={cta_text_color}'
-                    ).classes('font-bold self-start')
-
-        if _discovery_ready or _atlas_ready:
-            with ui.row().classes('w-full mt-2 gap-3 flex-wrap items-stretch'):
-                # Computed Identifications (Phase 136).
-                #
-                # Gated on discovery_available() — the SAME predicate as the
-                # /computed-identifications route and the nav entry — so a
-                # flag-OFF or sidecar-missing window can never advertise a link
-                # that clean-hides.
-                #
-                # DELIBERATELY CLAIM-FREE, a hard constraint rather than a style
-                # choice: no precision percentage, no interval, no accuracy rate,
-                # no count. MATCH-framing ("may be the same work as"), never
-                # assertion-framing ("is") — the surface shows candidates for a
-                # reader to judge, not settled facts.
-                if _discovery_ready:
-                    _announcement_card(
-                        mark='discovery-announcement',
-                        route='/computed-identifications',
-                        gradient=('linear-gradient(120deg, #4338ca 0%, #6366f1 45%, '
-                                  '#8b5cf6 100%)'),
-                        shadow='0 6px 24px rgba(99,102,241,0.28)',
-                        chip_color='#4338ca',
-                        icon='travel_explore',
-                        title='Computed Identifications',
-                        blurb=_DISCOVERY_BLURB_PLAIN,
-                        on_blurb=_fill_discovery_count,
-                        cta='Explore Computed Identifications',
-                        cta_text_color='indigo-9',
-                    )
-                # The Visual Genizah Atlas (#7, 2026-07-21). Claim-free: no
-                # counts, no "identifications" — it just names the map.
-                if _atlas_ready:
-                    _announcement_card(
-                        mark='atlas-announcement',
-                        route='/atlas',
-                        gradient=('linear-gradient(120deg, #0f766e 0%, #14b8a6 45%, '
-                                  '#6366f1 100%)'),
-                        shadow='0 6px 24px rgba(20,184,166,0.28)',
-                        chip_color='#0f766e',
-                        icon='hub',
-                        title='The Visual Genizah Atlas',
-                        blurb=('A new interactive map of textual connections across '
-                               'the Cairo Genizah.'),
-                        cta='Explore the Genizah Atlas',
-                        cta_text_color='teal-9',
-                    )
-
+        # The two big BETA ANNOUNCEMENT CARDS -- Computed Identifications and
+        # the Visual Genizah Atlas -- stood here until 2026-09-04. Removed on
+        # the owner's instruction: "we are past the promotional phase".
+        #
+        # Both surfaces KEEP their other homepage entry points, which is why
+        # this is a de-promotion and not a withdrawal: each still has a
+        # capability chip (`home-chip-computed`, `home-chip-atlas`), a carousel
+        # slide (`home-carousel-computed`, `home-carousel-atlas`) and a card in
+        # the Research Tools grid, all still gated on the same availability
+        # predicates.
+        #
+        # ONE CONSEQUENCE WORTH KNOWING: `_fill_discovery_count` went with the
+        # cards, and it was the ONLY place this module read the discovery
+        # artifact (`get_launch_stats_enveloped` -> `meta.work_total`). The
+        # masking sweep documented that read as "the only thing standing
+        # between the artifact and this surface", guarded by
+        # `isinstance(total, int) and total > 0`. The homepage now reads NO
+        # artifact value at all, which is a STRONGER position than a guarded
+        # one -- and the sweep's tests were rewritten to assert that absence
+        # rather than left asserting a card that no longer exists.
+        #
+        # `_DISCOVERY_BLURB_PLAIN` above is still live: the carousel slide uses
+        # it. The COUNTED variant and the deferred fill are gone with the card.
         # === Corpus Stats Band (SEED-023) — advertises the scale of the corpus ===
         # Five HARDCODED headline numbers (web/stats_service.CORPUS_STATS). Rendered
         # synchronously — no async/placeholder/readiness poll, so no layout shift.
@@ -368,10 +263,10 @@ def create_page():
             ('menu_book', 'scholarly_transcriptions', tr('Scholarly transcriptions')),
             ('subject', 'automatic_transcriptions', tr('Automatic transcriptions')),
         ]
-        with ui.row().classes('w-full justify-center gap-3 flex-wrap mt-2 px-2'):
+        with ui.row().classes('w-full justify-center gap-2 flex-wrap mt-1 px-2'):
             for _icon_name, _key, _label in _stat_specs:
-                with ui.column().classes('items-center justify-center px-4 py-3').style(
-                    'min-width: 150px; min-height: 96px; flex: 1 1 150px; max-width: 220px; '
+                with ui.column().classes('items-center justify-center px-3 py-2').style(
+                    'min-width: 140px; min-height: 78px; flex: 1 1 140px; max-width: 220px; '
                     'border: 1px solid var(--border-light); border-radius: 10px; '
                     'background: var(--bg-tertiary);'
                 ):
@@ -446,7 +341,7 @@ def create_page():
             if i > 0:
                 card.set_visibility(False)
             with card:
-                with ui.row().classes('w-full items-center gap-6 p-5 flex-wrap'):
+                with ui.row().classes('w-full items-center gap-4 p-4 flex-wrap'):
                     if slide.get('img'):
                         import html as _html
                         _alt = _html.escape(slide.get('heading', ''))
@@ -525,7 +420,7 @@ def create_page():
 
         # === Main Action Cards Grid ===
         # Changed to H2
-        h2(tr('Research Tools'), classes='text-xl font-bold mt-4', style='color: var(--text-primary);')
+        h2(tr('Research Tools'), classes='text-xl font-bold mt-3', style='color: var(--text-primary);')
 
         with ui.element('div').classes('w-full').style(
             'display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem;'
@@ -536,7 +431,7 @@ def create_page():
                 'role=button tabindex=0'
             ).on('click', lambda: ui.navigate.to('/search')).on('keydown.enter', lambda: ui.navigate.to('/search')).on('keydown.space', lambda: ui.navigate.to('/search')):
                 with ui.column().classes('w-full'):
-                    with ui.row().classes('w-full p-4 items-center gap-3').style(
+                    with ui.row().classes('w-full p-3 items-center gap-3').style(
                         'background: linear-gradient(135deg, var(--primary-600), var(--primary-700));'
                     ):
                         ui.icon('search').classes('text-3xl text-white')
@@ -544,7 +439,7 @@ def create_page():
                             h3(tr('Text Search'), classes='text-base font-bold text-white')
                             ui.label(tr('Search in manuscripts')).classes('text-xs text-white/80')
 
-                    with ui.column().classes('p-4 gap-3'):
+                    with ui.column().classes('p-3 gap-2'):
                         ui.label(tr('Search for words and phrases in the Genizah corpus')).classes('text-sm').style(
                             'color: var(--text-secondary);'
                         )
@@ -557,7 +452,7 @@ def create_page():
                 'role=button tabindex=0'
             ).on('click', lambda: ui.navigate.to('/parallels')).on('keydown.enter', lambda: ui.navigate.to('/parallels')).on('keydown.space', lambda: ui.navigate.to('/parallels')):
                 with ui.column().classes('w-full'):
-                    with ui.row().classes('w-full p-4 items-center gap-3').style(
+                    with ui.row().classes('w-full p-3 items-center gap-3').style(
                         'background: linear-gradient(135deg, #3b82f6, #1d4ed8);'
                     ):
                         ui.icon('compare_arrows').classes('text-3xl text-white')
@@ -565,7 +460,7 @@ def create_page():
                             h3(tr('Find Parallels'), classes='text-base font-bold text-white')
                             ui.label(tr('Composition Search')).classes('text-xs text-white/80')
 
-                    with ui.column().classes('p-4 gap-3'):
+                    with ui.column().classes('p-3 gap-2'):
                         ui.label(tr('Enter a long text and find parallel texts in the Genizah')).classes('text-sm').style(
                             'color: var(--text-secondary);'
                         )
@@ -580,7 +475,7 @@ def create_page():
                 'keydown.enter', lambda: ui.navigate.to('/joins-lab')
             ).on('keydown.space', lambda: ui.navigate.to('/joins-lab')).mark('joins-lab-tool-card'):
                 with ui.column().classes('w-full'):
-                    with ui.row().classes('w-full p-4 items-center gap-3').style(
+                    with ui.row().classes('w-full p-3 items-center gap-3').style(
                         'background: linear-gradient(135deg, #0f766e, #115e59);'
                     ):
                         ui.icon('join_inner').classes('text-3xl text-white')
@@ -588,7 +483,7 @@ def create_page():
                             h3(tr('Joins Lab'), classes='text-base font-bold text-white')
                             ui.label(tr('Find and compare joining fragments')).classes('text-xs text-white/80')
 
-                    with ui.column().classes('p-4 gap-3'):
+                    with ui.column().classes('p-3 gap-2'):
                         ui.label(tr(
                             'Pin an anchor fragment, build a line-by-line query, and compare possible physical joins.'
                         )).classes('text-sm').style('color: var(--text-secondary);')
@@ -601,7 +496,7 @@ def create_page():
                 'role=button tabindex=0'
             ).on('click', lambda: ui.navigate.to('/browse')).on('keydown.enter', lambda: ui.navigate.to('/browse')).on('keydown.space', lambda: ui.navigate.to('/browse')):
                 with ui.column().classes('w-full'):
-                    with ui.row().classes('w-full p-4 items-center gap-3').style(
+                    with ui.row().classes('w-full p-3 items-center gap-3').style(
                         'background: linear-gradient(135deg, #f59e0b, #d97706);'
                     ):
                         ui.icon('menu_book').classes('text-3xl text-white')
@@ -609,7 +504,7 @@ def create_page():
                             h3(tr('Browse by Shelfmark'), classes='text-base font-bold text-white')
                             ui.label(tr('Navigate through manuscript pages')).classes('text-xs text-white/80')
 
-                    with ui.column().classes('p-4 gap-3'):
+                    with ui.column().classes('p-3 gap-2'):
                         ui.label(tr('Navigate through manuscript pages')).classes('text-sm').style(
                             'color: var(--text-secondary);'
                         )
@@ -622,7 +517,7 @@ def create_page():
                 'role=button tabindex=0'
             ).on('click', lambda: ui.navigate.to('/catalog-browse')).on('keydown.enter', lambda: ui.navigate.to('/catalog-browse')).on('keydown.space', lambda: ui.navigate.to('/catalog-browse')):
                 with ui.column().classes('w-full'):
-                    with ui.row().classes('w-full p-4 items-center gap-3').style(
+                    with ui.row().classes('w-full p-3 items-center gap-3').style(
                         'background: linear-gradient(135deg, #8b5cf6, #6d28d9);'
                     ):
                         ui.icon('category').classes('text-3xl text-white')
@@ -630,7 +525,7 @@ def create_page():
                             h3(tr('Browse by Identification'), classes='text-base font-bold text-white')
                             ui.label(tr('Domains, authors & works')).classes('text-xs text-white/80')
 
-                    with ui.column().classes('p-4 gap-3'):
+                    with ui.column().classes('p-3 gap-2'):
                         ui.label(tr('Browse the manuscript corpus by scholarly domain classifications, author attributions, and work identifications.')).classes('text-sm').style(
                             'color: var(--text-secondary);'
                         )
@@ -650,7 +545,7 @@ def create_page():
                     'keydown.space', lambda: ui.navigate.to('/computed-identifications')
                 ).mark('computed-tool-card'):
                     with ui.column().classes('w-full'):
-                        with ui.row().classes('w-full p-4 items-center gap-3').style(
+                        with ui.row().classes('w-full p-3 items-center gap-3').style(
                             'background: linear-gradient(135deg, #6366f1, #4338ca);'
                         ):
                             ui.icon('travel_explore').classes('text-3xl text-white')
@@ -658,7 +553,7 @@ def create_page():
                                 h3(tr('Computed Identifications'), classes='text-base font-bold text-white')
                                 ui.label(tr('Review algorithmic text matches')).classes('text-xs text-white/80')
 
-                        with ui.column().classes('p-4 gap-3'):
+                        with ui.column().classes('p-3 gap-2'):
                             ui.label(tr(_DISCOVERY_BLURB_PLAIN)).classes('text-sm').style(
                                 'color: var(--text-secondary);'
                             )
@@ -671,7 +566,7 @@ def create_page():
                 'role=button tabindex=0'
             ).on('click', lambda: ui.navigate.to('/discoveries')).on('keydown.enter', lambda: ui.navigate.to('/discoveries')).on('keydown.space', lambda: ui.navigate.to('/discoveries')):
                 with ui.column().classes('w-full'):
-                    with ui.row().classes('w-full p-4 items-center gap-3').style(
+                    with ui.row().classes('w-full p-3 items-center gap-3').style(
                         'background: linear-gradient(135deg, #ec4899, #be185d);'
                     ):
                         ui.icon('lightbulb').classes('text-3xl text-white')
@@ -679,7 +574,7 @@ def create_page():
                             h3(tr('Community'), classes='text-base font-bold text-white')
                             ui.label(tr('Community discoveries, questions, and contributions')).classes('text-xs text-white/80')
 
-                    with ui.column().classes('p-4 gap-3'):
+                    with ui.column().classes('p-3 gap-2'):
                         ui.label(tr('View community discoveries, questions, and share your own findings')).classes('text-sm').style(
                             'color: var(--text-secondary);'
                         )
@@ -699,7 +594,7 @@ def create_page():
                     'role=button tabindex=0'
                 ).on('click', lambda: ui.navigate.to('/atlas')).on('keydown.enter', lambda: ui.navigate.to('/atlas')).on('keydown.space', lambda: ui.navigate.to('/atlas')).mark('atlas-teaser-card'):
                     with ui.column().classes('w-full'):
-                        with ui.row().classes('w-full p-4 items-center gap-3').style(
+                        with ui.row().classes('w-full p-3 items-center gap-3').style(
                             'background: linear-gradient(135deg, #14b8a6, #0f766e);'
                         ):
                             ui.icon('hub').classes('text-3xl text-white')
@@ -707,7 +602,7 @@ def create_page():
                                 h3(tr('The Genizah Atlas'), classes='text-base font-bold text-white')
                                 ui.label(tr('Explore the Genizah Atlas')).classes('text-xs text-white/80')
 
-                        with ui.column().classes('p-4 gap-3'):
+                        with ui.column().classes('p-3 gap-2'):
                             ui.label(
                                 tr('A preview map of textual connections across the Cairo Genizah — '
                                    'a claim-free, algorithmically laid-out overview.')
@@ -716,10 +611,10 @@ def create_page():
                                 ui.badge(tr('Beta')).props('outline color=teal-9').classes('text-xs')
 
         # === Secondary Actions Row ===
-        with ui.row().classes('w-full gap-6 mt-4 flex-wrap'):
+        with ui.row().classes('w-full gap-3 mt-3 flex-wrap'):
 
             # Personal Lists
-            with ui.card().classes('flex-1 min-w-64 p-6 cursor-pointer hover:shadow-lg transition-all').props(
+            with ui.card().classes('flex-1 min-w-64 p-4 cursor-pointer hover:shadow-lg transition-all').props(
                 'role=button tabindex=0'
             ).on('click', lambda: ui.navigate.to('/lists')).on('keydown.enter', lambda: ui.navigate.to('/lists')).on('keydown.space', lambda: ui.navigate.to('/lists')):
                 with ui.row().classes('items-center gap-4'):
@@ -733,7 +628,7 @@ def create_page():
                         )
 
             # Lab Settings
-            with ui.card().classes('flex-1 min-w-64 p-6 cursor-pointer hover:shadow-lg transition-all').props(
+            with ui.card().classes('flex-1 min-w-64 p-4 cursor-pointer hover:shadow-lg transition-all').props(
                 'role=button tabindex=0'
             ).on('click', lambda: ui.navigate.to('/settings')).on('keydown.enter', lambda: ui.navigate.to('/settings')).on('keydown.space', lambda: ui.navigate.to('/settings')):
                 with ui.row().classes('items-center gap-4'):
@@ -747,7 +642,7 @@ def create_page():
                         )
 
             # Help Center
-            with ui.card().classes('flex-1 min-w-64 p-6 cursor-pointer hover:shadow-lg transition-all').props(
+            with ui.card().classes('flex-1 min-w-64 p-4 cursor-pointer hover:shadow-lg transition-all').props(
                 'role=button tabindex=0'
             ).on('click', lambda: ui.navigate.to('/help')).on('keydown.enter', lambda: ui.navigate.to('/help')).on('keydown.space', lambda: ui.navigate.to('/help')):
                 with ui.row().classes('items-center gap-4'):
@@ -761,7 +656,7 @@ def create_page():
                         )
 
             # Desktop App
-            with ui.card().classes('flex-1 min-w-64 p-6 cursor-pointer hover:shadow-lg transition-all').props(
+            with ui.card().classes('flex-1 min-w-64 p-4 cursor-pointer hover:shadow-lg transition-all').props(
                 'role=button tabindex=0'
             ).on('click', lambda: ui.navigate.to('/download')).on('keydown.enter', lambda: ui.navigate.to('/download')).on('keydown.space', lambda: ui.navigate.to('/download')):
                 with ui.row().classes('items-center gap-4'):
@@ -774,8 +669,8 @@ def create_page():
                         )
 
         # === Recent Activity Section ===
-        with ui.card().classes('w-full p-6 mt-4'):
-            with ui.row().classes('w-full items-center justify-between mb-4'):
+        with ui.card().classes('w-full p-4 mt-3'):
+            with ui.row().classes('w-full items-center justify-between mb-3'):
                 # Changed to H2
                 h2(tr('Recent Activity'), classes='text-lg font-bold', style='color: var(--text-primary);')
                 ui.button(tr('View All'), icon='arrow_back' if is_rtl() else 'arrow_forward').props('flat dense').on(
@@ -784,7 +679,7 @@ def create_page():
 
             # Recent items container (min-height reserves space so the async
             # 0.3s load doesn't shift the System Status section below it — CLS).
-            recent_container = ui.row().classes('w-full gap-4 flex-wrap').style('min-height: 120px;')
+            recent_container = ui.row().classes('w-full gap-3 flex-wrap').style('min-height: 104px;')
 
             def render_recent(recent_items):
                 recent_container.clear()
@@ -889,8 +784,8 @@ def create_page():
             asyncio.ensure_future(_deferred_load_recent())
 
         # === System Status Section ===
-        with ui.expansion(tr('System Status'), icon='info').classes('w-full mt-4'):
-            with ui.row().classes('w-full gap-6 p-4 flex-wrap'):
+        with ui.expansion(tr('System Status'), icon='info').classes('w-full mt-3'):
+            with ui.row().classes('w-full gap-4 p-3 flex-wrap'):
                 def status_item(label, value_fn, icon_name):
                     with ui.column().classes('min-w-40'):
                         with ui.row().classes('items-center gap-2'):
@@ -932,7 +827,7 @@ def create_page():
                 )
 
         # === Credits Section ===
-        with ui.card().classes('w-full p-6 mt-4').style('background: var(--bg-tertiary);'):
+        with ui.card().classes('w-full p-4 mt-3').style('background: var(--bg-tertiary);'):
             with ui.row().classes('w-full items-start gap-4'):
                 ui.icon('info').classes('text-2xl').style('color: var(--primary-600);')
                 with ui.column().classes('flex-1 gap-2'):
@@ -959,7 +854,7 @@ def create_page():
         # also lang-gated so the Q&A text on the page matches the
         # structured-data payload byte-for-byte (Google rich-result rule).
         _is_he = is_rtl()
-        with ui.element('section').classes('w-full mt-4 px-6 py-4').style(
+        with ui.element('section').classes('w-full mt-3 px-5 py-3').style(
             'background: var(--bg-tertiary); border: 1px solid var(--border-light); border-radius: 8px;'
         ):
             if _is_he:
@@ -1011,7 +906,7 @@ def create_page():
                     sanitize=False,
                 )
 
-        with ui.element('section').classes('w-full mt-3 px-6 py-4').style(
+        with ui.element('section').classes('w-full mt-3 px-5 py-3').style(
             'background: var(--bg-tertiary); border: 1px solid var(--border-light); border-radius: 8px;'
         ):
             if _is_he:

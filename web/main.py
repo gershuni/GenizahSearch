@@ -701,6 +701,7 @@ from web.state import state
 from web.api import init_api_routes
 from web.search_api import init_search_api
 from web.translations import tr, set_language, get_language
+from web.citation_chip import render_citation_chip
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.atlas_assets import (
     load_atlas_state,
@@ -726,13 +727,13 @@ from genizah_core import MetadataManager, VariantManager, SearchEngine, LabEngin
 APP_TITLE = "Dicta Genizah Search | חיפוש גניזת קהיר"
 from version import APP_VERSION
 # Pinned, NOT APP_VERSION (2026-08-20). The desktop release line moved to 8.6.0
-# while this banner still describes the 9.0.0 WEB features, and the dismissal
-# check below is a STRING equality against the per-user 'whats_new_dismissed'
-# value -- so following a desktop bump would re-pop the banner for every web
-# reader who had already dismissed it. Bump by hand when the web What's New
+# while this still describes the 9.0.0 WEB features, and the seen-check is a
+# STRING equality against the per-user 'whats_new_dismissed' value -- so
+# following a desktop bump would light the unread dot again for every web
+# reader who had already read it. Bump by hand when the web What's New
 # content itself changes.
-# Names the CONTENT wave, not a release: dismissal is stored per browser
-# as this exact string, so it must change whenever the toast does, and
+# Names the CONTENT wave, not a release: the seen flag is stored per browser
+# as this exact string, so it must change whenever the announcement does, and
 # "9.0.0" was already spent on the 2026-08-16 web release.
 WHATS_NEW_VERSION = "9.0.0-letter-level"
 APP_PORT = int(os.environ.get('GENIZAH_PORT', 8081))
@@ -1601,6 +1602,85 @@ def create_layout():
     # Reference dictionary to store UI elements accessible across function scopes
     refs = {}
 
+    # === "What's New" — the DATA, resolved before the header is built ===
+    #
+    # Moved above `render_header_right` on 2026-09-04. It used to be computed
+    # further down, next to a fixed-position toast; the toast is gone (owner:
+    # the homepage showed FOUR overlays at once and the news was one of them),
+    # and what replaced it is a header button that has to exist by the time the
+    # header renders. The gating, the wording and the suppression rule are
+    # UNCHANGED — only where the result is drawn.
+    #
+    # v9.0.0 announces the two beta research surfaces, so they are resolved BEFORE
+    # the control is built rather than inside it. Three conditions, each load-bearing:
+    #
+    # 1. Each surface is gated on the SAME availability predicate as its own route
+    #    and nav entry (never a bare flag) — advertising one that clean-hides would
+    #    send the reader to a 404.
+    # 2. If NEITHER is reachable there is nothing to announce, and the control must
+    #    not render a heading followed by no links. A dev or flag-OFF environment
+    #    sees no button at all.
+    # 3. It SUPPRESSES ITSELF on the pages that already feature these
+    #    surfaces — `/help` documents both with their own anchors and `/parallels`
+    #    IS the feature. Repeating them there is duplication a reader reads as a
+    #    bug, and it is what made `/start`'s "exactly one /atlas href" render-smoke
+    #    guard fail: the guard was right, the second link was mine.
+    #
+    #    `/` is NOT suppressed (owner, 2026-08-16). The announcement's whole point
+    #    is the reader ARRIVING at the site, and that arrival is normally the
+    #    homepage; a homepage suppression meant the one visitor it was written for
+    #    never saw it.
+    #
+    # REPLACED 2026-08-26 (owner). This listed the introduction, the atlas and
+    # the identifications; all three shipped on 2026-08-16, all three keep their
+    # own nav entry, and none of them is the news any more. The news is the
+    # parallels search, so it carries that and nothing else.
+    #
+    # Both entries lead to `/parallels`, unlike the old list where every name led
+    # somewhere different. They are two distinct features on one page, and naming
+    # them separately is what makes the second one discoverable at all.
+    #
+    # WATCH THE LENGTH HERE. These are owner-worded (2026-08-26) and they are
+    # sentences, not names. If the panel has to shrink, shorten the text; do not
+    # introduce a third entry.
+    _WHATS_NEW_SUPPRESSED_ON = ('/parallels', '/help')
+
+    # Both entries land on a PREFILLED search rather than an empty form
+    # (owner, 2026-08-26). A reader who has just been told a new search
+    # method exists and is then shown a blank textarea has to go and find
+    # something to paste into it before the announcement means anything.
+    #
+    # The text comes from `/start`'s own prepared demo -- the Deror Yikra
+    # stanzas -- rather than a copy of it. That file is schema-validated and
+    # the URL is rebuilt from typed fields by `demo_url` (deliberately, so
+    # the JSON can never become an open-redirect), and one source of truth
+    # means the announcement cannot drift from the Start page.
+    #
+    # Failure here must not take the shell down with it: `load_start_content`
+    # raises on a malformed content file, and `/start` degrades to a fallback
+    # page when it does. This control is on EVERY page, so it degrades to the
+    # bare form instead.
+    _parallels_demo_target = '/parallels'
+    try:
+        _demo = (load_start_content().get('demos') or {}).get('parallels') or {}
+        if _demo.get('enabled'):
+            _parallels_demo_target = demo_url('parallels', _demo)
+    except Exception:                                        # noqa: BLE001
+        pass
+
+    _new_surfaces = []
+    if passage_available():
+        _new_surfaces.append(
+            (tr("Letter-level parallels search — faster and more precise"),
+             _parallels_demo_target))
+    if passage_multi_witness_available():
+        _new_surfaces.append(
+            (tr("Get the most from the parallels search by entering several "
+                "textual witnesses"), _parallels_demo_target))
+
+    _show_whats_new = bool(_new_surfaces) and current_page not in _WHATS_NEW_SUPPRESSED_ON
+    _whats_new_unseen = safe_user_get('whats_new_dismissed') != WHATS_NEW_VERSION
+
     # === Modular Header Rendering Functions ===
     # These allow us to reverse DOM order for RTL without using CSS order or row-reverse
 
@@ -1683,6 +1763,81 @@ def create_layout():
             lang_label = "EN" if get_language() == 'he' else "\u05E2\u05D1"
             ui.button(lang_label, on_click=toggle_lang).props('flat round text-color=white').tooltip(tr('Switch language')).classes('lang-btn-header')
 
+            # "What's New" — a header button with an unread dot, NOT a toast.
+            #
+            # This used to be a fixed-position card over the page. On a first
+            # visit the homepage stacked FOUR overlays at once (this, the OCR
+            # caveat, the citation footer, and a blocking citation modal), which
+            # is the "עומס / too many popups" the owner reported on 2026-09-04.
+            # A header button costs no page area, never covers the hero, and —
+            # unlike the toast — the news stays REACHABLE after it is read
+            # instead of being destroyed by a 30-second timer.
+            #
+            # It keeps its own class rather than `help-btn-header`, which is
+            # `display:none` under 768px: this site skews mobile, and hiding the
+            # announcement from most of its readers is not a tidy-up.
+            #
+            # The `whats-new-banner` mark stays on the panel. It is the handle
+            # the render-smoke suite keys its presence/absence assertions to, and
+            # that contract (gating, suppression, prefilled links, translation)
+            # is unchanged by moving where the panel is drawn.
+            if _show_whats_new:
+                with ui.button(icon='new_releases').props(
+                    f'flat round text-color=white aria-label="{tr("New Features!")}"'
+                ).tooltip(tr('New Features!')).classes('whats-new-btn-header') as _whats_new_btn:
+                    if _whats_new_unseen:
+                        # Quasar badge, floating: a dot, not a count.
+                        ui.element('div').props('id=whats-new-dot').classes(
+                            'whats-new-dot'
+                        )
+
+                    with ui.menu().props('auto-close').classes(
+                        'whats-new-menu'
+                    ).mark('whats-new-banner') as _whats_new_menu:
+                        with ui.column().classes('px-5 py-4 gap-0').style(
+                            f'max-width: min(92vw, 26rem); '
+                            f'direction: {"rtl" if rtl_mode else "ltr"};'
+                        ):
+                            with ui.element('div').classes(
+                                'flex items-center justify-center gap-2'
+                            ):
+                                ui.icon('new_releases').classes('text-xl').style('color: #10b981;')
+                                ui.label(tr("New Features!")).classes(
+                                    'text-base font-bold'
+                                ).style('color: var(--text-primary);')
+                            # Claim-free, as on the homepage cards. No precision
+                            # figure, no interval, no count, no accuracy rate.
+                            for _surface_name, _surface_route in _new_surfaces:
+                                ui.link(_surface_name, _surface_route).classes(
+                                    'text-sm font-semibold text-primary hover:underline'
+                                ).style('display: block; margin-top: 10px; line-height: 1.5; '
+                                        'text-align: center; text-wrap: balance;')
+
+                # Mutable, because `_whats_new_unseen` is captured by value and
+                # both handlers below fire on every open. Without it the button
+                # wrote the same storage key on every click for the rest of the
+                # session.
+                _whats_new_pending = {'unseen': _whats_new_unseen}
+
+                def _mark_whats_new_seen():
+                    """Opening the panel clears the dot — the button remains.
+
+                    The old toast persisted this from a close button AND from a
+                    30s timer, and the timer had to be careful not to record
+                    "seen" for a reader who had navigated away. There is no timer
+                    now: the flag is written only when the reader actually opens
+                    the panel.
+                    """
+                    if not _whats_new_pending['unseen']:
+                        return
+                    _whats_new_pending['unseen'] = False
+                    safe_user_set('whats_new_dismissed', WHATS_NEW_VERSION)
+                    ui.run_javascript(
+                        'document.getElementById("whats-new-dot")?.remove();')
+
+                _whats_new_menu.on('show', lambda: _mark_whats_new_seen())
+                _whats_new_btn.on('click', lambda: _mark_whats_new_seen())
+
             # Help Button (hidden on mobile via CSS)
             ui.button(icon='help_outline', on_click=lambda: ui.navigate.to('/help')).props(f'flat round text-color=white aria-label="{tr("Help")}"').tooltip(tr('Help')).classes('help-btn-header')
         return section
@@ -1738,173 +1893,6 @@ def create_layout():
     content_col = ui.column().classes('main-content w-full items-stretch flex-grow')
     # Add ID for skip link target
     content_col.props('id=main-content')
-
-    # === "What's New" Banner (dismissible, compact single-line) ===
-    #
-    # v9.0.0 announces the two beta research surfaces, so they are resolved BEFORE
-    # the banner is built rather than inside it. Three conditions, each load-bearing:
-    #
-    # 1. Each surface is gated on the SAME availability predicate as its own route
-    #    and nav entry (never a bare flag) — advertising one that clean-hides would
-    #    send the reader to a 404.
-    # 2. If NEITHER is reachable there is nothing to announce, and the banner must
-    #    not render a lead-in sentence followed by no links. A dev or flag-OFF
-    #    environment sees no toast at all.
-    # 3. The toast SUPPRESSES ITSELF on the pages that already feature these
-    #    surfaces — `/` carries the two announcement cards, `/start` links both
-    #    among its tools, and `/help` documents both with their own anchors. A
-    #    toast repeating them there is duplication a reader reads as a bug, and it
-    #    is what made `/start`'s "exactly one /atlas href" render-smoke guard fail:
-    #    the guard was right, the second link was mine.
-    #
-    #    `/` is NOT suppressed (owner, 2026-08-16). The toast's whole point is the
-    #    reader ARRIVING at the site, and that arrival is normally the homepage; a
-    #    homepage suppression meant the one visitor it was written for never saw
-    #    it. The homepage cards remain the richer advertisement and the duplication
-    #    is accepted deliberately. Verified safe: no test that opens `/` counts
-    #    hrefs or elements — they all locate by explicit `.mark()`.
-    #
-    # REPLACED 2026-08-26 (owner). This listed the introduction, the atlas and
-    # the identifications; all three shipped on 2026-08-16, all three keep their
-    # own nav entry, and none of them is the news any more. The news is the
-    # parallels search, so the toast carries that and nothing else.
-    #
-    # Both entries lead to `/parallels`, unlike the old list where every name led
-    # somewhere different. They are two distinct features on one page, and naming
-    # them separately is what makes the second one discoverable at all.
-    #
-    # WATCH THE LENGTH HERE. These are owner-worded (2026-08-26) and they are
-    # sentences, not names — noticeably longer than the three they replaced. A
-    # lead-in sentence was removed from this same toast on 2026-08-16 because it
-    # pushed the actionable names past the fold on a phone, and this site skews
-    # mobile. If the toast has to shrink, shorten the text; do not reintroduce a
-    # third entry.
-    #
-    # The empty-list guard below is now REACHABLE and load-bearing. The old list
-    # opened with `/start`, which is registered unconditionally, so the toast
-    # always had something to say and the guard was a formality. Both entries
-    # here are gated, so a box whose index did not open shows no toast at all —
-    # which is right: there is nothing new to announce there.
-    #
-    # Suppression follows the content. The rule is "do not toast on a page that
-    # already presents this", which named `/start` while `/start` was being
-    # advertised; it now names the page the toast points at.
-    _WHATS_NEW_SUPPRESSED_ON = ('/parallels', '/help')
-
-    # Both entries land on a PREFILLED search rather than an empty form
-    # (owner, 2026-08-26). A reader who has just been told a new search
-    # method exists and is then shown a blank textarea has to go and find
-    # something to paste into it before the announcement means anything.
-    #
-    # The text comes from `/start`'s own prepared demo -- the Deror Yikra
-    # stanzas -- rather than a copy of it. That file is schema-validated and
-    # the URL is rebuilt from typed fields by `demo_url` (deliberately, so
-    # the JSON can never become an open-redirect), and one source of truth
-    # means the toast cannot drift from the Start page.
-    #
-    # Failure here must not take the shell down with it: `load_start_content`
-    # raises on a malformed content file, and `/start` degrades to a fallback
-    # page when it does. The toast is on EVERY page, so it degrades to the
-    # bare form instead.
-    _parallels_demo_target = '/parallels'
-    try:
-        _demo = (load_start_content().get('demos') or {}).get('parallels') or {}
-        if _demo.get('enabled'):
-            _parallels_demo_target = demo_url('parallels', _demo)
-    except Exception:                                        # noqa: BLE001
-        pass
-
-    _new_surfaces = []
-    if passage_available():
-        _new_surfaces.append(
-            (tr("Letter-level parallels search — faster and more precise"),
-             _parallels_demo_target))
-    if passage_multi_witness_available():
-        _new_surfaces.append(
-            (tr("Get the most from the parallels search by entering several "
-                "textual witnesses"), _parallels_demo_target))
-
-    if (_new_surfaces
-            and current_page not in _WHATS_NEW_SUPPRESSED_ON
-            and safe_user_get('whats_new_dismissed') != WHATS_NEW_VERSION):
-        banner_dir = 'rtl' if rtl_mode else 'ltr'
-        with content_col:
-            # Fixed-position toast (out of document flow): showing it and the
-            # 30s auto-dismiss never reflow page content, so this stays off the
-            # CLS budget. (The comment said 10s; the timer has always been 30.)
-            with ui.element('div').classes('px-5 py-4').style(
-                # TOP, not bottom (owner, 2026-08-26), and clearing the fixed
-                # 64px header rather than sitting on it. Still fixed-position
-                # and so still out of document flow -- showing it and the 30s
-                # auto-dismiss must never reflow page content, which is what
-                # kept this off the CLS budget in the first place.
-                f'position: fixed; top: 80px; left: 50%; transform: translateX(-50%); '
-                # 26rem rather than 34: on a 375px phone the wider cap
-                # resolved to 94vw and the card ran edge to edge over the page
-                # behind it. And `fit-content` rather than an explicit width --
-                # it measures 188px on that viewport, about half the screen,
-                # which reads as a tidy card rather than a bar across the page,
-                # and is the rendering the owner reviewed on 2026-08-26.
-                # Widening it to the cap was tried and reverted. `max-content`
-                # is not used because with entries this long it is always wider
-                # than the cap and so never decides anything.
-                f'z-index: 2000; width: fit-content; max-width: min(92vw, 26rem); '
-                f'background: var(--bg-tertiary); '
-                f'border: 1px solid var(--border-light); border-radius: 10px; '
-                f'box-shadow: 0 6px 20px rgba(0,0,0,0.22); direction: {banner_dir};'
-            ).mark('whats-new-banner') as whats_new_banner:
-                def dismiss_whats_new():
-                    # Explicit user dismiss (X button): persist the flag unconditionally.
-                    safe_user_set('whats_new_dismissed', WHATS_NEW_VERSION)
-                    try:
-                        whats_new_banner.delete()
-                    except Exception:
-                        pass  # Already dismissed / parent slot gone
-
-                # A COLUMN, not a row (2026-08-26). The row was fine while every
-                # entry was a two-or-three-word surface NAME joined by a '*'.
-                # The entries are now owner-worded sentences, and in a row they
-                # wrapped: the separator stranded alone on the first line, the
-                # second entry dropped beneath it, and the close button floated
-                # into the middle of the text. One entry per line has no such
-                # failure mode and needs no separator at all.
-                # The close button is taken OUT of the flow rather than
-                # pushed to the edge by a spacer. While it was a flex sibling
-                # it decided where the title sat, so the title could not be
-                # centred without fighting it. `inset-inline-start` puts it in
-                # the corner correctly in both directions with no test on
-                # `banner_dir`.
-                ui.button(icon='close', on_click=dismiss_whats_new).props(
-                    f'flat dense round size=sm aria-label="{tr("Dismiss")}"'
-                ).style('position: absolute; top: 6px; inset-inline-start: 6px;')
-                with ui.element('div').classes('flex items-center justify-center gap-2'):
-                    ui.icon('new_releases').classes('text-xl').style('color: #10b981;')
-                    ui.label(tr("New Features!")).classes('text-base font-bold').style('color: var(--text-primary);')
-                # Claim-free, as on the homepage cards. No precision figure, no
-                # interval, no count, no accuracy rate.
-                for _surface_name, _surface_route in _new_surfaces:
-                    ui.link(_surface_name, _surface_route).classes(
-                        'text-sm font-semibold text-primary hover:underline'
-                    ).style('display: block; margin-top: 10px; line-height: 1.5; '
-                            'text-align: center; text-wrap: balance;')
-                # Use asyncio instead of ui.timer — ui.timer binds to the banner
-                # slot and raises 'parent_slot has been deleted' RuntimeError in
-                # journalctl when the user navigates away before the 30s fires.
-                def _auto_dismiss_whats_new():
-                    # Only persist the dismissed flag when the banner is still
-                    # alive and we successfully hide it. If the user navigated
-                    # away before the timer fired, .delete() raises and we must
-                    # not mark the banner as "seen" — otherwise leaving within
-                    # the first 30s permanently hides the banner on reload.
-                    try:
-                        whats_new_banner.delete()
-                    except Exception:
-                        return
-                    safe_user_set('whats_new_dismissed', WHATS_NEW_VERSION)
-                try:
-                    asyncio.get_event_loop().call_later(30.0, _auto_dismiss_whats_new)
-                except RuntimeError:
-                    pass  # No running loop in this context
 
     def toggle_drawer():
         """Toggle drawer and save state."""
@@ -2054,133 +2042,51 @@ def create_layout():
                 # Creator Credit
                 ui.label(tr('Created by Hillel Gershuni')).classes('text-xs text-center opacity-50 mt-1')
 
-    # The citation footer's state is applied to <html> by a BLOCKING head script,
-    # before first paint, rather than by a handler that runs after hydration.
+    # The sticky citation FOOTER lived here until 2026-09-04. It is replaced by
+    # the always-visible "How to cite" chip (`web/citation_chip.py`), on the
+    # owner's instruction.
     #
-    # It used to be the latter, and the cost was visible: the server rendered the
-    # footer expanded on every page, then JavaScript read localStorage and set
-    # `display:none` a moment later, so a reader who had ever dismissed it saw the
-    # citation flash and vanish on EVERY page load. Reported by the owner as
-    # "appears for a split second and then disappears".
+    # What went with it, deliberately: a full-width band on every page, a 10
+    # second auto-collapse timer, a blocking head <script> that read two storage
+    # keys before first paint to decide between a full and a compact form, and
+    # two dismiss buttons with different lifetimes (one permanent, one
+    # per-session). `localStorage['citation_footer_dismissed']` and
+    # `sessionStorage['citation_footer_off']` are now written and read by
+    # nothing; a returning reader's stored values are inert residue, which is the
+    # same disposition already accepted for `citation_reminder_seen` below.
     #
-    # A dismissal now COLLAPSES to the one-line compact form instead of removing
-    # the footer, because dismissal was previously a lifetime opt-out with no way
-    # back: the copy button went with it, and this footer is the only handy place
-    # to copy the citation from. The reminder and the copy source are the whole
-    # point of it, so the control that tidies it away must not also delete it.
-    # The storage key is REUSED deliberately -- everyone who dismissed it before
-    # gets the compact line back rather than staying dark.
-    ui.add_head_html('''<style>
-html.cite-compact .citation-full { display: none !important; }
-html.cite-compact .citation-compact { display: flex !important; }
-html.cite-off .citation-footer { display: none !important; }
-</style>
-<script>
-(function() {
-    var d = document.documentElement;
-    try {
-        if (sessionStorage.getItem("citation_footer_off") === "true") {
-            d.classList.add("cite-off");
-        } else if (localStorage.getItem("citation_footer_dismissed") === "true") {
-            d.classList.add("cite-compact");
-        }
-    } catch (e) { /* storage blocked: show the citation, never hide it on error */ }
-})();
-</script>''')
+    # What the chip does that the footer could not: name the transcription
+    # actually on screen. The footer carried ONE hardcoded MiDRASH citation, so
+    # on a page showing a Princeton or Friedberg edition it credited the wrong
+    # people -- the same defect the printed sheet had, fixed the same way, from
+    # the same `shared/transcription_credits` decision.
+    #
+    # NOTE the honesty trade the owner accepted: the MiDRASH citation was
+    # previously visible on every page without interaction and is now one click
+    # away. The CC-BY-4.0 obligation the /help page states binds PUBLICATION,
+    # not on-screen display, and the chip carries the copy button that was the
+    # footer's real use.
+    render_citation_chip(lang=resolved_lang)
 
-    # Global Footer with Citation Note (dismissible, auto-collapse to compact line)
-    full_citation = 'Stoekl Ben Ezra, D., Bambaci, L., Kiessling, B., Lapin, H., Ezer, N., Lolli, E., Rustow, M., Dershowitz, N., Kurar Barakat, B., Gogawale, S., Shmidman, A., Lavee, M., Siew, T., Raziel Kretzmer, V., Vasyutinsky Shapira, D., Olszowy-Schlanger, J., & Gila, Y. (2025). MiDRASH Automatic Transcriptions. Zenodo. https://doi.org/10.5281/zenodo.17734473'
-    footer = ui.footer().classes('citation-footer')
-    with footer:
-        # Full citation (shown initially)
-        with ui.row().classes('w-full items-center justify-center gap-2 py-2 px-4 flex-wrap citation-full'):
-            ui.button(icon='content_copy', on_click=lambda: ui.run_javascript(f'navigator.clipboard.writeText("{full_citation}"); alert("{tr("Citation copied!")}")')).props(f'flat dense size=xs aria-label="{tr("Copy citation")}"').classes('opacity-70 hover:opacity-100').tooltip(tr('Copy citation'))
-            ui.label(tr('When publishing material from this site, please cite:')).classes('text-xs opacity-80 citation-hebrew-label')
-            ui.link(full_citation, 'https://doi.org/10.5281/zenodo.17734473', new_tab=True).classes('text-xs font-medium citation-link').style('direction: ltr; text-decoration: none;')
-            # Collapses to the compact line; does NOT remove the footer.
-            ui.button(icon='close', on_click=lambda: ui.run_javascript('localStorage.setItem("citation_footer_dismissed", "true"); document.documentElement.classList.add("cite-compact");')).props(f'flat dense size=xs aria-label="{tr("Dismiss")}"').classes('opacity-50 hover:opacity-100').tooltip(tr('Dismiss'))
-
-        # Compact citation (shown after auto-collapse — full text, truncated with ellipsis on narrow screens)
-        with ui.row().classes('w-full items-center justify-center gap-2 py-1 px-4 citation-compact').style('flex-wrap: nowrap;'):
-            ui.label(full_citation).classes('text-xs opacity-80').style(
-                'direction: ltr; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1;'
-            )
-            ui.button(icon='content_copy', on_click=lambda: ui.run_javascript(f'navigator.clipboard.writeText("{full_citation}"); alert("{tr("Citation copied!")}")')).props(f'flat dense size=xs aria-label="{tr("Copy citation")}"').classes('opacity-70 hover:opacity-100').tooltip(tr('Copy full citation'))
-            # SESSION-only hide -- the citation returns on the reader's next visit.
-            # A permanent hide here would recreate the lifetime opt-out this change
-            # exists to remove.
-            ui.button(icon='close', on_click=lambda: ui.run_javascript('sessionStorage.setItem("citation_footer_off", "true"); document.documentElement.classList.add("cite-off");')).props(f'flat dense size=xs aria-label="{tr("Dismiss")}"').classes('opacity-50 hover:opacity-100').tooltip(tr('Dismiss'))
-
-    # Auto-collapse after 10 seconds. The dismissed/hidden states are ALREADY
-    # applied by the head script above, before first paint -- this handler must
-    # never re-decide them, or the flash it replaced comes straight back.
-    ui.run_javascript('''
-        (function() {
-            var d = document.documentElement;
-            if (d.classList.contains("cite-compact") || d.classList.contains("cite-off")) return;
-            setTimeout(function() {
-                var full = document.querySelector(".citation-full");
-                if (!full) return;
-                full.style.opacity = "0";
-                setTimeout(function() { d.classList.add("cite-compact"); }, 300);
-            }, 10000);
-        })();
-    ''')
-
-    # One-time citation reminder dialog (per machine, via localStorage)
-    _show_citation_reminder(get_language())
+    # REMOVED 2026-09-04 (owner): the one-time citation reminder MODAL.
+    #
+    # It opened `persistent` over every page on a first visit and had to be
+    # clicked away before anything else could be touched — on the homepage it
+    # was the fourth simultaneous overlay, and it said what the citation strip
+    # three rows below it already said. Its reasoning (the grant/funding
+    # argument, which that strip never carried) moved verbatim to
+    # `/about#citing-midrash`, and the CHIP's panel links there -- the footer
+    # that was originally going to carry that link was removed in the same
+    # session, so for a while nothing pointed at the anchor at all. The
+    # requirement, the full citation and the copy button are all in the chip.
+    #
+    # `localStorage['citation_reminder_seen']` is now unread. Left alone
+    # deliberately: nothing breaks by its presence, and
+    # `tests/test_findings_page.py` seeds it in a Playwright init script so that
+    # the modal's backdrop could not intercept its clicks. That seed is now a
+    # no-op rather than a lie, so removing it is not urgent.
 
     return content_col
-
-
-def _show_citation_reminder(lang: str):
-    """Show a one-time citation reminder dialog if not previously dismissed."""
-    dialog = ui.dialog().props('persistent')
-    with dialog, ui.card().classes('max-w-lg'):
-        if lang == 'he':
-            ui.label('בקשה חשובה: ציטוט מדרש').classes('text-lg font-bold').style('direction: rtl;')
-            with ui.column().classes('gap-2').style('direction: rtl; text-align: right;'):
-                ui.label(
-                    'אתר זה מבוסס על תמלולים אוטומטיים שנוצרו על ידי צוות פרויקט מדרש. '
-                    'על פי חוק זכויות יוצרים, יש לצטט את המקור בעת פרסום חומר מאתר זה.'
-                ).classes('text-sm')
-                ui.label(
-                    'מעבר לדרישה החוקית \u2014 ככל שיהיו יותר ציטוטים, כך יוכל צוות מדרש '
-                    'להשתמש בהם כדי לקבל מענקים נוספים, לשפר את התמלולים ולהרחיב את העבודה '
-                    'לכתבי יד עבריים נוספים. הציטוט המלא מופיע בתחתית המסך.'
-                ).classes('text-sm')
-                ui.label('תודה על שיתוף הפעולה!').classes('text-sm font-medium')
-        else:
-            ui.label('Important: Please cite MiDRASH').classes('text-lg font-bold')
-            with ui.column().classes('gap-2'):
-                ui.label(
-                    'This website is built on automatic transcriptions produced by the MiDRASH Project. '
-                    'Copyright law requires citing the source when publishing material from this site.'
-                ).classes('text-sm')
-                ui.label(
-                    'Beyond the legal requirement \u2014 the more citations the project receives, the more '
-                    'the MiDRASH team can use them to secure grants and funding to improve the Genizah '
-                    'transcriptions and expand their work to other Hebrew manuscripts. '
-                    'The full citation appears at the bottom of the screen.'
-                ).classes('text-sm')
-                ui.label('Thank you for your cooperation!').classes('text-sm font-medium')
-        with ui.row().classes('w-full justify-end mt-2'):
-            ui.button(
-                tr('Got it'),
-                on_click=lambda: (
-                    ui.run_javascript('localStorage.setItem("citation_reminder_seen", "true")'),
-                    dialog.close(),
-                ),
-            ).props('color=primary')
-    # Only open if not previously seen — pure JS check avoids slot context issues
-    _trigger = ui.button('', on_click=dialog.open).props('flat dense').style('display:none;')
-    _trigger_id = f'citation-trigger-{_trigger.id}'
-    _trigger.props(f'id="{_trigger_id}"')
-    ui.run_javascript(f'''
-        if (localStorage.getItem("citation_reminder_seen") !== "true") {{
-            document.getElementById("{_trigger_id}")?.click();
-        }}
-    ''')
 
 
 # ============================================================================

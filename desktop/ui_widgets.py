@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import re
 
+from PyQt6.QtGui import QFontMetrics
 from PyQt6.QtWidgets import (
     QTableWidgetItem,
     QHeaderView,
@@ -37,6 +38,55 @@ from PyQt6.QtCore import Qt, QRect, QEvent, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QPalette, QPen, QBrush, QPainterPath
 
 from genizah_core import natural_sort_key, tr
+
+
+class ElidingLabel(QLabel):
+    """A single-line QLabel that elides with "..." instead of clipping silently.
+
+    A QLabel with word-wrap off does NOT elide: it paints what fits and stops,
+    so a cut string is indistinguishable from a short one. That matters
+    wherever the text is a citation -- a reader who cannot see that the DOI was
+    cut off will paste a citation that ends mid-author-list.
+
+    The full text is kept in `full_text` and re-elided on every resize, so the
+    label shows as much as the current window allows. Anything that needs the
+    whole string (a copy action, a tooltip) must read `full_text`, never
+    `text()`, which is the elided form by design.
+    """
+
+    def __init__(self, text='', parent=None,
+                 mode=Qt.TextElideMode.ElideRight):
+        super().__init__(parent)
+        self._mode = mode
+        self.full_text = ''
+        self.setText(text)
+
+    def setText(self, text):                                # noqa: N802 (Qt)
+        self.full_text = text or ''
+        self._apply_elide()
+
+    def resizeEvent(self, event):                           # noqa: N802 (Qt)
+        super().resizeEvent(event)
+        self._apply_elide()
+
+    def showEvent(self, event):                             # noqa: N802 (Qt)
+        # Qt does not deliver resize events to a HIDDEN widget -- it coalesces
+        # them -- so a label resized before it is first shown would still be
+        # carrying the elision it computed at whatever width it had when it was
+        # built. Re-eliding on show closes that, and costs one call.
+        super().showEvent(event)
+        self._apply_elide()
+
+    def _apply_elide(self):
+        width = max(0, self.width())
+        if not width:
+            # Before the first layout pass there is no width to elide against;
+            # showing the full string here is right -- resizeEvent re-elides as
+            # soon as one exists, and a label that started empty would flash.
+            super().setText(self.full_text)
+            return
+        metrics = QFontMetrics(self.font())
+        super().setText(metrics.elidedText(self.full_text, self._mode, width))
 
 
 class ShelfmarkTableWidgetItem(QTableWidgetItem):

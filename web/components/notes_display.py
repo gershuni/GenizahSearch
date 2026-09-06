@@ -282,10 +282,16 @@ def create_notes_panel(
         Tuple of (panel element, refresh function)
         The refresh function can be called to reload notes and expand the panel
     """
+    # `print-hide` (owner, 2026-09-04): notes and comments are workflow around
+    # the document, not part of it. On a printed reading sheet the panel came
+    # out as a bare "Notes & Comments" heading with a collapsed chevron -- a
+    # control, printed as furniture, carrying no content. Set on the panel
+    # itself rather than at the /browse call site so every surface that mounts
+    # this component gets the same behaviour.
     panel = ui.expansion(
         text=tr('Notes & Comments'),
         icon='comment'
-    ).classes('w-full').props('dense')
+    ).classes('w-full print-hide').props('dense')
 
     with panel:
         notes_container = ui.column().classes('w-full gap-2 p-2')

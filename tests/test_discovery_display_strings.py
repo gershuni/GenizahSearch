@@ -770,14 +770,42 @@ def test_translations_split_is_documented_in_a_comment():
 
 CSS_PATH = REPO_ROOT / "web" / "static" / "common.css"
 CSS_BLOCK_MARKER = "/* discovery"
+CSS_BLOCK_END_MARKER = "/* end discovery"
 
 
 def discovery_css_block() -> str:
+    """The discovery rules in common.css, and ONLY those.
+
+    This used to slice from the opening marker to END OF FILE, which was
+    accurate only while discovery happened to be the last thing in the
+    stylesheet. On 2026-09-04 site-wide rules (dismiss buttons, the What's New
+    header control, the print stylesheet) were appended below it, and every one
+    of them was attributed to the discovery block -- so
+    `test_discovery_css_block_is_scoped_and_carries_the_required_treatments`
+    failed on 18 selectors that have nothing to do with discovery.
+
+    The gate itself is right: the sketch class names it guards (`.row`, `.chip`,
+    `.mode`, `.c`) really are too generic for a global stylesheet loaded beside
+    Quasar, and an unscoped one would silently restyle the app. It just needed a
+    bounded block rather than an open-ended one, so common.css now carries a
+    closing marker and this reads to it.
+
+    The end marker is REQUIRED, not optional: falling back to end-of-file when
+    it is missing would quietly restore the old over-reach the first time
+    someone deletes it.
+    """
     source = CSS_PATH.read_text(encoding="utf-8")
     assert CSS_BLOCK_MARKER in source, (
         "the discovery CSS block must open with a literal {!r} comment".format(CSS_BLOCK_MARKER)
     )
-    return source[source.index(CSS_BLOCK_MARKER):]
+    start = source.index(CSS_BLOCK_MARKER)
+    assert CSS_BLOCK_END_MARKER in source[start:], (
+        "the discovery CSS block must close with a literal {!r} comment, so "
+        "rules appended below it are not mistaken for discovery rules".format(
+            CSS_BLOCK_END_MARKER)
+    )
+    end = source.index(CSS_BLOCK_END_MARKER, start)
+    return source[start:end]
 
 
 def test_discovery_css_block_uses_only_logical_directional_properties():

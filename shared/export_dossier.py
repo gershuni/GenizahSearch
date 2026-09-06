@@ -134,7 +134,10 @@ Codex MUST-FIX disposition
 import logging
 from typing import Any, Callable, Dict, List, Optional
 
-from shared.export_utils import MIDRASH_CREDIT_LINES
+from shared.export_utils import (
+    MIDRASH_CREDIT_LINES,
+    GENIZAHSEARCH_URL as _GENIZAHSEARCH_URL,
+)
 
 # MUST-FIX 94-01-A: hoist factory functions to module scope so test
 # monkeypatches at 'shared.export_dossier.<name>' targets actually
@@ -535,7 +538,11 @@ _SEARCH_META_LABELS_HE: Dict[str, str] = {
     'off': "לא",
 }
 
-GENIZAHSEARCH_URL: str = "https://genizahsearch.com"
+# Re-exported from `shared/export_utils` (2026-09-04), which is now the one
+# home for both the MiDRASH citation and the site's own credit. The name is
+# kept here so existing importers of `export_dossier.GENIZAHSEARCH_URL` are
+# untouched; it is the SAME object, not a second copy.
+GENIZAHSEARCH_URL: str = _GENIZAHSEARCH_URL
 
 
 def credits_lines(

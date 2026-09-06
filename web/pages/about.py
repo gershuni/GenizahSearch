@@ -492,6 +492,32 @@ def _create_hebrew_content():
         </p>
         ''')
 
+        # Citing MiDRASH.
+        #
+        # This text was a BLOCKING modal that opened over every page on a first
+        # visit (`web/main.py::_show_citation_reminder`, removed 2026-09-04). It
+        # was one of four overlays the homepage stacked at once, and it said what
+        # the citation strip already said. The "How to cite" chip that replaced
+        # that strip keeps the requirement and the copy button; the REASONING
+        # lives here, and the chip's panel links to this anchor. Nothing was
+        # lost — only the interruption.
+        _html('''
+        <div class="about-disclaimer" id="citing-midrash">
+            <p>
+                <strong>בקשה חשובה: ציטוט מדרש</strong>
+            </p>
+            <p>
+                אתר זה מבוסס על תמלולים אוטומטיים שנוצרו על ידי צוות פרויקט מדרש.
+                על פי חוק זכויות יוצרים, יש לצטט את המקור בעת פרסום חומר מאתר זה.
+            </p>
+            <p>
+                מעבר לדרישה החוקית &mdash; ככל שיהיו יותר ציטוטים, כך יוכל צוות מדרש
+                להשתמש בהם כדי לקבל מענקים נוספים, לשפר את התמלולים ולהרחיב את העבודה
+                לכתבי יד עבריים נוספים. הציטוט המלא מופיע בתחתית המסך.
+            </p>
+        </div>
+        ''')
+
         # Disclaimer
         _html('''
         <div class="about-disclaimer">
@@ -697,6 +723,27 @@ def _create_english_content():
             This site was developed with the support of <strong><a href="https://dicta.org.il/" target="_blank">Dicta</a></strong>,
             to enable searching and browsing within the MiDRASH transcriptions.
         </p>
+        ''')
+
+        # Citing MiDRASH — see the Hebrew branch above for why this text lives
+        # here rather than in a modal over every page.
+        _html('''
+        <div class="about-disclaimer" id="citing-midrash">
+            <p>
+                <strong>Important: Please cite MiDRASH</strong>
+            </p>
+            <p>
+                This website is built on automatic transcriptions produced by the MiDRASH
+                Project. Copyright law requires citing the source when publishing material
+                from this site.
+            </p>
+            <p>
+                Beyond the legal requirement &mdash; the more citations the project receives,
+                the more the MiDRASH team can use them to secure grants and funding to improve
+                the Genizah transcriptions and expand their work to other Hebrew manuscripts.
+                The full citation appears at the bottom of the screen.
+            </p>
+        </div>
         ''')
 
         # Disclaimer

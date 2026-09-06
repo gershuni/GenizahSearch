@@ -243,3 +243,88 @@ def test_toast_is_translated_rather_than_leaking_english_into_the_hebrew_ui():
         assert 'New Features!' not in text
 
     _run(driver, lang='he')
+
+
+# ---------------------------------------------------------------------------
+# The SHAPE of the announcement (2026-09-04)
+#
+# Everything above pins WHAT is announced and WHERE it is suppressed. These pin
+# HOW it is drawn, which changed on 2026-09-04: it used to be a fixed-position
+# card floating over the page with its own close button and a 30-second
+# self-destruct. On a first visit the homepage stacked four such overlays at
+# once, which is the "עומס / too many popups" the owner reported.
+#
+# It is now a header button with an unread dot. The tests above still pass
+# unchanged — deliberately, because the announcement's CONTENT contract did not
+# change — so on their own they would go on passing if someone reinstated the
+# toast. These are what make that a red test.
+# ---------------------------------------------------------------------------
+
+
+def _classes(element):
+    return set(getattr(element, '_classes', None) or [])
+
+
+def _by_class(elements, name):
+    return [e for e in elements if name in _classes(e)]
+
+
+def test_the_announcement_is_a_header_button_not_a_floating_overlay():
+    async def driver(user):
+        await user.open('/')
+        elements = _elements(user)
+
+        buttons = _by_class(elements, 'whats-new-btn-header')
+        assert len(buttons) == 1, (
+            'expected exactly one What\'s New header button, got %d' % len(buttons))
+
+        # The panel is a Quasar menu anchored to that button. A menu is opened
+        # by the reader; a toast opens itself over the page.
+        banner = _banner(elements)
+        assert banner is not None
+        assert banner.tag == 'q-menu', (
+            'the panel is a %r, not a menu — has the toast come back?'
+            % banner.tag)
+
+        # Nothing in the announcement may be position:fixed. That is the whole
+        # defect being fixed, and it is the one an accidental revert reproduces.
+        for element in (banner, buttons[0]):
+            style = ' '.join((getattr(element, '_style', None) or {}).values())
+            assert 'fixed' not in style, (
+                'the announcement is position:fixed again: %r' % style)
+
+    _run(driver)
+
+
+def test_the_button_is_reachable_on_a_phone():
+    """`.help-btn-header` is `display: none !important` under 768px in
+    common.css. This site skews mobile, so borrowing that class for the
+    announcement would hide it from most of the readers it is written for."""
+    async def driver(user):
+        await user.open('/')
+        button = _by_class(_elements(user), 'whats-new-btn-header')[0]
+        assert 'help-btn-header' not in _classes(button)
+
+    _run(driver)
+
+
+def test_an_unread_announcement_carries_a_dot():
+    """The dot is what makes a header button discoverable at all. Without it
+    the announcement is present but silent, which is worse than the toast."""
+    async def driver(user):
+        await user.open('/')
+        assert _by_class(_elements(user), 'whats-new-dot'), (
+            'no unread dot: a fresh reader gets no signal that there is news')
+
+    _run(driver)
+
+
+def test_nothing_is_announced_when_there_is_nothing_to_announce():
+    """The control is gated on the CONTENT, so a box with no index draws no
+    button — not an empty button that opens an empty panel."""
+    async def driver(user):
+        await user.open('/')
+        assert not _by_class(_elements(user), 'whats-new-btn-header')
+        assert not _by_class(_elements(user), 'whats-new-dot')
+
+    _run(driver, passage_on=False, witnesses_on=False)
