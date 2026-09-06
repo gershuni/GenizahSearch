@@ -129,6 +129,15 @@ $per.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 8 |
 
 if (-not $Apply) { "`n(dry run - nothing written; pass -Apply to write)"; exit 0 }
 
+# GUARD (2026-09-06): this script REBUILDS the archive from scratch with WriteAllLines. It was
+# written for the first split on 2026-08-12, when no archive existed. Re-running -Apply would
+# replace the ~515 KB archive with this run's few-KB yield. Use scripts/archive_closed_issues.py,
+# which appends. The dry run above is still safe.
+if (Test-Path $arch) {
+    Write-Error "Refusing -Apply: $arch already exists and this script would overwrite it. Run: python scripts/archive_closed_issues.py --apply"
+    exit 2
+}
+
 # ---- write ----
 $stamp = (git log -1 --format=%cd --date=short) 2>$null
 $archHdr = @(

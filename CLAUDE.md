@@ -245,8 +245,10 @@ pytest tests/
 4. **At session end:** Update the "Last Updated" timestamp and summary counts
 
 Closed history (fixed/resolved/superseded + the full Change Log) lives in
-`docs/archive/OPEN_ISSUES_ARCHIVE.md` (~320 KB). **Grep it; never read it whole.**
-Re-split with `scripts/split_open_issues.ps1` if the tracker grows past ~150 KB again.
+`docs/archive/OPEN_ISSUES_ARCHIVE.md` (~515 KB). **Grep it; never read it whole.**
+Re-split with `python scripts/archive_closed_issues.py --apply` (dry run without the flag) if the
+tracker grows past ~150 KB again. Never re-run `scripts/split_open_issues.ps1 -Apply`: it rebuilds
+the archive from scratch and would discard everything in it.
 
 ### When to Update Docs
 

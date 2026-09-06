@@ -16,6 +16,7 @@ every line it removes from the tracker is present in the archive afterwards.
     python scripts/archive_closed_issues.py --apply
 """
 import argparse
+import datetime
 import io
 import os
 import re
@@ -36,6 +37,8 @@ WHOLE_SECTIONS = [
 # A table row moves when it carries a terminal marker and no live marker.
 CLOSED = re.compile(r"✅|🟡 Accepted|~~")
 OPEN = re.compile(r"❌|⏸|⏳|🔴|🟠")
+# A TOP-LEVEL bullet whose status prefix is terminal, e.g. "- ✅ **Fixed (...)".
+CLOSED_BULLET = re.compile(r"^- (?:✅|~~)")
 
 
 def is_table_row(line):
@@ -84,17 +87,31 @@ def plan(lines):
         if CLOSED.search(ln) and not OPEN.search(ln):
             move.add(i)
             why[i] = "closed row"
+
+    # 4. Closed TOP-LEVEL bullets (the v9 milestone section is a bullet list, not a
+    #    table). Only a bullet whose status prefix is terminal and that carries no live
+    #    marker anywhere moves; nested sub-bullets stay with their parent.
+    for i, ln in enumerate(lines):
+        if i in move or not CLOSED_BULLET.match(ln):
+            continue
+        if section_of(lines, i).startswith("## AI Assistant Maintenance Protocol"):
+            continue
+        if not OPEN.search(ln):
+            move.add(i)
+            why[i] = "closed bullet"
     return move, why
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true")
-    ap.add_argument("--date", default="2026-08-14")
+    ap.add_argument("--date", default=datetime.date.today().isoformat())
     args = ap.parse_args()
 
     with io.open(TRACKER, "r", encoding="utf-8", newline="") as fh:
         lines = fh.readlines()
+    # Preserve the tracker's own line ending (the worktree is CRLF under autocrlf).
+    EOL = "\r\n" if lines and lines[0].endswith("\r\n") else "\n"
     before_bytes = sum(len(x.encode("utf-8")) for x in lines)
 
     move, why = plan(lines)
@@ -130,9 +147,11 @@ def main():
 
     with io.open(ARCHIVE, "r", encoding="utf-8", newline="") as fh:
         archive_before = fh.read()
+    AEOL = "\r\n" if archive_before.count("\r\n") > archive_before.count("\n") // 2 else "\n"
+    block = "".join(out).replace("\r\n", "\n").replace("\n", AEOL)
     with io.open(ARCHIVE, "w", encoding="utf-8", newline="") as fh:
         fh.write(archive_before)
-        fh.write("".join(out))
+        fh.write(block)
 
     # Rewrite the tracker, leaving a pointer where a whole section was emptied.
     kept = []
@@ -141,12 +160,12 @@ def main():
             kept.append(ln)
             continue
         if why[i] == "header log":
-            kept.append("> **Last Updated:** %s — see `docs/archive/OPEN_ISSUES_ARCHIVE.md` "
-                        "for the dated header log; this tracker holds only what is still open.\n"
-                        % args.date)
+            # The pointer to the header log already sits two lines below; do not repeat it.
+            kept.append("> **Last Updated:** %s — previous header narrative moved to the "
+                        "archive (block dated %s); no open item changed." % (args.date, args.date) + EOL)
         elif why[i] == "closed section" and lines[i - 1].startswith("## "):
-            kept.append("\nClosed — moved to [`docs/archive/OPEN_ISSUES_ARCHIVE.md`]"
-                        "(archive/OPEN_ISSUES_ARCHIVE.md) on %s.\n" % args.date)
+            kept.append(EOL + "Closed — moved to [`docs/archive/OPEN_ISSUES_ARCHIVE.md`]"
+                        "(archive/OPEN_ISSUES_ARCHIVE.md) on %s." % args.date + EOL)
 
     with io.open(TRACKER, "w", encoding="utf-8", newline="") as fh:
         fh.writelines(kept)

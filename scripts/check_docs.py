@@ -59,7 +59,8 @@ STALE_THRESHOLD_DAYS = 90
 # and this is enforced.
 #
 # If a ceiling is hit, SPLIT the file (closed/historical content -> docs/archive/),
-# do not raise the number. scripts/split_open_issues.ps1 does it for the tracker.
+# do not raise the number. scripts/archive_closed_issues.py does it for the tracker
+# (append-only; the older split_open_issues.ps1 rebuilds the archive and must not be re-run).
 CONTEXT_BUDGET = [
     ('CLAUDE.md', 40_000),
     ('docs/OPEN_ISSUES.md', 180_000),
