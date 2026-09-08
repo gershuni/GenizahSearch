@@ -41,7 +41,7 @@ Notes:
   `invalid_request` ("unknown field 'mode' — use search_mode instead").
 - `search_mode` enum has **6 values** (Phase 81A D-09 dropped `regex`):
   `exact | variants | responsa | title | shelfmark | fuzzy`. `fuzzy` is the
-  approximate / maximum-variant tier (slowest; bounded by `SEARCH_API_FUZZY_TIMEOUT` ~300s,
+  approximate / maximum-variant tier (slowest; bounded by `SEARCH_API_FUZZY_TIMEOUT` ~110s,
   NOT the 30s interactive baseline). Expect long runtime for multi-word fuzzy queries.
 - `responsa_options` only with `search_mode: "responsa"`; otherwise 400 `invalid_combination`.
 - `limit` ceiling: **100** for non-fuzzy modes (Phase 81A D-05 unchanged). **500** (default,
@@ -157,7 +157,7 @@ Common codes the skill encounters:
 
 - `rate_limited` (HTTP 429 + Retry-After header)
 - `heavy_search_busy` (HTTP 503 + Retry-After: 5 — heavy-mode concurrency budget exhausted; retry shortly)
-- `core_timeout` (HTTP 504; per-mode ceiling exceeded — exact/title/shelfmark/responsa: 30s, variants: 60s, fuzzy: 300s, parallels: 300s)
+- `core_timeout` (HTTP 504; per-mode ceiling exceeded — exact/title/shelfmark/responsa: 30s, variants: 60s, fuzzy: 110s, parallels: 110s, passage method: 30s)
 - `manuscript_page_not_found` (HTTP 404)
 - `locator_conflict` (HTTP 400)
 - `invalid_request` (HTTP 400; e.g. unknown field, including legacy `mode`)
@@ -173,3 +173,26 @@ Common codes the skill encounters:
 Per-endpoint independent buckets, server enforces 120 rpm per IP per bucket
 (Phase 78/79/80 HARDEN-01, D-05; raised 30->120 in 2026-06). Skill
 self-throttles to 96 rpm per bucket (24 rpm headroom; SKILL-06).
+
+## GET /api/capabilities
+
+Cheap probe — no index load, no database, no search — that reports which
+flag-gated features are live on THIS deployment (e.g. `features.passage`,
+`features.passage_multi_witness`, `parallels.methods`, `parallels.sorts`,
+plus the live `limits`/`timeouts` values). Use it to learn what is callable
+before spending a heavy request only to read a 503. Full shape is in
+`docs/SEARCH_API.md` (already the cross-reference for anything this file
+doesn't cover) — this is just the pointer so an integrator knows it exists.
+
+## Non-JSON error bodies (edge proxy passthrough)
+
+A 5xx from the public deployment can arrive as a PLAIN-TEXT body — observed:
+`error code: 504` — instead of the JSON error envelope shown above. This
+happens when the edge proxy in front of the origin gives up on a slow
+request and answers for it; the origin's own JSON `core_timeout` envelope
+never gets sent. **Branch on HTTP status first; only parse the body as JSON
+once you know it parses as JSON** — never assume a non-2xx response body is
+the envelope. `search.py` and `parallels.py` already do this (they call
+`resp.json()` inside a `try` that catches `(json.JSONDecodeError, ValueError)`
+and fall back to an `invalid_response` error dict carrying the raw HTTP
+status code) — copy that pattern in any new script added to this skill.

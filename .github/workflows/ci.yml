@@ -16,7 +16,14 @@ jobs:
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 is REQUIRED by check_docs.py's contract-header gate,
+      # which asks git for the last commit date of a specific file. The
+      # default depth-1 clone answers "no such commit" for every file HEAD
+      # did not touch, so the gate would silently pass instead of running.
+      # Only this job needs history; the test jobs stay shallow and fast.
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'

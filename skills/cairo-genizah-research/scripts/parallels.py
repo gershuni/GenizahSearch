@@ -45,13 +45,18 @@ def call_parallels(
     boundary_mode: str | None = None,
     filters: dict | None = None,
     base_url: str | None = None,
-    timeout: float = 320.0,
+    timeout: float = 130.0,
 ) -> dict:
     """POST /api/parallels and return the parsed JSON response dict.
 
-    timeout default is 320s — slightly above the server's 300s parallels ceiling
-    (SEARCH_API_PARALLELS_TIMEOUT) so the server's 504 core_timeout envelope wins
-    instead of a client-side socket timeout. Composition searches are inherently slow.
+    timeout default (130s) is an INVARIANT, not a bare number: it must stay
+    strictly ABOVE the server's heaviest documented ceiling — currently 110s
+    for the parallels endpoint (SEARCH_API_PARALLELS_TIMEOUT, dropped from
+    300s so the ceiling sits below the edge proxy's origin-response budget)
+    — so the server's JSON 504 core_timeout envelope wins the race instead of
+    a client-side socket timeout or an opaque proxy error page. The margin
+    here is 20s. If the server ceiling moves again, this value must move with
+    it. Composition searches are inherently slow.
     Always returns a dict — never raises.
     GENIZAH_API_BASE env var overrides base_url per D-09.
 

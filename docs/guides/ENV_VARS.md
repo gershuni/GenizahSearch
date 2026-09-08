@@ -51,13 +51,34 @@ SEARCH_API_BROWSE_CORE_TIMEOUT=2.0    # core BrowsePage fetch timeout, seconds
 SEARCH_API_BROWSE_CORE_WARMUP_TIMEOUT=45.0  # core budget while the browse map is still loading (GenizahService.is_warm() False); the first resolution after start pays an 18 s cold pickle+repair load, so requests in that window WAIT instead of 504ing; normal budget resumes once warm
 SEARCH_API_CORE_TIMEOUT=30.0          # interactive baseline (exact/title/shelfmark/responsa); runs in executor off the event loop -> 504 core_timeout
 SEARCH_API_VARIANTS_TIMEOUT=60        # /api/search variants-mode core timeout (s); heavy tier
-SEARCH_API_FUZZY_TIMEOUT=300          # /api/search fuzzy-mode core timeout (s); heaviest mode
-SEARCH_API_PARALLELS_TIMEOUT=300      # /api/parallels composition core timeout (s)
+SEARCH_API_FUZZY_TIMEOUT=110          # /api/search fuzzy-mode core timeout (s); heaviest mode. 110, NOT 300: bounded by the edge proxy, not by the engine -- see the note below
+SEARCH_API_PARALLELS_TIMEOUT=110      # /api/parallels composition core timeout (s). Same 110 s edge bound as fuzzy
 SEARCH_API_HEAVY_CONCURRENCY=2        # max concurrent heavy (variants/fuzzy/parallels method=chunk) requests; over -> 503 heavy_search_busy + Retry-After
 SEARCH_API_PASSAGE_TIMEOUT=30         # /api/parallels method='passage' core timeout (s); own ceiling, unrelated to SEARCH_API_PARALLELS_TIMEOUT (Phase 145)
 SEARCH_API_PASSAGE_CONCURRENCY=4      # max concurrent method='passage' requests; its OWN semaphore + ThreadPoolExecutor(max_workers=4), never the default executor -> 503 passage_search_busy + Retry-After
 SEARCH_API_FUZZY_MAX_LIMIT=500        # fuzzy result-cap ceiling (recall over precision; non-fuzzy stays 100)
 SEARCH_API_BROWSE_TEXT_CAP=4000       # default char cap for transcription text; ?text_cap=N override bounded [100, 10000]
+
+# WHY 110 AND NOT 300 on the two heavy timeouts above (changed 2026-09-08).
+# These are SYNCHRONOUS endpoints behind an edge proxy that abandons the
+# origin connection somewhere between a measured 97.0 s success and a
+# measured 125.2 s 524. A 300 s ceiling is therefore undeliverable: the
+# client never receives our documented JSON `core_timeout` 504, it receives
+# the proxy's opaque non-JSON error page. 110 sits above the success and
+# below the giveup, so OUR timeout wins the race.
+#
+# Setting these back to 300 does not buy longer searches -- it only replaces
+# an honest 504 envelope with an opaque proxy error, AND the bundled skill
+# client now stops at 130 s (110 + margin), so the caller would hit its own
+# socket timeout first. Raise them only for a deployment that is NOT behind
+# such a proxy, and raise the client timeout with them.
+#
+# This block is the canonical reference, so it is checked against the code:
+# tests/test_env_vars_doc_matches_code.py fails if a default quoted here
+# disagrees with web/search_api.py. That test exists because this file said
+# 300 for four hours after the code said 110, and env wins over the code
+# default -- so an operator following this guide would have restored the
+# exact bug the change removed.
 
 # Skill-side (cairo-genizah-research skill consumer)
 GENIZAH_API_BASE=https://genizahsearch.com    # overrides --base-url CLI flag (env wins)

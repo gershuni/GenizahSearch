@@ -56,7 +56,13 @@ from web.api_hardening import (
 # Concern #3: APIError from neutral location.
 from shared.api_errors import APIError
 # Phase 79 imports.
-from shared.browse_service import fetch_browse_bundle, _read_timeout
+from shared.browse_service import (
+    fetch_browse_bundle,
+    _read_timeout,
+    DEFAULT_BROWSE_TIMEOUT,
+    DEFAULT_BROWSE_CORE_TIMEOUT,
+    DEFAULT_BROWSE_CORE_WARMUP_TIMEOUT,
+)
 # SEED-016 #3: the browse core-fetch provider is injected by the caller (here),
 # inverting the former shared/ -> web/ import. web.services is the web layer's
 # own dependency, so importing it from web/search_api.py respects layering.
@@ -85,6 +91,12 @@ _browse_rate_limiter = RateLimiter(default_limit=120)
 # + parallels-once does NOT exhaust the search or browse buckets. Independence
 # is verified by tests/test_parallels_api.py::test_parallels_rate_limit_independence.
 _parallels_rate_limiter = RateLimiter(default_limit=120)
+
+# D3 (2026-09-08): SEPARATE per-IP bucket from search/browse/parallels, same
+# pattern as every prior addition above -- a client hammering /api/capabilities
+# to poll for a flag flip must not be able to exhaust (or be starved by) any
+# of the three heavier buckets, and vice versa.
+_capabilities_rate_limiter = RateLimiter(default_limit=120)
 
 
 # ---------------------------------------------------------------------------
@@ -286,9 +298,24 @@ DEFAULT_SEARCH_CORE_TIMEOUT = 30.0
 
 # P9X per-mode timeout ladder: heavy modes get their own ceiling env knobs.
 # All are re-read per request (via _read_timeout inside helper functions).
+#
+# 2026-09-08 (external MCP-server incident, D1): DEFAULT_FUZZY_TIMEOUT and
+# DEFAULT_PARALLELS_TIMEOUT dropped from 300.0 to 110.0. The ceiling here is
+# bounded by the edge proxy's origin-response budget, NOT by how long the
+# engine may usefully run -- a synchronous endpoint that promises 300s to the
+# CLIENT is lying if the proxy in front of it gives up first. Measured from
+# outside on 2026-09-08: a chunk-mode /api/parallels request succeeded at
+# 97.0s, and a fuzzy /api/search request got an opaque proxy 524 (not our
+# JSON envelope) at 125.2s. 110.0 sits above the observed 97s success (so no
+# currently-succeeding request starts failing) and below the observed 125.2s
+# edge give-up point, so the timeout the client sees is OURS -- a documented
+# JSON `core_timeout`/`parallels_timeout` 504 -- instead of the proxy's opaque
+# non-JSON error page. SEARCH_API_FUZZY_TIMEOUT / SEARCH_API_PARALLELS_TIMEOUT
+# still override per-deployment, so a deployment behind no proxy (or a proxy
+# with a longer budget) can raise these back up.
 DEFAULT_VARIANTS_TIMEOUT = 60.0
-DEFAULT_FUZZY_TIMEOUT = 300.0
-DEFAULT_PARALLELS_TIMEOUT = 300.0
+DEFAULT_FUZZY_TIMEOUT = 110.0
+DEFAULT_PARALLELS_TIMEOUT = 110.0
 DEFAULT_HEAVY_CONCURRENCY = 2
 HEAVY_SEARCH_MODES = frozenset({'variants', 'fuzzy'})
 
@@ -427,6 +454,80 @@ class _SemaphoreBudget:
         cls._capacity = cls._default_capacity
 
     @classmethod
+    def _rebuild_possible(cls) -> bool:
+        """True when the semaphore is fully idle, so a resize may happen now.
+
+        A resize while any slot is held would strand that slot, so
+        ``acquire()`` refuses it. "Fully idle" means the counter is back at
+        capacity; asyncio exposes no public API for that, so the internal
+        counter is read defensively -- if the attribute is ever renamed or
+        removed this returns False, the rebuild is skipped, and the gate keeps
+        working at its current capacity (fail-safe, never raises).
+
+        Shared with ``effective_capacity()`` on purpose: what we ADVERTISE and
+        what we ENFORCE must be decided by the same predicate, or they drift
+        apart exactly the way this endpoint exists to prevent.
+        """
+        return getattr(cls.sem, '_value', None) == cls._capacity
+
+    @classmethod
+    def effective_capacity(cls) -> int:
+        """The capacity the NEXT acquire() will actually enforce.
+
+        Three-way distinction, and /api/capabilities needs the third:
+
+        - ``_capacity``          what the live semaphore was last BUILT with.
+        - ``resolve_capacity()`` what the environment currently ASKS for.
+        - this                   what the gate will enforce for the next
+                                 request, which is the only one a client can
+                                 act on.
+
+        They differ in both directions, and reporting either of the first two
+        was a real defect (both found by Codex on PR #336):
+
+        - Before the first acquire, ``_capacity`` is the import-time default
+          even though env asked for something else -- so a process serving no
+          heavy request under-reported forever.
+        - Raise the capacity while a slot is held and ``resolve_capacity()``
+          over-reports: the rebuild is blocked until idle, so a one-slot
+          semaphore with its slot occupied would advertise four while the very
+          next request still got 503 busy.
+
+        Resolves to the desired value when a rebuild will happen (or is
+        unnecessary), and to the built value while a rebuild is blocked --
+        i.e. never advertises more than the gate can currently enforce.
+        """
+        desired = cls.resolve_capacity()
+        if desired == cls._capacity or cls._rebuild_possible():
+            return desired
+        return cls._capacity
+
+    @classmethod
+    def resolve_capacity(cls) -> int:
+        """The capacity this budget WOULD use for a request arriving now.
+
+        Distinct from ``cls._capacity``, which is the capacity the live
+        semaphore was last built with. Those differ until the first
+        ``acquire()`` after an env change rebuilds it -- and they differ for
+        the whole life of a process that never serves a heavy request.
+
+        ``acquire()`` calls this too, deliberately: /api/capabilities must
+        report what the gate will actually enforce, and the only way to keep
+        that true under later edits is for both to run the SAME parse rather
+        than two copies that agree today. Reported by capabilities (Codex
+        review of PR #336, P2): with SEARCH_API_HEAVY_CONCURRENCY=1 the
+        endpoint advertised 2, then the first heavy request rebuilt the
+        semaphore to 1 and a second concurrent request got 503.
+        """
+        raw = os.environ.get(cls._env_var) if cls._env_var else None
+        if raw:
+            try:
+                return max(1, int(raw))
+            except (ValueError, TypeError):
+                pass
+        return cls._default_capacity
+
+    @classmethod
     def reset(cls, capacity: int) -> None:
         """Rebuild the semaphore to the given capacity. Only safe to call
         when the semaphore is fully idle (tests use this directly)."""
@@ -448,13 +549,7 @@ class _SemaphoreBudget:
             APIError(cls._busy_code, ..., 503): if no slot is available
                 right now (non-blocking acquire failed).
         """
-        raw = os.environ.get(cls._env_var) if cls._env_var else None
-        desired = cls._default_capacity
-        if raw:
-            try:
-                desired = max(1, int(raw))
-            except (ValueError, TypeError):
-                pass
+        desired = cls.resolve_capacity()
 
         # Rebuild only when the size changed AND fully idle (no held slots);
         # if partially held, keep the current semaphore so we never strand a
@@ -463,10 +558,8 @@ class _SemaphoreBudget:
         # read defensively via getattr -- if the attribute is ever
         # renamed/removed, current_value is None, the rebuild is skipped, and
         # the gate keeps working at the old capacity (fail-safe, never raises).
-        if desired != cls._capacity:
-            current_value = getattr(cls.sem, '_value', None)
-            if current_value == cls._capacity:
-                cls.reset(desired)
+        if desired != cls._capacity and cls._rebuild_possible():
+            cls.reset(desired)
 
         sem = cls.sem
         # Non-blocking acquire via the public API. On a single-threaded event
@@ -708,6 +801,37 @@ COMPOSITION_LENGTH_CAP = 20000
 # were therefore free to drift: changing a default would have started
 # rejecting every passage caller who simply omitted the field, with an error
 # message telling them to omit it. Both sides now read the same name.
+def _resolve_effective_max_witnesses() -> int:
+    """The largest witness count the handler would actually accept.
+
+    Two independent gates reject a witness list, and the CONFIGURED cap is
+    only the first. The parallels handler also refuses on projected cost --
+    ``len(witnesses) * PASSAGE_SECONDS_PER_WITNESS > passage ceiling`` ->
+    400 ``too_many_witnesses`` -- so a deployment that lowers
+    ``SEARCH_API_PASSAGE_TIMEOUT`` silently lowers the real cap without
+    touching ``SEARCH_API_PASSAGE_MAX_WITNESSES``.
+
+    At defaults the projection binds nothing (30 / 0.75 = 40, above the cap
+    of 25), which is exactly why this went unnoticed. At a 10s ceiling the
+    real cap is 13 while the configured cap still reads 25 -- and
+    /api/capabilities advertising 25 there would be the endpoint promising
+    something the very next request is rejected for. Found by the Codex
+    review of PR #336.
+
+    Returns the configured cap when no ceiling is set, and never a negative
+    number. Zero is a truthful answer: with a ceiling under
+    PASSAGE_SECONDS_PER_WITNESS, no witness list can be served at all.
+    """
+    configured = _resolve_max_witnesses()
+    ceiling = _resolve_passage_timeout()
+    if not ceiling or PASSAGE_SECONDS_PER_WITNESS <= 0:
+        return configured
+    # The handler accepts while projected <= ceiling, so the largest
+    # admissible count is floor(ceiling / seconds-per-witness).
+    affordable = int(ceiling // PASSAGE_SECONDS_PER_WITNESS)
+    return max(0, min(configured, affordable))
+
+
 def _resolve_max_witnesses() -> int:
     """Ceiling on witnesses per request (SEARCH_API_PASSAGE_MAX_WITNESSES).
 
@@ -2514,4 +2638,155 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
 
         return envelope
 
-    logger.info("Search API routes initialized: POST /api/search, GET /api/browse, POST /api/parallels")
+    # -----------------------------------------------------------------------
+    # D3 (2026-09-08): GET /api/capabilities -- cheap self-description.
+    #
+    # Background (do not relitigate -- see the incident record this shipped
+    # with): an external client inferred from our docs alone that
+    # search_mode='fuzzy', method='passage', witnesses[] and sort did not
+    # exist. All four are real and, for the passage pair, ON in production;
+    # nothing published let a caller confirm that without spending a heavy
+    # request and reading a 503. This endpoint is the fix: call it ONCE,
+    # branch on the result, never probe by firing a real search/parallels
+    # request and inspecting the failure.
+    # -----------------------------------------------------------------------
+    @target_app.get(
+        f'{path_prefix}/capabilities',
+        summary="Discover which flag-gated features are live on this deployment.",
+        tags=["capabilities"],
+        openapi_extra={
+            "responses": _openapi_responses_for("Capability/limit/timeout envelope."),
+        },
+    )
+    @wrap_endpoint(endpoint_name='capabilities')
+    async def capabilities_endpoint(request: Request, *, captured_state: dict):
+        """GET /api/capabilities -- no index load, no database, no search.
+
+        D4 (fail-closed posture, non-negotiable): this endpoint must NEVER
+        advertise a feature whose own gate is closed. `parallels.methods`
+        drops 'passage' entirely -- not merely marks it unavailable -- when
+        `passage_available()` is False, and `parallels.sorts` is `[]`
+        whenever multi-witness is off, mirroring the 400
+        'sort_requires_multi_witness' /api/parallels itself raises for
+        `sort` without `witnesses[]`. Advertising a closed gate would be
+        worse than not having this endpoint: a caller would build against a
+        feature that immediately 503s.
+
+        captured_state: pinned explicitly (mode/search_mode_value/
+        responsa_options_count/result_count) for the same reason browse and
+        parallels pin them -- a uniform PostHog event shape -- even though
+        wrap_endpoint's own defaults already agree for a fixed-shape
+        descriptor endpoint that has no mode and produces no result set.
+        """
+        captured_state['mode'] = None
+        captured_state['search_mode_value'] = None
+        captured_state['responsa_options_count'] = 0
+        captured_state['result_count'] = None
+
+        # 1. Mode gate (D-02/D-03/D-04 -- identical to every other endpoint;
+        #    SEARCH_API_MODE='disabled' -> 503, 'localhost-only' -> 403 for
+        #    non-loopback callers).
+        enforce_mode_gate(request)
+
+        # 2. Rate limit -- this endpoint's OWN bucket (see _capabilities_rate_limiter
+        #    above), independent of search/browse/parallels.
+        client_ip = _resolve_rate_limit_key(request)
+        _capabilities_rate_limiter.check(client_ip)
+
+        # 3. Feature gates, imported INSIDE the handler -- same convention as
+        #    the passage gate a few hundred lines up in this file -- so
+        #    import order at module-load time can never make registering
+        #    this route fail.
+        from web.passage_assets import passage_available as _passage_available
+        from web.passage_assets import (
+            passage_multi_witness_available as _passage_multi_witness_available)
+        from version import APP_VERSION as _app_version
+
+        _passage_on = _passage_available()
+        # passage_multi_witness_available() already ANDs its own flag with
+        # passage_available() internally (web/passage_assets.py) -- no need
+        # to AND it again here.
+        _multi_witness_on = _passage_multi_witness_available()
+
+        return {
+            'schema_version': 1,
+            'request': {},
+            'api_version': _app_version,
+            'endpoints': [
+                '/api/search', '/api/browse', '/api/parallels', '/api/capabilities',
+            ],
+            # Derived from the real mode enum (not a literal list) -- dict
+            # insertion order is preserved, and _SEARCH_MODE_TO_INTERNAL's
+            # own definition order already matches the documented contract.
+            'search_modes': list(_SEARCH_MODE_TO_INTERNAL.keys()),
+            'features': {
+                'passage': _passage_on,
+                'passage_multi_witness': _multi_witness_on,
+            },
+            'parallels': {
+                'methods': ['chunk', 'passage'] if _passage_on else ['chunk'],
+                'multi_witness': _multi_witness_on,
+                # EFFECTIVE, not configured -- see
+                # _resolve_effective_max_witnesses(): a lowered passage
+                # ceiling caps witnesses below SEARCH_API_PASSAGE_MAX_WITNESSES.
+                'max_witnesses': _resolve_effective_max_witnesses(),
+                # The per-witness LENGTH cap (a separate 400,
+                # `witness_too_long`, independent of count). Reported for
+                # the same reason as everything else here: it is a hard
+                # rejection a client cannot predict, and finding it by
+                # being rejected is what this endpoint exists to avoid.
+                'max_witness_chars': MAX_WITNESS_CHARS,
+                # [] rather than a lie: advertising sorts that 400 without
+                # witnesses[] would be worse than omitting them (D4).
+                'sorts': (
+                    ['fused', 'best_match', 'witness_count']
+                    if _multi_witness_on else []
+                ),
+            },
+            'limits': {
+                'search_requests_per_minute': _rate_limiter._current_limit(),
+                'browse_requests_per_minute': _browse_rate_limiter._current_limit(),
+                'parallels_requests_per_minute': _parallels_rate_limiter._current_limit(),
+                'capabilities_requests_per_minute': _capabilities_rate_limiter._current_limit(),
+                # effective_capacity(), which is neither _capacity (what the
+                # semaphore was BUILT with -- lags env) nor resolve_capacity()
+                # (what env ASKS for -- over-reports while a rebuild is blocked
+                # by a held slot). It is what the next request will actually
+                # face. See effective_capacity()'s docstring.
+                'heavy_concurrency': _HeavySemaphoreState.effective_capacity(),
+                'passage_concurrency': _PassageSemaphoreState.effective_capacity(),
+            },
+            # Every value re-read from the same live resolvers the other
+            # three endpoints use per request -- never a literal here, so
+            # this cannot drift the way the stale (v7.10)/300s header (P1)
+            # did.
+            'timeouts': {
+                'search_core': _resolve_search_timeout('exact')[0],
+                'variants': _resolve_search_timeout('variants')[0],
+                'fuzzy': _resolve_search_timeout('fuzzy')[0],
+                'parallels': _resolve_parallels_timeout(),
+                'passage': _resolve_passage_timeout(),
+                'browse': _read_timeout('SEARCH_API_BROWSE_TIMEOUT', DEFAULT_BROWSE_TIMEOUT),
+                'browse_core': _read_timeout(
+                    'SEARCH_API_BROWSE_CORE_TIMEOUT', DEFAULT_BROWSE_CORE_TIMEOUT,
+                ),
+                # A COLD provider does not use browse_core at all:
+                # shared/browse_service.py::_fetch_core substitutes
+                # SEARCH_API_BROWSE_CORE_WARMUP_TIMEOUT while
+                # is_warm() is False, so a fresh deployment can
+                # legitimately spend this long on a browse. Reported
+                # separately rather than folded into browse_core: a
+                # client sizing a socket timeout needs the larger of the
+                # two, but a client reasoning about steady state needs
+                # the smaller. Collapsing them would lie to one of them.
+                # (Codex review of PR #336, P2.)
+                'browse_core_warmup': _read_timeout(
+                    'SEARCH_API_BROWSE_CORE_WARMUP_TIMEOUT',
+                    DEFAULT_BROWSE_CORE_WARMUP_TIMEOUT),
+            },
+        }
+
+    logger.info(
+        "Search API routes initialized: POST /api/search, GET /api/browse, "
+        "POST /api/parallels, GET /api/capabilities"
+    )
