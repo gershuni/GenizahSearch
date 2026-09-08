@@ -69,7 +69,9 @@ def clean_env(monkeypatch):
     # test explicitly sets one.
     for var in (
         'SEARCH_API_FUZZY_TIMEOUT', 'SEARCH_API_PARALLELS_TIMEOUT',
-        'SEARCH_API_PASSAGE_MAX_WITNESSES',
+        'SEARCH_API_PASSAGE_MAX_WITNESSES', 'SEARCH_API_PASSAGE_TIMEOUT',
+        'SEARCH_API_HEAVY_CONCURRENCY', 'SEARCH_API_PASSAGE_CONCURRENCY',
+        'SEARCH_API_BROWSE_CORE_WARMUP_TIMEOUT',
     ):
         monkeypatch.delenv(var, raising=False)
     _rate_limiter.reset_for_tests()
@@ -181,15 +183,10 @@ def test_capabilities_limits_full_set(client, clean_env):
     """Every `limits.*` value must equal the SAME live resolver the other
     endpoints use (D1's own philosophy: never hardcode).
 
-    NOTE (finding, not asserted here as a failure): the orchestrator task's
-    illustrative sample JSON shows `"passage_concurrency": 2`, but the actual
-    default (`DEFAULT_PASSAGE_CONCURRENCY` in web/search_api.py, and
-    `SEARCH_API_PASSAGE_CONCURRENCY`'s documented default in docs/SEARCH_API.md,
-    independently, in three places) is 4 -- `heavy_concurrency` is the one
-    that defaults to 2. This assertion is written against the live resolver
-    (`_PassageSemaphoreState._capacity`) rather than either hardcoded number,
-    so it is correct regardless of which figure was a drafting slip; see the
-    structured report for the divergence writeup.
+    Concurrency is asserted against `resolve_capacity()`, NOT `_capacity`.
+    `_capacity` is the size the live semaphore was last BUILT with, which lags
+    the environment until the first `acquire()` rebuilds it; see
+    test_capabilities_concurrency_follows_env_before_first_acquire.
     """
     from web.search_api import _HeavySemaphoreState, _PassageSemaphoreState
     r = _get(client)
@@ -198,8 +195,113 @@ def test_capabilities_limits_full_set(client, clean_env):
     assert limits['browse_requests_per_minute'] == _browse_rate_limiter._current_limit()
     assert limits['parallels_requests_per_minute'] == _parallels_rate_limiter._current_limit()
     assert limits['capabilities_requests_per_minute'] == _capabilities_rate_limiter._current_limit()
-    assert limits['heavy_concurrency'] == _HeavySemaphoreState._capacity == 2
-    assert limits['passage_concurrency'] == _PassageSemaphoreState._capacity == 4
+    assert limits['heavy_concurrency'] == _HeavySemaphoreState.resolve_capacity() == 2
+    assert limits['passage_concurrency'] == _PassageSemaphoreState.resolve_capacity() == 4
+
+
+# ---------------------------------------------------------------------------
+# Never advertise a number the handler would refuse.
+#
+# All three tests below cover findings from the Codex review of PR #336. They
+# are one defect class: /api/capabilities exists so a client does not have to
+# discover limits by being rejected, so a value here that the very next request
+# is refused for is worse than no endpoint at all. Each was invisible at
+# default settings, which is why they shipped.
+# ---------------------------------------------------------------------------
+
+def test_capabilities_concurrency_follows_env_before_first_acquire(
+        client, clean_env, monkeypatch):
+    """A budget's `_capacity` is the size its semaphore was last built with, and
+    it is only rebuilt inside `acquire()`. So a process that has served no heavy
+    request reports the import-time default forever.
+
+    Codex's example: with heavy concurrency set to 1, capabilities said 2; the
+    first heavy request then rebuilt the semaphore to 1 and a second concurrent
+    request got 503 -- from an endpoint that had just promised two slots.
+    """
+    from web.search_api import _HeavySemaphoreState, _PassageSemaphoreState
+    monkeypatch.setenv('SEARCH_API_HEAVY_CONCURRENCY', '1')
+    monkeypatch.setenv('SEARCH_API_PASSAGE_CONCURRENCY', '7')
+
+    # Precondition: the STALE attribute still holds the old default, so this
+    # test would pass vacuously if the endpoint were reading resolve_capacity()
+    # only because the two happened to agree.
+    assert _HeavySemaphoreState._capacity == 2
+    assert _PassageSemaphoreState._capacity == 4
+
+    limits = _get(client).json()['limits']
+    assert limits['heavy_concurrency'] == 1, (
+        "capabilities must report the capacity a request arriving NOW would "
+        "face, not the one the semaphore was built with"
+    )
+    assert limits['passage_concurrency'] == 7
+
+
+def test_capabilities_max_witnesses_is_the_effective_cap(
+        client, clean_env, monkeypatch):
+    """`max_witnesses` must account for BOTH gates that reject a witness list.
+
+    The configured cap is only the first. The parallels handler also refuses on
+    projected cost -- `len(witnesses) * PASSAGE_SECONDS_PER_WITNESS > ceiling`
+    -> 400 `too_many_witnesses` -- so lowering `SEARCH_API_PASSAGE_TIMEOUT`
+    silently lowers the real cap without touching the cap variable.
+
+    At defaults the projection binds nothing (30 / 0.75 = 40 > 25), which is
+    exactly why this was invisible.
+    """
+    from web.search_api import _resolve_max_witnesses, PASSAGE_SECONDS_PER_WITNESS
+
+    monkeypatch.setenv('SEARCH_API_PASSAGE_TIMEOUT', '10')
+    assert _resolve_max_witnesses() == 25, "configured cap should be untouched"
+    reported = _get(client).json()['parallels']['max_witnesses']
+    # floor(10 / 0.75) == 13 -- the count the handler actually still accepts.
+    assert reported == int(10 // PASSAGE_SECONDS_PER_WITNESS) == 13, (
+        "capabilities advertised the configured cap while the cost projection "
+        "would reject anything over 13"
+    )
+
+    # A ceiling that binds nothing leaves the configured cap alone.
+    monkeypatch.setenv('SEARCH_API_PASSAGE_TIMEOUT', '30')
+    assert _get(client).json()['parallels']['max_witnesses'] == 25
+
+    # And the lower of the two always wins, in either direction.
+    monkeypatch.setenv('SEARCH_API_PASSAGE_MAX_WITNESSES', '5')
+    assert _get(client).json()['parallels']['max_witnesses'] == 5
+
+
+def test_capabilities_max_witnesses_zero_is_truthful(
+        client, clean_env, monkeypatch):
+    """With a ceiling under one witness's projected cost, NO witness list can be
+    served. Reporting 0 is the honest answer; reporting the configured cap would
+    invite a request that is certain to 400."""
+    monkeypatch.setenv('SEARCH_API_PASSAGE_TIMEOUT', '0.5')
+    assert _get(client).json()['parallels']['max_witnesses'] == 0
+
+
+def test_capabilities_reports_the_cold_start_browse_ceiling(
+        client, clean_env, monkeypatch):
+    """`browse_core` does not apply while the provider is cold.
+
+    `shared/browse_service.py::_fetch_core` substitutes
+    `SEARCH_API_BROWSE_CORE_WARMUP_TIMEOUT` (default 45s) while `is_warm()` is
+    False, so a fresh deployment can legitimately spend 45s on a browse while
+    capabilities advertised 2.0 -- and a client sizing its socket timeout from
+    that would abort a request that was going to succeed.
+
+    Reported as a separate key rather than folded into `browse_core`: a client
+    sizing a timeout needs the larger, one reasoning about steady state needs
+    the smaller, and collapsing them would lie to one of them.
+    """
+    from shared.browse_service import DEFAULT_BROWSE_CORE_WARMUP_TIMEOUT
+    timeouts = _get(client).json()['timeouts']
+    assert timeouts['browse_core'] == 2.0
+    assert timeouts['browse_core_warmup'] == DEFAULT_BROWSE_CORE_WARMUP_TIMEOUT == 45.0
+    assert timeouts['browse_core_warmup'] > timeouts['browse_core'], (
+        "the cold-start ceiling is the larger of the two by construction"
+    )
+
+    monkeypatch.setenv('SEARCH_API_BROWSE_CORE_WARMUP_TIMEOUT', '60')
+    assert _get(client).json()['timeouts']['browse_core_warmup'] == 60.0
 
 
 # ---------------------------------------------------------------------------

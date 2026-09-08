@@ -61,6 +61,7 @@ from shared.browse_service import (
     _read_timeout,
     DEFAULT_BROWSE_TIMEOUT,
     DEFAULT_BROWSE_CORE_TIMEOUT,
+    DEFAULT_BROWSE_CORE_WARMUP_TIMEOUT,
 )
 # SEED-016 #3: the browse core-fetch provider is injected by the caller (here),
 # inverting the former shared/ -> web/ import. web.services is the web layer's
@@ -453,6 +454,31 @@ class _SemaphoreBudget:
         cls._capacity = cls._default_capacity
 
     @classmethod
+    def resolve_capacity(cls) -> int:
+        """The capacity this budget WOULD use for a request arriving now.
+
+        Distinct from ``cls._capacity``, which is the capacity the live
+        semaphore was last built with. Those differ until the first
+        ``acquire()`` after an env change rebuilds it -- and they differ for
+        the whole life of a process that never serves a heavy request.
+
+        ``acquire()`` calls this too, deliberately: /api/capabilities must
+        report what the gate will actually enforce, and the only way to keep
+        that true under later edits is for both to run the SAME parse rather
+        than two copies that agree today. Reported by capabilities (Codex
+        review of PR #336, P2): with SEARCH_API_HEAVY_CONCURRENCY=1 the
+        endpoint advertised 2, then the first heavy request rebuilt the
+        semaphore to 1 and a second concurrent request got 503.
+        """
+        raw = os.environ.get(cls._env_var) if cls._env_var else None
+        if raw:
+            try:
+                return max(1, int(raw))
+            except (ValueError, TypeError):
+                pass
+        return cls._default_capacity
+
+    @classmethod
     def reset(cls, capacity: int) -> None:
         """Rebuild the semaphore to the given capacity. Only safe to call
         when the semaphore is fully idle (tests use this directly)."""
@@ -474,13 +500,7 @@ class _SemaphoreBudget:
             APIError(cls._busy_code, ..., 503): if no slot is available
                 right now (non-blocking acquire failed).
         """
-        raw = os.environ.get(cls._env_var) if cls._env_var else None
-        desired = cls._default_capacity
-        if raw:
-            try:
-                desired = max(1, int(raw))
-            except (ValueError, TypeError):
-                pass
+        desired = cls.resolve_capacity()
 
         # Rebuild only when the size changed AND fully idle (no held slots);
         # if partially held, keep the current semaphore so we never strand a
@@ -734,6 +754,37 @@ COMPOSITION_LENGTH_CAP = 20000
 # were therefore free to drift: changing a default would have started
 # rejecting every passage caller who simply omitted the field, with an error
 # message telling them to omit it. Both sides now read the same name.
+def _resolve_effective_max_witnesses() -> int:
+    """The largest witness count the handler would actually accept.
+
+    Two independent gates reject a witness list, and the CONFIGURED cap is
+    only the first. The parallels handler also refuses on projected cost --
+    ``len(witnesses) * PASSAGE_SECONDS_PER_WITNESS > passage ceiling`` ->
+    400 ``too_many_witnesses`` -- so a deployment that lowers
+    ``SEARCH_API_PASSAGE_TIMEOUT`` silently lowers the real cap without
+    touching ``SEARCH_API_PASSAGE_MAX_WITNESSES``.
+
+    At defaults the projection binds nothing (30 / 0.75 = 40, above the cap
+    of 25), which is exactly why this went unnoticed. At a 10s ceiling the
+    real cap is 13 while the configured cap still reads 25 -- and
+    /api/capabilities advertising 25 there would be the endpoint promising
+    something the very next request is rejected for. Found by the Codex
+    review of PR #336.
+
+    Returns the configured cap when no ceiling is set, and never a negative
+    number. Zero is a truthful answer: with a ceiling under
+    PASSAGE_SECONDS_PER_WITNESS, no witness list can be served at all.
+    """
+    configured = _resolve_max_witnesses()
+    ceiling = _resolve_passage_timeout()
+    if not ceiling or PASSAGE_SECONDS_PER_WITNESS <= 0:
+        return configured
+    # The handler accepts while projected <= ceiling, so the largest
+    # admissible count is floor(ceiling / seconds-per-witness).
+    affordable = int(ceiling // PASSAGE_SECONDS_PER_WITNESS)
+    return max(0, min(configured, affordable))
+
+
 def _resolve_max_witnesses() -> int:
     """Ceiling on witnesses per request (SEARCH_API_PASSAGE_MAX_WITNESSES).
 
@@ -2628,7 +2679,10 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             'parallels': {
                 'methods': ['chunk', 'passage'] if _passage_on else ['chunk'],
                 'multi_witness': _multi_witness_on,
-                'max_witnesses': _resolve_max_witnesses(),
+                # EFFECTIVE, not configured -- see
+                # _resolve_effective_max_witnesses(): a lowered passage
+                # ceiling caps witnesses below SEARCH_API_PASSAGE_MAX_WITNESSES.
+                'max_witnesses': _resolve_effective_max_witnesses(),
                 # [] rather than a lie: advertising sorts that 400 without
                 # witnesses[] would be worse than omitting them (D4).
                 'sorts': (
@@ -2641,8 +2695,12 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 'browse_requests_per_minute': _browse_rate_limiter._current_limit(),
                 'parallels_requests_per_minute': _parallels_rate_limiter._current_limit(),
                 'capabilities_requests_per_minute': _capabilities_rate_limiter._current_limit(),
-                'heavy_concurrency': _HeavySemaphoreState._capacity,
-                'passage_concurrency': _PassageSemaphoreState._capacity,
+                # resolve_capacity(), NOT _capacity: the latter is what the
+                # live semaphore was last BUILT with, which lags env until
+                # the first acquire() rebuilds it (and never catches up in a
+                # process that serves no heavy request).
+                'heavy_concurrency': _HeavySemaphoreState.resolve_capacity(),
+                'passage_concurrency': _PassageSemaphoreState.resolve_capacity(),
             },
             # Every value re-read from the same live resolvers the other
             # three endpoints use per request -- never a literal here, so
@@ -2658,6 +2716,19 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 'browse_core': _read_timeout(
                     'SEARCH_API_BROWSE_CORE_TIMEOUT', DEFAULT_BROWSE_CORE_TIMEOUT,
                 ),
+                # A COLD provider does not use browse_core at all:
+                # shared/browse_service.py::_fetch_core substitutes
+                # SEARCH_API_BROWSE_CORE_WARMUP_TIMEOUT while
+                # is_warm() is False, so a fresh deployment can
+                # legitimately spend this long on a browse. Reported
+                # separately rather than folded into browse_core: a
+                # client sizing a socket timeout needs the larger of the
+                # two, but a client reasoning about steady state needs
+                # the smaller. Collapsing them would lie to one of them.
+                # (Codex review of PR #336, P2.)
+                'browse_core_warmup': _read_timeout(
+                    'SEARCH_API_BROWSE_CORE_WARMUP_TIMEOUT',
+                    DEFAULT_BROWSE_CORE_WARMUP_TIMEOUT),
             },
         }
 
