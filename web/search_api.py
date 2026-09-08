@@ -2561,19 +2561,28 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
         # and no `responsa_options` (parallels never used Responsa), so the
         # echo has EXACTLY 7 keys for method='chunk' (byte-for-byte
         # unchanged): mode, chunk_size, max_freq, boundary_options,
-        # limit_effective, filters, method. limit_effective mirrors the
-        # post-truncation group count (D-07: 200-group cap surfaced via
-        # warnings_list).
+        # limit_effective, filters, method. limit_effective is the
+        # post-cap ROW count -- len(bundle.main_results), the raw
+        # chunk-hit rows behind the <=200 kept groups (D-07: the cap
+        # itself is surfaced via warnings_list). It is NOT the group
+        # count: that is the envelope's count/total, and this number is
+        # normally LARGER (a live response returns limit_effective=183
+        # with count=108). This comment said "post-truncation group
+        # count" until 2026-09-08, and docs/SEARCH_API.md had copied the
+        # error verbatim.
         #
         # Codex review finding #13(b): for method='passage', mode/chunk_size/
         # max_freq/boundary_options describe knobs the passage engine never
         # reads (step 4b above already rejects any non-default value of the
         # first three; boundary_mode is rejected too), so echoing them back
         # would read as "these were applied" when they were not -- nulled
-        # out, with an 8th key, passage_policy, carrying the knobs that
-        # ACTUALLY drove the search. passage_policy is present ONLY for
-        # method='passage' (a dict key, not merely a None value), so the
-        # pre-existing 7-key shape is untouched for method='chunk'.
+        # out, with two added keys -- passage_policy, carrying the knobs that
+        # ACTUALLY drove the search, and passage_report beside it. Both
+        # are present ONLY for method='passage' (dict keys, not merely
+        # None values), so the pre-existing 7-key shape is untouched for
+        # method='chunk'. They are added TOGETHER, which makes passage
+        # mode 9 keys and never 8 -- these comments said "8th key" and
+        # "8-key passage shape" until 2026-09-08.
         _is_passage = req.method == 'passage'
         echo_mode = None if _is_passage else req.mode
         echo_chunk_size = None if _is_passage else req.chunk_size
@@ -2594,7 +2603,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             # evaluation consumers who need postings/candidates/verify
             # accounting rather than just the truncated-or-not warning.
             parallels_echo['passage_report'] = bundle.passage_report
-        # Present ONLY when witnesses were sent, so both the 8-key passage
+        # Present ONLY when witnesses were sent, so both the 9-key passage
         # shape and the 7-key chunk shape stay untouched for every request
         # that does not use the feature. Counts and LABELS only -- a witness's
         # text is never echoed: it can be 20,000 characters, the caller

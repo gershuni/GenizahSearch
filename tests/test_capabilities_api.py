@@ -547,3 +547,50 @@ def test_capabilities_never_touches_the_searcher(client, clean_env, monkeypatch)
         assert r.status_code == 200, r.text
     finally:
         state.searcher = saved_searcher
+
+
+# ---------------------------------------------------------------------------
+# Documented-example gate (2026-09-08 round 2)
+# ---------------------------------------------------------------------------
+
+def test_documented_capabilities_example_matches_a_real_response(client, clean_env):
+    """The documented /api/capabilities response example must not promise a
+    key the endpoint does not return.
+
+    This endpoint's documentation had never been checked against a real body:
+    it was written and shipped the same day (PR #336), and the first gate only
+    read the Quick Start -- which has no capabilities entry at all. The section
+    that documents THIS endpoint also carried the error that its own field
+    table inherited from the intro, so it is exactly the kind of section that
+    goes stale unnoticed.
+    """
+    from tests.doc_response_shapes import missing_from
+    r = client.get('/api/capabilities')
+    assert r.status_code == 200, r.text
+    missing = missing_from(r.json(), 'capabilities', 'reference')
+    assert missing == set(), (
+        'docs/SEARCH_API.md capabilities example promises keys the endpoint '
+        'does not return: %s' % sorted(missing)
+    )
+
+
+def test_capabilities_response_has_no_source_key(client, clean_env):
+    """`source` is NOT part of this endpoint's envelope, and the document must
+    not claim otherwise.
+
+    The three data endpoints all carry `source` ('search'/'browse'/
+    'parallels'); this fixed-shape descriptor does not. docs/SEARCH_API.md
+    stated "every successful response carries schema_version and source" until
+    2026-09-08, which was false for precisely this endpoint -- an overclaim
+    introduced in the same PR that added it. PINNED_TOP_KEYS above already
+    locks the key set; this test exists to name the reason, so that anyone
+    tempted to "fix the inconsistency" by adding `source` sees that the
+    document was corrected deliberately instead.
+    """
+    body = client.get('/api/capabilities').json()
+    assert 'source' not in body
+    doc = (REPO_DOC := __import__('pathlib').Path(__file__).parent.parent
+           / 'docs' / 'SEARCH_API.md').read_text(encoding='utf-8')
+    assert 'no `source`' in doc, (
+        '%s must record that /api/capabilities carries no `source` key' % REPO_DOC
+    )
