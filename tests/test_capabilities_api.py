@@ -237,6 +237,46 @@ def test_capabilities_concurrency_follows_env_before_first_acquire(
     assert limits['passage_concurrency'] == 7
 
 
+def test_capabilities_concurrency_does_not_over_report_a_blocked_rebuild(
+        client, clean_env, monkeypatch):
+    """Raising the capacity while a slot is HELD must not be advertised yet.
+
+    `acquire()` deliberately refuses to resize a semaphore with slots held --
+    a resize would strand the held slot. So between the env change and the
+    next fully-idle moment, the gate still enforces the OLD capacity. Reporting
+    what env asks for would advertise four slots while the very next request
+    still got 503 busy.
+
+    This is the mirror image of
+    test_capabilities_concurrency_follows_env_before_first_acquire: the first
+    fix (read env, not the built size) traded under-reporting for
+    over-reporting, and `effective_capacity()` is what resolves both. Second
+    Codex round on PR #336.
+
+    Reaching into `sem._value` mirrors what the production predicate itself
+    reads (`_rebuild_possible()`), and what this module's other fixtures
+    already do with `.sem` / `._capacity`.
+    """
+    from web.search_api import _HeavySemaphoreState
+
+    _HeavySemaphoreState.reset(1)
+    _HeavySemaphoreState.sem._value = 0          # one slot held -> not idle
+    assert not _HeavySemaphoreState._rebuild_possible()
+    monkeypatch.setenv('SEARCH_API_HEAVY_CONCURRENCY', '4')
+
+    assert _HeavySemaphoreState.resolve_capacity() == 4, 'env does ask for 4'
+    reported = _get(client).json()['limits']['heavy_concurrency']
+    assert reported == 1, (
+        'while the rebuild is blocked the gate still enforces 1, so 1 is the '
+        'only honest answer -- advertising 4 would promise slots that 503'
+    )
+
+    # Once idle, the rebuild will happen on the next acquire, so 4 becomes true.
+    _HeavySemaphoreState.sem._value = 1
+    assert _HeavySemaphoreState._rebuild_possible()
+    assert _get(client).json()['limits']['heavy_concurrency'] == 4
+
+
 def test_capabilities_max_witnesses_is_the_effective_cap(
         client, clean_env, monkeypatch):
     """`max_witnesses` must account for BOTH gates that reject a witness list.

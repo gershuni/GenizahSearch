@@ -454,6 +454,55 @@ class _SemaphoreBudget:
         cls._capacity = cls._default_capacity
 
     @classmethod
+    def _rebuild_possible(cls) -> bool:
+        """True when the semaphore is fully idle, so a resize may happen now.
+
+        A resize while any slot is held would strand that slot, so
+        ``acquire()`` refuses it. "Fully idle" means the counter is back at
+        capacity; asyncio exposes no public API for that, so the internal
+        counter is read defensively -- if the attribute is ever renamed or
+        removed this returns False, the rebuild is skipped, and the gate keeps
+        working at its current capacity (fail-safe, never raises).
+
+        Shared with ``effective_capacity()`` on purpose: what we ADVERTISE and
+        what we ENFORCE must be decided by the same predicate, or they drift
+        apart exactly the way this endpoint exists to prevent.
+        """
+        return getattr(cls.sem, '_value', None) == cls._capacity
+
+    @classmethod
+    def effective_capacity(cls) -> int:
+        """The capacity the NEXT acquire() will actually enforce.
+
+        Three-way distinction, and /api/capabilities needs the third:
+
+        - ``_capacity``          what the live semaphore was last BUILT with.
+        - ``resolve_capacity()`` what the environment currently ASKS for.
+        - this                   what the gate will enforce for the next
+                                 request, which is the only one a client can
+                                 act on.
+
+        They differ in both directions, and reporting either of the first two
+        was a real defect (both found by Codex on PR #336):
+
+        - Before the first acquire, ``_capacity`` is the import-time default
+          even though env asked for something else -- so a process serving no
+          heavy request under-reported forever.
+        - Raise the capacity while a slot is held and ``resolve_capacity()``
+          over-reports: the rebuild is blocked until idle, so a one-slot
+          semaphore with its slot occupied would advertise four while the very
+          next request still got 503 busy.
+
+        Resolves to the desired value when a rebuild will happen (or is
+        unnecessary), and to the built value while a rebuild is blocked --
+        i.e. never advertises more than the gate can currently enforce.
+        """
+        desired = cls.resolve_capacity()
+        if desired == cls._capacity or cls._rebuild_possible():
+            return desired
+        return cls._capacity
+
+    @classmethod
     def resolve_capacity(cls) -> int:
         """The capacity this budget WOULD use for a request arriving now.
 
@@ -509,10 +558,8 @@ class _SemaphoreBudget:
         # read defensively via getattr -- if the attribute is ever
         # renamed/removed, current_value is None, the rebuild is skipped, and
         # the gate keeps working at the old capacity (fail-safe, never raises).
-        if desired != cls._capacity:
-            current_value = getattr(cls.sem, '_value', None)
-            if current_value == cls._capacity:
-                cls.reset(desired)
+        if desired != cls._capacity and cls._rebuild_possible():
+            cls.reset(desired)
 
         sem = cls.sem
         # Non-blocking acquire via the public API. On a single-threaded event
@@ -2701,12 +2748,13 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 'browse_requests_per_minute': _browse_rate_limiter._current_limit(),
                 'parallels_requests_per_minute': _parallels_rate_limiter._current_limit(),
                 'capabilities_requests_per_minute': _capabilities_rate_limiter._current_limit(),
-                # resolve_capacity(), NOT _capacity: the latter is what the
-                # live semaphore was last BUILT with, which lags env until
-                # the first acquire() rebuilds it (and never catches up in a
-                # process that serves no heavy request).
-                'heavy_concurrency': _HeavySemaphoreState.resolve_capacity(),
-                'passage_concurrency': _PassageSemaphoreState.resolve_capacity(),
+                # effective_capacity(), which is neither _capacity (what the
+                # semaphore was BUILT with -- lags env) nor resolve_capacity()
+                # (what env ASKS for -- over-reports while a rebuild is blocked
+                # by a held slot). It is what the next request will actually
+                # face. See effective_capacity()'s docstring.
+                'heavy_concurrency': _HeavySemaphoreState.effective_capacity(),
+                'passage_concurrency': _PassageSemaphoreState.effective_capacity(),
             },
             # Every value re-read from the same live resolvers the other
             # three endpoints use per request -- never a literal here, so
