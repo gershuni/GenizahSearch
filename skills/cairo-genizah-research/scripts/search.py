@@ -13,8 +13,10 @@ Valid search_mode values: exact | variants | responsa | title | shelfmark | fuzz
 
 Runtime notes:
 - fuzzy mode is the slowest (variants_maximum tier); the server allows up to
-  ~300s (SEARCH_API_FUZZY_TIMEOUT). Client timeout default is 320s so the
-  server's 504 core_timeout envelope wins instead of a socket-level timeout.
+  ~110s (SEARCH_API_FUZZY_TIMEOUT — dropped from 300s so this ceiling stays
+  strictly below the edge proxy's origin-response budget). Client timeout
+  default is 130s so the server's 504 core_timeout envelope wins instead of
+  a socket-level timeout.
 - fuzzy limit ceiling is SEARCH_API_FUZZY_MAX_LIMIT (server default 500); pass
   a higher --limit for recall-critical queries (max 2000).
 - If a heavy-mode (variants/fuzzy) request hits the server's concurrency cap,
@@ -48,7 +50,7 @@ def call_search(
     filters: dict | None = None,
     responsa_options: dict | None = None,
     base_url: str | None = None,
-    timeout: float = 320.0,
+    timeout: float = 130.0,
 ) -> dict:
     """POST /api/search and return the parsed JSON response dict.
 
@@ -62,11 +64,15 @@ def call_search(
     recall default ~250 for fuzzy via SEARCH_API_FUZZY_MAX_LIMIT). Passing an
     explicit limit overrides that — required to exceed 100 on fuzzy.
 
-    timeout default is 320s (slightly above the server's heaviest ceiling of
-    300s for fuzzy/parallels) so the server's 504 core_timeout envelope is
-    returned rather than a client-side socket timeout. For interactive modes
-    (exact/title/shelfmark/responsa) the server responds within 30s; the
-    higher default never causes a problem in practice.
+    timeout default (130s) is an INVARIANT, not a bare number: it must stay
+    strictly ABOVE the server's heaviest documented ceiling — currently 110s
+    for fuzzy/parallels (SEARCH_API_FUZZY_TIMEOUT / SEARCH_API_PARALLELS_TIMEOUT,
+    dropped from 300s so the ceiling sits below the edge proxy's origin-response
+    budget) — so the server's JSON 504 core_timeout envelope wins the race
+    instead of a client-side socket timeout or an opaque proxy error page. The
+    margin here is 20s. If the server ceiling moves again, this value must move
+    with it. For interactive modes (exact/title/shelfmark/responsa) the server
+    responds within 30s; the higher default never causes a problem in practice.
     """
     if search_mode not in SEARCH_MODES:
         return {

@@ -56,7 +56,12 @@ from web.api_hardening import (
 # Concern #3: APIError from neutral location.
 from shared.api_errors import APIError
 # Phase 79 imports.
-from shared.browse_service import fetch_browse_bundle, _read_timeout
+from shared.browse_service import (
+    fetch_browse_bundle,
+    _read_timeout,
+    DEFAULT_BROWSE_TIMEOUT,
+    DEFAULT_BROWSE_CORE_TIMEOUT,
+)
 # SEED-016 #3: the browse core-fetch provider is injected by the caller (here),
 # inverting the former shared/ -> web/ import. web.services is the web layer's
 # own dependency, so importing it from web/search_api.py respects layering.
@@ -85,6 +90,12 @@ _browse_rate_limiter = RateLimiter(default_limit=120)
 # + parallels-once does NOT exhaust the search or browse buckets. Independence
 # is verified by tests/test_parallels_api.py::test_parallels_rate_limit_independence.
 _parallels_rate_limiter = RateLimiter(default_limit=120)
+
+# D3 (2026-09-08): SEPARATE per-IP bucket from search/browse/parallels, same
+# pattern as every prior addition above -- a client hammering /api/capabilities
+# to poll for a flag flip must not be able to exhaust (or be starved by) any
+# of the three heavier buckets, and vice versa.
+_capabilities_rate_limiter = RateLimiter(default_limit=120)
 
 
 # ---------------------------------------------------------------------------
@@ -286,9 +297,24 @@ DEFAULT_SEARCH_CORE_TIMEOUT = 30.0
 
 # P9X per-mode timeout ladder: heavy modes get their own ceiling env knobs.
 # All are re-read per request (via _read_timeout inside helper functions).
+#
+# 2026-09-08 (external MCP-server incident, D1): DEFAULT_FUZZY_TIMEOUT and
+# DEFAULT_PARALLELS_TIMEOUT dropped from 300.0 to 110.0. The ceiling here is
+# bounded by the edge proxy's origin-response budget, NOT by how long the
+# engine may usefully run -- a synchronous endpoint that promises 300s to the
+# CLIENT is lying if the proxy in front of it gives up first. Measured from
+# outside on 2026-09-08: a chunk-mode /api/parallels request succeeded at
+# 97.0s, and a fuzzy /api/search request got an opaque proxy 524 (not our
+# JSON envelope) at 125.2s. 110.0 sits above the observed 97s success (so no
+# currently-succeeding request starts failing) and below the observed 125.2s
+# edge give-up point, so the timeout the client sees is OURS -- a documented
+# JSON `core_timeout`/`parallels_timeout` 504 -- instead of the proxy's opaque
+# non-JSON error page. SEARCH_API_FUZZY_TIMEOUT / SEARCH_API_PARALLELS_TIMEOUT
+# still override per-deployment, so a deployment behind no proxy (or a proxy
+# with a longer budget) can raise these back up.
 DEFAULT_VARIANTS_TIMEOUT = 60.0
-DEFAULT_FUZZY_TIMEOUT = 300.0
-DEFAULT_PARALLELS_TIMEOUT = 300.0
+DEFAULT_FUZZY_TIMEOUT = 110.0
+DEFAULT_PARALLELS_TIMEOUT = 110.0
 DEFAULT_HEAVY_CONCURRENCY = 2
 HEAVY_SEARCH_MODES = frozenset({'variants', 'fuzzy'})
 
@@ -2514,4 +2540,128 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
 
         return envelope
 
-    logger.info("Search API routes initialized: POST /api/search, GET /api/browse, POST /api/parallels")
+    # -----------------------------------------------------------------------
+    # D3 (2026-09-08): GET /api/capabilities -- cheap self-description.
+    #
+    # Background (do not relitigate -- see the incident record this shipped
+    # with): an external client inferred from our docs alone that
+    # search_mode='fuzzy', method='passage', witnesses[] and sort did not
+    # exist. All four are real and, for the passage pair, ON in production;
+    # nothing published let a caller confirm that without spending a heavy
+    # request and reading a 503. This endpoint is the fix: call it ONCE,
+    # branch on the result, never probe by firing a real search/parallels
+    # request and inspecting the failure.
+    # -----------------------------------------------------------------------
+    @target_app.get(
+        f'{path_prefix}/capabilities',
+        summary="Discover which flag-gated features are live on this deployment.",
+        tags=["capabilities"],
+        openapi_extra={
+            "responses": _openapi_responses_for("Capability/limit/timeout envelope."),
+        },
+    )
+    @wrap_endpoint(endpoint_name='capabilities')
+    async def capabilities_endpoint(request: Request, *, captured_state: dict):
+        """GET /api/capabilities -- no index load, no database, no search.
+
+        D4 (fail-closed posture, non-negotiable): this endpoint must NEVER
+        advertise a feature whose own gate is closed. `parallels.methods`
+        drops 'passage' entirely -- not merely marks it unavailable -- when
+        `passage_available()` is False, and `parallels.sorts` is `[]`
+        whenever multi-witness is off, mirroring the 400
+        'sort_requires_multi_witness' /api/parallels itself raises for
+        `sort` without `witnesses[]`. Advertising a closed gate would be
+        worse than not having this endpoint: a caller would build against a
+        feature that immediately 503s.
+
+        captured_state: pinned explicitly (mode/search_mode_value/
+        responsa_options_count/result_count) for the same reason browse and
+        parallels pin them -- a uniform PostHog event shape -- even though
+        wrap_endpoint's own defaults already agree for a fixed-shape
+        descriptor endpoint that has no mode and produces no result set.
+        """
+        captured_state['mode'] = None
+        captured_state['search_mode_value'] = None
+        captured_state['responsa_options_count'] = 0
+        captured_state['result_count'] = None
+
+        # 1. Mode gate (D-02/D-03/D-04 -- identical to every other endpoint;
+        #    SEARCH_API_MODE='disabled' -> 503, 'localhost-only' -> 403 for
+        #    non-loopback callers).
+        enforce_mode_gate(request)
+
+        # 2. Rate limit -- this endpoint's OWN bucket (see _capabilities_rate_limiter
+        #    above), independent of search/browse/parallels.
+        client_ip = _resolve_rate_limit_key(request)
+        _capabilities_rate_limiter.check(client_ip)
+
+        # 3. Feature gates, imported INSIDE the handler -- same convention as
+        #    the passage gate a few hundred lines up in this file -- so
+        #    import order at module-load time can never make registering
+        #    this route fail.
+        from web.passage_assets import passage_available as _passage_available
+        from web.passage_assets import (
+            passage_multi_witness_available as _passage_multi_witness_available)
+        from version import APP_VERSION as _app_version
+
+        _passage_on = _passage_available()
+        # passage_multi_witness_available() already ANDs its own flag with
+        # passage_available() internally (web/passage_assets.py) -- no need
+        # to AND it again here.
+        _multi_witness_on = _passage_multi_witness_available()
+
+        return {
+            'schema_version': 1,
+            'request': {},
+            'api_version': _app_version,
+            'endpoints': [
+                '/api/search', '/api/browse', '/api/parallels', '/api/capabilities',
+            ],
+            # Derived from the real mode enum (not a literal list) -- dict
+            # insertion order is preserved, and _SEARCH_MODE_TO_INTERNAL's
+            # own definition order already matches the documented contract.
+            'search_modes': list(_SEARCH_MODE_TO_INTERNAL.keys()),
+            'features': {
+                'passage': _passage_on,
+                'passage_multi_witness': _multi_witness_on,
+            },
+            'parallels': {
+                'methods': ['chunk', 'passage'] if _passage_on else ['chunk'],
+                'multi_witness': _multi_witness_on,
+                'max_witnesses': _resolve_max_witnesses(),
+                # [] rather than a lie: advertising sorts that 400 without
+                # witnesses[] would be worse than omitting them (D4).
+                'sorts': (
+                    ['fused', 'best_match', 'witness_count']
+                    if _multi_witness_on else []
+                ),
+            },
+            'limits': {
+                'search_requests_per_minute': _rate_limiter._current_limit(),
+                'browse_requests_per_minute': _browse_rate_limiter._current_limit(),
+                'parallels_requests_per_minute': _parallels_rate_limiter._current_limit(),
+                'capabilities_requests_per_minute': _capabilities_rate_limiter._current_limit(),
+                'heavy_concurrency': _HeavySemaphoreState._capacity,
+                'passage_concurrency': _PassageSemaphoreState._capacity,
+            },
+            # Every value re-read from the same live resolvers the other
+            # three endpoints use per request -- never a literal here, so
+            # this cannot drift the way the stale (v7.10)/300s header (P1)
+            # did.
+            'timeouts': {
+                'search_core': _resolve_search_timeout('exact')[0],
+                'variants': _resolve_search_timeout('variants')[0],
+                'fuzzy': _resolve_search_timeout('fuzzy')[0],
+                'parallels': _resolve_parallels_timeout(),
+                'passage': _resolve_passage_timeout(),
+                'browse': _read_timeout('SEARCH_API_BROWSE_TIMEOUT', DEFAULT_BROWSE_TIMEOUT),
+                'browse_core': _read_timeout(
+                    'SEARCH_API_BROWSE_CORE_TIMEOUT', DEFAULT_BROWSE_CORE_TIMEOUT,
+                ),
+            },
+        }
+
+    logger.info(
+        "Search API routes initialized: POST /api/search, GET /api/browse, "
+        "POST /api/parallels, GET /api/capabilities"
+    )

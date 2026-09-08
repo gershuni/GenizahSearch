@@ -1,6 +1,16 @@
-# GenizahSearch Search-Helper API (v7.10)
+# GenizahSearch Search-Helper API
 
-> Last updated: 2026-05-05
+> Contract `schema_version: 1` · Verified against site release 9.2.0 · Last updated: 2026-09-08
+
+The **site release** above is the GenizahSearch version this document was last checked
+against — it is NOT a separate API version, and it does not gate what is true. The
+contract itself is versioned only by `schema_version` (see "Stability" below). Because
+this file is edited in place rather than re-issued per release, the body can (and
+routinely does) document features that shipped after the site release named above was
+current — do not infer that a section is aspirational, unreleased, or newer-than-the-doc
+merely because it postdates the header. If something here looks newer than the header,
+trust the body: this exact failure mode (a stale header making shipped features read as
+speculative) is why this note exists.
 
 ## Stability
 
@@ -119,18 +129,22 @@ For full credits including hosting and development attribution, see the [Credits
 
 ## Overview
 
-The v7.10 search-helper API exposes three endpoints — `POST /api/search`, `GET /api/browse`,
-and `POST /api/parallels` — that together let a research consumer execute a Tantivy
-keyword/Responsa search, drill down into a single manuscript page (with PGP/FJMS/NLI
-enrichment), and run a composition-parallels job over an arbitrary input text. A reference
+This search-helper API exposes four endpoints — `POST /api/search`, `GET /api/browse`,
+`POST /api/parallels`, and `GET /api/capabilities` — that together let a research consumer
+execute a Tantivy keyword/Responsa search, drill down into a single manuscript page (with
+PGP/FJMS/NLI enrichment), run a composition-parallels job over an arbitrary input text
+(including the beta letter-level `method='passage'` engine and multi-witness search), and
+cheaply discover which flag-gated features are live on a given deployment. A reference
 consumer is the [`cairo-genizah-research` Claude skill](../skills/cairo-genizah-research/SKILL.md),
-which demonstrates the full search → browse → rank workflow. The three endpoints share a common
-hardening shell: per-IP rate limiting (independent token bucket per endpoint, all reading
-the same `SEARCH_API_RATE_LIMIT` env-var ceiling), a mode gate (`SEARCH_API_MODE`) that
-permits run-time disabling or loopback-only restriction without restart, a uniform error
+which demonstrates the full search → browse → rank workflow. The first three endpoints share
+a common hardening shell: per-IP rate limiting (independent token bucket per endpoint, all
+reading the same `SEARCH_API_RATE_LIMIT` env-var ceiling), a mode gate (`SEARCH_API_MODE`)
+that permits run-time disabling or loopback-only restriction without restart, a uniform error
 envelope, sampled PostHog observability, and a Phase-77-locked JSON envelope shape produced
-by the sole serializer at `shared/search_serializer.py`. The endpoints are stateless: the
-same query string produces the same body regardless of session.
+by the sole serializer at `shared/search_serializer.py`. `/api/capabilities` shares the mode
+gate and the uniform envelope but has its own rate-limit bucket and does no index/database
+work. All four endpoints are stateless: the same request produces the same body regardless
+of session.
 
 ## Endpoint: POST /api/search
 
@@ -177,7 +191,7 @@ when the offending key is the legacy `mode` field (renamed to `search_mode` in P
 | Name | Type | Constraint | Default | Notes |
 | ---- | ---- | ---------- | ------- | ----- |
 | `query` | string | 1..1000 chars (post-strip; empty → `query_required`; over cap → `query_too_long`) | required | `QUERY_LENGTH_CAP=1000` |
-| `search_mode` | enum | `exact \| variants \| responsa \| title \| shelfmark \| fuzzy` | required | `regex` was intentionally dropped per Phase 81A D-09. `fuzzy` (added 2026-06) is the approximate / maximum-variant tier — bounded by `SEARCH_API_FUZZY_TIMEOUT` (~300s), not the interactive 30s baseline |
+| `search_mode` | enum | `exact \| variants \| responsa \| title \| shelfmark \| fuzzy` | required | `regex` was intentionally dropped per Phase 81A D-09. `fuzzy` (added 2026-06) is the approximate / maximum-variant tier — bounded by `SEARCH_API_FUZZY_TIMEOUT` (default 110s as of 2026-09-08, down from 300s — see "Edge-Timeout Ceiling" below), not the interactive 30s baseline |
 | `responsa_options` | object \| null | valid only when `search_mode="responsa"` | `null` | see sub-table below |
 | `gap` | integer | must be `0` when `search_mode in {title, shelfmark}` | `0` | proximity slop for keyword search |
 | `limit` | integer | `1..100` for non-fuzzy modes (`MAX_LIMIT=100`); `1..SEARCH_API_FUZZY_MAX_LIMIT` (default 500, max 2000) for `fuzzy` | `50` (fuzzy with no explicit limit widens to a recall-oriented default of 250) | P9X: fuzzy recall-over-precision — non-fuzzy boundary unchanged |
@@ -238,7 +252,7 @@ Notes:
 | `responsa_options` set AND `search_mode != "responsa"` | `invalid_combination` | 400 | |
 | `gap != 0` AND `search_mode in {title, shelfmark}` | `invalid_combination` | 400 | |
 | Top-level `mode` key (legacy Phase 78 shape) | `invalid_request` | 400 | message includes hint `"unknown field 'mode' — use search_mode instead"` per Phase 81A D-13 |
-| `regex` value for `search_mode` | `invalid_request` | 400 | structurally rejected by Literal enum; not in v7.10 |
+| `regex` value for `search_mode` | `invalid_request` | 400 | structurally rejected by Literal enum; never part of this API's public surface (dropped before the initial public release, Phase 81A D-09) |
 
 ### Response example
 
@@ -475,13 +489,13 @@ mode is `mode`, NOT `search_mode` — see "Naming Inconsistency" below.
 | `chunk_size` | integer | `2..20` | `5` | size of sliding chunks |
 | `mode` | enum | `exact \| variants \| fuzzy` | `"exact"` | **field name is `mode`, not `search_mode`** — see "Naming Inconsistency" |
 | `max_freq` | float \| null | `>= 1`. A **document count**, not a ratio: a chunk matching more than `max_freq` documents is treated as too common. `null` disables high-frequency filtering | `null` | **Effective range is `[1, 50)`.** The engine tests `len(hits) > max_freq` against a per-chunk retrieval hard-capped at 50 hits, so any `max_freq >= 50` can never fire and behaves exactly like `null`. It is therefore not a corpus frequency: it counts hits inside a truncated top-50 and cannot tell a chunk in 51 manuscripts from one in 5,000. A value below 1 would discard every chunk that matches anything, so such values are rejected with `invalid_request` rather than silently returning an empty result set. Documented as a `0.0-1.0` ratio until 2026-08-24 — the docs were wrong, not the code |
-| `boundary_mode` | enum | `full \| boundary \| combined` | `"full"` | only boundary knob exposed in v7.10 (Phase 80 D-03) |
+| `boundary_mode` | enum | `full \| boundary \| combined` | `"full"` | only boundary knob exposed since the initial public release (Phase 80 D-03) |
 | `filters` | object \| null | reuses Phase 78 `FiltersModel` verbatim | `null` | same shape as `/api/search.filters` |
 | `method` | enum | `chunk \| passage` | `"chunk"` | Phase 145 (beta). `chunk` is the pre-Phase-145 sliding-window Tantivy engine described above, byte-for-byte unchanged. `passage` is a character-level matching engine, tolerant of OCR/HTR noise and reflowed line breaks — see "`method='passage'` (beta)" below. |
 | `witnesses` | array \| null | 1..`SEARCH_API_PASSAGE_MAX_WITNESSES` (default 25) objects; `method='passage'` only | `null` | Several witnesses of ONE work, each searched **separately** and merged by rank fusion — see "Multi-witness search" below. Mutually exclusive with `text`. |
 | `sort` | enum \| null | `fused \| best_match \| witness_count`; requires `witnesses` | `null` (→ `fused`) | Group ordering for a multi-witness search. Without `witnesses` → 400 `sort_requires_multi_witness`. |
 
-The Lab Engine extended-parallels path is OUT OF SCOPE for v7.10 (Phase 80 D-02).
+The Lab Engine extended-parallels path is OUT OF SCOPE for this API (Phase 80 D-02).
 
 ### Multi-witness search (`witnesses`, beta)
 
@@ -598,6 +612,12 @@ Gated by `PASSAGE_MULTI_WITNESS_ENABLED` **and** `passage_available()`; when off
 `passage_multi_witness_unavailable`. Witness *texts* are never echoed back — only counts,
 ids, labels, kinds and resolution status.
 
+A cheap way to check before spending a request: `GET /api/capabilities` (below) reports
+`features.passage_multi_witness` without the cost of a 503 round-trip. It is a convenience,
+not the authority — a client must still stay correct against a deployment with no
+capabilities endpoint, or one whose gate flips between the two calls, so treat this 503 as
+the ground truth and `/api/capabilities` as a way to avoid asking for it needlessly.
+
 ### `method='passage'` (beta, Phase 145)
 
 An alternative matching engine over the SAME response shape (`results[]`/`filtered[]`/
@@ -607,7 +627,10 @@ the two apart from the envelope shape alone.
 - **Availability.** Requires the deployment to have `PASSAGE_PARALLELS_ENABLED=1` AND a
   successfully-loaded passage index (`web/passage_assets.py::passage_available()`). When
   either is false, `method='passage'` returns 503 `passage_unavailable` — never a silent
-  fallback to `chunk`.
+  fallback to `chunk`. `GET /api/capabilities` (below) reports `features.passage` and
+  `parallels.methods` as a cheap pre-check — but the 503 stays authoritative, since a
+  deployment may have no capabilities endpoint, or its gate may change between the two
+  calls.
 - **Genizah-only scope.** The passage index is built ONLY from the Genizah transcription
   corpus; it holds zero records for `LOCAL` (My-Library) provenance. Requesting
   `method='passage'` together with `filters.library` containing `"LOCAL"` under the default
@@ -736,10 +759,102 @@ search-only concept), `responsa_options` (parallels never used Responsa).
 | `limit_effective` | `len(bundle.main_results)` | post-truncation group count |
 | `filters` | model-dumped `FiltersModel` (exclude_none) or `null` | |
 
+## Endpoint: GET /api/capabilities
+
+A client that wants to know which flag-gated features are live on a deployment has
+historically had to either spend a heavy request and read its 503, or guess from this
+document alone (which cannot say whether a given deployment currently has, say,
+`PASSAGE_PARALLELS_ENABLED=1`). `GET /api/capabilities` answers that cheaply: **no index
+load, no database, no search** — it reads live config and returns a small JSON object.
+
+It shares the same mode gate and error envelope as the other three endpoints — `enforce_mode_gate`
+applies, so `SEARCH_API_MODE=disabled` still returns 503 `disabled` and `localhost-only`
+still returns 403 `localhost_only` for non-loopback callers — and it is rate-limited through
+its own bucket (`SEARCH_API_RATE_LIMIT`, same ceiling as the other three buckets, tracked
+independently — see Rate Limiting & Buckets below), so hammering `/api/capabilities` cannot
+starve `/api/search`, `/api/browse`, or `/api/parallels` and vice versa.
+
+**This endpoint never advertises a feature whose gate is closed.** If `passage_available()`
+is `false` on this deployment, `"passage"` is absent from `parallels.methods`, full stop —
+an over-advertising capabilities endpoint would actively mislead a client, which is worse
+than not having one. Treat every value below as a snapshot of the moment the request was
+served, not a promise: a deployment's flags and env vars can change between this call and
+the next request you make.
+
+### Request
+
+No parameters, no body.
+
+```bash
+curl -s https://genizahsearch.com/api/capabilities | python -m json.tool
+```
+
+### Response example
+
+```json
+{
+  "schema_version": 1,
+  "request": {},
+  "api_version": "9.2.0",
+  "endpoints": ["/api/search", "/api/browse", "/api/parallels", "/api/capabilities"],
+  "search_modes": ["exact", "variants", "responsa", "title", "shelfmark", "fuzzy"],
+  "features": {
+    "passage": true,
+    "passage_multi_witness": true
+  },
+  "parallels": {
+    "methods": ["chunk", "passage"],
+    "multi_witness": true,
+    "max_witnesses": 25,
+    "sorts": ["fused", "best_match", "witness_count"]
+  },
+  "limits": {
+    "search_requests_per_minute": 120,
+    "browse_requests_per_minute": 120,
+    "parallels_requests_per_minute": 120,
+    "capabilities_requests_per_minute": 120,
+    "heavy_concurrency": 2,
+    "passage_concurrency": 4
+  },
+  "timeouts": {
+    "search_core": 30.0,
+    "variants": 60.0,
+    "fuzzy": 110.0,
+    "parallels": 110.0,
+    "passage": 30.0,
+    "browse": 1.0,
+    "browse_core": 2.0
+  }
+}
+```
+
+### Field semantics
+
+| Field | Meaning |
+| ----- | ------- |
+| `schema_version` | Always `1` — this endpoint is an additive change under the Stability commitment above, so adding it does not move the version. |
+| `request` | Always `{}`. Kept for envelope uniformity with the other three endpoints, which echo their input here; this endpoint takes none. |
+| `api_version` | The site release this deployment is running (`version.py::APP_VERSION`), read live — NOT a hardcoded string, and NOT the same thing as `schema_version`. |
+| `endpoints` | The four public paths as absolute `/api/...` strings — what a client actually calls, regardless of what path prefix this router happens to be mounted under. |
+| `search_modes` | The live `search_mode` enum accepted by `POST /api/search`, in the order documented above. |
+| `features.passage` | `web.passage_assets.passage_available()` — both `PASSAGE_PARALLELS_ENABLED=1` AND a successfully-loaded passage index. |
+| `features.passage_multi_witness` | `web.passage_assets.passage_multi_witness_available()` — both `PASSAGE_MULTI_WITNESS_ENABLED=1` AND `features.passage`. |
+| `parallels.methods` | `["chunk"]` when `features.passage` is `false`; `["chunk", "passage"]` when it is `true`. Never lists `"passage"` on a deployment where it would 503. |
+| `parallels.multi_witness` | Mirrors `features.passage_multi_witness`. |
+| `parallels.max_witnesses` | Live value of `SEARCH_API_PASSAGE_MAX_WITNESSES` (default 25). |
+| `parallels.sorts` | `[]` when `parallels.multi_witness` is `false` (advertising sort values that `sort_requires_multi_witness` would reject without `witnesses` would be a lie); the three live `sort` values otherwise. |
+| `limits.*` | Live per-bucket rate ceilings (each reads `SEARCH_API_RATE_LIMIT`, tracked independently per endpoint — see Rate Limiting & Buckets) and the two concurrency budgets (`SEARCH_API_HEAVY_CONCURRENCY`, `SEARCH_API_PASSAGE_CONCURRENCY`). |
+| `timeouts.*` | Live values of every per-mode timeout documented in Environment Variables below, in seconds (floats). `fuzzy` and `parallels` reflect the 110 s edge-timeout ceiling — see "Edge-Timeout Ceiling" below — not a hardcoded 300 s. |
+
+The JSON above shows this deployment's *current defaults*; every value is read from the
+live resolvers at request time, not typed in as a literal, specifically so this response
+cannot drift out of sync with reality the way the header of this document once did (see
+"Edge-Timeout Ceiling" below for that history).
+
 ## Naming Inconsistency: parallels.mode vs search.search_mode
 
 `/api/search` uses `search_mode` (the post-Phase-81A name). `/api/parallels` continues to
-use `mode`. This is intentional v7.10 debt locked by Phase 81A D-07: renaming the parallels
+use `mode`. This is intentional debt locked by Phase 81A D-07 at the initial public release: renaming the parallels
 field would have broken Phase 80 tests with no consumer-visible benefit, since the
 parallels enum is a different set of values (`exact | variants | fuzzy`) than the search
 enum (`exact | variants | responsa | title | shelfmark | fuzzy`). Future versions may unify the
@@ -789,10 +904,13 @@ No locator-field normalization is needed — feed values verbatim.
 
 ## Error Envelope
 
-The three search-helper endpoints all wrap their errors in a uniform JSON envelope.
+The four search-helper endpoints all wrap their errors in a uniform JSON envelope.
 Existing legacy `/api/*` routes (image proxies, puzzle uploads, NLI proxies) keep their
 original FastAPI default behavior — this envelope applies ONLY to `/api/search`,
-`/api/browse`, and `/api/parallels`.
+`/api/browse`, `/api/parallels`, and `/api/capabilities`. This is exactly the failure mode
+"Edge-Timeout Ceiling" (below) warns about at the transport level: even where this API's
+own handler is guaranteed to emit this envelope, an edge proxy sitting in front of the
+deployment is not part of this contract and may return a non-JSON body of its own.
 
 ```json
 {
@@ -806,7 +924,7 @@ original FastAPI default behavior — this envelope applies ONLY to `/api/search
 Properties:
 
 - `Content-Type: application/json` on every error response.
-- HTTP status varies (see Error Codes table); never raw FastAPI 422 dumps for these three
+- HTTP status varies (see Error Codes table); never raw FastAPI 422 dumps for these four
   endpoints (Phase 78 Concern #2 — handlers wrap their own bodies; no global exception
   handlers installed).
 - HTTP 429 carries a `Retry-After: <seconds>` header alongside the `rate_limited` body.
@@ -834,7 +952,7 @@ public API surface — renaming any is a breaking change).
 | `internal_error` | 500 | unhandled exception in handler |
 | `locator_conflict` | 400 | uid malformed; uid disagrees with sys_id/p_num/fl_id/volume_ie |
 | `manuscript_page_not_found` | 404 | core fetch returned `bundle.page is None`; or post-resolution `bundle.page.uid != requested_uid` |
-| `core_timeout` | 504 | `/api/browse`: BrowsePage exceeded `SEARCH_API_BROWSE_CORE_TIMEOUT` (2.0s). `/api/search`: per-mode ceiling exceeded — exact/title/shelfmark/responsa→30s (`SEARCH_API_CORE_TIMEOUT`), variants→60s (`SEARCH_API_VARIANTS_TIMEOUT`), fuzzy→300s (`SEARCH_API_FUZZY_TIMEOUT`). `/api/parallels`→300s (`SEARCH_API_PARALLELS_TIMEOUT`) for `method='chunk'`, 30s (`SEARCH_API_PASSAGE_TIMEOUT`) for `method='passage'`. Message names the ceiling and mode. |
+| `core_timeout` | 504 | `/api/browse`: BrowsePage exceeded `SEARCH_API_BROWSE_CORE_TIMEOUT` (2.0s). `/api/search`: per-mode ceiling exceeded — exact/title/shelfmark/responsa→30s (`SEARCH_API_CORE_TIMEOUT`), variants→60s (`SEARCH_API_VARIANTS_TIMEOUT`), fuzzy→110s (`SEARCH_API_FUZZY_TIMEOUT`, lowered from 300s 2026-09-08 — see "Edge-Timeout Ceiling" below). `/api/parallels`→110s (`SEARCH_API_PARALLELS_TIMEOUT`, likewise lowered from 300s) for `method='chunk'`, 30s (`SEARCH_API_PASSAGE_TIMEOUT`, unchanged) for `method='passage'`. Message names the ceiling and mode. |
 | `composition_required` | 400 | `text.strip()` empty |
 | `composition_too_long` | 400 | `len(text.strip()) > 20000` |
 | `passage_unavailable` | 503 | Phase 145: `method='passage'` requested but `PASSAGE_PARALLELS_ENABLED` is off, or the passage index did not load |
@@ -894,18 +1012,18 @@ echo divergence; user-facing display should surface the warning message verbatim
 
 ## Environment Variables
 
-Every server-side var that affects the three endpoints, plus the two skill-side vars.
+Every server-side var that affects the four endpoints, plus the two skill-side vars.
 
 | Var | Default | Scope | Notes |
 | --- | ------- | ----- | ----- |
-| `SEARCH_API_MODE` | `open` | server | Values: `open` \| `localhost-only` \| `disabled`. Flippable per request without restart (`enforce_mode_gate` re-reads env every call). Applies to `/api/search`, `/api/browse`, `/api/parallels` only. |
-| `SEARCH_API_RATE_LIMIT` | `120` | server | Per-IP requests per minute (raised from `30` in 2026-06 to support API-driven research). **Shared ceiling but each endpoint has an independent bucket** — Phase 80 D-05 makes `/api/search` + `/api/browse` + `/api/parallels` run three separate rate-limiter instances reading the same env var, so a client doing search+browse+parallels gets approximately 3× the per-IP allowance of one endpoint alone. Verified by `tests/test_parallels_api.py::test_parallels_rate_limit_independence`. |
+| `SEARCH_API_MODE` | `open` | server | Values: `open` \| `localhost-only` \| `disabled`. Flippable per request without restart (`enforce_mode_gate` re-reads env every call). Applies to `/api/search`, `/api/browse`, `/api/parallels`, and `/api/capabilities`. |
+| `SEARCH_API_RATE_LIMIT` | `120` | server | Per-IP requests per minute (raised from `30` in 2026-06 to support API-driven research). **Shared ceiling but each endpoint has an independent bucket** — Phase 80 D-05 makes `/api/search` + `/api/browse` + `/api/parallels` run three separate rate-limiter instances reading the same env var (a fourth, independent instance was added for `/api/capabilities` — see Rate Limiting & Buckets below), so a client doing search+browse+parallels+capabilities gets approximately 4× the per-IP allowance of one endpoint alone. Verified by `tests/test_parallels_api.py::test_parallels_rate_limit_independence`. |
 | `SEARCH_API_BROWSE_TIMEOUT` | `1.0` | server | Per-source enrichment timeout for `/api/browse` PGP/FJMS/NLI fetches, in seconds. Hitting it produces an `enrichment_timeout` warning (response is still 200). |
 | `SEARCH_API_BROWSE_CORE_TIMEOUT` | `2.0` | server | Core BrowsePage fetch timeout for `/api/browse`, in seconds. Phase 79 R-01 added this to prevent executor pinning on a hung Tantivy reader; hitting it produces a 504 `core_timeout` envelope. |
 | `SEARCH_API_CORE_TIMEOUT` | `30.0` | server | Interactive baseline timeout for `/api/search` (exact/title/shelfmark/responsa modes), in seconds. Re-read per request. |
 | `SEARCH_API_VARIANTS_TIMEOUT` | `60.0` | server | Heavy-tier timeout for `/api/search` with `search_mode=variants`, in seconds. Re-read per request. |
-| `SEARCH_API_FUZZY_TIMEOUT` | `300.0` | server | Heavy-tier timeout for `/api/search` with `search_mode=fuzzy`, in seconds. Fuzzy (variants_maximum) is inherently slow. Re-read per request. |
-| `SEARCH_API_PARALLELS_TIMEOUT` | `300.0` | server | Timeout for `/api/parallels` composition search with `method='chunk'` (default), in seconds. Re-read per request. |
+| `SEARCH_API_FUZZY_TIMEOUT` | `110.0` (was `300.0` before 2026-09-08) | server | Heavy-tier timeout for `/api/search` with `search_mode=fuzzy`, in seconds. Fuzzy (variants_maximum) is inherently slow. Lowered from 300s so the server-side ceiling sits below the public deployment's edge-proxy origin-response budget — see "Edge-Timeout Ceiling" below. A deployment that sits behind no such proxy can raise it back via this env var. Re-read per request. |
+| `SEARCH_API_PARALLELS_TIMEOUT` | `110.0` (was `300.0` before 2026-09-08) | server | Timeout for `/api/parallels` composition search with `method='chunk'` (default), in seconds. Lowered from 300s for the same edge-proxy reason as `SEARCH_API_FUZZY_TIMEOUT` — see "Edge-Timeout Ceiling" below. Re-read per request. |
 | `SEARCH_API_PASSAGE_TIMEOUT` | `30.0` | server | Phase 145. Timeout for `/api/parallels` with `method='passage'`, in seconds — its own ceiling, unrelated to `SEARCH_API_PARALLELS_TIMEOUT`. Re-read per request. |
 | `SEARCH_API_HEAVY_CONCURRENCY` | `2` | server | Maximum simultaneous in-flight heavy requests (variants/fuzzy/`method='chunk'` parallels). Beyond this, new requests fail fast with 503 `heavy_search_busy` + `Retry-After: 5`. Re-read per request (semaphore rebuilt when config changes and all slots are free). |
 | `SEARCH_API_PASSAGE_MAX_WITNESSES` | `25` | server | Maximum `witnesses` entries per request. 25 rather than a rounder number because the flagship case is a 17-witness Birkat Hamazon set; a cap of twelve would reject the workflow the feature exists for. Raising it past what `SEARCH_API_PASSAGE_TIMEOUT` can serve does not extend reach — such requests are refused up front with `too_many_witnesses`. Re-read per request. |
@@ -923,7 +1041,7 @@ above; the two skill-side vars are documented in
 
 ## Rate Limiting & Buckets
 
-Three INDEPENDENT per-IP buckets, all reading the same `SEARCH_API_RATE_LIMIT` env-var
+Four INDEPENDENT per-IP buckets, all reading the same `SEARCH_API_RATE_LIMIT` env-var
 ceiling on every request:
 
 | Bucket | Limiter instance | Endpoint |
@@ -931,15 +1049,18 @@ ceiling on every request:
 | search | `_rate_limiter` | `POST /api/search` |
 | browse | `_browse_rate_limiter` | `GET /api/browse` |
 | parallels | `_parallels_rate_limiter` | `POST /api/parallels` |
+| capabilities | its own `RateLimiter` instance | `GET /api/capabilities` |
 
-Bursting one endpoint's bucket does NOT exhaust the other two. A client making sustained
-calls to all three endpoints sees roughly 3× the per-IP allowance compared with hammering
-one endpoint alone. This is a deliberate v7.10 contract choice (Phase 80 D-05; Phase 79
-D-18 R-10 captures it as a monitoring obligation, not a contract change).
+Bursting one endpoint's bucket does NOT exhaust the other three. A client making sustained
+calls to all four endpoints sees roughly 4× the per-IP allowance compared with hammering
+one endpoint alone. The three-bucket version of this was a deliberate contract choice made
+at the initial public release (Phase 80 D-05; Phase 79 D-18 R-10 captures it as a
+monitoring obligation, not a contract change); `/api/capabilities` added a fourth bucket
+under the same reasoning when it shipped.
 
 429 responses include a `Retry-After: <seconds>` header.
 
-The `SEARCH_API_MODE` env var gates all three endpoints uniformly:
+The `SEARCH_API_MODE` env var gates all four endpoints uniformly:
 
 - `open` (default) — all callers permitted.
 - `localhost-only` — non-loopback callers receive a 403 `localhost_only` envelope.
@@ -961,8 +1082,8 @@ These run in a thread-pool worker (one slow query blocks ONE worker thread, not 
 | Mode | Timeout knob | Default | Budget knob | Default |
 | ---- | ------------ | ------- | ----------- | ------- |
 | `variants` | `SEARCH_API_VARIANTS_TIMEOUT` | 60 s | `SEARCH_API_HEAVY_CONCURRENCY` | 2 |
-| `fuzzy` | `SEARCH_API_FUZZY_TIMEOUT` | 300 s | `SEARCH_API_HEAVY_CONCURRENCY` | 2 |
-| parallels | `SEARCH_API_PARALLELS_TIMEOUT` | 300 s | `SEARCH_API_HEAVY_CONCURRENCY` | 2 |
+| `fuzzy` | `SEARCH_API_FUZZY_TIMEOUT` | 110 s (was 300 s before 2026-09-08) | `SEARCH_API_HEAVY_CONCURRENCY` | 2 |
+| parallels | `SEARCH_API_PARALLELS_TIMEOUT` | 110 s (was 300 s before 2026-09-08) | `SEARCH_API_HEAVY_CONCURRENCY` | 2 |
 | interactive (exact/title/shelfmark/responsa) | `SEARCH_API_CORE_TIMEOUT` | 30 s | — (no cap) | — |
 
 **Concurrency budget:** A module-level `asyncio.Semaphore` gates heavy-mode requests. When all `SEARCH_API_HEAVY_CONCURRENCY` slots are occupied, a new heavy request fails immediately with **503 `heavy_search_busy` + `Retry-After: 5`** instead of queuing and potentially starving the threadpool. The slot is released from the worker future's **done-callback**, i.e. when the underlying search/composition thread *actually finishes* — not merely when the request's awaiter returns. This matters on the timeout path: `run_in_executor` cannot cancel a running thread, so a 504'd heavy query keeps occupying its worker; holding the slot until true completion (rather than releasing it the moment the timeout fires) prevents re-admitting heavy work past the budget. A timeout or exception therefore cannot strand a slot, and cannot prematurely free one either.
@@ -970,6 +1091,46 @@ These run in a thread-pool worker (one slow query blocks ONE worker thread, not 
 Interactive modes (exact/title/shelfmark/responsa) are NOT gated by this semaphore and always proceed with their own 30 s baseline.
 
 All knobs are re-read per request and can be flipped without a restart.
+
+## Edge-Timeout Ceiling
+
+The public deployment at genizahsearch.com sits behind an edge proxy that abandons the
+origin connection somewhere between roughly 100 s and 125 s of wall-clock time,
+**independent of any server-side timeout this API documents.** Measured on 2026-09-08:
+a `chunk`-method parallels request returned our own 200 at 97.0 s, while a `fuzzy` search
+returned a proxy-level 524 at 125.2 s — no origin response involved. As of 2026-09-08,
+`SEARCH_API_FUZZY_TIMEOUT` and `SEARCH_API_PARALLELS_TIMEOUT` are therefore **110 s**
+(down from 300 s), so that the server-side ceiling sits strictly below the edge's
+abandonment window: a client hitting the timeout gets our documented JSON `core_timeout`
+504 rather than the proxy's opaque one. 110 s was chosen because it is above the observed
+97.0 s success (so no request that currently succeeds starts failing) and below the
+observed 125.2 s proxy giveup. A deployment that sits behind no such proxy — or one with a
+larger origin-response budget — can raise both env vars back via `SEARCH_API_FUZZY_TIMEOUT`
+/ `SEARCH_API_PARALLELS_TIMEOUT`; nothing in the engine itself needs 300 s, that number was
+only ever a server-side ceiling.
+
+**A 5xx from the public deployment may not be JSON.** A timeout absorbed by the edge
+arrives as a plain-text body (observed: `error code: 504`), not the `{"error": {...}}`
+envelope this document specifies elsewhere. Client error handling that assumes every 5xx
+is JSON will break on exactly the failures most likely to happen under load. Branch on the
+HTTP status first; parse the envelope only if the body actually parses as JSON.
+
+**Two related engine defects, tracked as open, not papered over here:**
+
+- `method='passage'` has been observed to exceed its own 30 s ceiling
+  (`SEARCH_API_PASSAGE_TIMEOUT`) on short single-text input — a 100-character text
+  returned a 504 `core_timeout` at roughly 34 s on 2026-09-08, twice. This is a
+  performance defect against the engine's own cost model (`shared/passage_parallels.py`
+  documents ~3,000 postings as comfortably inside the timeout for inputs of this size),
+  not a documented design point. `SEARCH_API_PASSAGE_TIMEOUT` is intentionally left at
+  30 s rather than raised to hide it — see the Environment Variables table below.
+- Multi-witness (`witnesses[]`) latency has been observed to be **non-deterministic**:
+  an identical 2-witness request returned 200 with 198 results once, and produced no
+  response within 120 s on an immediate identical repeat. Do not assume a multi-witness
+  request that succeeded once will succeed again at the same cost.
+
+Neither of these is fixed by the 110 s ceiling change above; both remain open engine-level
+work.
 
 ## Statelessness Contract
 
@@ -1005,6 +1166,53 @@ The following improvements are documented here as future work but are NOT implem
 ---
 
 ## Changelog
+
+### 9.2.0 (2026-09-08) — Capabilities endpoint, retroactive Phase 145 changelog entry, and the edge-timeout ceiling
+
+**(a) Retroactively recording shipped-but-never-logged additions.** The following were
+documented in the body of this file for some time but were never given a changelog entry —
+which is itself part of why this document could read as internally inconsistent (a body
+describing features with no corresponding history of when they arrived):
+
+- `search_mode: "fuzzy"` on `POST /api/search` (added 2026-06) — the approximate /
+  maximum-variant tier; no feature flag, always available.
+- `method: "chunk" | "passage"` on `POST /api/parallels` (Phase 145) — `"passage"` is
+  gated by `PASSAGE_PARALLELS_ENABLED` **and** a successfully-loaded passage index
+  (`passage_available()`); **both are ON in this production deployment.**
+- `witnesses[]` on `POST /api/parallels` (Phase 145, max `SEARCH_API_PASSAGE_MAX_WITNESSES`,
+  default 25) — multi-witness search, gated by `PASSAGE_MULTI_WITNESS_ENABLED` **and**
+  `passage_available()`; **both are ON in this production deployment.**
+- `sort: "fused" | "best_match" | "witness_count"` on `POST /api/parallels` (Phase 145) —
+  requires `witnesses[]`; gated the same way as `witnesses[]` above.
+
+This entry does not change behavior — every one of these was already live. The omission
+from this Changelog, against a body that documented them in full, was the defect being
+fixed here.
+
+**(b) `GET /api/capabilities` (additive).** A new endpoint reporting which flag-gated
+features are live on a deployment (which endpoints exist, the current `search_mode`
+enum, whether `passage` / `passage_multi_witness` are on, live rate limits, concurrency
+budgets, and timeouts) without the cost of a heavy request. See "Endpoint:
+GET /api/capabilities" above. New endpoints are explicitly additive per this document's
+own Stability section above; `schema_version` stays `1`.
+
+**(c) `SEARCH_API_FUZZY_TIMEOUT` and `SEARCH_API_PARALLELS_TIMEOUT` lowered 300s → 110s
+(reduction in a published ceiling).** The public deployment's edge proxy abandons the
+origin connection at roughly 100–125s regardless of what this API's own timeout says; a
+300s server-side ceiling could therefore never actually deliver our documented JSON
+`core_timeout` 504 to a client on a request that ran that long — the proxy would return an
+opaque, non-JSON 5xx first. Lowering both ceilings to 110s (still above the 97.0s slowest
+observed success, still below the 125.2s observed proxy giveup) means a timing-out request
+now gets our envelope instead. See "Edge-Timeout Ceiling" above for the full measurement.
+**Judged NOT breaking under this document's own Stability definition**, which names three
+specific things as breaking — request shape, response envelope shape, and error codes —
+and this change touches none of them: the same `core_timeout` error code, in the same
+envelope shape, on the same request shape, now simply fires somewhat sooner for the
+slowest requests. For transparency: this is still a reduction in a previously-published
+number, and a request that would have taken between 110s and 300s (none were observed in
+this measurement) would now time out where it previously would have succeeded — no such
+case is known to exist today, but the document should not claim the ceiling change is
+consequence-free, only that it does not meet this contract's own definition of breaking.
 
 ### v7.11 (Phase 85 — SYNTH-06) — Synthetic-row API field (additive)
 
