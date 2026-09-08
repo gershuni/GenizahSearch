@@ -2683,6 +2683,12 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 # _resolve_effective_max_witnesses(): a lowered passage
                 # ceiling caps witnesses below SEARCH_API_PASSAGE_MAX_WITNESSES.
                 'max_witnesses': _resolve_effective_max_witnesses(),
+                # The per-witness LENGTH cap (a separate 400,
+                # `witness_too_long`, independent of count). Reported for
+                # the same reason as everything else here: it is a hard
+                # rejection a client cannot predict, and finding it by
+                # being rejected is what this endpoint exists to avoid.
+                'max_witness_chars': MAX_WITNESS_CHARS,
                 # [] rather than a lie: advertising sorts that 400 without
                 # witnesses[] would be worse than omitting them (D4).
                 'sorts': (

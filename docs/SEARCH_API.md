@@ -806,6 +806,7 @@ curl -s https://genizahsearch.com/api/capabilities | python -m json.tool
     "methods": ["chunk", "passage"],
     "multi_witness": true,
     "max_witnesses": 25,
+    "max_witness_chars": 20000,
     "sorts": ["fused", "best_match", "witness_count"]
   },
   "limits": {
@@ -843,6 +844,7 @@ curl -s https://genizahsearch.com/api/capabilities | python -m json.tool
 | `parallels.methods` | `["chunk"]` when `features.passage` is `false`; `["chunk", "passage"]` when it is `true`. Never lists `"passage"` on a deployment where it would 503. |
 | `parallels.multi_witness` | Mirrors `features.passage_multi_witness`. |
 | `parallels.max_witnesses` | The **effective** cap — the largest witness count a request would actually be accepted with, which is the lower of `SEARCH_API_PASSAGE_MAX_WITNESSES` (default 25) and what the passage ceiling can afford. Two gates reject a witness list, not one: the handler also refuses on projected cost (`witnesses × 0.75 s > SEARCH_API_PASSAGE_TIMEOUT` → 400 `too_many_witnesses`), so lowering the passage timeout lowers the real cap without touching the cap variable. At defaults the projection binds nothing (30 / 0.75 = 40, above 25); at a 10 s ceiling the real cap is 13. `0` is a truthful answer when the ceiling cannot afford even one witness. |
+| `parallels.max_witness_chars` | The per-witness **length** cap (`MAX_WITNESS_CHARS`, 20,000 characters). A separate rejection from the count cap above — one over-long witness is a 400 `witness_too_long` regardless of how many were sent. |
 | `parallels.sorts` | `[]` when `parallels.multi_witness` is `false` (advertising sort values that `sort_requires_multi_witness` would reject without `witnesses` would be a lie); the three live `sort` values otherwise. |
 | `limits.*` | Live per-bucket rate ceilings (each reads `SEARCH_API_RATE_LIMIT`, tracked independently per endpoint — see Rate Limiting & Buckets) and the two concurrency budgets (`SEARCH_API_HEAVY_CONCURRENCY`, `SEARCH_API_PASSAGE_CONCURRENCY`). The concurrency values are what a request arriving **now** would face, resolved from the environment on each call — not the size the live semaphore was last built with, which lags a configuration change until the next acquisition. |
 | `timeouts.*` | Live values of every per-mode timeout documented in Environment Variables below, in seconds (floats). `fuzzy` and `parallels` reflect the 110 s edge-timeout ceiling — see "Edge-Timeout Ceiling" below — not a hardcoded 300 s. |

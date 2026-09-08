@@ -269,6 +269,14 @@ def test_capabilities_max_witnesses_is_the_effective_cap(
     assert _get(client).json()['parallels']['max_witnesses'] == 5
 
 
+def test_capabilities_reports_the_per_witness_char_cap(client, clean_env):
+    """A witness over MAX_WITNESS_CHARS is a 400 `witness_too_long`, independent
+    of how many witnesses were sent. Same rationale as every other limit here:
+    a client should not have to discover it by being rejected."""
+    from shared.passage_fusion import MAX_WITNESS_CHARS
+    assert _get(client).json()['parallels']['max_witness_chars'] == MAX_WITNESS_CHARS
+
+
 def test_capabilities_max_witnesses_zero_is_truthful(
         client, clean_env, monkeypatch):
     """With a ceiling under one witness's projected cost, NO witness list can be
