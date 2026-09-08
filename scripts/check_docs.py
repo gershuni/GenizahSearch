@@ -238,9 +238,17 @@ def check_unparsable_last_updated() -> list:
     return issues
 
 
-def check_contract_header_dates() -> list:
+def check_contract_header_dates() -> tuple:
     """For every CONTRACT_DOCS entry, fail if git says the file changed after
     the date its own header claims.
+
+    Returns ``(failures, unrunnable)``. Anything in ``failures`` is BLOCKING.
+    ``unrunnable`` names docs whose git history was not available to consult --
+    reported out loud rather than skipped, because a gate that quietly cannot
+    run is indistinguishable from a gate that passed, which is the exact
+    failure mode this check exists to end. In CI this is why the lint-and-docs
+    job checks out with ``fetch-depth: 0``: a depth-1 clone answers "no such
+    commit" for every file HEAD did not touch.
 
     The comparison is deliberately against the file's last COMMIT date rather
     than its mtime: mtime moves when you open a file in an editor, and it is
@@ -256,6 +264,7 @@ def check_contract_header_dates() -> list:
     untracked -- a source tarball with no .git must not fail this check.
     """
     issues = []
+    unrunnable = []
 
     for rel_path in CONTRACT_DOCS:
         full_path = ROOT_DIR / rel_path
@@ -298,17 +307,35 @@ def check_contract_header_dates() -> list:
                 timeout=20,
             )
         except (OSError, subprocess.SubprocessError):
-            # No git binary. Not a documentation defect -- skip silently.
+            unrunnable.append(
+                "{0}: no usable git binary, so the header date could not be "
+                "checked against the file's last commit.".format(rel_path)
+            )
             continue
         if proc.returncode != 0:
+            unrunnable.append(
+                "{0}: git log failed ({1}), so the header date could not be "
+                "checked.".format(rel_path, (proc.stderr or "").strip()[:120])
+            )
             continue
         stamp = (proc.stdout or "").strip()
         if not stamp:
-            # Untracked file (e.g. a fresh doc not yet committed).
+            # Either the file is untracked, or -- the case that actually
+            # bites -- this is a shallow clone whose single fetched commit
+            # did not touch the file, so git has no history to answer from.
+            unrunnable.append(
+                "{0}: git knows no commit touching this file (untracked, or a "
+                "shallow clone). The header-date check did NOT run. In CI, "
+                "check out with fetch-depth: 0.".format(rel_path)
+            )
             continue
         try:
             commit_date = datetime.strptime(stamp, '%Y-%m-%d').date()
         except ValueError:
+            unrunnable.append(
+                "{0}: git returned an unparsable commit date {1!r}.".format(
+                    rel_path, stamp)
+            )
             continue
 
         if commit_date > header_date:
@@ -321,7 +348,7 @@ def check_contract_header_dates() -> list:
                 )
             )
 
-    return issues
+    return issues, unrunnable
 
 
 def check_context_budget() -> list:
@@ -457,12 +484,14 @@ def main():
     # date is a published claim, so a body change committed after it is a
     # BLOCKING failure (unlike `stale` / `unparsable` above, which are
     # reminders). See CONTRACT_DOCS.
-    header_drift = check_contract_header_dates()
+    header_drift, header_unrunnable = check_contract_header_dates()
     if header_drift:
         for h in header_drift:
             print_status(False, h)
         total_issues += len(header_drift)
-    else:
+    for u in header_unrunnable:
+        print_warning(u)
+    if not header_drift and not header_unrunnable:
         print_status(
             True,
             "Contract-doc header dates match their last git commit "
