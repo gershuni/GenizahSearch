@@ -235,6 +235,24 @@ def test_parallels_happy_path_per_mode(client, mock_searcher, clean_env, mode):
     assert 'filtered' in body  # D-04
 
 
+def test_quick_start_parallels_example_matches_a_real_response(client, mock_searcher, clean_env):
+    """The Quick Start parallels example must not promise a key the endpoint
+    does not return.
+
+    All three Quick Start examples were materially wrong until 2026-09-08
+    (this one advertised top-level `sys_id` and `matched_chunks` instead of `locator` and `matches`). Comparing the document to a
+    real response body is the only thing that catches it.
+    """
+    from tests.doc_quickstart_shapes import missing_from
+    r = client.post('/api/parallels', json={'text': 'foo bar baz qux quux', 'chunk_size': 4})
+    assert r.status_code == 200, r.text
+    missing = missing_from(r.json(), 'parallels')
+    assert missing == set(), (
+        'docs/SEARCH_API.md Quick Start promises parallels keys the endpoint '
+        'does not return: %s' % sorted(missing)
+    )
+
+
 @pytest.mark.parametrize('boundary_mode', ['full', 'boundary', 'combined'])
 def test_parallels_happy_path_per_boundary_mode(client, mock_searcher, clean_env, boundary_mode):
     r = client.post('/api/parallels', json={

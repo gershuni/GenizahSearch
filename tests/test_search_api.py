@@ -165,6 +165,24 @@ def test_happy_path_text_mode(client, populated_state, clean_env):
     assert isinstance(body.get('warnings'), list)
 
 
+def test_quick_start_search_example_matches_a_real_response(client, populated_state, clean_env):
+    """The Quick Start search example must not promise a key the endpoint
+    does not return.
+
+    All three Quick Start examples were materially wrong until 2026-09-08
+    (this one advertised a `rank` field that does not exist). Comparing the document to a
+    real response body is the only thing that catches it.
+    """
+    from tests.doc_quickstart_shapes import missing_from
+    r = client.post('/api/search', json={'query': 'foo', 'search_mode': 'exact'})
+    assert r.status_code == 200, r.text
+    missing = missing_from(r.json(), 'search')
+    assert missing == set(), (
+        'docs/SEARCH_API.md Quick Start promises search keys the endpoint '
+        'does not return: %s' % sorted(missing)
+    )
+
+
 def test_happy_path_title_mode(client, populated_state, clean_env):
     r = client.post('/api/search', json={'query': 'foo', 'search_mode': 'title'})
     assert r.status_code == 200, r.json()

@@ -197,6 +197,26 @@ def test_browse_happy_path_uid(client, mock_browse_page, silent_sidecars, clean_
     assert body['locator']['p_num'] == 3
 
 
+def test_quick_start_browse_example_matches_a_real_response(
+        client, mock_browse_page, silent_sidecars, clean_env):
+    """docs/SEARCH_API.md's Quick Start browse example must not promise a key
+    this endpoint does not return.
+
+    Until 2026-09-08 it advertised a `manuscript{shelfmark,library_code}` /
+    `page{text,text_source,image_url}` nesting plus a `request` echo -- none of
+    which the endpoint has ever returned. Anyone copying it wrote a client that
+    broke on first contact. Nothing catches that but comparing the document to a
+    real body, so that is what this does."""
+    from tests.doc_quickstart_shapes import missing_from
+    r = client.get('/api/browse?sys_id=99001&uid=IE99_P3_FL12345')
+    assert r.status_code == 200, r.text
+    missing = missing_from(r.json(), 'browse')
+    assert missing == set(), (
+        'docs/SEARCH_API.md Quick Start promises browse keys the endpoint does '
+        'not return: %s' % sorted(missing)
+    )
+
+
 def test_browse_uid_only_path_resolves(client, monkeypatch, silent_sidecars, clean_env):
     """R-PR-04 contract test: uid-only path normalizes to {p_num, volume_ie, fl_id}
     and passes the parsed components (NOT uid) to WebDataService.

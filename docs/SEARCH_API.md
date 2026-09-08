@@ -22,7 +22,12 @@ This is a public research-automation API. We aim to keep this contract stable. B
 
 ## Quick Start
 
-All three endpoints return JSON wrapped in a uniform envelope. Successful responses contain `schema_version`, `request` (echo of input), and a result payload (`results[]` for `/search` and `/parallels`, top-level fields for `/browse`). Failures return `{"error": {"code": "...", "message": "..."}}` with an HTTP 4xx/5xx status.
+All four endpoints return JSON. Every successful response carries `schema_version` and `source`; `/search` and `/parallels` add `count`, `total`, `warnings`, `generated_at` and `results[]`, while `/browse` returns its fields at the top level rather than in a list. Failures return `{"error": {"code": "...", "message": "..."}}` with an HTTP 4xx/5xx status.
+
+Two details worth knowing before you write a client, because both have caught integrators out:
+
+- **`request` is not a plain echo, and `/browse` does not have one.** On `/search` and `/parallels` it is the LAST key and reports the *effective* request -- values after defaulting and capping (`limit_effective`, `responsa_options_effective`, the resolved `passage_policy`), which is what you want for reproducing a result but is not what you sent. `/browse` has no `request` key at all; its equivalent is `locator`, the normalized, round-trippable address of the page.
+- **A 5xx from the public deployment may not be JSON at all.** See "Edge-Timeout Ceiling" below. Branch on the HTTP status first and parse the envelope only if the body parses.
 
 ### Search for manuscripts
 
@@ -38,26 +43,40 @@ Response shape (truncated):
 ```json
 {
   "schema_version": 1,
-  "request": {"query": "אחד מי יודע", "search_mode": "variants", "limit": 5},
+  "source": "search",
+  "query": "אחד מי יודע",
+  "mode": "variants",
+  "count": 5,
+  "total": 42,
+  "warnings": [],
+  "generated_at": "2026-09-08T14:25:36Z",
   "results": [
     {
-      "uid": "IE1_P1_FL1",
-      "rank": 1,
-      "score": 12.34,
-      "locator": {"sys_id": "990025143260205171", "p_num": 1},
-      "snippet": "..."
+      "uid": "IE167876818_P000001_FL167876820",
+      "locator": {"sys_id": "990052326940205171", "volume_ie": "IE167876818", "p_num": "1"},
+      "is_synthetic": false,
+      "score": 32.2649,
+      "shelfmark": "T-S AS 194.244",
+      "title": "",
+      "library": {"code": "CUL", "name": "Cambridge University Library"},
+      "snippet": "...",
+      "match_terms": ["..."],
+      "image_url": "..."
     }
   ],
-  "total": 42
+  "request": {"search_mode": "variants", "limit": 5, "limit_effective": 5, "filters": null}
 }
 ```
+
+There is no `rank` field -- results arrive in rank order, and `score` is the ranking
+quantity. `count` is how many rows this response carries; `total` is how many matched.
 
 Take a result's `uid` and `locator.sys_id` to drill down via `/api/browse`.
 
 ### Drill down to a manuscript page
 
 ```bash
-curl -s "https://genizahsearch.com/api/browse?sys_id=990025143260205171&uid=IE1_P1_FL1" \
+curl -s "https://genizahsearch.com/api/browse?sys_id=990052326940205171&uid=IE167876818_P000001_FL167876820" \
   | python -m json.tool
 ```
 
@@ -66,13 +85,36 @@ Response shape (truncated):
 ```json
 {
   "schema_version": 1,
-  "request": {"sys_id": "990025143260205171", "uid": "IE1_P1_FL1"},
-  "manuscript": {"shelfmark": "...", "library_code": "..."},
-  "page": {"text": "...", "text_source": "pgp_transcription", "image_url": "..."}
+  "source": "browse",
+  "generated_at": "2026-09-08T14:26:51Z",
+  "locator": {
+    "uid": "IE167876818_P000001_FL167876820",
+    "sys_id": "990052326940205171",
+    "volume_ie": "IE167876818",
+    "p_num": 1,
+    "fl_id": "167876820"
+  },
+  "page_indexing": "1-based",
+  "is_synthetic": false,
+  "shelfmark": "T-S AS 194.244",
+  "title": "",
+  "library": {"code": "CUL", "name": "Cambridge University Library"},
+  "text": "...",
+  "text_source": "pgp_transcription",
+  "text_truncated": false,
+  "metadata": {},
+  "image": {},
+  "warnings": []
 }
 ```
 
-Returns transcription text (when available), PGP/FJMS/NLI metadata, and image URL.
+Returns transcription text (when available), PGP/FJMS/NLI metadata, and image URLs.
+
+**These fields are flat.** There is no `manuscript` object, no `page` object, and no
+`request` key -- `shelfmark`, `text` and `text_source` sit at the top level, the library
+is `library: {code, name}` (not `library_code`), images are under `image`, and the page
+address is `locator`. This document described a nested `manuscript`/`page` shape until
+2026-09-08; it was never what the endpoint returned.
 
 ### Find composition parallels
 
@@ -88,14 +130,35 @@ Response shape (truncated):
 ```json
 {
   "schema_version": 1,
-  "request": {"text": "...", "chunk_size": 4, "mode": "variants"},
+  "source": "parallels",
+  "source_text": "...",
+  "chunk_size": 4,
+  "mode": "variants",
+  "count": 20,
+  "total": 96,
+  "warnings": [],
+  "generated_at": "2026-09-08T14:26:12Z",
   "results": [
-    {"sys_id": "...", "matched_chunks": [], "score": 0.87}
-  ]
+    {
+      "uid": "IE167876818_P000001_FL167876820",
+      "locator": {"sys_id": "990052326940205171", "volume_ie": "IE167876818", "p_num": "1"},
+      "is_synthetic": false,
+      "score": 55.0,
+      "shelfmark": "T-S AS 194.244",
+      "library": {"code": "CUL", "name": "Cambridge University Library"},
+      "snippet": "...",
+      "matches": []
+    }
+  ],
+  "request": {"mode": "variants", "chunk_size": 4, "method": "chunk", "limit_effective": 438}
 }
 ```
 
-Returns a `results[]` of manuscript groups that share sequential phrase-chunks with the input text.
+Returns a `results[]` of manuscript groups that share sequential phrase-chunks with the
+input text. Result items carry the same shape as `/search` results plus `matches`; there
+is no top-level `sys_id` (it is inside `locator`) and no `matched_chunks`. With
+`witnesses[]`, each group also carries `witness_fusion` -- see the multi-witness section
+under `POST /api/parallels`.
 
 ### Error responses
 
@@ -835,7 +898,7 @@ curl -s https://genizahsearch.com/api/capabilities | python -m json.tool
 | Field | Meaning |
 | ----- | ------- |
 | `schema_version` | Always `1` — this endpoint is an additive change under the Stability commitment above, so adding it does not move the version. |
-| `request` | Always `{}`. Kept for envelope uniformity with the other three endpoints, which echo their input here; this endpoint takes none. |
+| `request` | Always `{}`. Present for uniformity with `/search` and `/parallels`, which carry an effective-request echo here; `/browse` has no `request` key (it uses `locator`). This endpoint takes no input, so there is nothing to echo. |
 | `api_version` | The site release this deployment is running (`version.py::APP_VERSION`), read live — NOT a hardcoded string, and NOT the same thing as `schema_version`. |
 | `endpoints` | The four public paths as absolute `/api/...` strings — what a client actually calls, regardless of what path prefix this router happens to be mounted under. |
 | `search_modes` | The live `search_mode` enum accepted by `POST /api/search`, in the order documented above. |
