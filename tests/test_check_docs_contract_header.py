@@ -90,16 +90,47 @@ def test_returns_two_lists(check_docs):
     assert isinstance(failures, list) and isinstance(unrunnable, list)
 
 
+def _repo_is_shallow() -> bool:
+    """Whether THIS checkout has real per-file history to consult.
+
+    Only CI's lint-and-docs job checks out with fetch-depth: 0 -- the `tests`
+    jobs are deliberately shallow, because full history costs every one of them
+    and the gate is enforced once, in lint-and-docs. So a test that needs real
+    history has to say so rather than assume it.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--is-shallow-repository"],
+            cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return True
+    return proc.returncode != 0 or (proc.stdout or "").strip() == "true"
+
+
+@pytest.mark.skipif(
+    _repo_is_shallow(),
+    reason="shallow checkout: no per-file history, so the gate cannot run here "
+           "(by design -- only CI's lint-and-docs job fetches full history). "
+           "test_ci_checks_out_full_history_for_the_docs_job guards that job.",
+)
 def test_real_repo_is_currently_clean(check_docs):
     """Against the working tree as committed, the gate passes and can run.
 
-    If this ever goes red, the header of a contract doc has drifted behind its
-    own last commit -- which is the gate doing its job, not a broken test.
+    If this goes red, the header of a contract doc has drifted behind its own
+    last commit -- the gate doing its job, not a broken test.
+
+    Skipped on a shallow checkout rather than relaxed. Asserting `unrunnable ==
+    []` in a job that deliberately has no history is a demand on the
+    ENVIRONMENT, not on the code, and this test failed in exactly that way on
+    `tests (ubuntu-latest)` before the skip existed. The strict assertion still
+    runs wherever history is present -- locally, and in lint-and-docs, which is
+    the job that actually enforces the gate.
     """
     failures, unrunnable = check_docs.check_contract_header_dates()
     assert failures == [], f"contract-doc header drift: {failures}"
     assert unrunnable == [], (
-        f"the gate could not run, which CI must never accept silently: {unrunnable}"
+        f"history is available here, so the gate must have run: {unrunnable}"
     )
 
 
@@ -258,16 +289,21 @@ def test_ci_checks_out_full_history_for_the_docs_job():
 
 def test_git_is_actually_available_here(check_docs):
     """Sanity: the un-runnable tests above stub git out, so prove the real thing
-    works in this environment -- otherwise test_real_repo_is_currently_clean
-    would be passing for the wrong reason."""
+    works here -- otherwise test_real_repo_is_currently_clean could pass for the
+    wrong reason.
+
+    Runs on a shallow checkout too, and passes there: a shallow clone DOES
+    answer this query, it just answers it wrongly (HEAD's date for every file),
+    which is the whole reason `check_contract_header_dates` refuses to use the
+    answer. This asserts only that git is reachable and responding.
+    """
     proc = subprocess.run(
         ["git", "log", "-1", "--date=short", "--format=%cd", "--", "docs/SEARCH_API.md"],
         cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=20,
     )
     assert proc.returncode == 0 and proc.stdout.strip(), (
         "git could not report a commit date for docs/SEARCH_API.md in this "
-        f"checkout (stdout={proc.stdout!r} stderr={proc.stderr!r}) -- if this is "
-        "a shallow clone, the gate cannot run here either"
+        f"checkout (stdout={proc.stdout!r} stderr={proc.stderr!r})"
     )
 
 
