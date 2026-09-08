@@ -246,9 +246,17 @@ def check_contract_header_dates() -> tuple:
     ``unrunnable`` names docs whose git history was not available to consult --
     reported out loud rather than skipped, because a gate that quietly cannot
     run is indistinguishable from a gate that passed, which is the exact
-    failure mode this check exists to end. In CI this is why the lint-and-docs
-    job checks out with ``fetch-depth: 0``: a depth-1 clone answers "no such
-    commit" for every file HEAD did not touch.
+    failure mode this check exists to end.
+
+    A SHALLOW clone is refused outright rather than answered. Measured in a
+    real ``git clone --depth 1``: ``git log -1 -- <path>`` returns HEAD's own
+    commit date for EVERY file, because the grafted root commit looks like it
+    added the whole tree (README.md read 2026-09-06 with full history and
+    2026-09-08 at depth 1). That does not make this check skip -- it makes it
+    compare against the WRONG commit, so any commit dated after a header would
+    fail the build for a doc nobody touched. Hence ``fetch-depth: 0`` on CI's
+    lint-and-docs job: it is what lets the check RUN, not merely what keeps it
+    honest.
 
     The comparison is deliberately against the file's last COMMIT date rather
     than its mtime: mtime moves when you open a file in an editor, and it is
@@ -260,11 +268,37 @@ def check_contract_header_dates() -> tuple:
     check passes -- which is what you want while you are mid-edit. It fires
     once the body change is committed with a stale header still in place.
 
-    Degrades to a no-op (returns []) when git is unavailable or the file is
-    untracked -- a source tarball with no .git must not fail this check.
+    Never FAILS for an environmental reason: no git binary, no repository, a
+    shallow clone or an untracked file all land in ``unrunnable``. A source
+    tarball with no .git must not fail this check.
     """
     issues = []
     unrunnable = []
+
+    # Ask ONCE whether git can be trusted about per-file history here.
+    # A shallow clone reports HEAD for every path (see the docstring), which
+    # would make this gate fire on docs nobody touched. Don't guess -- ask.
+    try:
+        probe = subprocess.run(
+            ['git', 'rev-parse', '--is-shallow-repository'],
+            cwd=str(ROOT_DIR), capture_output=True, text=True, timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return [], [
+            "{0}: no usable git binary, so the header date could not be checked "
+            "against the file's last commit.".format(rel_path)
+            for rel_path in CONTRACT_DOCS
+        ]
+    if probe.returncode != 0 or (probe.stdout or '').strip() == 'true':
+        reason = ('this is a SHALLOW clone, where git reports HEAD as the last '
+                  "commit for every file"
+                  if (probe.stdout or '').strip() == 'true'
+                  else 'git could not identify a repository here')
+        return [], [
+            "{0}: header-date check did NOT run -- {1}. In CI, check out with "
+            "fetch-depth: 0.".format(rel_path, reason)
+            for rel_path in CONTRACT_DOCS
+        ]
 
     for rel_path in CONTRACT_DOCS:
         full_path = ROOT_DIR / rel_path
@@ -320,13 +354,12 @@ def check_contract_header_dates() -> tuple:
             continue
         stamp = (proc.stdout or "").strip()
         if not stamp:
-            # Either the file is untracked, or -- the case that actually
-            # bites -- this is a shallow clone whose single fetched commit
-            # did not touch the file, so git has no history to answer from.
+            # Shallowness is already ruled out above, so this is the file
+            # being untracked -- a contract doc that exists on disk but in no
+            # commit. Reported, not skipped: the check did not run.
             unrunnable.append(
-                "{0}: git knows no commit touching this file (untracked, or a "
-                "shallow clone). The header-date check did NOT run. In CI, "
-                "check out with fetch-depth: 0.".format(rel_path)
+                "{0}: git knows no commit touching this file, so it appears "
+                "untracked. The header-date check did NOT run.".format(rel_path)
             )
             continue
         try:

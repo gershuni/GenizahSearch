@@ -49,11 +49,24 @@ class _FakeCompleted:
         self.returncode = returncode
 
 
-def _stub_git(monkeypatch, module, *, stdout="", stderr="", returncode=0, raises=None):
-    """Control only what git ANSWERS. The function under test is the real one."""
-    def fake_run(*args, **kwargs):
+def _stub_git(monkeypatch, module, *, stdout="", stderr="", returncode=0, raises=None,
+              shallow="false", probe_returncode=0):
+    """Control only what git ANSWERS. The function under test is the real one.
+
+    Two distinct git calls are made, so the stub dispatches on argv rather than
+    answering both the same way:
+
+    - ``git rev-parse --is-shallow-repository`` -> ``shallow`` / ``probe_returncode``
+    - ``git log -1 --format=%cd -- <path>``     -> ``stdout`` / ``returncode``
+
+    Defaulting ``shallow`` to "false" keeps every date-comparison test exercising
+    the real comparison rather than short-circuiting at the shallowness guard.
+    """
+    def fake_run(args, *rest, **kwargs):
         if raises is not None:
             raise raises
+        if "--is-shallow-repository" in args:
+            return _FakeCompleted(stdout=shallow + "\n", returncode=probe_returncode)
         return _FakeCompleted(stdout=stdout, stderr=stderr, returncode=returncode)
 
     monkeypatch.setattr(module.subprocess, "run", fake_run)
@@ -143,18 +156,53 @@ def test_quiet_when_header_equals_the_commit_date(monkeypatch, check_docs):
 # It refuses to be silent when it cannot run  (the shallow-clone class)
 # ---------------------------------------------------------------------------
 
-def test_shallow_clone_is_reported_not_skipped(monkeypatch, check_docs):
-    """A depth-1 clone answers "no commit touched this file" with empty stdout.
+def test_shallow_clone_is_refused_not_answered(monkeypatch, check_docs):
+    """A shallow clone must be DECLINED, not answered.
 
-    Before this was reported, the gate no-opped in CI and looked green. The note
-    must name the remedy, because whoever reads it is looking at a passing build.
+    Measured in a real `git clone --depth 1`: `git log -1 -- <path>` returns
+    HEAD's own commit date for every file, because the grafted root commit looks
+    like it added the whole tree. Full history vs depth 1, same four files:
+
+        docs/SEARCH_API.md   2026-09-08  ->  2026-09-08
+        README.md            2026-09-06  ->  2026-09-08
+        version.py           2026-09-06  ->  2026-09-08
+        docs/CODE_INDEX.md   2026-08-27  ->  2026-09-08
+
+    So shallowness does not make the gate skip -- it makes it compare against the
+    WRONG commit, and any commit dated after a header would then fail the build
+    for a doc nobody touched. `stdout` here is deliberately a date that WOULD
+    trip the comparison, proving the guard short-circuits before reaching it.
     """
+    _stub_git(monkeypatch, check_docs, shallow="true", stdout="2099-01-01\n")
+    failures, unrunnable = check_docs.check_contract_header_dates()
+    assert failures == [], (
+        "a shallow clone must never produce a build failure -- that is the "
+        "false-positive this guard exists to prevent"
+    )
+    assert len(unrunnable) == len(check_docs.CONTRACT_DOCS)
+    assert "did NOT run" in unrunnable[0]
+    assert "SHALLOW" in unrunnable[0]
+    assert "fetch-depth: 0" in unrunnable[0]
+
+
+def test_untracked_file_is_reported_not_skipped(monkeypatch, check_docs):
+    """Not shallow, but git knows no commit for the file: it is untracked."""
     _stub_git(monkeypatch, check_docs, stdout="")
     failures, unrunnable = check_docs.check_contract_header_dates()
     assert failures == [], "an un-runnable check must not be reported as drift"
     assert len(unrunnable) == len(check_docs.CONTRACT_DOCS)
     assert "did NOT run" in unrunnable[0]
-    assert "fetch-depth: 0" in unrunnable[0]
+    assert "untracked" in unrunnable[0]
+
+
+def test_no_repository_is_reported_not_skipped(monkeypatch, check_docs):
+    """A source tarball with no .git must report, not fail and not skip."""
+    _stub_git(monkeypatch, check_docs, shallow="", probe_returncode=128)
+    failures, unrunnable = check_docs.check_contract_header_dates()
+    assert failures == []
+    assert len(unrunnable) == len(check_docs.CONTRACT_DOCS)
+    assert "did NOT run" in unrunnable[0]
+    assert "repository" in unrunnable[0]
 
 
 def test_missing_git_binary_is_reported_not_skipped(monkeypatch, check_docs):
@@ -165,7 +213,7 @@ def test_missing_git_binary_is_reported_not_skipped(monkeypatch, check_docs):
     assert "git" in unrunnable[0].lower()
 
 
-def test_git_failure_is_reported_not_skipped(monkeypatch, check_docs):
+def test_git_log_failure_is_reported_not_skipped(monkeypatch, check_docs):
     _stub_git(
         monkeypatch, check_docs,
         stdout="", stderr="fatal: not a git repository", returncode=128,
