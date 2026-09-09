@@ -8,6 +8,7 @@ so they cannot silently rot back to the stale-header state that caused an extern
 developer to conclude four real, live features did not exist.
 """
 import re
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
@@ -72,11 +73,40 @@ def test_skill_md_references_public_docs():
 # 2026-09-08 — P1 (stale header) fix.
 # ---------------------------------------------------------------------------
 
+# The defect this guards was a header reading 2026-05-05 over a body edited
+# through August: the date going BACKWARDS, or standing still while the body
+# moved. So that is what is asserted.
+#
+# It used to assert the literal string "Last updated: 2026-09-08", which pinned
+# the fix in place and then blocked it -- the next legitimate bump broke the
+# test. That happened for real: a squash merge on 2026-09-09 restamped the
+# file's commit date, scripts/check_docs.py (correctly) demanded the header
+# move, and moving it reddened this test on both CI platforms. A date literal
+# in an assertion about freshness is a contradiction; it can only ever go
+# stale, and it takes the build down when someone does the right thing.
+_HEADER_FIX_DATE = date(2026, 9, 8)
+
+
 def test_header_last_updated_is_current():
     content = _read(SEARCH_API_MD)
-    assert "Last updated: 2026-09-08" in content, (
-        "docs/SEARCH_API.md header no longer carries the 2026-09-08 'Last updated' "
-        "stamp — this is the exact staleness this fix addressed (P1)."
+    match = re.search(r"Last updated:?\s*(\d{4}-\d\d-\d\d)", content)
+    assert match, (
+        "docs/SEARCH_API.md header carries no parsable 'Last updated: "
+        "YYYY-MM-DD' — it is what a reader uses to decide whether the body is "
+        "current, and its absence is the staleness this fix addressed (P1)."
+    )
+    stamped = datetime.strptime(match.group(1), "%Y-%m-%d").date()
+    assert stamped >= _HEADER_FIX_DATE, (
+        "docs/SEARCH_API.md header date went BACKWARDS to %s, behind the %s "
+        "repair. The original defect was a header months behind its own body, "
+        "which an integrator read as 'the newer sections are aspirational'."
+        % (stamped.isoformat(), _HEADER_FIX_DATE.isoformat())
+    )
+    # A tomorrow-tolerance, not zero: CI runs in UTC and the owner does not.
+    assert stamped <= date.today() + timedelta(days=1), (
+        "docs/SEARCH_API.md header date %s is in the future. 'Last updated' "
+        "records an edit that happened, not one that is planned."
+        % stamped.isoformat()
     )
 
 
