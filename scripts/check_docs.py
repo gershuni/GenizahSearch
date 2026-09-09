@@ -67,6 +67,25 @@ CONTRACT_DOCS = (
     'docs/SEARCH_API.md',
 )
 
+# How far git's last-commit date may exceed a contract doc's header date before
+# it is a failure rather than a note.
+#
+# Why there is a window at all: a SQUASH MERGE creates a commit touching the
+# file that nobody made on that date. GitHub rewrites both the committer AND
+# the author date to the merge time, so no git date survives to say when the
+# body actually changed. PR #337 proved it -- lint-and-docs passed on the
+# branch, where the file's last commit really was 2026-09-08, then failed the
+# moment the squash landed on 2026-09-09 against a header that was correct.
+# The gate's premise, that "a commit touching the file is the exact event that
+# should have moved the header", holds for edits and not for merges.
+#
+# Why the window is small: the defect this gate was written for was a header
+# reading 2026-05-05 (v7.10) over a body that had moved on for months. Days of
+# tolerance does not bring that back, and a longer window would.
+#
+# A lag inside the window is PRINTED, never silently swallowed.
+MERGE_LAG_GRACE_DAYS = 7
+
 # --- "Last updated" date parsing -----------------------------------------------
 # Matches a "Last updated" label followed, on the SAME line, by a YYYY-MM-DD
 # date -- allowing for the label's own markdown decoration (bold/italic
@@ -274,6 +293,7 @@ def check_contract_header_dates() -> tuple:
     """
     issues = []
     unrunnable = []
+    notes = []
 
     # Ask ONCE whether git can be trusted about per-file history here.
     # A shallow clone reports HEAD for every path (see the docstring), which
@@ -371,15 +391,33 @@ def check_contract_header_dates() -> tuple:
             )
             continue
 
-        if commit_date > header_date:
+        lag = (commit_date - header_date).days
+        if lag > MERGE_LAG_GRACE_DAYS:
             issues.append(
                 "{0}: header says 'Last updated: {1}' but git's last commit "
-                "touching this file is {2}. The body moved and the header did "
-                "not -- bump the header date (and any version string next to "
+                "touching this file is {2} -- {3} days later, past the "
+                "{4}-day merge-lag grace. The body moved and the header did "
+                "not: bump the header date (and any version string next to "
                 "it) in the same commit as the body change.".format(
-                    rel_path, header_date.isoformat(), commit_date.isoformat()
+                    rel_path, header_date.isoformat(), commit_date.isoformat(),
+                    lag, MERGE_LAG_GRACE_DAYS
                 )
             )
+        elif lag > 0:
+            notes.append(
+                "{0}: header says {1}, last commit {2} ({3} day(s) later). "
+                "Within the merge-lag grace, so not blocking -- a squash "
+                "merge restamps the commit date without anyone editing the "
+                "body.".format(rel_path, header_date.isoformat(),
+                               commit_date.isoformat(), lag)
+            )
+
+    # Printed rather than returned: the (failures, unrunnable) shape is itself
+    # a tested contract, and a within-grace lag is neither. It must still be
+    # SAID out loud -- a gate that silently tolerates something is how the
+    # tolerance turns into a blind spot.
+    for note in notes:
+        print("  ℹ  {0}".format(note))
 
     return issues, unrunnable
 

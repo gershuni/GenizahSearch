@@ -21,6 +21,7 @@ Two things therefore need locking down, and the second is the subtle one:
 import importlib.util
 import subprocess
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -181,6 +182,80 @@ def test_quiet_when_header_equals_the_commit_date(monkeypatch, check_docs):
     _stub_git(monkeypatch, check_docs, stdout=header.group(1) + "\n")
     failures, unrunnable = check_docs.check_contract_header_dates()
     assert failures == [] and unrunnable == []
+
+
+# ---------------------------------------------------------------------------
+# The merge-lag window. A squash merge is a commit touching the file that
+# nobody made on that date, and GitHub rewrites BOTH git dates to the merge
+# time -- so no date survives to say when the body really changed.
+# ---------------------------------------------------------------------------
+
+# Deliberately NOT the date the doc currently carries: doctoring a header to
+# the value it already holds is a no-op, and _with_header_date's own
+# "did the edit land" assertion catches it -- as it did when this was written.
+_BASE = date(2026, 1, 15)
+
+
+def _with_header_date(check_docs, header, git_date, monkeypatch):
+    """Run the gate with the doc's header forced to `header` and git to
+    `git_date`. Restores the artifact BYTE-identically -- this is a CRLF file
+    and read_text/write_text would silently rewrite the whole thing as LF."""
+    _stub_git(monkeypatch, check_docs, stdout=git_date + "\n")
+    doc = check_docs.ROOT_DIR / "docs" / "SEARCH_API.md"
+    original = doc.read_bytes()
+    current = check_docs.LAST_UPDATED_RE.search(original.decode("utf-8"))
+    assert current, "docs/SEARCH_API.md must carry a parsable Last updated date"
+    doctored = original.replace(current.group(1).encode(), header.encode(), 1)
+    assert doctored != original, "the doctoring edit did not land"
+    try:
+        doc.write_bytes(doctored)
+        result = check_docs.check_contract_header_dates()
+    finally:
+        doc.write_bytes(original)
+    assert doc.read_bytes() == original, "restore failed -- artifact left modified"
+    return result
+
+
+def test_a_squash_merge_restamp_does_not_fail_the_build(monkeypatch, check_docs):
+    """The exact shape that broke master-main after PR #337 merged.
+
+    lint-and-docs passed on the branch, where the file's last commit really was
+    2026-09-08, and failed the moment the squash landed it on 2026-09-09
+    against a header that was correct when written. One day of lag, no edit.
+    """
+    failures, unrunnable = _with_header_date(
+        check_docs, _BASE.isoformat(), (_BASE + timedelta(days=1)).isoformat(),
+        monkeypatch)
+    assert failures == [], failures
+    assert unrunnable == []
+
+
+def test_the_last_day_inside_the_window_is_still_not_a_failure(
+        monkeypatch, check_docs):
+    """Boundary, from the inside: exactly MERGE_LAG_GRACE_DAYS is tolerated."""
+    commit = _BASE + timedelta(days=check_docs.MERGE_LAG_GRACE_DAYS)
+    failures, unrunnable = _with_header_date(
+        check_docs, _BASE.isoformat(), commit.isoformat(), monkeypatch)
+    assert failures == [], failures
+    assert unrunnable == []
+
+
+def test_one_day_past_the_window_fails(monkeypatch, check_docs):
+    """Boundary, from the outside. Without this the window could widen to any
+    value and every test above would still pass."""
+    commit = _BASE + timedelta(days=check_docs.MERGE_LAG_GRACE_DAYS + 1)
+    failures, unrunnable = _with_header_date(
+        check_docs, _BASE.isoformat(), commit.isoformat(), monkeypatch)
+    assert len(failures) == 1, failures
+    assert commit.isoformat() in failures[0]
+    assert "grace" in failures[0]
+    assert unrunnable == []
+
+
+def test_the_window_is_days_not_months(check_docs):
+    """The gate exists because a header read 2026-05-05 over a body months
+    newer. A window wide enough to re-admit that defeats the whole check."""
+    assert 0 < check_docs.MERGE_LAG_GRACE_DAYS <= 14
 
 
 # ---------------------------------------------------------------------------
