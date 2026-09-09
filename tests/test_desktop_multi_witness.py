@@ -653,6 +653,28 @@ def _app_src():
 # overshot into the trailing newline on exactly those lines. Verified
 # byte-identical to ast.get_source_segment across all 1,657 functions and
 # methods in the file.
+#
+# The line split must agree with the tokenizer's, or every lineno below it is
+# off by the number of disagreements. `str.splitlines` breaks on characters
+# Python's tokenizer treats as ordinary whitespace -- form feed most plausibly,
+# since it is legal in Python source and some tools emit it as a page break --
+# so _EXTRA_SPLIT_CHARS is asserted absent rather than assumed absent. Codex
+# raised this on PR #337; the file has none today, and the assertion is what
+# makes that a checked fact instead of a lucky one.
+_EXTRA_SPLIT_CHARS = '\v\f\x1c\x1d\x1e\x85  '
+
+
+def _split_lines_for_ast(src):
+    bad = sorted({c for c in _EXTRA_SPLIT_CHARS if c in src})
+    assert not bad, (
+        'genizah_app.py contains %s, which str.splitlines breaks on but '
+        'Python does not count as a line -- every AST lineno past the first '
+        'occurrence would be shifted, so slice with a tokenizer-faithful '
+        'split instead of str.splitlines'
+        % ', '.join('U+%04X' % ord(c) for c in bad))
+    return src.splitlines(keepends=True)
+
+
 def _node_segment(lines, node):
     first, last = node.lineno - 1, node.end_lineno - 1
     if first == last:
@@ -675,7 +697,7 @@ def _fn_src(name):
                 # pessimization.
                 fns.setdefault(node.name, node)
         _APP_SRC_CACHE['fns'] = fns
-        _APP_SRC_CACHE['lines'] = src.splitlines(keepends=True)
+        _APP_SRC_CACHE['lines'] = _split_lines_for_ast(src)
     fns = _APP_SRC_CACHE['fns']
     if name not in fns:
         raise AssertionError('%s not found' % name)

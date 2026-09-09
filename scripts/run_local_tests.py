@@ -26,10 +26,17 @@ attempt, including Tantivy lock contention -- historical, but not encouraging.)
 HOW IT FAILS
 ------------
 Loudly. A non-zero chunk exit, a chunk whose output cannot be parsed, a missing
-result, or zero tests collected overall all fail the run. "No tests ran"
-(pytest exit 5) is reported as a distinct, counted outcome rather than folded
-into either success or failure -- a chunk of entirely deselected files is
-legitimate, and silently treating it as a pass is how a selection bug hides.
+result, a chunk that reports failures while exiting 0, or zero tests passed
+overall all fail the run.
+
+Pytest exit 5 (NO_TESTS_COLLECTED) is the subtle one, and it is split in two by
+what the chunk's summary accounts for. "43 deselected in 0.29s" or "3 skipped
+in 0.22s" means the tests were found and deliberately not run: legitimate, and
+counted and printed rather than hidden. "no tests ran in 0.16s" accounts for
+NOTHING, which is what a renamed module, a mistyped path or a swallowed
+collection error looks like: that fails the run. Exempting every exit 5 -- as
+this script did until Codex flagged it -- let one passing test in any other
+chunk print "All chunks passed." over a chunk that ran nothing.
 
     python scripts/run_local_tests.py                 # the routine run
     python scripts/run_local_tests.py -j 6            # more lanes
@@ -63,12 +70,30 @@ MAX_FILES_PER_CHUNK = 30        # process lifetime cap -- the thing that fixed i
 ISOLATE_ABOVE_SECONDS = 45.0    # a heavy module gets a lane to itself
 DEFAULT_DURATION = 1.0          # unmeasured module: assume cheap, not free
 
-_SUMMARY_RE = re.compile(
-    r"(?:(\d+) passed)?"
-    r"(?:.*?(\d+) failed)?"
-    r"(?:.*?(\d+) error)?"
-    r"(?:.*?(\d+) skipped)?"
-    r"(?:.*?(\d+) deselected)?", re.S)
+# One INDEPENDENT search per category, because pytest does not emit them in a
+# fixed order. A real chunk line from this suite's own failing run reads
+#   "426 passed, 2 skipped, 53 deselected, 2 warnings, 200 errors in 24.15s"
+# -- errors LAST -- and a failing chunk puts "failed" FIRST, before "passed".
+# The previous single ordered pattern returned 0 for every category that
+# appeared out of its expected position: that line parsed as 426/0/200/0/0,
+# losing skipped and deselected, and "3 failed, 426 passed" lost the 426
+# entirely -- which matters, because a zero `passed` total is one of the
+# run-level failure conditions below.
+_CATEGORIES = ("passed", "failed", "error", "skipped", "deselected")
+_COUNT_RES = {c: re.compile(r"(\d+) %ss?\b" % c) for c in _CATEGORIES}
+
+# pytest's counts line is the one ending in a duration -- "... in 24.15s".
+# "no tests ran in 0.16s" has that shape too and MUST be recognised: it is a
+# summary accounting for zero tests, not unparseable output.
+#
+# The trailing "(0:01:06)" is not optional decoration to skip: pytest appends a
+# human-readable duration once a run exceeds 60 seconds, so a strict `...s$`
+# anchor matches only the chunks that finished fast. That is not a hypothetical
+# -- the first run after this anchor was introduced reported 9 of 22 chunks as
+# "no parseable summary" for exactly this reason, every one of them a chunk that
+# had passed. The stricter exit-5 rule is what surfaced it loudly instead of
+# quietly dropping their counts, which is the whole point of it.
+_SUMMARY_TAIL_RE = re.compile(r"\bin \d+\.\d+s(?:\s*\(\d+:\d\d:\d\d\))?\s*$")
 
 
 # Directories whose tests CI runs in their own dedicated jobs, and which must
@@ -84,7 +109,19 @@ _SUMMARY_RE = re.compile(
 #
 # So they are excluded here and REPORTED, never silently dropped -- the header
 # prints the count and the command that runs them.
-_DEDICATED_JOB_DIRS = ("tests/render_smoke/", "tests/atlas_bake/", "tests/e2e/")
+#
+# tests/e2e/ WAS in this tuple and should not have been. It has no dedicated
+# job in ci.yml -- the main `tests` job runs it, and the marker expression does
+# not deselect `e2e` or `slow` -- so excluding it made this runner quietly
+# narrower than the CI command it claims to mirror. The stated reason (import
+# poisoning) was generalised from the render_smoke measurement and never
+# checked; measured now, it is false: test_findings_page.py is 282 passed both
+# alone and sharing a process with tests/e2e/test_search_flow.py. The e2e
+# modules importorskip selenium, which is in no requirements file, so today
+# they skip in both places -- but a runner that silently drops them would stop
+# matching CI the moment anyone installs selenium, with no signal. Codex
+# flagged this; tests/test_run_local_tests_gate.py now pins it.
+_DEDICATED_JOB_DIRS = ("tests/render_smoke/", "tests/atlas_bake/")
 
 
 def _test_files():
@@ -156,13 +193,95 @@ def _plan(files, durs, lanes, max_files):
 
 
 def _parse_counts(text):
-    """(passed, failed, errors, skipped, deselected) from pytest's tail."""
+    """(passed, failed, errors, skipped, deselected) from pytest's tail.
+
+    None ONLY when pytest produced no summary line at all -- which the caller
+    treats as a failure, because an unread result is not a passing one. A
+    summary that accounts for zero tests ("no tests ran in 0.16s") parses to
+    all zeros, so the caller can tell "every test here was deliberately
+    deselected or skipped" apart from "this chunk collected nothing".
+    """
     for line in reversed([ln for ln in text.splitlines() if ln.strip()]):
-        if " passed" in line or " failed" in line or " error" in line:
-            m = _SUMMARY_RE.search(line)
-            if m:
-                return tuple(int(g) if g else 0 for g in m.groups())
+        if not _SUMMARY_TAIL_RE.search(line):
+            continue
+        counts = []
+        for cat in _CATEGORIES:
+            m = _COUNT_RES[cat].search(line)
+            counts.append(int(m.group(1)) if m else 0)
+        return tuple(counts)
     return None
+
+
+def _verdict(n_chunks, results):
+    """Decide the run. Pure, so the gate can test THIS and not a copy of it.
+
+    Returns ((passed, failed, errors, skipped), empty, bad, problems). The run
+    is green if and only if `problems` is empty, so every path to a green exit
+    is enumerable by reading this one function -- which is the property Codex
+    asked for and the reason it lives apart from the process plumbing.
+
+    `empty` holds chunks that legitimately ran nothing (all deselected or all
+    skipped); `bad` holds per-chunk failures; `problems` holds run-level ones.
+    """
+    passed = failed = errors = skipped = 0
+    bad, unparsed, empty = [], [], []
+    for idx in range(1, n_chunks + 1):
+        r = results.get(idx)
+        if r is None:
+            bad.append((idx, "produced NO RESULT"))
+            continue
+        if r["counts"] is None:
+            # No summary line at all: an OS-killed chunk, a crashed
+            # interpreter, a pytest usage error (exit 4). Never a pass.
+            unparsed.append(idx)
+        else:
+            p, f, e, s, d = r["counts"]
+            passed += p
+            failed += f
+            errors += e
+            skipped += s
+            # pytest exit 5 is NO_TESTS_COLLECTED, and it is legitimate ONLY
+            # when the chunk's tests were accounted for and deliberately not
+            # run: "43 deselected in 0.29s" (the marker expression excluded
+            # them) or "3 skipped in 0.22s" (a module-level importorskip).
+            # It is a FAILURE when nothing is accounted for at all ("no tests
+            # ran"), because that is what a renamed module, a mistyped path or
+            # a swallowed collection error looks like. This used to exempt
+            # EVERY exit 5 from both the count check and the non-zero-exit
+            # check, so one passing test in any other chunk was enough to
+            # print "All chunks passed." over a chunk that ran nothing --
+            # reachable with --max-files 1, where a single entirely-deselected
+            # module becomes its own chunk.
+            if r["rc"] == 5:
+                if p + f + e + s + d > 0:
+                    empty.append(idx)
+                else:
+                    bad.append((idx, "exit 5 and accounted for NO tests at "
+                                     "all -- the chunk collected nothing"))
+                continue
+        if r["rc"] != 0:
+            bad.append((idx, "exit %d" % r["rc"]))
+
+    problems = []
+    if bad:
+        problems.append("%d chunk(s) did not pass: %s"
+                        % (len(bad), "; ".join("chunk %d %s" % b for b in bad)))
+    if unparsed:
+        problems.append("%d chunk(s) produced no parseable summary (chunks "
+                        "%s) -- treated as a failure, because an unread "
+                        "result is not a passing one"
+                        % (len(unparsed), ", ".join(map(str, unparsed))))
+    if passed == 0:
+        problems.append("zero tests passed overall -- the selection collected "
+                        "nothing, which is a failure and not a fast run")
+    # Defence in depth: every failing chunk should already have a non-zero
+    # exit, so this can only fire if a chunk reported failures and still
+    # exited 0. That contradiction is a failure either way, and cheap to catch.
+    if failed or errors:
+        problems.append("%d failed and %d error(s) appear in the chunk "
+                        "summaries -- reported as a failure even though the "
+                        "exit codes did not say so" % (failed, errors))
+    return (passed, failed, errors, skipped), empty, bad, problems
 
 
 def main(argv=None) -> int:
@@ -199,7 +318,6 @@ def main(argv=None) -> int:
               " Run them with:")
         print("             pytest tests/render_smoke/ -m render_smoke")
         print("             pytest tests/atlas_bake/ -m atlas_bake")
-        print("             pytest tests/e2e/ -m slow")
     print("=" * 78)
     if args.dry_run:
         for i, (chunk, load) in enumerate(plan, 1):
@@ -275,52 +393,20 @@ def main(argv=None) -> int:
         th.join()
     wall = time.time() - t_all
 
-    # ---- aggregate; every abnormal outcome is named, never folded away ----
-    passed = failed = errors = skipped = 0
-    bad, unparsed, empty = [], [], []
-    for idx, (chunk, _load) in enumerate(plan, 1):
-        r = results.get(idx)
-        if r is None:
-            bad.append((idx, "produced NO RESULT"))
-            continue
-        if r["rc"] == 5:
-            empty.append(idx)
-            continue
-        if r["counts"] is None:
-            unparsed.append(idx)
-        else:
-            p, f, e, s, _d = r["counts"]
-            passed += p
-            failed += f
-            errors += e
-            skipped += s
-        if r["rc"] != 0:
-            bad.append((idx, "exit %d" % r["rc"]))
+    totals, empty, bad, problems = _verdict(len(plan), results)
+    passed, failed, errors, skipped = totals
 
     print("\n" + "=" * 78)
     print(" wall %.1f min  |  %d passed, %d failed, %d errors, %d skipped"
           % (wall / 60, passed, failed, errors, skipped))
     if empty:
-        print(" %d chunk(s) collected nothing under this marker expression "
-              "(chunks %s) -- expected for render_smoke/atlas_bake/e2e files"
+        print(" %d chunk(s) ran no tests because every test in them was "
+              "deselected or skipped (chunks %s)"
               % (len(empty), ", ".join(map(str, empty))))
     print("=" * 78)
 
     if args.record:
         _record_durations(results)
-
-    problems = []
-    if bad:
-        problems.append("%d chunk(s) did not pass: %s"
-                        % (len(bad), "; ".join("chunk %d %s" % b for b in bad)))
-    if unparsed:
-        problems.append("%d chunk(s) exited 0 but produced no parseable "
-                        "summary (chunks %s) -- treated as a failure, because "
-                        "an unread result is not a passing one"
-                        % (len(unparsed), ", ".join(map(str, unparsed))))
-    if passed == 0:
-        problems.append("zero tests passed overall -- the selection collected "
-                        "nothing, which is a failure and not a fast run")
 
     if problems:
         print("\nFAILED:")
