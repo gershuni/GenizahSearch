@@ -235,6 +235,28 @@ def test_parallels_happy_path_per_mode(client, mock_searcher, clean_env, mode):
     assert 'filtered' in body  # D-04
 
 
+@pytest.mark.parametrize('which', ['quick_start', 'reference'])
+def test_documented_parallels_examples_match_a_real_response(
+        client, mock_searcher, clean_env, which):
+    """No parallels example in docs/SEARCH_API.md may promise a key the
+    endpoint does not return.
+
+    The Quick Start example advertised top-level `sys_id` and `matched_chunks`
+    instead of `locator` and `matches` until 2026-09-08; the REFERENCE example
+    outlived that repair still showing `aggregate_score`, which is an internal
+    group sort key consumed into `sort_score` and never serialized under that
+    name, plus the same phantom `fl_id` locator key as `/api/search`.
+    """
+    from tests.doc_response_shapes import missing_from
+    r = client.post('/api/parallels', json={'text': 'foo bar baz qux quux', 'chunk_size': 4})
+    assert r.status_code == 200, r.text
+    missing = missing_from(r.json(), 'parallels', which)
+    assert missing == set(), (
+        'docs/SEARCH_API.md %s parallels example promises keys the endpoint '
+        'does not return: %s' % (which, sorted(missing))
+    )
+
+
 @pytest.mark.parametrize('boundary_mode', ['full', 'boundary', 'combined'])
 def test_parallels_happy_path_per_boundary_mode(client, mock_searcher, clean_env, boundary_mode):
     r = client.post('/api/parallels', json={

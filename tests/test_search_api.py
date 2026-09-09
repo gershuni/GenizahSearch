@@ -165,6 +165,33 @@ def test_happy_path_text_mode(client, populated_state, clean_env):
     assert isinstance(body.get('warnings'), list)
 
 
+@pytest.mark.parametrize('which', ['quick_start', 'reference'])
+def test_documented_search_examples_match_a_real_response(
+        client, populated_state, clean_env, which):
+    """No search example in docs/SEARCH_API.md may promise a key the endpoint
+    does not return.
+
+    Both of them were wrong until 2026-09-08. The Quick Start advertised a
+    `rank` field that does not exist; the endpoint REFERENCE example -- which
+    survived the first repair, because the gate only read the Quick Start --
+    wrapped `library`/`domains`/`dating` in a `metadata` object that
+    `_serialize_item` has never emitted, put a 4th `fl_id` key in the locator,
+    and typed `p_num` as an int where the serializer emits a string.
+
+    Comparing the document to a real response body is the only thing that
+    catches this, and checking only SOME examples reads as checking all of
+    them -- hence the parametrize.
+    """
+    from tests.doc_response_shapes import missing_from
+    r = client.post('/api/search', json={'query': 'foo', 'search_mode': 'exact'})
+    assert r.status_code == 200, r.text
+    missing = missing_from(r.json(), 'search', which)
+    assert missing == set(), (
+        'docs/SEARCH_API.md %s search example promises keys the endpoint '
+        'does not return: %s' % (which, sorted(missing))
+    )
+
+
 def test_happy_path_title_mode(client, populated_state, clean_env):
     r = client.post('/api/search', json={'query': 'foo', 'search_mode': 'title'})
     assert r.status_code == 200, r.json()

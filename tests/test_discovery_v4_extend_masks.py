@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import pickle
+import sys
 from pathlib import Path
 
 import pytest
@@ -57,6 +58,35 @@ def build_ref_index(works, masks=None):
     # (seg_streams, seg_work, seg_off, codes_f, seg_f, pos_f, df_dropped)
     return (["seg"], {}, {}, {}, {}, {}, 0)
 '''
+
+
+# The two stub modules below are written into a tmp probe root, and `run()`
+# puts that directory on sys.path and imports them BY NAME. Both then sit in
+# sys.modules pointing at a temp directory, and the next test in the process
+# to import `track1_match` gets the STUB.
+#
+# That is not hypothetical: `tests/test_cert01_harness_adapter.py` imports
+# `track1_membership`, which does `from track1_match import accept_density`,
+# and it failed with "cannot import name accept_density from track1_match
+# (…pytest-of-gersh/…/probe/scripts/track1_match.py)" whenever this file ran
+# first in the same process. It passes alone, so nothing looked wrong until
+# a different test-file grouping put the two together (2026-09-09).
+#
+# Named explicitly rather than "pop everything new": these are the only two
+# modules this file stubs, and an explicit list cannot over-reach. Popping a
+# real one that was already imported is harmless -- sys.path is restored
+# first, so the next import resolves to the real module.
+_STUBBED_MODULES = ("track1_match", "mask_ref_canon")
+
+
+@pytest.fixture(autouse=True)
+def _no_stub_module_leak():
+    """Leave sys.path and sys.modules as they were found."""
+    path_before = list(sys.path)
+    yield
+    sys.path[:] = path_before
+    for name in _STUBBED_MODULES:
+        sys.modules.pop(name, None)
 
 
 def _probe_root(tmp_path: Path) -> Path:

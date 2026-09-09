@@ -130,6 +130,47 @@ def silent_sidecars(monkeypatch):
     monkeypatch.setattr('shared.browse_service._nli_sync', lambda *a, **k: None)
 
 
+@pytest.fixture
+def enriched_sidecars(monkeypatch):
+    """PGP/FJMS/NLI sidecars return POPULATED raw bundles.
+
+    `silent_sidecars` nulls all three, which is right for the endpoint
+    tests -- but it makes `metadata.pgp` / `metadata.fjms` / `metadata.nli`
+    empty, and a documented sub-shape under an empty parent is exempt from
+    the doc-shape gate (tests/doc_response_shapes.py::_unexpanded). So with
+    silent sidecars the gate CANNOT see those three sub-objects at all.
+
+    That mattered: every key of all three was wrong in
+    docs/SEARCH_API.md until 2026-09-08 (`metadata.pgp` claimed `editions`
+    and `translations`, `metadata.fjms` claimed `catalog_records`/
+    `free_descriptions`/`bibliography`, `metadata.nli` claimed
+    `manifest_url`/`fl_index`) -- and a mutation test proved the gate stayed
+    GREEN when that error was put back, because the fixture had nulled the
+    parent. This fixture closes that blind spot.
+
+    Deliberately returns RAW sidecar dicts, not pre-shaped output: the
+    serializer's own `_build_*_subset` functions do the shaping, so what the
+    gate compares against is the real envelope shape rather than a
+    hand-written copy of it.
+    """
+    monkeypatch.setattr('shared.browse_service._pgp_sync', lambda *a, **k: {
+        'pgpid': 12345, 'description': 'a letter', 'tags': ['letter'],
+        'document_type': 'Letter', 'languages_primary': ['Judeo-Arabic'],
+        'languages_secondary': [], 'doc_date_original': '...',
+        'doc_date_standard': '1100', 'inferred_date_display': '12th c.',
+        'pgp_url': 'https://geniza.princeton.edu/documents/12345/',
+    })
+    monkeypatch.setattr('shared.browse_service._fjms_sync', lambda *a, **k: {
+        'source_names': ['FGP'], 'has_measurements': True,
+        'has_visual_suggestions': False,
+    })
+    monkeypatch.setattr('shared.browse_service._nli_sync', lambda *a, **k: {
+        'physical_metadata': {'material': 'paper', 'size': '20x15',
+                              'num_folio': '1', 'num_bifolio': '0'},
+        'folio': {'fl_id': 'FL12345', 'folio_label': '1r', 'thumb_url': None},
+    })
+
+
 def _has_test_fixture_data():
     """Detect whether the dev/CI environment has the full Tantivy index +
     csv_bank loaded for real-shape integration tests. R-PR-07 smoke test
@@ -195,6 +236,39 @@ def test_browse_happy_path_uid(client, mock_browse_page, silent_sidecars, clean_
     assert body['locator']['fl_id'] == 'FL12345'  # R-04 round-trip
     assert body['locator']['sys_id'] == '99001'
     assert body['locator']['p_num'] == 3
+
+
+@pytest.mark.parametrize('which', ['quick_start', 'reference'])
+def test_documented_browse_examples_match_a_real_response(
+        client, mock_browse_page, enriched_sidecars, clean_env, which):
+    """No browse example in docs/SEARCH_API.md may promise a key this endpoint
+    does not return.
+
+    The Quick Start example advertised a `manuscript{shelfmark,library_code}` /
+    `page{text,text_source,image_url}` nesting plus a `request` echo until
+    2026-09-08 -- none of which the endpoint has ever returned. The REFERENCE
+    example was worse and outlived that repair: flat `library_code`/
+    `library_name` instead of `library:{code,name}`, and `metadata.pgp`,
+    `metadata.fjms`, `metadata.nli` and `image.sources` each carrying an
+    entirely different key set from the one the serializer builds.
+
+    Anyone copying either wrote a client that broke on first contact. Nothing
+    catches that but comparing the document to a real body.
+
+    Uses `enriched_sidecars`, NOT `silent_sidecars`: with the enrichment
+    sources nulled, `metadata.pgp`/`fjms`/`nli` come back empty and the
+    gate's empty-parent exemption skips their whole documented sub-shape --
+    which is exactly where three of this endpoint's worst doc errors lived.
+    A mutation test confirmed the gate stayed GREEN against silent
+    sidecars when the wrong `metadata.nli` shape was put back."""
+    from tests.doc_response_shapes import missing_from
+    r = client.get('/api/browse?sys_id=99001&uid=IE99_P3_FL12345')
+    assert r.status_code == 200, r.text
+    missing = missing_from(r.json(), 'browse', which)
+    assert missing == set(), (
+        'docs/SEARCH_API.md %s browse example promises keys the endpoint does '
+        'not return: %s' % (which, sorted(missing))
+    )
 
 
 def test_browse_uid_only_path_resolves(client, monkeypatch, silent_sidecars, clean_env):

@@ -374,18 +374,93 @@ def test_a_missing_axis_widget_still_yields_its_default():
 # copy of the predicate.
 # ---------------------------------------------------------------------------
 
+# genizah_app.py is 1.48 MB / 183,794 AST nodes -- 0.25 s to parse, 0.10 s to
+# walk. These helpers are called 46 times in this file, and re-read, re-parsed
+# and re-walked it every single time. The file cannot change mid-run, so the
+# read, the parse and the name->segment index are built once here.
+#
+# This caches ONLY the unmodified module. The `ast.parse(src)` calls further
+# down that parse a locally-built or deliberately-altered string are left
+# alone: caching those would change what is asserted.
+_APP_CACHE = {}
+
+
 def _app_source():
-    return io.open(os.path.join(REPO_ROOT, 'genizah_app.py'),
-                   encoding='utf-8').read()
+    if 'src' not in _APP_CACHE:
+        _APP_CACHE['src'] = io.open(os.path.join(REPO_ROOT, 'genizah_app.py'),
+                                    encoding='utf-8').read()
+    return _APP_CACHE['src']
+
+
+# `ast.get_source_segment` re-splits the whole 1.48 MB file on EVERY call
+# (99.9 ms measured), so it is used once here and never per assertion. Lines are
+# split once; a node's segment is sliced out of them.
+#
+# col_offset / end_col_offset are UTF-8 BYTE offsets, not character offsets. A
+# plain str slice is therefore wrong on any line containing a multi-byte
+# character -- genizah_app.py has emoji in UI strings, and a naive slice
+# overshot into the trailing newline on exactly those lines. Verified
+# byte-identical to ast.get_source_segment across all 1,657 functions and
+# methods in the file.
+# The line split must agree with the tokenizer's, or every lineno below it is
+# off by the number of disagreements. `str.splitlines` breaks on characters
+# Python's tokenizer treats as ordinary whitespace -- form feed most plausibly,
+# since it is legal in Python source and some tools emit it as a page break --
+# so _EXTRA_SPLIT_CHARS is asserted absent rather than assumed absent. Codex
+# raised this on PR #337; the file has none today, and the assertion is what
+# makes that a checked fact instead of a lucky one.
+_EXTRA_SPLIT_CHARS = '\v\f\x1c\x1d\x1e\x85  '
+
+
+def _split_lines_for_ast(src):
+    bad = sorted({c for c in _EXTRA_SPLIT_CHARS if c in src})
+    assert not bad, (
+        'genizah_app.py contains %s, which str.splitlines breaks on but '
+        'Python does not count as a line -- every AST lineno past the first '
+        'occurrence would be shifted, so slice with a tokenizer-faithful '
+        'split instead of str.splitlines'
+        % ', '.join('U+%04X' % ord(c) for c in bad))
+    return src.splitlines(keepends=True)
+
+
+def _node_segment(lines, node):
+    first, last = node.lineno - 1, node.end_lineno - 1
+    if first == last:
+        return (lines[first].encode('utf-8')
+                [node.col_offset:node.end_col_offset].decode('utf-8'))
+    head = lines[first].encode('utf-8')[node.col_offset:].decode('utf-8')
+    tail = lines[last].encode('utf-8')[:node.end_col_offset].decode('utf-8')
+    return ''.join([head] + lines[first + 1:last] + [tail])
+
+
+def _app_index():
+    """(functions, methods) AST NODES keyed by name, plus the split lines.
+
+    Nodes, not segments: extracting 1,657 segments up front cost 165 s. The
+    segment is sliced on demand instead. `functions` keeps the FIRST function
+    of each name, exactly as the previous `ast.walk` + first-match loop did.
+    """
+    if 'index' not in _APP_CACHE:
+        src = _app_source()
+        tree = ast.parse(src)
+        functions, methods = {}, {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef):
+                functions.setdefault(node.name, node)
+            elif isinstance(node, ast.ClassDef):
+                for fn in node.body:
+                    if isinstance(fn, ast.FunctionDef):
+                        methods.setdefault((node.name, fn.name), fn)
+        _APP_CACHE['index'] = (functions, methods,
+                               _split_lines_for_ast(src))
+    return _APP_CACHE['index']
 
 
 def _function_source(name):
-    src = _app_source()
-    tree = ast.parse(src)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == name:
-            return ast.get_source_segment(src, node) or ''
-    raise AssertionError('%s not found in genizah_app.py' % name)
+    functions, _methods, lines = _app_index()
+    if name not in functions:
+        raise AssertionError('%s not found in genizah_app.py' % name)
+    return _node_segment(lines, functions[name])
 
 
 def test_dispatch_revalidates_the_method_through_the_wrapper():
@@ -2794,14 +2869,11 @@ def test_picking_chunk_by_hand_cancels_it_too(monkeypatch):
 def _method_source(cls_name, fn_name):
     """`_function_source` matches the FIRST function of that name in the
     module, which for `__init__` is some other class entirely."""
-    src = _app_source()
-    tree = ast.parse(src)
-    for cls in ast.walk(tree):
-        if isinstance(cls, ast.ClassDef) and cls.name == cls_name:
-            for fn in cls.body:
-                if isinstance(fn, ast.FunctionDef) and fn.name == fn_name:
-                    return ast.get_source_segment(src, fn) or ''
-    raise AssertionError('%s.%s not found' % (cls_name, fn_name))
+    _functions, methods, lines = _app_index()
+    key = (cls_name, fn_name)
+    if key not in methods:
+        raise AssertionError('%s.%s not found' % (cls_name, fn_name))
+    return _node_segment(lines, methods[key])
 
 
 def test_the_restore_window_opens_before_any_ui_exists():

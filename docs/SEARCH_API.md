@@ -22,7 +22,18 @@ This is a public research-automation API. We aim to keep this contract stable. B
 
 ## Quick Start
 
-All three endpoints return JSON wrapped in a uniform envelope. Successful responses contain `schema_version`, `request` (echo of input), and a result payload (`results[]` for `/search` and `/parallels`, top-level fields for `/browse`). Failures return `{"error": {"code": "...", "message": "..."}}` with an HTTP 4xx/5xx status.
+All four endpoints return JSON, and every successful response carries `schema_version`. Beyond that the four are NOT uniform, so do not write one envelope parser for all of them:
+
+- `/search` and `/parallels` carry `source`, `generated_at`, `count`, `total`, `warnings[]` and `results[]`.
+- `/browse` carries `source` and `generated_at`, but returns its payload as top-level fields rather than a `results[]` list, and has no `count`/`total`.
+- `/capabilities` is a fixed-shape descriptor: it has **no `source`** and no `generated_at`. Its top-level key set is exhaustively listed in its own section below.
+
+Failures return `{"error": {"code": "...", "message": "..."}}` with an HTTP 4xx/5xx status -- but see "Error Envelope" for the two cases that carry something else.
+
+Two details worth knowing before you write a client, because both have caught integrators out:
+
+- **`request` is not a plain echo, and `/browse` does not have one.** On `/search` and `/parallels` it is the LAST key and reports the *effective* request -- values after defaulting and capping (`limit_effective`, `responsa_options_effective`, the resolved `passage_policy`), which is what you want for reproducing a result but is not what you sent. `/browse` has no `request` key at all; its equivalent is `locator`, the normalized, round-trippable address of the page.
+- **A 5xx from the public deployment may not be JSON at all.** See "Edge-Timeout Ceiling" below. Branch on the HTTP status first and parse the envelope only if the body parses.
 
 ### Search for manuscripts
 
@@ -38,26 +49,40 @@ Response shape (truncated):
 ```json
 {
   "schema_version": 1,
-  "request": {"query": "אחד מי יודע", "search_mode": "variants", "limit": 5},
+  "source": "search",
+  "query": "אחד מי יודע",
+  "mode": "variants",
+  "count": 5,
+  "total": 42,
+  "warnings": [],
+  "generated_at": "2026-09-08T14:25:36Z",
   "results": [
     {
-      "uid": "IE1_P1_FL1",
-      "rank": 1,
-      "score": 12.34,
-      "locator": {"sys_id": "990025143260205171", "p_num": 1},
-      "snippet": "..."
+      "uid": "IE167876818_P000001_FL167876820",
+      "locator": {"sys_id": "990052326940205171", "volume_ie": "IE167876818", "p_num": "1"},
+      "is_synthetic": false,
+      "score": 32.2649,
+      "shelfmark": "T-S AS 194.244",
+      "title": "",
+      "library": {"code": "CUL", "name": "Cambridge University Library"},
+      "snippet": "...",
+      "match_terms": ["..."],
+      "image_url": "..."
     }
   ],
-  "total": 42
+  "request": {"search_mode": "variants", "limit": 5, "limit_effective": 5, "filters": null}
 }
 ```
+
+There is no `rank` field -- results arrive in rank order, and `score` is the ranking
+quantity. `count` is how many rows this response carries; `total` is how many matched.
 
 Take a result's `uid` and `locator.sys_id` to drill down via `/api/browse`.
 
 ### Drill down to a manuscript page
 
 ```bash
-curl -s "https://genizahsearch.com/api/browse?sys_id=990025143260205171&uid=IE1_P1_FL1" \
+curl -s "https://genizahsearch.com/api/browse?sys_id=990052326940205171&uid=IE167876818_P000001_FL167876820" \
   | python -m json.tool
 ```
 
@@ -66,13 +91,36 @@ Response shape (truncated):
 ```json
 {
   "schema_version": 1,
-  "request": {"sys_id": "990025143260205171", "uid": "IE1_P1_FL1"},
-  "manuscript": {"shelfmark": "...", "library_code": "..."},
-  "page": {"text": "...", "text_source": "pgp_transcription", "image_url": "..."}
+  "source": "browse",
+  "generated_at": "2026-09-08T14:26:51Z",
+  "locator": {
+    "uid": "IE167876818_P000001_FL167876820",
+    "sys_id": "990052326940205171",
+    "volume_ie": "IE167876818",
+    "p_num": 1,
+    "fl_id": "167876820"
+  },
+  "page_indexing": "1-based",
+  "is_synthetic": false,
+  "shelfmark": "T-S AS 194.244",
+  "title": "",
+  "library": {"code": "CUL", "name": "Cambridge University Library"},
+  "text": "...",
+  "text_source": "pgp_transcription",
+  "text_truncated": false,
+  "metadata": {},
+  "image": {},
+  "warnings": []
 }
 ```
 
-Returns transcription text (when available), PGP/FJMS/NLI metadata, and image URL.
+Returns transcription text (when available), PGP/FJMS/NLI metadata, and image URLs.
+
+**These fields are flat.** There is no `manuscript` object, no `page` object, and no
+`request` key -- `shelfmark`, `text` and `text_source` sit at the top level, the library
+is `library: {code, name}` (not `library_code`), images are under `image`, and the page
+address is `locator`. This document described a nested `manuscript`/`page` shape until
+2026-09-08; it was never what the endpoint returned.
 
 ### Find composition parallels
 
@@ -88,14 +136,46 @@ Response shape (truncated):
 ```json
 {
   "schema_version": 1,
-  "request": {"text": "...", "chunk_size": 4, "mode": "variants"},
+  "source": "parallels",
+  "source_text": "...",
+  "chunk_size": 4,
+  "mode": "variants",
+  "count": 108,
+  "total": 108,
+  "warnings": [],
+  "generated_at": "2026-09-08T14:26:12Z",
   "results": [
-    {"sys_id": "...", "matched_chunks": [], "score": 0.87}
-  ]
+    {
+      "uid": "IE167876818_P000001_FL167876820",
+      "locator": {"sys_id": "990052326940205171", "volume_ie": "IE167876818", "p_num": "1"},
+      "is_synthetic": false,
+      "score": 55.0,
+      "shelfmark": "T-S AS 194.244",
+      "library": {"code": "CUL", "name": "Cambridge University Library"},
+      "snippet": "...",
+      "matches": []
+    }
+  ],
+  "request": {"mode": "variants", "chunk_size": 4, "method": "chunk", "limit_effective": 183}
 }
 ```
 
-Returns a `results[]` of manuscript groups that share sequential phrase-chunks with the input text.
+Returns a `results[]` of manuscript groups that share sequential phrase-chunks with the
+input text. Result items carry the same shape as `/search` results plus `matches`; there
+is no top-level `sys_id` (it is inside `locator`) and no `matched_chunks`. With
+`witnesses[]`, each group also carries `witness_fusion` -- see the multi-witness section
+under `POST /api/parallels`.
+
+Three numbers here are easy to misread, so they are worth stating outright:
+
+- **`count` and `total` are ALWAYS equal on `/api/parallels`.** The serializer assigns
+  both from the same expression. They differ on `/api/search` (where `total` is the full
+  match count and `count` is how many rows this page carries), and a client that relies
+  on `total > count` to detect "there is more" must not do so here.
+- **`request.limit_effective` is a ROW count, not a group count**, so it is normally
+  LARGER than `count`: 183 matching chunk-hit rows collapsed into 108 manuscript groups
+  in the response above. It is not a page size and cannot be compared with `count`.
+- **`results[]` is truncated in this example.** A real response carries `count` items.
 
 ### Error responses
 
@@ -270,21 +350,17 @@ Notes:
       "locator": {
         "sys_id": "990001234560205171",
         "volume_ie": "IE12345",
-        "p_num": 3,
-        "fl_id": "FL999"
+        "p_num": "3"
       },
       "score": 12.47,
       "shelfmark": "T-S 12.123",
       "title": "תשובה לרמב\"ם",
       "snippet": "...לפני הכתיבה תשובת הרמב\"ם...",
       "excerpt": "...הרמב\"ם השיב על השאלה הזאת...",
-      "metadata": {
-        "library": "CUL",
-        "library_name": "Cambridge University Library",
-        "domains": ["Halakha"],
-        "dating": "12th century"
-      },
-      "image_url": "https://cudl.lib.cam.ac.uk/iiif/MS-TS-00012-00123/canvas/1"
+      "library": {"code": "CUL", "name": "Cambridge University Library"},
+      "domains": ["Halakha"],
+      "dating": "12th century",
+      "image_url": "/api/nli_image_by_sysid/990001234560205171?page=2"
     }
   ],
   "request": {
@@ -304,15 +380,17 @@ Notes:
 | Name | Type | Notes |
 | ---- | ---- | ----- |
 | `uid` | string \| null | `IE{N}_P{M}_FL{K}` when resolvable; safe to feed verbatim into `/api/browse?uid=...` |
-| `locator` | object | always present; `{sys_id, volume_ie, p_num, fl_id}`; any individual field may be null |
+| `locator` | object | always present; EXACTLY `{sys_id, volume_ie, p_num}` — three keys, any of which may be null. **No `fl_id`**: that key exists only on `/api/browse`'s locator, and a client reading `result["locator"]["fl_id"]` here gets a `KeyError`, not `null`. `p_num` is a **string** (`"3"`), not an int — it is stringified in `parse_full_id_components`. Documented with a 4th `fl_id` key and an integer `p_num` until 2026-09-08; the code was right |
 | `is_synthetic` | bool | Phase 85 SYNTH-06 (v7.11): `true` iff the row is a Phase-85 synthetic libraries.csv entry generated for an FJMS-only or CUDL-orphaned inventory; `false` for real NLI Alma records. Top-level (NOT nested under `locator`); additive — schema_version stays 1. Skill consumers should consider showing a "no NLI metadata" annotation when `true`. |
 | `score` | float | Tantivy raw score |
 | `shelfmark` | string | canonical shelfmark for display |
 | `title` | string | manuscript title (often Hebrew) |
 | `snippet` | string | pre-snippet (text before the hit) |
 | `excerpt` | string | post-snippet (text including/after the hit) |
-| `metadata` | object | `library`, `library_name`, `domains` (list), `dating` (string) |
-| `image_url` | string \| null | best-effort IIIF URL; server does not probe upstream availability |
+| `library` | object | `{code, name}` — e.g. `{"code": "CUL", "name": "Cambridge University Library"}`. **Not** a bare string, and **not** nested under a `metadata` object (there is no `metadata` key on a search/parallels result item; that shape was documented here until 2026-09-08 and never existed) |
+| `domains` | list of string | possibly empty; top-level, not under `metadata` |
+| `dating` | string \| null | top-level, not under `metadata` |
+| `image_url` | string \| null | best-effort image URL; the server does not probe upstream availability. **Server-relative, same-origin** (e.g. `/api/nli_image_by_sysid/{sys_id}?page={n}`) — it proxies the upstream IIIF service rather than linking it, so resolve it against the API host and do not expect a `cudl.lib.cam.ac.uk` or NLI hostname |
 
 ### 7-key request echo
 
@@ -328,7 +406,7 @@ which may differ from the client-supplied `responsa_options`.
 | `responsa_options_effective` | post-cascade values; mirrors `responsa_options` when no cascade fired; non-Responsa modes → `null` | reflects what the engine actually applied |
 | `gap` | `req.gap` | unmodified |
 | `limit` | `req.limit` | unmodified |
-| `limit_effective` | `min(req.limit, MAX_LIMIT)` | post-cap value actually applied |
+| `limit_effective` | `min(req.limit, MAX_LIMIT)` for every mode EXCEPT `fuzzy`; for `search_mode='fuzzy'` it is the fuzzy-specific effective limit (the client's `limit` when supplied, else `SEARCH_API_FUZZY_MAX_RESULTS`) | post-cap value actually applied |
 | `filters` | model-dumped FiltersModel (exclude_none) or `null` | post-validation snapshot |
 
 **Worked Responsa cascade case.** Client sends `responsa_options.ja=true`; the server's
@@ -346,9 +424,7 @@ echo then reads:
     "limit_effective": 25,
     "filters": null
   },
-  "warnings": [
-    {"code": "query_downgraded", "message": "Judeo-Arabic expansion disabled for this query."}
-  ]
+  "warnings": ["query_downgraded: Judeo-Arabic expansion disabled for this query."]
 }
 ```
 
@@ -399,20 +475,27 @@ overrides env `SEARCH_API_BROWSE_TEXT_CAP`, default `4000`).
   },
   "shelfmark": "T-S 12.123",
   "title": "תשובה לרמב\"ם",
-  "library_code": "CUL",
-  "library_name": "Cambridge University Library",
+  "library": {"code": "CUL", "name": "Cambridge University Library"},
   "text": "<full PGP transcription, capped at text_cap chars>",
   "text_source": "pgp_transcription",
   "text_truncated": false,
   "metadata": {
-    "pgp":  {"pgpid": 12345, "description": "...", "editions": [], "translations": []},
-    "fjms": {"catalog_records": [], "free_descriptions": [], "bibliography": []},
-    "nli":  {"manifest_url": "...", "fl_index": 4}
+    "pgp":  {"description": "...", "tags": [], "document_type": null,
+             "languages_primary": [], "languages_secondary": [],
+             "doc_date_original": null, "doc_date_standard": null,
+             "inferred_date_display": null, "pgpid": 12345, "pgp_url": "..."},
+    "fjms": {"source_names": [], "has_measurements": false, "has_visual_suggestions": false},
+    "nli":  {"physical_metadata": {"material": "...", "size": "...",
+                                   "num_folio": "...", "num_bifolio": "..."},
+             "folio": {"fl_id": "167876820", "folio_label": "1r", "thumb_url": null}}
   },
   "image": {
-    "url": "https://cudl.lib.cam.ac.uk/iiif/MS-TS-00012-00123/canvas/1",
-    "provider": "Cambridge CUDL",
-    "sources": ["CUDL", "NLI"]
+    "url": "/api/cambridge_image/990001234560205171?page=2",
+    "provider": "cambridge",
+    "sources": [
+      {"url": "/api/cambridge_image/990001234560205171?page=2", "provider": "cambridge",
+       "role": "iiif_proxy", "kind": "image", "fl_id": "FL999", "folio_label": null}
+    ]
   },
   "warnings": []
 }
@@ -429,11 +512,10 @@ overrides env `SEARCH_API_BROWSE_TEXT_CAP`, default `4000`).
 | `is_synthetic` | bool | Phase 85 SYNTH-06 (v7.11): `true` iff the resolved row is a Phase-85 synthetic libraries.csv entry. Top-level (NOT nested under `locator`); additive — schema_version stays 1. When `true`, `metadata.nli` will typically be `null` and the image will fall back to CUDL when available. |
 | `shelfmark` | string | canonical shelfmark |
 | `title` | string | manuscript title |
-| `library_code` | string | e.g. `CUL`, `JTS`, `Oxford` |
-| `library_name` | string | full library name |
+| `library` | object | `{code, name}` — e.g. `{"code": "CUL", "name": "Cambridge University Library"}`. Documented as two FLAT keys `library_code`/`library_name` until 2026-09-08; the endpoint has only ever returned the nested object |
 | `text` | string | transcription, capped at effective `text_cap` |
 | `text_source` | enum | see below |
-| `text_truncated` | bool | `true` when `text` was clipped to `text_cap` |
+| `text_truncated` | bool | `true` when `text` was clipped to `text_cap`. The same event also appends a `transcription_truncated` entry to `warnings[]` — two channels, one fact |
 | `metadata.pgp` | object \| null | PGP enrichment; `null` on per-source failure |
 | `metadata.fjms` | object \| null | FJMS enrichment; `null` on per-source failure |
 | `metadata.nli` | object \| null | NLI enrichment; `null` on per-source failure |
@@ -485,7 +567,7 @@ mode is `mode`, NOT `search_mode` — see "Naming Inconsistency" below.
 
 | Name | Type | Constraint | Default | Notes |
 | ---- | ---- | ---------- | ------- | ----- |
-| `text` | string \| null | 1..20000 chars (post-strip; `COMPOSITION_LENGTH_CAP=20000`; empty → `composition_required`; over cap → `composition_too_long`) | required *unless* `witnesses` is sent | Omit it ONLY when sending `witnesses` instead. Sending both → 400 `witnesses_and_text_conflict`; sending neither → 400 `invalid_request` (unchanged). |
+| `text` | string \| null | 1..20000 chars (post-strip; `COMPOSITION_LENGTH_CAP=20000`; empty → `composition_required`; over cap → `composition_too_long`) | required *unless* `witnesses` is sent | Omit it ONLY when sending `witnesses` instead. Sending both → 400 `witnesses_and_text_conflict`; sending neither → 400 `composition_required`. |
 | `chunk_size` | integer | `2..20` | `5` | size of sliding chunks |
 | `mode` | enum | `exact \| variants \| fuzzy` | `"exact"` | **field name is `mode`, not `search_mode`** — see "Naming Inconsistency" |
 | `max_freq` | float \| null | `>= 1`. A **document count**, not a ratio: a chunk matching more than `max_freq` documents is treated as too common. `null` disables high-frequency filtering | `null` | **Effective range is `[1, 50)`.** The engine tests `len(hits) > max_freq` against a per-chunk retrieval hard-capped at 50 hits, so any `max_freq >= 50` can never fire and behaves exactly like `null`. It is therefore not a corpus frequency: it counts hits inside a truncated top-50 and cannot tell a chunk in 51 manuscripts from one in 5,000. A value below 1 would discard every chunk that matches anything, so such values are rejected with `invalid_request` rather than silently returning an empty result set. Documented as a `0.0-1.0` ratio until 2026-08-24 — the docs were wrong, not the code |
@@ -639,8 +721,12 @@ the two apart from the envelope shape alone.
   (`library_filter_mode="exclude"`) is a no-op for passage and is NOT rejected.
 - **Display name.** The web GUI presents this method as “Letter-level search” (owner naming, 2026-08-23) and selects it by default when the index is available; `method='passage'` remains the stable wire value — API clients should never parse display names.
 - **Span-shaped `matches[]`.** Each accepted contiguous span of matched text on a manuscript
-  page is one `matches[]` entry (`chunk_count` = number of spans, unlike the incumbent's
-  Tantivy-hit-derived count; `chunk_index` is the ordinal of the span's position within the
+  page is one `matches[]` entry, so the number of spans is `len(item["matches"])` — there is
+  **no `chunk_count` field in the response** on either method (it exists inside the engine
+  and is not serialized; documented as a response field here until 2026-09-08). Unlike the
+  incumbent's Tantivy-hit-derived count, one entry is one accepted span. Each entry is
+  exactly `{chunk_index, source_chunk_text, manuscript_snippet, score}`;
+  `chunk_index` is the ordinal of the span's position within the
   submitted `text`, comparable across different matched manuscripts the same way the
   `chunk` engine's sliding-window index is). `score` is the span's matched-letter count,
   not a Tantivy relevance score — and it is **NOT comparable to the `chunk` engine's
@@ -669,10 +755,14 @@ the two apart from the envelope shape alone.
 - **Multi-witness.** One work can be searched with several of its witnesses at once — see
   the next section.
 - **Filtering.** `filters` (domains/authors/works/materials/dates/other libraries) applies as
-  a plain sys_id restriction, same as `chunk`. `filtered[]` is always `[]` via the public API
-  specifically: `filter_text` (the "known source text" a row's match can be checked against,
-  routing it to `filtered` rather than `results[]`) is a web-page-only concept (the page's
-  "Filter Sources" panel) that this endpoint never populates. A row whose display-text lookup
+  a plain sys_id restriction, same as `chunk`. `filter_text` (the "known source text" a row's
+  match can be checked against, routing it to `filtered` rather than `results[]`) is a
+  web-page-only concept (the page's "Filter Sources" panel) that this endpoint never
+  populates — but `filtered[]` is **not** therefore always `[]`, as this section claimed
+  until 2026-09-08. The mandatory post-verify duplicate-photography pass DEMOTES rows into
+  `filtered[]` (each carrying `filter_reason: "duplicate_photography"`) rather than dropping
+  them, so a skeptical reader can still inspect what was set aside; the count ships in a
+  `duplicate_photography_demoted` warning. A row whose display-text lookup
   fails is DROPPED (never returned in either bucket) and counted in a `passage_text_lookup_
   failed` warning (see Warnings Array) rather than coming back with blank text.
 - **Timeout.** Its own ceiling, `SEARCH_API_PASSAGE_TIMEOUT` (default 30s; see Environment
@@ -698,10 +788,9 @@ the two apart from the envelope shape alone.
       "locator": {
         "sys_id": "990001234560205171",
         "volume_ie": "IE12345",
-        "p_num": 3,
-        "fl_id": "FL999"
+        "p_num": "3"
       },
-      "aggregate_score": 8.42,
+      "score": 8.42,
       "matches": [
         {
           "chunk_index": 0,
@@ -740,13 +829,32 @@ threshold but are still reported back to the client for transparency.
 ### 200-group cap and `truncated_to_200` warning
 
 The response is hard-capped at 200 result groups (Phase 80 D-07). When a query produces
-more than 200 groups, the top 200 are returned and a `{"code": "truncated_to_200", ...}`
-entry is added to `warnings[]`.
+more than 200 groups, the top 200 are returned and the **bare string** `"truncated_to_200"`
+is appended to `warnings[]` — not an object. This section described it as
+`{"code": "truncated_to_200", ...}` until 2026-09-08, contradicting the Warnings Array
+table, which had it right.
 
-### 7-key request echo
+**`warnings[]` is a mixed-type array.** Most entries are objects with a `code` key, but
+`truncated_to_200` and `query_downgraded: <message>` are plain strings. A client must
+therefore type-check each entry — `w["code"]` over this array raises `TypeError` on the
+string entries. See the Warnings Array table, which marks the shape of every code.
 
-The parallels response echoes exactly seven keys (no more, no fewer; six before Phase 145
-added `method`). Explicitly NOT echoed: `search_mode` (parallels uses `mode`), `gap` (a
+### Request echo: 7 keys for `chunk`, 9 for `passage`, 11 with witnesses
+
+The key COUNT is method-dependent — this section claimed a flat "exactly seven keys (no
+more, no fewer)" until 2026-09-08, which was true only for `method='chunk'`:
+
+| Configuration | Keys | Added |
+| ------------- | ---- | ----- |
+| `method='chunk'` (default) | **7** | — the byte-for-byte stable shape; unchanged since Phase 145 added `method` to the original six |
+| `method='passage'`, no witnesses | **9** | `passage_policy`, `passage_report` |
+| `method='passage'` with `witnesses[]` | **11** | `passage_policy`, `passage_report`, `witnesses`, `sort` |
+
+Both passage keys are added together in one branch, so 8 is not a reachable count (the
+source comments in `web/search_api.py` said "8-key" until 2026-09-08 and undercounted by
+one). A `chunk` caller's echo is untouched by any of this.
+
+Explicitly NOT echoed on any path: `search_mode` (parallels uses `mode`), `gap` (a
 search-only concept), `responsa_options` (parallels never used Responsa).
 
 | Echo key | Source | Notes |
@@ -756,8 +864,12 @@ search-only concept), `responsa_options` (parallels never used Responsa).
 | `max_freq` | `req.max_freq` | `null` permitted |
 | `boundary_options` | server-resolved 5-key dict (`boundary_mode`, `boundary_delimiter`, `boundary_boost`, `min_boundary_matches`, `min_delimiter_distance`) | includes service-layer defaults |
 | `method` | `req.method` | Phase 145; `"chunk"` when omitted — always present, so a caller never has to guess which engine served the response |
-| `limit_effective` | `len(bundle.main_results)` | post-truncation group count |
+| `limit_effective` | `len(bundle.main_results)` | post-cap **ROW** count — the raw chunk-hit rows behind the ≤200 kept groups. It is NOT the group count (which is `count`/`total`) and is normally LARGER: a live response showed `limit_effective: 183` with `count: 108`. Described as a group count here until 2026-09-08 |
 | `filters` | model-dumped `FiltersModel` (exclude_none) or `null` | |
+| `passage_policy` | resolved passage policy | `method='passage'` ONLY (a present key, not a null value). The knobs that ACTUALLY drove the search (`policy_id`, `min_span`, `regime`, `posting_budget`, …); `mode`/`chunk_size`/`max_freq`/`boundary_options` are nulled out on this path because the passage engine never reads them |
+| `passage_report` | `QueryReport.as_dict()` | `method='passage'` ONLY. Budget/truncation accounting (postings, candidates, verify counts) for evaluation consumers who need more than the truncated-or-not warning. Undocumented in this file until 2026-09-08 |
+| `witnesses` | `{requested, searched, labels[]}` | only when `witnesses[]` was sent. Counts and LABELS only — a witness's text is never echoed back |
+| `sort` | `req.sort or "fused"` | only when `witnesses[]` was sent; echoes what was ASKED for (see the `sort_not_applied` warning for what was done) |
 
 ## Endpoint: GET /api/capabilities
 
@@ -835,7 +947,7 @@ curl -s https://genizahsearch.com/api/capabilities | python -m json.tool
 | Field | Meaning |
 | ----- | ------- |
 | `schema_version` | Always `1` — this endpoint is an additive change under the Stability commitment above, so adding it does not move the version. |
-| `request` | Always `{}`. Kept for envelope uniformity with the other three endpoints, which echo their input here; this endpoint takes none. |
+| `request` | Always `{}`. Present for uniformity with `/search` and `/parallels`, which carry an effective-request echo here; `/browse` has no `request` key (it uses `locator`). This endpoint takes no input, so there is nothing to echo. |
 | `api_version` | The site release this deployment is running (`version.py::APP_VERSION`), read live — NOT a hardcoded string, and NOT the same thing as `schema_version`. |
 | `endpoints` | The four public paths as absolute `/api/...` strings — what a client actually calls, regardless of what path prefix this router happens to be mounted under. |
 | `search_modes` | The live `search_mode` enum accepted by `POST /api/search`, in the order documented above. |
@@ -864,9 +976,11 @@ parallels enum is a different set of values (`exact | variants | fuzzy`) than th
 enum (`exact | variants | responsa | title | shelfmark | fuzzy`). Future versions may unify the
 field name; consumers should code defensively against both names.
 
-The two enums share only `exact` and `variants`. A consumer must use the correct field
-name per endpoint and must not assume value-set equivalence (`responsa`/`title`/`shelfmark`
-exist only in `/api/search`; `fuzzy` exists only in `/api/parallels`).
+The two enums share `exact`, `variants` and `fuzzy`. A consumer must use the correct field
+name per endpoint and must not assume value-set equivalence: `responsa`/`title`/`shelfmark`
+exist only in `/api/search`, and no value exists only in `/api/parallels`. (This paragraph
+said the enums "share only `exact` and `variants`" and that `fuzzy` was parallels-only
+until 2026-09-08 — contradicting the two enum lists immediately above it.)
 
 ## Drill-Down Locator Round-Trip
 
@@ -876,10 +990,14 @@ The `locator` field on `/api/search` and `/api/parallels` result items is shaped
 {
   "sys_id": "990001234560205171",
   "volume_ie": "IE12345",
-  "p_num": 3,
-  "fl_id": "FL999"
+  "p_num": "3"
 }
 ```
+
+Three keys, and `p_num` is a string. **`fl_id` is not one of them** — it appears only on
+`/api/browse`'s locator (which does return five keys, `p_num` there being an int) and as a
+browse QUERY parameter. This block showed a 4-key locator with an integer `p_num` until
+2026-09-08, which is why the round-trip below deliberately uses `uid` rather than `fl_id`.
 
 …and each result item also carries a top-level `uid: "IE{N}_P{M}_FL{K}"` when resolvable.
 
@@ -932,6 +1050,18 @@ Properties:
   endpoints (Phase 78 Concern #2 — handlers wrap their own bodies; no global exception
   handlers installed).
 - HTTP 429 carries a `Retry-After: <seconds>` header alongside the `rate_limited` body.
+- **A structural validation failure adds a third key.** When the body fails Pydantic
+  validation outright (unknown top-level field, wrong type, bad `Literal`), the envelope
+  carries `fields` alongside `code` and `message` — a list of the offending dotted paths.
+  A live example, from `POST /api/parallels` with an unrecognized `limit` key:
+  `{"error": {"code": "invalid_request", "message": "Extra inputs are not permitted",
+  "fields": ["limit"]}}`. Treat `fields` as present-sometimes.
+- **Two failures never reach the envelope at all,** because they are decided before any
+  handler runs. Using the wrong HTTP method returns Starlette's own
+  `{"detail": "Method Not Allowed"}` with status 405 — `/api/search` and `/api/parallels`
+  are POST-only, `/api/browse` and `/api/capabilities` GET-only — and an edge proxy
+  timing out in front of the deployment returns whatever that proxy serves (see
+  "Edge-Timeout Ceiling"). Branch on the HTTP status BEFORE parsing the body.
 
 ## Error Codes
 
@@ -989,6 +1119,9 @@ outcome, or a per-source enrichment soft failure — none of which are item-scop
 | `passage_text_lookup_failed` | parallels (`method='passage'`) | one or more matched rows were DROPPED (never returned in `results[]`/`filtered[]`) because their display-text lookup failed -- never a silently blank row. Object-shaped (not a bare string, unlike `truncated_to_200`): `{"code": "passage_text_lookup_failed", "count": N}`. |
 | `witness_ref_unresolved` | parallels (`witnesses`) | one or more witnesses were SKIPPED because their `raw_header` did not resolve, or resolved to a page over the length cap. Object-shaped: `{"code": "witness_ref_unresolved", "count": N, "witnesses": [{"id", "label", "reason"}]}` where `reason` is `not_found` \| `bad_ref` \| `empty` \| `too_long`. The other witnesses still ran. |
 | `witness_duplicate_skipped` | parallels (`witnesses`) | an entry resolved to text an earlier witness had already supplied, and was skipped rather than searched again. Deduplication is on the RESOLVED TEXT, so it also catches two different `raw_header`s naming the same page, and a `text` identical to a resolved reference. Searching it would spend a witness slot to re-derive rows already in hand and then count them twice — `fuse()` counts contributors positionally, so the same witness supplied twice inflates `witness_count` and `fusion_score` and reorders results. Object-shaped: `{"code": "witness_duplicate_skipped", "count": N, "witnesses": [{"id": "...", "label": "...", "duplicate_of": "..."}]}`. NOT reported as `witness_ref_unresolved` — it resolved. |
+| `passage_results_truncated` | parallels (`method='passage'`) | the candidate pool or the verify pass hit its budget, so the result set is not exhaustive. Object-shaped and self-describing: `{"code": "passage_results_truncated", "candidates_truncated": bool, "verify_truncated": bool, "verified": N, "candidates": N}`. Undocumented in this table until 2026-09-08 |
+| `duplicate_photography_demoted` | parallels (`method='passage'`) | N rows were moved from `results[]` to `filtered[]` because they appear to photograph the same physical page as a higher-scoring row. Object-shaped: `{"code": "duplicate_photography_demoted", "count": N}`. Demoted, never deleted — the rows are in `filtered[]` with `filter_reason: "duplicate_photography"`. Undocumented until 2026-09-08 |
+| `transcription_truncated` | browse | the transcription was clipped to the effective `text_cap`; emitted whenever the top-level `text_truncated` flag is `true`, so the same fact reaches you through both channels. Object-shaped: `{"code": "transcription_truncated", "message": "..."}`. Undocumented until 2026-09-08 |
 | `sort_not_applied` | parallels (`witnesses`) | fewer than two witnesses resolved, so no fusion happened and there is nothing for `fused` / `witness_count` to order by. The array is ordered by score. Object-shaped: `{"code": "sort_not_applied", "sort": "...", "reason": "..."}`. `request.sort` still echoes what was **asked for** — the echo reflects the request, this warning reports what was done. |
 
 **Worked Responsa cascade case.** A `/api/search` response showing both signals
@@ -996,9 +1129,7 @@ simultaneously:
 
 ```json
 {
-  "warnings": [
-    {"code": "query_downgraded", "message": "Judeo-Arabic expansion disabled for this query."}
-  ],
+  "warnings": ["query_downgraded: Judeo-Arabic expansion disabled for this query."],
   "request": {
     "search_mode": "responsa",
     "responsa_options":           {"variants": true, "ja": true,  "flex_spacing": false, "bidirectional": false},
@@ -1217,6 +1348,80 @@ number, and a request that would have taken between 110s and 300s (none were obs
 this measurement) would now time out where it previously would have succeeded — no such
 case is known to exist today, but the document should not claim the ceiling change is
 consequence-free, only that it does not meet this contract's own definition of breaking.
+
+**(d) Response-shape accuracy sweep (documentation only).**
+No API change. Every response example and field table in this file was compared
+against the live serializers and against real production responses, and 26 corrections
+were applied. The endpoint REFERENCE sections had drifted further than the Quick Start
+examples repaired earlier the same day, and in the same direction: they described an
+envelope the code has never produced.
+
+**Fields that did not exist** (a client following the doc got a `KeyError` on first
+contact, not a `null`):
+
+- `/api/search` and `/api/parallels` result `locator` was documented with a fourth key,
+  `fl_id`. It has exactly three: `{sys_id, volume_ie, p_num}`. `fl_id` belongs only to
+  `/api/browse`'s locator. The Drill-Down Locator Round-Trip section — the part of this
+  document most likely to be copied verbatim — carried the same error.
+- `/api/search` result items were documented with a nested `metadata` object holding
+  `library`/`library_name`/`domains`/`dating`. There is no `metadata` key on a result
+  item; `library` (an OBJECT, `{code, name}`), `domains` and `dating` are top-level.
+- `/api/parallels` result items were documented with `aggregate_score`. That is an
+  internal group sort key, consumed into `sort_score`, never serialized under that name.
+  The field is `score`.
+- `/api/browse` was documented with flat `library_code` / `library_name`. It returns
+  `library: {code, name}`.
+- `method='passage'` was documented as returning a `chunk_count` field. It does not;
+  the span count is `len(item["matches"])`.
+
+**Sub-objects whose every key was wrong.** `/api/browse`'s `metadata.pgp` was documented
+as `{pgpid, description, editions, translations}` (it has ten keys, and neither
+`editions` nor `translations` is among them); `metadata.fjms` as
+`{catalog_records, free_descriptions, bibliography}` (it is
+`{source_names, has_measurements, has_visual_suggestions}`); `metadata.nli` as
+`{manifest_url, fl_index}` (it is `{physical_metadata, folio}`); and `image.sources` as a
+list of provider-name strings (it is a list of objects).
+
+**Wrong types and value domains.** `locator.p_num` is a STRING on `/api/search` and
+`/api/parallels` (an int on `/api/browse`) and was documented as an int on all three.
+`image_url` / `image.url` are server-relative same-origin proxy paths, not the absolute
+upstream IIIF URLs the examples showed. `image.provider` is a lowercase provider code.
+
+**`warnings[]` is a mixed-type array, which this document only half-admitted.** Most
+entries are objects with a `code` key, but `truncated_to_200` and
+`query_downgraded: <message>` are plain strings. The Warnings Array table had this right;
+the 200-group-cap section and both worked examples showed the object form, so a client
+written from either would raise `TypeError` reading `w["code"]`. Three emitted warning
+codes were missing from the table entirely: `passage_results_truncated`,
+`duplicate_photography_demoted`, and `transcription_truncated`.
+
+**Claims that contradicted the code or this file itself.** `/api/parallels`' request echo
+is 7 keys only for `method='chunk'` — it is 9 for `passage` (`passage_policy` and
+`passage_report`, the latter undocumented until now) and 11 with `witnesses[]`, where this
+section had asserted "exactly seven keys (no more, no fewer)". `count` and `total` are
+ALWAYS equal on `/api/parallels` (both assigned from one expression), and a Quick Start
+example showed them differing. `request.limit_effective` is a ROW count, not the
+"post-truncation group count" claimed here — a live response returns 183 against a `count`
+of 108; the wrong description originated in a source comment, now also corrected.
+`filtered[]` was said to be always `[]` for `method='passage'`; the mandatory
+duplicate-photography pass demotes rows into it. The two `mode` enums were said to share
+only `exact` and `variants` two lines after both were listed as including `fuzzy`. Sending
+neither `text` nor `witnesses` returns `composition_required`, not `invalid_request`.
+
+**Two things that are not this envelope at all**, now documented: a Pydantic structural
+failure adds a `fields` array to the error object, and a wrong HTTP method never reaches a
+handler — `GET /api/search` returns Starlette's `{"detail": "Method Not Allowed"}` at 405.
+
+**`/api/capabilities` carries no `source` key**, so the envelope guarantee added earlier
+the same day ("every successful response carries `schema_version` and `source`") was false
+for the endpoint added in the same commit. The fixed-shape descriptor is deliberate and
+pinned by test; the guarantee is now scoped to the three data endpoints.
+
+**Prevention.** The gate introduced with the Quick Start repair read only the Quick Start,
+which is why these sections survived it. It now locates every response example in this
+file by an explicit anchor — 7 examples across all four endpoints — compares each against
+a real response body, and fails if any fenced JSON block is neither checked nor recorded
+as exempt. Pointed at the pre-repair text it reports every error listed above.
 
 ### v7.11 (Phase 85 — SYNTH-06) — Synthetic-row API field (additive)
 
