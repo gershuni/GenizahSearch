@@ -528,10 +528,23 @@ def _load_from(tmp_path, monkeypatch) -> bool:
     return da.load_discovery_state()
 
 
+# The module state as it was before this file ran anything. Captured once,
+# at import, so `_restore_loader_state()` can put back an OBJECT instead of
+# re-validating the real sidecar from disk. `_state` is replaced wholesale
+# under `_lock` (web/discovery_assets.py:830-832), so a rebind IS the
+# documented restore -- and it cannot pick up a different artifact than the
+# one this module started with, which a reload can.
+_PRISTINE_STATE = da._state
+
+
 def _restore_loader_state():
-    # The monkeypatched dir is undone by pytest; re-load so module state never
-    # leaks a tmp asset into later tests (mirrors test_discovery_loader.py).
-    da.load_discovery_state()
+    # The monkeypatched dir is undone by pytest; put the module state back so
+    # it never leaks a tmp asset into later tests (mirrors
+    # test_discovery_loader.py). This used to call load_discovery_state(),
+    # which re-hashes the real sidecar and runs PRAGMA integrity_check on it
+    # once per test -- 317 s in this file alone (measured 2026-09-09).
+    with da._lock:
+        da._state = _PRISTINE_STATE
 
 
 def test_loader_accepts_the_full_cd_batch_shape(tmp_path, monkeypatch):

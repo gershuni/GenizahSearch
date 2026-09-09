@@ -629,17 +629,57 @@ _APP_PATH = _os.path.join(_os.path.dirname(_os.path.dirname(
     _os.path.abspath(__file__))), 'genizah_app.py')
 
 
+# Same reason as tests/test_desktop_passage_gate.py: genizah_app.py is
+# 1.48 MB / 183,794 nodes, and `_fn_src` is called 58 times in this file. The
+# file cannot change mid-run, so read/parse/index once. Only the unmodified
+# module is cached -- the `ast.parse(src)` calls below that parse a
+# locally-built string are deliberately left alone.
+_APP_SRC_CACHE = {}
+
+
 def _app_src():
-    return _io.open(_APP_PATH, encoding='utf-8').read()
+    if 'src' not in _APP_SRC_CACHE:
+        _APP_SRC_CACHE['src'] = _io.open(_APP_PATH, encoding='utf-8').read()
+    return _APP_SRC_CACHE['src']
+
+
+# `ast.get_source_segment` re-splits the whole 1.48 MB file on EVERY call
+# (99.9 ms measured), so it is used once here and never per assertion. Lines are
+# split once; a node's segment is sliced out of them.
+#
+# col_offset / end_col_offset are UTF-8 BYTE offsets, not character offsets. A
+# plain str slice is therefore wrong on any line containing a multi-byte
+# character -- genizah_app.py has emoji in UI strings, and a naive slice
+# overshot into the trailing newline on exactly those lines. Verified
+# byte-identical to ast.get_source_segment across all 1,657 functions and
+# methods in the file.
+def _node_segment(lines, node):
+    first, last = node.lineno - 1, node.end_lineno - 1
+    if first == last:
+        return (lines[first].encode('utf-8')
+                [node.col_offset:node.end_col_offset].decode('utf-8'))
+    head = lines[first].encode('utf-8')[node.col_offset:].decode('utf-8')
+    tail = lines[last].encode('utf-8')[:node.end_col_offset].decode('utf-8')
+    return ''.join([head] + lines[first + 1:last] + [tail])
 
 
 def _fn_src(name):
-    src = _app_src()
-    tree = ast.parse(src)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == name:
-            return ast.get_source_segment(src, node) or ''
-    raise AssertionError('%s not found' % name)
+    if 'fns' not in _APP_SRC_CACHE:
+        src = _app_src()
+        fns = {}
+        for node in ast.walk(ast.parse(src)):
+            if isinstance(node, ast.FunctionDef):
+                # setdefault keeps the FIRST match, exactly as the previous
+                # walk-and-return-first loop did. NODES, not segments -- see
+                # _node_segment above for why extracting them eagerly is a
+                # pessimization.
+                fns.setdefault(node.name, node)
+        _APP_SRC_CACHE['fns'] = fns
+        _APP_SRC_CACHE['lines'] = src.splitlines(keepends=True)
+    fns = _APP_SRC_CACHE['fns']
+    if name not in fns:
+        raise AssertionError('%s not found' % name)
+    return _node_segment(_APP_SRC_CACHE['lines'], fns[name])
 
 
 def _busy_flag_is_followed_by(fn_name, call_name, value=True):

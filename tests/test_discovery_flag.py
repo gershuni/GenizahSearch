@@ -30,8 +30,16 @@ FIXTURE_MANIFEST = FIXTURE_DIR / "manifest.json"
 
 @pytest.fixture(autouse=True)
 def _restore_state():
+    prev = da._state
     yield
-    da.load_discovery_state()
+    # Restore the exact state this test found, rather than re-validating the
+    # real sidecar from disk (hash + PRAGMA integrity_check) just to undo a
+    # monkeypatched directory. `_state` is replaced wholesale under `_lock`
+    # (web/discovery_assets.py:830-832), so rebinding it IS the documented
+    # restore -- and it cannot pick up a different artifact than the one the
+    # test started with, which a reload can.
+    with da._lock:
+        da._state = prev
 
 
 def test_flag_off_hides(tmp_path, monkeypatch):

@@ -4,8 +4,9 @@
 A gate nobody has watched fail is not a gate. Reading
 `scripts/verify_v3_review_offsets.py` cannot tell you whether it would notice a
 bad offset; only putting a bad offset in front of it can. So each test here
-copies a real review DB, breaks exactly one stored coordinate, runs the verifier
-AS A PROCESS, and asserts a non-zero exit.
+breaks exactly one stored coordinate, runs the verifier AS A PROCESS, and
+asserts both a non-zero exit AND the specific diagnostic for the row and side it
+broke -- a bare non-zero exit could be an unrelated crash.
 
 The mutations are chosen to defeat the two ways such a check goes vacuous:
 
@@ -23,9 +24,27 @@ The mutations are chosen to defeat the two ways such a check goes vacuous:
 guard: if the verifier ever starts calling the builder's mapping helpers, a bug
 in the map would confirm itself and every test above would still pass.
 
-These need a built review DB; they skip when none is present, and the M-source
-mutations additionally need the local key file (the restricted paths live only
-there, by design).
+WHY THESE RUN AGAINST A FIXTURE (changed 2026-09-09)
+----------------------------------------------------
+They used to copy the real `discovery-v5-REVIEW.db` -- 3.45 GB, 519,382 rows --
+once per mutation and verify every row of it. Measured: 3,396 seconds for six
+tests, **66.5% of the whole non-GUI suite's module time**, and paid entirely by
+the owner: the file is `skipif(DB is None)`, so CI (which has no review DB)
+skipped it for free while the one machine with the data spent 57 minutes on it
+every run.
+
+The mutation matrix now runs against `tests/review_offsets_fixture.py`, whose
+expected coordinates are hand-specified and independent of both the builder and
+the verifier. Same verifier, same subprocess, same exit-code assertions, same
+three mutation classes -- about a second instead of 57 minutes.
+
+**This is a cadence change, not a free lunch, and the boundary matters:** a small
+mutation matrix proves the verifier REJECTS bad coordinates. It does not prove
+the 519,382 production rows are right. That check did not go away -- it moved to
+`test_the_real_review_artifact_verifies_clean` below (marked `slow`, so it is
+deselected from routine runs but still runnable here) and, for real enforcement,
+to `scripts/verify_review_artifact.py`, which FAILS on missing data instead of
+skipping and is meant to run nightly and before any artifact is promoted.
 """
 from __future__ import annotations
 
@@ -38,6 +57,8 @@ import subprocess
 import sys
 
 import pytest
+
+from tests.review_offsets_fixture import build as build_fixture
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VERIFIER = os.path.join(REPO, "scripts", "verify_v3_review_offsets.py")
@@ -77,15 +98,60 @@ DB = _find_db()
 needs_db = pytest.mark.skipif(DB is None,
                               reason="no schema-v2 review DB with offsets built")
 
+# The `slow` marker alone does NOT deselect anything here: pyproject.toml
+# deliberately leaves the default selection unfiltered, and CI's own `tests` job
+# runs `-m "not gui and not render_smoke and not atlas_bake"` -- `slow` is not in
+# that list. Verified by running it: `pytest tests/test_verify_v3_review_offsets.py`
+# still spent >10 minutes in the real-data test. So the expensive check carries an
+# EXPLICIT opt-in as well, and `scripts/verify_review_artifact.py` is what sets it.
+_REAL_OPT_IN = "GENIZAH_VERIFY_REAL_ARTIFACT"
+needs_opt_in = pytest.mark.skipif(
+    os.environ.get(_REAL_OPT_IN) != "1",
+    reason="set %s=1 (or run scripts/verify_review_artifact.py) to verify the "
+           "real 3.45 GB artifact; it takes ~9.5 minutes" % _REAL_OPT_IN)
 
-def _run(db):
+
+# ---------------------------------------------------------------------------
+# The fixture the fast mutation matrix runs against
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def fixture_db(tmp_path_factory):
+    """A few rows over a few characters, built once for this module."""
+    return build_fixture(tmp_path_factory.mktemp("review_offsets"))
+
+
+def _run(db, sourcekeys=None, corpus=None):
+    """Run the verifier AS A PROCESS -- the exit code is the thing under test."""
     env = dict(os.environ)
     env.setdefault("PYTHONUTF8", "1")
     cmd = [sys.executable, "-X", "utf8", VERIFIER, "--db", db, "--all"]
-    if os.path.exists(KEYS):
+    if sourcekeys:
+        cmd += ["--sourcekeys", sourcekeys]
+    elif os.path.exists(KEYS):
         cmd += ["--sourcekeys", KEYS]
+    if corpus:
+        cmd += ["--corpus-file", corpus]
     return subprocess.run(cmd, capture_output=True, text=True, env=env,
                           encoding="utf-8", errors="replace")
+
+
+def _run_fixture(fx, db=None):
+    return _run(db or fx["db"], sourcekeys=fx["sourcekeys"], corpus=fx["corpus"])
+
+
+def _mutated(fx, tmp_path, name, *statements):
+    """A disposable copy of the fixture DB with `statements` applied."""
+    dst = str(tmp_path / name)
+    shutil.copy(fx["db"], dst)
+    con = sqlite3.connect(dst)
+    for sql, params in statements:
+        cur = con.execute(sql, params)
+        assert cur.rowcount > 0, (
+            "mutation changed no rows -- it would prove nothing: %s" % sql)
+    con.commit()
+    con.close()
+    return dst
 
 
 def _masked_witness_rows(con):
@@ -102,46 +168,67 @@ def _masked_witness_rows(con):
         ORDER BY r.evidence_id LIMIT 40""").fetchall()
 
 
-@needs_db
-def test_it_passes_on_the_unmutated_db():
-    """Baseline: the check is green before anything is broken. Without this the
-    failures below could just mean the verifier is broken."""
-    res = _run(DB)
+# ---------------------------------------------------------------------------
+# Baseline -- without this, every failure below could just mean a broken
+# verifier or a broken fixture rather than a detected mutation.
+# ---------------------------------------------------------------------------
+
+def test_it_passes_on_the_unmutated_fixture(fixture_db):
+    res = _run_fixture(fixture_db)
     assert res.returncode == 0, res.stdout[-4000:] + res.stderr[-2000:]
     assert "TOTAL FAILURES: 0" in res.stdout
+    # Not vacuous: it must actually have examined rows on BOTH sides. A
+    # verifier that checked nothing would also report zero failures.
+    assert "reference side: 2 checked, 2 ok" in res.stdout, res.stdout
+    assert "manuscript side: 2 ok, 0 bad" in res.stdout, res.stdout
 
 
-@needs_db
-def test_it_fails_when_a_start_lands_on_another_retained_letter(tmp_path):
-    if not os.path.exists(KEYS):
-        pytest.skip("restricted-source key file absent; cannot resolve M/RS")
-    dst = str(tmp_path / "mutated.db")
-    shutil.copy(DB, dst)
-    con = sqlite3.connect(dst)
+def test_the_fixture_offsets_are_what_the_layout_says():
+    """Guards the fixture itself, independently of the verifier.
+
+    If this file's hand-written character table and the DB it builds ever drift
+    apart, every mutation test above starts measuring the drift instead of the
+    verifier.
+    """
+    from tests import review_offsets_fixture as fx
+    # 'בגד' is stream[1:4]; the stream begins at character 10, so [11, 14).
+    assert fx.expected_ref_offsets(1, 4) == (11, 14)
+    assert fx.SOURCE_TEXT[11:14] == "בגד"
+    # The manuscript spans must slice the corpus text to exactly ms_match.
+    assert fx.CORPUS_TEXT[10:15] == "אבגדה"
+    assert fx.CORPUS_TEXT[20:25] == "וזחטי"
+
+
+# ---------------------------------------------------------------------------
+# The three mutation classes
+# ---------------------------------------------------------------------------
+
+def test_it_fails_when_a_start_lands_on_another_retained_letter(
+        fixture_db, tmp_path):
+    con = sqlite3.connect(fixture_db["db"])
     rows = _masked_witness_rows(con)
-    if not rows:
-        pytest.skip("no transformed-corpus rows in this DB")
-    eid, a, b, _ = rows[0]
-    # b-1 IS a retained letter position (ref_char_end == pos[last]+1).
-    con.execute("UPDATE review_row SET ref_char_start=? WHERE evidence_id=?",
-                (b - 1, eid))
-    con.commit()
     con.close()
-    res = _run(dst)
+    assert rows, "fixture lost its transformed-corpus rows"
+    eid, _a, b, _w = rows[0]
+    # b-1 IS a retained letter position (ref_char_end == pos[last]+1).
+    dst = _mutated(fixture_db, tmp_path, "mutated.db",
+                   ("UPDATE review_row SET ref_char_start=? WHERE evidence_id=?",
+                    (b - 1, eid)))
+    res = _run_fixture(fixture_db, dst)
     assert res.returncode != 0, (
         "a start moved onto a different retained letter went UNDETECTED:\n"
         + res.stdout[-4000:])
     assert "TOTAL FAILURES: 0" not in res.stdout
+    # The RIGHT failure, on the right row -- a non-zero exit alone could be an
+    # unrelated crash.
+    assert "!= oracle" in res.stdout, res.stdout[-2000:]
+    assert eid[:16] in res.stdout, res.stdout[-2000:]
 
 
-@needs_db
-def test_it_fails_when_two_rows_swap_their_loci(tmp_path):
-    if not os.path.exists(KEYS):
-        pytest.skip("restricted-source key file absent; cannot resolve M/RS")
-    dst = str(tmp_path / "swapped.db")
-    shutil.copy(DB, dst)
-    con = sqlite3.connect(dst)
+def test_it_fails_when_two_rows_swap_their_loci(fixture_db, tmp_path):
+    con = sqlite3.connect(fixture_db["db"])
     rows = _masked_witness_rows(con)
+    con.close()
     pair = None
     for i in range(len(rows)):
         for j in range(i + 1, len(rows)):
@@ -150,40 +237,43 @@ def test_it_fails_when_two_rows_swap_their_loci(tmp_path):
                 break
         if pair:
             break
-    if pair is None:
-        pytest.skip("no two same-witness rows to swap in this DB")
+    assert pair is not None, "fixture lost its same-witness pair to swap"
     (e1, a1, b1, _), (e2, a2, b2, _) = pair
-    con.execute("UPDATE review_row SET ref_char_start=?, ref_char_end=? "
-                "WHERE evidence_id=?", (a2, b2, e1))
-    con.execute("UPDATE review_row SET ref_char_start=?, ref_char_end=? "
-                "WHERE evidence_id=?", (a1, b1, e2))
-    con.commit()
-    con.close()
-    res = _run(dst)
+    dst = _mutated(
+        fixture_db, tmp_path, "swapped.db",
+        ("UPDATE review_row SET ref_char_start=?, ref_char_end=? "
+         "WHERE evidence_id=?", (a2, b2, e1)),
+        ("UPDATE review_row SET ref_char_start=?, ref_char_end=? "
+         "WHERE evidence_id=?", (a1, b1, e2)))
+    res = _run_fixture(fixture_db, dst)
     assert res.returncode != 0, (
         "two rows pointing at each other's passage went UNDETECTED:\n"
         + res.stdout[-4000:])
+    assert "!= oracle" in res.stdout, res.stdout[-2000:]
 
 
-@needs_db
-def test_it_fails_when_a_manuscript_offset_moves(tmp_path):
-    dst = str(tmp_path / "ms.db")
-    shutil.copy(DB, dst)
-    con = sqlite3.connect(dst)
+def test_it_fails_when_a_manuscript_offset_moves(fixture_db, tmp_path):
+    con = sqlite3.connect(fixture_db["db"])
     row = con.execute(
         "SELECT evidence_id, file_char_start FROM review_row "
         "WHERE ms_provenance_status='ok' AND file_char_start IS NOT NULL "
         "ORDER BY evidence_id LIMIT 1").fetchone()
-    if row is None:
-        pytest.skip("no manuscript-side offsets in this DB")
-    con.execute("UPDATE review_row SET file_char_start=? WHERE evidence_id=?",
-                (row[1] + 1, row[0]))
-    con.commit()
     con.close()
-    res = _run(dst)
+    assert row is not None, "fixture lost its manuscript-side offsets"
+    dst = _mutated(
+        fixture_db, tmp_path, "ms.db",
+        ("UPDATE review_row SET file_char_start=? WHERE evidence_id=?",
+         (row[1] + 1, row[0])))
+    res = _run_fixture(fixture_db, dst)
     assert res.returncode != 0, (
         "a shifted manuscript offset went UNDETECTED:\n" + res.stdout[-4000:])
+    # Specifically the MANUSCRIPT side, not some reference-side accident.
+    assert "MS FAIL" in res.stdout, res.stdout[-2000:]
 
+
+# ---------------------------------------------------------------------------
+# Independence and secrecy guards -- unchanged, and deliberately unconditional
+# ---------------------------------------------------------------------------
 
 def test_the_verifier_does_not_import_the_code_it_checks():
     """INDEPENDENCE. The verifier must not reach the builder's own mapping
@@ -219,3 +309,33 @@ def test_the_key_file_is_not_inside_the_repository():
         pytest.skip("no key file on this machine")
     assert not os.path.abspath(KEYS).startswith(os.path.abspath(REPO) + os.sep)
     json.load(open(KEYS, encoding="utf-8"))       # must be readable JSON
+
+
+# ---------------------------------------------------------------------------
+# The real artifact -- relocated, not deleted
+# ---------------------------------------------------------------------------
+
+@pytest.mark.slow
+@needs_db
+@needs_opt_in
+def test_the_real_review_artifact_verifies_clean():
+    """Every row of the actual review DB, against the actual sources.
+
+    This is the check the mutation matrix above does NOT perform. It measured
+    ~9.5 minutes on its own, and this file used to pay it four times over, so it
+    is behind BOTH the `slow` marker and an explicit opt-in:
+
+        GENIZAH_VERIFY_REAL_ARTIFACT=1 pytest tests/test_verify_v3_review_offsets.py -k real
+
+    Two guards rather than one because the marker alone deselects nothing in
+    this repo's default selection -- see `_REAL_OPT_IN` above.
+
+    Do not treat a green routine suite as evidence that this passed; on a
+    routine run it does not run at all. The enforcing path is
+    `scripts/verify_review_artifact.py`, which FAILS rather than skips when the
+    data or keys are absent, and which is meant to run nightly and before any
+    rebuilt artifact is promoted.
+    """
+    res = _run(DB)
+    assert res.returncode == 0, res.stdout[-4000:] + res.stderr[-2000:]
+    assert "TOTAL FAILURES: 0" in res.stdout

@@ -217,8 +217,26 @@ Three more you will hit directly while working:
 ## Testing
 
 ```bash
-pytest tests/
+python scripts/run_local_tests.py
 ```
+
+**Do not run the whole suite as one `pytest tests/` process.** Measured
+2026-09-09: it was killed after 2h35m unfinished, holding 91.6 GB of private
+commit on a 63 GB machine and spending its time paging (45% of ONE core out of
+24). Nothing in this suite frees what it allocates, so the fix is bounded
+process lifetime: `run_local_tests.py` splits the same selection into balanced
+chunks of <=30 files across 4 disposable processes, using CI's own marker
+expression. `-j N` changes the lane count; `--dry-run` prints the plan.
+
+`pytest tests/some_file.py` for a single file is of course still fine.
+
+One check is deliberately NOT in any routine run: the full verification of
+`discovery-v5-REVIEW.db` (3.45 GB, 519,382 rows) used to cost 57 minutes per
+run and is now behind `GENIZAH_VERIFY_REAL_ARTIFACT=1` plus its own script,
+`scripts/verify_review_artifact.py`, which FAILS rather than skips on missing
+data. Register it nightly with
+`scripts/schedule_nightly_artifact_verify.ps1`, and run it with
+`--expect-rows` before promoting any rebuilt artifact.
 
 ## Common Issues
 

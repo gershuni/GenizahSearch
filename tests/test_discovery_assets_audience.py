@@ -75,8 +75,16 @@ def _restore_state():
     in place rather than popping `sys.modules`, so only one `web.discovery`
     object ever exists. See that helper for why the difference matters.
     """
+    prev = da._state
     yield
-    da.load_discovery_state()
+    # Restore the exact state this test found, rather than re-validating the
+    # real sidecar from disk (hash + PRAGMA integrity_check) just to undo a
+    # monkeypatched directory. `_state` is replaced wholesale under `_lock`
+    # (web/discovery_assets.py:830-832), so rebinding it IS the documented
+    # restore -- and it cannot pick up a different artifact than the one the
+    # test started with, which a reload can.
+    with da._lock:
+        da._state = prev
 
 
 def _seed_cell_marker(db_path) -> None:
