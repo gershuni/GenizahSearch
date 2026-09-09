@@ -57,6 +57,27 @@ because pytest does not emit them in a fixed order: it puts `errors` last, and
 this suite's own output as `426 passed / 200 errors` while losing its 2 skipped
 and 53 deselected entirely.
 
+### `-m` is honoured, not overridden
+
+The same exclusion rule has to answer to the *active* expression, not the
+default one. `-m "not gui"` selects 632 tests under `tests/render_smoke/` and
+`tests/atlas_bake/`, and those directories were being dropped unconditionally
+-- 632 selected tests silently omitted, under a header claiming they were
+deselected, exiting green. So the decision is now asked of pytest
+(`--collect-only`) rather than parsed out of the expression text:
+
+| the expression | what happens to the directory |
+|---|---|
+| deselects every test in it | skipped, and reported, since skipping changes nothing |
+| selects any test in it | **planned in chunks of its own**, so it runs without sharing a process |
+| cannot be answered (e.g. a malformed `-m`) | the run **aborts** -- "I could not tell" must never mean "safe to omit" |
+
+The routine run pays nothing for this: under the default expression the answer
+is a constant, and `test_a_directory_is_only_skipped_when_the_markers_really_deselect_it`
+is what verifies that constant against the collector once per suite run.
+Collecting `tests/render_smoke/` costs 34 seconds, so probing it on every run
+would be 10% of the wall clock spent re-learning a known fact.
+
 ## The one check that is not in any routine run
 
 `tests/test_verify_v3_review_offsets.py` proves the offset verifier can FAIL.

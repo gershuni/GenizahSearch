@@ -97,9 +97,9 @@ _SUMMARY_TAIL_RE = re.compile(r"\bin \d+\.\d+s(?:\s*\(\d+:\d\d:\d\d\))?\s*$")
 
 
 # Directories whose tests CI runs in their own dedicated jobs, and which must
-# not share a process with anything else. The marker expression already
-# deselects their tests -- but pytest still IMPORTS the modules at collection,
-# and that import alone is enough to break other tests in the same process.
+# not share a process with anything else, because pytest IMPORTS the modules at
+# collection and that import alone is enough to break other tests in the same
+# process.
 #
 # Measured: putting tests/render_smoke/test_start_render_smoke.py in the same
 # process as tests/test_findings_page.py fails 7 findings-page tests, with every
@@ -107,8 +107,19 @@ _SUMMARY_TAIL_RE = re.compile(r"\bin \d+\.\d+s(?:\s*\(\d+:\d\d:\d\d\))?\s*$")
 # render_smoke lifespan teardown closes the event loop and drops NiceGUI's
 # auto-index client, which is exactly why ci.yml gives these their own jobs.
 #
-# So they are excluded here and REPORTED, never silently dropped -- the header
-# prints the count and the command that runs them.
+# What happens to them depends on the ACTIVE marker expression, which is asked
+# of pytest rather than parsed. If it deselects every test in the directory,
+# skipping the directory changes nothing about which tests run, and it is
+# skipped and REPORTED (never silently dropped). If it selects any of them,
+# they are PLANNED IN THEIR OWN CHUNKS -- their tests run, in their own
+# process, poisoning nobody.
+#
+# That distinction is Codex's second finding on this file and it was a real
+# false green: `-m "not gui"`, advertised in this module's own docstring,
+# selects 632 tests under these two directories, and the runner dropped all 632
+# while printing "their tests are deselected by the markers anyway". A green
+# run that silently omits 632 selected tests is the exact failure this script
+# is supposed to be incapable of.
 #
 # tests/e2e/ WAS in this tuple and should not have been. It has no dedicated
 # job in ci.yml -- the main `tests` job runs it, and the marker expression does
@@ -124,8 +135,8 @@ _SUMMARY_TAIL_RE = re.compile(r"\bin \d+\.\d+s(?:\s*\(\d+:\d\d:\d\d\))?\s*$")
 _DEDICATED_JOB_DIRS = ("tests/render_smoke/", "tests/atlas_bake/")
 
 
-def _test_files():
-    """(included, excluded) test modules, as repo-relative posix paths."""
+def _all_test_files():
+    """Every test module in tests/, as repo-relative posix paths."""
     found = []
     for dirpath, dirnames, filenames in os.walk(os.path.join(REPO_ROOT, "tests")):
         dirnames[:] = [d for d in dirnames if d != "__pycache__"]
@@ -133,10 +144,77 @@ def _test_files():
             if name.startswith("test_") and name.endswith(".py"):
                 p = os.path.join(dirpath, name)
                 found.append(os.path.relpath(p, REPO_ROOT).replace("\\", "/"))
-    included = sorted(f for f in found
-                      if not f.startswith(_DEDICATED_JOB_DIRS))
-    excluded = sorted(f for f in found if f.startswith(_DEDICATED_JOB_DIRS))
-    return included, excluded
+    return sorted(found)
+
+
+_SELECTS_CACHE = {}
+
+
+def _selects_anything(path, markers):
+    """Does `markers` select any test under `path`? Ask pytest, don't parse it.
+
+    A marker expression is arbitrary boolean text -- "not gui",
+    "not (gui or render_smoke)", "render_smoke and not slow" -- so answering
+    this by string-matching the expression is a guess, and a guess here decides
+    whether tests run at all. pytest's own collector is the authority, costs
+    about a second per directory, and is the whole difference between a runner
+    that honours its -m flag and one that quietly overrides it.
+
+    A collection ERROR raises rather than returning False: "I could not tell"
+    must never resolve to "safe to skip".
+
+    Memoised because the answer cannot change within one process, and because
+    collecting tests/render_smoke/ costs real seconds -- the runner asks once
+    per directory, but its own gate asks repeatedly.
+    """
+    key = (path, markers)
+    if key in _SELECTS_CACHE:
+        return _SELECTS_CACHE[key]
+    pr = subprocess.run(
+        [sys.executable, "-m", "pytest", path, "-m", markers,
+         "--collect-only", "-q", "-p", "no:cacheprovider"],
+        cwd=REPO_ROOT, env=dict(os.environ, PYTHONUTF8="1"),
+        capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if pr.returncode in (0, 5):
+        # 5 is NO_TESTS_COLLECTED: the expression deselects every test here.
+        _SELECTS_CACHE[key] = pr.returncode == 0
+        return _SELECTS_CACHE[key]
+    raise SystemExit(
+        "cannot tell whether %r selects anything under %s: pytest "
+        "--collect-only exited %d. Refusing to guess, because guessing wrong "
+        "means silently not running those tests.\n%s"
+        % (markers, path, pr.returncode,
+           "\n".join((pr.stdout or "").splitlines()[-15:])))
+
+
+def _test_files(markers):
+    """(included, skipped, isolated) for the ACTIVE marker expression.
+
+    `included` share chunks normally. `skipped` are the dedicated-job files the
+    expression deselects entirely, so omitting them changes nothing. `isolated`
+    is a list of file-lists -- one per dedicated directory whose tests this
+    expression DOES select -- each of which gets its own chunk, so they run
+    without sharing a process with anything they could poison.
+    """
+    found = _all_test_files()
+    included = [f for f in found if not f.startswith(_DEDICATED_JOB_DIRS)]
+    skipped, isolated = [], []
+    for d in _DEDICATED_JOB_DIRS:
+        group = [f for f in found if f.startswith(d)]
+        if not group:
+            continue
+        if markers == DEFAULT_MARKERS:
+            # The routine run pays no probe: under this exact expression the
+            # answer is a constant, and the gate is what verifies it (see
+            # tests/test_run_local_tests_gate.py, which asks pytest for real).
+            # Measured: collecting tests/render_smoke/ costs 34 s, which would
+            # be 10% of a 6-minute run spent re-learning a known fact. Any
+            # OTHER expression is probed, because then it is genuinely unknown.
+            selects = False
+        else:
+            selects = _selects_anything(d, markers)
+        (isolated.append(group) if selects else skipped.extend(group))
+    return included, sorted(skipped), isolated
 
 
 def _durations():
@@ -149,13 +227,26 @@ def _durations():
         return {}
 
 
-def _plan(files, durs, lanes, max_files):
+def _plan(files, durs, lanes, max_files, isolated=()):
     """Chunks of <=MAX_FILES_PER_CHUNK, balanced by measured seconds.
 
     Heavy modules are isolated first (a 124-second module sharing a chunk sets
     that chunk's floor), then the rest are packed longest-first into the
     currently-lightest chunk -- ordinary LPT scheduling.
+
+    `isolated` is a list of file-groups that must not share a process with
+    anything outside their own group. Each becomes its own chunk (split when
+    larger than the file cap) and is never merged into the balanced set, so a
+    render-smoke module cannot land beside a NiceGUI test.
     """
+    dedicated = []
+    for group in isolated:
+        group = sorted(group)
+        for i in range(0, len(group), max_files):
+            part = group[i:i + max_files]
+            dedicated.append((part, sum(durs.get(f, DEFAULT_DURATION)
+                                        for f in part)))
+
     weighted = sorted(((durs.get(f, DEFAULT_DURATION), f) for f in files),
                       reverse=True)
     solo = [(d, f) for d, f in weighted if d >= ISOLATE_ABOVE_SECONDS]
@@ -189,7 +280,9 @@ def _plan(files, durs, lanes, max_files):
 
     keep = [(c, loads[i]) for i, c in enumerate(chunks) if c]
     keep.sort(key=lambda cl: -cl[1])          # longest first: better packing
-    return keep
+    # Dedicated groups go FIRST so the slowest lane starts on them rather than
+    # picking them up last; they are already their own chunks either way.
+    return dedicated + keep
 
 
 def _parse_counts(text):
@@ -298,26 +391,39 @@ def main(argv=None) -> int:
                     help="print the plan and exit")
     args = ap.parse_args(argv)
 
-    files, excluded = _test_files()
+    files, skipped, isolated = _test_files(args.markers)
     durs = _durations()
-    plan = _plan(files, durs, args.lanes, args.max_files)
+    plan = _plan(files, durs, args.lanes, args.max_files, isolated)
     measured = sum(1 for f in files if f in durs)
 
+    n_isolated = sum(len(g) for g in isolated)
     print("=" * 78)
     print(" %d test files -> %d chunks over %d lanes (<=%d files/chunk)"
-          % (len(files), len(plan), args.lanes, args.max_files))
+          % (len(files) + n_isolated, len(plan), args.lanes, args.max_files))
     print(" balance data: %d/%d modules measured, %.1f min of known work"
           % (measured, len(files), sum(durs.get(f, 0) for f in files) / 60))
     print(" markers: %s" % args.markers)
-    if excluded:
-        print(" excluded: %d file(s) under %s -- their tests are deselected by"
-              % (len(excluded), ", ".join(d.rstrip("/") for d in _DEDICATED_JOB_DIRS)))
-        print("           the markers anyway, but IMPORTING them breaks other"
-              " tests in the")
-        print("           same process (measured: 7 findings-page failures)."
-              " Run them with:")
-        print("             pytest tests/render_smoke/ -m render_smoke")
-        print("             pytest tests/atlas_bake/ -m atlas_bake")
+    if isolated:
+        print(" isolated: %d file(s) under %s -- this marker expression DOES"
+              % (n_isolated, ", ".join(sorted(
+                  set(d.rstrip("/") for g in isolated for f in g
+                      for d in _DEDICATED_JOB_DIRS if f.startswith(d))))))
+        print("           select them, so they run in chunk(s) of their own"
+              " rather than being")
+        print("           dropped -- importing them breaks other tests sharing"
+              " the process")
+        print("           (measured: 7 findings-page failures).")
+    if skipped:
+        print(" skipped: %d file(s) under %s -- this marker expression"
+              " deselects EVERY"
+              % (len(skipped), ", ".join(sorted(
+                  set(d.rstrip("/") for f in skipped
+                      for d in _DEDICATED_JOB_DIRS if f.startswith(d))))))
+        print("          test in them (verified with pytest --collect-only),"
+              " so omitting them")
+        print("          changes nothing about which tests run. Run them with:")
+        print("            pytest tests/render_smoke/ -m render_smoke")
+        print("            pytest tests/atlas_bake/ -m atlas_bake")
     print("=" * 78)
     if args.dry_run:
         for i, (chunk, load) in enumerate(plan, 1):

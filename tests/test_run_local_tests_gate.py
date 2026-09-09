@@ -64,6 +64,30 @@ def _chunk(rc, summary):
     }
 
 
+@pytest.fixture
+def probe_says_selected():
+    """Seed the runner's probe cache so the branching can be tested cheaply.
+
+    `_selects_anything` shells out to `pytest --collect-only`, and collecting
+    tests/render_smoke/ is 34 seconds. The tests below are about what
+    `_test_files` DOES with the answer, not about the answer -- which
+    test_a_directory_is_only_skipped_when_the_markers_really_deselect_it
+    verifies for real. Seeding the cache keeps them at milliseconds.
+
+    The cache is restored afterwards: a seeded entry left behind would make a
+    later test's real probe return this fixture's answer instead of pytest's.
+    """
+    before = dict(runner._SELECTS_CACHE)
+
+    def seed(markers, selected=True):
+        for d in runner._DEDICATED_JOB_DIRS:
+            runner._SELECTS_CACHE[(d, markers)] = selected
+
+    yield seed
+    runner._SELECTS_CACHE.clear()
+    runner._SELECTS_CACHE.update(before)
+
+
 def _is_green(results, n_chunks=None):
     _totals, _empty, _bad, problems = runner._verdict(
         n_chunks if n_chunks is not None else len(results), results)
@@ -248,31 +272,109 @@ def test_the_e2e_directory_is_in_the_default_selection():
     passed, exactly as it is alone -- so the import-poisoning reason given for
     the exclusion was not true either.
     """
-    included, excluded = runner._test_files()
-    e2e = [f for f in included + excluded if f.startswith("tests/e2e/")]
+    included, skipped, isolated = runner._test_files(runner.DEFAULT_MARKERS)
+    everything = list(included) + list(skipped) + [f for g in isolated for f in g]
+    e2e = [f for f in everything if f.startswith("tests/e2e/")]
     assert e2e, "expected tests/e2e/ test modules to exist"
-    assert not [f for f in excluded if f.startswith("tests/e2e/")], (
+    assert set(e2e) <= set(included), (
         "tests/e2e/ is run by CI's main `tests` job and is not deselected by "
         "the marker expression, so excluding it makes this runner narrower "
         "than the command it claims to mirror")
-    assert set(e2e) <= set(included)
 
 
-def test_every_excluded_directory_is_deselected_by_the_marker_expression():
+def test_a_directory_is_only_skipped_when_the_markers_really_deselect_it():
     """The invariant whose absence let tests/e2e/ be dropped.
 
-    A directory may only be excluded from the plan if the marker expression
-    already deselects its tests -- then the exclusion changes nothing about
-    WHICH tests run and only prevents a poisoning import. If a directory's
-    marker is not in the expression, excluding it silently removes tests that
-    the equivalent CI command runs.
+    A dedicated directory may be skipped ONLY if the active expression
+    deselects every test in it -- then skipping changes nothing about which
+    tests run, and only prevents a poisoning import.
+
+    This is the ONE test that asks pytest for real, and it is why the runner is
+    allowed its no-probe fast path for the default expression: the constant the
+    runner assumes is asserted here against the collector, so the assumption is
+    checked once per suite run rather than trusted forever or re-measured on
+    every run. It costs about 40 seconds -- collecting tests/render_smoke/
+    alone is 34 -- which is the price of not silently dropping 632 tests.
     """
+    _included, skipped, isolated = runner._test_files(runner.DEFAULT_MARKERS)
+    assert not isolated, (
+        "under the default expression nothing should need isolating; the "
+        "runner's fast path assumes exactly that")
     for path in runner._DEDICATED_JOB_DIRS:
-        marker = path.strip("/").split("/")[-1]
-        assert ("not %s" % marker) in runner.DEFAULT_MARKERS, (
-            "%s is excluded from the plan but 'not %s' is not in the default "
-            "marker expression (%r), so excluding it drops tests that would "
-            "otherwise run" % (path, marker, runner.DEFAULT_MARKERS))
+        assert any(f.startswith(path) for f in skipped), (
+            "%s should be in the skipped set under the default expression"
+            % path)
+        assert not runner._selects_anything(path, runner.DEFAULT_MARKERS), (
+            "%s is skipped on the runner's fast path, but pytest "
+            "--collect-only says %r SELECTS tests in it -- the fast path is "
+            "now dropping tests that would otherwise run"
+            % (path, runner.DEFAULT_MARKERS))
+
+
+def test_a_custom_marker_expression_cannot_silently_drop_a_whole_directory(
+        probe_says_selected):
+    """Codex finding 3, and it was a live false green.
+
+    `-m "not gui"` is advertised in the runner's own docstring, and it selects
+    632 tests under tests/render_smoke/ and tests/atlas_bake/. `_test_files`
+    excluded those directories unconditionally, so the runner dropped all 632
+    and printed "their tests are deselected by the markers anyway" -- then
+    exited green. Under a selecting expression they must now be ISOLATED (their
+    own chunks) rather than skipped, and every one must reach the plan.
+    """
+    probe_says_selected("not gui", selected=True)
+    included, skipped, isolated = runner._test_files("not gui")
+    assert not skipped, (
+        "'not gui' selects these files, so none may be skipped: %s" % skipped)
+    assert isolated, "expected the dedicated directories to be isolated"
+
+    isolated_files = [f for g in isolated for f in g]
+    for path in runner._DEDICATED_JOB_DIRS:
+        assert any(f.startswith(path) for f in isolated_files), (
+            "%s selects tests under 'not gui' but reached neither the "
+            "isolated set nor the plan" % path)
+
+    plan = runner._plan(included, runner._durations(), 4,
+                        runner.MAX_FILES_PER_CHUNK, isolated)
+    planned = [f for chunk, _load in plan for f in chunk]
+    assert sorted(planned) == sorted(list(included) + isolated_files)
+
+
+def test_an_isolated_group_never_shares_a_chunk_with_anything_else(
+        probe_says_selected):
+    """Isolation is the reason they were excluded; it must survive inclusion.
+
+    Measured: one render_smoke module in the same process as
+    tests/test_findings_page.py fails 7 findings-page tests. Running these
+    files instead of dropping them is only correct if they still get their own
+    process.
+    """
+    probe_says_selected("not gui", selected=True)
+    included, _skipped, isolated = runner._test_files("not gui")
+    plan = runner._plan(included, runner._durations(), 4,
+                        runner.MAX_FILES_PER_CHUNK, isolated)
+    isolated_files = {f for g in isolated for f in g}
+    for chunk, _load in plan:
+        touching = [f for f in chunk if f in isolated_files]
+        if touching:
+            assert set(chunk) == set(touching), (
+                "chunk mixes isolated files with ordinary ones: %s" % chunk)
+            dirs = {d for f in chunk for d in runner._DEDICATED_JOB_DIRS
+                    if f.startswith(d)}
+            assert len(dirs) == 1, (
+                "one chunk spans two dedicated directories: %s" % chunk)
+
+
+def test_an_unanswerable_collection_probe_raises_instead_of_skipping():
+    """"I could not tell" must never resolve to "safe to omit those tests".
+
+    A malformed marker expression makes pytest exit 4 (usage error), not 5. If
+    that were read as "nothing selected", a typo in -m would silently drop a
+    whole dedicated directory -- the same failure this probe exists to prevent.
+    """
+    with pytest.raises(SystemExit) as exc:
+        runner._selects_anything("tests/atlas_bake/", "not (gui")
+    assert "Refusing to guess" in str(exc.value)
 
 
 def test_the_default_markers_are_the_expression_ci_actually_uses():
@@ -288,7 +390,7 @@ def test_the_default_markers_are_the_expression_ci_actually_uses():
 
 def test_the_plan_covers_every_included_file_exactly_once():
     """Balance must never become coverage: no file dropped, none duplicated."""
-    included, _excluded = runner._test_files()
+    included, _skipped, _isolated = runner._test_files(runner.DEFAULT_MARKERS)
     plan = runner._plan(included, runner._durations(), 4,
                         runner.MAX_FILES_PER_CHUNK)
     planned = [f for chunk, _load in plan for f in chunk]
@@ -298,7 +400,7 @@ def test_the_plan_covers_every_included_file_exactly_once():
 
 def test_no_chunk_exceeds_the_file_cap_that_made_the_run_finish():
     """Bounded process lifetime is the property; the cap is how it is bounded."""
-    included, _excluded = runner._test_files()
+    included, _skipped, _isolated = runner._test_files(runner.DEFAULT_MARKERS)
     plan = runner._plan(included, runner._durations(), 4,
                         runner.MAX_FILES_PER_CHUNK)
     assert plan
