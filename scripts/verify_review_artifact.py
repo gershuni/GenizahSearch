@@ -81,15 +81,47 @@ def _row_count(db: str):
         return "unreadable (%s)" % exc
 
 
+# This artifact's KNOWN non-ok provenance rows, measured on the 2026-09-02
+# build (519,382 rows):
+#
+#     26,180  offsets_missing   the HTR re-alignment, docs/OPEN_ISSUES.md:210,
+#                               recorded there as CLOSED 2026-09-01 -- the
+#                               rows were re-located in the HTR text and the
+#                               status kept as a label of how they got there
+#         86  nfc_shift         normalisation-shifted spans, accepted
+#        278  stream_fallback   reference rows addressed via the stream index
+#
+# I shipped this defaulting to 0 and calling it "the final-mode budget". There
+# was no such budget: the underlying verifier defaults --max-status-fail to
+# None and does not run the check at all unless the flag is given, so a budget
+# of 0 was a NEW and stricter standard I invented in a wrapper, and the first
+# real nightly run failed on a documented, closed condition.
+#
+# Worse, I had reported the real artifact as "verified clean" beforehand. That
+# run went through the test helper, which passes no --max-status-fail -- so it
+# never checked provenance status. The claim was true of what it ran and false
+# of what I said it proved.
+#
+# A baseline rather than 0 or None: 0 fails every night on known history, None
+# checks nothing, and this number fails the night an unexpected 26,545th row
+# appears -- which is the only thing a nightly can usefully tell you. A rebuilt
+# artifact needs this re-measured; that is what --expect-rows is for.
+ACCEPTED_NON_OK_ROWS = 26180 + 86 + 278      # = 26544
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--db", default=DEFAULT_DB)
     ap.add_argument("--sourcekeys", default=DEFAULT_KEYS)
     ap.add_argument("--corpus-file", default=DEFAULT_CORPUS)
-    ap.add_argument("--max-status-fail", type=int, default=0,
+    ap.add_argument("--max-status-fail", type=int,
+                    default=ACCEPTED_NON_OK_ROWS,
                     help="rows allowed to carry a non-ok provenance status "
-                         "(default 0 -- the final-mode budget)")
+                         "(default %d -- this artifact's documented baseline; "
+                         "pass 0 to demand a perfectly clean artifact, or a "
+                         "new baseline after a rebuild)"
+                         % ACCEPTED_NON_OK_ROWS)
     ap.add_argument("--expect-rows", type=int, default=None,
                     help="fail unless review_row holds exactly this many rows; "
                          "use it to tie a run to a specific built artifact")
@@ -155,6 +187,15 @@ def main(argv=None) -> int:
            "--sourcekeys", args.sourcekeys,
            "--corpus-file", args.corpus_file,
            "--all", "--max-status-fail", str(args.max_status_fail)]
+    if args.max_status_fail == ACCEPTED_NON_OK_ROWS:
+        print("provenance-status budget: %d (this artifact's documented "
+              "baseline)\n  a FAILURE here means MORE non-ok rows than "
+              "history explains, not that\n  the artifact is dirty -- see "
+              "ACCEPTED_NON_OK_ROWS in this file"
+              % args.max_status_fail)
+    else:
+        print("provenance-status budget: %d (overridden from the documented "
+              "baseline of %d)" % (args.max_status_fail, ACCEPTED_NON_OK_ROWS))
     print("running: %s\n" % " ".join(cmd), flush=True)
     env = dict(os.environ, PYTHONUTF8="1")
     t0 = time.time()
@@ -164,6 +205,9 @@ def main(argv=None) -> int:
     identity["seconds"] = round(dur, 1)
     identity["returncode"] = proc.returncode
     identity["result"] = "verified" if proc.returncode == 0 else "FAILED"
+    # Recorded so a green night says WHAT it was green against: a later run
+    # passing under a raised budget is not the same result as this one.
+    identity["max_status_fail"] = args.max_status_fail
     _record(args.json_out, identity)
 
     print("\n%s in %.1f min" % (identity["result"], dur / 60.0))
