@@ -37,6 +37,32 @@
 
 ## Current Milestone: v9.0.0 Discovery — Same-Work Identification & Connection Atlas (web-only)
 
+> ## ⚠ THIS FILE STOPPED TRACKING REALITY ON 2026-08-21. Read the exit audit first.
+>
+> **[`.planning/milestones/v9.0.0-MILESTONE-AUDIT.md`](milestones/v9.0.0-MILESTONE-AUDIT.md)**
+> (readable version: <https://claude.ai/code/artifact/b8016041-d1e5-4a09-8fec-2f7aab8b0f50>)
+>
+> Everything below was frozen on 2026-08-21. After that date **339 commits, one 98-commit branch
+> merge (PR #324, `e6a0ba46`), and two tagged releases — v9.1.0 (2026-08-28) and v9.2.0
+> (2026-09-06) — shipped with no phase number attached to any of them.** Specifically, and
+> contrary to what you will read below:
+>
+> - **Phases 141–146 all shipped and merged.** The text below calls 141–143 "Built, unmerged", 145
+>   "Not started", and 146 "0/TBD, Not started". All are live; 146 was released twice.
+> - **The passage-search default was flipped** (web `bee7d49c` 2026-08-23, desktop `7c998627`
+>   2026-08-28) although Phase 144's pre-registered holdout was shelved unspent and has still never
+>   been scored. The Phase 144 block below is true about the phase and silent about the flip.
+> - **Phases 137, 138, 139a, 139b, 140, 147, 148, 149 have no phase directory and never ran.**
+>   Phase 140 — the bookkeeping phase created to prevent exactly this drift, and sequenced first —
+>   is among them. That is why this banner exists.
+>
+> The audit is a 24-unit reconciliation in which every finding faced two adversarial verifiers
+> (104 candidates in, 81 out). **Where it and this file disagree, the audit is right.** It was
+> verified against the repository on 2026-09-10; this file was not.
+>
+> *Banner added at milestone close, 2026-09-10. The record below is preserved unedited as the
+> historical artifact it is — the corrections live in the audit, not in retroactive edits here.*
+
 Fold the SEED-029 corpus-wide same-work text-reuse map (275,894 tier-A page-level identifications on 52,497 MSS across 4,093 works; bands R-A 0.889 / R-B 0.859 / R-CANON 0.647) into genizahsearch.com as a multi-band discovery module. The journey opens with an **early quick win** — the static Visual Atlas Preview (Phase 133), the milestone's FIRST deployable artifact, shipped as a standalone beta page under the REL-01 ATLAS-PREVIEW exception (no claim-level statements, asset-level masking, behind the flag) — then runs strictly along the REL-01 gate sequence: a thin de-risk **data spine** (masked, versioned sidecar + async service + budgets), the **certificate & band-display** contract (with a pre-registered tier-A precision measurement grading in parallel), the **read surfaces** (browse connections panel + work→witnesses pages), **community judgments** (Supabase + voting), the **leads queue** (the high-recall screening lane), and finally the **atlas drill-down + homepage promotion** capstone, with the main discovery feature flag / SEO / full homepage discovery band held OFF until the full release gate passes (a DEDICATED atlas-preview flag ships the Phase 133 beta and a claim-free homepage teaser early under the widened ATLAS-PREVIEW exception). Integration milestone, not greenfield: almost no new runtime stack (native `ui.echart`, existing Canvas 2D starfield, read-only SQLite sidecar, Supabase corrections pattern). Two hard blockers dominate the risk profile — **M-source provenance masking** (structural, at the build boundary) and **epistemic honesty** (band label travels inseparably with every claim; "expert-verified" must not overclaim while the R-A audit is pending; "no identification shown ≠ none exists" everywhere).
 
 **UX discuss-phase precedes Phase 133/134 planning** (Phase 11 lesson). Its decisions feed the atlas bake and the spine and are NOT separate phases:

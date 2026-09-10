@@ -316,6 +316,14 @@ every session's context.
 
 ### Facts that outlive their release (keep these here)
 
+- **v9.0.0 is CLOSED, and its planning record is NOT the authority on what it shipped.**
+  `.planning/ROADMAP.md`/`STATE.md` froze 2026-08-21; 339 commits and two releases landed after.
+  The exit ledger — 81 adversarially verified gaps, ranked, with the next milestone proposed — is
+  [`.planning/milestones/v9.0.0-MILESTONE-AUDIT.md`](.planning/milestones/v9.0.0-MILESTONE-AUDIT.md).
+  **Read it before planning discovery, passage-matching, or REL-01 work.** Three findings are live
+  risks: the passage default flipped without its pre-registered test (C1), no gate stops a repeat of
+  the 103-identification append loss (C3), and the nightly artifact verify is a laptop task that
+  failed its first unattended run (H13).
 - **Where code lives.** Search / metadata / variants / responsa / engines are in `shared/*.py`,
   not `genizah_core.py` (which is a 755-line facade re-exporting 27 names). Desktop dialogs,
   widgets, and update-UI are in `desktop/*.py`. **Grep `shared/` and `desktop/`**, not just the

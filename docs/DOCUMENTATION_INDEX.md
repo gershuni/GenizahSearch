@@ -12,6 +12,7 @@ This directory contains all project documentation, organized by category.
 |------------|-----------|
 | **See open bugs & issues** | [OPEN_ISSUES.md](OPEN_ISSUES.md) |
 | **See feature ideas / what to build next** | [FEATURE_IDEAS.md](FEATURE_IDEAS.md) |
+| **Know what v9.0.0 actually shipped vs. planned** | [v9.0.0 Milestone Audit](../.planning/milestones/v9.0.0-MILESTONE-AUDIT.md) — 81 verified gaps, ranked; supersedes the archived v9.0.0 roadmap wherever they disagree |
 | Deploy the website | [guides/DEPLOYMENT_TECHNICAL.md](guides/DEPLOYMENT_TECHNICAL.md) |
 | Manage browser extension | [guides/DEPLOYMENT_TECHNICAL.md#browser-extension](guides/DEPLOYMENT_TECHNICAL.md#browser-extension-genizahsearch-image-helper) |
 | Manage the website (non-technical) | [guides/WEBSITE_ADMIN_GUIDE.md](guides/WEBSITE_ADMIN_GUIDE.md) |
