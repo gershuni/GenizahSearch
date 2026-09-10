@@ -1,5 +1,82 @@
 # Project Milestones: GenizahSearch
 
+## v9.0.0 Discovery — Same-Work Identification & Connection Atlas (Shipped: 2026-09-10)
+
+**Phases completed:** 6 phases, 45 plans, 108 tasks
+
+**Closeout type:** `override_closeout` — this milestone did NOT close verified.
+
+**Known verification overrides:** 57 newly acknowledged, 0 carried forward from a prior close
+(see `.planning/STATE.md` § Deferred Items). Roughly 26 of the 57 were inherited from milestones
+v7.14 through v8.4.0 that were archived without closing them.
+
+### Known gaps
+
+**14 of the 20 planned phases never ran** — 137 (Community Judgments hardening), 138 (Leads
+Queue), 139a (Release Hardening & REL-01 gate closure), 139b (Atlas Drill-down & Homepage
+capstone), 140 (Milestone Bookkeeping), 141-147 (the passage-matching lane, which shipped as
+code but never as GSD phases), 148 (Reference Expansion & Bake Reproducibility) and 149
+(Discovery Performance & Operability). None has a phase directory.
+
+**The planning record stopped tracking reality on 2026-08-21.** 339 commits, the 98-commit
+PR #324 merge, and two tagged releases — v9.1.0 (2026-08-28) and v9.2.0 (2026-09-06) — shipped
+with no phase number attached. Phase 140, created specifically to prevent this and sequenced
+first, is among the phases that never ran.
+
+**The exit audit, not this entry, is the authority on what shipped.**
+[`milestones/v9.0.0-MILESTONE-AUDIT.md`](milestones/v9.0.0-MILESTONE-AUDIT.md) reconciled 24 units
+against the repository and put every candidate through two adversarial verifiers: 104 in, **81
+verified** (3 critical, 19 high, 33 medium, 26 low). The three criticals carry forward as live
+obligations:
+
+1. **The passage-search default flipped without its pre-registered test.** The Phase 144 holdout
+   was shelved unspent (`fc2a14ad`); the web default flipped two days later (`bee7d49c`) on the
+   owner's own GUI grading, the desktop default (`7c998627`) on no new measurement. Both are live.
+2. **Phase 140 never ran**, and the record-drift pattern it exists to stop recurred at ~10x scale.
+3. **No gate stops a repeat of the 103-identification Track-1 append loss.** `REF_DF_CAP` is
+   unchanged and the owner's acceptance of that loss was conditional on a diff-before-ship gate
+   that was never built.
+
+Requirements were not re-checked against the traceability table at close; the audit's
+requirement-coverage unit supersedes that check and records which IDs have no phase carrying them.
+
+**Key accomplishments:**
+
+- Built the reusable multi-surface M-source masking scan (`scripts/check_atlas_masking.py`) and used its first run to scrub the pre-existing uncommitted M-source leak in `genizah_translations.py` before making the phase's first commit.
+- Forked the gitignored atlas prototype into a committed, schema-frozen offline bake (`scripts/build_atlas_asset.py`) that closes the ~13,000-manuscript node-inclusion gap with a proven exact-set-equality invariant, strips the discovery overlay, encodes to a versioned typed-array+Brotli binary under a hard 6 MB cap, and ships with a committed golden fixture, 10 invariant tests, and a pinned CI bake job.
+- Filled the 133-03 renderer contract: `web/static/js/atlas_decode.js` is a self-contained UMD module that fetches the manifest + content-hashed asset (never inline), decodes it field-for-field against the FROZEN schema (BigUint64 sys_id, single path), and draws the domain-colored galaxy (overview aggregate flows + stars, per-MS edges on zoom) with the full D-08 interactive experience — zoom/pan, title+shelfmark search, domain↔library color toggle, library hide/solo filter, click-a-region focus constellation, reduced-motion-aware skippable bloom-in intro, and same-origin `/browse?sys_id=` click-through — with the gold discovery overlay stripped (D-04), bilingual domain labels (D-15), and EVERY catalogue-derived DOM node built XSS-safe via createElement/textContent (HIGH-7). Cross-language decode (JS == Python per-field) and DOM-XSS neutralization (the fabricated malicious fixture string renders as inert text, never innerHTML) are proven by Node tests; server render (chrome/CLS/EN-HE/RTL/injection) by a render-smoke.
+- Claim-free, predicate-gated Connections Atlas teaser card added to the homepage Main Action Cards Grid, forked from the existing static Community Card shape and gated on the same `atlas_preview_available()` predicate the `/atlas` page, nav link, and data routes already share.
+- Baked the REAL production Connections Atlas asset from the ~2.9 GB research DB with exact node-set completeness (eligible==placed==62,645, missing=0, extra=0), content-hashed and Brotli-compressed well under budget; built the two-mode (ASGI + Playwright browser-DOM) masking capture helper; passed BOTH hard pre-deploy masking gates (recursive `--scan-asset atlas_data/` AND the ASGI-captured server-HTML scan, exit 0); added a parametrized four-surface (page/data/nav/teaser × OFF/asset-missing/ready) behavioral integration test; and documented the new sidecar-style asset + asset-first deploy procedure. The production-touching Tasks 3-4 (asset-first upload → deploy → flag → restart → live smoke → rollback) are `checkpoint:human-verify` and remain PENDING the human deploy — this plan is IN PROGRESS, not complete.
+- Rewrote the discovery sidecar schema doc as the FROZEN two-table (`discovery_claim` + `discovery_evidence`) claim model per the 134-CONTEXT.md owner-gate contract correction, and implemented its deterministic id/routing/precedence primitives in `scripts/discovery_ids.py` with 31 golden-hash tests.
+- Extended the permanent DATA-05 masking CI guard with a cell-level `--scan-sqlite` mode (schema + every str/BLOB cell, fail-closed) and committed the PERF-01 `discovery-budgets.md` acceptance-budget exit artifact, so both leak-detection and performance contracts exist BEFORE `discovery.db` is built.
+- A deterministic, masking-safe SQLite fixture encoding all 7 confidence bands + the witness/shared_text collision, plus a path-parameterized all-invariant verifier and 69 passing tests proving each invariant fails closed.
+- Real-mode distillation of the masked discovery.db from the gitignored research corpus + Q2/E1 collections -- unified witness family (track1_direct + propagated), shared_text family, DATA-10 witness units, and a blocking masking-gated build orchestration, validated end-to-end against actual research data (625 works / 231,604 claims / 251,976 evidence rows).
+- DISCOVERY_ENABLED feature flag + a fail-closed versioned discovery.db startup loader (web/discovery_assets.py, modeled 1:1 on web/atlas_assets.py) wired into web/main.py -- proving the flag-AND-readiness gate and the full 8-defect-mode fail-closed matrix before any discovery UI exists.
+- The single async `DiscoveryService` chokepoint over `discovery.db` -- lazy versioned connection, `asyncio.wait`-based per-query timeouts, a non-blocking bounded heavy-query semaphore releasing only via `add_done_callback`, a version-keyed browse-enrichment LRU, server-side pagination, and the DATA-10 unit x work projection -- plus the web-free back-edge guard and the `web/discovery.py` composition shim (no UI).
+- 134-08 (wave 5, `autonomous: false`, LAST plan in Phase 134)
+- Hand-authored bilingual band-label + precision-copy values module with a CI-fail-closed default-eligibility predicate and a band-inseparable claim serializer, backed by a new fail-closed `band_precision`/display-deduplicated-population reader on `DiscoveryService`.
+- A flag-gated, bilingual EN/HE "Confidence Bands & Methods" section inside /help — per-band deep-link anchors, population from the runtime display-deduplicated shipped-claim count, 0.926 at collection scope only, placeholder-safe registry fields — served by an async route noindexed only in the pre-release window (flips to indexed at the Phase-139 REL-01 gate).
+- A tracked, masking-clean written protocol (`docs/specs/discovery-cert01-protocol.md`) that pre-registers the entire CERT-01 tier-A precision measurement design — frozen estimand SQL, physMS cluster mapping hashed as `cluster_map_hash`, Strict ≥0.85 decision rule, immutable pre-registration freeze with four input hashes + DB content_hash, and a tested FAIL-branch reband to `screening_rb` — before any card is drawn.
+- Rewrote the v2 discovery-sidecar bake plan against the full 16-merge owner-ratified census, the D-17 chronological co-claim demotion rule, and three hash-pinned build inputs; closed the blocking Codex adversarial-review gate on OWNER AUTHORITY after 9 non-converging rounds, folding the two remaining real defects (collection-precision preservation + coverage-anchor schema) first.
+- Landed the discovery-v2 vocabulary + schema + spec lockstep as ONE atomic unit — `routing_reason` gains `later_shared_text`, the stored band adds `high_confidence_algorithmic` (v1 `expert_verified` retained for read-compat), `band_precision` gains the five CERT-01 registry columns with a closed-vocab `measurement_status` CHECK, and a masking-safe `discovery_routing_audit` table appears — with NO bake logic (population is 135-06).
+- The discovery-v2 build logic — hash-pinned canonical merge + w001239 drop + frozen-schema date inputs + Lever-1 coverage routing + the D-17 chronological co-claim demotion + the CERT-01 FAIL-branch reband — is implemented as pure, fixture-tested logic behind seven new load-bearing verifier invariants, with NO production bake (that is 135-07).
+- Outcome: ✅ DEPLOYED.
+- Froze the shipped tier_a estimand (134,123 `(page, canonical_work_id)` rows) in an immutable, hash-pinned pre-registration against the deployed discovery-v2 sidecar, drew a 220-card stratified discovery deck + 20 gold + 20/20 blinded diagnostic sample bound by a separate deck manifest, rendered it to a gradable page, and built a twelve-check mechanical validator. The owner then graded ALL 280 cards catalogue-blind: validator 12/12 exit 0, pre-registered weighted precision 0.9382 CI [0.9084, 0.9644] -- PASS against the 0.85 Strict floor.
+- Five discovery contract documents amended in place (dated `## Amendment 2026-08-02` sections, zero silent edits) to authorize the trimmed rebuild's new fields, the tooltip-only band display, the findings-page PERF-01 budget, and a corrected reproducible rebuild command — landing every contract later Phase-136 plans will cite before any of them write code.
+- Removed every precision percentage, confidence interval and strata table from the `/help` "Confidence Bands & Methods" section (replaced with a qualitative per-band status vocabulary + three new bilingual subsections explaining the two-bucket rule, known limitations, and the novelty check), then shipped `assert_discovery_honesty()` as the ONE shared no-numbers gate every later Phase-136 surface suite will import — proven able to fail via two positive controls.
+- Five gate-1 decisions ratified with measured numbers as citable constants/predicates; the novelty flag evolved from a tri-state to a ten-value shade enum across five owner rulings (E/E′/F/G/H) plus a funnel-first architecture (ruling J); and a 101-case, owner-labelled ground-truth evaluation set was built, labelled, and analyzed per-arm via a new XLSX round-trip in `scripts/discovery_gate1_evidence.py`.
+- Built the novelty contract module (ten-value shade enum, masked provenance, alias-aware identity, self-hashing pinned LLM contract), its canonical spec doc, and a committed funnel-first heuristic-pass + checkpointed-model-arm + owner-label grading harness that structurally avoids the reference implementation's Codex-flagged over-demotion defects -- but could not execute Task 3's real re-measurement or production run in this isolated environment, which lacks the owner label file, every real sidecar, and any LLM credentials; that gap is documented, not worked around.
+- A streamed old/new allowlisted diff harness over the six core discovery tables (plus a dedicated `band_precision` D-02a check and a CERT-01 card-binding check), with its expectation REALLY pinned from the currently-live 297K-evidence-row production asset -- verified against `cert01_prereg.json`'s independently-computed values for the same asset, and proven able to fail seven distinct ways.
+- Lands the one authorized `band_precision.tier_a` change (measurement_status='measured_pass', ci_low=0.9084, precision stays NULL) across the builder, the build-time validator, the release verifier's M4 check plus a new smuggling check, and both-branch test fixtures at two independent layers -- and fixes a gate-12 regression the amendment directly caused.
+- The two visible discovery buckets ("main pool" / "more matches") are now drawn everywhere by ONE pure, fully-tested predicate with a closed reason-code vocabulary and a single bilingual wording — closing the exact failure class (a hand-picked, drifting band-set rule) that mislabelled the best-measured population in the system "Weak" in an earlier sketch.
+- Public/private eligibility is now the conjunction of two independently-derived, fail-closed axes (never a `works.source_corpus`-only proxy), and the public projection is a closed graph that recomputes every aggregate from the surviving public evidence set rather than filtering the private build's own stored totals -- proven by six leak controls that were each watched actually failing.
+- One bilingual claim-vocabulary module (703 lines, 26 tests) plus the discovery page-chrome `tr()` entries and one `.gs-discovery`-scoped CSS block — so the panel track and the findings track can now be built concurrently without either touching a shared file.
+- Task 1 — coverage, band rank, indexes
+- Every panel display rule is now one pure function over the five live service envelopes — collapse, generic-group separation, lead attribution, short-evidence gating, ruling R title curation, status arbitration, the manuscript pane and the related-pages section — with 157 tests, a model-level honesty sweep in both languages and six positive controls.
+- A routable, availability-gated, bilingual `/computed-identifications` shell — reserved digit-free launch-headline slot, permanent designed caveat, inert phase-tagged future modes, a first-class "more matches" control proven to replace the rendered result set through a simulated click that was watched failing, and four distinguishable service states — with 71 tests and one acceptance criterion explicitly NOT MET.
+
+---
+
 ## v8.4.1 Public API Dual-Mode (`/api/search` + `/api/parallels`) (Shipped: 2026-07-01, web)
 
 **Phases completed:** 1 phase (132), 3 plans

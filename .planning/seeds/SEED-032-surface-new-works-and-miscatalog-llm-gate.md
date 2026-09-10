@@ -5,6 +5,10 @@ planted: 2026-07-23
 planted_during: v9.0.0 Discovery milestone (raised during Phase 135 planning)
 trigger_when: when planning Phase 136 (Discovery claim-rendering surfaces — connections panel + /work/{id}); also relevant to Phase 138 (leads)
 scope: medium
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
+  status: dormant
 ---
 
 # SEED-032: Surface new/uncataloged discoveries above known works; treat miscatalog as a distinct, LLM-gated category
@@ -22,12 +26,15 @@ But Phase 134 deliberately made `is_new` **"a flag, NOT a surface."** Turning it
 ## The Idea, In Full
 
 ### (a) New / uncataloged / undercataloged — surface above known
+
 Driven off the existing `is_new` flag: default/highlight the not-in-catalog identifications above already-known works; let the user filter to "only new" or toggle "see all." Low-risk — reuses the "show more possible matches" pattern from the Phase-135 band-display work; the flag already exists in the sidecar.
 
 ### (b) Miscatalog — a distinct, richer, harder category
+
 Beyond uncataloged (gaps) there is **miscataloged**: the catalog says work X but we identify work Y — a *disagreement*, not a gap. Potentially the most valuable class of all (finding catalog ERRORS), but NOT captured by the binary `is_new` flag; it would need its own field/treatment.
 
 **Hard problem (owner-flagged):** it is often hard to tell a *genuine* miscatalog from a *benign/generic* mismatch —
+
 - **Cross-language:** the catalog describes a fragment in (Judeo-)Arabic while our identification is labeled in Hebrew → a naive title/string compare flags a false "disagreement."
 - **Generic descriptions:** catalog says "commentary" / "prayers" / "fragment" — neither confirms nor contradicts our identification.
 
@@ -40,6 +47,7 @@ So a naive comparison will over-flag miscatalogs and cry wolf.
 ## Scope Estimate
 
 **Medium** — two separable parts:
+
 1. **The surfacing feature (phase-sized):** new-above-known ranking + "show only new" default + "see all" toggle, off the `is_new` flag. Straightforward once the flag becomes a surface.
 2. **The miscatalog investigation (spike-sized, must precede any miscatalog surface):** the LLM-gate feasibility spike (accuracy on cross-language / generic cases, false-positive rate, cost), plus a new field/model for catalog-disagreement. Ships only if the spike clears — and always under the catalogue-blind constraint.
 

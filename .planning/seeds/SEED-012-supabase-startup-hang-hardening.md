@@ -5,6 +5,10 @@ planted: 2026-06-22
 planted_during: desktop release crash-data review (PostHog desktop telemetry, v8.1.0 line)
 trigger_when: A post-release desktop stability/startup-hardening pass. NOT release-blocking — it is a network-robustness improvement, not a regression. Pairs naturally with any future work on the desktop startup path (StartupThread / cloud-client init) or a follow-on to the Phase 98 NLI-resilience timeout philosophy.
 scope: medium (touches startup ordering + network/SSL robustness; not a one-liner)
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
+  status: dormant
 ---
 
 > **ROUTING:** Pre-existing desktop startup-robustness issue, surfaced 2026-06-22 while reviewing desktop
@@ -63,6 +67,7 @@ Goal: a network blip must never freeze app launch; cloud (corrections/lists/comm
 late or degrade, but the app window must appear promptly.
 
 Options (pick during discuss/plan):
+
 1. **Defer cloud-client creation off the startup path** — don't call `get_corrections_client()` in
    `__init__`; lazily create on first actual use, or warm it on the existing background `StartupThread`
    instead of the constructor. `get_corrections_client()` is already a lazy singleton getter, so the bug is

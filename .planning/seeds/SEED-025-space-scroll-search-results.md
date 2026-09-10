@@ -5,6 +5,10 @@ planted: 2026-06-26
 planted_during: mid-Phase-125 (v8.3.0 god-file decomposition) — parked as a seed rather than implemented inline ([[feedback_seed_midphase_fixes_to_cloud]]); UNRELATED to the decomposition milestone.
 trigger_when: A keyboard-nav / UX polish pass or a standalone /gsd-quick. Self-contained, no dependency on v8.3.0. Web (NiceGUI) is the likely primary surface; assess desktop (PyQt6) parity.
 scope: small (one keydown handler on the search-results scroll container + a focus/selection guard)
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
+  status: dormant
 ---
 
 # SEED-025: Scroll search results with the Space key (when no result action is focused)

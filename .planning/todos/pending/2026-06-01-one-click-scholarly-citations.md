@@ -5,11 +5,16 @@ area: export, web, desktop
 priority: high
 source: v8.0 headline-feature ideation (see docs/FEATURE_IDEAS.md)
 files:
+
   - shared/citations.py   # new
   - shared/export_dossier.py
   - web/pages/search_results.py
   - web/pages/browse.py
   - genizah_app.py
+
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
 ---
 
 ## Problem

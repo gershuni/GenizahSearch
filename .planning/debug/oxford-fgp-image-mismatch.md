@@ -4,6 +4,10 @@ trigger: "Oxford texts and images presentation. When I search for example \"תק
 created: 2026-09-02T06:20:00Z
 updated: 2026-09-02T12:30:00Z
 surface: desktop (PyQt6 ResultDialog / ManuscriptViewerWidget); web shares the Oxford image host and the FGP sidecar
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
+  status: fix_implemented_pending_uat
 ---
 
 ## Current Focus
@@ -61,11 +65,13 @@ tdd_checkpoint: none
 
 expected: Searching "תקום רבה דיניך" opens MS heb. g.2/27 (sys_id 990053489970205171, FL 168181475) showing (1) the folio-27 image by default, (2) the transcription that actually contains the hit (V0.8/HTR) with the match highlighted, (3) an image list whose count matches the text pages / NLI list, (4) switching image source keeps you on the SAME folio side.
 actual (desktop, 2026-09-02, screenshots in owner message):
+
   1. Image pane shows "No Image" with the source combo on "Oxford (164 pages)".
   2. Version combo defaults to one of ~10 identical-looking "FGP Transcription" entries; the displayed text starts "Ox, Bold. Heb. g. 2 (2700) [example] / [ברכות השחר] / .1[..] מעביר שינה..." — unrelated to the hit and not a full transcription.
   3. Switching Version to "V0.8" shows the correct text (lines 8–9: "תקום רבה / דיניך וכהדרי...") but the search hit is NOT highlighted.
   4. Oxford source lists 164 pages; NLI source and the result nav ("Image: 2 / 2") list 2.
   5. Switching to NLI shows an image, but not the folio side the text is on.
+
 errors: none surfaced to the user; image failure is silent ("No Image").
 timeline: Oxford thumbnails were still loading on 2026-06-21 (see `.planning/debug/joins-lab-image-resolution.md`, grid thumbs shown). The Bodleian host now fronts an anti-bot challenge (below) — regression is external and recent. FGP duplication has existed since the FGP import (v8.2.0, 2026-06-22).
 reproduction: desktop → search "תקום רבה דיניך" → open the single result. Offline repro of each mechanism is in Evidence.
@@ -73,6 +79,7 @@ reproduction: desktop → search "תקום רבה דיניך" → open the singl
 ## Sub-issues (one root cause each)
 
 ### A. "No Image" on Oxford (symptom 1) — external host now returns an HTML bot-challenge with HTTP 200
+
 - Every Oxford image URL in `oxford_full_db.json` (3,122 images, 100% on `https://hebrew.bodleian.ox.ac.uk/fragments/...`) now returns **HTTP 200, `Content-Type: text/html`, 7,435 bytes** — an "Anubis" proof-of-work challenge page ("Making sure you're not a bot!"), not JPEG bytes. Verified with curl on `full/MS_HEB_g_2_27b.jpg`, `thumbs/MS_HEB_g_2_27b.jpg`, `full/MS_HEB_g_2_1a.jpg`.
 - Desktop loader `desktop/image_loader.py::_download_bytes` (~line 160) accepts `status_code == 200` and then tries to decode → decode fails → `load_failed` → `viewers.py:1202` shows "No Image". Nothing checks Content-Type or falls back to the NLI list (which HAS 2 images for this part).
 - Web is hit too: `web/api.py:1471 oxford_image` (+ `:1590`, `:1636`) builds the same URLs; prod `GET /api/oxford_image/990053489970205171?page=53` **timed out at 30 s** (curl 28, 0 bytes) — twice.
@@ -80,6 +87,7 @@ reproduction: desktop → search "תקום רבה דיניך" → open the singl
 - **Fix constraints:** do NOT implement any challenge solver / bot-detection bypass. Acceptable fixes: treat non-image Content-Type as failure fast; auto-fallback to NLI images when the external default fails (desktop `_nli_fallback_active` machinery already exists for CUDL); surface a status line; longer-term migrate Oxford to Digital Bodleian IIIF (needs a shelfmark→object mapping — separate seed).
 
 ### B. Hit not highlighted after switching back to V0.8 (symptom 3) — highlight markers are lost when the original text is cached
+
 - Initial render applies `highlight_pattern` (`desktop/result_dialog.py:2337-2351`) as `*…*` → `<b style='color:red'>` via `_htmlify`.
 - Then the version machinery snapshots the ORIGINAL as `self._rd_original_text = self.text_ms.toPlainText()` (`result_dialog.py:1160` and `:1561`) — `toPlainText()` strips the HTML bold, and the `*` markers were already consumed by `_htmlify`, so the cached V0.8 text is unhighlighted.
 - `_rd_load_version_content` for `source == "original"` (`result_dialog.py:1427-1431`) calls `_rd_display_text(self._rd_original_text)` (`:1477`) — which never re-applies `highlight_pattern`.
@@ -87,10 +95,12 @@ reproduction: desktop → search "תקום רבה דיניך" → open the singl
 - Fix direction: re-apply `self.data.get('highlight_pattern')` inside the `original` branch (same code as `:2554-2565`), or cache the raw `ms_raw` instead of `toPlainText()`.
 
 ### C. Wrong NLI image after switching source (symptom 5) — index carried across lists of different length
+
 - `viewers.py:1016-1035 _on_source_changed`: keeps `self.current_idx` from the Oxford list (folio 27b ≈ index 53 of 164) and, when out of range for the 2-item NLI list, resets to **0** (27r) — while the text page is 2 (27v). No folio/side mapping between lists.
 - Fix direction: map by folio side (recto/verso of `target_folio`) or by relative page position when lengths differ; the `_get_folio_image_index(meta, folio_num, side_offset)` helper (`desktop/widgets/__init__.py:94`) already computes side-aware indices for the Oxford list.
 
 ### D. Unrelated, excerpt-only FGP text shown by default; ~10 identical "FGP Transcription" entries (symptoms 2, 4)
+
 - `fgp_data/fgp_transcriptions.db`: sys_id 990053489970205171 has **10 rows**, ALL with `image_side=NULL`, `folio_num=NULL`, `c_number=NULL`, `sysid_method='infotxt_prior'`, `text_source='FGP'`. Same 10 `image_id`s (`10000020001111…10000020002291`, `60013680000491`) appear under **all 82 parts** of MS heb. g.2 (829 rows, 13 distinct image_ids for the codex). The source PDFs are byte-identical across part folders (md5 `4e3955fc…` for `10000020001111_trans.pdf` under `g.2_1` and `g.2_27`) — the duplication is in the FGP export itself (`fgp_copy.py` is a faithful `os.walk` mirror).
 - These are codex-level piyyut excerpts from the Zulay/Schocken catalogue and site users (per `fgp_shelfmark_meta` DataSource); row `60013680000491` (4,281 chars) begins "Ox, Bold. Heb. g. 2 (2700) [example]" — a catalogue sample, not a folio transcription. Only two of the 12 metadata entries carry a folio hint (`Comment: "(אופן ליו''כ) דף 27b"`, `"(סילוק ליוצר ליו''כ) … דף 27b"`), and the metadata has no image_id link, so per-part attribution is not mechanically recoverable from the sidecar.
 - ALL 6,733 Oxford FGP rows have `image_side=NULL` (whole-doc). Corpus-wide, 23 of 144 multi-part Oxford codices are fully duplicated (rows == parts × distinct image_ids; 175 rows); MS heb. g.2 is the extreme case.
@@ -99,6 +109,7 @@ reproduction: desktop → search "תקום רבה דיניך" → open the singl
 - Fix directions (owner decision likely needed — this is policy): (i) demote whole-doc FGP rows that are duplicated across >1 sys_id of the same codex (or that carry "[example]" / catalogue DataSource) below V0.8; (ii) a text-overlap sanity check (token overlap between FGP content and the folio HTR) before making an FGP row the default; (iii) label FGP combo entries with an incipit so 10 rows are tellable apart. Web `version_selector.py:225/450` and `search_results.py:1450` share the policy — fix in `shared/fgp_service.py`, not per surface.
 
 ### Not a bug (symptom 4, "164 vs 2")
+
 - The Oxford list is the WHOLE codex MS. Heb. g. 2 (`oxford_part_id` from `libraries.csv` col 1; `folio_range [1, 82]` → 164 sides) — by design of the Oxford Part model (browse the codex, positioned at `target_folio`). NLI's list is per-part (folio 27 r/v). The count mismatch is expected; C is the real defect.
 
 ## Evidence
@@ -118,12 +129,13 @@ reproduction: desktop → search "תקום רבה דיניך" → open the singl
 - timestamp: 2026-09-02T08:30Z — D+SEED-033-A implemented in `shared/fgp_service.py::choose_default_source` (extended, backward-compatible: `must_contain` param + PGP-first folded in + a text-match demotion step) plus render-only callers in `genizah_app.py` (`_auto_select_pgp_edition`, `_populate_pgp_combo`), `desktop/result_dialog.py` (captures the search-hit phrase in `load_page()`), `web/components/version_selector.py` (PGP block routes through the helper, no longer returns unconditionally), `web/pages/browse.py`+`browse_enrichment.py` (thread `must_contain=state.highlight_terms`), `web/pages/search_results.py` (4 browse-link sites now append `&highlight=<matched phrase>`). New tests: `tests/test_fgp_default_coverage.py::TestTextMatchDemotion` (6), `::TestFgpIncipit` (5), `::TestMustContainOverride` (7) — 18 new tests, all pinned against real sidecar data where the resume directive required it (`test_real_ms_heb_g2_folio27_case`, `test_real_pgpid_37732_pair`, both `skipif` guarded on the real DBs being present, which they are on this machine). Confirmed RED-then-GREEN twice via `git stash`: (1) `shared/fgp_service.py` alone — reverting it makes the whole test module fail collection (`ImportError: cannot import name '_normalize_for_contains'`), confirming the gate can fail; restoring it makes all 44 tests in the file pass. (2) `genizah_app.py` + `desktop/result_dialog.py` — reverting them fails `TestWiring::test_desktop_selector_methods_are_context_parametrized` (old signature string absent); restoring passes. `ruff check` clean on every changed file (`genizah_app.py`, `genizah_translations.py`, `desktop/result_dialog.py`, `shared/fgp_service.py`, `web/components/version_selector.py`, `web/pages/browse.py`, `web/pages/browse_enrichment.py`, `web/pages/search_results.py`, `tests/test_fgp_default_coverage.py`). Regression subset (`-k "image_loader or folio or widgets or image_resolution or result_dialog or local_nav or corrections or fgp or version_selector or oxford or search_results"`): 523 passed / 5 skipped (up from the A/B/C baseline of 492/5 — the +31 include this session's 18 new tests in `test_fgp_default_coverage.py` plus others already present in the broader `-k` match at collection time).
 
 - timestamp: 2026-09-02T11:56Z — ORCHESTRATOR LIVE WEB CHECK (dev server, `python -m web.main`, auto-reload). (1) `/browse?sys_id=990053489970205171&page=2` (MS heb. g.2/27) now defaults to V0.8 showing "תקום רבה / דיניך" — sub-issue D confirmed live on web. (2) `/search?q=עצים עליו למודה` result cards carry `&highlight=%D7%A2...` on every browse link — SEED-033 link wiring confirmed live. (3) SEED-033's own masked case (`/browse?sys_id=990043939960205171&fl_id=61676829&volume_ie=IE61676826&page=2&highlight=…`) STILL renders the Arabic PGP edition. Diagnostic print inside `load_and_apply_latest` showed `must_contain` arriving correctly, `sources=1`, `reason=pgp_edition`, and **`htr_len=10`**: `/api/browse` returns `text='ל
+
 ל
 נ
 ב
 
-
 '` (10 chars) for uid `IE61676826_P000002_FL61676829`, whereas `Transcriptions.txt` holds a 497-char record for the same uid that DOES contain the phrase (normalized substring check True). So on this dev box the browse text for that page is the near-blank stub and PGP-first is the CORRECT decision for the data the page sees — the must-contain logic is not at fault; the index/browse text for this uid diverges from the corpus file (belongs to `.planning/debug/v08-cross-manuscript-misattribution.md`, duplicate-uid / stub-vs-full). SEED-033's V0.8 branch is therefore verified live on the g.2/27 page with `&highlight=תקום רבה דיניך` (FGP rows lack it, V0.8 has it → `must_contain_v08`), not on the Heid. Hebr. 18 pair.
+
 - timestamp: 2026-09-02T11:45Z — ORCHESTRATOR FOUND + FIXED a renderer gap the debugger missed: in `web/components/version_selector.py::load_and_apply_latest`, a `provider='v08'` decision (must_contain matched V0.8) only set a tooltip and then FELL THROUGH to the legacy `pgp_transcription` fallback, which re-applies the PGP edition. Added an explicit v08 branch (re-render `original_text`, label V0.8, tooltip, `return`) + wiring test `test_web_version_selector_honors_v08_must_contain_before_legacy_pgp_fallback`. Also routed the search page's inline reader (`web/pages/search_results.py`, ~line 1465) through `choose_default_source(..., must_contain=_snippet_match_phrase(snippet))` instead of its hard-coded PGP-first block; `test_web_search_results_uses_policy` extended. 45/45 in `tests/test_fgp_default_coverage.py`.
 
 - timestamp: 2026-09-02T16:30Z — OWNER DESKTOP UAT (screenshots): D verified on desktop (V0.8 default, correct text); A verified on desktop (NLI image + "Oxford image unavailable — showing the NLI image instead" notice). THREE new findings: (E) header shows "[part ]" (web) / "[part]" (desktop) — `oxford_part_id` for a folio-level record is the whole codex "MS. Heb. g. 2" (no "/N"); `get_part_display_name` appended a bare " part" and the web header split on the word "part" → empty number; `get_part_label` returned bare "part". FIXED: `shared/codicological.py::get_part_label(part_id, shelfmark)` → "part N" | "fol. N" (from the record's shelfmark) | ""; display-name fallback no longer appends " part"; web computes `oxford_part_label` once in browse_enrichment (new BrowsePage field) and the header renders it verbatim; desktop passes the shelfmark. Test: `tests/test_oxford_part_label.py` (9) — RED proven by patch-revert (fails without the change). (F) Desktop shows NO search-hit highlight on V0.8 for this hit even after the B fix — the exact-mode regex built by `SearchEngine.build_regex_pattern(['תקום','רבה','דיניך'],'exact',0)` DOES match the folio's V0.8 text across the line break (verified offline: MATCH=True), and the only post-load_page render paths are `_rd_display_text`/`_rd_display_pgp_text` via `_rd_load_version_content`; both branches now use the marked text. Mechanism NOT yet reproduced headlessly — needs the owner to say whether V0.8 was the default at open or selected by hand, and whether Find highlights the word. OPEN. (G) Web shows "Image not available" for the Oxford page: the fallback chain (direct Bodleian → /api/oxford_image → NLI manifest → /api/nli_image_by_sysid) reached the NLI proxy, which returned 404 on the owner's server; that process started BEFORE the real nli_crossref.db was restored (and the proxy negative-caches an empty FL list) — restart and re-check before treating as a code defect.
@@ -156,6 +168,7 @@ fix:
   D1 (text-match demotion): `choose_default_source` now runs an additional gate AFTER the existing coverage decision — when the coverage-picked candidate is a whole-document row (no confident per-image folio/c-number match) and the displayed folio's HTR has enough tokens to trust (>= `_SIM_MIN_TOKENS`, same guard `_select_fgp_editions_by_similarity` uses), at least one whole-doc edition must clear the SAME word-overlap floor (`_SIM_FLOOR`, via the existing `_content_similarity`/`_heb_token_set`) against that HTR text, else the whole decision demotes to V0.8 with a new `reason='demote_no_text_match'` (`eligible=False`, `source=None`; FGP stays selectable in the menu). Foliated/c-numbered rows (`_fgp_is_whole_doc(...)` false) are NEVER subject to this — their coverage baseline is already the correct folio's own HTR, so a coverage pass already implies relevance; zero regression by construction on the ~5,400 such editions.
   D2 (incipit labels): new `shared/fgp_service.py::fgp_incipit(content, max_chars=40)` — nikud-stripped, whitespace-collapsed, ellipsis-truncated snippet of an FGP row's content. Wired into both label sites: desktop `genizah_app.py::_populate_pgp_combo`'s FGP-group loop appends `" — {incipit}"` to the combo label (credit stays in the tooltip, unchanged); web `version_selector.py`'s FGP menu section adds a small incipit line under the credit line (shown only when the manuscript has more than one FGP source, so a single-row manuscript's menu stays uncluttered).
 files_changed:
+
   - desktop/image_loader.py (A — Content-Type guard in `_download_bytes`)
   - desktop/viewers.py (A — `_on_image_load_failed` auto-fallback + `lbl_fallback_notice`; C — `_on_source_changed` uses `map_matching_image_index`)
   - desktop/widgets/__init__.py (A+C — new `map_matching_image_index` / `_side_of_label` / `_SIDE_SUFFIX_RE`)
@@ -190,6 +203,7 @@ files_changed:
   - web/services.py (H — `GenizahService.is_warm()`)
   - tests/test_browse_core_warmup.py (new, 6)
   - docs/OPEN_ISSUES.md (SEED-033 row updated: awaiting-decision -> implemented/awaiting human verification)
+
 verification: |
   OWNER-REQUESTED FOLLOW-UPS (2026-09-02 17:40–18:10): tests/test_nli_proxy_rosetta_fallback.py 7/7 (seam-driven: IIIF 500 → Rosetta thumbnail served as image/png; Rosetta 404 / HTML-200 → None; link wiring on web header, JS placeholder, desktop notice); RED proven by patch-revert (the fallback test fails without the web/api.py change). Together with tests/test_api_nli_breaker_integration.py and tests/test_oxford_image_source_fallback.py: 42 passed. `node --check` on manuscript_viewer.js OK; ruff clean; py_compile OK on browse.py/viewers.py. Live Rosetta thumbnail for FL168181477 with verify=True: 200 image/png, 21,734 bytes. NOT live-rendered in a browser (the owner's server holds port 8081) — the header link and placeholder link are verified by source assertions only.
   ORCHESTRATOR LIVE WEB (cont., 12:20–12:28): g.2/27 version menu (history button) lists 10 FGP entries, each with a third line carrying the incipit (e.g. 'ברכת מזון אברך לאל אמוּנה…', 'ברכת מועד ושבת…', 'Ox, Bold. Heb. g. 2 (2700) [example]…') under the credit — D2 verified live on web. The 'showing the version containing your search' tooltip was NOT visually captured (Quasar tooltip did not surface to hover/JS probing); the branch that sets it is pinned by the wiring test and the decision log. Web Oxford IMAGES remain 'Image not available' — `web/api.py::oxford_image` still fetches the challenge-fronted host and has NO NLI fallback; that half of sub-issue A is desktop-only so far (OPEN follow-up).

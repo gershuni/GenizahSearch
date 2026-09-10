@@ -5,9 +5,14 @@ status: human_needed
 score: 6/7 must-haves verified
 overrides_applied: 0
 human_verification:
+
   - test: "Run `GenizahSearchPro.exe --telemetry-selftest` on a CLEAN Windows VM with NO Python installed (network UP)"
     expected: "stdout: SSL_OK, exit code 0. Confirms certifi/cacert.pem is bundled inside the frozen binary (NOT borrowed from the dev-machine Python). Also confirm `desktop_selftest` event appears in PostHog project 134161 (EU) — this closes Phase 114 live-delivery UAT. Then disable network adapter and run `--telemetry-selftest-offline` → OFFLINE_OK printed fast (well under 2s). Then launch normally with adapter still disabled → app is usable and silent (no telemetry error, no crash, no delay). This run satisfies SC#3 + closes INFRA-06 + closes Phase 114 live-delivery UAT."
     why_human: "Requires a frozen PyInstaller .exe built at /release time running on a clean no-Python Windows VM. Cannot be verified in a dev session: the frozen binary bundles certifi's cacert.pem separately from the dev-machine Python's SSL stack; only a clean-VM run proves the bundle shipped. No such build exists in this session (Task 3, 116-02-PLAN.md, is explicitly a `checkpoint:human-verify` gate)."
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
+  status: human_needed
 ---
 
 # Phase 116: Privacy Audit + CI Gate — Verification Report
@@ -97,6 +102,7 @@ All modified files scanned. No `TBD`, `FIXME`, `XXX` markers. No stub returns. N
 #### 1. SC#3 Clean-VM SSL Proof + Offline Degradation + Phase 114 Live-Delivery UAT
 
 **Test:**
+
 1. Build `GenizahSearchPro.exe` (happens at `/release`).
 2. On a CLEAN Windows VM with NO Python installed, network UP, run: `.\GenizahSearchPro.exe --telemetry-selftest`
 3. Confirm PostHog project 134161 (EU) shows a `desktop_selftest` event (closes Phase 114 live-delivery UAT).
@@ -104,6 +110,7 @@ All modified files scanned. No `TBD`, `FIXME`, `XXX` markers. No stub returns. N
 5. Launch `.\GenizahSearchPro.exe` normally with the adapter still disabled — confirm the app is usable and silent.
 
 **Expected:**
+
 - Step 2: stdout `SSL_OK`, exit code 0. (`SSL_FAIL` = certifi/SSL NOT bundled — release blocker. `NO_KEY` = phc_ key not baked — release blocker.)
 - Step 3: `desktop_selftest` event visible in PostHog 134161.
 - Step 4: `OFFLINE_OK` printed quickly (well under 2s — offline arm makes zero network calls).

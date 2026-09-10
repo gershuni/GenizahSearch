@@ -3,6 +3,9 @@ created: 2026-03-08
 priority: medium
 scope: data-pipeline
 tags: [nli, marc, translation, sidecar]
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
 ---
 
 # NLI MARC Data Crawl, Local Storage & Translation
@@ -10,6 +13,7 @@ tags: [nli, marc, translation, sidecar]
 ## Problem
 
 NLI Ktiv metadata (notes, english_title, physical_desc, subjects, people, bibliography) is fetched live per-manuscript from the NLI MARC XML API. This means:
+
 - No batch translation possible — on-demand Dicta only
 - Slow browse page loads (network-dependent)
 - No offline access to Ktiv Info

@@ -5,6 +5,7 @@ status: human_needed
 score: 5/6 must-haves verified
 overrides_applied: 1
 overrides:
+
   - must_have: "a self-match banner appears when detect_self_match finds the anchor among its own candidates"
     reason: >
       D-13 (user decision documented in 119-CONTEXT.md): self-match is silently excluded via
@@ -16,6 +17,7 @@ overrides:
     accepted_by: "hillel (documented in 119-CONTEXT.md D-13)"
     accepted_at: "2026-06-19T00:00:00Z"
 human_verification:
+
   - test: "Open /joins-lab in the browser, load an anchor (sys_id), run a search with 1+ result lines, and confirm the candidate grid appears with 160×160 image-first cards, Prev/Next pagination, and triage Y/?/N buttons visible on each card."
     expected: "Grid renders up to 24 cards per page; cards show thumbnail at ≈160×160; each card has three triage buttons (Yes/Maybe/No) and a Compare button; Prev/Next controls appear when more than 24 candidates."
     why_human: "The NiceGUI render path is not exercised by the headless tests; only the headless pure-function layer is tested. Visual card layout and actual browser DOM rendering require a live browser session."
@@ -34,6 +36,10 @@ human_verification:
   - test: "Load a fresh anchor (re-anchor) after triaging some candidates — confirm that all triage verdicts are cleared and the VS look-alikes refetch for the new anchor."
     expected: "After re-anchor: triage dict is empty (no verdict borders on any card); if VS was ON, look-alikes refetch and the loading notice appears briefly."
     why_human: "Re-anchor invalidation + VS refetch sequence requires a live session."
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
+  status: human_needed
 ---
 
 # Phase 119: Candidates, Compare & Visual Similarity — Verification Report

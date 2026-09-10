@@ -21,6 +21,7 @@ re_verification:
   gaps_remaining: []
   regressions: []
 human_verification:
+
   - test: "Open the web app under Hebrew UI (/search). Run any search returning results from multiple libraries. After results appear, verify the 'סינון לפי ספרייה' button is visible. Click it. Verify a CHECKBOX DIALOG opens (not a dropdown menu). Verify the Apply button is disabled when all checkboxes are unchecked. Verify 'בחר הכל' (Select All) re-enables Apply. Select one library (e.g. CUL), click Apply. Verify: (a) result count drops; (b) a removable chip appears in the post-search filter row (not in the pre-search 'search only in...' bar); (c) clicking x on the chip restores full results; (d) the domain filter button opens ONLY the domain dialog (no second library menu)."
     expected: "Checkbox dialog opens; Apply disabled at zero-checked; filter applies over full pre-paginated set; chip renders in the post-search row with Hebrew library name; removing chip restores all results; domain button unaffected; no English text under Hebrew UI."
     why_human: "NiceGUI async rendering, dialog open/close, Apply disabled state on Quasar q-btn, RTL chip text, and visual chip placement cannot be verified headlessly."
@@ -30,6 +31,10 @@ human_verification:
   - test: "On the desktop app under Hebrew UI, open the catalog Browse-by-Identification tab. Click the library filter button. Verify a CHECKBOX DIALOG opens (not a QMenu). Verify LOCAL/'My Library' is NOT in the dialog. Verify OK is disabled when all items are unchecked. Select CUL. Click OK. Verify: (a) catalog refreshes with CUL records only; (b) a chip appears in the catalog chip row; (c) clicking x on the chip restores all records; (d) click 'Search in these results' — verify the search results chip bar shows a 'Library: Cambridge' chip that is removable; (e) removing a non-library chip (e.g. domain) after the catalog→search handoff preserves the library restriction in the search count."
     expected: "Checkbox dialog with Hebrew library names; LOCAL absent; OK guard works; filter applies; chip appears; search-within threads library scope; chip-removal recompute preserves library restriction (FilterCountWorker meta_mgr); no English text under Hebrew UI."
     why_human: "Cannot test PyQt6 widget rendering, QDialog accept/reject, chip click, or Hebrew label rendering headlessly; cannot verify FilterCountWorker library preservation end-to-end without a running desktop app."
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
+  status: human_needed
 ---
 
 # Phase 129: Library Filter — Re-Verification Report

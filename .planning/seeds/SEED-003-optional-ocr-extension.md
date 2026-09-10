@@ -6,6 +6,10 @@ planted_during: Spike 001 (PDF extraction reorder) — Phase 102 scoping
 trigger_when: user demand for searching scanned/image-only PDFs in My Library, OR an OCR/accessibility milestone, OR corrupt-text-layer (F-G) files become a recurring complaint
 scope: Large
 related: D-F2, F-G (Spike 001), Phase 102
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
+  status: dormant
 ---
 
 # SEED-003: Optional opt-in OCR extension for image-only / corrupt-text-layer PDFs in My Library
@@ -26,6 +30,7 @@ So OCR would unlock search over a big, currently-invisible chunk of user content
 
 Hillel's explicit constraint (2026-05-29): OCR is **heavy**, and **most users won't need it**.
 Design tenets if/when built:
+
 - **Opt-in, on-demand** — never on the core indexing hot path; common users unaffected
   (no startup cost, no mandatory dependency).
 - **Optional/separate install** — Tesseract + Hebrew/Judeo-Arabic traineddata should NOT
@@ -39,6 +44,7 @@ Design tenets if/when built:
 ## When to Surface
 
 Present during `/gsd-new-milestone` when scope matches:
+
 - User demand to search scanned books already in their My Library
 - An OCR / accessibility / "index everything" milestone
 - F-G corrupt-text-layer files become a recurring complaint

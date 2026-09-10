@@ -6,6 +6,10 @@ revised: 2026-07-06 (three-agent critical review — codebase/data grounding + l
 planted_during: A /gsd-new-milestone exploration (2026-07-02). Scoped end-to-end with the user + a Codex methodology review, then parked. Revised 2026-07-06 after a parallel three-agent review (grounding, research, adversarial critique) requested by the user.
 trigger_when: A dedicated research/experimentation milestone when the user is ready to explore automated fragment identification via text. Standalone — no dependency on other seeds. Feasibility-FIRST (week-1 separability probe → prototype → eval → go/no-go), likely an INTERNAL milestone (no public version bump) until proven. COORDINATE WITH MiDRASH/Dicta FIRST (see "Strategic context").
 scope: large (research + prototype + evaluation feasibility spike; new `same_work_spike/` pipeline; no web/desktop UI integration this cycle)
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
+  status: dormant
 ---
 
 # SEED-029: Fragment textual similarity — shared-passage detection (feasibility spike, REVISED)
@@ -16,16 +20,19 @@ scope: large (research + prototype + evaluation feasibility spike; new `same_wor
 > — the "inside the corpus" complement to `/corpus_mapper`. Feasibility, not ship-a-feature.
 
 ## Goal
+
 Detect **shared passages / citations** between Genizah pages over the MiDRASH HTR text of the whole
 corpus — robust to HTR noise, spelling variation, and partial overlap. From passage-level evidence,
 infer same-work relationships and identify unknown fragments. Long citations surface as valuable
 indirect textual witnesses.
 
 ## What the 2026-07-06 review changed (summary)
+
 The seed's instincts survive (lexical-first, multi-view normalization, canonical-as-feature,
 embeddings-last, honest eval). Its ENGINE does not: **windowed-Jaccard + MinHash/LSH is replaced by
 seed-and-extend** (DF-banded exact char-n-gram seeds → diagonal two-hit filtering → local-alignment
 verification — the BLAST/Passim/Shmidman architecture). Three independent lines converged:
+
 1. **The math**: at realistic HTR noise (CER ~10%, both sides), *identical* text lands at
    char-4/5/6-gram Jaccard ≈ 0.27/0.21/0.17. The planned 32×4 LSH banding captures only **2–15%**
    of true pairs there; the "stricter 16×8" has threshold s*≈0.71 — a near-duplicate setting,
@@ -44,6 +51,7 @@ correct). **Windowed char-TF-IDF → demoted to a 50-line sklearn eval baseline*
 stage). **Local-alignment verifier → promoted to the load-bearing stage.**
 
 ## Corpus ground truth (verified 2026-07-06 — corrects the original seed)
+
 - `Transcriptions.txt` (repo root, 1.47 GB, UTF-8): records delimited by `==> <ID> <==` headers.
   **The unit is a PAGE, not a fragment**: **948,549 page records** across **216,911 manuscripts**
   (220,813 sys_id+IE). ID = `{sys_id}_{IE…}_{P######}_{FL…}`; the sys_id prefix joins directly to
@@ -111,6 +119,7 @@ density. Aggregate window/span hits → fragment-pair evidence via diagonal binn
 acceptance relative to shorter side, explicit short-page eval stratum.
 
 **Externals:**
+
 - **Passim v2** (Python/PySpark, github.com/dasmiq/passim; char n-grams default n=25 → lower to
   ~10–15, `--floating-ngrams`, `--min-match 3`, lower `--min-align`, tune `--maxDF` down;
   `series`=sys_id; KITAB/OpenITI Arabic recipe is the template; CHR 2024 Syriac paper = exact
@@ -129,6 +138,7 @@ acceptance relative to shorter side, explicit short-page eval stratum.
   quarantined side-channel later: Hebrew↔JA translation pairs / heavy paraphrase, separately labeled.
 
 ## Canonical-text handling (user's key requirement — now structural)
+
 Two tracks, two indexes (replaces mask-vs-label agonizing): Track 1 *identifies + labels* canon
 (separate channel — "quotes Bavli Berakhot" is a finding, canonical-copy identification is a win);
 Track 2 *never sees* canonical characters (masked pre-insert) so frag↔frag similarity is scored on
@@ -136,6 +146,7 @@ distinctive shared wording only. DF-banding independently suppresses residual fo
 Keep a whitelist path for wanted-but-formulaic classes (piyyut incipits) searchable deliberately.
 
 ## Evaluation (revised)
+
 - **Fix 1 — Tier-1 positives:** same-work pairs with non-overlapping passages are unfindable BY
   CONSTRUCTION. Run the verifier once over all known same-work pairs and split: **Tier-1 = pairs
   with a verified shared span** → the recall denominator; the remainder reported as a corpus fact
@@ -160,9 +171,11 @@ Keep a whitelist path for wanted-but-formulaic classes (piyyut incipits) searcha
 - Report per genre × language × CER band × length; unknown hits stay "unverified until sampled."
 
 ## Week 1 — the separability probe: ✅ RUN 2026-07-06 — VERDICT: GO
+
 Full results: **`same_work_spike/probe/PROBE-RESULTS.md`** (code in `same_work_spike/probe/scripts/`).
 Pilot = 17,228 pages (1,393 Birkat-Hamazon witness pages from the Shmidman BH index docx — 471/484
 sigla resolved — + joins + title-groups + FGP-overlap + 10K random background). Headlines:
+
 - **Candidate recall 1.00 on all three GT families** (joins/titles/BH) — the seed stage lost nothing.
 - **Empirical letter-CER 16–20%** (209 HTR↔FGP-human aligned pages; י↔ו/ד↔ר/ב↔כ dominate) —
   high-noise regime confirmed; the discarded LSH design would have been blind here.
@@ -202,6 +215,7 @@ Method report for external collaborators: `same_work_spike/probe/METHOD.md`.
 Next steps (ordered, handoff-ready) in PROBE-RESULTS.md §Next steps.
 
 ## The 10 decisions that matter (start values + cheap validation)
+
 | # | Decision | Start | Validate by |
 |---|---|---|---|
 | 0 | Positives | Tier-1 via verifier over all known pairs | one cheap pass, thousands of pairs |
@@ -217,6 +231,7 @@ Next steps (ordered, handoff-ready) in PROBE-RESULTS.md §Next steps.
 | 10 | Language | char-freq ID; per-language DF + strata | 100-page manual check |
 
 ## Strategic context (weigh BEFORE building)
+
 Text-based intertextuality over this exact corpus is a **funded, roadmapped, not-yet-published
 MiDRASH work package** (ERC Synergy 101071829; Avi Shmidman = NLP PI — already this seed's domain
 steer). The Haifa group (Miller/Kuflik/Lavee) has published the HTR-noise-tolerant reuse machinery
@@ -229,6 +244,7 @@ as Dicta's contribution to / coordination with the MiDRASH work package, not a p
 gets scooped within months.
 
 ## Build posture
+
 Clean **`same_work_spike/`** pipeline: read `Transcriptions.txt` → stage-0 hygiene → normalize
 (union view) → Track 1 (canon ID + span labels) → Track 2 (DF-banded seed index → diagonal two-hit)
 → verify (alignment) → emit pair evidence / spans / canon labels to SQLite or Parquet. Reuse
@@ -240,6 +256,7 @@ New deps: edlib or rapidfuzz (+parasail optional); PySpark only if the Passim ba
 No NiceGUI/PyQt integration this cycle. Internal milestone, no version bump, until green.
 
 ## Requirement themes (draft → REQUIREMENTS.md at trigger)
+
 1. Stage-0 corpus hygiene (empty pages; near-dup/V0.7-V0.8; same-sys_id exclusion; language ID).
 2. Union-view normalization (NFC; nikud/diacritics; final-letter fold; space-strip; matres-light union).
 3. Track 1 canon identification (Shmidman skip-grams + maxDF + i=2 vs clean M-source/Sefaria; span
@@ -255,6 +272,7 @@ No NiceGUI/PyQt integration this cycle. Internal milestone, no version bump, unt
 9. MiDRASH/Dicta coordination checkpoint before (or alongside) the spike.
 
 ## Pointers (verified 2026-07-06)
+
 - Corpus: `Transcriptions.txt` (root, 1.47 GB; `==> ID <==` page records). Older dump `AllGenizah_OLD.txt`.
 - `corpus_mapper/` — reuse `runner.py::ResultsDatabase` (SQLite + checkpoints), `LibrariesDB`,
   logging; `canonical_filter.py` (exact-match pickle, `corpus_mapper_output/canonical_fingerprints.pkl`,
@@ -271,6 +289,7 @@ No NiceGUI/PyQt integration this cycle. Internal milestone, no version bump, unt
   · MiqraBERT arXiv:2606.19638 · corpus Zenodo 10.5281/zenodo.17734473.
 
 ## Open questions (remaining at trigger time)
+
 - Final seed length n + DF cap values (week-1 sweep decides).
 - Whether the Shmidman second generator earns its keep frag↔frag, or stays Track-1-only.
 - Matres-light union: keep or drop after the plene/defective validation.

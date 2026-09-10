@@ -5,9 +5,14 @@ status: human_needed
 score: 3/3 must-haves verified
 overrides_applied: 0
 human_verification:
+
   - test: "SEED-010 — Joins Lab image-resolution + zoom defect (language-independent)"
     expected: "CUDL/Oxford images resolve consistently across anchor/grid/Compare panes; zoom works when image fails to load"
     why_human: "Defect is language-independent and was explicitly deferred during Hillel's 2026-06-21 HE-UAT pass (untestable during NLI outage). Logged as SEED-010 / docs/OPEN_ISSUES.md P2. Out of i18n scope but still an open defect in the Joins Lab that must be resolved before v8.2.0 ships."
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
+  status: human_needed
 ---
 
 # Phase 121: i18n Polish — Verification Report

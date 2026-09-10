@@ -401,6 +401,75 @@ God-file decomposition (genizah_app.py + genizah_core.py → cohesive shared/+de
 
 ---
 
+## Milestone: v9.0.0 — Discovery: Same-Work Identification & Connection Atlas
+
+**Shipped:** web 2026-08-16, desktop 2026-08-26 | **Closed:** 2026-09-10 (`override_closeout`)
+**Phases:** 6 built of 20 planned | **Plans:** 45 | **Tasks:** 108
+
+### What Was Built
+- `/atlas` — a static, canon-masked, offline-baked Canvas 2D corpus overview (62,645 nodes, exact
+  set-equality invariant, Brotli under a 6 MB cap), live since 2026-07-21
+- A masked, versioned `discovery.db` sidecar behind an async fail-closed `DiscoveryService`
+  (bounded concurrency, per-query timeouts, version-keyed LRU)
+- A pre-registered tier-A precision measurement: **0.9382, 95% CI [0.9084, 0.9644]**, owner-graded
+  catalogue-blind over 280 cards against a 0.85 Strict floor, validator 12/12
+- The browse connections panel, `/computed-identifications`, a frozen relation-precedence matrix,
+  the `/start` launchpad, beta community identification reviews, and an xlsx export
+- Passage-matching (141-147 in the plan): a character-level seed-and-extend engine, full-corpus
+  index, release verifier, web `method='passage'` surface, and the desktop Composition-tab
+  surface with multi-witness RRF fusion — all shipped, none as a GSD phase
+
+### What Worked
+- **Pre-registration.** CERT-01 froze the estimand, the deck manifest and four input hashes before
+  a single card was drawn. It is the one number in the milestone nobody can argue with.
+- **Fail-closed loaders as a repeated pattern.** `atlas_assets` → `discovery_assets` →
+  `passage_assets`, each flag ANDed with a readiness predicate. The `meta.audience` check in
+  `discovery_assets.py` was strong enough to refute a critical audit finding on inspection.
+- **Mutation-proving gates.** The masking sweep was watched failing at both the data and code
+  levels before being trusted. Three defects in its first draft were found by the gate, not by
+  reading it.
+- **Owner rulings as first-class artifacts.** "No precision percentages, tiers only" propagated
+  cleanly to every surface, including the xlsx export nobody had anticipated when the rule was set.
+
+### What Was Inefficient
+- **The record stopped and the product didn't — twice, then a third time at 10x.** Reconciliations
+  on 2026-08-16 and 2026-08-20 both diagnosed it; Phase 140 was created as the standing answer and
+  sequenced first; it never ran. 339 commits and two releases then landed unrecorded.
+- **Work shipped ahead of its own gates and the gates were never retro-run.** `DISCOVERY_ENABLED`
+  flipped 2026-08-08 ahead of REL-01. The passage default flipped ahead of Phase 144's holdout,
+  which is still unspent. Phase 145's cold-cache SLOs were declared and never measured.
+- **Codex found 25 rounds' worth of real defects across three unplanned PRs**, some the inverse of
+  the bug they were fixing. That is not a review problem — it is the absence of any pre-merge gate
+  on a maintenance stream the milestone's gates could not see.
+- **Decisions taken in untracked files.** Three of Phase 136.1's six success criteria were reshaped
+  by owner ruling in a `.json` that sat untracked for 19 days.
+
+### Patterns Established
+- **The availability predicate, never the bare flag.** Every gated surface reads
+  `x_available()` (flag AND asset readiness). Code that jumped the queue still respected it.
+- **Display strings belong where both halves meet** — fixed at sidecar ingestion, not at either end.
+- **A gate must be watched failing.** Adopted across masking, projection and rebuild-preservation.
+- **The exit audit as a deliverable.** 24 units, two adversarial verifiers per finding, refuted-by
+  default. 104 candidates produced 81 verified — and killed two of its own drafted criticals.
+
+### Key Lessons
+1. **A bookkeeping phase that is never scheduled is not a control.** Phase 140 was correctly
+   diagnosed, correctly designed and correctly sequenced. None of that mattered. The next
+   equivalent needs a forcing function that does not depend on someone choosing to run it.
+2. **Flipping a flag ends the pressure to finish the gate.** Five REL-01 items were waived after
+   the flip and none has moved in 25 days. Nothing downstream of a shipped-looking feature gets
+   done on schedule.
+3. **A pre-registered instrument only helps if it is spent.** The holdout exists, is well designed,
+   and has never been scored — while the default it was built to license flipped twice.
+4. **Verify the harness before trusting its green.** This close's own acknowledge pass reported
+   "ALL SUCCEEDED" while acknowledging nothing, because `jq` was absent and every loop body
+   iterated zero times. The same session had already recorded that failure mode as a project lesson.
+
+### Cost Observations
+- The exit audit ran ~240 agents across survey / reconcile / verify stages; adversarial
+  verification removed 23 of 104 candidates, including two drafted as critical. The refutation
+  pass was the highest-value stage — a false critical in a roadmap costs more than it saves.
+
 ## Cross-Milestone Trends
 
 | Milestone | Phases | Plans | Days | Plans/Day | Key Theme |

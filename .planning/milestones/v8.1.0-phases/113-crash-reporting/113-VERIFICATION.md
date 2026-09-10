@@ -5,12 +5,17 @@ status: human_needed
 score: 7/7
 overrides_applied: 0
 human_verification:
+
   - test: "Frozen-binary Qt slot exception fires sys.excepthook + writes crash_log.txt + delivers desktop_crash event"
     expected: "In the packaged .exe, raising inside a QTimer.singleShot slot causes (1) crash_log.txt to be written and (2) a desktop_crash event to reach PostHog (or a mock endpoint). crash_log.txt must be written even when telemetry fails."
     why_human: "Requires a built PyInstaller .exe; frozen Qt slot behavior cannot be reproduced deterministically under pytest headless offscreen. The pytest test test_qtimer_slot_raise_reaches_excepthook passes in the dev build but frozen-binary behavior differs (PyQt6 routing in packaged executables is unconfirmed)."
   - test: "Real native C-extension crash produces faulthandler dump + next-launch desktop_prior_crash"
     expected: "Forcing a native crash (e.g. ctypes null-deref or Tantivy SIGSEGV), relaunching with consent=True results in exactly one desktop_prior_crash event with a fixed-enum fatal_error value (no paths, no frames, no raw dump text)."
     why_human: "Real segfaults cannot be triggered deterministically in-process. Requires a manual crash-then-relaunch cycle with PostHog capture enabled."
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
+  status: human_needed
 ---
 
 # Phase 113: Crash Reporting Verification Report

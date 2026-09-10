@@ -6,6 +6,10 @@ updated: 2026-06-21T00:00:00Z
 seed: SEED-010
 branch: master-main (fix applied here per user; no feature branch)
 fix_scope: Option B (unified breaker-aware resolver) + Compare per-instance zoom — Codex-reviewed
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
+  status: fix_implemented_pending_uat
 ---
 
 ## Current Focus
@@ -19,9 +23,11 @@ next_action: Decide fix scope (minimal targeted patches vs single shared breaker
 
 expected: In the Web Joins Lab, candidate images load consistently across the candidate grid, the main anchor pane, and the Compare modal, for every provider (NLI, Oxford, Cambridge/CUDL, Manchester, JTS) — and zoom/pan controls work — including when NLI's image API is down (other providers should still resolve).
 actual (observed 2026-06-21, web Joins Lab, NLI image API DOWN):
+
   - Oxford: thumbnails shown in the candidate GRID, but full images NOT shown in the main ANCHOR pane nor in COMPARE.
   - CUDL/Cambridge: images shown in COMPARE, but NOT in the GRID nor the main ANCHOR.
   - Zoom controls do NOT work, at least for CUDL images.
+
 errors: No exception surfaced to the user; images silently fail (404 from the NLI proxy when NLI is down), and zoom buttons click but do nothing.
 reproduction: Open the Web Joins Lab, pin an anchor, view candidates from Oxford and CUDL/Cambridge while NLI's image API is unavailable (or with the Phase-98 NLI circuit breaker open). Compare across grid / anchor / Compare surfaces. Try zoom on a CUDL image.
 started: Pre-existing latent bug; only manifests when NLI is down. Masked when NLI is up because the NLI proxy itself falls back to other providers server-side and /api/cambridge_image has its own NLI fallback (web/api.py:1156-1177).
@@ -141,12 +147,14 @@ DESIGN NOTE: the durable fix is a SINGLE shared, breaker-aware image-URL resolve
    ruff clean; py_compile clean; node --check manuscript_viewer.js OK.
 
 ## Test results (2026-06-21)
+
 - 565 passed / 2 skipped across joins_lab/compare/browse_api/api_legacy/search_serializer/
   parallels/openapi suites + 163 in image_resolution/candidate_grid/anchor_viewer (incl. new).
 - Pre-existing unrelated failure: test_joins_lab_render::test_cold_start... (Windows cross-test
   asyncio event-loop pollution; reproduces identically on the stashed baseline — NOT this change).
 
 ## REMAINING — live HUMAN UAT (cannot be unit-verified; matches the seed's UP/DOWN mandate)
+
 - [ ] Browser: open Web Joins Lab, pin an anchor, open Compare → ZOOM works in BOTH panes
       (wheel + +/-/reset buttons), and pan works in both. (The per-instance JS wiring can only be
       confirmed in a real browser.)

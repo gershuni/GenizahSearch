@@ -5,6 +5,7 @@ status: human_needed
 score: 8/8 must-haves verified
 overrides_applied: 0
 human_verification:
+
   - test: "Web end-to-end: load /search, run a query, click empty results area, press Space"
     expected: "Results pane scrolls down approximately one viewport"
     why_human: "NiceGUI render-smoke gap — headless pytest cannot dispatch a real browser keydown and observe the scroll offset change"
@@ -23,6 +24,10 @@ human_verification:
   - test: "Desktop native keys: after the Space-scroll branch is installed, press PageDown and PageUp"
     expected: "Native table scroll unaffected (branch does not intercept Key_PageDown/Key_PageUp)"
     why_human: "Live interactive desktop only"
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
+  status: human_needed
 ---
 
 # Phase 128: Search Results Space-Scroll (SEED-025) Verification Report

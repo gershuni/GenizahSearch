@@ -3,8 +3,13 @@ created: 2026-03-07T21:30:04.145Z
 title: Server-side search with email notification of results
 area: search, infrastructure
 files:
+
   - genizah_core.py
   - web/pages/search.py
+
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
 ---
 
 ## Problem
@@ -12,6 +17,7 @@ files:
 Long-running searches (especially composition/parallel searches) can take minutes to hours. Users must keep the browser tab open and wait. There is no way to submit a search and come back later to see the results.
 
 The user wants the ability to run searches on the server in the background and receive results by email when the search completes. This would allow users to:
+
 - Submit complex searches and close their browser
 - Queue multiple searches
 - Get notified when results are ready without keeping the app open
@@ -27,6 +33,7 @@ Milestone-level feature (v7.0+), not a single phase. Requires multiple new subsy
 5. **Rate limiting & auth guards** — per-user quotas to prevent resource abuse
 
 ### Notes (2026-03-15)
+
 - v6.2.0 already mitigated the worst pain: ETA display, cancel with partial results, desktop notifications, sleep prevention
 - No existing background task system or email infrastructure — this is greenfield
 - Composition searches are the primary use case (minutes to hours)

@@ -18,9 +18,14 @@ re_verification:
   gaps_remaining: []
   regressions: []
 human_verification:
+
   - test: "Opt the desktop app in to telemetry, log in with a Supabase account, then open PostHog and confirm a desktop_session_start event appears with distinct_id equal to the user's Supabase UUID (not an int hash), no hostname/username/path props present."
     expected: "Event appears in PostHog with correct distinct_id and only app_version, os_family, os_version, python_version, pyqt_version, ui_language, session_id props."
     why_human: "End-to-end event transmission to the PostHog EU project requires a live desktop session with valid credentials and real network access — not verifiable by grep or unit tests."
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
+  status: human_needed
 ---
 
 # Phase 114: Usage Analytics Verification Report
@@ -136,6 +141,7 @@ All events route through `telemetry.track()` → `_emit()` → `_BASE_PROPS()` +
 ### 1. Live PostHog Event Delivery
 
 **Test:** Opt the desktop app in to telemetry, log in with a Supabase account, let the startup coordinator fire (~700ms after launch). Open PostHog and verify:
+
 - A `desktop_session_start` event appears with `distinct_id` equal to the user's Supabase UUID
 - Props contain only: `app_version`, `os_family`, `os_version`, `python_version`, `pyqt_version`, `ui_language`, `session_id` — NOT hostname, username, executable path, or working directory
 - The same `distinct_id` matches the web session for the same user

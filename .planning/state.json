@@ -1,0 +1,113 @@
+{
+  "contract": "1.0.0",
+  "flavor": "core",
+  "milestone": "v9.0.0 — Discovery — Same-Work Identification & Connection Atlas (web)",
+  "phases": [
+    {
+      "number": "133",
+      "name": "Visual Atlas Preview (early quick win)",
+      "status": "complete"
+    },
+    {
+      "number": "134",
+      "name": "Discovery Data Spine",
+      "status": "complete"
+    },
+    {
+      "number": "135",
+      "name": "Precision Certificate & Confidence Bands",
+      "status": "complete"
+    },
+    {
+      "number": "136",
+      "name": "Read Surfaces — Connections Panel & Work→Witnesses",
+      "status": "complete"
+    },
+    {
+      "number": "136.1",
+      "name": "Evidence View, Work Pages & Catalogue Integration",
+      "status": "in_progress"
+    },
+    {
+      "number": "136.2",
+      "name": "Findings Export (xlsx)",
+      "status": "complete"
+    },
+    {
+      "number": "137",
+      "name": "Community Judgments — Hardening",
+      "status": "in_progress"
+    },
+    {
+      "number": "138",
+      "name": "Leads Queue",
+      "status": "pending"
+    },
+    {
+      "number": "139",
+      "name": "a. Release Hardening & REL-01 Gate Closure",
+      "status": "pending"
+    },
+    {
+      "number": "139",
+      "name": "b. Atlas Drill-down & Homepage Capstone",
+      "status": "in_progress"
+    },
+    {
+      "number": "140",
+      "name": "Milestone Bookkeeping & Debt Closure",
+      "status": "pending"
+    },
+    {
+      "number": "141",
+      "name": "Passage Matching — Algorithm Specification",
+      "status": "pending"
+    },
+    {
+      "number": "142",
+      "name": "Passage Matching — Spike & GO/NO-GO",
+      "status": "pending"
+    },
+    {
+      "number": "143",
+      "name": "Passage Matching — Engine, Builder & Full Index",
+      "status": "pending"
+    },
+    {
+      "number": "144",
+      "name": "Passage Matching — Evaluation & Default Decision",
+      "status": "in_progress"
+    },
+    {
+      "number": "145",
+      "name": "Passage Matching — Web Surface",
+      "status": "pending"
+    },
+    {
+      "number": "146",
+      "name": "Passage Matching — Desktop Surface & Release",
+      "status": "pending"
+    },
+    {
+      "number": "147",
+      "name": "Passage Mode on Regular Search (optional)",
+      "status": "pending"
+    },
+    {
+      "number": "148",
+      "name": "Reference Expansion & Bake Reproducibility",
+      "status": "in_progress"
+    },
+    {
+      "number": "149",
+      "name": "Discovery Performance & Operability",
+      "status": "in_progress"
+    }
+  ],
+  "next": {
+    "command": "/gsd:progress",
+    "label": "Show progress",
+    "reason": "Unsure of state — showing progress"
+  },
+  "updated_at": "2026-09-10T12:01:22.326Z"
+}

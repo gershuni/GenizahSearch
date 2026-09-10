@@ -5,6 +5,10 @@ planted: 2026-03-31
 planted_during: v7.7 Volume-Aware Browse (Phase 60)
 trigger_when: infrastructure/reliability milestone, image performance work, or NLI downtime escalation
 scope: Medium
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
+  status: dormant
 ---
 
 # SEED-001: Server-side IIIF image cache — batch-fetch low-res images for reliability
@@ -20,6 +24,7 @@ The puzzle derivative cache already proves this pattern works at small scale (ex
 **Trigger:** Next infrastructure/reliability milestone, or when NLI downtime becomes a recurring user complaint.
 
 This seed should be presented during `/gsd:new-milestone` when the milestone scope matches any of these conditions:
+
 - Infrastructure, reliability, or performance milestone
 - Image loading/viewing improvements
 - Offline or degraded-mode features

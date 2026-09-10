@@ -11,6 +11,7 @@ Items discovered during execution that are out of scope per Rule SCOPE BOUNDARY 
 - Recommended cleanup: remove the unused imports OR add a `# noqa: F401` comment OR reference them in a sanity-check assertion within the test
 
 Deferred to a future cleanup pass (e.g., Phase 97.2-02 or general test maintenance).
+  status: acknowledged
 
 ## Pre-existing failures in tests/test_local_indexer.py
 
@@ -25,3 +26,4 @@ assertions were not updated to match.
 Not in scope for Phase 97.2-01 per SCOPE BOUNDARY rule. Recommended cleanup: update the tests
 to use a truly unsupported extension (e.g., `.bin` or `.xyz`) or to assert HTML now indexes
 as 'ok'.
+  status: acknowledged

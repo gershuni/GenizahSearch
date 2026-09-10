@@ -4,6 +4,10 @@ phase: 116-privacy-audit-ci-gate
 source: [116-VERIFICATION.md, 116-02-PLAN.md Task 3]
 started: 2026-06-16T12:00:00Z
 updated: 2026-06-16T14:05:00Z
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
+  gap_snapshot: "partial::scenarios=0"
 ---
 
 ## Current Test
@@ -14,6 +18,7 @@ Strict gold-standard items remaining: clean no-Python VM SSL_OK token + offline-
 ## Tests
 
 ### 1. Frozen-exe live delivery + on-the-wire privacy (real-session evidence)
+
 expected: |
   A real frozen-GenizahSearchPro.exe session delivers desktop_* events to PostHog 134161 over
   TLS, and the delivered events contain NO forbidden content (no query/search text, My-Library
@@ -35,6 +40,7 @@ result: PASS (2026-06-16). Verified by querying production PostHog 134161 direct
   disclosure ("anonymous") awareness; consistent with the shared-project posture.
 
 ### 2. SC#3 strict gold-standard — clean no-Python VM SSL_OK token + offline degradation
+
 expected: |
   On a CLEAN Windows VM with NO Python installed:
   1. Network UP — `.\GenizahSearchPro.exe --telemetry-selftest` → stdout `SSL_OK`, exit 0
@@ -43,6 +49,7 @@ expected: |
   2. Disable the network adapter — `.\GenizahSearchPro.exe --telemetry-selftest-offline`
      → `OFFLINE_OK` fast (< ~2s, no network call).
   3. With the adapter still disabled, launch normally → usable + silent (INFRA-05 offline proof).
+
 result: [pending — recommended at /release on a clean VM. Test 1 already gives strong PRACTICAL
   evidence the frozen exe's bundled certifi works (real events delivered over TLS), but the
   clean no-Python VM is the strict proof that rules out any borrowed-SSL/env contamination, and

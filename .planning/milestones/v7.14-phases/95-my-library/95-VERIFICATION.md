@@ -5,6 +5,7 @@ status: human_needed
 score: 10/10 must-haves verified
 overrides_applied: 0
 human_verification:
+
   - test: "Index 3+ local files via My Library tab; run a search returning both Genizah hits AND LOCAL hits; verify COL_SRC shows 'LOCAL' in blue (#3498db); verify LOCAL filter button appears and cycles All → Only Local → No Local → All; close and reopen app, verify filter state persists (REQ-6 D-39 full cycle)"
     expected: "Filter button visible only when LOCAL hits present; cycling correct; persistence across restart; independent state per surface (Search vs Composition vs Parallels)"
     why_human: "Qt UI state, QSettings persistence, and per-session JSON corpus_scope require live desktop app — cannot verify programmatically without a running Qt event loop"
@@ -23,6 +24,10 @@ human_verification:
   - test: "Open Help page (web); verify 'My Library — Local Documents' section is present; verify cleartext-on-disk disclosure line is present in EN and HE (D-31 + D-33)"
     expected: "Section present with privacy guarantee, three-cloud-write-gates text, filter usage, hostname-rename caveat, and cleartext disclosure"
     why_human: "Web Help page visual presence and Hebrew rendering require browser check"
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
+  status: human_needed
 ---
 
 # Phase 95: My Library Verification Report
@@ -165,6 +170,7 @@ Step 7b: SKIPPED for UI surfaces (requires running Qt desktop app — no headles
 **Deferred review items (non-blocking per 95-REVIEW.md):** WR-02, WR-03, WR-04, WR-06, WR-07 (code quality / future robustness warnings), IN-01 through IN-07 (informational). None are blockers for phase goal achievement.
 
 **Critical findings from 95-REVIEW.md — all fixed:**
+
 - CR-01: `SearchEngine._current_lab_weights_hash` AttributeError — fixed with `getattr` safe defaults at `genizah_core.py:6772-6773` + defensive try/except at call site
 - CR-02: LabEngine LOCAL LAB hook silently skipped — fixed by adding `reload_local_lab_index()` and `_check_local_lab_freshness()` to LabEngine (genizah_core.py:752-790) and calling at LabEngine.__init__ line 714
 - WR-01, WR-05, WR-08: fixed per 95-REVIEW.md `fixed_items` list

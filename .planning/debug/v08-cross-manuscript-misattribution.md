@@ -1,3 +1,10 @@
+---
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
+  status: unknown
+---
+
 # V0.8 cross-manuscript misattribution — corpus-wide scan (2026-08-14)
 
 Follow-up to SEED-033's finding #1, which recorded one case (`Ms. P. Heid. Hebr. 18`
@@ -102,6 +109,7 @@ passage*, not a misattribution. They should not be counted in any defect total.
 ## This is a lower bound, by construction
 
 Named shapes the scan cannot see:
+
 - the victim **has** its own V0.8 record (outside the V0.7-only victim pool);
 - the foreign text was appended **once**, with no repetition (invisible to Sweep A);
 - **replacement** rather than concatenation;

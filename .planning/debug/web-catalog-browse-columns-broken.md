@@ -3,6 +3,10 @@ status: investigating
 trigger: "Web app catalog browse tab has broken column navigation. Middle columns don't load subcategories, and clicking leaf items doesn't show the detail panel."
 created: 2026-02-28T00:00:00Z
 updated: 2026-02-28T00:00:00Z
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
+  status: investigating
 ---
 
 ## Current Focus

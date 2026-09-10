@@ -3,11 +3,16 @@ created: 2026-03-09T19:00:00Z
 title: Unified metadata text search with translations
 area: search, browse
 files:
+
   - shared/fjms_service.py
   - shared/translation_service.py
   - genizah_app.py
   - web/pages/search.py
   - web/pages/catalog_browse.py
+
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
 ---
 
 ## Problem

@@ -5,6 +5,7 @@ status: human_needed
 score: 7/8 goal-backward checks verified
 overrides_applied: 0
 human_verification:
+
   - test: "End-to-end indexing at 13K-file / 43 GB with mid-run crash and Resume"
     expected: "Recovery modal appears on next launch; LOCAL search is gated during recovery; Resume resumes without re-extracting committed files."
     why_human: "Requires a real 43 GB Hebrew scholarly corpus and taskkill simulation. No CI machine has this data; scripted kill race is non-deterministic."
@@ -14,6 +15,10 @@ human_verification:
   - test: "Bilingual EN+HE Help / About visual review"
     expected: "zstd cleartext disclosure is readable in both languages; wording matches Phase 95 D-33 voice."
     why_human: "Strings confirmed present in code; AST test passes. Layout and Hebrew RTL rendering requires visual inspection."
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
+  status: human_needed
 ---
 
 # Phase 97: More LOCAL Features — Verification Report
@@ -180,11 +185,13 @@ Phase 97 verification completed on its own date with a known set of P0 cascade
 items deferred. Two follow-up phases retroactively closed those items:
 
 ### Phase 97.1 (commit `2e1b846e`, 2026-05-25)
+
 - MAX_PATH long-path prefix (`\\\\?\\` on Windows for paths > 260 chars)
 - Non-blocking cancel + per-file cancel check (resolves UI freeze + `WinError 3`
   storm during cancel on large folders)
 
 ### Phase 97.2 (2026-05-26)
+
 8-bug recovery cascade fix + new "Reset My Library" / "אפס ספריה שלי" toolbar
 action. See `.planning/phases/97.2-recovery-cascade-lockbusy/` for full
 documentation. Closes the Phase 97 P0 cascade items where startup +

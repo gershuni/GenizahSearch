@@ -25,6 +25,7 @@ rather than left red. No git history is affected (the file was never
 committed). Re-ran the gate after the fix: exit 0.
 
 **Deferred (systemic, NOT fixed here):**
+
 - `tmp/` is not in `.gitignore` — any future `git add -A` (prohibited by
   this project's own commit protocol, but a real footgun for a
   less-careful session) could commit a similar leak from a Codex/Gemini CLI
@@ -38,6 +39,7 @@ committed). Re-ran the gate after the fix: exit 0.
   addressed. A dedicated `/gsd-quick` or manual `--scan-repo` pass over the
   full `tmp/` tree is recommended before any of those files are ever
   staged.
+  status: acknowledged
 
 ## 134-02 — pre-existing masking leaks recur in untracked `tmp/` Codex-review scratch files (NOT fixed; systemic risk from 134-01 has recurred a 2nd time)
 
@@ -76,6 +78,7 @@ combined `--scan-repo` report):
 
 **Recommended action (systemic, escalates the 134-01 recommendation --
 2nd occurrence now confirmed):**
+
 - Gitignore `tmp/**/*.md` and `tmp/**/*.log` (or the whole `/tmp/` tree) so
   Codex/Gemini CLI review transcripts can never accidentally enter a
   `git add -A` (already prohibited by this project's commit protocol, but a
@@ -88,6 +91,7 @@ combined `--scan-repo` report):
   `tmp/CODEX-REVIEW-134-replan-r2.md` / `tmp/CODEX-REVIEW-134-replan-r3.md`
   (or move them outside the repo tree) at their convenience -- they were left
   untouched by this session for the reasons above, not because they are safe.
+  status: acknowledged
 
 ## 134-04 — evidence_id collision: shared_text vs family-router same-span (auto-fixed defensively; FROZEN recipe gap flagged for a future dated amendment)
 
@@ -135,6 +139,7 @@ with the real `.masking_patterns` file (0 hits).
 
 **Deferred (schema-level, NOT resolved here — the frozen recipe itself is
 untouched):**
+
 - Whether the 134-07 real re-distill (or an earlier schema-amendment plan)
   should extend the FROZEN `evidence_id()` recipe with an explicit
   discriminator (e.g. folding `router_bucket`/collection-source into the
@@ -148,6 +153,7 @@ untouched):**
   represented some other way (e.g. via a future non-PK-colliding evidence
   model). Flagging for 134-07 owner review alongside the neutral-title
   curation gate.
+  status: acknowledged
 
 ## Future work — catalog/title/FGP-identity propagation (owner-flagged 2026-07-21, NOT built)
 

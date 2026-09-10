@@ -6,6 +6,10 @@ planted_during: FGP-chooser groundwork — user floated a thin-installer / pick-
 trigger_when: installer size / download bloat becomes a complaint, OR a "desktop footprint / data management" milestone, OR after the FGP-chooser milestone (which ships FGP as a download and resolves its bundle-vs-download decision)
 scope: Large (own multi-phase milestone). NOTE: the existing infra is download TRANSPORT only — the real build is a full artifact-lifecycle Data Manager. Realistic completeness ≈ 40–50%, not 70%.
 related: SEED-004 (FGP chooser), docs/plans/FGP_CHOOSER_MILESTONE.md, gui_threads.py SidecarUpdateThread/SidecarDownloadThread, CompileScriptGenizah.iss, genizah_core.py Indexer, memory reference_desktop_data_provisioning
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
+  status: dormant
 ---
 
 # SEED-005: Thin desktop installer + on-demand "Data Manager" (user picks which data to download)
@@ -110,6 +114,7 @@ parts (state, integrity, UX, resumability, the core index) are unbuilt.
 Ship **FGP as a download FIRST** inside the FGP-chooser milestone (387 MB, optional, fits the
 existing sidecar pattern) — bundling it would make the installer problem worse before solving it.
 Then do this full thin-installer milestone later. Two FGP guardrails from Codex:
+
 - Show **minimal user-visible install status** for FGP in the chooser (empty FGP because the DB
   is missing must NOT look like a data-quality failure).
 - Build a **small reusable "artifact status/install" widget**, NOT a one-off FGP-only download UX

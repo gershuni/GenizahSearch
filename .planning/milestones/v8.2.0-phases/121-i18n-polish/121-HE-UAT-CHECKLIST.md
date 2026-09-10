@@ -1,3 +1,10 @@
+---
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
+  gap_snapshot: "unknown::scenarios=0"
+---
+
 # Phase 121 — Joins Lab HE-Mode RTL UAT Checklist
 
 **Purpose:** Load-bearing SC#2 acceptance gate. Headless render-smoke tests structurally cannot
@@ -190,5 +197,6 @@ to load) but is language-independent and was untestable during an NLI outage —
 as SEED-010 (logged ea4140f9; docs/OPEN_ISSUES.md P2 row) and out of i18n scope.
 
 **Open items (if any FAIL):**
+
 - SEED-010: Joins Lab image-resolution + zoom bug (CUDL/Oxford images / zoom on failed load) —
   language-independent defect; deferred to dedicated cloud-branch debug/fix. See docs/OPEN_ISSUES.md.

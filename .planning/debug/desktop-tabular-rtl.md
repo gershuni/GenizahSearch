@@ -3,6 +3,10 @@ status: diagnosed
 trigger: "Investigate the desktop tabular query builder's layout direction. The user reports it should be RTL (right-to-left) even in English, matching the web version."
 created: 2026-02-10T00:00:00Z
 updated: 2026-02-10T00:00:00Z
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
+  status: diagnosed
 ---
 
 ## Current Focus
@@ -48,4 +52,5 @@ fix: Remove the `if CURRENT_LANG == 'he':` condition from both setLayoutDirectio
 verification: Open tabular query builder with English UI language, verify dialog and preview label both display RTL
 
 files_changed:
+
   - genizah_app.py: Remove language condition from lines 4367-4368 and 4503-4504

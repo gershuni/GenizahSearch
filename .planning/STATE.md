@@ -1,11 +1,13 @@
 ---
 gsd_state_version: 1.0
 milestone: v9.0.0
-milestone_name: Discovery — Same-Work Identification & Connection Atlas
-status: executing
+milestone_name: Discovery — Same-Work Identification & Connection Atlas (web)
+status: Awaiting next milestone
 stopped_at: "Phase 136.2 (Findings Export, xlsx) CLOSED 2026-08-21 — merged as PR #323 (f1d0f94d) and deployed by the owner the same day, then verified against PRODUCTION rather than inferred from the merge (route live, the completion cookie stamped on a failure path, the %0A token ignored). 38 mutations red by name; the battery is now crash-safe after an interrupted run left a mutation in the working tree. Still owed: the 136.2 retro-plan (Phase 140 SC1). Left unfixed by decision: the harness-only concurrency-slot leak, and a PRE-EXISTING cross-file test failure (measured at 6 failed on the base vs 5 with the work). Next: Phase 136.1, and the discovery-data lane (148-149). BOOKKEEPING 2026-08-21: 136.2 had no phase directory, so `init.manager` (disk-strict since ADR-3180 §7.4 — a ticked ROADMAP box carries no machine authority) read it as never discussed and kept recommending it; its retrospective attestation moved to `.planning/phases/136.2-findings-export-xlsx/` and the phase now reads complete (4/20 -> 5/20). Also: 136.1 had a Phase Details block and a Progress-table row but NO checkbox (19 boxes against 20 phases) — added. 141/142/143 UNTICKED by owner ruling the same day: they read `[x]` while the Progress table called them 'Built, unmerged' on `claude/computed-id-parallels-search-a7c8fd`. Re-tick on merge + verification, not on build. Checkbox list and disk state now agree exactly: 5 ticked, 5 complete."
-last_updated: "2026-08-21T12:00:00.000Z"
-last_activity: 2026-08-21
+last_updated: "2026-09-10T12:01:22.216Z"
+last_activity: 2026-09-10
+last_activity_desc: Milestone v9.0.0 completed and archived
+state_head: 0f6c2cd749ac59e87a91fe4ca7bb108b5856d6b5
 progress:
   total_phases: 20
   completed_phases: 5
@@ -25,99 +27,13 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 
 ## Current Position
 
-> ### ⚠ RE-MAPPED 2026-08-20 — read this first, then the 2026-08-16 banner below it
->
-> A second reconciliation ran on 2026-08-20. The 2026-08-16 ratification below is still accurate
-> about everything it covers; what it left behind were three mechanical faults and four days of
-> unrecorded work.
->
-> **Fixed by the re-map:** `ROADMAP.md`'s `## Phase Details` had never been updated to match the
-> checkbox list the ratification rewrote, so `init.manager` read a retired **Phase 139**, reported
-> **136 as incomplete** (its own Progress table said 22/22 Complete) and **139 as complete** (the
-> atlas explorer is unbuilt) — exactly inverted. Phase Details is rebuilt, 136 is ticked, 139 is
-> split into 139a/139b in both halves of the file, and phases 140-149 have detail blocks.
->
-> **Added:** the **passage-matching lane (141-147)** — owner-planned outside GSD, 20 commits on the
-> unmerged branch `claude/computed-id-parallels-search-a7c8fd`, placed inside v9.0.0 as the desktop
-> release's headline — and the **discovery data lane (148-149)** for the V4.1/V4.2 reference
-> expansion and the serving-performance work. Requirements PASS-01..09 and OPS-01..03 were added so
-> that work has something to be verified against.
->
-> **Corrected here:** `completed_plans` read 45 against 43 actual summaries (`134-07` and `136-13`
-> have no SUMMARY); `total_phases` read 10 against 19; and this file's own "Current focus: Phase 136"
-> line sat directly above its SUPERSEDED banner.
->
-> **Do not read `completed_phases: 4` as a verifier result.** The four closed phases now carry
-> `VERIFICATION.md` files, but those are **retrospective attestations** written 2026-08-20 from
-> production evidence and commit references — not `gsd-verifier` runs. Each says so in its first line.
-
-> ### ⚠ SUPERSEDED 2026-08-16 — read this before the paragraph below
->
-> **The discovery beta is LIVE in production and has been since 2026-08-08** (`DISCOVERY_ENABLED=1`;
-> `/computed-identifications`, the browse connections panel and the `/help` methods section are
-> publicly reachable). The "deployed behind an OFF flag" and "the flag must NOT be flipped yet"
-> language throughout this file predates the flip and is **historical**, not current state. The flip
-> was an owner decision; it simply was never written back here, so for eight days this file
-> contradicted the live site.
->
-> Phases 133-136 are CLOSED. The roadmap was reconciled on 2026-08-16 under the owner's
-> "ratify reality" ruling — see `.planning/ROADMAP.md`, sections "Scope that shipped ahead of its
-> phase" and "REL-01: the 2026-08-08 flag flip, recorded after the fact", which are now the
-> authority for phase status and for the gate waivers.
->
-> Of the six items recorded below as gating flag-on: **one is resolved** (the 58 NULL-genre works,
-> `2e9b409e`), **four are waived in writing** (D-06b, the CERT-02 tier-A number copy, the
-> correction/retraction policy, VIS-02 — all now homed in Phase 139a), and **one is NOT waived and
-> is a live obligation**: the cross-surface masking sweep was last attested 2026-08-05, and the
-> three surfaces that shipped after it (beta reviews, excerpt view, homepage promotion) have never
-> been swept. That is the first task of Phase 139a.
-
-Phase: 136 (read-surfaces-connections-panel-work-witnesses) — **CLOSED 2026-08-08**
-Plan: **22 of 22 complete.** Four plans (`136-13`, `136-15`, `136-21`, `136-22`) were never ticked
-in ROADMAP.md although their functionality shipped under other commit messages; counted as done on
-the code. See the ROADMAP Progress-table notes.
-Status (historical, as written 2026-08-04): Code complete and deployed behind an OFF flag. Flag-on
-is an owner decision and is **gated on six items that are NOT done** — see "WAVE 11" below. Do not
-read "22 of 22" as "ready".
-
-**WAVE 11 CLOSED 2026-08-05 — `136-19`, the cross-surface masking sweep + flag-on attestation.**
-15 mutations, each watched red by name. An unset `MASKING_SCAN_PATTERNS_FILE` yields a RED suite
-(26 passed, 5 errors), never a skip. Coverage is derived from what code CALLS (`ui.*`, transitively)
-and checked at LINE granularity against Python's own compiler; the database scope derives from every
-`manifest*.json` on disk and the payload scope from parsing every `web/` module importing
-`web.discovery`. **Both derivations failed on their first run, which is the point.** Four classes
-swept: 2,213,790 / 23,063 / 470 / 27,566 chars; all 48 findings state combinations, 9 enveloped
-reads, 1 link target, 15 error modes. Six manifest-named databases clean under
-`--strict --scan-repo --scan-asset --scan-sqlite`. Non-vacuity proved by feeding values read OUT of
-the deployed artifact back in as the pattern set: 11 / 26,480 / 1 hits. `--scan-asset` alone proved
-INSUFFICIENT by construction — at offsets 515/522/529 the byte scan reports 0 where the cell scan
-reports 1.
-
-**Three real gaps it closed in already-"finished" work:** the findings page had NO automated masking
-gate at all (136-18 wrote the capture helper and ran the scan by hand; nothing called it); neither
-surface's click-painted output had ever been scanned (and closing that needed a CHANGE-handler
-driver as well as a click driver, because the unit/sort selects register value-change handlers);
-and three of six manifest-named databases had never been scanned.
-
-⚠ **THE SEVENTH INSTANCE OF THIS PHASE'S CHARACTERISTIC DEFECT — and it was in the sweep itself.**
-Mutation M4 turned a control red and the failure output **printed the restricted pattern in clear
-text**: `assert needle in text` is rewritten by pytest to display both operands. A D-25 leak
-introduced BY the tool built to detect D-25 leaks, found by the mutation battery rather than by
-review. Fixed structurally (`_contains()` returns a bool) and pinned by an AST check that refuses
-any assertion able to echo it again. Repo re-verified clean afterwards, with the fail-closed control
-confirming exit 1 when the pattern file is unset.
-
-**THE PHASE'S CHARACTERISTIC DEFECT, for whoever plans 137+.** Seven instances, all failing in the
-same direction — toward false confidence: (1) a masking test that SKIPPED when its pattern file was
-absent; (2) the atlas browser-DOM capture exiting 0 having run none of its interactions; (3) an
-executor-dispatch assertion measuring ZERO and passing; (4) a benchmark whose non-empty assertion
-counted the ROWS of a `COUNT(*)`; (5) a skip list calling a reachable state "unreachable", which hid
-a real user-facing crash; (6) a masking capture whose "derived" coverage was a NAMING CONVENTION,
-missing 78 executable lines including every surface painted by a click; (7) the M4 leak above.
-Three were found by the external reviewer, four by CI or direct measurement. **None was found by
-reading the code and thinking it looked right.**
+Phase: Milestone v9.0.0 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-09-10 — Milestone v9.0.0 completed and archived
 
 ### The six items that gate the public flag-on (NOT done)
+
 From `136-FLAG-ON-READINESS.md` §3: **D-06b**; the tier-A-with-its-number clause; the
 correction/retraction policy; VIS-02's reconciliation; the browser-check record; and the **58
 NULL-genre works the release verifier fails on**. Additionally, and largest: **no public read path
@@ -163,6 +79,7 @@ rule exists to forbid) and two holes in the honesty gate (`accuracy is 91 percen
 **Ruling T's `more matches` browser check is now MET — first green run 2026-08-04, CI run
 30931268195**, after being carried as NOT MET since 136-16. It took four runs and caught THREE real
 defects on the way, TWO of them product defects rather than test defects:
+
 1. a `persistent` citation dialog covered the page for every first-time visitor;
 2. **the mobile nav drawer never closed at all** — it mounted open and its retraction ran under
    `asyncio.ensure_future`, which empties NiceGUI's slot stack, so `ui.run_javascript` raised and a
@@ -409,7 +326,7 @@ numbers: `136-NOVELTY-RUN.md` §§ 2-3 (§0's environment-gap account is preserv
 `sha256:ce0dc2fb176d01de5f04975eac82017feaeb390db71e9ec13f3872a77d28d4b6` recorded in `136-GATE1-DECISIONS.md`. Read back via a new `--read-labels-from`/`--labels-out` mode added to `scripts/discovery_gate1_evidence.py` (fails closed on a missing/renamed sheet, header mismatch, out-of-vocab value, or a Case # outside 1..101/duplicated). Verified cell-for-cell against the actual XLSX — zero data discrepancies across all 101 cases; one FRAMING correction found (cases 6-8 are Class 1 near-miss, not "Class 3" — Class 3 is genuinely cases 1-3, all `same_work`). Per-arm analysis recorded in `136-GATE1-DECISIONS.md` (new section after § J): Arm 1 residual (30) has ZERO `fills_gap` — 19 `diverges_work` (18 `catalogue_correct`), `container_predicts` saved 4/30 rows from false candidacy (validates ruling H); Class 6 (30) selector over-fires ~57% (15 `confirms` + 2 `refines_granularity`), and its 13 confirmed `diverges_work` calls are 13/13 `catalogue_correct`; Identity constant-answer hypothesis CONFIRMED on the 5 decided cases (cases 6-8 skipped); Arm 2 (heuristic-demoted, 25) recorded as **INCONCLUSIVE** — only 7/25 decisive, the two Codex-flagged-hardest strata (`published_full_sole`, `pgp_sole`) each produced exactly 1 decisive verdict of 10, diagnosed as an instrument-design gap (the sheet shows only the stratum rationale, never the actual bib/PGP source text a labeller needs) — the owner's ungraded prose read is recorded verbatim but explicitly NOT treated as a measurement; a redesigned Arm 2 is recommended, not built. **A genuine, currently-dormant D-13d gap was found and flagged (not fixed):** investigating the owner's skip note for cases 6-8 ("same work, different location, perhaps not the same page") led to confirming via direct query that Class 1's near-miss pairs are never actually co-located on any span (unlike Class 3, verified genuinely span-grounded) — and that D-13d's `works_related_by_title` predicate (author + >=4-char title-prefix) WOULD collapse a real example (three catalogued volumes of `המספיק לעובדי השם` by אברהם בן הרמב"ם, `w000007`/`w000036`/`w000038`) if they ever co-occurred, though a corpus-wide check found zero span-groups where 2+ of them currently do. Flagged for a future re-examination of `works_related_by_title`; the collapse rule itself is UNCHANGED. **Wave 2+ impact assessed, not acted on:** 136-04 (which grades the funnel against this label file and its hash) and 136-13 (the one authorized rebuild) are NOT blocked by any of the above — the label file exists with its hash, and every finding here is either already actionable within 136-04's existing scope (ruling I's re-measurement gate; the funnel-first residual-only wiring already reconciled) or explicitly deferred (Arm 2 redesign, D-13d re-examination) without touching any code 136-04/136-13 depend on. Full analysis: `136-GATE1-DECISIONS.md`'s new post-§-J section. Next: `136-04-PLAN.md`.
 
 **A further continuation (same day, 2026-08-02) recorded owner RULING J and REBUILT the hard-case pool as a three-arm, SOURCE-STRATIFIED sample — this SUPERSEDES the 95-case/three-sheet state described above.** Ruling J closes `136-NOVELTY-PRIOR-ART.md` § 7's open design question: the LLM arm runs ONLY on the heuristic-funnel RESIDUAL, never over all identifications (owner, verbatim: "Makes sense to use LLM only after the heuristics"). Recorded consequence: because the funnel only ever demotes (never promotes), a heuristic FALSE-KNOWN is now PERMANENT and UNRECOVERABLE — Codex measured 3,688 `published_full` false-knowns and 2,014 PGP false-knowns (942 sole-source) in the reference implementation, and the model will never see any of them under this architecture. Full record: `136-GATE1-DECISIONS.md` § J. `.planning/REQUIREMENTS.md` NOVEL-01 gained a dated `⟨AMENDED 2026-08-02 — ruling J⟩` amendment; `136-04-PLAN.md` Task 3's action text was surgically reconciled from "run the authorized funnel over the full identification set" to funnel-first/residual-only wording (no restructuring). **`scripts/discovery_gate1_evidence.py` was extended with real bib/PGP/FGP/FJMS-catalogue source loaders** (reading `fist_data/fjms_enrichment.db`, `pgp_data/pgp.db`, `fgp_data/fgp_transcriptions.db` — the SAME checked-source families NOVEL-01 names, joined to the live `discovery-v1-33499c5b…` asset) and a `select_novelty_arms` three-arm sampler, REPLACING the former Classes 4 (terse catalogue), 5 (generic collection) and 7 (liturgical container) as the accuracy instrument. **Kept unchanged:** Classes 1-3 (identity spot-check, 8 cases) and Class 6 (catalogue divergence, 30 cases incl. the owner's F/G annotations on 12 of the original 15 — retained because those rulings characterize specific real manuscripts and dropping the class would discard that owner-authorized work). **Folded in as Arm 1 strata:** the former Class 4 (now the `terse_catalogue` stratum) and Class 7 (now `container_predicts`). **Dropped:** Class 5 (no owner ruling exists for any specific Class 5 case; its collection-level-identity question does not correspond to a source-coverage stratum). New pool, measured against the live asset: **101 total candidates** — 8 identity + 30 Class 6 (unchanged) + 30 Arm 1 residual (7 strata capped at 5 each; 6 of 7 populated — `pgp_sole` measured ZERO in Arm 1, an honest finding: PGP's "present" and "named" tests are near-synonymous under the current heuristic, so PGP-present rows land almost entirely in Arm 2, not Arm 1) + 25 Arm 2 heuristic-demoted (`published_full_sole` 10 / `pgp_sole` 10 / `other_demotion` 5, a NEW `demotion_correct`/`false_known`/`unsure`/`skip` question) + 8 Arm 3 no-source-text (NO verdict collected by design — ships as candidates automatically; shown only so the owner can eyeball the bypass). A real logic bug (stratum-priority ordering made `bib_sole`/`pgp_sole`/`fgp_sole` unreachable) was found during this continuation's own dry run and fixed before the final regeneration — see `136-GATE1-DECISIONS.md` § J's own note. XLSX widens from three sheets to FIVE ("Identity Spot-Check", "Novelty Shades" [Class 6 + Arm 1], "Heuristic-Demoted" [Arm 2], "No-Source-Text" [Arm 3], "Vocabulary & Instructions"). Reproducibility verified: two consecutive full runs produced byte-identical `136-GATE1-EVIDENCE.md` and `136-NOVELTY-HARDCASES.md`; the XLSX is reproducible at the cell-value/sheet-structure level (not byte-for-byte, per its own pre-existing openpyxl-timestamp caveat). **Masking scan NOT MET in this environment** (`MASKING_SCAN_PATTERNS_FILE` unset/no pattern file present — fails closed by design, per this plan's own verification text; must be re-run with the real pattern file before the phase closes, tracked at 136-19's attestation — never counted as satisfied). Task 4 (owner-provenance label file, reading verdicts back from the four data sheets over the NEW 101-case pool) still pending — awaits this same Task 3 checkpoint, now re-presented with the redesigned worksheet.
-Last activity: 2026-08-03
+Last activity: 2026-09-10
 
 **PHASE 135 CLOSED 2026-07-28.** 135-08 deployed the v2 sidecar to production (atomic manifest swap, `discovery-v1-33499c5b…`, flag OFF, rollback drilled, prod-box PERF-01 actuals recorded: browse p95 0.49 ms / added RSS 11.2 MB). 135-09 froze the CERT-01 pre-registration + OC table + 280-card deck + twelve-check validator, rendered the deck, and the owner then **GRADED ALL 280 CARDS** catalogue-blind (zero reveals) — **validator 12/12 exit 0**, closing on the real D-02 signal.
 
@@ -501,6 +418,88 @@ Carried forward from prior milestones (unchanged; see MILESTONES.md for full con
 | FUT-08 | New generalized discovery exports (xlsx/CSV) | Future | v9.0.0 |
 
 Older cross-milestone deferrals (JSA/JWB Component B, DEFER-01..05 decomposition, D-F12, etc.) remain tracked in `docs/OPEN_ISSUES.md` and the v8.4.0 archive; not v9.0.0-relevant.
+
+### Acknowledged at the v9.0.0 close (2026-09-10)
+
+57 open artifacts were acknowledged as deferred at milestone close, making this an
+**override_closeout** rather than a verified one. Acknowledgement is verdict-preserving and
+self-invalidating: it never rewrites an artifact's own `status:` field, and the suppression
+lapses the moment the artifact's observed state changes again (a reopened debug session, an
+edited UAT gap, a re-triggered seed) — anything that moves resurfaces at the next audit and must
+be acknowledged again.
+
+**Attribution note.** The `Milestone` column records WHERE each item was acknowledged, not where
+it originated. Roughly 26 of these — every `uat_gaps` and `verification_gaps` row — were
+inherited from milestones v7.14 through v8.4.0 that were archived without closing them, and carry
+their originating milestone in brackets. The only items that are genuinely v9.0.0 debt are the
+three Phase 134 `deferred_items`: two are the same unresolved systemic risk (`tmp/` is still not
+gitignored, and Codex review transcripts in it have twice tripped the masking scan), and the third
+records that the frozen `evidence_id` recipe has a real-data collision gap (115 of 252,091 rows)
+currently handled by a build-side dedup heuristic rather than a dated schema amendment.
+
+**Not the same list as the exit audit.** These 57 are open *artifacts* — debug sessions, UAT files,
+seeds, todos. The 81 verified plan-vs-reality findings are a different and larger set; see
+[`milestones/v9.0.0-MILESTONE-AUDIT.md`](milestones/v9.0.0-MILESTONE-AUDIT.md).
+
+| Category | Item | Status | Deferred At | Milestone |
+|----------|------|--------|-------------|-----------|
+| debug_sessions | desktop-tabular-rtl | diagnosed | 2026-09-10 | v9.0.0 |
+| debug_sessions | index-build-utf8-decode | root_cause_found | 2026-09-10 | v9.0.0 |
+| debug_sessions | joins-lab-image-resolution | fix_implemented_pending_uat | 2026-09-10 | v9.0.0 |
+| debug_sessions | oxford-fgp-image-mismatch | fix_implemented_pending_uat | 2026-09-10 | v9.0.0 |
+| debug_sessions | puzzle-nli-tiny-images | unknown | 2026-09-10 | v9.0.0 |
+| debug_sessions | v08-cross-manuscript-misattribution | unknown | 2026-09-10 | v9.0.0 |
+| debug_sessions | web-catalog-browse-columns-broken | investigating | 2026-09-10 | v9.0.0 |
+| quick_tasks | 260322-jtk-brown-bg-removal-open-issues-md | missing | 2026-09-10 | v9.0.0 |
+| quick_tasks | 260809-rjw-fix-find-out-why-ms-the-national-library | missing | 2026-09-10 | v9.0.0 |
+| seeds | SEED-001-server-iiif-image-cache | dormant | 2026-09-10 | v9.0.0 |
+| seeds | SEED-003-optional-ocr-extension | dormant | 2026-09-10 | v9.0.0 |
+| seeds | SEED-005-thin-installer-data-manager | dormant | 2026-09-10 | v9.0.0 |
+| seeds | SEED-012-supabase-startup-hang-hardening | dormant | 2026-09-10 | v9.0.0 |
+| seeds | SEED-025-space-scroll-search-results | dormant | 2026-09-10 | v9.0.0 |
+| seeds | SEED-026-library-filter-web-search-and-catalog-browse | dormant | 2026-09-10 | v9.0.0 |
+| seeds | SEED-027-refresh-code-index-after-decomposition | dormant | 2026-09-10 | v9.0.0 |
+| seeds | SEED-028-method-based-desktop-panel-extraction | dormant | 2026-09-10 | v9.0.0 |
+| seeds | SEED-029-fragment-textual-similarity-same-work-detection | dormant | 2026-09-10 | v9.0.0 |
+| seeds | SEED-031-telemetry-reask-consent-on-update | dormant | 2026-09-10 | v9.0.0 |
+| seeds | SEED-032-surface-new-works-and-miscatalog-llm-gate | dormant | 2026-09-10 | v9.0.0 |
+| todos | 2026-02-11-migrate-desktop-corrections-fetch-to-shared-corrections-service.md | (presence-only) | 2026-09-10 | v9.0.0 |
+| todos | 2026-03-07-server-side-search-with-email-notification-of-results.md | (presence-only) | 2026-09-10 | v9.0.0 |
+| todos | 2026-03-08-nli-marc-crawl-and-translate.md | (presence-only) | 2026-09-10 | v9.0.0 |
+| todos | 2026-03-09-unified-metadata-text-search-with-translations.md | (presence-only) | 2026-09-10 | v9.0.0 |
+| todos | 2026-04-16-reading-desk-ux-fixes.md | (presence-only) | 2026-09-10 | v9.0.0 |
+| uat_gaps | [v8.4.0] 130/130-HUMAN-UAT.md | passed | 2026-09-10 | v9.0.0 |
+| uat_gaps | [v8.3.0] 129/129-HUMAN-UAT.md | partial | 2026-09-10 | v9.0.0 |
+| uat_gaps | [v8.2.0] 117/117-HUMAN-UAT.md | passed | 2026-09-10 | v9.0.0 |
+| uat_gaps | [v8.2.0] 118/118-HUMAN-UAT.md | passed | 2026-09-10 | v9.0.0 |
+| uat_gaps | [v8.2.0] 119/119-HUMAN-UAT.md | code-resolved-pending-verify | 2026-09-10 | v9.0.0 |
+| uat_gaps | [v8.2.0] 119/119-UAT-CODEX-DIAGNOSIS.md | unknown | 2026-09-10 | v9.0.0 |
+| uat_gaps | [v8.2.0] 121/121-HE-UAT-CHECKLIST.md | unknown | 2026-09-10 | v9.0.0 |
+| uat_gaps | [v8.2.0] 121/121-HUMAN-UAT.md | partial | 2026-09-10 | v9.0.0 |
+| uat_gaps | [v8.1.0] 113/113-HUMAN-UAT.md | partial | 2026-09-10 | v9.0.0 |
+| uat_gaps | [v8.1.0] 114/114-HUMAN-UAT.md | partial | 2026-09-10 | v9.0.0 |
+| uat_gaps | [v8.1.0] 116/116-HUMAN-UAT.md | partial | 2026-09-10 | v9.0.0 |
+| uat_gaps | [v8.0.0] 107/107-HUMAN-UAT.md | passed | 2026-09-10 | v9.0.0 |
+| uat_gaps | [v8.0.0] 108/108-HUMAN-UAT.md | passed | 2026-09-10 | v9.0.0 |
+| uat_gaps | [v7.15] 100/100-HUMAN-UAT.md | passed | 2026-09-10 | v9.0.0 |
+| uat_gaps | [v7.14] 95/95-HUMAN-UAT.md | partial | 2026-09-10 | v9.0.0 |
+| uat_gaps | [v7.14] 96/96-06-UAT.md | partial | 2026-09-10 | v9.0.0 |
+| uat_gaps | [v7.14] 96/96-08-UAT.md | partial | 2026-09-10 | v9.0.0 |
+| verification_gaps | [v8.3.0] 128/128-VERIFICATION.md | human_needed | 2026-09-10 | v9.0.0 |
+| verification_gaps | [v8.3.0] 129/129-VERIFICATION.md | human_needed | 2026-09-10 | v9.0.0 |
+| verification_gaps | [v8.2.0] 119/119-VERIFICATION.md | human_needed | 2026-09-10 | v9.0.0 |
+| verification_gaps | [v8.2.0] 121/121-VERIFICATION.md | human_needed | 2026-09-10 | v9.0.0 |
+| verification_gaps | [v8.1.0] 113/113-VERIFICATION.md | human_needed | 2026-09-10 | v9.0.0 |
+| verification_gaps | [v8.1.0] 114/114-VERIFICATION.md | human_needed | 2026-09-10 | v9.0.0 |
+| verification_gaps | [v8.1.0] 116/116-VERIFICATION.md | human_needed | 2026-09-10 | v9.0.0 |
+| verification_gaps | [v7.14] 95/95-VERIFICATION.md | human_needed | 2026-09-10 | v9.0.0 |
+| verification_gaps | [v7.14] 97/97-VERIFICATION.md | human_needed | 2026-09-10 | v9.0.0 |
+| deferred_items | 134/deferred-items.md: 134-01 Task 1 — pre-existing masking leak in an untracked scratch log (fixed as a blocking exce | acknowledged | 2026-09-10 | v9.0.0 |
+| deferred_items | 134/deferred-items.md: 134-02 — pre-existing masking leaks recur in untracked `tmp/` Codex-review scratch files (NOT f | acknowledged | 2026-09-10 | v9.0.0 |
+| deferred_items | 134/deferred-items.md: 134-04 — evidence_id collision: shared_text vs family-router same-span (auto-fixed defensively; | acknowledged | 2026-09-10 | v9.0.0 |
+| deferred_items | [v7.14] 97.2/deferred-items.md: Pre-existing ruff F401 in tests/test_phase_97_2_schema_marker_absence.py - Lines 14-15: `_comp | acknowledged | 2026-09-10 | v9.0.0 |
+| deferred_items | [v7.14] 97.2/deferred-items.md: Pre-existing failures in tests/test_local_indexer.py - `test_supported_file_types_docx_pdf_txt | acknowledged | 2026-09-10 | v9.0.0 |
+| todos | 2026-06-01-one-click-scholarly-citations.md | (presence-only) | 2026-09-10 | v9.0.0 |
 
 ## Session Continuity
 
@@ -619,3 +618,7 @@ V2 BAKE SEQUENCING LOCKED 2026-07-23: bake discovery-v2 on Lever 1 NOW (canonica
 - [Phase ?]: 136-11: eligibility_basis added NULLABLE -- schema-doc amendment owed at 136-12; a NOT NULL column would break scripts/project_discovery_public.py
 - [Phase ?]: 136-14: eligibility_basis is derived per row, not read from discovery_identification -- the stored column is an aggregate that mislabels a restored row inside a mixed identification, and it is not yet in the schema contract
 - [Phase ?]: 136-14: a failing sidecar query returns status=unavailable, never ok/0 -- found against the real pre-rebuild asset, where a swallowed exception produced a false zero on the one surface that hides itself on a zero
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone

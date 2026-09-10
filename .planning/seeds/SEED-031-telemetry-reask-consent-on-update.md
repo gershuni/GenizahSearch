@@ -6,6 +6,10 @@ planted_during: "none (post-v8.4.1 close, no active milestone)"
 trigger_when: "revisiting desktop telemetry / opt-in rates, or the next desktop release milestone"
 scope: small-medium
 intended_runner: gsd-quick
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
+  status: dormant
 ---
 
 # SEED-031: Re-ask desktop telemetry consent on update (throttled)
@@ -13,12 +17,15 @@ intended_runner: gsd-quick
 ## Why This Matters
 
 Desktop telemetry is opt-in via a **single first-run modal** (`desktop/consent_dialog.py`
+
 + `desktop/telemetry.py`), gated on `FIRST_RUN_SHOWN_KEY` so it shows **at most once, ever**.
+
 Every non-Enable exit — "Not now / לא עכשיו", Escape, the X, even Enter — routes through the
 single `done()` finalizer which sets `set_consent(False)` **and** locks
 `FIRST_RUN_SHOWN_KEY=True`, so it never asks again.
 
 Consequences:
+
 - Only ~9 opt-in users observed in a 2-week PostHog window (2026-06-30 → 2026-07-14) — the
   telemetry sample is tiny and its representativeness is unknowable (non-consenters send
   nothing, so there's no denominator).
@@ -44,6 +51,7 @@ small planned task, not a blind inline edit.
 ## The Rule to Implement
 
 Re-ask the consent invite on a **new-version launch** ONLY IF **all** hold:
+
 1. Not already opted in (`consent=True` short-circuits everything — never ask an opted-in user).
 2. **≥ 30 days** since the last ask (time-based cooldown).
 3. Under a **lifetime cap** (~3 ignored asks, then stop permanently).
@@ -65,6 +73,7 @@ bumps) does NOT help, since minors also ship ~weekly.
 
 Replace the permanent "lock on decline" with re-askable state, stored in the **same
 `config.pkl` app-config** used today (consent-independent — must work *before* opt-in):
+
 - `telemetry_last_asked_version` + `telemetry_last_asked_ts` → drive the 30-day cooldown.
 - `telemetry_ask_count` → drive the lifetime cap.
 - `telemetry_never_ask` → the hard opt-out ("Don't ask again").

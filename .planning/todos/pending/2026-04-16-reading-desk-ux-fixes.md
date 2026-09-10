@@ -4,6 +4,9 @@ created: 2026-04-16
 area: desktop
 priority: low
 source: Phase 69 smoke test (user feedback)
+audit_acknowledged:
+  milestone: v9.0.0
+  at: 2026-09-10
 ---
 
 # Reading Desk UX Fixes
