@@ -1,0 +1,139 @@
+{
+  "phase": "136.1",
+  "phase_name": "Read Surfaces — Evidence View, Work Pages & Catalogue Integration",
+  "timestamp": "2026-08-22T00:00:00Z",
+  "areas_completed": [
+    "Licence gate urgency",
+    "SC1 drift fail-close",
+    "/work/{id} page shape"
+  ],
+  "areas_remaining": [
+    "catalog-browse shape"
+  ],
+  "decisions": {
+    "Licence gate urgency": [
+      {
+        "question": "When does the reuse_ok gate land?",
+        "answer": "Neither — owner ruling: the works are public and shown deliberately. Not an exposure, not a hotfix.",
+        "options_presented": [
+          "Hotfix now, ahead of the phase",
+          "Plan 1 of the phase",
+          "Measure first, then decide"
+        ]
+      },
+      {
+        "question": "What should a reader see for a licence-gated work?",
+        "answer": "Moot — 'if I publish it, it means I decide it's ok'.",
+        "options_presented": [
+          "Existing work_unavailable state",
+          "Distinct licence wording",
+          "Hide the work pane entirely"
+        ]
+      },
+      {
+        "question": "JA: public text, no reuse_ok flag. Which reading governs?",
+        "answer": "Set the flag deliberately for the 21 JA works.",
+        "options_presented": [
+          "Fail closed — absent is not yes",
+          "Set the flag deliberately",
+          "Fail closed now, flag later"
+        ]
+      },
+      {
+        "question": "What should the code actually enforce?",
+        "answer": "NO GATE — render whatever is staged. Staging a work in the reference corpus IS the decision. Concern raised (a new work renders with nobody deciding) and reaffirmed by owner.",
+        "options_presented": [
+          "Owner-set flag, fail closed on absent",
+          "No gate — render whatever is staged",
+          "Gate only the genuinely unclear"
+        ]
+      },
+      {
+        "question": "Does the ruling cover the 46 unclear and 1 noncommercial_only?",
+        "answer": "Everything currently rendering. One ruling, across the board.",
+        "options_presented": [
+          "Everything currently rendering",
+          "JA 21 only for now",
+          "Review the list before ruling"
+        ]
+      }
+    ],
+    "SC1 drift fail-close": [
+      {
+        "question": "How should the excerpt detect that the page text has moved on?",
+        "answer": "Re-bake is the guarantee. No render-time detector. FINDING: the excerpt table stores the text itself (frag_before/span/after) plus text_layer but NO page-text hash or snapshot id, so the shipped view never applies offsets to live text and cannot have the offset bug SC1 was written against; the real risk is undetectable staleness.",
+        "options_presented": [
+          "Stamp a snapshot hash, compare at render",
+          "Re-bake is the guarantee",
+          "Render-time slicing as SC1 specified"
+        ]
+      },
+      {
+        "question": "Reader switches the version selector to a source the excerpt wasn't cut from. Then what?",
+        "answer": "Ignore - the identification is about the manuscript, not about one transcription of it. Excerpt stands regardless of selected source.",
+        "options_presented": [
+          "Label which layer it came from",
+          "Hide when the layer differs",
+          "Ignore - the match is about the manuscript"
+        ]
+      },
+      {
+        "question": "Rewrite SC1 to the shipped architecture, or keep it as the target?",
+        "answer": "Rewrite SC1 to the real mechanism, so the criterion describes something verifiable. Consequence: SC1's remaining work collapses to a re-specification plus a re-bake discipline note.",
+        "options_presented": [
+          "Rewrite SC1 to the real mechanism",
+          "Keep SC1, mark it partially met",
+          "You decide"
+        ]
+      }
+    ],
+    "/work/{id} page shape": [
+      {
+        "question": "Focused witness map, or a browse surface in its own right?",
+        "answer": "Witness map PLUS work context - the unit-grouped carrier list with band+library filters, plus a header giving work identity (title, author, witness count, manuscript count) so the page is worth landing on from outside. FINDING: the service is already built (get_work_witnesses_async with anchor_sys_id=None; build_work_expansion_count_sql for the real total); the page is the missing part, not the query.",
+        "options_presented": [
+          "Focused witness map",
+          "Witness map plus work context",
+          "Full browse surface"
+        ]
+      },
+      {
+        "question": "Does the findings page facet already satisfy WORK-02's 'findable by neutral title'?",
+        "answer": "YES - mark WORK-02 met by the /computed-identifications domain/author/work cascade (web/pages/findings.py) and record where. This phase only adds the links into /work/{id}. Removes the work-browse chunk from the phase.",
+        "options_presented": [
+          "Yes - mark it met, note where",
+          "Partly - the title normalization is still owed",
+          "No - a work index is still wanted"
+        ]
+      },
+      {
+        "question": "Where do links to /work/{id} come from?",
+        "answer": "Connections panel work titles, findings page rows, and catalog-browse rows. Atlas EXCLUDED (its explorer is unbuilt, Phase 139b - nothing to link from yet).",
+        "options_presented": [
+          "Connections panel work titles",
+          "Findings page rows",
+          "Atlas nodes",
+          "catalog-browse rows"
+        ]
+      }
+    ]
+  },
+  "deferred_ideas": [],
+  "canonical_refs": [
+    "docs/specs/discovery-v3-naming.md",
+    "docs/specs/discovery-budgets.md",
+    ".claude/skills/sketch-findings-genizahsearch/SKILL.md",
+    ".planning/phases/136-read-surfaces-connections-panel-work-witnesses/superseded-2026-08-02/136-17-PLAN.md",
+    ".planning/phases/136-read-surfaces-connections-panel-work-witnesses/superseded-2026-08-02/136-22-PLAN.md",
+    ".planning/phases/136-read-surfaces-connections-panel-work-witnesses/superseded-2026-08-02/136-23-PLAN.md",
+    ".planning/phases/136-read-surfaces-connections-panel-work-witnesses/superseded-2026-08-02/136-24-PLAN.md",
+    ".planning/phases/136-read-surfaces-connections-panel-work-witnesses/superseded-2026-08-02/136-25-PLAN.md",
+    ".planning/phases/136-read-surfaces-connections-panel-work-witnesses/superseded-2026-08-02/136-26-PLAN.md",
+    ".planning/phases/136-read-surfaces-connections-panel-work-witnesses/136-GATE1-DECISIONS.md"
+  ],
+  "open_notes": [
+    "SC2 is STRUCK, not met: owner ruling - no licence gate, staging a work in the reference corpus IS the decision; everything currently rendering stays, JA included. REQUIREMENTS.md:320 (PANEL-03 'reference text is never rendered') also contradicts shipped reality and needs amending.",
+    "discovery_links.py carries only browse_url; SC5 needs a work_url in the same AST-guarded builder or the guard's premise leaks.",
+    "Remaining area not yet discussed: /catalog-browse shape (SC4) - layout against a q-table whose identification column is already 36% wide, ~68% mobile, match-framing wording, and whether to reuse the panel's neutral divergence chip."
+  ]
+}
