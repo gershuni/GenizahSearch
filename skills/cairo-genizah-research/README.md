@@ -39,14 +39,6 @@ the extracted folder and explicitly ask it to read SKILL.md and run its scripts.
 The scripts do not depend on Claude-specific tools or environment variables.
 See [Codex skill documentation](https://developers.openai.com/codex/skills/).
 
-## First questions
-
-> השתמש בסקיל cairo-genizah-research כדי למצוא מקורות בגניזה העוסקים בתוספות לתפילה בעשרת ימי תשובה. הצג סימני מדף וקישורים והסבר על מה מבוסס הזיהוי.
-
-> מצא מקבילות לקטע המצורף בעזרת חיפוש האותיות. הבחן בין עד נוסף לאותו חיבור לבין נוסח תפילה משותף.
-
-> בדוק את הקטע בתצלום והסבר אילו קריאות שינית לעומת התעתיק האוטומטי.
-
 ## Smoke test
 
 From the installed skill directory:
