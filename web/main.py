@@ -1940,6 +1940,7 @@ def create_layout():
                     ('/', 'home', tr('Home'), None),
                     ('/start', 'explore', tr('Start Here'), None),
                     ('/about', 'info', tr('About the Genizah'), None),
+                    ('/ai', 'smart_toy', 'כלי AI' if get_language() == 'he' else 'AI tools', None),
                     ('/search', 'search', tr('Search'), None),
                     # Badge gated on passage_available() -- the flag ANDed
                     # with a loaded index -- and NOT on the flag alone, the
@@ -2430,6 +2431,31 @@ def dashboard_page():
         # Password-reset-link-dead-end fix: check for + consume a Supabase
         # recovery fragment on every homepage load (cheap no-op when absent).
         _render_password_recovery_handler()
+
+
+@app.get('/chatgpt', include_in_schema=False)
+def chatgpt_redirect():
+    from fastapi.responses import RedirectResponse
+    from web.pages.ai_tools import GPT_URL
+    return RedirectResponse(GPT_URL, status_code=307)
+
+
+@ui.page('/ai', title='AI tools | כלי AI — Dicta Genizah Search')
+def ai_tools_route():
+    safe_user_set('current_page', '/ai')
+    ui.add_head_html(page_meta(
+        '/ai',
+        title='AI tools | כלי AI — Dicta Genizah Search',
+        description='Research Cairo Genizah manuscripts with ChatGPT, a research skill, or the public API.',
+    ))
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+    content = create_layout()
+    with content:
+        from web.pages.ai_tools import create_ai_page
+        create_ai_page()
 
 
 @ui.page('/start', title='Start Here | התחילו כאן — Dicta Genizah Search')

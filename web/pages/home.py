@@ -182,6 +182,9 @@ def create_page():
                     ui.icon('explore').props('aria-hidden=true').classes('text-lg')
                     ui.label(tr("What's on this website? Start here to explore the Cairo Genizah"))
 
+        from web.pages.ai_tools import create_ai_card
+        create_ai_card()
+
         # === Capability Chips (clickable) ===
         with ui.row().classes('w-full justify-center gap-2 flex-wrap mt-1 px-2'):
             _chips = [
