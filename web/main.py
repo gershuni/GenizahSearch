@@ -779,6 +779,7 @@ _search_helper_app = _SearchHelperFastAPI(
 init_search_api(app_override=_search_helper_app, path_prefix="")
 from web.chatgpt_api import register_chatgpt_api
 register_chatgpt_api(_search_helper_app)
+app.on_shutdown(_search_helper_app.state.shutdown_chatgpt_jobs)
 app.mount("/api", _search_helper_app)
 
 # Serve static files for SEO images

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "GenizahSearch Research Actions",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "Read-only Cairo Genizah research pilot: discover features, search manuscripts, browse evidence, and find passage parallels."
   },
   "servers": [
@@ -50,23 +50,13 @@
         }
       }
     },
-    "/search": {
+    "/search/jobs": {
       "post": {
         "operationId": "searchManuscripts",
-        "summary": "Find phrases, titles, or shelfmarks. Start exact with limit 5. Browse promising results and preserve warnings. Fuzzy searches may exceed the client timeout.",
-        "description": "Find phrases, titles, or shelfmarks. Start exact with limit 5. Browse promising results and preserve warnings. Fuzzy searches may exceed the client timeout.",
+        "summary": "Submit a phrase, title, or shelfmark search. Returns a job ID, not matches. Call getResearchJob until finished; never resubmit a pending search.",
+        "description": "Submit a phrase, title, or shelfmark search. Returns a job ID, not matches. Call getResearchJob until finished; never resubmit a pending search.",
         "x-openai-isConsequential": false,
         "responses": {
-          "200": {
-            "description": "Successful response.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Results"
-                }
-              }
-            }
-          },
           "default": {
             "description": "Request failed. Preserve HTTP status, error code, and Retry-After when available. Proxy errors may be non-JSON.",
             "headers": {
@@ -81,6 +71,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted and queued. Poll this same job ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingJob"
                 }
               }
             }
@@ -178,11 +178,59 @@
         ]
       }
     },
-    "/parallels": {
+    "/parallels/jobs": {
       "post": {
         "operationId": "findPassageParallels",
-        "summary": "Find character-level parallels for a passage or separate witnesses of one work. Always send method=passage. Inspect matches, filtered results, and warnings; scores are not probabilities.",
-        "description": "Find character-level parallels for a passage or separate witnesses of one work. Always send method=passage. Inspect matches, filtered results, and warnings; scores are not probabilities.",
+        "summary": "Submit character-level passage or multi-witness matching with method=passage. Call getResearchJob with the returned private job ID until finished.",
+        "description": "Submit character-level passage or multi-witness matching with method=passage. Call getResearchJob with the returned private job ID until finished.",
+        "x-openai-isConsequential": false,
+        "responses": {
+          "default": {
+            "description": "Request failed. Preserve HTTP status, error code, and Retry-After when available. Proxy errors may be non-JSON.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Suggested delay in seconds or HTTP date."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted and queued. Poll this same job ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingJob"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PassageRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_id}": {
+      "get": {
+        "operationId": "getResearchJob",
+        "summary": "Retrieve an existing search job. Pending returns 202; keep the same ID and poll again. Completion returns results or the original error. Job IDs are private, not citation links.",
+        "description": "Retrieve an existing search job. Pending returns 202; keep the same ID and poll again. Completion returns results or the original error. Job IDs are private, not citation links.",
         "x-openai-isConsequential": false,
         "responses": {
           "200": {
@@ -212,18 +260,29 @@
                 }
               }
             }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PassageRequest"
+          },
+          "202": {
+            "description": "Still running; poll this same job again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingJob"
+                }
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Copy the returned private job_id exactly. Never guess IDs or submit the query again while pending."
+          }
+        ]
       }
     }
   },
@@ -407,7 +466,7 @@
               "title",
               "shelfmark"
             ],
-            "description": "Start exact; shelfmark resolves call numbers. Variants/fuzzy can exceed the ChatGPT timeout; report failure honestly."
+            "description": "Start exact; shelfmark resolves call numbers. Search runs as a background job; poll its returned ID."
           },
           "limit": {
             "type": "integer",
@@ -833,6 +892,45 @@
           "schema_version",
           "features",
           "search_modes"
+        ],
+        "additionalProperties": true
+      },
+      "PendingJob": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "progress": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "next_action": {
+            "type": "string"
+          },
+          "poll_after_seconds": {
+            "type": "integer"
+          },
+          "retention_seconds": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "job_id",
+          "state",
+          "next_action"
         ],
         "additionalProperties": true
       }

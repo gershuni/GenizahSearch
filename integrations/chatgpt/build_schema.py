@@ -41,7 +41,7 @@ def build():
         'SearchRequest': obj({
             'query': {'type': 'string', 'minLength': 1, 'maxLength': 1000},
             'search_mode': {'type': 'string', 'enum': ['exact', 'variants', 'fuzzy', 'responsa', 'title', 'shelfmark'],
-                            'description': 'Start exact; shelfmark resolves call numbers. Variants/fuzzy can exceed the ChatGPT timeout; report failure honestly.'},
+                            'description': 'Start exact; shelfmark resolves call numbers. Search runs as a background job; poll its returned ID.'},
             'limit': {'type': 'integer', 'minimum': 1, 'maximum': 10, 'default': 5,
                       'description': 'Always send a small result limit to fit ChatGPT. This is not an exhaustive census.'},
             'gap': {'type': 'integer', 'minimum': 0, 'default': 0, 'description': 'Words allowed between terms; must be zero for title/shelfmark.'},
@@ -96,6 +96,11 @@ def build():
             'search_modes': array(string), 'features': obj({'passage': boolean, 'passage_multi_witness': boolean}),
             'parallels': free_object, 'limits': free_object, 'timeouts': free_object,
         }, ('schema_version', 'features', 'search_modes'), additionalProperties=True),
+        'PendingJob': obj({
+            'job_id': string, 'state': {'type': 'string', 'enum': ['queued', 'running']},
+            'status': string, 'progress': array(number), 'next_action': string,
+            'poll_after_seconds': integer, 'retention_seconds': integer,
+        }, ('job_id', 'state', 'next_action'), additionalProperties=True),
     }
 
     def operation(name, description, response, request=None):
@@ -116,16 +121,27 @@ def build():
         {'name': 'volume_ie', 'in': 'query', 'required': False, 'schema': string, 'description': 'Copy locator.volume_ie when present.'},
         {'name': 'text_cap', 'in': 'query', 'required': True, 'schema': {'type': 'integer', 'minimum': 100, 'maximum': 10000, 'default': 4000}, 'description': 'Start with 4000 characters. A snippet remains a snippet even if not truncated.'},
     ]
+    search = operation('searchManuscripts', 'Submit a phrase, title, or shelfmark search. Returns a job ID, not matches. Call getResearchJob until finished; never resubmit a pending search.', 'PendingJob', 'SearchRequest')
+    parallels = operation('findPassageParallels', 'Submit character-level passage or multi-witness matching with method=passage. Call getResearchJob with the returned private job ID until finished.', 'PendingJob', 'PassageRequest')
+    for op in (search, parallels):
+        op['responses']['202'] = op['responses'].pop('200')
+        op['responses']['202']['description'] = 'Accepted and queued. Poll this same job ID.'
+    poll = operation('getResearchJob', 'Retrieve an existing search job. Pending returns 202; keep the same ID and poll again. Completion returns results or the original error. Job IDs are private, not citation links.', 'Results')
+    poll['parameters'] = [{'name': 'job_id', 'in': 'path', 'required': True, 'schema': string,
+                           'description': 'Copy the returned private job_id exactly. Never guess IDs or submit the query again while pending.'}]
+    poll['responses']['202'] = {'description': 'Still running; poll this same job again.',
+                                'content': {'application/json': {'schema': ref('PendingJob')}}}
     return {
         'openapi': '3.1.0',
-        'info': {'title': 'GenizahSearch Research Actions', 'version': '0.1.0',
+        'info': {'title': 'GenizahSearch Research Actions', 'version': '0.2.0',
                  'description': 'Read-only Cairo Genizah research pilot: discover features, search manuscripts, browse evidence, and find passage parallels.'},
         'servers': [{'url': 'https://genizahsearch.com/api/chatgpt'}], 'security': [],
         'paths': {
             '/capabilities': {'get': operation('getGenizahCapabilities', 'Check available search modes and passage features once before research. Runtime errors remain authoritative.', 'Capabilities')},
-            '/search': {'post': operation('searchManuscripts', 'Find phrases, titles, or shelfmarks. Start exact with limit 5. Browse promising results and preserve warnings. Fuzzy searches may exceed the client timeout.', 'Results', 'SearchRequest')},
+            '/search/jobs': {'post': search},
             '/browse': {'get': browse},
-            '/parallels': {'post': operation('findPassageParallels', 'Find character-level parallels for a passage or separate witnesses of one work. Always send method=passage. Inspect matches, filtered results, and warnings; scores are not probabilities.', 'Results', 'PassageRequest')},
+            '/parallels/jobs': {'post': parallels},
+            '/jobs/{job_id}': {'get': poll},
         }, 'components': {'schemas': schemas},
     }
 

@@ -89,63 +89,86 @@ def _validate_pilot_body(kind, body):
     return None
 
 
+async def _prepare_request(kind, request):
+    raw = bytearray()
+    async for chunk in request.stream():
+        raw.extend(chunk)
+        if len(raw) > 65536:
+            return _error('invalid_request', 'ChatGPT request exceeds 64 KiB.', 413)
+    try:
+        body = json.loads(raw)
+    except (ValueError, UnicodeError):
+        return _error('invalid_request', 'Expected a JSON request body.')
+    problem = _validate_pilot_body(kind, body)
+    if problem:
+        return _error('invalid_request', problem)
+    encoded = json.dumps(body, ensure_ascii=False).encode('utf-8')
+
+    async def receive():
+        return {'type': 'http.request', 'body': encoded, 'more_body': False}
+
+    # Keep client, headers and scope so the original guards see the caller.
+    request = Request(request.scope, receive)
+    return request
+
+
+def _finish_response(response):
+    if not isinstance(response, Response):
+        response = JSONResponse(response)
+    if response.status_code >= 400:
+        if len(response.body) <= MAX_RESPONSE_BYTES:
+            return response  # Includes the original status and Retry-After.
+        code, message = 'upstream_error', 'Upstream error body exceeded the ChatGPT transfer limit.'
+        try:
+            detail = json.loads(response.body)['error']
+            code = str(detail['code'])[:200]
+            message = str(detail['message'])[:2000]
+        except (ValueError, TypeError, KeyError):
+            pass
+        headers = {'Retry-After': response.headers['Retry-After']} if 'Retry-After' in response.headers else {}
+        return JSONResponse({'error': {'code': code, 'message': message,
+                                       'upstream_body_truncated': True}},
+                            status_code=response.status_code, headers=headers)
+    try:
+        payload = compact_payload(json.loads(response.body))
+    except (ValueError, TypeError):
+        return _error('invalid_upstream_response', 'Search service did not return a JSON object.', 502)
+    if payload is None:
+        return _error('chatgpt_response_too_large', 'This result cannot fit in ChatGPT. Use the website or request a narrower search.', 503)
+    headers = {k: v for k, v in response.headers.items()
+               if k.lower() not in ('content-length', 'content-type', 'content-encoding')}
+    return JSONResponse(payload, status_code=response.status_code, headers=headers)
+
+
+def _job_owner(request):
+    from shared.api_errors import APIError
+    from web.search_api import enforce_mode_gate, _resolve_rate_limit_key
+    try:
+        enforce_mode_gate(request)
+        return _resolve_rate_limit_key(request)
+    except APIError as exc:
+        return _error(exc.code, str(exc), exc.http_status)
+
+
 def register_chatgpt_api(app):
     """Call after init_search_api on its /api sub-app; no extra corpus imports."""
     handlers = {route.path: route.endpoint for route in app.routes if hasattr(route, 'endpoint')}
+    from web.chatgpt_jobs import register_chatgpt_jobs
+    register_chatgpt_jobs(app, handlers, _prepare_request, _finish_response, _job_owner)
 
     def wrapped(kind):
         handler = handlers['/' + kind]
 
         async def endpoint(request: Request):
             if request.method == 'POST':
-                raw = bytearray()
-                async for chunk in request.stream():
-                    raw.extend(chunk)
-                    if len(raw) > 65536:
-                        return _error('invalid_request', 'ChatGPT request exceeds 64 KiB.', 413)
-                try:
-                    body = json.loads(raw)
-                except (ValueError, UnicodeError):
-                    return _error('invalid_request', 'Expected a JSON request body.')
-                problem = _validate_pilot_body(kind, body)
-                if problem:
-                    return _error('invalid_request', problem)
-                encoded = json.dumps(body, ensure_ascii=False).encode('utf-8')
-
-                async def receive():
-                    return {'type': 'http.request', 'body': encoded, 'more_body': False}
-
-                # Keep client, headers and scope so the original guards see the caller.
-                request = Request(request.scope, receive)
+                request = await _prepare_request(kind, request)
+                if isinstance(request, Response):
+                    return request
             try:
                 response = await asyncio.wait_for(handler(request), timeout=ACTION_TIMEOUT)
             except TimeoutError:
                 return _error('chatgpt_timeout', 'Search exceeded this ChatGPT action deadline. No complete results returned; narrow the query or use the website.', 504)
-            if not isinstance(response, Response):
-                response = JSONResponse(response)
-            if response.status_code >= 400:
-                if len(response.body) <= MAX_RESPONSE_BYTES:
-                    return response  # Includes the original status and Retry-After.
-                code, message = 'upstream_error', 'Upstream error body exceeded the ChatGPT transfer limit.'
-                try:
-                    detail = json.loads(response.body)['error']
-                    code = str(detail['code'])[:200]
-                    message = str(detail['message'])[:2000]
-                except (ValueError, TypeError, KeyError):
-                    pass
-                headers = {'Retry-After': response.headers['Retry-After']} if 'Retry-After' in response.headers else {}
-                return JSONResponse({'error': {'code': code, 'message': message,
-                                               'upstream_body_truncated': True}},
-                                    status_code=response.status_code, headers=headers)
-            try:
-                payload = compact_payload(json.loads(response.body))
-            except (ValueError, TypeError):
-                return _error('invalid_upstream_response', 'Search service did not return a JSON object.', 502)
-            if payload is None:
-                return _error('chatgpt_response_too_large', 'This result cannot fit in ChatGPT. Use the website or request a narrower search.', 503)
-            headers = {k: v for k, v in response.headers.items()
-                       if k.lower() not in ('content-length', 'content-type', 'content-encoding')}
-            return JSONResponse(payload, status_code=response.status_code, headers=headers)
+            return _finish_response(response)
 
         return endpoint
 

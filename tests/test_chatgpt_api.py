@@ -143,6 +143,6 @@ def test_original_routes_unchanged_and_import_schema_served():
         assert client.post('/api/parallels').json()['count'] == 20
         schema = client.get('/api/chatgpt/openapi.json').json()
         assert schema['servers'][0]['url'] == 'https://genizahsearch.com/api/chatgpt'
-        assert set(schema['paths']) == {'/search', '/browse', '/parallels', '/capabilities'}
+        assert set(schema['paths']) == {'/search/jobs', '/browse', '/parallels/jobs', '/capabilities', '/jobs/{job_id}'}
         assert 'request' not in schema['components']['schemas']['Browse']['required']
         json.dumps(schema)

@@ -23,6 +23,8 @@ def main():
     checks = []
 
     def call(name, path, body=None, expected=200):
+        if args.api_prefix == '/api/chatgpt' and body is not None:
+            path += '/jobs'
         data = json.dumps(body, ensure_ascii=False).encode('utf-8') if body is not None else None
         request = urllib.request.Request(
             'https://genizahsearch.com' + args.api_prefix + path.removeprefix('/api'), data=data,
@@ -31,16 +33,29 @@ def main():
         )
         started = time.monotonic()
         status, retry_after, raw = None, None, ''
+        max_call_seconds = 0
         try:
-            try:
-                response = urllib.request.urlopen(request, timeout=44)
-            except urllib.error.HTTPError as exc:
-                response = exc
-            with response:
-                status = response.status
-                retry_after = response.headers.get('Retry-After')
-                raw = response.read().decode('utf-8')
-            result = json.loads(raw)
+            while True:
+                call_started = time.monotonic()
+                try:
+                    response = urllib.request.urlopen(request, timeout=44)
+                except urllib.error.HTTPError as exc:
+                    response = exc
+                with response:
+                    status = response.status
+                    retry_after = response.headers.get('Retry-After')
+                    raw = response.read().decode('utf-8')
+                max_call_seconds = max(max_call_seconds, time.monotonic() - call_started)
+                result = json.loads(raw)
+                if status != 202:
+                    break
+                if time.monotonic() - started > 620:
+                    raise TimeoutError('Job polling allowance exceeded; job is not an empty result.')
+                token = urllib.parse.quote(result['job_id'], safe='')
+                request = urllib.request.Request(
+                    'https://genizahsearch.com/api/chatgpt/jobs/' + token,
+                    headers={'User-Agent': 'GenizahSearch-ChatGPT-Pilot/0.2', 'Accept': 'application/json'})
+                time.sleep(2)
             failure = None
         except (OSError, ValueError) as exc:
             result = {}
@@ -49,11 +64,12 @@ def main():
         check = {
             'name': name, 'http_status': status, 'expected_status': expected,
             'seconds': elapsed, 'response_characters': len(raw),
-            'within_actions_limits': elapsed < 45 and len(raw) < 100000,
+            'max_call_seconds': round(max_call_seconds, 2),
+            'within_actions_limits': max_call_seconds < 45 and len(raw) < 100000,
             'count': result.get('count'), 'total': result.get('total'),
             'warnings': result.get('warnings', []), 'error': result.get('error', failure),
             'retry_after': retry_after,
-            'passed': status == expected and failure is None and elapsed < 45 and len(raw) < 100000,
+            'passed': status == expected and failure is None and max_call_seconds < 45 and len(raw) < 100000,
         }
         checks.append(check)
         print(json.dumps(check, ensure_ascii=True), flush=True)
