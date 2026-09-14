@@ -847,6 +847,8 @@ class PassageSearcher:
                 else:
                     try:
                         text = self.text_fetcher.get_full_text_by_header(ref)
+                    except MemoryError:
+                        raise
                     except Exception:
                         # traceback.format_exc() -- a STRING -- not
                         # exc_info=True. `exc_info=True` stores the raw
@@ -1012,6 +1014,8 @@ class PassageSearcher:
         orig_text = None
         try:
             orig_text = self.text_fetcher.get_full_text_by_header(hit.record_id)
+        except MemoryError:
+            raise
         except Exception:
             # traceback.format_exc(), never exc_info=True -- see the
             # matching comment in _resolve_witnesses above. This is the

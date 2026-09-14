@@ -116,7 +116,7 @@ from web.passage_assets import (passage_available, get_passage_searcher,
 # Codex review finding #15: route the page's passage search through the
 # SAME bounded execution budget POST /api/parallels uses -- one semaphore,
 # one dedicated ThreadPoolExecutor, one timeout ceiling, for BOTH surfaces.
-from web.search_api import run_passage_search
+from web.research_jobs import ResearchJobError, run_research_call
 from shared.api_errors import APIError
 
 
@@ -2829,13 +2829,14 @@ def create_parallels_page(initial_text: str = None):
         """Search ONE witness through the SAME bounded passage budget the
         seed search uses.
 
-        Each witness gets its own acquire/release, so the 30s ceiling bounds
-        ONE witness rather than a whole batch, and the shared pool of 4
-        interleaves with other users between witnesses. A witness that hits
-        `passage_search_busy` or `core_timeout` is marked failed, skipped, and
-        offered a Retry -- the run continues.
+        Each witness enters the shared research queue independently so other
+        users can run between witnesses. Stop also cancels a running worker.
         """
         ctx = p_state.last_passage_ctx or {}
+
+        def check_cancel(*_):
+            if p_state.is_cancelled:
+                raise InterruptedError('Search cancelled')
 
         def _sync():
             searcher = get_passage_searcher(
@@ -2849,6 +2850,7 @@ def create_parallels_page(initial_text: str = None):
                 return None
             return searcher.search_composition_logic(
                 entry['text'],
+                progress_callback=check_cancel,
                 filter_text=ctx.get('filter_text') or None,
                 boundary_mode='full',
                 min_boundary_matches=ctx.get('min_boundary_matches') or 0,
@@ -2856,7 +2858,10 @@ def create_parallels_page(initial_text: str = None):
             )
 
         try:
-            return await run_passage_search(_sync)
+            return await run_research_call(_sync)
+        except ResearchJobError as exc:
+            entry['error'] = str(exc)
+            return None
         except APIError as exc:
             if exc.code == 'passage_search_busy':
                 entry['error'] = tr(
@@ -4692,6 +4697,9 @@ def create_parallels_page(initial_text: str = None):
                 # precedes each string call and already drives the web progress UI.
                 return
             current, total = arg1, arg2
+            if current < 0:
+                p_state.status = f'Queued: {-current}'
+                return
             if total is not None and total > 0:
                 p_state.progress = current / total
                 p_state.chunks_processed = current
@@ -4890,7 +4898,7 @@ def create_parallels_page(initial_text: str = None):
                 return None
             except Exception as e:
                 logger.exception(f"Parallels Error: {e}")
-                return None
+                return {'worker_error': str(e)}
 
         def _run_passage_search_sync():
             """PASSAGE MATCHING (Phase 145, beta): character-level engine,
@@ -4899,14 +4907,8 @@ def create_parallels_page(initial_text: str = None):
             the index is unavailable, per
             web/passage_assets.py::get_passage_searcher's contract.
 
-            Deliberately NOT wrapped in its own try/except -- run_search()
-            above swallows InterruptedError/Exception itself because it
-            dispatches via run.io_bound with no other error channel; this
-            function instead lets exceptions propagate through
-            run_passage_search so the await site below (still on THIS
-            coroutine, not a background thread) can distinguish a budget
-            APIError (busy/timeout -> a translated notification) from any
-            other failure.
+            Exceptions propagate through run_research_call so the page can
+            report cancellation and worker failures on the UI coroutine.
             """
             # render_cap=0 -> UNCAPPED (owner ruling 2026-08-23): the page's
             # own "Load more" batching (50 groups per click, strongest first)
@@ -4936,19 +4938,13 @@ def create_parallels_page(initial_text: str = None):
             )
 
         if captured_passage_mode:
-            # Codex review finding #15: route through the SAME bounded
-            # execution budget POST /api/parallels uses for method='passage'
-            # (semaphore capacity 4 + its own dedicated ThreadPoolExecutor +
-            # SEARCH_API_PASSAGE_TIMEOUT) -- never run.io_bound's generic,
-            # unbounded pool. run_passage_search is awaited directly from
-            # THIS coroutine (it manages its own off-loop dispatch via
-            # run_in_executor internally); all ui.*/safe_user_* interaction
-            # stays on THIS side of the await (repo memory: NiceGUI
-            # background execution loses context -- ui.* calls from a raw
-            # executor thread RAISE, and safe_user_* reads silently degrade
-            # to {} -- _run_passage_search_sync itself does neither).
+            # Queue heavy work in an isolated subprocess. All UI interaction
+            # stays on this side of the await to preserve NiceGUI context.
             try:
-                result_data = await run_passage_search(_run_passage_search_sync)
+                result_data = await run_research_call(_run_passage_search_sync)
+            except ResearchJobError as exc:
+                ui.notify(str(exc), type='warning', timeout=8000)
+                result_data = None
             except APIError as exc:
                 if exc.code == 'passage_search_busy':
                     ui.notify(
@@ -4967,7 +4963,11 @@ def create_parallels_page(initial_text: str = None):
                 logger.exception(f"Parallels Error (passage): {e}")
                 result_data = None
         else:
-            result_data = await run.io_bound(run_search)
+            result_data = await run_research_call(run_search)
+
+        if result_data and result_data.get('worker_error'):
+            ui.notify(result_data['worker_error'], type='warning', timeout=8000)
+            result_data = None
 
         p_state.is_running = False
         p_state.progress = 1.0

@@ -836,10 +836,20 @@ class TestGenerateTabularSyntax:
             {'words': [{'text': 'word2', 'mods': {}}]},
         ]
         syntax, _ = generate_tabular_syntax(components, [5], scope='within_document')
+        assert syntax == 'word1 AND word2'
         assert '[' not in syntax
         assert ']' not in syntax
         assert 'word1' in syntax
         assert 'word2' in syntax
+
+    def test_document_and_is_operator_outside_groups(self):
+        from shared.responsa import has_document_and, extract_per_pair_gaps
+
+        assert has_document_and('first AND (second/third)')
+        assert not has_document_and('(AND/and) second')
+        assert [c.words for c in parse_responsa_query('first AND (second/third)')] == [
+            ['first'], ['second', 'third']]
+        assert extract_per_pair_gaps('first AND second') == [None]
 
     def test_negated_words_extracted_and_inline(self):
         """Word with negation=True -> -word in syntax AND in returned negated_words."""

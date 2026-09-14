@@ -1,0 +1,139 @@
+"""Private subprocess entry point for the web research queue."""
+import json
+import gzip
+import os
+from pathlib import Path
+import pickle
+import sys
+import time
+
+
+class MeasuredWriter:
+    def __init__(self, stream, limit):
+        self.stream, self.limit, self.size = stream, limit, 0
+
+    def write(self, data):
+        self.size += len(data)
+        if self.size > self.limit:
+            raise ValueError('Expanded search output exceeds its memory allowance.')
+        return self.stream.write(data)
+
+
+def write_progress(root, event):
+    """A progress reader briefly holding the file must not abort research."""
+    temporary = root / 'progress.tmp'
+    try:
+        temporary.write_text(json.dumps(event), encoding='utf-8')
+        temporary.replace(root / 'progress.json')
+    except OSError:
+        # Windows can reject replacement while the parent reads. A later
+        # progress update replaces this one; completion uses a separate file.
+        pass
+
+
+def main(directory):
+    from shared.research_limits import limit_memory
+    limit_memory(int(os.environ['GENIZAH_RESEARCH_MEMORY_MB']) * 1024**2)
+    import psutil
+    import threading
+
+    # A crashed/restarted web process must not leave unlimited orphan searches.
+    parent = psutil.Process(int(os.environ['GENIZAH_RESEARCH_PARENT']))
+
+    def watch_parent():
+        while parent.is_running():
+            time.sleep(1)
+        os._exit(1)
+
+    threading.Thread(target=watch_parent, daemon=True).start()
+
+    proc = psutil.Process()
+    if os.name == 'nt':
+        proc.nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+    else:
+        proc.nice(10)
+    if hasattr(proc, 'cpu_affinity'):
+        allowed = proc.cpu_affinity()
+        # Leave the first allowed CPU available exclusively to non-search work.
+        if len(allowed) > 1:
+            search_cpus = allowed[1:]
+            slot = int(os.environ.get('GENIZAH_RESEARCH_SLOT', '0'))
+            proc.cpu_affinity([search_cpus[slot % len(search_cpus)]])
+
+    root = Path(directory)
+    payload = pickle.loads((root / 'input.pkl').read_bytes())
+    last = [0.0]
+
+    def report(*values):
+        now = time.monotonic()
+        if now - last[0] < 0.2:
+            return
+        last[0] = now
+        progress = values if len(values) == 2 and all(isinstance(v, (int, float)) for v in values) else (0, 0)
+        write_progress(root, {'status': 'Searching', 'progress': progress})
+
+    try:
+        from shared.metadata_manager import MetadataManager
+        from shared.variants import VariantManager
+        from shared.lab_engine import LabEngine
+        from shared.search_engine import SearchEngine, _consume_last_responsa_downgrade, _consume_last_responsa_downgrade_meta
+        from shared.search_regex import isolated_matching
+
+        meta = MetadataManager()
+        # The web initializer loads these asynchronously. A short-lived worker
+        # must finish loading before it searches or serializes display metadata.
+        meta._load_heavy_caches_bg()
+        lab = LabEngine(meta, None)
+        variants = VariantManager(settings=lab.settings)
+        lab.var_mgr = variants
+        scope = payload['arguments'].get('corpus_scope',
+                                         'all' if payload['method'] == 'execute_search' else 'genizah')
+        searcher = SearchEngine(meta, variants, worker_mode=True, open_local=scope != 'genizah')
+        kind = payload['kind']
+        if kind == 'search' and searcher.searcher is None and payload['arguments'].get('mode') not in ('Title', 'Shelfmark'):
+            raise ValueError('The transcription search index is unavailable.')
+        if kind == 'lab' and lab.lab_searcher is None:
+            raise ValueError('The lab search index is unavailable.')
+        engine = searcher if kind == 'search' else lab
+        if kind == 'passage':
+            from shared.passage_index import open_index
+            from shared.passage_parallels import PassageSearcher
+            from shared.passage_policy import compose
+            options = payload['options']
+            index = open_index(options['path'])
+            if index is None:
+                raise ValueError('The passage index is unavailable.')
+            engine = PassageSearcher(index=index, text_fetcher=searcher,
+                                     policy=compose(options['preset'], options['length'], options['depth']),
+                                     **({} if options['render_cap'] is None else {'render_cap': options['render_cap']}))
+        allowed = {'search': {'execute_search', 'search_composition_logic'},
+                   'lab': {'lab_search', 'lab_composition_search'},
+                   'passage': {'search_composition_logic'}}
+        if payload['method'] not in allowed[kind]:
+            raise ValueError('Unsupported research operation.')
+        arguments = payload['arguments']
+        if arguments.get('restrict_sys_ids') is not None:
+            arguments['restrict_sys_ids'] = set(arguments['restrict_sys_ids'])
+        arguments['progress_callback'] = report
+        with isolated_matching():
+            value = getattr(engine, payload['method'])(**arguments)
+        result = {'value': value, 'downgrade': _consume_last_responsa_downgrade(),
+                  'cascade': _consume_last_responsa_downgrade_meta()}
+    except ValueError as exc:
+        result = {'error': str(exc), 'validation': True}
+        if type(exc).__name__ == 'NoWitnessesResolved':
+            result.update(exception='NoWitnessesResolved', report=exc.report)
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        result = {'error': 'The search worker could not complete this query. No complete results were returned.'}
+    # Transcriptions and HTML contain considerable repetition. Stream the
+    # transfer compressed without allocating another full serialized copy.
+    with gzip.open(root / 'output.pkl', 'wb', compresslevel=1) as stream:
+        measured = MeasuredWriter(stream, int(os.environ['GENIZAH_RESEARCH_MEMORY_MB']) * 1024**2)
+        pickle.dump(result, measured, protocol=pickle.HIGHEST_PROTOCOL)
+    (root / 'output-size.json').write_text(json.dumps({'expanded_bytes': measured.size}), encoding='utf-8')
+
+
+if __name__ == '__main__':
+    main(sys.argv[1])

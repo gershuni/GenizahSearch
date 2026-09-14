@@ -1543,9 +1543,28 @@ def test_no_quasar_prop_pins_an_element_to_a_physical_side(module_path):
 # for browser actionability and uses its own larger network/UI timeout.
 _ASYNC_UI_RETRIES = 30
 
+
+@pytest.fixture
+def findings_interaction_services(monkeypatch):
+    """Keep simulated control tests independent of live auxiliary services.
+
+    Rows and facets are supplied by each test. The other reads must also be
+    deterministic: live suppression/review/availability calls can exceed
+    NiceGUI's page-response deadline before User.open can connect, or delay a
+    later refresh past should_see. Service behavior has its own tests.
+    """
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(fp, 'get_launch_stats_enveloped', _fake_launch())
+    monkeypatch.setattr(fp, 'suppressed_identification_ids', AsyncMock(return_value=()))
+    monkeypatch.setattr(fp, 'cached_suppressed_identification_ids', lambda: ())
+    monkeypatch.setattr(fp, 'excerpts_available', AsyncMock(return_value=False))
+    monkeypatch.setattr(fp, '_fetch_approved_review_map', AsyncMock(return_value={}))
+
+
 @pytest.mark.render_smoke
 @pytest.mark.parametrize("lang", ["en", "he"])
-def test_more_matches_click_replaces_the_rendered_result_set(lang):
+def test_more_matches_click_replaces_the_rendered_result_set(lang, findings_interaction_services):
     """Ruling T, criterion (c).
 
     Open the page, locate the control by its ACCESSIBLE NAME with NO preceding
@@ -1723,7 +1742,7 @@ def _contract_bound_findings(recorder=None):
 
 @pytest.mark.render_smoke
 @pytest.mark.parametrize("lang", ["en", "he"])
-def test_turning_candidates_on_then_switching_to_one_row_per_work_does_not_break_the_page(lang):
+def test_turning_candidates_on_then_switching_to_one_row_per_work_does_not_break_the_page(lang, findings_interaction_services):
     """THE READER SEQUENCE, end to end, through the simulated user.
 
     Pick "candidates" on the selector; then change "Show as" to one row per
@@ -5028,7 +5047,7 @@ def test_an_empty_facet_still_speaks_rather_than_offering_an_empty_dropdown(
 
 
 @pytest.mark.render_smoke
-def test_switching_bucket_replaces_the_facet_lists_as_well_as_the_rows():
+def test_switching_bucket_replaces_the_facet_lists_as_well_as_the_rows(findings_interaction_services):
     """End to end, through the simulated user: the cascade is part of the ONE
     refresh path, not a one-shot fill after the first paint.
 
@@ -5112,7 +5131,7 @@ def _filter_keyed_findings():
 
 
 @pytest.mark.render_smoke
-def test_a_chip_removes_its_own_filter_and_clear_all_removes_every_filter():
+def test_a_chip_removes_its_own_filter_and_clear_all_removes_every_filter(findings_interaction_services):
     """The reversibility half, end to end, through the elements' own listeners.
 
     Asserting that the chip vanished would be satisfied by a chip wired to

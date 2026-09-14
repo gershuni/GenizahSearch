@@ -67,6 +67,8 @@ class LabEngine:
             try:
                 with open(Config.LAB_WEIGHTS_FILE, 'r', encoding='utf-8') as f:
                     self.dynamic_rank_map = json.load(f)
+            except MemoryError:
+                raise
             except Exception:
                 # Dynamic weights file corrupt or unreadable; keep defaults.
                 logging.getLogger(__name__).warning(
@@ -89,10 +91,14 @@ class LabEngine:
         """Register analyzers safely."""
         try:
             index.register_tokenizer("whitespace", tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.whitespace()).build())
+        except MemoryError:
+            raise
         except Exception:
             pass  # Tokenizer registration may fail on reopen; non-fatal, search still works
         try:
             index.register_tokenizer("simple", tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.simple()).build())
+        except MemoryError:
+            raise
         except Exception:
             pass  # Tokenizer registration may fail on reopen; non-fatal, search still works
 
@@ -108,6 +114,8 @@ class LabEngine:
                 # Simplified robust check
                 self.lab_index_needs_rebuild = False
                 return True
+            except MemoryError:
+                raise
             except Exception as e:
                 LAB_LOGGER.error(f"Failed to load Lab Index: {e}")
                 self._close_index()
@@ -161,6 +169,8 @@ class LabEngine:
                 LAB_LOGGER.info(
                     "CR-02: LabEngine LOCAL LAB side-index dir absent; searcher=None"
                 )
+        except MemoryError:
+            raise
         except Exception as e:
             LAB_LOGGER.warning(
                 "CR-02: LabEngine LOCAL LAB side-index unavailable: %r", e
@@ -230,6 +240,8 @@ class LabEngine:
         if os.path.exists(Config.LAB_INDEX_DIR):
             try:
                 shutil.rmtree(Config.LAB_INDEX_DIR, ignore_errors=True)
+            except MemoryError:
+                raise
             except Exception as e:
                 LAB_LOGGER.error(f"Delete failed: {e}")
 
@@ -263,6 +275,8 @@ class LabEngine:
                     for line in f:
                         if label == "V0.8" and line.startswith("==>"): count += 1
                         elif label == "V0.7" and line.startswith("###"): count += 1
+            except MemoryError:
+                raise
             except Exception as e:
                 logging.getLogger(__name__).debug('Could not count documents in %s: %s', fname, e)
             return count
@@ -368,6 +382,8 @@ class LabEngine:
         for strategy in strategies:
             try:
                 return strategy()
+            except MemoryError:
+                raise
             except Exception:
                 continue  # Try next query strategy; all-fail logged after loop by LAB_LOGGER.error
 
@@ -393,6 +409,8 @@ class LabEngine:
         # This is memory-safe even for 50k items. The heavy lifting (doc loading) happens in the loop.
         try:
             res = self.lab_searcher.search(query_obj, limit)
+        except MemoryError:
+            raise
         except Exception as e:
             LAB_LOGGER.warning(f"Search execution failed: {e}")
             return
@@ -410,6 +428,8 @@ class LabEngine:
                     progress_callback(i, total_hits)
                 except (InterruptedError, KeyboardInterrupt):
                     raise
+                except MemoryError:
+                    raise
                 except Exception:
                     pass  # Score extraction optional — result still usable without score
                 # Send text status for Label.
@@ -420,6 +440,8 @@ class LabEngine:
                 try:
                     progress_callback(f"Scanning items {i}-{min(i+BATCH_SIZE, total_hits)} / {total_hits}...")
                 except (InterruptedError, KeyboardInterrupt):
+                    raise
+                except MemoryError:
                     raise
                 except Exception:
                     pass  # Status text optional — search proceeds without it
@@ -737,6 +759,8 @@ class LabEngine:
                     p_num = _parts[1].split("_F")[0]
                 try:
                     _shelf = doc['shelfmark'][0] if doc['shelfmark'] else sys_id
+                except MemoryError:
+                    raise
                 except Exception:
                     _shelf = sys_id
                 display_meta = {
@@ -802,6 +826,8 @@ class LabEngine:
                                     # (lab_engine.py:410-413), so Stop never worked in
                                     # Lab Mode at all.
                                     raise
+                                except MemoryError:
+                                    raise
                                 except Exception:
                                     pass  # Progress callback optional — search proceeds without progress updates
 
@@ -812,6 +838,8 @@ class LabEngine:
                             # Limit 5000 for standard scan
                             res = self.lab_searcher.search(query_obj, 5000)
                             iterator = res.hits
+                        except MemoryError:
+                            raise
                         except Exception as e:
                             LOGGER.debug('Batched search query failed, falling back to empty: %s', e)
                             iterator = []
@@ -829,10 +857,14 @@ class LabEngine:
                                 progress_callback(_i_lab, _tick_total)
                             except (InterruptedError, KeyboardInterrupt):
                                 raise
+                            except MemoryError:
+                                raise
                             except Exception:
                                 pass  # progress is advisory; cancellation is not
                         try:
                             _process_lab_doc(self.lab_searcher.doc(doc_addr), is_local=False)
+                        except MemoryError:
+                            raise
                         except Exception as e:
                             LAB_LOGGER.error(f"Error processing doc: {e}")
 
@@ -860,10 +892,14 @@ class LabEngine:
                                     progress_callback(_i_llab, _local_total)
                                 except (InterruptedError, KeyboardInterrupt):
                                     raise
+                                except MemoryError:
+                                    raise
                                 except Exception:
                                     pass  # progress is advisory; cancellation is not
                             try:
                                 _process_lab_doc(self.local_lab_searcher.doc(_doc_addr), is_local=True)
+                            except MemoryError:
+                                raise
                             except Exception as _e:
                                 LAB_LOGGER.error(f"Error processing LOCAL LAB doc: {_e}")
                     except (InterruptedError, KeyboardInterrupt):
@@ -872,6 +908,8 @@ class LabEngine:
                         raise
                     except (ValueError, RuntimeError):
                         pass  # tokenizer/parse issue — skip LOCAL contribution gracefully
+                    except MemoryError:
+                        raise
                     except Exception as _local_exc:
                         LAB_LOGGER.warning("lab_search LOCAL LAB scan failed: %r", _local_exc)
         except InterruptedError:
@@ -1100,6 +1138,8 @@ class LabEngine:
                     try:
                         res = self.lab_searcher.search(q_obj, 5000)
                         iterator = res.hits
+                    except MemoryError:
+                        raise
                     except Exception as e:
                         LOGGER.debug('Batched search query failed, falling back to empty: %s', e)
                         iterator = []
@@ -1198,6 +1238,8 @@ class LabEngine:
         if callable(_freshness_fn):
             try:
                 _lab_fresh_lab = bool(_freshness_fn())
+            except MemoryError:
+                raise
             except Exception as _lab_fresh_exc:
                 LOGGER.warning(
                     "lab_composition_search: _check_local_lab_freshness raised %r — "
@@ -1249,6 +1291,8 @@ class LabEngine:
                                 progress_callback(_i, _total_llb)
                             except (InterruptedError, KeyboardInterrupt):
                                 raise
+                            except MemoryError:
+                                raise
                             except Exception:
                                 pass  # progress is advisory; cancellation is not
                         if _plan is None:
@@ -1270,6 +1314,8 @@ class LabEngine:
                         try:
                             _res = local_lab_searcher.search(_q_obj, 5000)
                             _local_iter = _res.hits
+                        except MemoryError:
+                            raise
                         except Exception:
                             continue
                         for _score, _doc_addr in _local_iter:
@@ -1344,6 +1390,8 @@ class LabEngine:
                 # Precedes the broad handler and sets the flag, so the returned
                 # payload's 'partial' key stays truthful on a cancelled run.
                 was_interrupted = True
+            except MemoryError:
+                raise
             except Exception as _local_lab_exc:
                 logging.getLogger(__name__).warning(
                     "lab_composition_search: LOCAL LAB scan failed: %r", _local_lab_exc,
@@ -1564,6 +1612,8 @@ class LabEngine:
 
             count = self.lab_searcher.doc_freq(self.lab_index.schema.get_field(target_field), word)
             return count > threshold
+        except MemoryError:
+            raise
         except Exception:
             # If error/unsupported, assume word is not too common to avoid missing it
             return False

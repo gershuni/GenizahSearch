@@ -56,6 +56,7 @@ from web.api_hardening import (
 # Concern #3: APIError from neutral location.
 from shared.api_errors import APIError
 from shared.search_regex import SearchBudgetExceeded, search_budget
+from web.research_jobs import api_engine, wait_executor, ResearchJobError
 # Phase 79 imports.
 from shared.browse_service import (
     fetch_browse_bundle,
@@ -1629,10 +1630,14 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 # Resolve before dispatch so the worker also enforces this
                 # deadline; the HTTP wait alone cannot stop a worker thread.
                 core_timeout, timeout_env = _resolve_search_timeout(req.search_mode)
+                background_job = request.scope.get('research_job')
+                worker_searcher = api_engine(state.searcher, request, core_timeout)
+                if background_job:
+                    core_timeout = None
 
                 def _run_search_sync():
-                    with search_budget(core_timeout):
-                        res = state.searcher.execute_search(
+                    with search_budget(core_timeout if core_timeout is not None else 0):
+                        res = worker_searcher.execute_search(
                             query_str=query,
                             mode=internal_mode,
                             gap=req.gap,
@@ -1651,7 +1656,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
 
                 # P9X heavy-mode concurrency gate (variants/fuzzy only).
                 _heavy_release = None
-                if req.search_mode in HEAVY_SEARCH_MODES:
+                if req.search_mode in HEAVY_SEARCH_MODES and not background_job:
                     _heavy_release = await _acquire_heavy_slot()
                 try:
                     # The heavy slot must stay held for the WORKER's TRUE
@@ -1665,7 +1670,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     # finally would recycle the slot while a timed-out search
                     # still runs, re-admitting heavy work past the budget and
                     # defeating the saturation guard (the NLI-hang lesson).
-                    _search_fut = loop.run_in_executor(None, _run_search_sync)
+                    _search_fut = loop.run_in_executor(wait_executor(), _run_search_sync)
                     # A worker can raise its budget exception after the HTTP
                     # timeout/client disconnect. Retrieve it even when there is
                     # no awaiter left; result() below still propagates failures.
@@ -1694,6 +1699,8 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                         )
                     try:
                         results, downgrade_msg, cascade_meta = _search_fut.result()
+                    except ResearchJobError as exc:
+                        raise APIError('research_worker_stopped', str(exc), http_status=503) from exc
                     except SearchBudgetExceeded as exc:
                         raise APIError(
                             'core_timeout',
@@ -2163,7 +2170,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             # comment: if a deployment raises the witness cap past what the
             # ceiling can serve, requests are refused up front rather than
             # 504-ing with their permits still held.
-            _ceiling = _resolve_passage_timeout()
+            _ceiling = None if request.scope.get('research_job') else _resolve_passage_timeout()
             _projected = len(witnesses_in) * PASSAGE_SECONDS_PER_WITNESS
             if _ceiling and _projected > _ceiling:
                 raise APIError(
@@ -2393,11 +2400,18 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                  'raw_header': _w.raw_header}
                 for _i, _w in enumerate(witnesses_in)
             ] or None
+            _pg_searcher = api_engine(_pg_searcher, request, _resolve_passage_timeout())
+
+            async def passage_budget(factory):
+                if request.scope.get('research_job'):
+                    return await factory()
+                return await run_through_passage_budget(factory)
+
             try:
                 # A factory, not a coroutine: the work is built only after a
                 # budget slot is held. Passing the coroutine directly also
                 # left it un-awaited (RuntimeWarning) on the 503 path.
-                bundle = await run_through_passage_budget(
+                bundle = await passage_budget(
                     lambda: fetch_parallels_results(
                         searcher=_pg_searcher,
                         meta_mgr=state.meta_mgr,
@@ -2407,7 +2421,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                         max_freq=req.max_freq,
                         boundary_mode=req.boundary_mode,
                         restrict_sys_ids=restrict_sys_ids,
-                        executor=_passage_executor(),
+                        executor=wait_executor(),
                         witnesses=witness_payload,
                         witness_text_cap=MAX_WITNESS_CHARS,
                     )
@@ -2446,14 +2460,14 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             # past the budget — the NLI-hang lesson). The done-callback is the
             # SOLE releaser; it fires on success, exception, or post-timeout
             # completion, so no finally release is needed.
-            parallels_ceiling = _resolve_parallels_timeout()
-            _par_release = await _acquire_heavy_slot()
+            parallels_ceiling = None if request.scope.get('research_job') else _resolve_parallels_timeout()
+            _par_release = (lambda: None) if request.scope.get('research_job') else await _acquire_heavy_slot()
             try:
                 _par_task = asyncio.ensure_future(
                     fetch_parallels_results(
                         # SEED-016 #3: inject the SearchEngine + MetadataManager
                         # singletons (was read off web.state inside shared/).
-                        searcher=state.searcher,
+                        searcher=api_engine(state.searcher, request, parallels_ceiling),
                         meta_mgr=state.meta_mgr,
                         text=text,
                         chunk_size=req.chunk_size,
@@ -2462,6 +2476,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                         boundary_mode=req.boundary_mode,
                         restrict_sys_ids=restrict_sys_ids,
                         worker_timeout=parallels_ceiling,
+                        executor=wait_executor(),
                     )
                 )
                 # Hand the slot to the task's done-callback (sole releaser): it
@@ -2823,6 +2838,9 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     DEFAULT_BROWSE_CORE_WARMUP_TIMEOUT),
             },
         }
+
+    from web.research_api import register_research_api
+    register_research_api(target_app, path_prefix, search_endpoint, parallels_endpoint)
 
     logger.info(
         "Search API routes initialized: POST /api/search, GET /api/browse, "

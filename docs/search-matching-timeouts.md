@@ -1,36 +1,101 @@
-# Search matching time limits
+# Research search resource policy
 
-The September 14, 2026 incident was sampled twice with `py-spy`: the same
-search worker held the GIL inside `regex.search(match_content)` in
-`shared/search_engine.py`. That variable previously held a standard-library
-`re.Pattern`. Running it in a thread did not isolate the web event loop.
+Web transcription, lab, and parallels searches run in disposable subprocesses.
+Interactive searches and the background API have no elapsed-time cutoff inside
+those workers. A slow valid query may finish as long as it stays within resource
+limits. The ordinary synchronous API retains its existing HTTP deadlines.
 
-Query-derived matching now uses the pinned `regex` package with bounded
-operations and GIL release. Ordinary metadata parsing continues to use `re`.
-Search timeouts abort with an explicit UI error or API `core_timeout` (504),
-rather than skipping expensive candidates and reporting incomplete results as
-complete. Optional viewer highlighting can fall back to escaped plain text.
+The web process owns a FIFO queue. Stop removes a queued request or kills its
+running process; its slot is released after process exit. A crashed worker does
+not take down the server. Workers also exit when their parent server disappears.
+Waiting uses a separate thread pool so it does not occupy the browsing pool.
 
-Configuration:
+Workers use low scheduling priority, one native compute thread, and (when CPU
+affinity is available) one CPU excluding the first allowed CPU. Before importing
+engines they install an OS allocation limit. The parent also checks resident
+memory and available system/container memory every 100 ms. This reduces resource
+competition; it is not a guarantee against all host overload or storage contention.
 
-| Variable | Default | Purpose |
+## Configuration
+
+| Variable | Default | Meaning |
 | --- | --- | --- |
-| `GENIZAH_REGEX_TIMEOUT_SECONDS` | 0.25 | Maximum duration of one matching operation |
-| `GENIZAH_SEARCH_BUDGET_SECONDS` | 60 | Shared worker deadline for a search |
+| `GENIZAH_RESEARCH_WORKERS` | 1 | Concurrent computations per web process (maximum 4) |
+| `GENIZAH_RESEARCH_QUEUE_SIZE` | 16 | Waiting computations (maximum 64) |
+| `GENIZAH_RESEARCH_MEMORY_MB` | 4096 | Maximum worker allocation and resident-memory allowance |
+| `GENIZAH_WEB_RESERVE_MB` | 1024 | Free memory reserved for website/host activity |
+| `GENIZAH_RESEARCH_RESULT_MB` | 512 | Maximum compressed worker transfer (maximum 512) |
 
-The search API supplies its existing per-mode time budget to the worker.
-The chunk-mode parallels API likewise installs `SEARCH_API_PARALLELS_TIMEOUT`
-(110 seconds by default) inside its executor worker, overriding the generic
-60-second default for that request. Passage-mode deadlines remain unchanged.
-Cancellation of an awaiting UI task keeps its admission slot occupied until
-the underlying work finishes.
+A worker waits when available memory is too low to start. Its allocation limit
+is reduced at launch if the configured allowance would consume the reserve.
+Memory pressure during a run may stop it with an explicit error. A full queue
+also returns an explicit error. Neither case is reported as a successful empty
+search. Existing expansion, candidate, and result caps still apply; this change
+does not promise exhaustive results beyond the engines' existing limits.
+Transfers use streaming compression, with expanded serialized size bounded by
+the worker's allocation allowance. After the child exits, the server waits for
+free memory covering its reserve plus twice that expanded size before loading
+results. This wait remains cancellable. The size estimate is conservative for
+the current result structures; it is not an OS allocation limit on the web process.
 
-These are cooperative worker deadlines checked around matching operations,
-not process termination. They do not interrupt a blocked database call or
-regex compilation. Existing query expansion limits still matter. A separately
-managed search process would provide stronger isolation for those cases.
+These allowances are **per web process**. Use one serving process for this queue
+design. Multiple server processes multiply capacity and do not share API job
+records; supporting that deployment requires an external queue/result store.
+Start with one worker and measure real broad queries, peak worker memory, queue
+wait, and concurrent browse response times before increasing concurrency.
+Each query starts a fresh worker and reloads engine metadata, adding startup
+latency in exchange for releasing its memory and native threads after completion.
 
-Deployment requires installing the updated requirements before restarting the
-service. A running old worker is not changed by updating source files; it must
-finish or the service must be restarted. The local change does not itself
-deploy or restart production.
+## Background API
+
+POST `/api/search/jobs` or `/api/parallels/jobs` with the same JSON body as the
+corresponding synchronous endpoint. A 202 response supplies `job_id`, `status_url`,
+and `result_url`. Poll the status URL; retrieve the result when the state is
+`completed` or `failed`. Results preserve the endpoint's response body and status.
+DELETE the status URL to cancel. Pending results return 409.
+
+Mode gates and existing query validation/rate limits remain in force. Records
+are bound to the client IP resolved by the existing trusted-proxy rules, and use
+unguessable IDs. There are at most two active jobs per client IP and 32 retained
+jobs per web process. Shared institutional IPs therefore share the active-job
+allowance. Requests are limited to 64 KiB and API result files to 16 MiB. Finished
+records expire after ten minutes; expired files are removed on subsequent job
+requests. Jobs/results are temporary and do not survive a server restart. Clients
+must use the same server process and client IP to retrieve them.
+
+## Matching and rendering
+
+Query matching uses the pinned `regex` dependency with GIL release. In isolated
+workers it has no per-match timer. In-process callers retain the 10-second
+`GENIZAH_REGEX_TIMEOUT_SECONDS` guard and optional
+`GENIZAH_SEARCH_BUDGET_SECONDS` total deadline (default 0, meaning none).
+Nested explicit deadlines cannot be extended. Optional viewer highlighting has
+its own 0.25-second budget and may fall back to escaped plain text without
+aborting the research search.
+
+Windows uses [Job Object memory limits](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_extended_limit_information).
+Linux uses [RLIMIT_DATA](https://man7.org/linux/man-pages/man2/getrlimit.2.html),
+which includes anonymous mmap allocation on Linux 4.7 and newer, plus the parent
+watchdog and cgroup-aware available-memory check. Read-only index mappings are
+not charged as anonymous allocations but their resident pages are watched.
+
+## Rollout and verification
+
+Install updated requirements and restart the service to activate the workers.
+Updating files alone does not replace an already-running search. Validate broad
+Responsa and parallels queries on production-sized data while opening browse
+pages; record both search completion and browse latency. Exercise Stop, queue
+saturation, and memory pressure before raising allowances. Do not remove the
+resource protections simply to make a benchmark pass.
+
+Local tests cover actual subprocess cancellation, FIFO admission, worker crash
+recovery, OS allocation rejection, memory watchdogs, event-loop responsiveness,
+background API lifecycle, and existing search/API behavior. They do not replace
+production-sized load testing or the Windows Python 3.11 render-smoke CI job.
+
+The local corpus smoke check for plain Responsa `ראובן AND שמעון` processed
+8,428 candidates and returned 4,471 results through the subprocess boundary.
+Matching took about 35 seconds; the transfer was 276 MiB compressed / 758 MiB
+expanded. Startup and transfer add time beyond matching. This is one local
+measurement, not a production latency guarantee. It exposed why small fixed
+memory/transfer allowances rejected a legitimate broad query.

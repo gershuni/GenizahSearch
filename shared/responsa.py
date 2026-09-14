@@ -105,6 +105,7 @@ def parse_responsa_query(query_str: str) -> List[ResponsaComponent]:
     - Hash + OR: "#(שלום/שלומות)" -> OR group with grammatical_prefixes=True
     - Inline alternation: "אירו(ס/ש)ין" -> inline_pattern set
     - Multiple components separated by whitespace
+    - AND between components: require all components anywhere in the transcription
 
     Args:
         query_str: Raw query string from user input
@@ -126,8 +127,8 @@ def parse_responsa_query(query_str: str) -> List[ResponsaComponent]:
     for token in tokens:
         if not token:
             continue
-        # Skip [N] gap tokens — they are handled by extract_per_pair_gaps()
-        if _GAP_TOKEN_RE.match(token):
+        # Operators are handled separately from searchable components.
+        if token == 'AND' or _GAP_TOKEN_RE.match(token):
             continue
         components.append(_parse_single_token(token))
 
@@ -319,6 +320,11 @@ def _parse_line_break_query(query_str: str):
     return groups, line_gaps
 
 
+def has_document_and(query_str: str) -> bool:
+    """Recognize the builder's document-wide AND operator outside OR groups."""
+    return 'AND' in _tokenize_responsa_query(query_str or '')
+
+
 def extract_per_pair_gaps(query_str: str) -> List[Optional[int]]:
     """Extract per-pair gap values from [N] tokens in a Responsa query.
 
@@ -340,7 +346,7 @@ def extract_per_pair_gaps(query_str: str) -> List[Optional[int]]:
     component_count = 0
 
     for token in tokens:
-        if not token:
+        if not token or token == 'AND':
             continue
         gap_match = _GAP_TOKEN_RE.match(token)
         if gap_match:
@@ -453,6 +459,8 @@ def generate_tabular_syntax(components, distances, scope='word_range'):
                 if dist > 0:
                     parts.append(f'[{dist}]')
 
+        if scope == 'within_document' and valid_component_index > 0:
+            parts.append('AND')
         parts.append(part)
         valid_component_index += 1
 
@@ -1012,4 +1020,3 @@ def _expand_inline_alternation(pattern_str: str) -> str:
             i += 1
 
     return ''.join(result)
-

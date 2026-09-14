@@ -27,29 +27,53 @@ class SearchBudgetExceeded(TimeoutError):
 
 
 _deadline = ContextVar("search_regex_deadline", default=None)
+_isolated = ContextVar("search_regex_isolated", default=False)
 
 
-def _seconds(value, env_name, default):
+@contextmanager
+def isolated_matching():
+    """Only for disposable, externally supervised search subprocesses.
+
+    Their parent enforces resource limits and can kill native work, so elapsed
+    matching time need not reject a legitimate query. UI highlighting may still
+    establish its own explicit short budget inside this context.
+    """
+    token = _isolated.set(True)
+    try:
+        with search_budget(0):
+            yield
+    finally:
+        _isolated.reset(token)
+
+
+def _seconds(value, env_name, default, *, allow_zero=False):
     if value is None:
         value = os.environ.get(env_name, default)
     try:
         value = float(value)
     except (TypeError, ValueError):
         return default
-    return value if math.isfinite(value) and value > 0 else default
+    valid = value >= 0 if allow_zero else value > 0
+    return value if math.isfinite(value) and valid else default
 
 
 @contextmanager
 def search_budget(seconds=None):
-    """Share the outer search's deadline across nested search operations."""
+    """Apply an optional deadline; nested operations cannot extend it.
+
+    Interactive research searches have no total deadline by default. A zero
+    budget disables only the total deadline, never the per-operation guard.
+    Explicit API and highlighting budgets still bound their worker operations.
+    """
     previous = _deadline.get()
+    now = time.monotonic()
+    if previous is not None and now >= previous:
+        raise SearchBudgetExceeded()
+    duration = _seconds(seconds, "GENIZAH_SEARCH_BUDGET_SECONDS", 0.0, allow_zero=True)
+    deadline = now + duration if duration else math.inf
     if previous is not None:
-        if time.monotonic() >= previous:
-            raise SearchBudgetExceeded()
-        yield
-        return
-    duration = _seconds(seconds, "GENIZAH_SEARCH_BUDGET_SECONDS", 60.0)
-    token = _deadline.set(time.monotonic() + duration)
+        deadline = min(previous, deadline)
+    token = _deadline.set(deadline)
     try:
         yield
         if time.monotonic() >= _deadline.get():
@@ -67,8 +91,15 @@ def bounded_search(function):
 
 
 def _match_timeout():
-    limit = _seconds(None, "GENIZAH_REGEX_TIMEOUT_SECONDS", 0.25)
     deadline = _deadline.get()
+    if _isolated.get():
+        if deadline is None or math.isinf(deadline):
+            return None
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise SearchBudgetExceeded()
+        return remaining
+    limit = _seconds(None, "GENIZAH_REGEX_TIMEOUT_SECONDS", 10.0)
     if deadline is not None:
         remaining = deadline - time.monotonic()
         if remaining <= 0:

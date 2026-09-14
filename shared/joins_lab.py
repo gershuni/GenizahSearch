@@ -714,7 +714,8 @@ def htmlify(text: str, pattern: Optional[str] = None) -> str:
     if pattern:
         try:
             rx = compile_search_regex(pattern, re.IGNORECASE | re.MULTILINE)
-            text = rx.sub(lambda m: MARK_A + m.group(0) + MARK_B, text)
+            with search_budget(seconds=0.25):
+                text = rx.sub(lambda m: MARK_A + m.group(0) + MARK_B, text)
         except (re.error, SearchBudgetExceeded):
             pass
     t = html.escape(text)

@@ -3326,6 +3326,12 @@ async def initialize_engine():
             # 5. Start background loading
             state.meta_mgr.start_background_loading()
 
+            # Only heavy entry points leave this process. Browsing, metadata,
+            # and result formatting retain their existing engine interfaces.
+            from web.research_jobs import IsolatedEngine
+            state.searcher = IsolatedEngine(state.searcher, 'search')
+            state.lab_engine = IsolatedEngine(state.lab_engine, 'lab')
+
             print("[init] Engine initialization complete (searcher ready).", flush=True)
 
             return True
@@ -3358,6 +3364,14 @@ app.on_startup(compact_export_storage_on_startup)
 app.on_startup(start_malloc_trim_on_startup)
 app.on_startup(start_perf_watch_on_startup)
 app.on_startup(initialize_engine)
+
+
+async def stop_research_workers():
+    from web.research_jobs import shutdown_research
+    await asyncio.to_thread(shutdown_research)
+
+
+app.on_shutdown(stop_research_workers)
 
 def _find_free_port(start_port: int, max_attempts: int = 10) -> int:
     """Find a free port starting from start_port. Returns the first available port."""

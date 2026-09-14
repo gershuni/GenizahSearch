@@ -38,7 +38,7 @@ from shared.responsa import (
     expand_judeo_arabic, expand_plene_defective,
     parse_responsa_query, _parse_line_break_query,
     ResponsaComponent, _apply_explosion_guard,  # noqa: F401
-    extract_per_pair_gaps, _expand_inline_alternation,
+    extract_per_pair_gaps, has_document_and, _expand_inline_alternation,
 )
 from shared.responsa import _SOFIT_TO_NORMAL
 
@@ -330,6 +330,8 @@ def _index_has_field(index, field_name: str) -> bool:
         if 'does not exist' in msg or 'not defined' in msg:
             return False
         return True
+    except MemoryError:
+        raise
     except Exception:
         return True
 
@@ -467,7 +469,8 @@ def mark_word_highlights(snippet, highlights):
 
 class SearchEngine:
     """Run searches, build queries, and provide browsing utilities."""
-    def __init__(self, meta_mgr, variants_mgr):
+    def __init__(self, meta_mgr, variants_mgr, *, worker_mode=False, open_local=True):
+        self._worker_mode = worker_mode
         self.meta_mgr = meta_mgr
         self.var_mgr = variants_mgr
         self.index = None
@@ -482,7 +485,8 @@ class SearchEngine:
         self._fl_id_index_building = False
         self._fl_id_index_lock = threading.Lock()
         self.reload_index()
-        self.start_fl_id_index_build()
+        if not worker_mode:
+            self.start_fl_id_index_build()
         # Phase 95 — open LOCAL side-index alongside main (D-14 + D-37 fallback).
         self.local_index = None            # tantivy.Index for LOCAL side-index
         self.local_searcher = None         # tantivy.Searcher snapshot
@@ -500,7 +504,8 @@ class SearchEngine:
         self._my_library_tab_ref: weakref.ref | None = None
         # Phase 97 R-02: error from last atomic rebuild attempt; surfaced in UI banner.
         self._local_open_error: str | None = None
-        self._open_local_searcher()
+        if open_local:
+            self._open_local_searcher()
 
     def attach_my_library_tab(self, tab) -> None:
         """Phase 97 R-01: attach a weakref to the MyLibraryTab for is_searchable gate.
@@ -577,7 +582,11 @@ class SearchEngine:
             self._local_has_content_search = _index_has_field(local_index, "content_search")
             self._warn_if_local_index_stale()
             LOGGER.info("LOCAL side-index opened: %s", Config.LOCAL_INDEX_DIR)
+        except MemoryError:
+            raise
         except Exception as open_exc:
+            if getattr(self, '_worker_mode', False):
+                raise RuntimeError('Local index needs maintenance before it can be searched.') from open_exc
             LOGGER.warning(
                 "LOCAL index open/schema-check failed: %r — attempting atomic rebuild",
                 open_exc,
@@ -607,6 +616,8 @@ class SearchEngine:
                 # (a still-live writer would block writer acquisition on the dir).
                 try:
                     indexer._close_internal_writer_index()
+                except MemoryError:
+                    raise
                 except Exception:
                     LOGGER.exception("temp indexer close failed (continuing)")
                 schema2 = build_local_schema()
@@ -620,6 +631,8 @@ class SearchEngine:
                     "LOCAL side-index: atomic rebuild succeeded, reopened: %s",
                     Config.LOCAL_INDEX_DIR,
                 )
+            except MemoryError:
+                raise
             except Exception as rebuild_exc:
                 LOGGER.error("LOCAL atomic rebuild failed: %r", rebuild_exc)
                 self._local_open_error = str(rebuild_exc)
@@ -668,6 +681,8 @@ class SearchEngine:
                         local_lab_index.register_tokenizer(
                             _tk_name, tantivy.TextAnalyzerBuilder(_tk).build()
                         )
+                    except MemoryError:
+                        raise
                     except Exception:
                         pass  # May fail on reopen — non-fatal, like _ensure_lab_tokenizers
                 self.local_lab_searcher = local_lab_index.searcher()
@@ -682,6 +697,8 @@ class SearchEngine:
                 LOGGER.info(
                     "HIGH-1 reload: LOCAL LAB side-index dir absent; searcher=None"
                 )
+        except MemoryError:
+            raise
         except Exception as e:
             LOGGER.warning(
                 "HIGH-1 reload: LOCAL LAB side-index unavailable: %r", e
@@ -917,6 +934,8 @@ class SearchEngine:
                     phase_callback(PHASE_LOCAL_SEARCH)
                 except (InterruptedError, KeyboardInterrupt):
                     raise
+                except MemoryError:
+                    raise
                 except Exception:
                     pass
             _local_total = len(hits) if hasattr(hits, '__len__') else 0
@@ -934,6 +953,8 @@ class SearchEngine:
                         try:
                             progress_callback(_i_loc, _local_total)
                         except (InterruptedError, KeyboardInterrupt):
+                            raise
+                        except MemoryError:
                             raise
                         except Exception:
                             pass  # progress is advisory; cancellation is not
@@ -957,6 +978,8 @@ class SearchEngine:
             # results)" suffix comes from the UI's own _search_was_cancelled.
             return results
         except SearchBudgetExceeded:
+            raise
+        except MemoryError:
             raise
         except Exception as e:
             LOGGER.warning("LOCAL index query failed: %r", e)
@@ -1118,6 +1141,8 @@ class SearchEngine:
     def _build_fl_id_index_thread(self):
         try:
             self._build_fl_id_index()
+        except MemoryError:
+            raise
         except Exception as e:
             LOGGER.warning("Failed to build FL ID index: %s", e)
         finally:
@@ -1174,6 +1199,8 @@ class SearchEngine:
                         LOGGER.warning("Stale index [%s]: %s", db_path, _msg)
                 self.searcher = self.index.searcher()
                 return True
+            except MemoryError:
+                raise
             except Exception as e:
                 LOGGER.error("Failed to reload Tantivy index from %s: %s", db_path, e)
         return False
@@ -1262,6 +1289,8 @@ class SearchEngine:
                     with open(tmp_path, 'wb') as f:
                         pickle.dump(cleaned_map, f)
                     os.replace(tmp_path, Config.BROWSE_MAP)
+                except MemoryError:
+                    raise
                 except Exception as e:
                     LOGGER.warning("Failed to write deduplicated browse map to %s: %s", Config.BROWSE_MAP, e)
                     try:
@@ -1318,6 +1347,7 @@ class SearchEngine:
         be expressed for LOCAL (no components, line-break query, or no positive
         components) so the caller falls back to the simplified path.
         """
+        responsa_options = dict(responsa_options, within_document=has_document_and(query_str))
         components = parse_responsa_query(query_str)
         if not components:
             return None, None
@@ -1389,6 +1419,8 @@ class SearchEngine:
                 for w in expanded_words:
                     try:
                         ve.extend(self.var_mgr.get_variants(w, variant_mode, limit=200))
+                    except MemoryError:
+                        raise
                     except Exception:
                         ve.append(w)
                 expanded_words = list(dict.fromkeys(ve))
@@ -1657,7 +1689,17 @@ class SearchEngine:
 
             forward = _join_parts_with_gaps(parts, per_pair_gaps, max_gap, flex_spacing)
 
-            if bidirectional and len(parts) >= 2:
+            if opts.get('within_document'):
+                # At the earliest matching term, every required component must
+                # occur somewhere in the remaining transcription. This permits
+                # any order/distance (including newlines) and returns a real
+                # term span for snippets rather than a zero-width match.
+                required = ''.join(r'(?=[\s\S]*' + part + ')' for part in parts)
+                term = '(?:' + '|'.join(parts) + ')'
+                # Reject non-term positions before scanning the remaining
+                # document, especially during finditer/highlighting.
+                pattern_str = '(?=' + term + ')' + required + term
+            elif bidirectional and len(parts) >= 2:
                 reversed_gaps = list(reversed(per_pair_gaps)) if per_pair_gaps else per_pair_gaps
                 backward = _join_parts_with_gaps(list(reversed(parts)), reversed_gaps, max_gap, flex_spacing)
                 pattern_str = f"({forward})|({backward})"
@@ -1667,6 +1709,8 @@ class SearchEngine:
             try:
                 return compile_search_regex(pattern_str, re.IGNORECASE)
             except SearchBudgetExceeded:
+                raise
+            except MemoryError:
                 raise
             except Exception:
                 return None  # Boundary data unavailable for this document
@@ -1763,10 +1807,14 @@ class SearchEngine:
             return []
         try:
             return json.loads(raw[0])
+        except MemoryError:
+            raise
         except Exception as e:
             uid_val = None
             try:
                 uid_val = doc['unique_id'][0]
+            except MemoryError:
+                raise
             except Exception:
                 uid_val = '?'  # UID extraction failed; use placeholder for warning message
             LOGGER.warning("Failed to parse boundaries for doc %s: %s", uid_val, e)
@@ -1807,6 +1855,8 @@ class SearchEngine:
     def _get_field(self, doc, field, default=None):
         try:
             return doc[field]
+        except MemoryError:
+            raise
         except Exception:
             return default  # Key missing or type mismatch; caller gets default value
 
@@ -1944,6 +1994,8 @@ class SearchEngine:
             for w in expanded:
                 try:
                     var.extend(self.var_mgr.get_variants(w, variant_mode, limit=200))
+                except MemoryError:
+                    raise
                 except Exception:
                     var.append(w)  # Variant expansion failed for this word; use original
             expanded = list(dict.fromkeys(var))
@@ -2148,6 +2200,8 @@ class SearchEngine:
         try:
             query = self.index.parse_query(t_query_str, ['content'])
             res_obj = self.searcher.search(query, Config.SEARCH_LIMIT)
+        except MemoryError:
+            raise
         except Exception as e:
             LOGGER.warning("Line-break search query failed: %s", e)
             return []
@@ -2260,6 +2314,8 @@ class SearchEngine:
                             })
 
                 except SearchBudgetExceeded:
+                    raise
+                except MemoryError:
                     raise
                 except Exception as e:
                     LOGGER.warning("Line-break search: failed to process hit %s: %s", i, e)
@@ -2426,6 +2482,8 @@ class SearchEngine:
                 )
             except SearchBudgetExceeded:
                 raise
+            except MemoryError:
+                raise
             except Exception as _le:
                 LOGGER.warning("LOCAL-only search failed: %r", _le)
                 return []
@@ -2448,6 +2506,7 @@ class SearchEngine:
         _local_responsa_query = None
         if responsa_options and responsa_options.get('responsa_mode'):
             # a. Bypass prefix shortcuts
+            responsa_options = dict(responsa_options, within_document=has_document_and(query_str))
             self.parse_query_syntax(query_str, responsa_mode=True)
 
             # b. Parse Responsa query into components
@@ -2574,6 +2633,8 @@ class SearchEngine:
                         try:
                             variants = self.var_mgr.get_variants(w, variant_mode, limit=200)
                             var_expanded.extend(variants)
+                        except MemoryError:
+                            raise
                         except Exception:
                             var_expanded.append(w)  # Variant expansion failed for this word; use original
                     expanded_words = list(dict.fromkeys(var_expanded))
@@ -2697,6 +2758,8 @@ class SearchEngine:
         try:
             query = self.index.parse_query(t_query_str, [search_field])
             res_obj = self.searcher.search(query, Config.SEARCH_LIMIT)
+        except MemoryError:
+            raise
         except Exception as e:
             if text_position and search_field != 'content':
                 raise RuntimeError(
@@ -2815,6 +2878,8 @@ class SearchEngine:
                             })
                 except SearchBudgetExceeded:
                     raise
+                except MemoryError:
+                    raise
                 except Exception as e:
                     LOGGER.warning("Failed to materialize search hit at position %s: %s", i, e)
         except InterruptedError:
@@ -2863,6 +2928,8 @@ class SearchEngine:
                 # real and partial is the right semantics at this point.
                 local_hits = []
             except SearchBudgetExceeded:
+                raise
+            except MemoryError:
                 raise
             except Exception as _e:
                 LOGGER.warning(
@@ -3188,6 +3255,8 @@ class SearchEngine:
                                 _snip_s = max(0, _ms_s - 60)
                                 _snip_e = min(len(content), _ms_e + 60)
                                 ms_snip = content[_snip_s:_ms_s] + f"*{content[_ms_s:_ms_e]}*" + content[_ms_e:_snip_e]
+                            except MemoryError:
+                                raise
                             except Exception:
                                 ms_snip = ''
                             # Dedup: Tantivy can return the same uid twice from
@@ -3212,6 +3281,8 @@ class SearchEngine:
                                 rec['boundary_chunk_scores'].append(score)
                                 rec['crossed_boundaries'].update(chunk_crossed_bounds)
                 except SearchBudgetExceeded:
+                    raise
+                except MemoryError:
                     raise
                 except Exception as e:
                     LAB_LOGGER.warning(f"Failed composition chunk processing at token {token_idx}: {e}")
@@ -3276,6 +3347,8 @@ class SearchEngine:
                             try:
                                 progress_callback(_i_scl, _total_scl)
                             except (InterruptedError, KeyboardInterrupt):
+                                raise
+                            except MemoryError:
                                 raise
                             except Exception:
                                 pass  # progress is advisory; cancellation is not
@@ -3362,6 +3435,8 @@ class SearchEngine:
                                             + f"*{_content_scl[_ms_s_scl:_ms_e_scl]}*"
                                             + _content_scl[_ms_e_scl:_snip_e_scl]
                                         )
+                                    except MemoryError:
+                                        raise
                                     except Exception:
                                         _ms_snip_scl = ''
                                     _seen_scl = _rec_scl.setdefault('_chunk_hit_keys', {})
@@ -3379,6 +3454,8 @@ class SearchEngine:
                                         )
                         except SearchBudgetExceeded:
                             raise
+                        except MemoryError:
+                            raise
                         except Exception:
                             pass
             except InterruptedError:
@@ -3387,6 +3464,8 @@ class SearchEngine:
                 # user cancelled — a lie, not just a missing detail.
                 was_cancelled = True
             except SearchBudgetExceeded:
+                raise
+            except MemoryError:
                 raise
             except Exception as _scl_exc:
                 LAB_LOGGER.warning(
@@ -3764,6 +3843,8 @@ class SearchEngine:
             q = self.index.parse_query(f'unique_id:"{uid}"', ["unique_id"])
             res = self.searcher.search(q, 1)
             if res.hits: return self.searcher.doc(res.hits[0][1])['content'][0]
+        except MemoryError:
+            raise
         except Exception as e:
             LOGGER.warning("Failed to retrieve full text for uid %s: %s", uid, e)
         return None
@@ -3807,6 +3888,8 @@ class SearchEngine:
                 doc = self.searcher.doc(doc_addr)
                 if doc['full_header'][0] == full_header:
                     return doc['content'][0]
+        except MemoryError:
+            raise
         except Exception as e:
             LOGGER.warning("Failed to retrieve full text for header %s: %s", full_header, e)
         return None
@@ -4034,6 +4117,8 @@ class SearchEngine:
             try:
                 q = self.local_index.parse_query(sys_id, ["full_header"])
                 res = self.local_searcher.search(q, 5000)
+            except MemoryError:
+                raise
             except Exception as e:
                 LOGGER.warning(
                     "get_local_browse_page: parse_query failed for %s: %s", sys_id, e

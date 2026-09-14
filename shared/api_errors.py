@@ -39,6 +39,7 @@ ERROR_CODES = frozenset({
     'locator_conflict',
     'manuscript_page_not_found',
     'core_timeout',
+    'research_worker_stopped',
     # Phase 80 (/api/parallels) additions:
     'composition_required',     # D-06: text.strip() empty
     'composition_too_long',     # D-06: len(text.strip()) > COMPOSITION_LENGTH_CAP (20000)
