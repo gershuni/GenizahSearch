@@ -216,5 +216,12 @@ def get_passage_searcher(text_fetcher: "PageTextFetcher",
     # review). render_cap is simply omitted when the caller did not
     # ask for one, so the searcher's own default still applies.
     kwargs = {} if render_cap is None else {'render_cap': render_cap}
-    return PassageSearcher(index=idx, text_fetcher=text_fetcher,
-                           policy=compose(preset, length, depth), **kwargs)
+    searcher = PassageSearcher(index=idx, text_fetcher=text_fetcher,
+                               policy=compose(preset, length, depth), **kwargs)
+    from web.research_jobs import IsolatedEngine
+    if isinstance(text_fetcher, IsolatedEngine):
+        return IsolatedEngine(searcher, 'passage', options={
+            'path': str(PASSAGE_DATA_DIR), 'preset': preset, 'length': length,
+            'depth': depth, 'render_cap': render_cap,
+        })
+    return searcher

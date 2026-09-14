@@ -142,6 +142,71 @@ def test_compilation_error_is_stdlib_error():
 @pytest.mark.parametrize("value", ["bad", "nan", "inf", "-1", "0"])
 def test_invalid_environment_uses_finite_default(monkeypatch, value):
     monkeypatch.setenv("GENIZAH_REGEX_TIMEOUT_SECONDS", value)
+    assert search_regex._match_timeout() == 10.0
+
+
+def test_default_research_search_can_run_past_one_minute(monkeypatch):
+    monkeypatch.delenv('GENIZAH_SEARCH_BUDGET_SECONDS', raising=False)
+    monkeypatch.delenv('GENIZAH_REGEX_TIMEOUT_SECONDS', raising=False)
+    clock = [100.0]
+    monkeypatch.setattr(search_regex.time, 'monotonic', lambda: clock[0])
+    pattern = search_regex.compile('שלום')
+    with search_regex.search_budget():
+        clock[0] += 3600
+        assert pattern.search('שלום')
+        assert search_regex._match_timeout() == 10.0
+    assert search_regex._deadline.get() is None
+
+
+def test_matching_receives_research_allowance(monkeypatch):
+    from unittest.mock import Mock
+
+    monkeypatch.delenv('GENIZAH_REGEX_TIMEOUT_SECONDS', raising=False)
+    compiled = Mock()
+    pattern = search_regex.Pattern(compiled, 'שלום', 0)
+    pattern.search('שלום')
+    assert compiled.search.call_args.kwargs['timeout'] == 10.0
+    assert compiled.search.call_args.kwargs['concurrent'] is True
+
+
+def test_explicit_budget_inside_unlimited_search_is_enforced(monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr(search_regex.time, 'monotonic', lambda: clock[0])
+    with search_regex.search_budget(0):
+        with pytest.raises(search_regex.SearchBudgetExceeded):
+            with search_regex.search_budget(2):
+                clock[0] += 3
+                search_regex.compile('a').search('a')
+        assert search_regex._match_timeout() > 0
+
+
+def test_default_nested_search_preserves_api_deadline(monkeypatch):
+    monkeypatch.setenv('GENIZAH_SEARCH_BUDGET_SECONDS', '0')
+    clock = [100.0]
+    monkeypatch.setattr(search_regex.time, 'monotonic', lambda: clock[0])
+    with pytest.raises(search_regex.SearchBudgetExceeded):
+        with search_regex.search_budget(30):
+            with search_regex.search_budget():
+                clock[0] += 31
+                search_regex.compile('a').search('a')
+
+
+def test_configured_total_budget_remains_available(monkeypatch):
+    monkeypatch.setenv('GENIZAH_SEARCH_BUDGET_SECONDS', '120')
+    clock = [100.0]
+    monkeypatch.setattr(search_regex.time, 'monotonic', lambda: clock[0])
+    with pytest.raises(search_regex.SearchBudgetExceeded):
+        with search_regex.search_budget():
+            clock[0] += 121
+
+
+def test_only_supervised_worker_disables_matching_timeout(monkeypatch):
+    monkeypatch.setenv('GENIZAH_REGEX_TIMEOUT_SECONDS', '0.25')
+    assert search_regex._match_timeout() == 0.25
+    with search_regex.isolated_matching():
+        assert search_regex._match_timeout() is None
+        with search_regex.search_budget(0.1):
+            assert 0 < search_regex._match_timeout() <= 0.1
     assert search_regex._match_timeout() == 0.25
 
 

@@ -277,11 +277,15 @@ class MetadataManager:
                     self.nli_cache = _loaded
                 else:
                     self.nli_cache = _BoundedLRUCache(data=dict(_loaded))
+            except MemoryError:
+                raise
             except Exception as e:
                 LOGGER.warning("Failed to load NLI cache from %s: %s", Config.CACHE_NLI, e)
         if os.path.exists(Config.CACHE_META):
             try:
                 with open(Config.CACHE_META, 'rb') as f: self.meta_map = pickle.load(f)
+            except MemoryError:
+                raise
             except Exception as e:
                 LOGGER.warning("Failed to load metadata cache from %s: %s", Config.CACHE_META, e)
 
@@ -360,6 +364,8 @@ class MetadataManager:
                 _build_cudl_alias_index(self.csv_bank)
             except ImportError as e:
                 _warn_bridge_import_failed(e)
+            except MemoryError:
+                raise
             except Exception as e:
                 LOGGER.warning("CUDL alias index build failed (continuing without bridge): %s", e)
 
@@ -378,8 +384,12 @@ class MetadataManager:
                             self.csv_bank[vid]['has_vs'] = True
                             stamped += 1
                     LOGGER.info("Stamped has_vs on %d/%d manuscripts from vs_manifest.txt", stamped, len(vs_ids))
+                except MemoryError:
+                    raise
                 except Exception as e:
                     LOGGER.warning("Failed to load vs_manifest.txt: %s", e)
+        except MemoryError:
+            raise
         except Exception as e:
             LOGGER.error("Failed to load CSV library bank from %s: %s", Config.LIBRARIES_CSV, e)
 

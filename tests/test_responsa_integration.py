@@ -487,6 +487,71 @@ class TestParseQuerySyntaxResponsaBypass:
 class TestExecuteSearchResponsa:
     """Tests for the Responsa pipeline in execute_search."""
 
+    @pytest.mark.parametrize('content,expected', [
+        ('ראובן ' + 'מילה ' * 200 + '\nשמעון', True),
+        ('שמעון\n' + 'מילה ' * 200 + ' ראובן', True),
+        ('לוי שמעון ראובן', True),
+        ('ראובן בלבד', False),
+        ('שמעון בלבד', False),
+    ], ids=['distant', 'reversed', 'alternatives', 'missing-second', 'missing-first'])
+    def test_builder_document_and_execution(self, content, expected):
+        from shared.responsa import generate_tabular_syntax
+
+        query, _ = generate_tabular_syntax([
+            {'words': [{'text': 'ראובן'}]},
+            {'words': [{'text': 'שמעון'}, {'text': 'לוי'}]},
+        ], [0], scope='within_document')
+        engine = _make_search_engine()
+        engine.index = MagicMock()
+        engine.searcher = MagicMock()
+        engine.searcher.search.return_value.hits = [(1.0, 'doc')]
+        engine.searcher.doc.return_value = {
+            'content': [content], 'full_header': ['test'], 'source': ['V0.8'],
+            'unique_id': ['uid1'], 'scope': ['page'], 'boundaries': ['[]'],
+        }
+        engine.meta_mgr.get_display_data.return_value = {
+            'shelfmark': 'T-S 12.1', 'source': 'V0.8'}
+        engine.meta_mgr.parse_header_smart.return_value = ('sys1', '1')
+        opts = {'responsa_mode': True}
+        results = engine.execute_search(query, 'exact', 0,
+                                        responsa_options=opts, corpus_scope='genizah')
+        assert bool(results) is expected
+        assert opts == {'responsa_mode': True}
+        tantivy_query = engine.index.parse_query.call_args.args[0]
+        assert '"AND"' not in tantivy_query
+
+        # Local-library searches must interpret the same portable syntax.
+        _, local_regex = engine._build_local_responsa_query_and_regex(
+            query, 'exact', 0, opts)
+        assert bool(local_regex.search(content)) is expected
+
+    def test_document_and_does_not_change_word_range(self):
+        engine = _make_search_engine()
+        _, pattern = engine._build_local_responsa_query_and_regex(
+            'ראובן שמעון', 'exact', 0, {'responsa_mode': True})
+        assert pattern.search('ראובן שמעון')
+        assert not pattern.search('ראובן מילה שמעון')
+        assert not pattern.search('שמעון ראובן')
+
+    def test_document_and_rejects_long_nonmatching_text_without_repeated_scans(self):
+        from shared.search_regex import search_budget
+        engine = _make_search_engine()
+        _, pattern = engine._build_local_responsa_query_and_regex(
+            'ראובן AND שמעון', 'exact', 0, {'responsa_mode': True})
+        with search_budget(2):
+            assert not pattern.search('מילה ' * 20000)
+
+    @pytest.mark.parametrize('failure_site', ['search', 'doc'])
+    def test_memory_exhaustion_never_becomes_successful_empty_results(self, failure_site):
+        engine = _make_search_engine()
+        engine.index = MagicMock()
+        engine.searcher = MagicMock()
+        engine.searcher.search.return_value.hits = [(1.0, 'doc')]
+        getattr(engine.searcher, failure_site).side_effect = MemoryError('worker allocation exhausted')
+        with pytest.raises(MemoryError):
+            engine.execute_search('ראובן AND שמעון', 'exact', 0,
+                                  responsa_options={'responsa_mode': True}, corpus_scope='genizah')
+
     def test_accepts_responsa_options_parameter(self):
         """execute_search accepts responsa_options parameter without error."""
         engine = _make_search_engine()

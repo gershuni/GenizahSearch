@@ -154,9 +154,7 @@ def test_disable_calls_are_inside_the_passage_mode_true_branch():
 
 def test_page_imports_run_passage_search_from_search_api():
     src = _read_source()
-    assert 'from web.search_api import run_passage_search' in src, (
-        'web/pages/parallels.py must import the SAME run_passage_search '
-        'web/search_api.py exposes -- not a separately reimplemented copy')
+    assert 'from web.research_jobs import ResearchJobError, run_research_call' in src
 
 
 def test_passage_branch_calls_run_passage_search_not_io_bound():
@@ -178,8 +176,7 @@ def test_passage_branch_calls_run_passage_search_not_io_bound():
     passage_branch = passage_branch_and_after[:else_idx]
     chunk_lab_branch = passage_branch_and_after[else_idx:]
 
-    assert 'run_passage_search(' in passage_branch, (
-        'the passage_mode branch must call run_passage_search')
+    assert 'run_research_call(' in passage_branch
     # 'run.io_bound' alone would also match this branch's own explanatory
     # comment (which names it to say why it is NOT used) -- check for an
     # actual CALL (the opening paren) instead of the bare substring.
@@ -187,7 +184,7 @@ def test_passage_branch_calls_run_passage_search_not_io_bound():
         'the passage_mode branch must NOT dispatch through run.io_bound -- '
         'that bypasses the shared semaphore/executor/timeout entirely')
     # The lab/chunk branch is UNCHANGED by this finding -- still run.io_bound.
-    assert 'run.io_bound(run_search)' in chunk_lab_branch
+    assert 'run_research_call(run_search)' in chunk_lab_branch
 
 
 def test_passage_branch_handles_busy_and_timeout_with_translated_messages():

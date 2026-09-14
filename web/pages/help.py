@@ -939,7 +939,7 @@ This mode offers two search methods inspired by the Bar-Ilan Responsa Project: a
 2. Add 2\u20134 **components**, each representing a search term or group
 3. Enter one or more **words** per component (multiple words = OR alternatives)
 4. Toggle **per-word modifiers**: prefix (#), suffix (#), wildcard (*), plene (%), negation
-5. Set the **distance** between components using the spinners
+5. Set the **distance** between components using the spinners, or choose **Within Document** to require every component anywhere in the transcription, in any order (`word1 AND word2`)
 6. Watch the **live preview** update in real time
 7. Click **Search** to execute the query
         ''').style('color: var(--text-secondary);').classes('mb-4')

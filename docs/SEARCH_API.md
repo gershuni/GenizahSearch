@@ -22,6 +22,12 @@ This is a public research-automation API. We aim to keep this contract stable. B
 
 ## Quick Start
 
+For long-running searches, use the additive background endpoints
+`POST /api/search/jobs` and `POST /api/parallels/jobs`. They accept the same
+request bodies as their synchronous counterparts and return URLs for polling,
+result retrieval, and cancellation. See [research job limits and lifecycle](search-matching-timeouts.md#background-api).
+Job status envelopes are separate from the four result contracts below.
+
 All four endpoints return JSON, and every successful response carries `schema_version`. Beyond that the four are NOT uniform, so do not write one envelope parser for all of them:
 
 - `/search` and `/parallels` carry `source`, `generated_at`, `count`, `total`, `warnings[]` and `results[]`.

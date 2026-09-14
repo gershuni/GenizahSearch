@@ -71,6 +71,8 @@ class CodicologicalManager:
             LOGGER.info("Loaded %d codicological parts from Oxford database", len(self.part_metadata))
             return True
 
+        except MemoryError:
+            raise
         except Exception as e:
             LOGGER.error("Failed to load Oxford database: %s", e)
             return False

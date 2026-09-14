@@ -51,7 +51,8 @@ from web.document_service import (
     get_sys_ids_with_transcriptions, get_sys_ids_with_pgp_text,
     get_fragments_by_tag, get_all_distinct_tags,
 )
-from web.search_load_control import enrichment_batch_slot, try_acquire_ui_search_slot
+from web.search_load_control import enrichment_batch_slot
+from web.research_jobs import ResearchJobError, run_research_call
 from shared.fgp_service import get_sys_ids_with_fgp_sources
 from shared.search_regex import SearchBudgetExceeded
 from shared.transcription_service import union_manual_transcriptions
@@ -4742,6 +4743,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # Check if search was cancelled
             if search_state.is_cancelled:
                 raise InterruptedError("Search cancelled")
+            if current < 0:
+                search_state.status = (
+                    f'ממתין בתור: {-current}' if get_language() == 'he'
+                    else f'Queued: {-current}')
+                return
             if total > 0:
                 search_state.progress = current / total
                 search_state.status = f"{current} / {total}"
@@ -4863,6 +4869,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         restrict_sys_ids=effective_restrict,
                         text_position=tp if tp != 'anywhere' else None,
                     )
+            except InterruptedError:
+                return []
+            except ResearchJobError as e:
+                return {'error': str(e)}
             except SearchBudgetExceeded:
                 logger.warning('Search stopped after exceeding its computation budget')
                 return {'error': 'search_budget_exceeded'}
@@ -4875,34 +4885,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 logger.exception(f"Search Error: {e}")
                 return []
 
-        # Protect the shared NiceGUI thread pool from bursts of independent
-        # browser sessions. The future, rather than this page coroutine, owns
-        # the release so a disconnected client cannot free a still-running job.
-        _core_slot_release = await try_acquire_ui_search_slot()
-        if _core_slot_release is None:
-            search_state.is_running = False
-            search_state.is_cancelled = False
-            search_state.progress = 0
-            search_btn.style('display: inline-flex;')
-            stop_btn.style('display: none;')
-            progress_bar.classes('opacity-0')
-            status_label.text = ''
-            ui.notify(tr('Searches are busy. Please try again shortly.'), type='warning', timeout=4000)
-            return
-        try:
-            _core_future = asyncio.get_running_loop().run_in_executor(
-                run.thread_pool, run_core_search,
-            )
-            _core_future.add_done_callback(
-                lambda _future, release=_core_slot_release: release()
-            )
-            _core_slot_release = None  # ownership transferred to the future callback
-            # Client cancellation must not cancel the wrapper and release the
-            # permit while its non-cancellable worker is still running.
-            results = await asyncio.shield(_core_future)
-        finally:
-            if _core_slot_release is not None:
-                _core_slot_release()
+        # Admission, FIFO waiting and process termination are shared by text,
+        # parallels and API searches. Waiting does not occupy NiceGUI's pool.
+        results = await run_research_call(run_core_search)
 
         # Handle validation errors from explosion guard (returned as sentinel dict
         # because run_core_search runs in io_bound thread and cannot call ui.notify)
