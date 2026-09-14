@@ -2461,6 +2461,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                         max_freq=req.max_freq,
                         boundary_mode=req.boundary_mode,
                         restrict_sys_ids=restrict_sys_ids,
+                        worker_timeout=parallels_ceiling,
                     )
                 )
                 # Hand the slot to the task's done-callback (sole releaser): it

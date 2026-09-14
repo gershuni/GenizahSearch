@@ -235,6 +235,40 @@ def test_parallels_happy_path_per_mode(client, mock_searcher, clean_env, mode):
     assert 'filtered' in body  # D-04
 
 
+@pytest.mark.parametrize('configured, expected', [(None, 110.0), ('150', 150.0)])
+def test_parallels_worker_inherits_endpoint_deadline(
+    client, mock_searcher, clean_env, monkeypatch, configured, expected,
+):
+    from shared import search_regex
+    from types import SimpleNamespace
+    import threading
+
+    if configured is None:
+        monkeypatch.delenv('SEARCH_API_PARALLELS_TIMEOUT', raising=False)
+    else:
+        monkeypatch.setenv('SEARCH_API_PARALLELS_TIMEOUT', configured)
+    monkeypatch.setenv('GENIZAH_SEARCH_BUDGET_SECONDS', '60')
+    clock = [1000.0]
+    monkeypatch.setattr(search_regex, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
+    calling_thread = threading.get_ident()
+    observed = []
+
+    @search_regex.bounded_search
+    def composition(**kwargs):
+        assert threading.get_ident() != calling_thread
+        observed.append(search_regex._deadline.get() - clock[0])
+        # A previously successful 97-second request must survive the default
+        # engine's 60-second budget, without sleeping in the regression test.
+        clock[0] += 97.0
+        search_regex.compile('hello').search('hello')
+        return {'main': [], 'filtered': []}
+
+    mock_searcher.search_composition_logic.side_effect = composition
+    response = client.post('/api/parallels', json={'text': 'hello world', 'mode': 'exact'})
+    assert response.status_code == 200, response.text
+    assert observed == [expected]
+
+
 @pytest.mark.parametrize('which', ['quick_start', 'reference'])
 def test_documented_parallels_examples_match_a_real_response(
         client, mock_searcher, clean_env, which):

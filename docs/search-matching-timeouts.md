@@ -18,7 +18,10 @@ Configuration:
 | `GENIZAH_REGEX_TIMEOUT_SECONDS` | 0.25 | Maximum duration of one matching operation |
 | `GENIZAH_SEARCH_BUDGET_SECONDS` | 60 | Shared worker deadline for a search |
 
-The API also supplies its existing per-mode time budget to the worker.
+The search API supplies its existing per-mode time budget to the worker.
+The chunk-mode parallels API likewise installs `SEARCH_API_PARALLELS_TIMEOUT`
+(110 seconds by default) inside its executor worker, overriding the generic
+60-second default for that request. Passage-mode deadlines remain unchanged.
 Cancellation of an awaiting UI task keeps its admission slot occupied until
 the underlying work finishes.
 
