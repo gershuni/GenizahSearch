@@ -219,7 +219,12 @@ def _rewrite_class(pattern, start, word, nonword):
             complement = '(?:(?![' + ''.join(residual) + '])' + complement + ')'
         return complement, i + 1
     if residual:
-        atoms.append("[" + "".join(residual) + "]")
+        # Express the union as NOT(NOT atom AND NOT residual). Alternation
+        # lets regex's first-set optimization fold branches across -i, e.g.
+        # [\Wİ] under IGNORECASE can lose the nonword U+0345. Keep both tests
+        # inside assertions, then consume exactly one character.
+        return ('(?:(?!(?!' + atoms[0] + ')(?![' + ''.join(residual)
+                + r']))[\s\S])'), i + 1
     union = "(?:" + "|".join(atoms) + ")"
     return union, i + 1
 

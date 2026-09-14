@@ -74,6 +74,23 @@ def test_ignorecase_keeps_simple_case_folding():
     assert search_regex.compile('\u00df', re.I).search('ss') is None
 
 
+@pytest.mark.parametrize('pattern', [r'[\W\u0130]', r'(?i:[\W\u0130])', r'(?a:[\W\u0130])'])
+def test_mixed_class_case_folding_does_not_change_nonword_membership(pattern):
+    old, new = re.compile(pattern, re.I), search_regex.compile(pattern, re.I)
+    for char in ('\u0345', '\u0307', '\u200c', '\u0130', '!', '\n', 'a'):
+        expected, actual = old.fullmatch(char), new.fullmatch(char)
+        assert (expected.span() if expected else None) == (actual.span() if actual else None)
+
+
+@pytest.mark.parametrize('pattern', [r'[\W\u0130I\u0131]+', r'[\w\u0130I\u0131]+'])
+def test_case_insensitive_mixed_class_over_entire_unicode_database(pattern):
+    # Spell out Turkish-I equivalents: the dependency's literal folding of İ
+    # alone already differs from re in the pre-PR adapter. This checks that
+    # folding the residual cannot alter word/nonword membership anywhere.
+    text = ''.join(map(chr, range(sys.maxunicode + 1)))
+    assert search_regex.compile(pattern, re.I).sub('', text) == re.sub(pattern, '', text, flags=re.I)
+
+
 @pytest.mark.parametrize('flags', [0, re.IGNORECASE])
 def test_word_membership_over_entire_unicode_database(flags):
     # Includes surrogates, newly assigned letters, combining marks and numbers.

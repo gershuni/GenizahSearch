@@ -111,3 +111,20 @@ versus 0.066 s. Fixed batch rounds were 0.895/0.921/0.912 s, and pre-review roun
 were 0.920/0.935/0.918 s. This compares the two arms of this run; the absolute
 times should not be compared directly with the earlier run under different load.
 These fixes do not establish end-to-end production latency or concurrency safety.
+
+## Codex review follow-up
+
+The mixed-class alternation allowed the dependency's optimization to apply case
+folding across the nonword predicate: `[\Wİ]` with IGNORECASE could omit U+0345.
+The union now uses nested assertions followed by a single-character consumer,
+preventing that optimization without adding captures. Regression coverage includes
+the reported character, scoped flags, and exhaustive Unicode mixed-class checks.
+The dependency's pre-existing Turkish-I literal-folding differences remain outside
+this fix; the exhaustive test spells out those literal equivalents explicitly.
+
+A three-round interleaved five-word-gap benchmark against `e1d40345` measured
+1.991 s median batch compilation after this fix versus 1.967 s before. Synthetic
+matching returned identical spans/captures and took a median 0.0017 s after versus
+8.1924 s before; this very small document sample is not a production throughput
+estimate. All measurements here used Python 3.12.14 and regex 2026.9.10.
+After this fix, 676 targeted tests passed; Ruff and patch whitespace checks passed.
