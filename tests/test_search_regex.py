@@ -3,12 +3,70 @@
 import asyncio
 import concurrent.futures
 import re
+import sys
 import threading
 import time
 
 import pytest
 
 from shared import search_regex
+
+
+@pytest.mark.parametrize('flags', [0, re.IGNORECASE])
+def test_word_membership_over_entire_unicode_database(flags):
+    # Includes surrogates, newly assigned letters, combining marks and numbers.
+    text = ''.join(map(chr, range(sys.maxunicode + 1)))
+    for pattern in (r'\w+', r'\W+', r"[^\w\u0590-\u05FF']+", r'[\W\u0590-\u05FF]+'):
+        assert search_regex.compile(pattern, flags).sub('', text) == re.sub(pattern, '', text, flags=flags)
+
+
+@pytest.mark.parametrize('pattern', [
+    r'[\w-]+', r'[-\w]+', r'[\w^]+', r'[]\w]+', r'[^]\w-]+',
+    r'[\w\W]+', r'[^\w\W]+', r'[a-z\w]+', r'[\W\b]+',
+    r'[\w\N{LATIN CAPITAL LETTER A}]+', r'(?i:[\wA-Z]+)',
+    r'(?a:[\w-]+)(?u:[\w-]+)', r'(?x:[\w #]+)',
+    r'(?P<a>[\w-]+)([\W]+)(?P=a)', r'(?<=[\w-])x',
+])
+def test_mixed_classes_preserve_spans_captures_and_replacements(pattern):
+    text = '-A_a^]x \u0307\u05D0\u2163\u00B2#\n\x08\U00011F02 A_a A_a'
+    for flags in (0, re.IGNORECASE, re.ASCII):
+        old, new = re.compile(pattern, flags), search_regex.compile(pattern, flags)
+        assert new.groups == old.groups
+        assert new.groupindex == old.groupindex
+        for pos, end in ((0, len(text)), (1, 10), (4, 4)):
+            expected, actual = old.search(text, pos, end), new.search(text, pos, end)
+            assert ((expected.span(), expected.groups(), expected.groupdict()) if expected else None) == (
+                (actual.span(), actual.groups(), actual.groupdict()) if actual else None
+            )
+        assert old.sub(lambda match: '<' + match.group() + '>', text) == new.sub(
+            lambda match: '<' + match.group() + '>', text
+        )
+
+
+def test_expired_budget_stops_before_native_compilation(monkeypatch):
+    with search_regex.search_budget(1):
+        deadline = search_regex._deadline.get()
+        monkeypatch.setattr(search_regex.time, 'monotonic', lambda: deadline + 1)
+        monkeypatch.setattr(search_regex._regex, 'compile', lambda *a, **k: pytest.fail('compiled after deadline'))
+        with pytest.raises(search_regex.SearchBudgetExceeded):
+            search_regex.compile('not cached')
+        monkeypatch.undo()
+
+
+def test_budget_expiring_during_compilation_is_reported(monkeypatch):
+    original = search_regex._regex.compile
+    with search_regex.search_budget(1):
+        deadline = search_regex._deadline.get()
+
+        def delayed_compile(*args, **kwargs):
+            result = original(*args, **kwargs)
+            monkeypatch.setattr(search_regex.time, 'monotonic', lambda: deadline + 1)
+            return result
+
+        monkeypatch.setattr(search_regex._regex, 'compile', delayed_compile)
+        with pytest.raises(search_regex.SearchBudgetExceeded):
+            search_regex.compile('also not cached')
+        monkeypatch.undo()
 
 
 @pytest.mark.parametrize("pattern", [
