@@ -31,6 +31,16 @@ def write_progress(root, event):
         pass
 
 
+def restore_settings(snapshot):
+    from shared.lab_settings import LabSettings
+    settings = LabSettings()
+    if snapshot is not None:
+        for name, value in snapshot.items():
+            if name in vars(settings):
+                setattr(settings, name, value)
+    return settings
+
+
 def main(directory):
     from shared.research_limits import limit_memory
     limit_memory(int(os.environ['GENIZAH_RESEARCH_MEMORY_MB']) * 1024**2)
@@ -72,6 +82,20 @@ def main(directory):
         progress = values if len(values) == 2 and all(isinstance(v, (int, float)) for v in values) else (0, 0)
         write_progress(root, {'status': 'Searching', 'progress': progress})
 
+    from shared.config import Config
+    from shared.local_index_leases import index_leases
+    write_progress(root, {'status': 'Waiting for local index maintenance', 'progress': (0, 0)})
+    with index_leases([Config.LOCAL_INDEX_DIR, Config.LOCAL_LAB_INDEX_DIR]):
+        write_progress(root, {'status': 'Starting search worker', 'progress': (0, 0)})
+        try:
+            run_query(root, payload, report)
+        finally:
+            # Drop engine cycles/native handles before releasing the read lease.
+            import gc
+            gc.collect()
+
+
+def run_query(root, payload, report):
     try:
         from shared.metadata_manager import MetadataManager
         from shared.variants import VariantManager
@@ -83,7 +107,7 @@ def main(directory):
         # The web initializer loads these asynchronously. A short-lived worker
         # must finish loading before it searches or serializes display metadata.
         meta._load_heavy_caches_bg()
-        lab = LabEngine(meta, None)
+        lab = LabEngine(meta, None, settings=restore_settings(payload.get('settings')))
         variants = VariantManager(settings=lab.settings)
         lab.var_mgr = variants
         scope = payload['arguments'].get('corpus_scope',

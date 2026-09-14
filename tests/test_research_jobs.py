@@ -61,6 +61,46 @@ def test_streamed_compressed_results_preserve_transcriptions(queue):
     assert queue.submit(data).future.result(timeout=5)['value'] == data
 
 
+@pytest.mark.parametrize('kind', ['search', 'lab', 'passage'])
+def test_worker_receives_selected_settings_snapshot(queue, monkeypatch, kind):
+    from types import SimpleNamespace
+    from shared.lab_settings import LabSettings
+    from shared.variants import VariantManager
+    from shared.research_worker import restore_settings
+    from web.research_jobs import IsolatedEngine
+    monkeypatch.setattr(LabSettings, 'load', lambda self: None)
+    settings = LabSettings()
+    settings.variant_pairs_count = 123
+    settings.variant_max_changes = 1
+    settings.custom_variants = {'א=ת': True}
+    settings.gap_penalty = 7
+    variants = VariantManager(settings)
+    engine = SimpleNamespace(execute_search=lambda query_str, mode, gap: None)
+    if kind == 'lab':
+        engine.settings = settings
+    elif kind == 'passage':
+        engine.text_fetcher = SimpleNamespace(var_mgr=variants)
+    else:
+        engine.var_mgr = variants
+    monkeypatch.setattr('web.research_jobs.get_queue', lambda: queue)
+    submit = queue.submit
+
+    def submit_then_change_live_settings(payload):
+        job = submit(payload)
+        settings.variant_pairs_count = 2
+        settings.variant_max_changes = 4
+        settings.custom_variants.clear()
+        return job
+    monkeypatch.setattr(queue, 'submit', submit_then_change_live_settings)
+    received = IsolatedEngine(engine, kind).execute_search('אבג', 'variants', 0)
+    restored = restore_settings(received['settings'])
+    worker_variants = VariantManager(restored)
+    assert worker_variants._get_pairs_count() == 123
+    assert worker_variants._get_max_changes_for_length(8, 4) == 1
+    assert restored.custom_variants == {'א=ת': True}
+    assert restored.gap_penalty == 7
+
+
 def test_stream_writer_bounds_expanded_size():
     import io
     from shared.research_worker import MeasuredWriter
@@ -188,7 +228,7 @@ def test_result_loading_waits_for_memory_and_remains_cancellable(queue, monkeypa
 
     def available():
         job = holder.get('job')
-        if job and job.process and job.process.poll() is not None:
+        if job and job.status == 'Waiting for memory to load results':
             return 0
         return 16 * 1024**3
 

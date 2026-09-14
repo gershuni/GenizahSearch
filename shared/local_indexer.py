@@ -37,6 +37,8 @@ the file is marked extraction_status='encoding_error'.
 """
 from __future__ import annotations
 
+from shared.local_index_leases import index_swap
+
 import datetime
 import errno
 import gc
@@ -3780,6 +3782,7 @@ class LocalIndexer:
             return ""
         return ""
 
+    @index_swap
     def rebuild_main_index_atomic(
         self,
         scan_run_id: str,
@@ -3954,6 +3957,7 @@ class LocalIndexer:
             docs_written, old_dir,
         )
 
+    @index_swap
     def rebuild_lab_index_atomic(
         self,
         scan_run_id: str,
@@ -4274,6 +4278,7 @@ class LocalIndexer:
     # Phase 97.2 R97.2-E — Reset My Library (atomic LOCAL teardown)
     # ------------------------------------------------------------------
 
+    @index_swap
     def reset_my_library(
         self,
         close_searcher_cb,

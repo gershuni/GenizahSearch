@@ -215,14 +215,10 @@ def test_the_page_never_passes_a_witness_list_to_the_engine():
 
 
 def test_each_witness_gets_its_own_budget_slot():
-    """One acquire/release per witness, so the 30s ceiling bounds ONE
-    witness rather than a whole batch and the shared pool of 4 interleaves
-    with other users between witnesses."""
+    """Each witness enters the isolated queue independently and supports Stop."""
     src = _func_source('_run_one_witness_search')
-    assert 'run_passage_search(' in src, (
-        'witness searches must go through the bounded passage budget, not '
-        'run.io_bound\'s generic unbounded pool'
-    )
+    assert 'run_research_call(' in src
+    assert 'progress_callback=check_cancel' in src
     assert 'run.io_bound' not in src
 
 

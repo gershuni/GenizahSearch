@@ -9,6 +9,15 @@ The web process owns a FIFO queue. Stop removes a queued request or kills its
 running process; its slot is released after process exit. A crashed worker does
 not take down the server. Workers also exit when their parent server disappears.
 Waiting uses a separate thread pool so it does not occupy the browsing pool.
+Each job snapshots the effective variant and Lab settings from its submitting
+engine. Later UI changes do not alter jobs that are already queued.
+
+Workers hold shared leases for the LOCAL index directories. My Library atomic
+rebuild/reset operations hold exclusive leases through handle closure, directory
+swap, and reload. Maintenance waits for existing readers; workers starting during
+a swap wait until it finishes and remain cancellable by their supervisor. Leases
+use dedicated SQLite lock files beside the index directories, so they survive
+directory swaps and their OS locks are released if a process exits unexpectedly.
 
 Workers use low scheduling priority, one native compute thread, and (when CPU
 affinity is available) one CPU excluding the first allowed CPU. Before importing

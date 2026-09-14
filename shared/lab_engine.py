@@ -42,10 +42,10 @@ class LabEngine:
     # NGRAM_SIZE kept for compatibility if other parts of code ref it
     NGRAM_SIZE = 3
 
-    def __init__(self, meta_mgr, variants_mgr):
+    def __init__(self, meta_mgr, variants_mgr, *, settings=None):
         self.meta_mgr = meta_mgr
         self.var_mgr = variants_mgr
-        self.settings = LabSettings()
+        self.settings = settings if settings is not None else LabSettings()
         self.lab_index = None
         self.lab_searcher = None
         self.lab_index_needs_rebuild = False

@@ -7,6 +7,7 @@ indexes and memory. Nothing in the child imports web.main.
 from __future__ import annotations
 
 import atexit
+from copy import deepcopy
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeout
 from contextlib import contextmanager
@@ -35,6 +36,16 @@ _status_context = ContextVar('research_status', default=None)
 
 class ResearchJobError(RuntimeError):
     """A computation stopped without returning misleading partial results."""
+
+
+def snapshot_settings(engine):
+    settings = getattr(engine, 'settings', None)
+    if settings is None:
+        variants = getattr(engine, 'var_mgr', None)
+        if variants is None:
+            variants = getattr(getattr(engine, 'text_fetcher', None), 'var_mgr', None)
+        settings = getattr(variants, '_settings', None)
+    return deepcopy(vars(settings)) if settings is not None else None
 
 
 def _integer(name, default, minimum=1, maximum=1024):
@@ -333,7 +344,7 @@ class IsolatedEngine:
             arguments.pop('phase_callback', None)
             queue = get_queue()
             job = queue.submit({'kind': self._kind, 'method': name, 'arguments': arguments,
-                                'options': self._options})
+                                'options': self._options, 'settings': snapshot_settings(self._engine)})
             cancelled = self._cancel or _cancel_context.get()
             update = self._status or _status_context.get()
             try:

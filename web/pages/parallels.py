@@ -2826,8 +2826,7 @@ def create_parallels_page(initial_text: str = None):
         dialog.open()
 
     async def _run_one_witness_search(entry: dict):
-        """Search ONE witness through the SAME bounded passage budget the
-        seed search uses.
+        """Search one witness through the same isolated queue as the seed search.
 
         Each witness enters the shared research queue independently so other
         users can run between witnesses. Stop also cancels a running worker.
