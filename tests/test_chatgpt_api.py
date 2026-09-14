@@ -29,6 +29,18 @@ def client_for(handler):
     return TestClient(parent)
 
 
+def test_privacy_policy_is_public_without_search_execution():
+    async def handler(request):
+        raise AssertionError('Privacy must not execute research')
+
+    with client_for(handler) as client:
+        response = client.get('/api/chatgpt/privacy')
+    assert response.status_code == 200
+    assert response.headers['content-type'].startswith('text/html')
+    assert 'GenizahSearch GPT' in response.text
+    assert 'mailto:gershuni@gmail.com' in response.text
+
+
 def test_compaction_retains_provenance_and_discloses_missing_evidence():
     original = payload()
     before = deepcopy(original)

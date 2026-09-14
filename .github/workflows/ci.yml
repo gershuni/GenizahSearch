@@ -63,8 +63,8 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libegl1
       - run: pip install -r requirements-lock.txt
-      # pytest and ruff are CI-only dev tools, not runtime deps
-      - run: pip install pytest
+      # Schema validation is exercised by the ChatGPT contract tests.
+      - run: pip install pytest jsonschema==4.26.0
       # `-m "not gui"` deselects PyQt6 event-dispatching dialog tests (auto-marked
       # `gui` in tests/conftest.py). Run together in this one process they tip the
       # accumulated Qt state into SIGSEGV (exit 139) after ~3000 tests. They run

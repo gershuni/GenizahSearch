@@ -42,6 +42,7 @@ Deploy these files together through the project's normal reviewed release:
 - The registration and shutdown lines added to `web/main.py`, immediately after
   `init_search_api(app_override=_search_helper_app, path_prefix="")`.
 - `integrations/chatgpt/openapi.json`
+- `integrations/chatgpt/privacy.html`
 
 After deployment the schema URL is
 `https://genizahsearch.com/api/chatgpt/openapi.json`. Under `/api/chatgpt`, it points
@@ -110,10 +111,19 @@ their IP ownership rules unchanged.
    - Find parallels to this passage, allowing spelling differences.
    - חפש מקבילות לקטע הזה והצג סימני מדף וקישורים למקורות.
 8. Run the tests in `acceptance-tests.md` in the Action tester and GPT preview.
-9. Save privately for the pilot. Test a shared link from a separate researcher
-   account before distributing it. If public/link sharing requires a privacy URL,
-   supply an accurate published policy covering this integration. The site's
-   `/privacy-extension` page is for a different product and should not be reused.
+9. Set the Action privacy policy URL to
+   `https://genizahsearch.com/api/chatgpt/privacy` after deploying this update.
+   Open it signed out to verify it loads. The policy is maintained in `privacy.html`;
+   keep it aligned with actual hosting, logging and analytics practices.
+10. Test a shared link from a separate researcher account before public distribution.
+
+The instructions require source-specific credits inside generated files, including
+the full MiDRASH citation from `shared/export_utils.py` when its automatic text is
+used, and actual scholar/provider credits for PGP/FGP material. They also include
+Web Search and Data Analysis guidance; enable these capabilities for external
+scholarship and downloadable files. Replace the old Instructions text rather than
+appending duplicate guidance. No Action schema reimport is needed for credits or
+the privacy page.
 
 No custom visual interface, Python execution, image generation, or knowledge-file
 upload is required for the actions. An image link alone does not enable or

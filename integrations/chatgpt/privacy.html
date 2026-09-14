@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GenizahSearch GPT — Privacy Policy</title>
+<style>body{font:18px/1.65 system-ui,sans-serif;max-width:800px;margin:3rem auto;padding:0 1.2rem;color:#202830}h1,h2{line-height:1.25}a{color:#165b91}</style>
+<main>
+<h1>GenizahSearch GPT — Privacy Policy</h1>
+<p>Last updated: 14 September 2026</p>
+<p>This policy covers the GenizahSearch actions used by the GenizahSearch custom GPT in ChatGPT. The integration is maintained by Hillel Gershuni, creator of <a href="https://genizahsearch.com">Dicta Genizah Search</a>. Contact: <a href="mailto:gershuni@gmail.com">gershuni@gmail.com</a>.</p>
+<h2>Information received</h2>
+<p>When ChatGPT calls an action, it sends GenizahSearch the parameters needed for that request: search phrases, passages or witnesses, spelling and matching options, filters, manuscript/page identifiers, and job identifiers used to retrieve results. This may include text taken from your messages or uploaded files. The API does not request your ChatGPT name, email, password, or full conversation. Only content included in action requests is sent to this API.</p>
+<p>Our infrastructure also receives technical request information, including connection IP addresses (often those of the service making the call), headers, request paths, timestamps, and response status. Job identifiers may appear in request paths.</p>
+<h2>How information is used</h2>
+<p>We process requests to search the manuscript corpus, retrieve pages, find parallels, return results to ChatGPT, limit server load, prevent abuse, and diagnose failures. The action implementation does not create researcher accounts or publish submitted passages. It does not use submitted research text to train an AI model or serve advertisements.</p>
+<h2>Temporary storage and operational records</h2>
+<p>Research jobs hold request information and results in server memory. Completed jobs become unavailable ten minutes after completion; expired entries are removed on subsequent job requests or server shutdown. Restarting the service clears this memory. Search workers also use temporary files for inputs and outputs, normally removed when worker processing ends; an abnormal server termination can leave temporary files behind.</p>
+<p>Operational logs and configured service analytics may last longer than the job cache. Logs may contain technical request information and error diagnostics. When enabled, PostHog receives limited API usage metrics such as endpoint, search mode, duration, result count, status, and a hashed client-IP identifier; the API metrics event does not include submitted search text. Operational records follow the hosting and analytics systems' retention settings, rather than the ten-minute result expiry.</p>
+<h2>Other services and access</h2>
+<p>Results are returned to ChatGPT. Hosting providers and, when configured, PostHog process operational data to support the service. Administrators may access records for maintenance, security, and support. Anyone possessing an unexpired job identifier can retrieve its results; keep these identifiers private.</p>
+<p>OpenAI separately processes your conversations, uploads, action calls, and files generated in ChatGPT under <a href="https://openai.com/policies/privacy-policy/">OpenAI's privacy policy</a> and your account settings. GenizahSearch's job expiry does not delete copies in ChatGPT. Following manuscript or image links can send requests to holding libraries and other providers, whose own privacy policies apply.</p>
+<h2>Your choices and requests</h2>
+<p>You can use the website directly or stop using GPT actions. Send only the text needed for research; avoid submitting confidential material or unnecessary personal information. For questions or requests to access, correct, or delete personal information held by GenizahSearch, email the contact above. Provide an approximate request time and enough context to locate a record, without posting private job identifiers publicly. We may need to verify a request and may be unable to recover expired data. Contact OpenAI separately about information held in ChatGPT.</p>
+<h2>Changes</h2>
+<p>Updates will be published on this page with a revised date.</p>
+</main>
+</html>

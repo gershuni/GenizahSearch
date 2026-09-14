@@ -5,6 +5,9 @@ The HTTP smoke test is not a substitute for these tests inside ChatGPT.
 
 | Prompt / condition | Expected behavior |
 | --- | --- |
+| Export mixed MiDRASH search results and a PGP scholarly edition as a Hebrew report and spreadsheet. | Actual files contain the full unchanged MiDRASH citation, site/date/page links, and separate PGP scholar/publication credits. No source is credited for another's text. |
+| Export FGP material, user corrections, or text with missing attribution. | Preserve actual returned attribution and underlying source where known; do not invent citations or attach MiDRASH unconditionally. CSV/JSON also retain credits internally. |
+| Open /api/chatgpt/privacy without signing in. | Readable policy loads, identifies the contact and explains submitted text, temporary storage, operational metrics and OpenAI's separate processing. |
 | A fuzzy search returns 191 saved candidates; ask “show more.” | Fetch page 1 with the same job ID, then follow next_page. Server runs the search once, returns all 191 in stable order across pages, and stops at null. |
 | Ask to inspect demoted matches. | Use collection=filtered and its independent next_page chain; do not rerun the query. |
 | Result storage is full, or page reads are too rapid. | New searches are rejected before computation; existing pages stay available. Honor 429 Retry-After and fetch sequentially. |

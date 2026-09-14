@@ -183,3 +183,10 @@ def register_chatgpt_api(app):
         return JSONResponse(json.loads(path.read_text(encoding='utf-8')))
 
     app.add_api_route('/chatgpt/openapi.json', schema, methods=['GET'], include_in_schema=False)
+
+    async def privacy():
+        from fastapi.responses import HTMLResponse
+        path = Path(__file__).resolve().parents[1] / 'integrations' / 'chatgpt' / 'privacy.html'
+        return HTMLResponse(path.read_text(encoding='utf-8'))
+
+    app.add_api_route('/chatgpt/privacy', privacy, methods=['GET'], include_in_schema=False)
