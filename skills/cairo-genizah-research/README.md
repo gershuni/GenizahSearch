@@ -1,91 +1,96 @@
-# Cairo Genizah Research — Anthropic Skill
+# Cairo Genizah Research
 
-Drives genizahsearch.com APIs to find candidate Genizah manuscript witnesses for
-a phrase, piyyut, responsum, or composition. v7.10 acceptance harness for
-GenizahSearch's internal API.
+Research Cairo Genizah manuscripts with an AI assistant: search phrases, read
+pages, and find letter-level parallels through the public GenizahSearch API.
+No desktop search application or local corpus is required.
 
-## Installation
+## Requirements
 
-### Claude Code (primary target)
+Python 3.10+, the `requests` package (`python -m pip install requests`), and an
+assistant that can execute scripts and access `https://genizahsearch.com`.
+The public API currently requires no key; your AI provider's usage limits apply.
+Network availability depends on the runtime and organization.
 
-Copy this directory to your Claude Code skills location:
+## Claude web or Desktop
 
-```bash
-# Personal (all your projects)
-cp -r skills/cairo-genizah-research ~/.claude/skills/
+1. Obtain a ZIP containing the complete `cairo-genizah-research` folder, including
+   SKILL.md, scripts, and references. Uploading SKILL.md alone is insufficient.
+2. Enable **Code execution and file creation** in **Settings → Capabilities**.
+3. Open **Customize → Skills → + → Create skill → Upload a skill**, upload the
+   ZIP, and enable the skill.
+4. Ask Claude to run the smoke test below. Installation alone does not establish
+   that the runtime can contact `genizahsearch.com`.
 
-# Project-only
-mkdir -p .claude/skills && cp -r skills/cairo-genizah-research .claude/skills/
-```
+Organization settings may control these options. See the current
+[Claude instructions](https://support.claude.com/en/articles/12512180-use-skills-in-claude).
+The upload route is documented by Claude; test this specific skill in your account.
 
-Restart Claude Code (or wait for live change detection). Verify:
+## Claude Code
 
-```bash
-ls ~/.claude/skills/cairo-genizah-research/SKILL.md
-```
+Copy the complete folder to `~/.claude/skills/cairo-genizah-research/` for personal
+use, or `.claude/skills/cairo-genizah-research/` inside a project. On Windows `~`
+means your user profile directory. Ask the assistant to read SKILL.md and run a test.
 
-### Claude Desktop (Pro/Max/Team/Enterprise)
+## Codex and other agents
 
-1. Zip the skill directory: `cd skills && zip -r cairo-genizah-research.zip cairo-genizah-research/`.
-2. In Claude Desktop: Settings > Features > Custom Skills > Upload.
-3. Code execution + network access must be enabled in admin settings.
+Give the agent the [skill directory](https://github.com/gershuni/GenizahSearch/tree/master-main/skills/cairo-genizah-research)
+and ask its skill installer to install that subdirectory. Alternatively, give it
+the extracted folder and explicitly ask it to read SKILL.md and run its scripts.
+The scripts do not depend on Claude-specific tools or environment variables.
+See [Codex skill documentation](https://developers.openai.com/codex/skills/).
 
-### Claude API (NOT SUPPORTED in v7.10)
+## First questions
 
-Code-execution containers on the Claude API surface have no outbound network
-access and cannot reach genizahsearch.com. v7.10 acceptance run targets Claude
-Code only. v7.11 may add an egress-allowlisted path.
+> השתמש בסקיל cairo-genizah-research כדי למצוא מקורות בגניזה העוסקים בתוספות לתפילה בעשרת ימי תשובה. הצג סימני מדף וקישורים והסבר על מה מבוסס הזיהוי.
 
-## Configuration
+> מצא מקבילות לקטע המצורף בעזרת חיפוש האותיות. הבחן בין עד נוסף לאותו חיבור לבין נוסח תפילה משותף.
 
-Set env vars in your shell or Claude Code config:
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `GENIZAH_API_BASE` | `https://genizahsearch.com` | Base URL (env wins over `--base-url`). |
-| `GENIZAH_TOP_N` | `10` | Top-N for drill-down (bounded [1, 25]). |
-| `GENIZAH_SKILL_REQ_PER_MIN` | `96` | Throttle ceiling per endpoint. |
-| `GENIZAH_SKILL_BURST` | `5` | Token-bucket burst. |
-
-For local development against a dev server: `export GENIZAH_API_BASE=http://localhost:8080`.
+> בדוק את הקטע בתצלום והסבר אילו קריאות שינית לעומת התעתיק האוטומטי.
 
 ## Smoke test
 
+From the installed skill directory:
+
 ```bash
-python skills/cairo-genizah-research/scripts/search.py --query "ויאמר" --search-mode exact --limit 1
+python scripts/search.py --query "זכרינו לחיים" --search-mode exact --limit 1
+python scripts/parallels.py --method passage --text-file passage.txt
 ```
 
-Expected: JSON envelope with `schema_version: 1`, `source: "search"`, `results: [...]`.
+Supply your own UTF-8 text in passage.txt. Success returns `results` and `warnings`;
+a structured `error` means the search did not complete. Passage search never
+silently falls back to word chunks. The legacy method is available explicitly
+with `--method chunk` (also the script's backward-compatible default).
 
-## Acceptance run procedure
+For several witnesses of one work, create a JSON array:
 
-Per ROADMAP.md Phase 81B phase gate, the acceptance run is live and user-observed:
+```json
+[
+  {"label": "Witness A", "text": "First witness text"},
+  {"label": "Witness B", "text": "Second witness text"}
+]
+```
 
-1. Install skill (above).
-2. Open Claude Code in any directory.
-3. Ask a real scholarly question, e.g. "Find Cairo Genizah witnesses to the piyyut
-   'אין אדיר כי-י-י' — list shelfmarks with library and brief evidence."
-4. Confirm Claude invokes `cairo-genizah-research`, runs through `stage.py` →
-   `browse.py` chain, returns ranked Tier A/B/C list with shelfmarks, libraries,
-   browse URLs, image URLs, justifications, and honesty annotations where
-   text_source != "pgp_transcription".
-5. Sign off (or report bugs) on at least one query.
+```bash
+python scripts/parallels.py --method passage --witnesses-file witnesses.json --sort fused
+```
 
-## Architecture
+## Sharing a ZIP
 
-Three-level Anthropic Skill progressive disclosure:
+Run the bundled packager; it excludes caches and local throttle state:
 
-| Level | Loaded | Content |
-|-------|--------|---------|
-| 1 | Always | Frontmatter `name` + `description` (~100 tokens) |
-| 2 | On trigger | `SKILL.md` body (workflow instructions) |
-| 3 | On demand | `references/api_contract.md`, fixture JSON, scripts via bash |
+```bash
+python scripts/package_skill.py --output cairo-genizah-research.zip
+```
 
-Scripts execute via the model's `bash` tool — only stdout/stderr enters context,
-not script source. This keeps token cost flat.
+Distribute the ZIP with these instructions. Creating it does not publish it online.
 
-## See also
+## Configuration and research limits
 
-- `SKILL.md` — instructions loaded by the model on trigger.
-- `references/api_contract.md` — locked envelope shapes for debugging.
-- `scripts/` — Python transport + business-logic helpers.
+`GENIZAH_API_BASE` overrides the API URL, including `--base-url`.
+`CAIRO_GENIZAH_STATE_DIR` can place throttle state in a writable directory if the
+installed folder is read-only. Other options are documented in SKILL.md.
+
+Automatic text can contain errors. Check significant readings against photographs.
+Catalog descriptions do not prove authorship or publication. Truncation warnings
+mean results are not exhaustive. See [API contract](references/api_contract.md)
+and [public API docs](https://genizahsearch.com/api/docs).

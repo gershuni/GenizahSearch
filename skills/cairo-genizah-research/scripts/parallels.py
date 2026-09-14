@@ -1,6 +1,8 @@
 """POST /api/parallels transport. Emits JSON envelope to stdout.
 
 Usage:
+    python parallels.py --method passage --text-file passage.txt
+    python parallels.py --method passage --witnesses-file witnesses.json --sort fused
     python parallels.py --text "ויאמר אליו" [--chunk-size 5] [--mode exact]
                         [--max-freq N] [--boundary-mode full]
                         [--library CUL,JTS] [--library-mode include|exclude]
@@ -38,7 +40,10 @@ PARALLELS_MODES = {"exact", "variants", "fuzzy"}
 
 def call_parallels(
     *,
-    text: str,
+    text: str = "",
+    method: str = "chunk",
+    witnesses: list[dict] | None = None,
+    sort: str | None = None,
     chunk_size: int = 5,
     mode: str = "exact",
     max_freq: int | None = None,
@@ -62,6 +67,17 @@ def call_parallels(
 
     Note: uses `mode` field (not `search_mode`) per Phase 81A D-07.
     """
+    if method not in {"chunk", "passage"}:
+        return {"error": {"code": "invalid_request", "message": "method must be chunk or passage"}}
+    if method == "passage" and (
+        chunk_size != 5 or mode != "exact" or max_freq is not None
+        or boundary_mode not in (None, "full")
+    ):
+        return {"error": {"code": "passage_option_unsupported", "message": "Letter-level search does not accept chunk tuning options"}}
+    if witnesses is not None and (method != "passage" or text):
+        return {"error": {"code": "invalid_request", "message": "witnesses require passage and no text"}}
+    if sort is not None and (witnesses is None or sort not in {"fused", "best_match", "witness_count"}):
+        return {"error": {"code": "invalid_request", "message": "sort requires witnesses and a supported ordering"}}
     if mode not in PARALLELS_MODES:
         return {
             "error": {
@@ -77,6 +93,13 @@ def call_parallels(
         "chunk_size": chunk_size,
         "mode": mode,
     }
+    if method == "passage":
+        body = {"method": "passage", "text": text}
+    if witnesses is not None:
+        body.pop("text", None)
+        body["witnesses"] = witnesses
+    if sort is not None:
+        body["sort"] = sort
     if max_freq is not None:
         body["max_freq"] = max_freq
     if boundary_mode is not None:
@@ -122,6 +145,12 @@ def _main(argv: list[str] | None = None) -> int:
     )
     text_src = p.add_mutually_exclusive_group(required=True)
     text_src.add_argument("--text", default=None, help="Composition text (inline)")
+    text_src.add_argument(
+        "--witnesses-file", help="UTF-8 JSON array of witnesses (passage only; replaces text)",
+    )
+    p.add_argument("--method", choices=["chunk", "passage"], default="chunk",
+                   help="passage = letter-level search; chunk = legacy word chunks")
+    p.add_argument("--sort", choices=["fused", "best_match", "witness_count"])
     text_src.add_argument(
         "--text-file",
         default=None,
@@ -192,7 +221,14 @@ def _main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     # Resolve text source
-    if args.text is not None:
+    witnesses = None
+    if args.witnesses_file:
+        with open(args.witnesses_file, encoding="utf-8-sig") as fh:
+            witnesses = json.load(fh)
+        if not isinstance(witnesses, list) or not witnesses:
+            p.error("--witnesses-file must contain a nonempty JSON array")
+        text = ""
+    elif args.text is not None:
         text = args.text
     elif args.text_file == "-":
         text = sys.stdin.read()
@@ -214,6 +250,9 @@ def _main(argv: list[str] | None = None) -> int:
 
     result = call_parallels(
         text=text,
+        method=args.method,
+        witnesses=witnesses,
+        sort=args.sort,
         chunk_size=args.chunk_size,
         mode=args.mode,
         max_freq=args.max_freq,

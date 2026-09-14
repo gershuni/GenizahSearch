@@ -29,18 +29,15 @@ Trigger this skill when the user:
 Do NOT use this skill for general Hebrew translation, modern Hebrew text, or
 non-Genizah biblical/talmudic queries.
 
-## Surface compatibility (R1 — IMPORTANT)
+## Runtime and installation
 
-| Surface | Network | Works? |
-|---------|---------|--------|
-| Claude Code | full (user's machine) | YES — primary target |
-| Claude Desktop (code execution + network enabled) | per user/admin settings | YES |
-| claude.ai (web, code execution) | per user/admin settings | YES if network enabled |
-| Claude API code-execution containers | NONE | NO — skill cannot reach genizahsearch.com |
-
-The skill REQUIRES outbound HTTPS to `genizahsearch.com`. On the Claude API
-surface, code-execution containers have no network access; the skill will fail
-on every script invocation. v7.10 acceptance run targets Claude Code.
+Use an agent with Python 3.10+, `requests`, file access, and outbound HTTPS to
+`genizahsearch.com`. No local corpus, desktop application, or API credentials are
+required for the public open endpoint. Claude Code and Codex can run the scripts.
+Claude web/Desktop also need code execution and permitted network access; test
+connectivity in the actual account. API-hosted runtime capabilities vary.
+Read [README.md](README.md) for installation. Resolve scripts relative to this
+installed SKILL.md, without assuming a checkout or Claude-specific variables.
 
 ## Configuration (D-09 — env wins over CLI)
 
@@ -51,7 +48,7 @@ on every script invocation. v7.10 acceptance run targets Claude Code.
 | `GENIZAH_SKILL_REQ_PER_MIN` | `96` | Throttle ceiling per endpoint bucket. |
 | `GENIZAH_SKILL_BURST` | `5` | Token-bucket burst capacity. |
 
-**API Documentation:** Full public API reference at [`docs/SEARCH_API.md`](../../docs/SEARCH_API.md) · Interactive: [genizahsearch.com/api/docs](https://genizahsearch.com/api/docs)
+**API Documentation:** Full public API reference at [public API guide](https://github.com/gershuni/GenizahSearch/blob/master-main/docs/SEARCH_API.md) · Interactive: [genizahsearch.com/api/docs](https://genizahsearch.com/api/docs)
 
 **Precedence (D-09 — INVERSION of typical CLI convention):** if `GENIZAH_API_BASE`
 is set, it wins over any `--base-url` CLI flag. Rationale: a developer who set the
@@ -62,7 +59,7 @@ overrides quietly redirect to production. Document loudly when both are set.
 
 1. **Decide entry point based on input shape:**
    - Multi-line text > 200 chars (a piyyut stanza, document body) → composition
-     search → use `scripts/parallels.py`.
+     search → use `scripts/parallels.py --method passage` (letter-level).
    - Otherwise → text query → use `scripts/stage.py` (staged phrase discovery).
    - User explicitly asks for a shelfmark resolution → use `scripts/search.py`
      with `--search-mode shelfmark`.
@@ -72,7 +69,7 @@ overrides quietly redirect to production. Document loudly when both are set.
      are unusual enough to discriminate (avoid stopwords, very common
      expressions). For Hebrew/Judeo-Arabic, include rare orthography variants
      where applicable.
-   - Run `python ${CLAUDE_SKILL_DIR}/scripts/stage.py --phrase "P1" --phrase "P2"
+   - Run `python scripts/stage.py --phrase "P1" --phrase "P2"
      --phrase "P3" --search-mode exact --limit 50`. The script fans out one
      /api/search call per phrase, merges by uid, assigns Tier A/B/C, and emits
      JSON to stdout.
@@ -81,9 +78,10 @@ overrides quietly redirect to production. Document loudly when both are set.
 
 3. **Top-N drill-down (default top 10):**
    - Take the first `GENIZAH_TOP_N` (default 10) merged candidates.
-   - For each, call `python ${CLAUDE_SKILL_DIR}/scripts/browse.py --uid <UID>`.
-     The `uid` field on each candidate is preferred per Phase 77 D-13. If the
-     candidate lacks `uid`, fall back to `--sys-id <SID> --p-num <N> --volume-ie <IE>`.
+   - For each, call `python scripts/browse.py --sys-id <SID> --p-num <N> --volume-ie <IE>`.
+     Prefer the returned locator: `--sys-id <SID> --p-num <N> --volume-ie <IE>`.
+     Page numbers are 1-based. UID-only lookup can fail on some deployments;
+     never invent a UID from a shelfmark.
    - The browse response carries `text`, `text_source`, `metadata` (PGP/FJMS/NLI),
      and `image` (url, sources). The skill MUST handle errors per "Error
      handling" below — do not crash on a single failed candidate.
@@ -164,49 +162,47 @@ server's 120 rpm per bucket. A heavier query (5 phrases + top-25 + tier-2
 shelfmark resolution for 3 known witnesses) is ~5 + 25 + 3 = ~33 requests
 spread across two buckets — still safe with throttle pacing.
 
-## Sample invocations
+## Letter-level composition matching
+
+Use `parallels.py --method passage --text-file passage.txt` for letter-level
+matching, including the request “גרסת האותיות”. Legacy word-chunk search remains
+available with `--method chunk`. Never silently substitute it if passage is
+unavailable. Read [references/api_contract.md](references/api_contract.md) for
+options, multi-witness inputs, and response warnings.
+
+- Search meaningful sections separately when common prayer or biblical quotations
+  dominate. Record the input and label excerpts; an assembled excerpt is not a
+  new continuous manuscript transcription.
+- Several witnesses of one work can be supplied with `--witnesses-file`. Do not
+  concatenate different witnesses into one input. Sides of a fragment may also be
+  searched separately, then results deduplicated by locator.
+- Inspect matches, not just scores. Distinguish another copy of the same work,
+  partial verbal parallels, analogous rulings, and common quotations. A high
+  score for standard prayer language does not identify a composition.
+- Browse promising results before quoting. Distinguish the source itself and
+  duplicate photographs from independent witnesses.
+- Report `passage_results_truncated` and caps: failure to find a parallel does not
+  establish its absence. Scores count matched letters, are not probabilities,
+  and are not comparable with chunk scores.
+- Do not fill a damaged legal conclusion from a parallel without evidence of a
+  textual relationship. Mark restorations and inspect images. Catalog attribution
+  and bibliography are leads, not proof that this particular text was published.
+- State whether text is automatic, an existing scholarly transcription, or checked
+  against photographs. For image-checked work retain API provenance in research
+  notes and explain the additional checking.
+
+## Examples
+
+Run from the installed skill directory or use absolute script paths:
 
 ```bash
-# Text query
-python ${CLAUDE_SKILL_DIR}/scripts/stage.py \
-  --phrase "ויאמר משה אל בני ישראל" \
-  --phrase "קרא ה' בשם בצלאל" \
-  --search-mode exact --limit 50
-
-# Drill-down on a result
-python ${CLAUDE_SKILL_DIR}/scripts/browse.py \
-  --uid 990001234560205171_001r
-
-# Composition search
-cat composition.txt | python ${CLAUDE_SKILL_DIR}/scripts/parallels.py \
-  --text-file - --chunk-size 5 --mode exact
-
-# Shelfmark resolution (Tier 2)
-python ${CLAUDE_SKILL_DIR}/scripts/search.py \
-  --query "T-S 12.123" --search-mode shelfmark --limit 5
-
-# Library filter — restrict to, or exclude, holding libraries
-python ${CLAUDE_SKILL_DIR}/scripts/search.py \
-  --query "ויאמר" --library CUL,JTS                       # only these libraries
-python ${CLAUDE_SKILL_DIR}/scripts/search.py \
-  --query "ויאמר" --library CUL --library-mode exclude    # everything EXCEPT CUL
-# (--library / --library-mode also work on parallels.py; omitting --library-mode = include, unchanged)
+python scripts/stage.py --phrase "זכרינו לחיים" --phrase "המלך המשפט" --search-mode exact --limit 50
+python scripts/parallels.py --method passage --text-file passage.txt
+python scripts/parallels.py --method passage --witnesses-file witnesses.json --sort fused
+python scripts/parallels.py --method chunk --text-file passage.txt --mode variants
+python scripts/search.py --query "ENA 1628.38" --search-mode shelfmark --limit 5
+python scripts/browse.py --sys-id 990053090560205171 --p-num 2 --volume-ie IE149740278 --text-cap 10000
 ```
 
-Note: `${CLAUDE_SKILL_DIR}` is a Claude-Code-only string substitution. On other
-surfaces, scripts resolve their own directory via `Path(__file__).parent` so
-invocations work without the variable.
-
-## Future extension point — local-data shortcut (D-03, NOT implemented in v7.10)
-
-When the user has the GenizahSearch desktop app installed, the skill could
-optionally read `Genizah_Index/` (Tantivy) and/or `transcriptions.txt` directly
-to skip /api/search calls. v7.10 ships API-only; v7.11 candidate. Hook lives
-here for a future contributor.
-
-## See also
-
-- `references/api_contract.md` — exact envelope shapes for /api/search,
-  /api/browse, /api/parallels (load on demand if you need to debug a response
-  shape mismatch).
-- `README.md` — installation instructions and acceptance-run procedure.
+Search and parallels support library inclusion/exclusion via `--library CUL,JTS`
+and `--library-mode include|exclude`.
