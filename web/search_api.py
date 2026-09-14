@@ -55,6 +55,7 @@ from web.api_hardening import (
 )
 # Concern #3: APIError from neutral location.
 from shared.api_errors import APIError
+from shared.search_regex import SearchBudgetExceeded, search_budget
 # Phase 79 imports.
 from shared.browse_service import (
     fetch_browse_bundle,
@@ -1608,10 +1609,9 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
 
             # 7. Execute search OR short-circuit on empty intersection.
             #
-            # execute_search runs in a thread-pool worker wrapped in
-            # asyncio.wait_for (SEARCH_API_CORE_TIMEOUT) so a slow query — esp.
-            # the 'fuzzy'/variants_maximum tier — returns 504 'core_timeout'
-            # instead of pinning the event loop for its full duration.
+            # execute_search runs in a thread-pool worker with a cooperative
+            # computation budget. asyncio.wait separately bounds the HTTP
+            # response; it cannot stop native work or a running thread.
             #
             # R2-#1 / 81A thread-local note: execute_search sets the responsa
             # downgrade signals on the THREAD it runs on. We consume them INSIDE
@@ -1626,24 +1626,27 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             else:
                 internal_mode = _SEARCH_MODE_TO_INTERNAL[req.search_mode]
 
+                # Resolve before dispatch so the worker also enforces this
+                # deadline; the HTTP wait alone cannot stop a worker thread.
+                core_timeout, timeout_env = _resolve_search_timeout(req.search_mode)
+
                 def _run_search_sync():
-                    res = state.searcher.execute_search(
-                        query_str=query,
-                        mode=internal_mode,
-                        gap=req.gap,
-                        progress_callback=None,
-                        exclude_words=None,
-                        responsa_options=responsa_options,
-                        restrict_sys_ids=restrict_sys_ids,
-                        text_position=None,
-                    ) or []
+                    with search_budget(core_timeout):
+                        res = state.searcher.execute_search(
+                            query_str=query,
+                            mode=internal_mode,
+                            gap=req.gap,
+                            progress_callback=None,
+                            exclude_words=None,
+                            responsa_options=responsa_options,
+                            restrict_sys_ids=restrict_sys_ids,
+                            text_position=None,
+                        ) or []
                     from genizah_core import (
                         _consume_last_responsa_downgrade_meta as _consume_meta_inner,
                     )
                     return res, _consume_last_responsa_downgrade(), _consume_meta_inner()
 
-                # P9X per-mode timeout: variants/fuzzy get heavier ceilings.
-                core_timeout, timeout_env = _resolve_search_timeout(req.search_mode)
                 loop = asyncio.get_event_loop()
 
                 # P9X heavy-mode concurrency gate (variants/fuzzy only).
@@ -1663,6 +1666,12 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     # still runs, re-admitting heavy work past the budget and
                     # defeating the saturation guard (the NLI-hang lesson).
                     _search_fut = loop.run_in_executor(None, _run_search_sync)
+                    # A worker can raise its budget exception after the HTTP
+                    # timeout/client disconnect. Retrieve it even when there is
+                    # no awaiter left; result() below still propagates failures.
+                    _search_fut.add_done_callback(
+                        lambda future: None if future.cancelled() else future.exception()
+                    )
                     if _heavy_release is not None:
                         _search_fut.add_done_callback(
                             lambda _f, _r=_heavy_release: _r()
@@ -1683,7 +1692,15 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                             f'try a narrower query or a faster search_mode',
                             http_status=504,
                         )
-                    results, downgrade_msg, cascade_meta = _search_fut.result()
+                    try:
+                        results, downgrade_msg, cascade_meta = _search_fut.result()
+                    except SearchBudgetExceeded as exc:
+                        raise APIError(
+                            'core_timeout',
+                            'search exceeded its computation budget; '
+                            'try a narrower query or a faster search_mode',
+                            http_status=504,
+                        ) from exc
                 finally:
                     # Safety net: only fires if a slot was acquired but never
                     # handed to a done-callback (e.g. executor dispatch failed).
@@ -2444,12 +2461,16 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                         max_freq=req.max_freq,
                         boundary_mode=req.boundary_mode,
                         restrict_sys_ids=restrict_sys_ids,
+                        worker_timeout=parallels_ceiling,
                     )
                 )
                 # Hand the slot to the task's done-callback (sole releaser): it
                 # fires on success, exception, or post-timeout completion, so the
                 # budget is held for the task's TRUE lifetime.
                 _par_task.add_done_callback(lambda _t, _r=_par_release: _r())
+                _par_task.add_done_callback(
+                    lambda task: None if task.cancelled() else task.exception()
+                )
                 _par_release = None  # ownership -> done-callback
                 _done, _pending = await asyncio.wait(
                     {_par_task}, timeout=parallels_ceiling,
@@ -2464,7 +2485,15 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                         f'try a shorter text or smaller chunk_size',
                         http_status=504,
                     )
-                bundle = _par_task.result()
+                try:
+                    bundle = _par_task.result()
+                except SearchBudgetExceeded as exc:
+                    raise APIError(
+                        'core_timeout',
+                        'parallels search exceeded its computation budget; '
+                        'try a shorter text or a faster mode',
+                        http_status=504,
+                    ) from exc
             finally:
                 # Safety net: only fires if the slot was acquired but never handed
                 # to the done-callback (e.g. ensure_future raised before transfer).

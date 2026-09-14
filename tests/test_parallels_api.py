@@ -235,6 +235,40 @@ def test_parallels_happy_path_per_mode(client, mock_searcher, clean_env, mode):
     assert 'filtered' in body  # D-04
 
 
+@pytest.mark.parametrize('configured, expected', [(None, 110.0), ('150', 150.0)])
+def test_parallels_worker_inherits_endpoint_deadline(
+    client, mock_searcher, clean_env, monkeypatch, configured, expected,
+):
+    from shared import search_regex
+    from types import SimpleNamespace
+    import threading
+
+    if configured is None:
+        monkeypatch.delenv('SEARCH_API_PARALLELS_TIMEOUT', raising=False)
+    else:
+        monkeypatch.setenv('SEARCH_API_PARALLELS_TIMEOUT', configured)
+    monkeypatch.setenv('GENIZAH_SEARCH_BUDGET_SECONDS', '60')
+    clock = [1000.0]
+    monkeypatch.setattr(search_regex, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
+    calling_thread = threading.get_ident()
+    observed = []
+
+    @search_regex.bounded_search
+    def composition(**kwargs):
+        assert threading.get_ident() != calling_thread
+        observed.append(search_regex._deadline.get() - clock[0])
+        # A previously successful 97-second request must survive the default
+        # engine's 60-second budget, without sleeping in the regression test.
+        clock[0] += 97.0
+        search_regex.compile('hello').search('hello')
+        return {'main': [], 'filtered': []}
+
+    mock_searcher.search_composition_logic.side_effect = composition
+    response = client.post('/api/parallels', json={'text': 'hello world', 'mode': 'exact'})
+    assert response.status_code == 200, response.text
+    assert observed == [expected]
+
+
 @pytest.mark.parametrize('which', ['quick_start', 'reference'])
 def test_documented_parallels_examples_match_a_real_response(
         client, mock_searcher, clean_env, which):
@@ -828,6 +862,18 @@ def test_parallels_statelessness_two_identical_posts(client, mock_searcher, clea
 # ---------------------------------------------------------------------------
 # P9X Task 1 — Parallels timeout + heavy concurrency (2)
 # ---------------------------------------------------------------------------
+
+def test_parallels_worker_budget_exceeded_returns_504(client, clean_env, monkeypatch):
+    from shared.search_regex import SearchBudgetExceeded
+
+    async def exceeded(**kwargs):
+        raise SearchBudgetExceeded()
+
+    monkeypatch.setattr('web.search_api.fetch_parallels_results', exceeded)
+    response = client.post('/api/parallels', json={'text': 'hello world', 'mode': 'exact'})
+    assert response.status_code == 504, response.text
+    assert response.json()['error']['code'] == 'core_timeout'
+
 
 def test_parallels_timeout_uses_parallels_knob(client, clean_env, monkeypatch):
     """SEARCH_API_PARALLELS_TIMEOUT=0.2 + slow composition stub → 504 core_timeout."""

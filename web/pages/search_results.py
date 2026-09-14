@@ -43,6 +43,7 @@ from urllib.parse import quote
 from web.components.typography import h3
 import logging
 import re
+from shared.search_regex import compile as compile_search_regex, SearchBudgetExceeded
 import html
 import asyncio
 
@@ -939,11 +940,13 @@ def create_result_card(search_state, refs, index, result):
                                 flags = re.IGNORECASE
                                 if '\\n' in pattern or pattern.startswith('^'):
                                     flags |= re.MULTILINE
-                                escaped = re.sub(
-                                    f'({pattern})',
+                                escaped = compile_search_regex(f'({pattern})', flags).sub(
                                     r'<span class="highlight-match">\1</span>',
-                                    escaped, flags=flags
+                                    escaped
                                 )
+                            except SearchBudgetExceeded:
+                                ui.label('ההדגשה הופסקה מפני שחרגה ממגבלת הזמן.' if is_rtl()
+                                         else 'Highlighting stopped because it exceeded the time limit.')
                             except re.error:
                                 pass
                         with ui.scroll_area().classes('w-full').style('max-height: 250px;'):

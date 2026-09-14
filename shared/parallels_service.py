@@ -267,6 +267,7 @@ async def fetch_parallels_results(
     hide_canonical: bool = False,
     witnesses: Optional[list] = None,
     witness_text_cap: Optional[int] = None,
+    worker_timeout: Optional[float] = None,
 ) -> ParallelsResultBundle:
     """Run search_composition_logic via run_in_executor + apply group cap.
 
@@ -318,6 +319,9 @@ async def fetch_parallels_results(
                    -- twenty-five tiny references can resolve to twenty-five
                    20,000-character pages, so a payload-only cap bounds the
                    request rather than the work.
+        worker_timeout: Optional seconds for a cooperative search deadline,
+                        installed inside the executor worker. None preserves
+                        the searcher's own deadline policy.
         executor: Optional[concurrent.futures.Executor] (Phase 145). Passed
                   straight through to `_run_sync`'s `_executor` kwarg and
                   ALONE decides dispatch -- there is no separate `method`
@@ -348,7 +352,7 @@ async def fetch_parallels_results(
     # high-frequency filtering when the caller did not specify a threshold.
     effective_max_freq = float('inf') if max_freq is None else float(max_freq)
 
-    def _sync_call() -> dict:
+    def _search() -> dict:
         return searcher.search_composition_logic(
             full_text=text,
             chunk_size=chunk_size,
@@ -368,6 +372,16 @@ async def fetch_parallels_results(
             **({'witnesses': witnesses,
                 'witness_text_cap': witness_text_cap} if witnesses else {}),
         )
+
+    def _sync_call() -> dict:
+        # ContextVars are not copied by run_in_executor. Install the caller's
+        # resolved ceiling INSIDE the worker so nested engine budgets reuse it.
+        # Omission preserves other callers' own deadline policies (e.g. passage).
+        if worker_timeout is None:
+            return _search()
+        from shared.search_regex import search_budget
+        with search_budget(worker_timeout):
+            return _search()
 
     # `executor` alone decides dispatch (None -> the default executor, the
     # pre-Phase-145 behavior every chunk-path caller still gets today).
