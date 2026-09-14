@@ -2426,6 +2426,8 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                         witness_text_cap=MAX_WITNESS_CHARS,
                     )
                 )
+            except ResearchJobError as exc:
+                raise APIError('research_worker_stopped', str(exc), http_status=503) from exc
             except NoWitnessesResolved as exc:
                 # Caught BEFORE the ValueError branch below -- it is a
                 # ValueError subclass, and mapping it to
@@ -2502,6 +2504,8 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     )
                 try:
                     bundle = _par_task.result()
+                except ResearchJobError as exc:
+                    raise APIError('research_worker_stopped', str(exc), http_status=503) from exc
                 except SearchBudgetExceeded as exc:
                     raise APIError(
                         'core_timeout',

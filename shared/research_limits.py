@@ -17,16 +17,21 @@ def available_memory():
     available = psutil.virtual_memory().available
     if os.name == 'nt':
         return available
-    root = Path('/sys/fs/cgroup')
+    return _cgroup_available_memory(available, Path('/sys/fs/cgroup'), Path('/proc/self/cgroup'))
+
+
+def _cgroup_available_memory(available, root, membership_path):
+    """Apply limits from the membership's controller mount and its ancestors."""
     directories = [root, root / 'memory']
     try:
-        for line in Path('/proc/self/cgroup').read_text().splitlines():
+        for line in membership_path.read_text().splitlines():
             _, controllers, relative = line.split(':', 2)
             if controllers == '' or 'memory' in controllers.split(','):
-                directory = root / relative.lstrip('/')
-                while directory == root or root in directory.parents:
+                mount = root if controllers == '' else root / 'memory'
+                directory = mount / relative.lstrip('/')
+                while directory == mount or mount in directory.parents:
                     directories.append(directory)
-                    if directory == root:
+                    if directory == mount:
                         break
                     directory = directory.parent
     except (OSError, ValueError):

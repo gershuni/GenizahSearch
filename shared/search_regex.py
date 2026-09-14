@@ -69,6 +69,10 @@ def search_budget(seconds=None):
     now = time.monotonic()
     if previous is not None and now >= previous:
         raise SearchBudgetExceeded()
+    # An implicit nested engine budget inherits the caller's policy. Only an
+    # explicitly requested nested limit (e.g. highlighting) may shorten it.
+    if seconds is None and previous is not None:
+        seconds = 0
     duration = _seconds(seconds, "GENIZAH_SEARCH_BUDGET_SECONDS", 0.0, allow_zero=True)
     deadline = now + duration if duration else math.inf
     if previous is not None:

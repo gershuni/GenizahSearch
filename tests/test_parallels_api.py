@@ -1070,6 +1070,30 @@ def test_parallels_envelope_contains_request_echo(client, mock_searcher, clean_e
 # Phase 145 — method='passage' validation (scope restriction + availability)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.parametrize('method', ['chunk', 'passage'])
+@pytest.mark.parametrize('background', [False, True])
+def test_parallel_worker_failures_are_retryable_503(client, mock_searcher, clean_env, monkeypatch, method, background):
+    from web.research_jobs import ResearchJobError
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    monkeypatch.setattr('web.passage_assets.get_passage_searcher', lambda *args, **kwargs: mock_searcher)
+    mock_searcher.search_composition_logic.side_effect = ResearchJobError('Worker stopped to preserve website memory')
+    payload = {'text': 'hello world', 'method': method}
+    if background:
+        with client:
+            created = client.post('/api/parallels/jobs', json=payload)
+            assert created.status_code == 202, created.text
+            urls = created.json()
+            deadline = time.monotonic() + 5
+            while client.get(urls['status_url']).json()['state'] not in ('completed', 'failed'):
+                assert time.monotonic() < deadline
+                time.sleep(0.01)
+            response = client.get(urls['result_url'])
+    else:
+        response = client.post('/api/parallels', json=payload)
+    assert response.status_code == 503, response.text
+    assert response.json()['error']['code'] == 'research_worker_stopped'
+
+
 def test_parallels_method_passage_unavailable_returns_503(client, mock_searcher, clean_env):
     """method='passage' with no loaded index (the default test environment --
     this worktree carries no real passage_index/) is a clean 503, never a
