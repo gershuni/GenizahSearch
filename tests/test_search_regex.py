@@ -12,6 +12,68 @@ import pytest
 from shared import search_regex
 
 
+def test_short_budget_initialization_retains_progress(monkeypatch):
+    search_regex._word_predicates.cache_clear()
+    search_regex._word_delta_block.cache_clear()
+    findall = search_regex._regex.findall
+    scans = [0]
+    clock = [0.0]
+
+    def slow_findall(*args, **kwargs):
+        scans[0] += 1
+        result = findall(*args, **kwargs)
+        clock[0] += 0.0025
+        return result
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(search_regex._regex, 'findall', slow_findall)
+            patch.setattr(search_regex.time, 'monotonic', lambda: clock[0])
+            expirations = 0
+            for _ in range(100):
+                try:
+                    with search_regex.search_budget(0.02):
+                        pattern = search_regex.compile(r'\w+')
+                    break
+                except search_regex.SearchBudgetExceeded:
+                    expirations += 1
+            else:
+                pytest.fail('short-budget renders never finish initialization')
+            assert expirations > 1
+            blocks = len(range(0, sys.maxunicode + 1, search_regex._UNICODE_BLOCK_SIZE))
+            assert scans[0] == 2 * blocks  # No completed block was scanned twice.
+            assert pattern.fullmatch('abc_123')
+            assert not pattern.fullmatch('\u0307')
+    finally:
+        search_regex._word_predicates.cache_clear()
+        search_regex._word_delta_block.cache_clear()
+
+
+@pytest.mark.parametrize('pattern', [r'[\w[:alpha:]]', r'[^\w[:alpha:]]', r'[\W[:digit:]]'])
+@pytest.mark.parametrize('flags', [0, re.IGNORECASE, re.ASCII])
+def test_literal_opening_bracket_in_mixed_class(pattern, flags):
+    text = '[] a] 3] :] \u0307] !]'
+    old, new = re.compile(pattern, flags), search_regex.compile(pattern, flags)
+    assert old.sub('<hit>', text) == new.sub('<hit>', text)
+
+
+@pytest.mark.parametrize('pattern', [r'\b', r'\B'])
+@pytest.mark.parametrize('flags', [0, re.IGNORECASE, re.ASCII])
+def test_unicode_boundaries_and_search_bounds(pattern, flags):
+    text = ''.join(map(chr, range(sys.maxunicode + 1)))
+    old, new = re.compile(pattern, flags), search_regex.compile(pattern, flags)
+    assert old.sub('|', text) == new.sub('|', text)
+    for text in ('ax', '\u0307x', 'a\U00011f02x', ''):
+        for pos in range(len(text) + 1):
+            for end in range(pos, len(text) + 1):
+                expected, actual = old.search(text, pos, end), new.search(text, pos, end)
+                assert (expected.span() if expected else None) == (actual.span() if actual else None)
+
+
+def test_ignorecase_keeps_simple_case_folding():
+    assert search_regex.compile('\u00df', re.I).search('ss') is None
+
+
 @pytest.mark.parametrize('flags', [0, re.IGNORECASE])
 def test_word_membership_over_entire_unicode_database(flags):
     # Includes surrogates, newly assigned letters, combining marks and numbers.

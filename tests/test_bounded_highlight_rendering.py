@@ -2,7 +2,8 @@
 import html
 import time
 
-from shared.joins_lab import htmlify, _match_line
+from shared.joins_lab import htmlify, _match_line, snippet_html, snippet_plain
+from shared import search_regex
 
 
 def test_highlight_timeout_keeps_escaped_text(monkeypatch):
@@ -16,6 +17,19 @@ def test_highlight_timeout_keeps_escaped_text(monkeypatch):
 def test_snippet_line_search_is_bounded(monkeypatch):
     monkeypatch.setenv('GENIZAH_REGEX_TIMEOUT_SECONDS', '0.001')
     assert _match_line(['a' * 10000 + '!'], r'(a+)+$') == -1
+
+
+def test_snippets_survive_expired_compilation_budget(monkeypatch):
+    monkeypatch.setattr(search_regex.time, 'monotonic', lambda: 2.0)
+    token = search_regex._deadline.set(1.0)
+    try:
+        text = 'first <line>\nsecond line'
+        assert _match_line(text.splitlines(), r'\w+') == -1
+        assert snippet_plain(text, r'\w+') == snippet_plain(text, None)
+        assert snippet_html(text, r'\w+') == snippet_html(text, None)
+        assert '&lt;line&gt;' in snippet_html(text, r'\w+')
+    finally:
+        search_regex._deadline.reset(token)
 
 
 def test_hebrew_highlight_and_escaping_preserved():

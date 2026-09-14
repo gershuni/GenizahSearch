@@ -119,6 +119,27 @@ def _check_deadline():
         raise SearchBudgetExceeded()
 
 
+_UNICODE_BLOCK_SIZE = 4096
+
+
+@lru_cache(maxsize=(sys.maxunicode + _UNICODE_BLOCK_SIZE) // _UNICODE_BLOCK_SIZE)
+def _word_delta_block(start):
+    """Retain completed blocks when a caller's initialization budget expires.
+
+    Each immutable result depends only on the two Unicode databases. Keeping
+    these small checkpoints lets later renders finish initialization without
+    either restarting the scan or ignoring the current render's deadline.
+    """
+    block = ''.join(map(chr, range(start, min(start + _UNICODE_BLOCK_SIZE, sys.maxunicode + 1))))
+    removed = tuple(map(ord, _regex.findall(
+        r"[\p{L}\p{N}_]", re.sub(r"\w+", '', block), _regex.VERSION0,
+    )))
+    added = tuple(map(ord, _regex.findall(
+        r"[^\p{L}\p{N}_]", re.sub(r"\W+", '', block), _regex.VERSION0,
+    )))
+    return added, removed
+
+
 @lru_cache(maxsize=1)
 def _word_predicates():
     r"""Compact word atoms with the running Python's Unicode semantics.
@@ -128,18 +149,14 @@ def _word_predicates():
     Disable case folding for these atoms: re's \w is unaffected by IGNORECASE.
     No captures or VERSION1 set syntax are introduced into user patterns.
     """
-    native = _regex.compile(r"[\p{L}\p{N}_]", _regex.VERSION0)
-    native_nonword = _regex.compile(r"[^\p{L}\p{N}_]", _regex.VERSION0)
-    python_word = re.compile(r"\w+")
-    python_nonword = re.compile(r"\W+")
     added, removed = [], []
     # Compare in small blocks: bounded temporary memory, deadline checkpoints,
     # and native scans instead of over a million Python/native match calls.
-    for start in range(0, sys.maxunicode + 1, 4096):
+    for start in range(0, sys.maxunicode + 1, _UNICODE_BLOCK_SIZE):
         _check_deadline()
-        block = ''.join(map(chr, range(start, min(start + 4096, sys.maxunicode + 1))))
-        removed.extend(map(ord, native.findall(python_word.sub('', block))))
-        added.extend(map(ord, native_nonword.findall(python_nonword.sub('', block))))
+        block_added, block_removed = _word_delta_block(start)
+        added.extend(block_added)
+        removed.extend(block_removed)
 
     def ranges(points):
         result = []
@@ -186,7 +203,7 @@ def _rewrite_class(pattern, start, word, nonword):
             continue
         # Removing a word escape must not turn a literal into a range or
         # move a literal caret/closing bracket into a special position.
-        if char in "^]" or (char == "-" and (i == first or pattern[i + 1] == "]")):
+        if char in "^][" or (char == "-" and (i == first or pattern[i + 1] == "]")):
             char = "\\" + char
         residual.append(char)
         i += 1

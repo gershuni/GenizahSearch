@@ -17,6 +17,13 @@ Compilation checks the active deadline before and after native compilation and
 between initialization blocks. A single native compilation is still not
 interruptible in process; isolated workers remain necessary.
 
+Review follow-up: completed Unicode scan blocks now remain cached if an explicit
+budget expires during cold initialization, allowing subsequent calls to finish
+without rescanning earlier blocks. Mixed classes escape literal opening brackets
+before re-emission, and Lab snippets handle compilation deadline expiry as well
+as matching expiry. The comment scanner is unchanged: the review's proposed
+comment-parser reproducer is rejected by stdlib itself.
+
 ## Compilation benchmark
 
 Windows, Python 3.12.14, regex 2026.9.10. Actual
@@ -89,3 +96,18 @@ research-platform latency. Before deployment conclusions, measure real variant
 expansion and real-index composition/search completion, p50/p95 latency, queue
 wait, worker/parent peak memory, and event-loop/browsing responsiveness under
 concurrent load. The private review-viewer facet optimization remains separate.
+
+## Review-fix validation
+
+After the review fixes, 671 targeted tests passed, including Lab snippet tests,
+repeated short-budget initialization, literal opening brackets in mixed classes,
+exhaustive Unicode boundaries, boundary `pos`/`endpos`, and simple case folding.
+Ruff and patch whitespace checks passed. The same two deprecation warnings remain.
+
+A fresh three-round, interleaved exact-query comparison against the pre-review
+compiler at `96f5418c` retained identical spans/captures. Batch compilation medians
+were 0.912 s after fixes versus 0.920 s before fixes; initialization was 0.073 s
+versus 0.066 s. Fixed batch rounds were 0.895/0.921/0.912 s, and pre-review rounds
+were 0.920/0.935/0.918 s. This compares the two arms of this run; the absolute
+times should not be compared directly with the earlier run under different load.
+These fixes do not establish end-to-end production latency or concurrency safety.
