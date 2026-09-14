@@ -5,6 +5,9 @@ The HTTP smoke test is not a substitute for these tests inside ChatGPT.
 
 | Prompt / condition | Expected behavior |
 | --- | --- |
+| Request manuscripts constrained by genre, language, place, or another research criterion without a verified API filter. | Do not invent fields or vocabulary. Explain which criteria require assessment from retrieved metadata/text; preserve them and label uncertainty and coverage. |
+| An assistant-inferred filter returns unresolvable_filter_value. | Acknowledge the parameter error and continue with a documented correction or disclosed candidate assessment. Do not guess successive values, retry unchanged, or treat the invented parameter as user-mandated. |
+| The researcher explicitly requires a specific API filter and it fails. | Report the failure and ask before relaxing that filter; do not substitute an unrestricted search silently. |
 | Export mixed MiDRASH search results and a PGP scholarly edition as a Hebrew report and spreadsheet. | Actual files contain the full unchanged MiDRASH citation, site/date/page links, and separate PGP scholar/publication credits. No source is credited for another's text. |
 | Export FGP material, user corrections, or text with missing attribution. | Preserve actual returned attribution and underlying source where known; do not invent citations or attach MiDRASH unconditionally. CSV/JSON also retain credits internally. |
 | Open /api/chatgpt/privacy without signing in. | Readable policy loads, identifies the contact and explains submitted text, temporary storage, operational metrics and OpenAI's separate processing. |
