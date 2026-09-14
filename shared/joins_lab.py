@@ -18,6 +18,7 @@ from __future__ import annotations
 import dataclasses
 import html
 import re
+from shared.search_regex import compile as compile_search_regex, SearchBudgetExceeded, search_budget
 from dataclasses import dataclass
 from typing import Optional, Protocol, runtime_checkable
 
@@ -672,12 +673,16 @@ def _match_line(lines: list, pattern: Optional[str]) -> int:
     if not pattern:
         return -1
     try:
-        rx = re.compile(pattern, re.IGNORECASE)
+        rx = compile_search_regex(pattern, re.IGNORECASE)
     except re.error:
         return -1
-    for i, ln in enumerate(lines):
-        if rx.search(ln):
-            return i
+    try:
+        with search_budget(seconds=0.25):
+            for i, ln in enumerate(lines):
+                if rx.search(ln):
+                    return i
+    except SearchBudgetExceeded:
+        return -1
     return -1
 
 
@@ -708,9 +713,9 @@ def htmlify(text: str, pattern: Optional[str] = None) -> str:
     text = (text or "").replace(MARK_A, "").replace(MARK_B, "")
     if pattern:
         try:
-            rx = re.compile(pattern, re.IGNORECASE | re.MULTILINE)
+            rx = compile_search_regex(pattern, re.IGNORECASE | re.MULTILINE)
             text = rx.sub(lambda m: MARK_A + m.group(0) + MARK_B, text)
-        except re.error:
+        except (re.error, SearchBudgetExceeded):
             pass
     t = html.escape(text)
     t = t.replace("\n", "<br>")

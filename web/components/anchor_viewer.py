@@ -286,9 +286,10 @@ def _highlight_html_line_safe(text: str, pattern: Optional[str]) -> str:
     # 1. Wrap match regions with sentinels (before escaping).
     if pattern:
         try:
-            rx = re.compile(pattern, re.IGNORECASE | re.MULTILINE)
+            from shared.search_regex import compile as compile_search_regex, SearchBudgetExceeded
+            rx = compile_search_regex(pattern, re.IGNORECASE | re.MULTILINE)
             text = rx.sub(lambda m: MARK_A + m.group(0) + MARK_B, text)
-        except re.error:
+        except (re.error, SearchBudgetExceeded):
             pass
 
     # 2. HTML-escape the whole string (corpus content fully escaped; sentinels survive).

@@ -287,6 +287,21 @@ def test_search_fuzzy_translates_to_internal_fuzzy(client, stub_searcher):
     assert stub_searcher.calls[-1]['mode'] == 'fuzzy'
 
 
+def test_search_worker_budget_exceeded_returns_504(client, monkeypatch):
+    """A matcher abort must be a timeout response, never empty success or 500."""
+    from shared.search_regex import SearchBudgetExceeded
+    from web.state import state
+
+    class BudgetExceededSearcher:
+        def execute_search(self, **kwargs):
+            raise SearchBudgetExceeded()
+
+    monkeypatch.setattr(state, 'searcher', BudgetExceededSearcher())
+    response = _post_search(client, query='ברכת המזון', search_mode='exact')
+    assert response.status_code == 504, response.text
+    assert response.json()['error']['code'] == 'core_timeout'
+
+
 def test_search_core_timeout_returns_504(client, monkeypatch):
     """A core search exceeding SEARCH_API_CORE_TIMEOUT returns a 504
     'core_timeout' envelope instead of pinning the event loop. The slow query

@@ -53,6 +53,7 @@ from web.document_service import (
 )
 from web.search_load_control import enrichment_batch_slot, try_acquire_ui_search_slot
 from shared.fgp_service import get_sys_ids_with_fgp_sources
+from shared.search_regex import SearchBudgetExceeded
 from shared.transcription_service import union_manual_transcriptions
 from urllib.parse import quote
 import logging
@@ -4862,6 +4863,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         restrict_sys_ids=effective_restrict,
                         text_position=tp if tp != 'anywhere' else None,
                     )
+            except SearchBudgetExceeded:
+                logger.warning('Search stopped after exceeding its computation budget')
+                return {'error': 'search_budget_exceeded'}
             except ValueError as e:
                 # Explosion guard or other validation error — surface to user
                 error_msg = str(e)
@@ -4893,7 +4897,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 lambda _future, release=_core_slot_release: release()
             )
             _core_slot_release = None  # ownership transferred to the future callback
-            results = await _core_future
+            # Client cancellation must not cancel the wrapper and release the
+            # permit while its non-cancellable worker is still running.
+            results = await asyncio.shield(_core_future)
         finally:
             if _core_slot_release is not None:
                 _core_slot_release()
@@ -4902,10 +4908,20 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # because run_core_search runs in io_bound thread and cannot call ui.notify)
         if isinstance(results, dict) and 'error' in results:
             error_msg = results['error']
+            if error_msg == 'search_budget_exceeded':
+                error_msg = (
+                    'החיפוש חרג ממגבלת הזמן ונעצר. נסו לצמצם את השאילתה או את טווח החיפוש.'
+                    if get_language() == 'he' else
+                    'The search exceeded its time limit and was stopped. Try a narrower query or search scope.'
+                )
             ui.notify(error_msg, type='warning', timeout=8000, close_button=True)
             search_state.is_running = False
             search_state.is_cancelled = False
             search_state.progress = 0
+            search_btn.style('display: inline-flex;')
+            stop_btn.style('display: none;')
+            progress_bar.classes('opacity-0')
+            status_label.text = ''
             results_count.text = f"0 {tr('Results')}"
             render_results([])
             return

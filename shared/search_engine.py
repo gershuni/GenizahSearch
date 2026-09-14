@@ -26,6 +26,9 @@ except ImportError:
     raise ImportError("Tantivy library missing. Please install it.")
 
 from shared.config import Config
+from shared.search_regex import (
+    compile as compile_search_regex, SearchBudgetExceeded, bounded_search,
+)
 from shared.text_normalize import strip_nikud, strip_search_diacritics
 from shared.browse_map_utils import natural_sort_key, dedupe_browse_map, _extract_ie_from_header
 from shared.search_tokenizer import register_search_tokenizers
@@ -819,6 +822,7 @@ class SearchEngine:
         from shared.lab_engine import LabEngine  # noqa: PLC0415 -- lazy; avoids module cycle
         return LabEngine.lab_index_normalize(content)
 
+    @bounded_search
     def _query_local_index(self, query_str: str, mode: str, gap: int,
                            limit=None, regex=None, tantivy_query_str=None,
                            progress_callback=None, phase_callback=None):
@@ -952,6 +956,8 @@ class SearchEngine:
             # is suppressed by the worker's cancel_flag, and the "(Partial
             # results)" suffix comes from the UI's own _search_was_cancelled.
             return results
+        except SearchBudgetExceeded:
+            raise
         except Exception as e:
             LOGGER.warning("LOCAL index query failed: %r", e)
             return []
@@ -1659,13 +1665,15 @@ class SearchEngine:
                 pattern_str = forward
 
             try:
-                return re.compile(pattern_str, re.IGNORECASE)
+                return compile_search_regex(pattern_str, re.IGNORECASE)
+            except SearchBudgetExceeded:
+                raise
             except Exception:
                 return None  # Boundary data unavailable for this document
 
         # --- Existing path (unchanged) ---
         if mode == 'Regex':
-            try: return re.compile(" ".join(terms), re.IGNORECASE)
+            try: return compile_search_regex(" ".join(terms), re.IGNORECASE)
             except re.error: return None
 
         parts = []
@@ -1699,7 +1707,7 @@ class SearchEngine:
             sep = rf'(?:[^\w\u0590-\u05FF\']+{Config.WORD_TOKEN_PATTERN}){{0,{max_gap}}}[^\w\u0590-\u05FF\']+'
 
         try:
-            return re.compile(sep.join(parts), re.IGNORECASE)
+            return compile_search_regex(sep.join(parts), re.IGNORECASE)
         except re.error:
             return None
 
@@ -2035,11 +2043,12 @@ class SearchEngine:
 
         pattern_str = ''.join(parts)
         try:
-            return re.compile(pattern_str, re.IGNORECASE | re.MULTILINE)
+            return compile_search_regex(pattern_str, re.IGNORECASE | re.MULTILINE)
         except re.error as e:
             LOGGER.warning("Line-break regex failed to compile: %s", e)
             return None
 
+    @bounded_search
     def _execute_line_break_search(self, line_groups, line_gaps, query_str,
                                     responsa_options=None, progress_callback=None,
                                     exclude_words=None, restrict_sys_ids=None,
@@ -2250,6 +2259,8 @@ class SearchEngine:
                                 'scope': scope
                             })
 
+                except SearchBudgetExceeded:
+                    raise
                 except Exception as e:
                     LOGGER.warning("Line-break search: failed to process hit %s: %s", i, e)
         except InterruptedError:
@@ -2355,6 +2366,7 @@ class SearchEngine:
         results.sort(key=lambda r: natural_sort_key(r.get('display', {}).get('shelfmark', '')))
         return results
 
+    @bounded_search
     def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None, corpus_scope: str = "all", phase_callback=None):
         search_started = time.perf_counter()
         # R2-#1: discard any stale per-thread downgrade signal from a prior
@@ -2412,6 +2424,8 @@ class SearchEngine:
                     progress_callback=progress_callback,
                     phase_callback=phase_callback,
                 )
+            except SearchBudgetExceeded:
+                raise
             except Exception as _le:
                 LOGGER.warning("LOCAL-only search failed: %r", _le)
                 return []
@@ -2799,6 +2813,8 @@ class SearchEngine:
                                 # Phase 77 D-01: Tantivy relevance score for JSON.
                                 'score': float(score),
                             })
+                except SearchBudgetExceeded:
+                    raise
                 except Exception as e:
                     LOGGER.warning("Failed to materialize search hit at position %s: %s", i, e)
         except InterruptedError:
@@ -2846,6 +2862,8 @@ class SearchEngine:
                 # re-raise, because the Genizah results already in `deduped` are
                 # real and partial is the right semantics at this point.
                 local_hits = []
+            except SearchBudgetExceeded:
+                raise
             except Exception as _e:
                 LOGGER.warning(
                     "LOCAL side-index query failed; main results unaffected: %r", _e
@@ -2931,6 +2949,7 @@ class SearchEngine:
             final.append(r)
         return final
 
+    @bounded_search
     def search_composition_logic(self, full_text, chunk_size, max_freq, mode, filter_text=None, progress_callback=None,
                                    boundary_mode='full', boundary_delimiter='\n', boundary_boost=1.5,
                                    min_boundary_matches=0, min_delimiter_distance=3,
@@ -3192,6 +3211,8 @@ class SearchEngine:
                             if chunk_crossed_bounds:
                                 rec['boundary_chunk_scores'].append(score)
                                 rec['crossed_boundaries'].update(chunk_crossed_bounds)
+                except SearchBudgetExceeded:
+                    raise
                 except Exception as e:
                     LAB_LOGGER.warning(f"Failed composition chunk processing at token {token_idx}: {e}")
         except InterruptedError:
@@ -3356,6 +3377,8 @@ class SearchEngine:
                                         _rec_scl['chunk_hits'][_existing_scl] = (
                                             _i_scl, ' '.join(_chunk_scl), _new_score_scl, _ms_snip_scl
                                         )
+                        except SearchBudgetExceeded:
+                            raise
                         except Exception:
                             pass
             except InterruptedError:
@@ -3363,6 +3386,8 @@ class SearchEngine:
                 # the returned payload's 'partial' key reports False for a run the
                 # user cancelled — a lie, not just a missing detail.
                 was_cancelled = True
+            except SearchBudgetExceeded:
+                raise
             except Exception as _scl_exc:
                 LAB_LOGGER.warning(
                     "search_composition_logic: LOCAL (regular-index) scan failed: %r", _scl_exc

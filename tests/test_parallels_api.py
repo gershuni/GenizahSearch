@@ -829,6 +829,18 @@ def test_parallels_statelessness_two_identical_posts(client, mock_searcher, clea
 # P9X Task 1 — Parallels timeout + heavy concurrency (2)
 # ---------------------------------------------------------------------------
 
+def test_parallels_worker_budget_exceeded_returns_504(client, clean_env, monkeypatch):
+    from shared.search_regex import SearchBudgetExceeded
+
+    async def exceeded(**kwargs):
+        raise SearchBudgetExceeded()
+
+    monkeypatch.setattr('web.search_api.fetch_parallels_results', exceeded)
+    response = client.post('/api/parallels', json={'text': 'hello world', 'mode': 'exact'})
+    assert response.status_code == 504, response.text
+    assert response.json()['error']['code'] == 'core_timeout'
+
+
 def test_parallels_timeout_uses_parallels_knob(client, clean_env, monkeypatch):
     """SEARCH_API_PARALLELS_TIMEOUT=0.2 + slow composition stub → 504 core_timeout."""
     import asyncio
