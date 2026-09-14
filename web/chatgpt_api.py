@@ -64,13 +64,14 @@ def compact_payload(payload):
             return None
 
 
-def _validate_pilot_body(kind, body):
+def _validate_pilot_body(kind, body, background=False):
     if not isinstance(body, dict):
         return 'Expected a JSON object.'
     if kind == 'search':
-        limit = body.get('limit', 5)
-        if type(limit) is not int or not 1 <= limit <= 10:
-            return 'ChatGPT search limit must be an integer from 1 to 10.'
+        maximum = (500 if body.get('search_mode') == 'fuzzy' else 100) if background else 10
+        limit = body.get('limit', maximum if background else 5)
+        if type(limit) is not int or not 1 <= limit <= maximum:
+            return f'ChatGPT search limit must be an integer from 1 to {maximum} for this mode.'
         body['limit'] = limit
     if kind == 'parallels':
         if body.get('method') != 'passage':
@@ -89,7 +90,7 @@ def _validate_pilot_body(kind, body):
     return None
 
 
-async def _prepare_request(kind, request):
+async def _prepare_request(kind, request, background=False):
     raw = bytearray()
     async for chunk in request.stream():
         raw.extend(chunk)
@@ -99,7 +100,7 @@ async def _prepare_request(kind, request):
         body = json.loads(raw)
     except (ValueError, UnicodeError):
         return _error('invalid_request', 'Expected a JSON request body.')
-    problem = _validate_pilot_body(kind, body)
+    problem = _validate_pilot_body(kind, body, background)
     if problem:
         return _error('invalid_request', problem)
     encoded = json.dumps(body, ensure_ascii=False).encode('utf-8')
@@ -154,7 +155,9 @@ def register_chatgpt_api(app):
     """Call after init_search_api on its /api sub-app; no extra corpus imports."""
     handlers = {route.path: route.endpoint for route in app.routes if hasattr(route, 'endpoint')}
     from web.chatgpt_jobs import register_chatgpt_jobs
-    register_chatgpt_jobs(app, handlers, _prepare_request, _finish_response, _job_owner)
+    async def prepare_job(kind, request):
+        return await _prepare_request(kind, request, background=True)
+    register_chatgpt_jobs(app, handlers, prepare_job, _finish_response, _job_owner)
 
     def wrapped(kind):
         handler = handlers['/' + kind]

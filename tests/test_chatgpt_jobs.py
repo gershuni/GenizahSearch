@@ -55,7 +55,10 @@ def test_search_survives_short_polls_and_ip_change(monkeypatch):
                 assert response.json()['state'] == 'running'
             assert len(calls) == 1  # Pending polling does not submit more workers.
             finish.set()
-            result = await poller.get('/api/chatgpt/jobs/' + token)
+            for _ in range(50):
+                result = await poller.get('/api/chatgpt/jobs/' + token)
+                if result.status_code != 202:
+                    break
             assert result.status_code == 200
             assert result.json()['request'] == BODY
             assert result.json()['warnings'][0]['code'] == 'upstream_warning'

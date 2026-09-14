@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "GenizahSearch Research Actions",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "description": "Read-only Cairo Genizah research pilot: discover features, search manuscripts, browse evidence, and find passage parallels."
   },
   "servers": [
@@ -229,8 +229,8 @@
     "/jobs/{job_id}": {
       "get": {
         "operationId": "getResearchJob",
-        "summary": "Retrieve an existing search job. Pending returns 202; keep the same ID and poll again. Completion returns results or the original error. Job IDs are private, not citation links.",
-        "description": "Retrieve an existing search job. Pending returns 202; keep the same ID and poll again. Completion returns results or the original error. Job IDs are private, not citation links.",
+        "summary": "Poll or page through ONE saved search. Follow pagination.next_page with the same private job ID to see more matches without rerunning. Use collection=filtered for demoted candidates. Null next_page means this collection is finished.",
+        "description": "Poll or page through ONE saved search. Follow pagination.next_page with the same private job ID to see more matches without rerunning. Use collection=filtered for demoted candidates. Null next_page means this collection is finished.",
         "x-openai-isConsequential": false,
         "responses": {
           "200": {
@@ -281,6 +281,31 @@
               "type": "string"
             },
             "description": "Copy the returned private job_id exactly. Never guess IDs or submit the query again while pending."
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            },
+            "description": "Start at 0, then copy pagination.next_page. Page sizes may shrink to fit the response limit."
+          },
+          {
+            "name": "collection",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "results",
+                "filtered"
+              ],
+              "default": "results"
+            },
+            "description": "Main matches or demoted/filtered matches. Each collection has its own page sequence."
           }
         ]
       }
@@ -471,9 +496,8 @@
           "limit": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 10,
-            "default": 5,
-            "description": "Always send a small result limit to fit ChatGPT. This is not an exhaustive census."
+            "maximum": 500,
+            "description": "Total candidates to save from ONE search, not page size. Use 100 for exact/variants/responsa/title/shelfmark; 500 for fuzzy. Other modes allow at most 100. Retrieval pages contain at most 10 rows."
           },
           "gap": {
             "type": "integer",
@@ -755,6 +779,46 @@
             "properties": {},
             "description": "Effective request parameters and policy after defaulting/capping. Retain for reproducibility.",
             "additionalProperties": true
+          },
+          "pagination": {
+            "type": "object",
+            "properties": {
+              "job_id": {
+                "type": "string"
+              },
+              "collection": {
+                "type": "string",
+                "enum": [
+                  "results",
+                  "filtered"
+                ]
+              },
+              "page": {
+                "type": "integer"
+              },
+              "offset": {
+                "type": "integer"
+              },
+              "returned": {
+                "type": "integer"
+              },
+              "available": {
+                "type": "integer"
+              },
+              "results_available": {
+                "type": "integer"
+              },
+              "filtered_available": {
+                "type": "integer"
+              },
+              "next_page": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false
           }
         },
         "required": [

@@ -42,8 +42,8 @@ def build():
             'query': {'type': 'string', 'minLength': 1, 'maxLength': 1000},
             'search_mode': {'type': 'string', 'enum': ['exact', 'variants', 'fuzzy', 'responsa', 'title', 'shelfmark'],
                             'description': 'Start exact; shelfmark resolves call numbers. Search runs as a background job; poll its returned ID.'},
-            'limit': {'type': 'integer', 'minimum': 1, 'maximum': 10, 'default': 5,
-                      'description': 'Always send a small result limit to fit ChatGPT. This is not an exhaustive census.'},
+            'limit': {'type': 'integer', 'minimum': 1, 'maximum': 500,
+                      'description': 'Total candidates to save from ONE search, not page size. Use 100 for exact/variants/responsa/title/shelfmark; 500 for fuzzy. Other modes allow at most 100. Retrieval pages contain at most 10 rows.'},
             'gap': {'type': 'integer', 'minimum': 0, 'default': 0, 'description': 'Words allowed between terms; must be zero for title/shelfmark.'},
             'responsa_options': {**ref('ResponsaOptions'), 'description': 'Omit unless search_mode is responsa.'},
             'filters': ref('Filters'),
@@ -82,6 +82,12 @@ def build():
             'count': integer, 'total': integer, 'results': array(ref('Result')),
             'filtered': array(ref('Result')), 'warnings': array(ref('Warning')),
             'request': obj({}, description='Effective request parameters and policy after defaulting/capping. Retain for reproducibility.', additionalProperties=True),
+            'pagination': obj({
+                'job_id': string, 'collection': {'type': 'string', 'enum': ['results', 'filtered']},
+                'page': integer, 'offset': integer, 'returned': integer, 'available': integer,
+                'results_available': integer, 'filtered_available': integer,
+                'next_page': {'type': ['integer', 'null']},
+            }, additionalProperties=False),
         }, ('schema_version', 'source', 'generated_at', 'count', 'total', 'results', 'warnings', 'request'), additionalProperties=True),
         'Browse': obj({
             'schema_version': integer, 'source': string, 'generated_at': string,
@@ -126,14 +132,20 @@ def build():
     for op in (search, parallels):
         op['responses']['202'] = op['responses'].pop('200')
         op['responses']['202']['description'] = 'Accepted and queued. Poll this same job ID.'
-    poll = operation('getResearchJob', 'Retrieve an existing search job. Pending returns 202; keep the same ID and poll again. Completion returns results or the original error. Job IDs are private, not citation links.', 'Results')
+    poll = operation('getResearchJob', 'Poll or page through ONE saved search. Follow pagination.next_page with the same private job ID to see more matches without rerunning. Use collection=filtered for demoted candidates. Null next_page means this collection is finished.', 'Results')
     poll['parameters'] = [{'name': 'job_id', 'in': 'path', 'required': True, 'schema': string,
-                           'description': 'Copy the returned private job_id exactly. Never guess IDs or submit the query again while pending.'}]
+                           'description': 'Copy the returned private job_id exactly. Never guess IDs or submit the query again while pending.'},
+                          {'name': 'page', 'in': 'query', 'required': False,
+                           'schema': {'type': 'integer', 'minimum': 0, 'default': 0},
+                           'description': 'Start at 0, then copy pagination.next_page. Page sizes may shrink to fit the response limit.'},
+                          {'name': 'collection', 'in': 'query', 'required': False,
+                           'schema': {'type': 'string', 'enum': ['results', 'filtered'], 'default': 'results'},
+                           'description': 'Main matches or demoted/filtered matches. Each collection has its own page sequence.'}]
     poll['responses']['202'] = {'description': 'Still running; poll this same job again.',
                                 'content': {'application/json': {'schema': ref('PendingJob')}}}
     return {
         'openapi': '3.1.0',
-        'info': {'title': 'GenizahSearch Research Actions', 'version': '0.2.0',
+        'info': {'title': 'GenizahSearch Research Actions', 'version': '0.3.0',
                  'description': 'Read-only Cairo Genizah research pilot: discover features, search manuscripts, browse evidence, and find passage parallels.'},
         'servers': [{'url': 'https://genizahsearch.com/api/chatgpt'}], 'security': [],
         'paths': {

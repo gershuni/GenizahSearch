@@ -7,15 +7,18 @@ target account before announcing availability.
 
 ## Status
 
-The owner deployed and used the original synchronous GPT pilot. Search worker
-startup/queue time then triggered 504s, including the exact-search 30-second
-deadline. Version 0.2 uses background search jobs and short polling requests.
-The asynchronous upgrade still needs deployment and testing inside ChatGPT.
+Version 0.3 adds pagination to the background jobs introduced in 0.2. Each search
+runs once; subsequent pages read prebuilt response bytes, without reloading an
+index, invoking a search worker, or browsing manuscript pages. The pagination
+upgrade needs deployment and testing inside ChatGPT.
 
 To upgrade: deploy, re-import `https://genizahsearch.com/api/chatgpt/openapi.json`
 in the GPT's Action editor, replace Instructions with `instructions.md`, and save.
 Confirm the fifth action `getResearchJob` appears. Merely deploying the server
 does not replace the schema saved in an existing GPT.
+For version 0.3, `getResearchJob` must also show `page` and `collection` parameters.
+Start a new search after upgrading: previous jobs contain only the old preview
+and cannot recover candidates that were discarded.
 
 Validation: targeted adapter and job-lifecycle tests cover limits, polling across
 IP changes, failure preservation, expiry, cancellation, and shutdown. OpenAPI, request combinations, and
@@ -35,6 +38,7 @@ Deploy these files together through the project's normal reviewed release:
 
 - `web/chatgpt_api.py`
 - `web/chatgpt_jobs.py` (uses the deployed `web/research_api.py` APIJob)
+- `web/chatgpt_pagination.py`
 - The registration and shutdown lines added to `web/main.py`, immediately after
   `init_search_api(app_override=_search_helper_app, path_prefix="")`.
 - `integrations/chatgpt/openapi.json`
@@ -54,23 +58,37 @@ The job allowance is ten minutes including worker startup and queue time. Expiry
 or shutdown signals cancellation to the isolated worker; it does not recycle a
 worker as soon as a polling request disconnects. Old synchronous facade routes
 remain available for compatibility and retain their old deadlines.
-It returns at most 80,000 UTF-8 bytes, five main results, three filtered results,
-and three complete matching spans per retained result. More rows can be omitted
-to fit the byte budget. Oversized fixed envelopes/browse responses return an
-explicit error. `total` and `request` keep their upstream values; `count` describes
-the preview, and a `chatgpt_output_limited` warning reports upstream/returned counts.
+Completed jobs return at most ten candidates and 80,000 UTF-8 bytes per page.
+Oversized rows shrink the page without discarding candidates. Use the same job ID
+and returned `pagination.next_page` to continue; null ends that collection. Main
+results and demoted/filtered results have independent page sequences, selected
+with `collection=results|filtered`. `pagination.available` counts saved candidates
+in that collection. `total` and `request` retain upstream meanings; `count` counts
+main results on the current page (zero on filtered pages). Three complete matching
+spans per candidate are shown; `matches_available` records additional spans.
+Byte/storage overflow returns an error rather than silent loss of later candidates.
+Old synchronous routes retain their five-result preview behavior.
 
-These are pilot display limits, not changes to search algorithms. Search requests
-are limited to 10 results (default 5); passage input to 5000 characters per witness
-and three witnesses. The server validates these bounds too.
+Background searches save up to 100 candidates by default for non-fuzzy modes and
+500 for fuzzy; a smaller explicit limit is respected. These are retrieval caps,
+not page sizes or guarantees of exhaustive corpus coverage. Existing engine caps
+and truncation warnings still apply. Passage input remains limited to 5000
+characters per witness and three witnesses. The server validates these bounds.
 
 ChatGPT jobs are separate from the general API's IP-bound jobs. An opaque,
 unguessable 256-bit job ID authorizes retrieval across different egress IPs.
 Treat it as a private bearer token: do not publish IDs, cite them, or send them to
 web search. There is no listing endpoint. Admission is capped at two active jobs
 per resolved client IP and 32 retained jobs per process. Completed results expire
-after ten minutes; memory is reclaimed on later job requests or shutdown. Only
-bounded results are retained. The existing API mode gate still applies to polling.
+after ten minutes; memory is reclaimed on later job requests or shutdown. Storage
+is capped at 8 MiB per job and 64 MiB across jobs. Admission reserves the full
+per-job allowance before starting work, and rejects new searches when full.
+Raw result input is capped at 16 MiB before parsing. Pages are serialized once
+off the event loop; later reads serve their cached bytes. A job permits 60 reads
+per minute and one outstanding pending poll; 429 includes Retry-After. These
+limits apply across IP changes using that job ID. No automatic eviction makes
+another researcher's live pagination disappear. The existing API mode gate still
+applies to polling.
 Restart loses jobs; deployment assumes one web process (multiple processes would
 require shared storage or sticky routing). Existing general research jobs keep
 their IP ownership rules unchanged.
@@ -105,7 +123,7 @@ prove image inspection. ChatGPT may ask the user to allow API calls.
 
 ```bash
 python integrations/chatgpt/build_schema.py
-pytest tests/test_chatgpt_api.py tests/test_chatgpt_jobs.py -q
+pytest tests/test_chatgpt_api.py tests/test_chatgpt_jobs.py tests/test_chatgpt_pagination.py -q
 python integrations/chatgpt/validate.py --captures scratch/chatgpt-smoke
 # After deployment; these calls use public example manuscript text:
 python integrations/chatgpt/smoke_test.py --api-prefix /api/chatgpt

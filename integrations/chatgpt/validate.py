@@ -13,6 +13,7 @@ from openapi_spec_validator import validate
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from web.chatgpt_api import MAX_RESPONSE_BYTES, compact_payload  # noqa: E402
+from web.chatgpt_pagination import build_pages  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
 
 
@@ -69,6 +70,16 @@ def main():
             size = len(JSONResponse(compact).body)
             assert size <= MAX_RESPONSE_BYTES
             print(f'{path.name}: original + compact contract valid, {size} compact bytes.')
+            if name == 'Results':
+                pages, stored = build_pages(body, 'offline-validation')
+                for collection, raw_pages in pages.items():
+                    count = 0
+                    for raw in raw_pages:
+                        page = json.loads(raw)
+                        validator(name).validate(page)
+                        count += len(page[collection])
+                    assert count == len(body.get(collection, []))
+                print(f'  All saved candidates preserved across {sum(map(len, pages.values()))} pages; {stored} stored bytes.')
 
 
 if __name__ == '__main__':
