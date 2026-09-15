@@ -41,7 +41,15 @@ def prepare_section(sys_id, section, loader):
             'generated_at': datetime.now(timezone.utc).isoformat()}
 
 
-def register_manuscript_details(app, owner, loader=load_section, limiter=None):
+def load_web_section(sys_id, section):
+    """Supply the web application's local cache to the shared record reader."""
+    if section.startswith('nli_'):
+        from web.state import state
+        return load_section(sys_id, section, nli_cache=getattr(state.meta_mgr, 'nli_cache', None))
+    return load_section(sys_id, section)
+
+
+def register_manuscript_details(app, owner, loader=load_web_section, limiter=None):
     cache = OrderedDict()
     active = {}
 

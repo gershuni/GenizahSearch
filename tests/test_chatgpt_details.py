@@ -150,8 +150,10 @@ def test_nli_cache_only_preserves_raw_citation(monkeypatch):
     marc = {'bibliography': ['Author, title $$g 12–19'], 'notes': ['Catalog note']}
     fake_state = SimpleNamespace(meta_mgr=SimpleNamespace(nli_cache={'99001': {'marc': marc}}))
     monkeypatch.setitem(sys.modules, 'web.state', SimpleNamespace(state=fake_state))
-    assert load_section('99001', 'nli_bibliography') == ([{'citation': marc['bibliography'][0]}], 'local_cache')
-    assert load_section('99001', 'nli_catalog')[0] == [{'field': 'notes', 'value': ['Catalog note']}]
+    assert details.load_web_section('99001', 'nli_bibliography') == ([{'citation': marc['bibliography'][0]}], 'local_cache')
+    assert details.load_web_section('99001', 'nli_catalog')[0] == [{'field': 'notes', 'value': ['Catalog note']}]
+    assert details.load_web_section('missing', 'nli_catalog') == ([], 'not_cached')
+    assert load_section('99001', 'nli_catalog') == ([], 'not_cached')
     assert load_section('missing', 'nli_catalog') == ([], 'not_cached')
 
 

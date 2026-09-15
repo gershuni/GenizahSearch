@@ -17,7 +17,7 @@ def source_credit_rows(rows):
     return [{key: row[key] for key in SOURCE_FIELDS if key in row} for row in rows]
 
 
-def load_section(sys_id, section):
+def load_section(sys_id, section, *, nli_cache=None):
     """Return (records, availability). No remote fetches or corpus searches."""
     if section.startswith('fjms_'):
         from shared.fjms_service import get_fjms_service
@@ -37,9 +37,7 @@ def load_section(sys_id, section):
         method = 'get_bibliography' if section == 'fjms_bibliography' else 'get_catalog_refs'
         return getattr(service, method)(sys_id), 'local_records'
     if section.startswith('nli_'):
-        from web.state import state
-        manager = state.meta_mgr
-        cached = getattr(manager, 'nli_cache', {}).get(sys_id, {})
+        cached = (nli_cache or {}).get(sys_id, {})
         marc = cached.get('marc')
         if not marc:
             return [], 'not_cached'
