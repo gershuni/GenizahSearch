@@ -2,7 +2,8 @@
 
 Only query patterns use this adapter. Patterns retain Python ``re`` syntax and
 word classes; regex's broader Unicode word definition would change Hebrew hits.
-The deadline bounds matching, not compilation or arbitrary blocking native work.
+The deadline bounds matching and is checked between compilation steps; native
+compilation and arbitrary blocking native work are not interruptible in process.
 """
 
 from contextlib import contextmanager
@@ -116,56 +117,150 @@ def _match_timeout():
     return limit
 
 
+def _check_deadline():
+    deadline = _deadline.get()
+    if deadline is not None and time.monotonic() >= deadline:
+        raise SearchBudgetExceeded()
+
+
+_UNICODE_BLOCK_SIZE = 4096
+
+
+@lru_cache(maxsize=(sys.maxunicode + _UNICODE_BLOCK_SIZE) // _UNICODE_BLOCK_SIZE)
+def _word_delta_block(start):
+    """Retain completed blocks when a caller's initialization budget expires.
+
+    Each immutable result depends only on the two Unicode databases. Keeping
+    these small checkpoints lets later renders finish initialization without
+    either restarting the scan or ignoring the current render's deadline.
+    """
+    block = ''.join(map(chr, range(start, min(start + _UNICODE_BLOCK_SIZE, sys.maxunicode + 1))))
+    removed = tuple(map(ord, _regex.findall(
+        r"[\p{L}\p{N}_]", re.sub(r"\w+", '', block), _regex.VERSION0,
+    )))
+    added = tuple(map(ord, _regex.findall(
+        r"[^\p{L}\p{N}_]", re.sub(r"\W+", '', block), _regex.VERSION0,
+    )))
+    return added, removed
+
+
 @lru_cache(maxsize=1)
-def _word_ranges():
-    # Use the running Python's Unicode database, including numeric characters.
-    # \p{L}/\p{N} would instead use the dependency's different Unicode version.
-    words, nonwords = [], []
-    start = 0
-    previous = False  # U+0000 is not a word character.
-    for point in range(1, sys.maxunicode + 2):
-        current = point <= sys.maxunicode and (
-            chr(point).isalnum() or point == 95
-        )
-        if point > sys.maxunicode or current != previous:
-            first = f"\\U{start:08x}"
-            last = f"\\U{point - 1:08x}"
-            (words if previous else nonwords).append(
-                first if start == point - 1 else first + "-" + last
-            )
-            start, previous = point, current
-    return "".join(words), "".join(nonwords)
+def _word_predicates():
+    r"""Compact word atoms with the running Python's Unicode semantics.
+
+    Native L/N properties avoid compiling hundreds of ranges at every escape.
+    Only differences between the two Unicode databases need explicit ranges.
+    Disable case folding for these atoms: re's \w is unaffected by IGNORECASE.
+    No captures or VERSION1 set syntax are introduced into user patterns.
+    """
+    added, removed = [], []
+    # Compare in small blocks: bounded temporary memory, deadline checkpoints,
+    # and native scans instead of over a million Python/native match calls.
+    for start in range(0, sys.maxunicode + 1, _UNICODE_BLOCK_SIZE):
+        _check_deadline()
+        block_added, block_removed = _word_delta_block(start)
+        added.extend(block_added)
+        removed.extend(block_removed)
+
+    def ranges(points):
+        result = []
+        i = 0
+        while i < len(points):
+            first = last = points[i]
+            i += 1
+            while i < len(points) and points[i] == last + 1:
+                last = points[i]
+                i += 1
+            result.append(f"\\U{first:08x}" + (f"-\\U{last:08x}" if last != first else ""))
+        return "".join(result)
+
+    word = r"[\p{L}\p{N}_]"
+    nonword = r"[^\p{L}\p{N}_]"
+    if removed:
+        word = "(?![" + ranges(removed) + "])" + word
+        nonword = "(?:" + nonword + "|[" + ranges(removed) + "])"
+    if added:
+        word = "(?:" + word + "|[" + ranges(added) + "])"
+        nonword = "(?![" + ranges(added) + "])" + nonword
+    return "(?u-i:" + word + ")", "(?u-i:" + nonword + ")"
+
+
+def _rewrite_class(pattern, start, word, nonword):
+    """Rewrite a validated simple class as a union of single-character atoms."""
+    i = start + 1
+    negated = pattern[i] == "^"
+    if negated:
+        i += 1
+    first = i
+    residual, atoms = [], []
+    while i < len(pattern):
+        char = pattern[i]
+        if char == "]" and i != first:
+            break
+        if char == "\\":
+            escape = pattern[i + 1]
+            if escape in "wW":
+                atoms.append(word if escape == "w" else nonword)
+            else:
+                residual.append(pattern[i:i + 2])
+            i += 2
+            continue
+        # Removing a word escape must not turn a literal into a range or
+        # move a literal caret/closing bracket into a special position.
+        if char in "^][" or (char == "-" and (i == first or pattern[i + 1] == "]")):
+            char = "\\" + char
+        residual.append(char)
+        i += 1
+    if not atoms:
+        return pattern[start:i + 1], i + 1
+    atoms = list(dict.fromkeys(atoms))
+    if len(atoms) == 2:
+        # A class containing both \w and \W includes every character.
+        return (r'(?!)' if negated else r'[\s\S]'), i + 1
+    if negated:
+        complement = nonword if atoms[0] == word else word
+        if residual:
+            complement = '(?:(?![' + ''.join(residual) + '])' + complement + ')'
+        return complement, i + 1
+    if residual:
+        # Express the union as NOT(NOT atom AND NOT residual). Alternation
+        # lets regex's first-set optimization fold branches across -i, e.g.
+        # [\Wİ] under IGNORECASE can lose the nonword U+0345. Keep both tests
+        # inside assertions, then consume exactly one character.
+        return ('(?:(?!(?!' + atoms[0] + ')(?![' + ''.join(residual)
+                + r']))[\s\S])'), i + 1
+    union = "(?:" + "|".join(atoms) + ")"
+    return union, i + 1
 
 
 _INLINE_FLAGS = re.compile(r"\(\?([aiLmsux]*)(?:-([imsx]+))?([:)])")
+_ASCII_WORD = r"(?a-i:[a-zA-Z0-9_])"
+_ASCII_NONWORD = r"(?a-i:[^a-zA-Z0-9_])"
 
 
 def _preserve_word_classes(pattern, flags):
     r"""Rewrite lexical word escapes, respecting classes, comments and flags.
 
-    Input was validated by stdlib re first. Explicit ranges keep VERSION0's
-    simple sets while preserving re's Unicode definition even for [^\w...].
+    Input was validated by stdlib re first. Single-character predicates keep
+    VERSION0's simple sets while preserving re's definition even for [^\w...].
     """
     if not any(token in pattern for token in (r"\w", r"\W", r"\b", r"\B")):
         return pattern
-    word, nonword = _word_ranges()
+    word, nonword = _word_predicates()
     result = []
     ascii_mode = bool(flags & re.ASCII)
     verbose = bool(flags & re.VERBOSE)
     stack = []
-    in_class = False
-    class_start = False
-    class_initial = False
     i = 0
     while i < len(pattern):
         char = pattern[i]
         if char == "\\" and i + 1 < len(pattern):
             escape = pattern[i + 1]
-            if not ascii_mode and escape in "wW":
-                interior = word if escape == "w" else nonword
-                result.append(interior if in_class else "[" + interior + "]")
-            elif not ascii_mode and not in_class and escape in "bB":
-                w = "[" + word + "]"
+            if escape in "wW":
+                w, nw = (_ASCII_WORD, _ASCII_NONWORD) if ascii_mode else (word, nonword)
+                result.append(w if escape == "w" else nw)
+            elif escape in "bB":
+                w = _ASCII_WORD if ascii_mode else word
                 boundary = rf"(?:(?<!{w})(?={w})|(?<={w})(?!{w}))"
                 if escape == "b":
                     result.append(boundary)
@@ -173,22 +268,9 @@ def _preserve_word_classes(pattern, flags):
                     # Python <3.14 \B does not match an empty input.
                     nonempty = r"(?=[\s\S]|(?<=[\s\S]))" if sys.version_info < (3, 14) else ""
                     result.append(nonempty + "(?!" + boundary + ")")
-            elif ascii_mode and not in_class and escape == "B" and sys.version_info < (3, 14):
-                result.append(r"(?=[\s\S]|(?<=[\s\S]))\B")
             else:
                 result.append(pattern[i:i + 2])
             i += 2
-            class_start = False
-            class_initial = False
-            continue
-        if in_class:
-            result.append(char)
-            if char == "]" and not class_start:
-                in_class = False
-            if not (class_initial and char == "^"):
-                class_start = False
-            class_initial = False
-            i += 1
             continue
         if verbose and char == "#":
             end = pattern.find("\n", i)
@@ -211,8 +293,10 @@ def _preserve_word_classes(pattern, flags):
             i = end + 1
             continue
         if char == "[":
-            in_class, class_start = True, True
-            class_initial = True
+            w, nw = (_ASCII_WORD, _ASCII_NONWORD) if ascii_mode else (word, nonword)
+            rewritten, i = _rewrite_class(pattern, i, w, nw)
+            result.append(rewritten)
+            continue
         elif char == "(":
             match = _INLINE_FLAGS.match(pattern, i)
             if match:
@@ -285,6 +369,9 @@ class Pattern:
 
 def compile(pattern, flags=0):
     """Compile stdlib syntax with bounded, GIL-releasing match operations."""
+    # Native compilation itself cannot be interrupted here. Check on both
+    # sides so an expired API budget cannot compile an entire chunk batch.
+    _check_deadline()
     if isinstance(pattern, Pattern):
         if flags:
             raise ValueError("cannot process flags argument with a compiled pattern")
@@ -301,8 +388,10 @@ def compile(pattern, flags=0):
         if validated.flags & old:
             mapped |= new
     rewritten = _preserve_word_classes(validated.pattern, validated.flags)
+    _check_deadline()
     try:
         compiled = _regex.compile(rewritten, mapped)
     except _regex.error as exc:
         raise re.error(str(exc)) from exc
+    _check_deadline()
     return Pattern(compiled, validated.pattern, validated.flags)

@@ -111,6 +111,13 @@ Nested explicit deadlines cannot be extended. Optional viewer highlighting has
 its own 0.25-second budget and may fall back to escaped plain text without
 aborting the research search.
 
+Compilation checks the active deadline before and after native compilation and
+between Unicode initialization blocks. Completed blocks are cached, so later
+renders retain progress if a short budget interrupts cold initialization. A
+single native compilation remains non-interruptible in process; research-worker
+isolation and resource limits still apply. Lab snippets fall back to plain text
+if either compilation or matching exhausts their budget.
+
 Windows uses [Job Object memory limits](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_extended_limit_information).
 Linux uses [RLIMIT_DATA](https://man7.org/linux/man-pages/man2/getrlimit.2.html),
 which includes anonymous mmap allocation on Linux 4.7 and newer, plus the parent

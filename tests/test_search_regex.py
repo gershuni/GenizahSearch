@@ -3,6 +3,7 @@
 import asyncio
 import concurrent.futures
 import re
+import sys
 import threading
 import time
 from contextlib import nullcontext
@@ -10,6 +11,142 @@ from contextlib import nullcontext
 import pytest
 
 from shared import search_regex
+
+
+def test_short_budget_initialization_retains_progress(monkeypatch):
+    search_regex._word_predicates.cache_clear()
+    search_regex._word_delta_block.cache_clear()
+    findall = search_regex._regex.findall
+    scans = [0]
+    clock = [0.0]
+
+    def slow_findall(*args, **kwargs):
+        scans[0] += 1
+        result = findall(*args, **kwargs)
+        clock[0] += 0.0025
+        return result
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(search_regex._regex, 'findall', slow_findall)
+            patch.setattr(search_regex.time, 'monotonic', lambda: clock[0])
+            expirations = 0
+            for _ in range(100):
+                try:
+                    with search_regex.search_budget(0.02):
+                        pattern = search_regex.compile(r'\w+')
+                    break
+                except search_regex.SearchBudgetExceeded:
+                    expirations += 1
+            else:
+                pytest.fail('short-budget renders never finish initialization')
+            assert expirations > 1
+            blocks = len(range(0, sys.maxunicode + 1, search_regex._UNICODE_BLOCK_SIZE))
+            assert scans[0] == 2 * blocks  # No completed block was scanned twice.
+            assert pattern.fullmatch('abc_123')
+            assert not pattern.fullmatch('\u0307')
+    finally:
+        search_regex._word_predicates.cache_clear()
+        search_regex._word_delta_block.cache_clear()
+
+
+@pytest.mark.parametrize('pattern', [r'[\w[:alpha:]]', r'[^\w[:alpha:]]', r'[\W[:digit:]]'])
+@pytest.mark.parametrize('flags', [0, re.IGNORECASE, re.ASCII])
+def test_literal_opening_bracket_in_mixed_class(pattern, flags):
+    text = '[] a] 3] :] \u0307] !]'
+    old, new = re.compile(pattern, flags), search_regex.compile(pattern, flags)
+    assert old.sub('<hit>', text) == new.sub('<hit>', text)
+
+
+@pytest.mark.parametrize('pattern', [r'\b', r'\B'])
+@pytest.mark.parametrize('flags', [0, re.IGNORECASE, re.ASCII])
+def test_unicode_boundaries_and_search_bounds(pattern, flags):
+    text = ''.join(map(chr, range(sys.maxunicode + 1)))
+    old, new = re.compile(pattern, flags), search_regex.compile(pattern, flags)
+    assert old.sub('|', text) == new.sub('|', text)
+    for text in ('ax', '\u0307x', 'a\U00011f02x', ''):
+        for pos in range(len(text) + 1):
+            for end in range(pos, len(text) + 1):
+                expected, actual = old.search(text, pos, end), new.search(text, pos, end)
+                assert (expected.span() if expected else None) == (actual.span() if actual else None)
+
+
+def test_ignorecase_keeps_simple_case_folding():
+    assert search_regex.compile('\u00df', re.I).search('ss') is None
+
+
+@pytest.mark.parametrize('pattern', [r'[\W\u0130]', r'(?i:[\W\u0130])', r'(?a:[\W\u0130])'])
+def test_mixed_class_case_folding_does_not_change_nonword_membership(pattern):
+    old, new = re.compile(pattern, re.I), search_regex.compile(pattern, re.I)
+    for char in ('\u0345', '\u0307', '\u200c', '\u0130', '!', '\n', 'a'):
+        expected, actual = old.fullmatch(char), new.fullmatch(char)
+        assert (expected.span() if expected else None) == (actual.span() if actual else None)
+
+
+@pytest.mark.parametrize('pattern', [r'[\W\u0130I\u0131]+', r'[\w\u0130I\u0131]+'])
+def test_case_insensitive_mixed_class_over_entire_unicode_database(pattern):
+    # Spell out Turkish-I equivalents: the dependency's literal folding of İ
+    # alone already differs from re in the pre-PR adapter. This checks that
+    # folding the residual cannot alter word/nonword membership anywhere.
+    text = ''.join(map(chr, range(sys.maxunicode + 1)))
+    assert search_regex.compile(pattern, re.I).sub('', text) == re.sub(pattern, '', text, flags=re.I)
+
+
+@pytest.mark.parametrize('flags', [0, re.IGNORECASE])
+def test_word_membership_over_entire_unicode_database(flags):
+    # Includes surrogates, newly assigned letters, combining marks and numbers.
+    text = ''.join(map(chr, range(sys.maxunicode + 1)))
+    for pattern in (r'\w+', r'\W+', r"[^\w\u0590-\u05FF']+", r'[\W\u0590-\u05FF]+'):
+        assert search_regex.compile(pattern, flags).sub('', text) == re.sub(pattern, '', text, flags=flags)
+
+
+@pytest.mark.parametrize('pattern', [
+    r'[\w-]+', r'[-\w]+', r'[\w^]+', r'[]\w]+', r'[^]\w-]+',
+    r'[\w\W]+', r'[^\w\W]+', r'[a-z\w]+', r'[\W\b]+',
+    r'[\w\N{LATIN CAPITAL LETTER A}]+', r'(?i:[\wA-Z]+)',
+    r'(?a:[\w-]+)(?u:[\w-]+)', r'(?x:[\w #]+)',
+    r'(?P<a>[\w-]+)([\W]+)(?P=a)', r'(?<=[\w-])x',
+])
+def test_mixed_classes_preserve_spans_captures_and_replacements(pattern):
+    text = '-A_a^]x \u0307\u05D0\u2163\u00B2#\n\x08\U00011F02 A_a A_a'
+    for flags in (0, re.IGNORECASE, re.ASCII):
+        old, new = re.compile(pattern, flags), search_regex.compile(pattern, flags)
+        assert new.groups == old.groups
+        assert new.groupindex == old.groupindex
+        for pos, end in ((0, len(text)), (1, 10), (4, 4)):
+            expected, actual = old.search(text, pos, end), new.search(text, pos, end)
+            assert ((expected.span(), expected.groups(), expected.groupdict()) if expected else None) == (
+                (actual.span(), actual.groups(), actual.groupdict()) if actual else None
+            )
+        assert old.sub(lambda match: '<' + match.group() + '>', text) == new.sub(
+            lambda match: '<' + match.group() + '>', text
+        )
+
+
+def test_expired_budget_stops_before_native_compilation(monkeypatch):
+    with search_regex.search_budget(1):
+        deadline = search_regex._deadline.get()
+        monkeypatch.setattr(search_regex.time, 'monotonic', lambda: deadline + 1)
+        monkeypatch.setattr(search_regex._regex, 'compile', lambda *a, **k: pytest.fail('compiled after deadline'))
+        with pytest.raises(search_regex.SearchBudgetExceeded):
+            search_regex.compile('not cached')
+        monkeypatch.undo()
+
+
+def test_budget_expiring_during_compilation_is_reported(monkeypatch):
+    original = search_regex._regex.compile
+    with search_regex.search_budget(1):
+        deadline = search_regex._deadline.get()
+
+        def delayed_compile(*args, **kwargs):
+            result = original(*args, **kwargs)
+            monkeypatch.setattr(search_regex.time, 'monotonic', lambda: deadline + 1)
+            return result
+
+        monkeypatch.setattr(search_regex._regex, 'compile', delayed_compile)
+        with pytest.raises(search_regex.SearchBudgetExceeded):
+            search_regex.compile('also not cached')
+        monkeypatch.undo()
 
 
 @pytest.mark.parametrize("pattern", [
