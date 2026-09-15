@@ -2787,12 +2787,16 @@ class SearchEngine:
                     restrict_uids.add(page['uid'])
 
         materialize_started = time.perf_counter()
+        document_load_seconds = 0.0
+        candidate_match_seconds = 0.0
         try:
             for i, (score, doc_addr) in enumerate(hits):
                 if progress_callback and i % 5 == 0:
                     progress_callback(i, total_hits)
                 try:
+                    load_started = time.perf_counter()
                     doc = self.searcher.doc(doc_addr)
+                    document_load_seconds += time.perf_counter() - load_started
 
                     # Pre-search filter: skip manuscripts outside the restrict set
                     if restrict_uids is not None:
@@ -2808,7 +2812,11 @@ class SearchEngine:
                     match_content = content if _query_has_brackets(query_str) else _strip_brackets(content)
 
                     # Check for match before any heavy parsing
-                    match_obj = regex.search(match_content)
+                    match_started = time.perf_counter()
+                    try:
+                        match_obj = regex.search(match_content)
+                    finally:
+                        candidate_match_seconds += time.perf_counter() - match_started
                     if not match_obj:
                         regex_filtered_count += 1
                         continue
@@ -2963,9 +2971,11 @@ class SearchEngine:
         LOGGER.debug(f"Results after dedup & filtering: {len(deduped)}")
         LOGGER.info(
             "search_perf mode=%s scope=%s candidates=%d regex_kept=%d final=%d "
-            "tantivy_ms=%.0f materialize_ms=%.0f local_merge_ms=%.0f total_ms=%.0f",
+            "tantivy_ms=%.0f materialize_ms=%.0f doc_load_ms=%.0f candidate_match_ms=%.0f "
+            "local_merge_ms=%.0f total_ms=%.0f",
             mode, corpus_scope, total_hits, len(results), len(deduped),
-            tantivy_elapsed_ms, materialize_elapsed_ms, local_merge_elapsed_ms,
+            tantivy_elapsed_ms, materialize_elapsed_ms,
+            document_load_seconds * 1000, candidate_match_seconds * 1000, local_merge_elapsed_ms,
             (time.perf_counter() - search_started) * 1000.0,
         )
 

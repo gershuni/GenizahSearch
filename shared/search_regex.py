@@ -237,12 +237,21 @@ def _preserve_word_classes(pattern, flags):
 class Pattern:
     def __init__(self, compiled, original, flags):
         self._compiled = compiled
+        self._stdlib = re.compile(original, flags)
         self.pattern = original
         self.flags = flags
 
     def _call(self, method, *args, **kwargs):
+        # Disposable workers are supervised by another process, which can kill
+        # them even during native matching. Use Python's original matcher there:
+        # large transcriptions with variant alternations are much slower in
+        # regex. Explicit nested budgets (e.g. highlighting) still need regex's
+        # interruptible operations, as do all calls in the web/desktop process.
+        timeout = _match_timeout()
+        if _isolated.get() and timeout is None:
+            return getattr(self._stdlib, method.__name__)(*args, **kwargs)
         try:
-            return method(*args, concurrent=True, timeout=_match_timeout(), **kwargs)
+            return method(*args, concurrent=True, timeout=timeout, **kwargs)
         except TimeoutError as exc:
             raise SearchBudgetExceeded() from exc
 

@@ -26,6 +26,12 @@ request = pickle.loads((root / 'input.pkl').read_bytes())
 (root / 'progress.json').write_text(json.dumps({'status': 'Searching', 'progress': [1, 2]}))
 if request.get('crash'):
     os._exit(9)
+if request.get('native_match'):
+    from shared.search_regex import compile, isolated_matching
+    pattern = compile('(a|aa)+$')
+    with isolated_matching():
+        (root / 'progress.json').write_text(json.dumps({'status': 'Native matching', 'progress': [0, 1]}))
+        pattern.search('a' * 10000 + '!')
 if request.get('block'):
     while True:
         time.sleep(0.01)
@@ -130,9 +136,10 @@ def test_fifo_queue_and_queued_cancellation(queue):
     assert third.future.result(timeout=5)['value']['query'] == 'third'
 
 
-def test_stop_kills_busy_process_before_reusing_slot(queue):
-    job = queue.submit({'block': True})
-    wait_for(lambda: job.status == 'Searching')
+@pytest.mark.parametrize('native', [False, True])
+def test_stop_kills_busy_process_before_reusing_slot(queue, native):
+    job = queue.submit({'native_match': True} if native else {'block': True})
+    wait_for(lambda: job.status == ('Native matching' if native else 'Searching'))
     pid = job.process.pid
     queue.cancel(job)
     with pytest.raises(InterruptedError):

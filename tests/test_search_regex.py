@@ -5,6 +5,7 @@ import concurrent.futures
 import re
 import threading
 import time
+from contextlib import nullcontext
 
 import pytest
 
@@ -23,15 +24,17 @@ from shared import search_regex
     "", "שלום עולם", "צ\u0307מאן צ'מאן", "שָׁלוֹם ]א[", "abc_12 Ⅳ²\u200c!",
     "abc abc", "abc#א", "x[]w\\", "éΩא 123",
 ])
-def test_word_and_hebrew_span_parity(pattern, text):
+@pytest.mark.parametrize('isolated', [False, True])
+def test_word_and_hebrew_span_parity(pattern, text, isolated):
     for flags in (0, re.IGNORECASE, re.ASCII):
         old = re.compile(pattern, flags)
         new = search_regex.compile(pattern, flags)
-        old_match, new_match = old.search(text), new.search(text)
-        assert (old_match.span() if old_match else None) == (
-            new_match.span() if new_match else None
-        )
-        assert old.sub("<hit>", text) == new.sub("<hit>", text)
+        with search_regex.isolated_matching() if isolated else nullcontext():
+            old_match, new_match = old.search(text), new.search(text)
+            assert (old_match.span() if old_match else None) == (
+                new_match.span() if new_match else None
+            )
+            assert old.sub("<hit>", text) == new.sub("<hit>", text)
         assert new.pattern == old.pattern
         assert new.flags == old.flags
 
@@ -43,6 +46,19 @@ def test_real_pathological_search_stops(monkeypatch):
     with pytest.raises(search_regex.SearchBudgetExceeded):
         pattern.search("a" * 10000 + "!")
     assert time.monotonic() - started < 1
+
+
+def test_isolated_pattern_retains_nested_and_outside_timeouts(monkeypatch):
+    monkeypatch.setenv('GENIZAH_REGEX_TIMEOUT_SECONDS', '0.025')
+    with search_regex.isolated_matching():
+        pattern = search_regex.compile(r'(a|aa)+$')
+        with pytest.raises(search_regex.SearchBudgetExceeded):
+            with search_regex.search_budget(0.025):
+                pattern.search('a' * 10000 + '!')
+        assert pattern.fullmatch('aaaa').span() == (0, 4)
+        assert pattern.match('aaaa', 1, 3).span() == (1, 3)
+    with pytest.raises(search_regex.SearchBudgetExceeded):
+        pattern.search('a' * 10000 + '!')
 
 
 def test_deadline_caps_many_successful_operations(monkeypatch):

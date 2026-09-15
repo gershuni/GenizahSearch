@@ -80,7 +80,10 @@ def main(directory):
             return
         last[0] = now
         progress = values if len(values) == 2 and all(isinstance(v, (int, float)) for v in values) else (0, 0)
-        write_progress(root, {'status': 'Searching', 'progress': progress})
+        status = ('Checking candidate texts'
+                  if payload['kind'] == 'search' and payload['method'] == 'execute_search'
+                  else 'Searching')
+        write_progress(root, {'status': status, 'progress': progress})
 
     from shared.config import Config
     from shared.local_index_leases import index_leases
@@ -139,6 +142,7 @@ def run_query(root, payload, report):
         if arguments.get('restrict_sys_ids') is not None:
             arguments['restrict_sys_ids'] = set(arguments['restrict_sys_ids'])
         arguments['progress_callback'] = report
+        write_progress(root, {'status': 'Preparing search', 'progress': (0, 0)})
         with isolated_matching():
             value = getattr(engine, payload['method'])(**arguments)
         result = {'value': value, 'downgrade': _consume_last_responsa_downgrade(),
@@ -153,6 +157,7 @@ def run_query(root, payload, report):
         result = {'error': 'The search worker could not complete this query. No complete results were returned.'}
     # Transcriptions and HTML contain considerable repetition. Stream the
     # transfer compressed without allocating another full serialized copy.
+    write_progress(root, {'status': 'Saving search results', 'progress': (0, 0)})
     with gzip.open(root / 'output.pkl', 'wb', compresslevel=1) as stream:
         measured = MeasuredWriter(stream, int(os.environ['GENIZAH_RESEARCH_MEMORY_MB']) * 1024**2)
         pickle.dump(result, measured, protocol=pickle.HIGHEST_PROTOCOL)
