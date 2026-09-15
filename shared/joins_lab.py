@@ -664,7 +664,7 @@ def _match_line(lines: list, pattern: Optional[str]) -> int:
     """Return the index of the first line whose content matches the pattern.
 
     Returns -1 if pattern is None/empty, if no line matches, or if the
-    pattern is malformed (re.error swallowed — no raise).
+    pattern is malformed or its compilation/matching budget expires.
 
     Case-insensitive match (re.IGNORECASE).
 
@@ -674,7 +674,7 @@ def _match_line(lines: list, pattern: Optional[str]) -> int:
         return -1
     try:
         rx = compile_search_regex(pattern, re.IGNORECASE)
-    except re.error:
+    except (re.error, SearchBudgetExceeded):
         return -1
     try:
         with search_budget(seconds=0.25):
