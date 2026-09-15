@@ -369,6 +369,8 @@ def _pgp_sync(sys_id: str, p_num: int) -> Optional[dict]:
         'inferred_date_display': doc.get('inferred_date_display'),
         'pgpid':                 doc.get('pgpid'),
         'pgp_url':               doc.get('pgp_url'),
+        'transcription_source':  doc.get('transcription_source'),
+        'doc_relation':          doc.get('doc_relation'),
         'page_section_text':     page_section_text,
     }
 

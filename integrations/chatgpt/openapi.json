@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "GenizahSearch Research Actions",
-    "version": "0.3.0",
+    "version": "0.4.0",
     "description": "Read-only Cairo Genizah research pilot: discover features, search manuscripts, browse evidence, and find passage parallels."
   },
   "servers": [
@@ -174,6 +174,93 @@
               "default": 4000
             },
             "description": "Start with 4000 characters. A snippet remains a snippet even if not truncated."
+          }
+        ]
+      }
+    },
+    "/manuscript-details": {
+      "get": {
+        "operationId": "getManuscriptDetails",
+        "summary": "Read catalog records, bibliography or edition/translation credits for a returned sys_id. Choose a section; follow next_offset with the same snapshot. Local data only: missing records do not prove absence. References are leads, not proof a passage was published.",
+        "description": "Read catalog records, bibliography or edition/translation credits for a returned sys_id. Choose a section; follow next_offset with the same snapshot. Local data only: missing records do not prove absence. References are leads, not proof a passage was published.",
+        "x-openai-isConsequential": false,
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManuscriptDetails"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Request failed. Preserve HTTP status, error code, and Retry-After when available. Proxy errors may be non-JSON.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Suggested delay in seconds or HTTP date."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sys_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Copy the manuscript sys_id from search or browse; never guess."
+          },
+          {
+            "name": "section",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "fjms_catalog",
+                "fjms_bibliography",
+                "fjms_catalog_refs",
+                "nli_catalog",
+                "nli_bibliography",
+                "pgp_sources",
+                "fgp_sources"
+              ]
+            },
+            "description": "FJMS catalog detail/references and bibliography; NLI cached catalog/MARC bibliography; PGP/FGP edition and translation credits (no text). Sources are separate, not merged."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            },
+            "description": "Start at 0. For more, copy next_offset; null ends this section."
+          },
+          {
+            "name": "snapshot",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Omit initially; copy on subsequent pages. Expires within 10 minutes or sooner if evicted. On 409 restart the section; do not mix snapshots."
           }
         ]
       }
@@ -903,6 +990,131 @@
           "warnings"
         ],
         "additionalProperties": true
+      },
+      "ManuscriptDetails": {
+        "type": "object",
+        "properties": {
+          "sys_id": {
+            "type": "string"
+          },
+          "section": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "availability": {
+            "type": "string",
+            "enum": [
+              "local_records",
+              "local_cache",
+              "unavailable",
+              "not_cached"
+            ]
+          },
+          "generated_at": {
+            "type": "string"
+          },
+          "snapshot": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "returned": {
+            "type": "integer"
+          },
+          "available": {
+            "type": "integer"
+          },
+          "next_offset": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "records": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "category": {
+                  "type": "string"
+                },
+                "data": {},
+                "field": {
+                  "type": "string"
+                },
+                "value": {},
+                "citation": {},
+                "source_scholar": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "doc_relation": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "pgpid": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "source_credit": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "source_credit_he": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "source_credit_en": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "attribution": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Warning"
+            }
+          }
+        },
+        "required": [
+          "sys_id",
+          "section",
+          "provider",
+          "availability",
+          "generated_at",
+          "snapshot",
+          "offset",
+          "returned",
+          "available",
+          "next_offset",
+          "records",
+          "warnings"
+        ],
+        "additionalProperties": false
       },
       "Capabilities": {
         "type": "object",

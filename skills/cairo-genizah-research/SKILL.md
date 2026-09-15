@@ -151,8 +151,9 @@ Error code → plain-text mapping:
 
 ## Throttle (SKILL-06)
 
-All scripts share `scripts/throttle.py` with three independent token buckets:
-`search`, `browse`, `parallels`. Default 96 rpm per bucket; burst 5. State
+All scripts share `scripts/throttle.py` with independent token buckets:
+`search`, `browse`, `parallels` (default 96 rpm, burst 5), and `details`
+(at most 24 rpm, burst 1). State
 persists in `state/throttle.json` under a file lock. You do not call the
 throttle directly — every endpoint script acquires its bucket internally.
 
@@ -206,3 +207,27 @@ python scripts/browse.py --sys-id 990053090560205171 --p-num 2 --volume-ie IE149
 
 Search and parallels support library inclusion/exclusion via `--library CUL,JTS`
 and `--library-mode include|exclude`.
+
+## Catalog, bibliography and source credits
+
+After resolving a manuscript ID, use `scripts/details.py` to fetch the relevant
+source section. For example:
+
+```bash
+python scripts/details.py --sys-id RETURNED_SYS_ID --section fjms_bibliography
+python scripts/details.py --sys-id RETURNED_SYS_ID --section nli_bibliography
+python scripts/details.py --sys-id RETURNED_SYS_ID --section pgp_sources
+# Continue using the actual response values:
+python scripts/details.py --sys-id RETURNED_SYS_ID --section fjms_bibliography --offset NEXT_OFFSET --snapshot RETURNED_SNAPSHOT
+```
+
+The script requests one page only. Follow `next_offset` with the same snapshot;
+null ends that section. Read [references/api_contract.md](references/api_contract.md)
+for sections, availability states and error handling. The `details` throttle bucket
+is separate, capped at 24 requests/minute with burst 1; respect server Retry-After.
+
+Preserve publication authors, titles, page references, catalog sources and
+mention/edition/translation roles. Match credits to the document/page actually
+used; browse's PGP transcription_source credits the selected text. Local empty or
+uncached results do not establish absence, and references alone do not prove the
+exact passage was published. Preserve these credits inside generated research files.

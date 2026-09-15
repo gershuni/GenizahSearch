@@ -95,3 +95,41 @@ Report failures and continue independent work without automatic retry loops.
 Retry-After can accompany 429 or 503. Scripts self-throttle each endpoint.
 Chunk requests allow 130 seconds for the documented 110-second server ceiling;
 passage's documented ceiling is 30 seconds. Live capabilities may differ.
+
+## Manuscript details (catalog, bibliography, credits)
+
+`details.py` calls `GET /api/chatgpt/manuscript-details`. This URL is usable by
+ordinary HTTP clients; no ChatGPT account is required. It requires the newer
+details integration to be deployed. A 404 on an older server is not an empty result.
+
+Required: `--sys-id` copied from a search/browse result and `--section`:
+
+- `fjms_catalog`: structured catalog detail and record/source associations.
+- `fjms_bibliography`: publication references, mention type, page/volume details.
+- `fjms_catalog_refs`: catalog references.
+- `nli_catalog`: cached MARC catalog fields.
+- `nli_bibliography`: raw cached MARC citations.
+- `pgp_sources`, `fgp_sources`: edition/translation credits and scope; no full text.
+
+Returns `sys_id`, `section`, `provider`, `availability`, `generated_at`, `snapshot`,
+`offset`, `returned`, `available`, `next_offset`, `records`, and `warnings`. Unlike
+the main endpoints, there is no schema_version/results/count/total. Record fields
+vary by source; preserve them. `available` is a local section count, not a census.
+Availability is local_records/local_cache/unavailable/not_cached. In particular,
+NLI missing cache means no local information, not no bibliography; no remote
+fetch is triggered. Legacy lookup failures can also produce empty lists.
+
+One invocation fetches one page (at most ten records, bounded bytes). Use
+`--offset NEXT_OFFSET --snapshot RETURNED_SNAPSHOT` for the next page and stop at
+null. Snapshots last at most ten minutes and can be evicted sooner. On 409
+`details_expired`, restart at offset 0 without snapshot; do not mix versions.
+For 503 `details_pending` or `details_busy`, honor retry_after before repeating
+the request. Pending work is shared. For 429 also honor retry_after. Oversized
+sections/records fail with details_too_large; use the website instead of retrying.
+The script preserves HTTP status and Retry-After in error.http_status/retry_after,
+including non-JSON failures, and never automatically retries or fetches all pages.
+
+Use browse metadata.pgp.transcription_source/doc_relation for its selected PGP
+text. Source lists cover the manuscript: match pgpid/page_info/folio scope before
+assigning a particular scholar's credit. Bibliography entries are research leads,
+not proof that the exact passage was published.

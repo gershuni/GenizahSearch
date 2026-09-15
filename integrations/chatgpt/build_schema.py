@@ -97,6 +97,22 @@ def build():
             'text_truncated': boolean, 'metadata': free_object, 'image': free_object,
             'warnings': array(ref('Warning')),
         }, ('schema_version', 'locator', 'text', 'text_source', 'text_truncated', 'warnings'), additionalProperties=True),
+        'ManuscriptDetails': obj({
+            'sys_id': string, 'section': string, 'provider': string,
+            'availability': {'type': 'string', 'enum': ['local_records', 'local_cache', 'unavailable', 'not_cached']},
+            'generated_at': string, 'snapshot': string, 'offset': integer,
+            'returned': integer, 'available': integer,
+            'next_offset': {'type': ['integer', 'null']},
+            'records': array(obj({
+                'category': string, 'data': {}, 'field': string, 'value': {},
+                'citation': {}, 'source_scholar': nullable_string,
+                'doc_relation': nullable_string, 'pgpid': {'type': ['integer', 'null']},
+                'source_credit': nullable_string, 'source_credit_he': nullable_string,
+                'source_credit_en': nullable_string, 'attribution': nullable_string,
+            }, additionalProperties=True)),
+            'warnings': array(ref('Warning')),
+        }, ('sys_id', 'section', 'provider', 'availability', 'generated_at', 'snapshot',
+            'offset', 'returned', 'available', 'next_offset', 'records', 'warnings'), additionalProperties=False),
         'Capabilities': obj({
             'schema_version': integer, 'api_version': string, 'endpoints': array(string),
             'search_modes': array(string), 'features': obj({'passage': boolean, 'passage_multi_witness': boolean}),
@@ -143,15 +159,29 @@ def build():
                            'description': 'Main matches or demoted/filtered matches. Each collection has its own page sequence.'}]
     poll['responses']['202'] = {'description': 'Still running; poll this same job again.',
                                 'content': {'application/json': {'schema': ref('PendingJob')}}}
+    details = operation('getManuscriptDetails', 'Read catalog records, bibliography or edition/translation credits for a returned sys_id. Choose a section; follow next_offset with the same snapshot. Local data only: missing records do not prove absence. References are leads, not proof a passage was published.', 'ManuscriptDetails')
+    details['parameters'] = [
+        {'name': 'sys_id', 'in': 'query', 'required': True, 'schema': string,
+         'description': 'Copy the manuscript sys_id from search or browse; never guess.'},
+        {'name': 'section', 'in': 'query', 'required': True, 'schema': {'type': 'string', 'enum': [
+            'fjms_catalog', 'fjms_bibliography', 'fjms_catalog_refs', 'nli_catalog',
+            'nli_bibliography', 'pgp_sources', 'fgp_sources']},
+         'description': 'FJMS catalog detail/references and bibliography; NLI cached catalog/MARC bibliography; PGP/FGP edition and translation credits (no text). Sources are separate, not merged.'},
+        {'name': 'offset', 'in': 'query', 'required': False, 'schema': {'type': 'integer', 'minimum': 0, 'default': 0},
+         'description': 'Start at 0. For more, copy next_offset; null ends this section.'},
+        {'name': 'snapshot', 'in': 'query', 'required': False, 'schema': string,
+         'description': 'Omit initially; copy on subsequent pages. Expires within 10 minutes or sooner if evicted. On 409 restart the section; do not mix snapshots.'},
+    ]
     return {
         'openapi': '3.1.0',
-        'info': {'title': 'GenizahSearch Research Actions', 'version': '0.3.0',
+        'info': {'title': 'GenizahSearch Research Actions', 'version': '0.4.0',
                  'description': 'Read-only Cairo Genizah research pilot: discover features, search manuscripts, browse evidence, and find passage parallels.'},
         'servers': [{'url': 'https://genizahsearch.com/api/chatgpt'}], 'security': [],
         'paths': {
             '/capabilities': {'get': operation('getGenizahCapabilities', 'Check available search modes and passage features once before research. Runtime errors remain authoritative.', 'Capabilities')},
             '/search/jobs': {'post': search},
             '/browse': {'get': browse},
+            '/manuscript-details': {'get': details},
             '/parallels/jobs': {'post': parallels},
             '/jobs/{job_id}': {'get': poll},
         }, 'components': {'schemas': schemas},
