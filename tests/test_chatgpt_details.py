@@ -10,7 +10,6 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
-from jsonschema import Draft202012Validator
 import pytest
 
 from shared.api_errors import APIError
@@ -29,6 +28,10 @@ BASE = '/chatgpt/manuscript-details?sys_id=99001&section=fjms_bibliography'
 
 
 def test_complete_pages_preserve_citations_and_query_once():
+    # Other CI lanes collect this module before marker deselection, but only
+    # the main test lane installs the schema-validation dependency.
+    from jsonschema import Draft202012Validator
+
     calls = []
     rows = [{'citation': f'Author {i}, title; pages 12–19', 'mention_type': 'Discussion'} for i in range(23)]
     def loader(*args):
