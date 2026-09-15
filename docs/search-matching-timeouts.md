@@ -55,6 +55,35 @@ wait, and concurrent browse response times before increasing concurrency.
 Each query starts a fresh worker and reloads engine metadata, adding startup
 latency in exchange for releasing its memory and native threads after completion.
 
+## Matching in supervised workers
+
+Unbounded matching inside a disposable Linux worker uses Python's original `re`
+matcher after arming `PR_SET_PDEATHSIG` with `SIGKILL` and checking that the parent
+has not changed. This makes parent-death cleanup independent of the worker's
+GIL. If that protection is unavailable or fails, the worker retains the
+GIL-releasing matcher and its watchdog thread. The parent can terminate a live
+worker even if native matching cannot check a cooperative deadline.
+Matching in the web/desktop process, and explicit
+nested budgets such as result highlighting, retain the interruptible `regex`
+matcher. Selecting the matcher happens for each operation, so a pattern created
+inside a worker does not disable deadlines when used outside that context.
+
+A standalone, low-priority diagnostic on the production index on 2026-09-15
+used `לא יתזוג עליהא`, variants, gap 0, and the saved 30-pair settings. It
+retrieved 920 candidates containing 85.9 million characters. Loading and
+stripping brackets took 1.14 seconds; matching took 28.32 seconds with the
+deployed adapter and 3.60 seconds with the supervised-worker path. Every first
+match span (including absent matches) was identical, with no diagnostic timeouts.
+These are candidate-matching timings, not end-to-end API latency. The earlier
+279-candidate, 514-second logged run could not be identified conclusively with
+this request and must not be presented as this benchmark's baseline.
+
+The search performance log retains `materialize_ms` and adds `doc_load_ms`
+and `candidate_match_ms` for the initial candidate checks. Highlighting,
+metadata formatting, and other per-hit work remain in `materialize_ms`.
+Workers report preparing, checking candidate texts, and saving results through
+the existing progress channel; polling does not start another computation.
+
 ## Background API
 
 POST `/api/search/jobs` or `/api/parallels/jobs` with the same JSON body as the

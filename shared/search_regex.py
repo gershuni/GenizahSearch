@@ -29,21 +29,25 @@ class SearchBudgetExceeded(TimeoutError):
 
 _deadline = ContextVar("search_regex_deadline", default=None)
 _isolated = ContextVar("search_regex_isolated", default=False)
+_native_matching = ContextVar("search_regex_native_matching", default=False)
 
 
 @contextmanager
-def isolated_matching():
+def isolated_matching(*, native=False):
     """Only for disposable, externally supervised search subprocesses.
 
     Their parent enforces resource limits and can kill native work, so elapsed
     matching time need not reject a legitimate query. UI highlighting may still
     establish its own explicit short budget inside this context.
+    Set native=True only after installing GIL-independent parent-death protection.
     """
     token = _isolated.set(True)
+    native_token = _native_matching.set(native)
     try:
         with search_budget(0):
             yield
     finally:
+        _native_matching.reset(native_token)
         _isolated.reset(token)
 
 
@@ -321,12 +325,21 @@ def _preserve_word_classes(pattern, flags):
 class Pattern:
     def __init__(self, compiled, original, flags):
         self._compiled = compiled
+        self._stdlib = re.compile(original, flags)
         self.pattern = original
         self.flags = flags
 
     def _call(self, method, *args, **kwargs):
+        # Disposable workers are supervised by another process, which can kill
+        # them even during native matching. Use Python's original matcher there:
+        # large transcriptions with variant alternations are much slower in
+        # regex. Explicit nested budgets (e.g. highlighting) still need regex's
+        # interruptible operations, as do all calls in the web/desktop process.
+        timeout = _match_timeout()
+        if _isolated.get() and _native_matching.get() and timeout is None:
+            return getattr(self._stdlib, method.__name__)(*args, **kwargs)
         try:
-            return method(*args, concurrent=True, timeout=_match_timeout(), **kwargs)
+            return method(*args, concurrent=True, timeout=timeout, **kwargs)
         except TimeoutError as exc:
             raise SearchBudgetExceeded() from exc
 

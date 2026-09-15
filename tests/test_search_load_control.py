@@ -1,5 +1,6 @@
 """Focused tests for the process-wide public-search load budgets."""
 import asyncio
+import ast
 from pathlib import Path
 
 from web.search_load_control import (
@@ -75,5 +76,16 @@ def test_result_cards_defer_optional_joins_and_hidden_thumbnail_fetches():
 
 def test_core_search_emits_query_free_timing_metrics():
     source = Path('shared/search_engine.py').read_text(encoding='utf-8')
-    assert '"search_perf mode=%s scope=%s candidates=%d regex_kept=%d final=%d "' in source
-    assert 'tantivy_ms=%.0f materialize_ms=%.0f local_merge_ms=%.0f total_ms=%.0f' in source
+    calls = [node for node in ast.walk(ast.parse(source))
+             if isinstance(node, ast.Call) and node.args
+             and isinstance(node.args[0], ast.Constant)
+             and isinstance(node.args[0].value, str)
+             and node.args[0].value.startswith('search_perf ')]
+    assert len(calls) == 1
+    message = calls[0].args[0].value
+    assert message.startswith('search_perf mode=%s scope=%s candidates=%d regex_kept=%d final=%d ')
+    for metric in ('tantivy_ms', 'materialize_ms', 'doc_load_ms',
+                   'candidate_match_ms', 'local_merge_ms', 'total_ms'):
+        assert f'{metric}=%.0f' in message
+    assert not any(isinstance(node, ast.Name) and node.id in {'query', 'query_str'}
+                   for arg in calls[0].args[1:] for node in ast.walk(arg))
