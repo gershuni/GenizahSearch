@@ -18,7 +18,7 @@ def queue(tmp_path, monkeypatch):
     monkeypatch.setenv('GENIZAH_RESEARCH_QUEUE_SIZE', '2')
     monkeypatch.setenv('GENIZAH_WEB_RESERVE_MB', '128')
     script = tmp_path / 'worker.py'
-    script.write_text('''
+    script.write_text('import sys\nsys.path.insert(0, ' + repr(str(Path(__file__).resolve().parents[1])) + ')\n' + '''
 import gzip, json, os, pickle, sys, time
 from pathlib import Path
 root = Path(sys.argv[1])
@@ -29,7 +29,7 @@ if request.get('crash'):
 if request.get('native_match'):
     from shared.search_regex import compile, isolated_matching
     pattern = compile('(a|aa)+$')
-    with isolated_matching():
+    with isolated_matching(native=True):
         (root / 'progress.json').write_text(json.dumps({'status': 'Native matching', 'progress': [0, 1]}))
         pattern.search('a' * 10000 + '!')
 if request.get('block'):

@@ -57,9 +57,13 @@ latency in exchange for releasing its memory and native threads after completion
 
 ## Matching in supervised workers
 
-Unbounded matching inside a disposable worker uses Python's original `re`
-matcher. The parent can terminate that process even if native matching cannot
-check a cooperative deadline. Matching in the web/desktop process, and explicit
+Unbounded matching inside a disposable Linux worker uses Python's original `re`
+matcher after arming `PR_SET_PDEATHSIG` with `SIGKILL` and checking that the parent
+has not changed. This makes parent-death cleanup independent of the worker's
+GIL. If that protection is unavailable or fails, the worker retains the
+GIL-releasing matcher and its watchdog thread. The parent can terminate a live
+worker even if native matching cannot check a cooperative deadline.
+Matching in the web/desktop process, and explicit
 nested budgets such as result highlighting, retain the interruptible `regex`
 matcher. Selecting the matcher happens for each operation, so a pattern created
 inside a worker does not disable deadlines when used outside that context.

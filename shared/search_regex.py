@@ -28,21 +28,25 @@ class SearchBudgetExceeded(TimeoutError):
 
 _deadline = ContextVar("search_regex_deadline", default=None)
 _isolated = ContextVar("search_regex_isolated", default=False)
+_native_matching = ContextVar("search_regex_native_matching", default=False)
 
 
 @contextmanager
-def isolated_matching():
+def isolated_matching(*, native=False):
     """Only for disposable, externally supervised search subprocesses.
 
     Their parent enforces resource limits and can kill native work, so elapsed
     matching time need not reject a legitimate query. UI highlighting may still
     establish its own explicit short budget inside this context.
+    Set native=True only after installing GIL-independent parent-death protection.
     """
     token = _isolated.set(True)
+    native_token = _native_matching.set(native)
     try:
         with search_budget(0):
             yield
     finally:
+        _native_matching.reset(native_token)
         _isolated.reset(token)
 
 
@@ -248,7 +252,7 @@ class Pattern:
         # regex. Explicit nested budgets (e.g. highlighting) still need regex's
         # interruptible operations, as do all calls in the web/desktop process.
         timeout = _match_timeout()
-        if _isolated.get() and timeout is None:
+        if _isolated.get() and _native_matching.get() and timeout is None:
             return getattr(self._stdlib, method.__name__)(*args, **kwargs)
         try:
             return method(*args, concurrent=True, timeout=timeout, **kwargs)
