@@ -86,3 +86,19 @@ Automatic text can contain errors. Check significant readings against photograph
 Catalog descriptions do not prove authorship or publication. Truncation warnings
 mean results are not exhaustive. See [API contract](references/api_contract.md)
 and [public API docs](https://genizahsearch.com/api/docs).
+
+## Catalog and bibliography
+
+The skill also includes `scripts/details.py` for FJMS catalog/bibliography, cached
+NLI catalog/bibliography, and PGP/FGP edition credits. Resolve a manuscript with
+search first, then supply its returned ID:
+
+```bash
+python scripts/details.py --sys-id RETURNED_SYS_ID --section fjms_bibliography
+```
+
+Follow `next_offset` and `snapshot` for more records. No ChatGPT account is needed;
+the newer `/api/chatgpt/manuscript-details` endpoint must be deployed. NLI coverage
+is limited to the site's existing cache. See SKILL.md and references/api_contract.md
+for source interpretation and missing-data handling. Rebuild the installation ZIP
+to include this new script when distributing an updated skill.

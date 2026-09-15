@@ -43,6 +43,10 @@ Two details worth knowing before you write a client, because both have caught in
 
 ### Search for manuscripts
 
+For catalog records, bibliography and edition credits after resolving a manuscript,
+see [Manuscript details](#manuscript-details). This is a separate bounded response
+contract under `/api/chatgpt`, usable by any HTTPS client without ChatGPT.
+
 ```bash
 curl -s -X POST https://genizahsearch.com/api/search \
   -H "Content-Type: application/json" \
@@ -1478,3 +1482,87 @@ the Phase-85 hide-NLI gates) are tracked in **Phase 86** — see `ROADMAP.md §P
 - Attribution & Citation section added.
 
 Breaking changes announced in `CHANGELOG.md` for all future major-version releases.
+
+## Manuscript details
+
+`GET /api/chatgpt/manuscript-details` retrieves local catalog, bibliography and
+source-credit records. Despite its URL prefix, it is usable by scripts and other
+HTTP clients without a ChatGPT account or API key. It is described in the
+[Actions schema](https://genizahsearch.com/api/chatgpt/openapi.json), not the main
+`/api/openapi.json`. Requires deployment of the manuscript-details integration;
+older deployments may return 404. Do not substitute a guessed endpoint.
+
+### Parameters and sections
+
+| Parameter | Meaning |
+| --- | --- |
+| `sys_id` | Required manuscript ID copied from search/browse, not a shelfmark. |
+| `section` | Required value from the table below. Request only relevant sections. |
+| `offset` | Nonnegative record offset; default 0. Continue with returned `next_offset`. |
+| `snapshot` | Omit initially; required on later pages. Copy it unchanged. |
+
+| Section | Records and provenance |
+| --- | --- |
+| `fjms_catalog` | Catalog records and their structured detail, with `category`, `data`, and catalog-record identifiers where available. Categories include records, running titles, sizes, fields, free descriptions, full texts, textual frames and mentions. Preserve `source_name` and record associations. |
+| `fjms_bibliography` | Publication titles, authors, year, volume, page references, mention type, edition/translation indicators and notes where provided. |
+| `fjms_catalog_refs` | Catalog references supplied by FJMS; preserve source and entry identifiers. |
+| `nli_catalog` | Locally cached MARC title, notes, people, date, subjects, physical description, attribution and link fields. Each record has `field` and `value`. |
+| `nli_bibliography` | Raw MARC bibliography strings under `citation`, preserved without speculative parsing. |
+| `pgp_sources` | Edition/translation source credits, including scholar, document ID, relation and page scope when available. No edition text. |
+| `fgp_sources` | FGP source credits, including bilingual team credits and folio scope when available. No edition text; respects the FGP availability flag. |
+
+```bash
+curl -sG https://genizahsearch.com/api/chatgpt/manuscript-details \
+  --data-urlencode 'sys_id=RETURNED_SYS_ID' \
+  --data-urlencode 'section=fjms_bibliography'
+# For another page, add the actual returned continuation values:
+# --data-urlencode 'offset=NEXT_OFFSET' --data-urlencode 'snapshot=RETURNED_SNAPSHOT'
+```
+
+### Response and continuation
+
+This endpoint has its own envelope: `sys_id`, `section`, `provider`, `availability`,
+`generated_at`, `snapshot`, `offset`, `returned`, `available`, `next_offset`,
+`records[]`, and `warnings[]`. It does not carry the main API's `schema_version`,
+`results`, `count`, or `total`. Record fields vary by source; retain additional
+fields rather than discarding unfamiliar citation details.
+
+`available` counts locally saved records for this section, not all publications.
+`availability` is `local_records`, `local_cache`, `unavailable`, or `not_cached`.
+Missing local data never establishes that no catalog record/publication exists.
+Some legacy source methods can also return no records on internal lookup failures;
+the coverage warning discloses this uncertainty. NLI reads the existing website
+MARC cache only; this action does not fetch missing NLI data from the network.
+
+Continue sequentially with the same `sys_id`, `section`, `snapshot` and the returned
+`next_offset`; null ends the section. Pages contain at most ten records and 70 KB
+of encoded record data. A large record reduces page length rather than being cut.
+Do not combine different snapshots or treat a bibliography mention as proof that
+the particular passage was edited or discussed.
+
+Snapshots expire within ten minutes and may be evicted earlier. The per-process
+cache holds at most 32 sections / 8 MiB; a section is capped at 1 MiB. Two local
+lookups run concurrently; requests for the same section share work. A ten-second
+HTTP wait does not cancel the lookup or free its slot prematurely. Existing API
+mode/client-IP rate guards apply (default details allowance: 30 requests/minute).
+No corpus searches or remote source fetches are initiated.
+
+### Errors
+
+| HTTP / code | Client handling |
+| --- | --- |
+| 400 `invalid_request`, `invalid_offset` | Correct parameters; do not guess successive values. |
+| 409 `details_expired` | Restart the section at offset 0 without a snapshot; discard the old continuation. |
+| 429 `rate_limited` | Honor `Retry-After`; retrieve sequentially. |
+| 503 `details_pending` | Lookup still running. Honor `Retry-After` and retry the same request; it shares existing work. |
+| 503 `details_busy` | Concurrency is full. Honor `Retry-After` before trying again. |
+| 503 `details_too_large` | Record or section exceeds the allowance. Use the website; repeated requests do not help. |
+| 503 `details_unavailable` | Lookup failed. Report failure, not an empty bibliography. |
+
+Mode-gate errors and non-JSON proxy errors remain possible. Preserve the HTTP
+status and `Retry-After` even when no JSON error envelope is available.
+
+Browse metadata additionally includes `metadata.pgp.transcription_source` and
+`doc_relation` for the selected PGP document, when supplied. Match other PGP/FGP
+credits to the document and page scope; do not attribute a displayed transcription
+to every scholar listed for the manuscript.
