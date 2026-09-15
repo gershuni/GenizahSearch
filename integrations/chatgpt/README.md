@@ -39,6 +39,8 @@ Deploy these files together through the project's normal reviewed release:
 - `web/chatgpt_api.py`
 - `web/chatgpt_jobs.py` (uses the deployed `web/research_api.py` APIJob)
 - `web/chatgpt_pagination.py`
+- `web/chatgpt_details.py` and `shared/manuscript_details.py`
+- The PGP attribution additions in `shared/browse_service.py` and `shared/search_serializer.py`
 - The registration and shutdown lines added to `web/main.py`, immediately after
   `init_search_api(app_override=_search_helper_app, path_prefix="")`.
 - `integrations/chatgpt/openapi.json`
@@ -103,8 +105,8 @@ their IP ownership rules unchanged.
 4. Paste the contents of `instructions.md` into Instructions.
 5. Add an Action. Authentication: **None**. Paste `openapi.json`, or import the
    schema URL above after deployment. Do not upload the schema as a knowledge file.
-6. Verify five actions appear: `getGenizahCapabilities`, `searchManuscripts`,
-   `browseManuscriptPage`, `findPassageParallels`, `getResearchJob`.
+6. Verify six actions appear: `getGenizahCapabilities`, `searchManuscripts`,
+   `browseManuscriptPage`, `findPassageParallels`, `getResearchJob`, `getManuscriptDetails`.
 7. Add these conversation starters:
    - Find manuscripts containing this Hebrew phrase and show the matching text.
    - Show me ENA 1628.38 and explain what evidence is available.
@@ -131,9 +133,32 @@ prove image inspection. ChatGPT may ask the user to allow API calls.
 
 ## Verify and maintain
 
+Version 0.4 adds `GET /api/chatgpt/manuscript-details`. Deploy, reimport the Action
+schema, and replace Instructions. Select one section: `fjms_catalog`,
+`fjms_bibliography`, `fjms_catalog_refs`, `nli_catalog`, `nli_bibliography`,
+`pgp_sources`, or `fgp_sources`. Use a returned sys_id. Responses identify the
+provider and local availability; record fields preserve citations and source roles.
+FJMS catalog detail retains category and catalog-record identifiers. NLI bibliography
+preserves raw MARC citations. Source lists omit edition text; browse now also carries
+the selected PGP document's transcription_source and doc_relation.
+
+Pages contain at most ten records and 70 KB of encoded record data. Continue with
+next_offset and the same snapshot. Snapshots last at most ten minutes and can be
+evicted earlier; 409 requires starting the section again, not combining snapshots.
+The cache holds at most 32 sections / 8 MiB; each section is limited to 1 MiB.
+Oversized records or sections fail explicitly. Two local lookups can run at once;
+requests for the same section share work, including after a ten-second HTTP wait
+expires. Existing API mode and client-IP rate guards apply. No remote source fetch,
+corpus search, or transcription download is initiated by this action.
+
+NLI reads only the website's existing MARC cache. Missing cache/source data and local
+coverage are disclosed; an empty list is not proof of no bibliography. Existing
+source-service methods can return empty lists after internal lookup failures, so
+the coverage warning explicitly preserves that uncertainty.
+
 ```bash
 python integrations/chatgpt/build_schema.py
-pytest tests/test_chatgpt_api.py tests/test_chatgpt_jobs.py tests/test_chatgpt_pagination.py -q
+pytest tests/test_chatgpt_api.py tests/test_chatgpt_jobs.py tests/test_chatgpt_pagination.py tests/test_chatgpt_details.py -q
 python integrations/chatgpt/validate.py --captures scratch/chatgpt-smoke
 # After deployment; these calls use public example manuscript text:
 python integrations/chatgpt/smoke_test.py --api-prefix /api/chatgpt

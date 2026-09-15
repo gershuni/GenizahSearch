@@ -1,6 +1,6 @@
 # GenizahSearch Search-Helper API
 
-> Contract `schema_version: 1` · Verified against site release 9.2.0 · Last updated: 2026-09-09
+> Contract `schema_version: 1` · Verified against site release 9.2.0 · Last updated: 2026-09-15
 
 The **site release** above is the GenizahSearch version this document was last checked
 against — it is NOT a separate API version, and it does not gate what is true. The
@@ -489,7 +489,8 @@ overrides env `SEARCH_API_BROWSE_TEXT_CAP`, default `4000`).
     "pgp":  {"description": "...", "tags": [], "document_type": null,
              "languages_primary": [], "languages_secondary": [],
              "doc_date_original": null, "doc_date_standard": null,
-             "inferred_date_display": null, "pgpid": 12345, "pgp_url": "..."},
+             "inferred_date_display": null, "pgpid": 12345, "pgp_url": "...",
+             "transcription_source": "<citation when supplied>", "doc_relation": "Digital Edition"},
     "fjms": {"source_names": [], "has_measurements": false, "has_visual_suggestions": false},
     "nli":  {"physical_metadata": {"material": "...", "size": "...",
                                    "num_folio": "...", "num_bifolio": "..."},

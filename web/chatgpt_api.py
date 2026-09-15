@@ -154,6 +154,8 @@ def _job_owner(request):
 def register_chatgpt_api(app):
     """Call after init_search_api on its /api sub-app; no extra corpus imports."""
     handlers = {route.path: route.endpoint for route in app.routes if hasattr(route, 'endpoint')}
+    from web.chatgpt_details import register_manuscript_details
+    register_manuscript_details(app, _job_owner)
     from web.chatgpt_jobs import register_chatgpt_jobs
     async def prepare_job(kind, request):
         return await _prepare_request(kind, request, background=True)

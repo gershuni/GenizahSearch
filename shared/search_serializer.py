@@ -656,7 +656,7 @@ def _truncate_text_at_word_boundary(text: str, cap: int) -> tuple[str, bool]:
 
 
 def _build_pgp_subset(pgp: dict) -> dict:
-    """R-07 stable shape (10 keys, never missing)."""
+    """Stable PGP metadata, including the selected text's source attribution."""
     return {
         'description':           pgp.get('description'),
         'tags':                  list(pgp.get('tags') or []),
@@ -668,6 +668,8 @@ def _build_pgp_subset(pgp: dict) -> dict:
         'inferred_date_display': pgp.get('inferred_date_display'),
         'pgpid':                 pgp.get('pgpid'),
         'pgp_url':               pgp.get('pgp_url'),
+        'transcription_source':  pgp.get('transcription_source'),
+        'doc_relation':          pgp.get('doc_relation'),
     }
 
 
