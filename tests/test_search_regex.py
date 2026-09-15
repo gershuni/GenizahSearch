@@ -6,6 +6,7 @@ import re
 import sys
 import threading
 import time
+from contextlib import nullcontext
 
 import pytest
 
@@ -160,15 +161,17 @@ def test_budget_expiring_during_compilation_is_reported(monkeypatch):
     "", "שלום עולם", "צ\u0307מאן צ'מאן", "שָׁלוֹם ]א[", "abc_12 Ⅳ²\u200c!",
     "abc abc", "abc#א", "x[]w\\", "éΩא 123",
 ])
-def test_word_and_hebrew_span_parity(pattern, text):
+@pytest.mark.parametrize('isolated', [False, True])
+def test_word_and_hebrew_span_parity(pattern, text, isolated):
     for flags in (0, re.IGNORECASE, re.ASCII):
         old = re.compile(pattern, flags)
         new = search_regex.compile(pattern, flags)
-        old_match, new_match = old.search(text), new.search(text)
-        assert (old_match.span() if old_match else None) == (
-            new_match.span() if new_match else None
-        )
-        assert old.sub("<hit>", text) == new.sub("<hit>", text)
+        with search_regex.isolated_matching(native=True) if isolated else nullcontext():
+            old_match, new_match = old.search(text), new.search(text)
+            assert (old_match.span() if old_match else None) == (
+                new_match.span() if new_match else None
+            )
+            assert old.sub("<hit>", text) == new.sub("<hit>", text)
         assert new.pattern == old.pattern
         assert new.flags == old.flags
 
@@ -180,6 +183,28 @@ def test_real_pathological_search_stops(monkeypatch):
     with pytest.raises(search_regex.SearchBudgetExceeded):
         pattern.search("a" * 10000 + "!")
     assert time.monotonic() - started < 1
+
+
+def test_isolated_pattern_retains_nested_and_outside_timeouts(monkeypatch):
+    monkeypatch.setenv('GENIZAH_REGEX_TIMEOUT_SECONDS', '0.025')
+    with search_regex.isolated_matching(native=True):
+        pattern = search_regex.compile(r'(a|aa)+$')
+        with pytest.raises(search_regex.SearchBudgetExceeded):
+            with search_regex.search_budget(0.025):
+                pattern.search('a' * 10000 + '!')
+        assert pattern.fullmatch('aaaa').span() == (0, 4)
+        assert pattern.match('aaaa', 1, 3).span() == (1, 3)
+    with pytest.raises(search_regex.SearchBudgetExceeded):
+        pattern.search('a' * 10000 + '!')
+
+
+def test_isolation_without_kernel_protection_retains_interruptible_matcher():
+    from unittest.mock import Mock
+    pattern = search_regex.compile('a')
+    pattern._stdlib = Mock()
+    with search_regex.isolated_matching():
+        assert pattern.search('a').span() == (0, 1)
+    pattern._stdlib.search.assert_not_called()
 
 
 def test_deadline_caps_many_successful_operations(monkeypatch):
@@ -340,7 +365,7 @@ def test_configured_total_budget_remains_available(monkeypatch):
 def test_only_supervised_worker_disables_matching_timeout(monkeypatch):
     monkeypatch.setenv('GENIZAH_REGEX_TIMEOUT_SECONDS', '0.25')
     assert search_regex._match_timeout() == 0.25
-    with search_regex.isolated_matching():
+    with search_regex.isolated_matching(native=True):
         assert search_regex._match_timeout() is None
         with search_regex.search_budget(0.1):
             assert 0 < search_regex._match_timeout() <= 0.1

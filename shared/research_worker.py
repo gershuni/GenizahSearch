@@ -41,14 +41,35 @@ def restore_settings(snapshot):
     return settings
 
 
+def protect_parent_death(parent_pid):
+    """Permit GIL-holding matching only with kernel-enforced parent death."""
+    if sys.platform != 'linux':
+        return False
+    import ctypes
+    import signal
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        # PR_SET_PDEATHSIG: SIGKILL requires neither Python nor a running thread.
+        if libc.prctl(1, signal.SIGKILL, 0, 0, 0) != 0:
+            return False
+    except (AttributeError, OSError):
+        return False
+    # Close the race where the parent exited before prctl was armed.
+    if os.getppid() != parent_pid:
+        os._exit(1)
+    return True
+
+
 def main(directory):
+    parent_pid = int(os.environ['GENIZAH_RESEARCH_PARENT'])
+    native_matching = protect_parent_death(parent_pid)
     from shared.research_limits import limit_memory
     limit_memory(int(os.environ['GENIZAH_RESEARCH_MEMORY_MB']) * 1024**2)
     import psutil
     import threading
 
     # A crashed/restarted web process must not leave unlimited orphan searches.
-    parent = psutil.Process(int(os.environ['GENIZAH_RESEARCH_PARENT']))
+    parent = psutil.Process(parent_pid)
 
     def watch_parent():
         while parent.is_running():
@@ -80,7 +101,10 @@ def main(directory):
             return
         last[0] = now
         progress = values if len(values) == 2 and all(isinstance(v, (int, float)) for v in values) else (0, 0)
-        write_progress(root, {'status': 'Searching', 'progress': progress})
+        status = ('Checking candidate texts'
+                  if payload['kind'] == 'search' and payload['method'] == 'execute_search'
+                  else 'Searching')
+        write_progress(root, {'status': status, 'progress': progress})
 
     from shared.config import Config
     from shared.local_index_leases import index_leases
@@ -88,14 +112,14 @@ def main(directory):
     with index_leases([Config.LOCAL_INDEX_DIR, Config.LOCAL_LAB_INDEX_DIR]):
         write_progress(root, {'status': 'Starting search worker', 'progress': (0, 0)})
         try:
-            run_query(root, payload, report)
+            run_query(root, payload, report, native_matching=native_matching)
         finally:
             # Drop engine cycles/native handles before releasing the read lease.
             import gc
             gc.collect()
 
 
-def run_query(root, payload, report):
+def run_query(root, payload, report, *, native_matching=False):
     try:
         from shared.metadata_manager import MetadataManager
         from shared.variants import VariantManager
@@ -139,7 +163,8 @@ def run_query(root, payload, report):
         if arguments.get('restrict_sys_ids') is not None:
             arguments['restrict_sys_ids'] = set(arguments['restrict_sys_ids'])
         arguments['progress_callback'] = report
-        with isolated_matching():
+        write_progress(root, {'status': 'Preparing search', 'progress': (0, 0)})
+        with isolated_matching(native=native_matching):
             value = getattr(engine, payload['method'])(**arguments)
         result = {'value': value, 'downgrade': _consume_last_responsa_downgrade(),
                   'cascade': _consume_last_responsa_downgrade_meta()}
@@ -153,6 +178,7 @@ def run_query(root, payload, report):
         result = {'error': 'The search worker could not complete this query. No complete results were returned.'}
     # Transcriptions and HTML contain considerable repetition. Stream the
     # transfer compressed without allocating another full serialized copy.
+    write_progress(root, {'status': 'Saving search results', 'progress': (0, 0)})
     with gzip.open(root / 'output.pkl', 'wb', compresslevel=1) as stream:
         measured = MeasuredWriter(stream, int(os.environ['GENIZAH_RESEARCH_MEMORY_MB']) * 1024**2)
         pickle.dump(result, measured, protocol=pickle.HIGHEST_PROTOCOL)
