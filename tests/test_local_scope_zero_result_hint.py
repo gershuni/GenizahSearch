@@ -1,0 +1,276 @@
+# -*- coding: utf-8 -*-
+"""Search tab: a zero-result search in LOCAL scope offers the Genizah corpus.
+
+Owner request (2026-09-17): users pick "Local" in the corpus-scope combo by
+accident, search, find nothing, and conclude the manuscript is not there.
+After a LOCAL-scope run with no results a strip above the empty results
+table says the search looked only at their local files and offers the same
+query against the Genizah corpus in one click.
+
+Rules pinned here:
+  - shown only when the run that just finished was scope 'local' AND found
+    nothing; 'all' includes the Genizah corpus, a LOCAL run with results is
+    what was asked for;
+  - the scope is the one RECORDED for the run, not the combo's live value;
+  - hidden again on every new search and on any manual scope change;
+  - the button routes through the combo (so the choice persists like a
+    manual change) and re-runs start_search();
+  - both strings have Hebrew translations.
+
+Pattern: unbound GenizahGUI methods bound to a stub -- no QApplication
+(same approach as tests/test_desktop_passage_gate.py).
+"""
+from __future__ import annotations
+
+import inspect
+import os
+import re
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+import genizah_app                       # noqa: E402
+import genizah_translations as gt        # noqa: E402
+
+APP = genizah_app.GenizahGUI
+
+LABEL = "No results in My Library. This search looked only at your local files."
+BUTTON = "Search the Genizah corpus instead"
+
+
+class _Strip:
+    def __init__(self):
+        self.visible = None
+        self.stylesheet = None
+
+    def setVisible(self, v):
+        self.visible = v
+
+    def setStyleSheet(self, css):
+        self.stylesheet = css
+
+
+class _Combo:
+    ITEMS = ['genizah', 'local', 'all']
+
+    def __init__(self, data):
+        self._idx = self.ITEMS.index(data)
+        self.set_calls = []
+
+    def findData(self, d):
+        return self.ITEMS.index(d) if d in self.ITEMS else -1
+
+    def currentIndex(self):
+        return self._idx
+
+    def currentData(self):
+        return self.ITEMS[self._idx]
+
+    def setCurrentIndex(self, i):
+        self._idx = i
+        self.set_calls.append(i)
+
+
+class _Host:
+    _search_run_corpus = APP._search_run_corpus
+    _set_local_scope_strip_visible = APP._set_local_scope_strip_visible
+    _update_local_scope_strip = APP._update_local_scope_strip
+    _search_genizah_instead = APP._search_genizah_instead
+    _style_local_scope_strip = APP._style_local_scope_strip
+    _local_scope_strip_colors = staticmethod(APP._local_scope_strip_colors)
+
+    def __init__(self, run_corpus='local', combo_corpus=None, dark=False):
+        self.local_scope_strip = _Strip()
+        self.local_scope_strip_label = _Strip()
+        self.corpus_scope_combo = _Combo(combo_corpus or run_corpus)
+        self._current_search_run = {'mode': 'literal', 'corpus': run_corpus,
+                                    'emitted': False}
+        self.started = 0
+        self._dark = dark
+
+    def start_search(self):
+        self.started += 1
+
+    def palette(self):
+        lightness = 40 if self._dark else 240
+
+        class _P:
+            def color(self, _role):
+                class _C:
+                    def lightness(self_inner):
+                        return lightness
+                return _C()
+        return _P()
+
+
+# ---------------------------------------------------------------- the rule
+
+def test_zero_results_in_local_scope_shows_the_hint():
+    h = _Host('local')
+    assert h._update_local_scope_strip(0) is True
+    assert h.local_scope_strip.visible is True
+
+
+def test_zero_results_in_genizah_or_all_scope_shows_nothing():
+    for scope in ('genizah', 'all'):
+        h = _Host(scope)
+        assert h._update_local_scope_strip(0) is False, scope
+        assert h.local_scope_strip.visible is False, scope
+
+
+def test_local_scope_with_results_shows_nothing():
+    h = _Host('local')
+    assert h._update_local_scope_strip(3) is False
+    assert h.local_scope_strip.visible is False
+
+
+def test_the_recorded_run_scope_wins_over_the_live_combo():
+    # The user moved the combo to Genizah while the LOCAL run was still going.
+    h = _Host(run_corpus='local', combo_corpus='genizah')
+    assert h._update_local_scope_strip(0) is True
+    # ...and the other way round: the run was Genizah, the combo now says Local.
+    h = _Host(run_corpus='genizah', combo_corpus='local')
+    assert h._update_local_scope_strip(0) is False
+
+
+def test_falls_back_to_the_combo_when_no_run_was_recorded():
+    h = _Host('local')
+    h._current_search_run = None
+    assert h._search_run_corpus() == 'local'
+    del h.corpus_scope_combo
+    assert h._search_run_corpus() == 'genizah'
+
+
+def test_missing_strip_widget_is_tolerated():
+    h = _Host('local')
+    del h.local_scope_strip
+    assert h._update_local_scope_strip(0) is True   # rule still evaluated
+    h._set_local_scope_strip_visible(False)          # no AttributeError
+
+
+# ---------------------------------------------------------------- the button
+
+def test_button_switches_scope_to_genizah_hides_the_strip_and_reruns():
+    h = _Host('local')
+    h.local_scope_strip.visible = True
+    h._search_genizah_instead()
+    assert h.corpus_scope_combo.currentData() == 'genizah'
+    assert h.corpus_scope_combo.set_calls == [_Combo.ITEMS.index('genizah')]
+    assert h.local_scope_strip.visible is False
+    assert h.started == 1
+
+
+def test_button_does_not_touch_a_combo_already_on_genizah():
+    h = _Host(run_corpus='local', combo_corpus='genizah')
+    h._search_genizah_instead()
+    assert h.corpus_scope_combo.set_calls == []
+    assert h.started == 1
+
+
+# ---------------------------------------------------------------- the wiring
+
+def test_start_search_hides_the_hint_before_running():
+    src = inspect.getsource(APP.start_search)
+    assert 'self._set_local_scope_strip_visible(False)' in src
+    # ...and does so before any worker is bound.
+    assert (src.index('_set_local_scope_strip_visible(False)')
+            < src.index('_drain_previous_worker'))
+
+
+def test_zero_result_branch_of_on_search_finished_evaluates_the_hint():
+    src = inspect.getsource(APP.on_search_finished)
+    m = re.search(r"if not results:\s*\n\s*self\.reset_ui\(\)\s*\n\s*"
+                  r"self\._update_local_scope_strip\(0\)", src)
+    assert m, "the hint must be decided right where the empty result set is handled"
+
+
+def test_manual_scope_change_hides_the_hint():
+    src = inspect.getsource(APP._on_corpus_scope_changed)
+    assert 'self._set_local_scope_strip_visible(False)' in src
+
+
+def test_strip_is_built_above_the_results_table_and_wired_to_the_button():
+    src = inspect.getsource(genizah_app)
+    assert 'table_layout.addWidget(self.local_scope_strip)' in src
+    assert ('self.btn_local_scope_search_genizah.clicked.connect(\n'
+            '            self._search_genizah_instead)') in src
+    # built before the table is added, so it sits above it
+    assert (src.index('table_layout.addWidget(self.local_scope_strip)')
+            < src.index('table_layout.addWidget(self.results_table)'))
+    assert f'tr(\n            "{LABEL}")' in src or f'tr("{LABEL}")' in src
+    assert f'tr("{BUTTON}")' in src
+
+
+# ---------------------------------------------------------------- the colours
+
+def _hue(hex_color):
+    r, g, b = (int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    mx, mn = max(r, g, b), min(r, g, b)
+    if mx == mn:
+        return None
+    if mx == r:
+        h = (g - b) / (mx - mn) % 6
+    elif mx == g:
+        h = (b - r) / (mx - mn) + 2
+    else:
+        h = (r - g) / (mx - mn) + 4
+    return h * 60
+
+
+def _lightness(hex_color):
+    r, g, b = (int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
+    return (max(r, g, b) + min(r, g, b)) / 2
+
+
+def test_both_themes_use_an_orange_background_with_readable_text():
+    """Owner (2026-09-17): brighter, light orange, in light AND dark mode."""
+    for dark in (False, True):
+        c = APP._local_scope_strip_colors(dark)
+        assert 20 <= _hue(c['bg']) <= 45, (dark, c['bg'])          # orange
+        assert 20 <= _hue(c['border']) <= 45, (dark, c['border'])
+        # contrast direction follows the theme
+        if dark:
+            assert _lightness(c['text']) - _lightness(c['bg']) > 120
+        else:
+            assert _lightness(c['bg']) - _lightness(c['text']) > 120
+    light, dark = (APP._local_scope_strip_colors(False),
+                   APP._local_scope_strip_colors(True))
+    assert _lightness(light['bg']) > 200, "light mode must read as LIGHT orange"
+    assert light['bg'] != dark['bg']
+
+
+def test_styling_follows_the_palette_lightness_probe():
+    for dark in (False, True):
+        h = _Host('local', dark=dark)
+        h._style_local_scope_strip()
+        expected = APP._local_scope_strip_colors(dark)
+        assert expected['bg'] in h.local_scope_strip.stylesheet
+        assert expected['border'] in h.local_scope_strip.stylesheet
+        assert expected['text'] in h.local_scope_strip_label.stylesheet
+        assert 'QFrame#localScopeStrip' in h.local_scope_strip.stylesheet
+
+
+def test_showing_the_strip_restyles_it_for_the_current_theme():
+    h = _Host('local', dark=True)
+    h._set_local_scope_strip_visible(True)
+    assert APP._local_scope_strip_colors(True)['bg'] in h.local_scope_strip.stylesheet
+    h._dark = False
+    h._set_local_scope_strip_visible(True)
+    assert APP._local_scope_strip_colors(False)['bg'] in h.local_scope_strip.stylesheet
+
+
+def test_strip_is_built_with_an_object_name_the_stylesheet_targets():
+    src = inspect.getsource(genizah_app)
+    assert 'self.local_scope_strip.setObjectName("localScopeStrip")' in src
+    assert 'self._style_local_scope_strip()' in src
+
+
+# ---------------------------------------------------------------- the strings
+
+def test_both_strings_have_hebrew_translations():
+    hebrew = re.compile(r'[֐-׿]')
+    for key in (LABEL, BUTTON):
+        assert key in gt.TRANSLATIONS, key
+        assert hebrew.search(gt.TRANSLATIONS[key]), key

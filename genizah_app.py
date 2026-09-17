@@ -5444,6 +5444,30 @@ class GenizahGUI(QMainWindow):
         self.refinement_strip.setVisible(False)
         table_layout.addWidget(self.refinement_strip)
 
+        # A search that returns nothing while the corpus scope is "Local" is
+        # usually an accident: the user meant the Genizah corpus and never
+        # noticed the scope combo. Say so where the results would be, and
+        # offer the same query against the Genizah corpus in one click.
+        # Hidden on every new search and on any manual scope change; shown
+        # only by _update_local_scope_strip after a zero-result LOCAL run.
+        self.local_scope_strip = QFrame()
+        self.local_scope_strip.setObjectName("localScopeStrip")
+        local_scope_layout = QHBoxLayout(self.local_scope_strip)
+        local_scope_layout.setContentsMargins(8, 2, 8, 2)
+        local_scope_layout.setSpacing(8)
+        self.local_scope_strip_label = QLabel(tr(
+            "No results in My Library. This search looked only at your local files."))
+        self.local_scope_strip_label.setWordWrap(True)
+        local_scope_layout.addWidget(self.local_scope_strip_label, 1)
+        self.btn_local_scope_search_genizah = QPushButton(
+            tr("Search the Genizah corpus instead"))
+        self.btn_local_scope_search_genizah.clicked.connect(
+            self._search_genizah_instead)
+        local_scope_layout.addWidget(self.btn_local_scope_search_genizah)
+        self._style_local_scope_strip()
+        self.local_scope_strip.setVisible(False)
+        table_layout.addWidget(self.local_scope_strip)
+
         table_layout.addWidget(self.results_table)
 
         self.results_stack = QStackedLayout()
@@ -19558,6 +19582,80 @@ class GenizahGUI(QMainWindow):
         scope = self.corpus_scope_combo.currentData() or "genizah"
         self._search_corpus_scope = scope
         self._save_session()
+        self._set_local_scope_strip_visible(False)
+
+    # -- Zero-result LOCAL search: "did you mean the Genizah corpus?" -------
+
+    def _search_run_corpus(self):
+        """The corpus scope of the run that just finished -- recorded by
+        start_search, never the combo's live value, which the user may have
+        moved while the worker ran."""
+        run = getattr(self, '_current_search_run', None) or {}
+        corpus = run.get('corpus')
+        if corpus:
+            return corpus
+        combo = getattr(self, 'corpus_scope_combo', None)
+        return (combo.currentData() if combo is not None else None) or 'genizah'
+
+    def _set_local_scope_strip_visible(self, visible):
+        strip = getattr(self, 'local_scope_strip', None)
+        if strip is not None:
+            if visible:
+                self._style_local_scope_strip()
+            strip.setVisible(bool(visible))
+
+    @staticmethod
+    def _local_scope_strip_colors(is_dark):
+        """Light orange, bright enough to read as a notice and not as
+        another toolbar (owner, 2026-09-17). One pair per theme; the dark
+        pair keeps the orange hue at a lightness that still reads on a
+        dark window, with light text."""
+        if is_dark:
+            return {'bg': '#7a4a12', 'border': '#f39c3c', 'text': '#ffe8cc'}
+        return {'bg': '#ffe0b2', 'border': '#f5a742', 'text': '#5a3000'}
+
+    def _style_local_scope_strip(self):
+        """Apply the theme's colours. Same lightness probe the rest of the
+        window uses; called at build time and on every show, since there is
+        no runtime theme-change hook to listen to."""
+        strip = getattr(self, 'local_scope_strip', None)
+        if strip is None:
+            return
+        try:
+            is_dark = self.palette().color(
+                QPalette.ColorRole.Window).lightness() < 128
+        except Exception:  # noqa: BLE001
+            is_dark = False
+        c = self._local_scope_strip_colors(is_dark)
+        strip.setStyleSheet(
+            "QFrame#localScopeStrip { background: %s; "
+            "border: 1px solid %s; border-radius: 4px; padding: 2px 8px; }"
+            % (c['bg'], c['border']))
+        label = getattr(self, 'local_scope_strip_label', None)
+        if label is not None:
+            label.setStyleSheet(
+                "QLabel { color: %s; font-weight: 600; background: transparent; }"
+                % c['text'])
+
+    def _update_local_scope_strip(self, result_count):
+        """Show the hint only for a LOCAL-scope run that found nothing.
+        'all' includes the Genizah corpus, so the hint would be false there,
+        and a LOCAL run WITH results is exactly what the user asked for."""
+        show = (not result_count) and self._search_run_corpus() == 'local'
+        self._set_local_scope_strip_visible(show)
+        return show
+
+    def _search_genizah_instead(self):
+        """One click: scope -> Genizah, same query, run again. Goes through
+        the combo so _on_corpus_scope_changed persists the choice exactly as
+        a manual change would."""
+        self._set_local_scope_strip_visible(False)
+        combo = getattr(self, 'corpus_scope_combo', None)
+        if combo is not None:
+            idx = combo.findData('genizah')
+            if idx >= 0 and combo.currentIndex() != idx:
+                combo.setCurrentIndex(idx)
+        self.start_search()
 
     def _on_comp_corpus_scope_changed(self, _index):
         """Phase 110 (COMP-LOC-01): persist the composition corpus scope. Mirrors
@@ -19624,6 +19722,7 @@ class GenizahGUI(QMainWindow):
     def start_search(self):
         query = self.query_input.text().strip()
         if not query: return
+        self._set_local_scope_strip_visible(False)
 
         # Detect query prefix (?, ??, ???, ~, /) - Delegated to Core
         # Skip prefix parsing in Responsa mode -- # is Responsa syntax, not Shelfmark
@@ -20470,6 +20569,7 @@ class GenizahGUI(QMainWindow):
         was_cancelled = getattr(self, '_search_was_cancelled', False)
         if not results:
             self.reset_ui()
+            self._update_local_scope_strip(0)
             if was_cancelled:
                 self.status_label.setText(f"{tr('No results found.')} ({tr('Partial results')})")
             else:
