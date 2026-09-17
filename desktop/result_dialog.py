@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QTextBrowser, QToolButton, QVBoxLayout, QWidget,
 )
 from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal
+from PyQt6 import sip
 from PyQt6.QtGui import QColor, QDesktopServices, QFont, QPalette, QPixmap
 
 from genizah_core import (
@@ -48,8 +49,24 @@ class ResultDialog(QDialog):
     thumb_resolved = pyqtSignal(str, object)
 
     def __init__(self, parent, all_results, current_index, meta_mgr, searcher):
-        super().__init__(parent)
+        # The viewer is an INDEPENDENT top-level window (2026-09-17): no Qt
+        # parent, non-modal, its own taskbar button. Parented to the main
+        # window it was a Win32 OWNED window -- always above its owner, no
+        # taskbar button of its own -- and .exec() made it application-modal,
+        # so minimizing it left the main window disabled and buried behind
+        # whatever app Windows activated next, which read as "the whole app
+        # minimized" (measured on the live desktop: IsIconic(main) stayed
+        # False in every parent/modality combination). `parent` is still
+        # the host for every callback, via `self._app`; only the Qt
+        # ownership is gone. Shown by GenizahGUI._show_result_dialog, which
+        # holds the one reference that keeps an unparented dialog alive.
+        super().__init__(None)
         self._app = parent
+        self.setModal(False)
+        self.setWindowFlags(
+            self.windowFlags()
+            | Qt.WindowType.WindowMinMaxButtonsHint
+            | Qt.WindowType.WindowCloseButtonHint)
         # D-03: result_detail feature_opened — single canonical construction site (covers all 6
         # ResultDialog(...) construction sites in genizah_app.py). Routed through the host's gated
         # _emit_feature_opened() (WR-01 / T-114-03): a ResultDialog opened in the ~700ms startup
@@ -66,6 +83,11 @@ class ResultDialog(QDialog):
         # Phase 100 (REVIEWS-R2-2): guarantee scope teardown on EVERY dialog-finish
         # path (accept/reject/done/Esc) — closeEvent alone misses reject/accept/done.
         self.finished.connect(self._on_pdf_dialog_finished)
+        # Esc / reject / accept / done never reach closeEvent, and since the
+        # viewer became unparented (2026-09-17) its host deleteLater()s it
+        # right after `finished` -- so the workers must be stopped HERE too,
+        # or a late image callback lands on deleted widgets (Codex, PR #343).
+        self.finished.connect(self._on_dialog_finished_teardown)
 
         self.all_results = all_results
         self.current_result_idx = current_index
@@ -2162,6 +2184,9 @@ class ResultDialog(QDialog):
         if not pattern_str or text_browser is None:
             return
         def _do_scroll():
+            # Deferred past the host's deleteLater(): the browser may be gone.
+            if sip.isdeleted(text_browser):
+                return
             try:
                 flags = re.IGNORECASE
                 if '\\n' in pattern_str or pattern_str.startswith('^') or '^\\' in pattern_str:
@@ -3114,7 +3139,10 @@ class ResultDialog(QDialog):
             request_id = self.current_meta_request
             def worker():
                 meta = self.meta_mgr.fetch_nli_data(self.current_sys_id)
-                self.metadata_loaded.emit(request_id, meta or {})
+                try:
+                    self.metadata_loaded.emit(request_id, meta or {})
+                except RuntimeError:
+                    pass  # dialog deleted after close; the answer has no home
             threading.Thread(target=worker, daemon=True).start()
 
         if not cached_meta or 'marc' not in cached_meta:
@@ -3665,7 +3693,10 @@ class ResultDialog(QDialog):
 
         def worker(target_sid=sys_id):
             url = self.meta_mgr.get_thumbnail(target_sid)
-            self.thumb_resolved.emit(target_sid, url)
+            try:
+                self.thumb_resolved.emit(target_sid, url)
+            except RuntimeError:
+                pass  # dialog deleted after close; the answer has no home
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -3711,38 +3742,68 @@ class ResultDialog(QDialog):
         except Exception as e:
             logger.error("Failed to save metadata caches on exit: %s", e)
 
-        # 2. Stop ResultDialog-owned worker threads
+        # 2. Stop ResultDialog-owned worker threads -- idempotent with the
+        # `finished` handler, which covers the paths closeEvent never sees.
         try:
-            for attr in ('enrich_worker', '_rd_pgp_worker', 'preload_meta_worker'):
+            self._teardown_workers()
+        finally:
+            super().closeEvent(event)
+
+    def _teardown_workers(self):
+        """Stop every worker this dialog owns. Idempotent, and run on EVERY
+        termination path: closeEvent (the X button, close()) AND `finished`
+        (Esc, reject, accept, done), which never reaches closeEvent.
+
+        Until 2026-09-17 the main window owned this dialog, so a worker that
+        outlived an Esc was harmless -- the C++ object lived until app exit.
+        Now the host deleteLater()s the viewer right after `finished`, and a
+        manuscript-image callback arriving afterwards would touch deleted
+        widgets (Codex, PR #343)."""
+        if getattr(self, '_workers_torn_down', False):
+            return
+        self._workers_torn_down = True
+        # Each step is guarded on its own: one worker that fails to stop must
+        # not skip the others, or the viewer's _closing flag would never be set.
+        for attr in ('enrich_worker', '_rd_pgp_worker', 'preload_meta_worker'):
+            try:
                 worker = getattr(self, attr, None)
                 if worker and worker.isRunning():
                     worker.requestInterruption()
                     if not worker.wait(2000):
                         worker.terminate()
                         worker.wait()
+            except Exception:  # noqa: BLE001
+                logger.exception("ResultDialog: could not stop %s", attr)
 
-            # Stop dialog's own thumbnail image loaders (img_thread, ext_img_thread)
+        # Stop dialog's own thumbnail image loaders (img_thread, ext_img_thread)
+        try:
             self.cancel_image_thread()
+        except Exception:  # noqa: BLE001
+            logger.exception("ResultDialog: could not stop the image loaders")
 
-            # Stop manuscript viewer image threads
+        # Stop manuscript viewer image threads (sets its _closing flag, so
+        # a late loader result is dropped instead of drawn)
+        try:
             if getattr(self, 'ms_viewer', None):
                 self.ms_viewer.stop_threads()
+        except Exception:  # noqa: BLE001
+            logger.exception("ResultDialog: could not stop the manuscript viewer")
 
+        try:
             # Phase 100 (REVIEWS HIGH-2 + R2-2 + R2-3): fully discard this dialog's transient
             # render scope so a late worker result cannot write into the closed dialog's ms_viewer,
             # the retained callbacks (closing over this dialog + viewer) are released, AND the
-            # scope's debounce/watchdog QTimer dict entries are removed (not just stopped — they
+            # scope's debounce/watchdog QTimer dict entries are removed (not just stopped -- they
             # would otherwise accumulate one pair per opened PDF dialog for the app session).
-            # Idempotent with the finished-signal handler (_on_pdf_dialog_finished).
-            try:
-                ctrl = self._pdf_controller()
-                if ctrl is not None:
-                    ctrl.discard_scope(self._pdf_scope)
-            except Exception:  # noqa: BLE001
-                pass
+            # Idempotent with _on_pdf_dialog_finished.
+            ctrl = self._pdf_controller()
+            if ctrl is not None:
+                ctrl.discard_scope(self._pdf_scope)
+        except Exception:  # noqa: BLE001
+            pass
 
-        finally:
-            super().closeEvent(event)
+    def _on_dialog_finished_teardown(self, _result):
+        self._teardown_workers()
 
     # ------------------------------------------------------------------
     # Phase 100 (PDFIMG-03/05): LOCAL PDF image rendering helpers

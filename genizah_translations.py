@@ -5201,3 +5201,14 @@ TRANSLATIONS.update({
     'Open on the Princeton Geniza Project website':
         'פתיחה באתר של פרויקט הגניזה של פרינסטון',
 })
+
+
+# Desktop Search tab: a zero-result search while the corpus scope is "Local"
+# shows a strip above the (empty) results table offering the same query
+# against the Genizah corpus in one click.
+TRANSLATIONS.update({
+    'No results in My Library. This search looked only at your local files.':
+        'אין תוצאות בספרייה שלי. החיפוש הזה בדק רק את הקבצים המקומיים שלך.',
+    'Search the Genizah corpus instead':
+        'לחפש במאגר הגניזה במקום',
+})

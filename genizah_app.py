@@ -1527,6 +1527,7 @@ class GenizahGUI(QMainWindow):
 
         # Puzzle window singleton (Phase 48)
         self._puzzle_window = None
+        self._result_dialog = None  # the one open Manuscript Viewer
 
         # Join Workbench singleton (Phase 107)
         self._join_workbench = None
@@ -5442,6 +5443,30 @@ class GenizahGUI(QMainWindow):
         refinement_strip_layout.setSpacing(4)
         self.refinement_strip.setVisible(False)
         table_layout.addWidget(self.refinement_strip)
+
+        # A search that returns nothing while the corpus scope is "Local" is
+        # usually an accident: the user meant the Genizah corpus and never
+        # noticed the scope combo. Say so where the results would be, and
+        # offer the same query against the Genizah corpus in one click.
+        # Hidden on every new search and on any manual scope change; shown
+        # only by _update_local_scope_strip after a zero-result LOCAL run.
+        self.local_scope_strip = QFrame()
+        self.local_scope_strip.setObjectName("localScopeStrip")
+        local_scope_layout = QHBoxLayout(self.local_scope_strip)
+        local_scope_layout.setContentsMargins(8, 2, 8, 2)
+        local_scope_layout.setSpacing(8)
+        self.local_scope_strip_label = QLabel(tr(
+            "No results in My Library. This search looked only at your local files."))
+        self.local_scope_strip_label.setWordWrap(True)
+        local_scope_layout.addWidget(self.local_scope_strip_label, 1)
+        self.btn_local_scope_search_genizah = QPushButton(
+            tr("Search the Genizah corpus instead"))
+        self.btn_local_scope_search_genizah.clicked.connect(
+            self._search_genizah_instead)
+        local_scope_layout.addWidget(self.btn_local_scope_search_genizah)
+        self._style_local_scope_strip()
+        self.local_scope_strip.setVisible(False)
+        table_layout.addWidget(self.local_scope_strip)
 
         table_layout.addWidget(self.results_table)
 
@@ -11572,7 +11597,7 @@ class GenizahGUI(QMainWindow):
                 target_index = i
 
         if adapted_results:
-            ResultDialog(self, adapted_results, target_index, self.meta_mgr, self.searcher).exec()
+            self._show_result_dialog(adapted_results, target_index)
 
     def _catalog_browse_manuscript_by_row(self, row):
         """Navigate to Browse by Shelfmark tab for the given row."""
@@ -13208,7 +13233,7 @@ class GenizahGUI(QMainWindow):
             }
         }
 
-        ResultDialog(self, [result], 0, self.meta_mgr, self.searcher).exec()
+        self._show_result_dialog([result], 0)
 
     def lists_browse_item(self):
         """Browse the current item in the Browse tab."""
@@ -13280,8 +13305,8 @@ class GenizahGUI(QMainWindow):
             }
 
             logger.debug("Opening ResultDialog")
-            ResultDialog(self, [result], 0, self.meta_mgr, self.searcher).exec()
-            logger.debug("ResultDialog closed")
+            self._show_result_dialog([result], 0)
+            logger.debug("ResultDialog shown")
         except Exception as e:
             logger.exception("Error in _open_document_result_dialog: %s", e)
 
@@ -14986,6 +15011,85 @@ class GenizahGUI(QMainWindow):
         self._puzzle_window.raise_()
         self._puzzle_window.activateWindow()
 
+    def _show_result_dialog(self, results, index):
+        """Open the Manuscript Viewer (ResultDialog) as an independent,
+        non-modal window, and keep the one reference that owns it.
+
+        Until 2026-09-17 every site constructed the dialog and ran exec():
+        application-modal, and Win32-owned by this window. Minimizing that
+        dialog hid it with no taskbar button to bring it back, and the
+        disabled main window could not take focus, so Windows activated
+        the next application over it -- the whole app appeared to
+        minimize. A user asked to see the search panel while reading
+        results, so the viewer is now a top-level window of its own (Qt
+        parent None, show() not exec()): its own taskbar button, minimized
+        and restored on its own, and this window stays usable beside it.
+
+        One viewer at a time, as before: opening another result closes the
+        open one first. The reference lives in ``self._result_dialog``
+        because an unparented dialog is garbage-collected the moment show()
+        returns; ``finished`` releases it and schedules the C++ object for
+        deletion after its closeEvent has stopped its workers.
+        """
+        # Opened from INSIDE another dialog's exec() loop (the corrections,
+        # discoveries and my-comments viewers call on_view_result while
+        # application-modal), a non-modal viewer would sit blocked behind
+        # that loop, so there the new viewer runs modally, NESTED, exactly as
+        # the old nested exec() call did. The open viewer is then left
+        # alone and keeps the reference slot: ResultDialog.view_corrections
+        # parents its corrections dialog to the viewer, so closing that
+        # viewer here would delete the very dialog whose callback we are in,
+        # mid-stack (Codex, PR #343). One free-standing viewer at a time is
+        # a rule for the main-window path only.
+        nested = QApplication.activeModalWidget() is not None
+        previous = getattr(self, '_result_dialog', None)
+        if (not nested and previous is not None
+                and not sip.isdeleted(previous)):
+            previous.close()
+        dlg = ResultDialog(self, results, index, self.meta_mgr, self.searcher)
+        if not nested:
+            self._result_dialog = dlg
+        dlg.finished.connect(
+            lambda _code, d=dlg: self._on_result_dialog_finished(d))
+        # Centre over this window: an unparented QDialog would otherwise
+        # land wherever the screen puts it.
+        try:
+            dlg.move(self.frameGeometry().center() - dlg.rect().center())
+        except Exception:  # noqa: BLE001
+            pass
+        if nested:
+            # Its own taskbar button, and control returns to the source
+            # dialog when it closes; `finished` still deleteLater()s it.
+            dlg.exec()
+            return dlg
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        return dlg
+
+    def _on_result_dialog_finished(self, dlg):
+        """Release the viewer once it has closed (any path: X, Esc, done())."""
+        if getattr(self, '_result_dialog', None) is dlg:
+            self._result_dialog = None
+        try:
+            dlg.deleteLater()
+        except RuntimeError:
+            pass
+
+    def _close_result_dialog(self):
+        """Close the open Manuscript Viewer, if any. Called at shutdown;
+        the viewer's own closeEvent stops its workers and `finished`
+        releases the reference."""
+        dlg = getattr(self, '_result_dialog', None)
+        if dlg is None:
+            return
+        try:
+            if not sip.isdeleted(dlg):
+                dlg.close()
+        except RuntimeError:
+            pass
+        self._result_dialog = None
+
     def add_to_puzzle(self, sys_id, shelfmark, folio_label=None, fl_id=None):
         """Add a fragment to the puzzle canvas. Opens puzzle window if needed."""
         # D-03: Fragment Puzzle feature_opened (add-fragment path — REVIEWS MEDIUM-7).
@@ -16237,8 +16341,12 @@ class GenizahGUI(QMainWindow):
     # passed to setEnabled anywhere in this file (both by
     # `update_lab_ui_state`), so passage mode is the FIRST owner of the other
     # four and may re-enable them unconditionally -- while those two must be
-    # handed back to Lab's predicate instead, or turning passage mode off
-    # would re-enable a control Lab is legitimately holding disabled.
+    # re-derived from Lab's own predicate on revert instead of a blind
+    # setEnabled(True), or turning passage mode off would re-enable a
+    # control Lab is legitimately holding disabled. (Bug, fixed 2026-09-17:
+    # `_apply_passage_mode_ui`'s revert branch used to skip these two
+    # entirely rather than re-derive them, so they stayed disabled until Lab
+    # Mode was toggled by hand.)
     _PASSAGE_FORCED_CONTROLS = (
         ('comp_mode_combo', 'index', 0),        # Exact
         ('spin_chunk', 'value', 5),
@@ -18573,8 +18681,13 @@ class GenizahGUI(QMainWindow):
     def _apply_passage_mode_ui(self, on):
         """Force-set and disable the chunk knobs a letter-level search does
         not use, or hand them back. Reverting restores the cached value AND
-        the enabled state -- except for the two controls Lab also owns,
-        which go back through Lab's own predicate."""
+        the enabled state -- for the two controls Lab also owns, re-derived
+        from Lab's own predicate right here (`update_lab_ui_state` is not
+        called: it also touches the Search tab and re-enters
+        `_revalidate_comp_method`, neither of which belongs in this
+        function), so switching letter-level off never leaves them disabled
+        with nothing left to re-enable them until Lab Mode is toggled by
+        hand."""
         if on and not hasattr(self, '_passage_cached_chunk_state'):
             cache = {}
             for name, kind, _forced in self._PASSAGE_FORCED_CONTROLS:
@@ -18584,6 +18697,9 @@ class GenizahGUI(QMainWindow):
                 cache[name] = (w.currentIndex() if kind == 'index'
                                else w.value())
             self._passage_cached_chunk_state = cache
+
+        lab_btn = getattr(self, 'btn_lab_mode_toggle_comp', None)
+        lab_on = bool(lab_btn is not None and lab_btn.isChecked())
 
         for name, kind, forced in self._PASSAGE_FORCED_CONTROLS:
             w = getattr(self, name, None)
@@ -18608,7 +18724,9 @@ class GenizahGUI(QMainWindow):
                 w.blockSignals(False)
             if on:
                 w.setEnabled(False)
-            elif name not in self._PASSAGE_CONTROLS_LAB_ALSO_OWNS:
+            elif name in self._PASSAGE_CONTROLS_LAB_ALSO_OWNS:
+                w.setEnabled(not lab_on)
+            else:
                 w.setEnabled(True)
 
         # The whole paragraph row goes away in letter-level mode rather than
@@ -19496,6 +19614,85 @@ class GenizahGUI(QMainWindow):
         scope = self.corpus_scope_combo.currentData() or "genizah"
         self._search_corpus_scope = scope
         self._save_session()
+        self._set_local_scope_strip_visible(False)
+
+    # -- Zero-result LOCAL search: "did you mean the Genizah corpus?" -------
+
+    def _search_run_corpus(self):
+        """The corpus scope of the run that just finished -- recorded by
+        start_search, never the combo's live value, which the user may have
+        moved while the worker ran."""
+        run = getattr(self, '_current_search_run', None) or {}
+        corpus = run.get('corpus')
+        if corpus:
+            return corpus
+        combo = getattr(self, 'corpus_scope_combo', None)
+        return (combo.currentData() if combo is not None else None) or 'genizah'
+
+    def _set_local_scope_strip_visible(self, visible):
+        strip = getattr(self, 'local_scope_strip', None)
+        if strip is not None:
+            if visible:
+                self._style_local_scope_strip()
+            strip.setVisible(bool(visible))
+
+    @staticmethod
+    def _local_scope_strip_colors(is_dark):
+        """Light orange, bright enough to read as a notice and not as
+        another toolbar (owner, 2026-09-17). One pair per theme; the dark
+        pair keeps the orange hue at a lightness that still reads on a
+        dark window, with light text."""
+        if is_dark:
+            return {'bg': '#7a4a12', 'border': '#f39c3c', 'text': '#ffe8cc'}
+        return {'bg': '#ffe0b2', 'border': '#f5a742', 'text': '#5a3000'}
+
+    def _style_local_scope_strip(self):
+        """Apply the theme's colours. Same lightness probe the rest of the
+        window uses; called at build time and on every show, since there is
+        no runtime theme-change hook to listen to."""
+        strip = getattr(self, 'local_scope_strip', None)
+        if strip is None:
+            return
+        try:
+            is_dark = self.palette().color(
+                QPalette.ColorRole.Window).lightness() < 128
+        except Exception:  # noqa: BLE001
+            is_dark = False
+        c = self._local_scope_strip_colors(is_dark)
+        strip.setStyleSheet(
+            "QFrame#localScopeStrip { background: %s; "
+            "border: 1px solid %s; border-radius: 4px; padding: 2px 8px; }"
+            % (c['bg'], c['border']))
+        label = getattr(self, 'local_scope_strip_label', None)
+        if label is not None:
+            label.setStyleSheet(
+                "QLabel { color: %s; font-weight: 600; background: transparent; }"
+                % c['text'])
+
+    def _update_local_scope_strip(self, result_count, cancelled=False):
+        """Show the hint only for a LOCAL-scope run that COMPLETED and found
+        nothing. 'all' includes the Genizah corpus, so the hint would be
+        false there; a LOCAL run WITH results is exactly what the user asked
+        for; and a cancelled run is incomplete -- the status line already
+        says "Partial results", so steering the user elsewhere would be a
+        guess (Codex, PR #343)."""
+        show = ((not result_count) and not cancelled
+                and not getattr(self, '_local_scope_hint_blocked', False)
+                and self._search_run_corpus() == 'local')
+        self._set_local_scope_strip_visible(show)
+        return show
+
+    def _search_genizah_instead(self):
+        """One click: scope -> Genizah, same query, run again. Goes through
+        the combo so _on_corpus_scope_changed persists the choice exactly as
+        a manual change would."""
+        self._set_local_scope_strip_visible(False)
+        combo = getattr(self, 'corpus_scope_combo', None)
+        if combo is not None:
+            idx = combo.findData('genizah')
+            if idx >= 0 and combo.currentIndex() != idx:
+                combo.setCurrentIndex(idx)
+        self.start_search()
 
     def _on_comp_corpus_scope_changed(self, _index):
         """Phase 110 (COMP-LOC-01): persist the composition corpus scope. Mirrors
@@ -19562,6 +19759,8 @@ class GenizahGUI(QMainWindow):
     def start_search(self):
         query = self.query_input.text().strip()
         if not query: return
+        self._set_local_scope_strip_visible(False)
+        self._local_scope_hint_blocked = False
 
         # Detect query prefix (?, ??, ???, ~, /) - Delegated to Core
         # Skip prefix parsing in Responsa mode -- # is Responsa syntax, not Shelfmark
@@ -19984,6 +20183,11 @@ class GenizahGUI(QMainWindow):
         self.reset_ui()
 
     def reset_ui(self):
+        # Every search exit path lands here (New, cancel, error, done), so a
+        # stale "nothing in your local files" strip cannot survive into the
+        # next state. The zero-result branch of on_search_finished decides
+        # afresh right after this call (Codex, PR #343).
+        self._set_local_scope_strip_visible(False)
         self.is_searching = False; self.btn_search.setText(tr("Search")); self.btn_search.setStyleSheet("background-color: #27ae60; color: white;")
         # reset_ui is the single funnel every search exit path reaches, so hiding
         # here guarantees no orphaned visible Pause button on any of them.
@@ -20013,6 +20217,10 @@ class GenizahGUI(QMainWindow):
 
     def _reset_search(self):
         """Clear all search state and start fresh."""
+        # A zero-result LOCAL completion already queued when New was clicked
+        # would re-show the "nothing in your local files" strip on the fresh
+        # screen; block the hint until the next run starts (Codex, PR #343).
+        self._local_scope_hint_blocked = True
         # 1. Stop any running search thread
         self._apply_pause_state(self._pause_search, 'hidden')
         self._pause_search.state = 'idle'
@@ -20408,6 +20616,7 @@ class GenizahGUI(QMainWindow):
         was_cancelled = getattr(self, '_search_was_cancelled', False)
         if not results:
             self.reset_ui()
+            self._update_local_scope_strip(0, cancelled=was_cancelled)
             if was_cancelled:
                 self.status_label.setText(f"{tr('No results found.')} ({tr('Partial results')})")
             else:
@@ -21595,6 +21804,9 @@ class GenizahGUI(QMainWindow):
             tag = self.tag_search_combo.currentText().strip()
         if not tag:
             return
+        # A tag search is never LOCAL: the strip from the previous run is moot
+        # the moment a tag is accepted, not only when its results arrive.
+        self._set_local_scope_strip_visible(False)
         # CR-114-01: drain + disconnect the previous worker BEFORE installing the new run
         # object. wait() blocks the UI thread until the old worker exits; disconnect() drops
         # its slot. But Qt may ALREADY have posted the old worker's finished QMetaCallEvent
@@ -21637,6 +21849,9 @@ class GenizahGUI(QMainWindow):
         `token` is the per-run token bound at connect time (CR-114-01) — threaded into the
         emit helper so a stale slot from a superseded PGP-tag worker is skipped.
         """
+        # A tag search is never LOCAL and does not pass through start_search,
+        # so it clears the hint itself.
+        self._set_local_scope_strip_visible(False)
         if not results:
             # Phase 114 USAGE-03: zero-result completed tag search (D-07).
             # `tag` is the search term — MUST NOT appear in props (D-04).
@@ -22354,7 +22569,7 @@ class GenizahGUI(QMainWindow):
                 if (candidate.get('display') or {}).get('id') == res_id:
                     target_index = idx
                     break
-        ResultDialog(self, sorted_results, target_index, self.meta_mgr, self.searcher).exec()
+        self._show_result_dialog(sorted_results, target_index)
 
     def open_result_in_browse_from_table(self, res):
         if not res:
@@ -27944,7 +28159,7 @@ class GenizahGUI(QMainWindow):
         if clicked_index == -1: return
 
         # 3. Open Dialog with List
-        ResultDialog(self, flat_list, clicked_index, self.meta_mgr, self.searcher).exec()
+        self._show_result_dialog(flat_list, clicked_index)
 
     def _refresh_comp_tree_metadata(self):
 
@@ -29433,6 +29648,10 @@ class GenizahGUI(QMainWindow):
         Legacy entries that still carry a 'results' snapshot are restored
         instantly for backward compatibility.
         """
+        # Query and scope change here with signals blocked, and the re-run may
+        # be deferred behind a filter recompute or skipped -- the strip from the
+        # previous run must not survive into the restored one.
+        self._set_local_scope_strip_visible(False)
         filter_pending = False
         if entry:
             self.query_input.setText(entry.get('query', ''))
@@ -30498,6 +30717,12 @@ class GenizahGUI(QMainWindow):
         # telemetry and session-save paths are already disarmed.
         if self._defer_close_for_passage(event):
             return
+        # The Manuscript Viewer is an unparented top-level window
+        # (2026-09-17), so it does not close with this one. Left open it
+        # would keep the process alive (quitOnLastWindowClosed never fires)
+        # and keep pointing, via _app, at a host whose shared workers are
+        # about to be torn down. Close it before any shutdown state is set.
+        self._close_result_dialog()
         # Phase 114 D-09/D-15: set shutdown flag first so Plan-02 search/comp emit
         # guards (REVIEWS HIGH-2) and session_end exactly-once guard both see it
         # before any subsequent teardown fires events.
@@ -30879,8 +31104,7 @@ class GenizahGUI(QMainWindow):
         if target_index == -1: target_index = 0
 
         try:
-            dlg = ResultDialog(self, flat_list, target_index, self.meta_mgr, self.searcher)
-            dlg.exec()
+            self._show_result_dialog(flat_list, target_index)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open viewer: {e}")
 

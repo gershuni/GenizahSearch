@@ -2945,3 +2945,110 @@ def test_the_same_ordering_still_reaches_a_user_with_no_stored_method(
 
     assert w.comp_method_combo.currentData() == 'passage', (
         'the startup guard swallowed the default instead of deferring it')
+
+
+# ---------------------------------------------------------------------------
+# Owner report, 2026-09-17: in the Composition tab, choosing letter-level
+# search and then switching back to chunk search leaves the search-type
+# combo and the frequency spinner disabled. Both are FORCED off while
+# letter-level is selected (`_PASSAGE_FORCED_CONTROLS`), and both are ALSO
+# owned by Lab Mode (`_PASSAGE_CONTROLS_LAB_ALSO_OWNS`) -- so the revert half
+# of `_apply_passage_mode_ui` deliberately skips re-enabling them, on the
+# theory that they "go back through Lab's own predicate". Nothing on the
+# revert path ever consulted that predicate, so they stayed disabled until
+# Lab Mode was toggled on and off by hand.
+#
+# Exercises the REAL function end to end -- every other test in this file
+# that touches `_apply_passage_mode_ui` stubs it out, so none of them could
+# have caught this.
+# ---------------------------------------------------------------------------
+
+class _EnabledSpin:
+    """Unlike `_Spin` above (read-only: exists only to be asked `.value()`),
+    this stub actually tracks enabled state, which is exactly what this bug
+    is about."""
+
+    def __init__(self, value=0):
+        self._v = value
+        self.enabled = True
+
+    def value(self):
+        return self._v
+
+    def setValue(self, v):
+        self._v = v
+
+    def setEnabled(self, b):
+        self.enabled = bool(b)
+
+    def blockSignals(self, _b):
+        return False
+
+
+class _RevertWin(_Win):
+    """`_apply_passage_mode_ui` also drives the visibility helpers below it,
+    none of which `_Win` borrows (no other test runs the real function).
+    Borrowed rather than stubbed, same rule the rest of this file follows:
+    a stand-in would let a real defect in one of these hide behind it."""
+    _set_boundary_row_visible = APP._set_boundary_row_visible
+    _set_witness_panel_visible = APP._set_witness_panel_visible
+    _set_passage_options_visible = APP._set_passage_options_visible
+
+
+def _revert_window(lab=False):
+    w = _RevertWin()
+    w._PASSAGE_CONTROLS_LAB_ALSO_OWNS = APP._PASSAGE_CONTROLS_LAB_ALSO_OWNS
+    w.comp_mode_combo = _Combo(
+        [('exact', ''), ('variants', ''), ('fuzzy', '')], index=0)
+    w.spin_chunk = _EnabledSpin(5)
+    w.spin_freq = _EnabledSpin(50)
+    w.spin_min_chunks = _EnabledSpin(1)
+    w.boundary_mode_combo = _Combo([('full', ''), ('boundary', '')], 0)
+    w.btn_lab_mode_toggle_comp = _Toggle(lab)
+    return w
+
+
+def test_reverting_from_letter_level_re_enables_the_lab_owned_controls():
+    """The owner's report, reproduced directly: Lab Mode is OFF, so nothing
+    legitimately holds these two down once letter-level is deselected."""
+    w = _revert_window(lab=False)
+    APP._apply_passage_mode_ui(w, True)
+    assert w.comp_mode_combo.enabled is False, (
+        'sanity: letter-level mode did not disable the search-type combo')
+    assert w.spin_freq.enabled is False, (
+        'sanity: letter-level mode did not disable the frequency spinner')
+
+    APP._apply_passage_mode_ui(w, False)
+    assert w.comp_mode_combo.enabled is True, (
+        'the search-type combo stayed disabled after switching back to '
+        'chunk search')
+    assert w.spin_freq.enabled is True, (
+        'the frequency spinner stayed disabled after switching back to '
+        'chunk search')
+
+
+def test_reverting_while_lab_mode_is_on_still_leaves_them_disabled():
+    """Lab Mode is the OTHER legitimate owner of these two controls.
+    Reverting from letter-level must not re-enable a control Lab Mode is
+    holding disabled for its own, unrelated reason."""
+    w = _revert_window(lab=True)
+    APP._apply_passage_mode_ui(w, True)
+    APP._apply_passage_mode_ui(w, False)
+    assert w.comp_mode_combo.enabled is False, (
+        'reverting from letter-level re-enabled a control Lab Mode is '
+        'legitimately holding disabled')
+    assert w.spin_freq.enabled is False, (
+        'reverting from letter-level re-enabled a control Lab Mode is '
+        'legitimately holding disabled')
+
+
+def test_the_single_owner_controls_are_unaffected_by_lab_mode():
+    """`spin_chunk`, `spin_min_chunks` and `boundary_mode_combo` have only
+    ONE owner (letter-level mode), so they must always come back on revert
+    regardless of Lab Mode -- this must keep passing across the fix above."""
+    w = _revert_window(lab=True)
+    APP._apply_passage_mode_ui(w, True)
+    APP._apply_passage_mode_ui(w, False)
+    assert w.spin_chunk.enabled is True
+    assert w.spin_min_chunks.enabled is True
+    assert w.boundary_mode_combo.enabled is True
