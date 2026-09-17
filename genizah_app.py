@@ -15035,7 +15035,7 @@ class GenizahGUI(QMainWindow):
         # discoveries and my-comments viewers call on_view_result while
         # application-modal), a non-modal viewer would sit blocked behind
         # that loop, so there the new viewer runs modally, NESTED, exactly as
-        # the old ResultDialog(...).exec() did. The open viewer is then left
+        # the old nested exec() call did. The open viewer is then left
         # alone and keeps the reference slot: ResultDialog.view_corrections
         # parents its corrections dialog to the viewer, so closing that
         # viewer here would delete the very dialog whose callback we are in,
