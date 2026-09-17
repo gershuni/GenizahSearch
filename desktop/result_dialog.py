@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QTextBrowser, QToolButton, QVBoxLayout, QWidget,
 )
 from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal
+from PyQt6 import sip
 from PyQt6.QtGui import QColor, QDesktopServices, QFont, QPalette, QPixmap
 
 from genizah_core import (
@@ -82,6 +83,11 @@ class ResultDialog(QDialog):
         # Phase 100 (REVIEWS-R2-2): guarantee scope teardown on EVERY dialog-finish
         # path (accept/reject/done/Esc) — closeEvent alone misses reject/accept/done.
         self.finished.connect(self._on_pdf_dialog_finished)
+        # Esc / reject / accept / done never reach closeEvent, and since the
+        # viewer became unparented (2026-09-17) its host deleteLater()s it
+        # right after `finished` -- so the workers must be stopped HERE too,
+        # or a late image callback lands on deleted widgets (Codex, PR #343).
+        self.finished.connect(self._on_dialog_finished_teardown)
 
         self.all_results = all_results
         self.current_result_idx = current_index
@@ -2178,6 +2184,9 @@ class ResultDialog(QDialog):
         if not pattern_str or text_browser is None:
             return
         def _do_scroll():
+            # Deferred past the host's deleteLater(): the browser may be gone.
+            if sip.isdeleted(text_browser):
+                return
             try:
                 flags = re.IGNORECASE
                 if '\\n' in pattern_str or pattern_str.startswith('^') or '^\\' in pattern_str:
@@ -3733,7 +3742,26 @@ class ResultDialog(QDialog):
         except Exception as e:
             logger.error("Failed to save metadata caches on exit: %s", e)
 
-        # 2. Stop ResultDialog-owned worker threads
+        # 2. Stop ResultDialog-owned worker threads -- idempotent with the
+        # `finished` handler, which covers the paths closeEvent never sees.
+        try:
+            self._teardown_workers()
+        finally:
+            super().closeEvent(event)
+
+    def _teardown_workers(self):
+        """Stop every worker this dialog owns. Idempotent, and run on EVERY
+        termination path: closeEvent (the X button, close()) AND `finished`
+        (Esc, reject, accept, done), which never reaches closeEvent.
+
+        Until 2026-09-17 the main window owned this dialog, so a worker that
+        outlived an Esc was harmless -- the C++ object lived until app exit.
+        Now the host deleteLater()s the viewer right after `finished`, and a
+        manuscript-image callback arriving afterwards would touch deleted
+        widgets (Codex, PR #343)."""
+        if getattr(self, '_workers_torn_down', False):
+            return
+        self._workers_torn_down = True
         try:
             for attr in ('enrich_worker', '_rd_pgp_worker', 'preload_meta_worker'):
                 worker = getattr(self, attr, None)
@@ -3746,25 +3774,28 @@ class ResultDialog(QDialog):
             # Stop dialog's own thumbnail image loaders (img_thread, ext_img_thread)
             self.cancel_image_thread()
 
-            # Stop manuscript viewer image threads
+            # Stop manuscript viewer image threads (sets its _closing flag, so
+            # a late loader result is dropped instead of drawn)
             if getattr(self, 'ms_viewer', None):
                 self.ms_viewer.stop_threads()
 
             # Phase 100 (REVIEWS HIGH-2 + R2-2 + R2-3): fully discard this dialog's transient
             # render scope so a late worker result cannot write into the closed dialog's ms_viewer,
             # the retained callbacks (closing over this dialog + viewer) are released, AND the
-            # scope's debounce/watchdog QTimer dict entries are removed (not just stopped — they
+            # scope's debounce/watchdog QTimer dict entries are removed (not just stopped -- they
             # would otherwise accumulate one pair per opened PDF dialog for the app session).
-            # Idempotent with the finished-signal handler (_on_pdf_dialog_finished).
+            # Idempotent with _on_pdf_dialog_finished.
             try:
                 ctrl = self._pdf_controller()
                 if ctrl is not None:
                     ctrl.discard_scope(self._pdf_scope)
             except Exception:  # noqa: BLE001
                 pass
+        except Exception:  # noqa: BLE001
+            logger.exception("ResultDialog worker teardown failed")
 
-        finally:
-            super().closeEvent(event)
+    def _on_dialog_finished_teardown(self, _result):
+        self._teardown_workers()
 
     # ------------------------------------------------------------------
     # Phase 100 (PDFIMG-03/05): LOCAL PDF image rendering helpers

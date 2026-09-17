@@ -19677,6 +19677,7 @@ class GenizahGUI(QMainWindow):
         says "Partial results", so steering the user elsewhere would be a
         guess (Codex, PR #343)."""
         show = ((not result_count) and not cancelled
+                and not getattr(self, '_local_scope_hint_blocked', False)
                 and self._search_run_corpus() == 'local')
         self._set_local_scope_strip_visible(show)
         return show
@@ -19759,6 +19760,7 @@ class GenizahGUI(QMainWindow):
         query = self.query_input.text().strip()
         if not query: return
         self._set_local_scope_strip_visible(False)
+        self._local_scope_hint_blocked = False
 
         # Detect query prefix (?, ??, ???, ~, /) - Delegated to Core
         # Skip prefix parsing in Responsa mode -- # is Responsa syntax, not Shelfmark
@@ -20215,6 +20217,10 @@ class GenizahGUI(QMainWindow):
 
     def _reset_search(self):
         """Clear all search state and start fresh."""
+        # A zero-result LOCAL completion already queued when New was clicked
+        # would re-show the "nothing in your local files" strip on the fresh
+        # screen; block the hint until the next run starts (Codex, PR #343).
+        self._local_scope_hint_blocked = True
         # 1. Stop any running search thread
         self._apply_pause_state(self._pause_search, 'hidden')
         self._pause_search.state = 'idle'
@@ -21798,6 +21804,9 @@ class GenizahGUI(QMainWindow):
             tag = self.tag_search_combo.currentText().strip()
         if not tag:
             return
+        # A tag search is never LOCAL: the strip from the previous run is moot
+        # the moment a tag is accepted, not only when its results arrive.
+        self._set_local_scope_strip_visible(False)
         # CR-114-01: drain + disconnect the previous worker BEFORE installing the new run
         # object. wait() blocks the UI thread until the old worker exits; disconnect() drops
         # its slot. But Qt may ALREADY have posted the old worker's finished QMetaCallEvent
@@ -29639,6 +29648,10 @@ class GenizahGUI(QMainWindow):
         Legacy entries that still carry a 'results' snapshot are restored
         instantly for backward compatibility.
         """
+        # Query and scope change here with signals blocked, and the re-run may
+        # be deferred behind a filter recompute or skipped -- the strip from the
+        # previous run must not survive into the restored one.
+        self._set_local_scope_strip_visible(False)
         filter_pending = False
         if entry:
             self.query_input.setText(entry.get('query', ''))

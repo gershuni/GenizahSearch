@@ -39,8 +39,10 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 import genizah_app                            # noqa: E402
+import desktop.result_dialog as result_dialog  # noqa: E402
 
 APP = genizah_app.GenizahGUI
+RD = result_dialog.ResultDialog
 RD_PY = os.path.join(ROOT, 'desktop', 'result_dialog.py')
 APP_PY = os.path.join(ROOT, 'genizah_app.py')
 
@@ -300,6 +302,105 @@ def test_nesting_leaves_the_open_viewer_alone(host):
 def test_opened_from_the_main_window_the_viewer_is_free_standing(host):
     dlg = host._show_result_dialog(['a'], 0)
     assert dlg.shown and not dlg.execd
+
+
+# ---------------------------------------------------------------------------
+# 4. Worker teardown on EVERY termination path (Codex CLI review, PR #343).
+# ---------------------------------------------------------------------------
+
+class _Worker:
+    def __init__(self, finishes=True):
+        self.running = True
+        self.interrupted = self.terminated = False
+        self.finishes = finishes
+
+    def isRunning(self):
+        return self.running
+
+    def requestInterruption(self):
+        self.interrupted = True
+
+    def wait(self, _ms=None):
+        if self.finishes or self.terminated:
+            self.running = False
+            return True
+        return False
+
+    def terminate(self):
+        self.terminated = True
+
+
+class _MsViewer:
+    def __init__(self):
+        self.stopped = 0
+
+    def stop_threads(self):
+        self.stopped += 1
+
+
+class _Viewer:
+    _teardown_workers = RD._teardown_workers
+    _on_dialog_finished_teardown = RD._on_dialog_finished_teardown
+
+    def __init__(self):
+        self.enrich_worker = _Worker()
+        self._rd_pgp_worker = _Worker(finishes=False)
+        self.preload_meta_worker = None
+        self.ms_viewer = _MsViewer()
+        self.images_cancelled = 0
+        self._pdf_scope = 1
+
+    def cancel_image_thread(self):
+        self.images_cancelled += 1
+
+    def _pdf_controller(self):
+        return None
+
+
+def test_teardown_stops_every_worker_once_and_is_idempotent():
+    v = _Viewer()
+    v._on_dialog_finished_teardown(0)         # the Esc / reject / accept / done path
+    assert v.enrich_worker.interrupted and not v.enrich_worker.running
+    assert v._rd_pgp_worker.interrupted and v._rd_pgp_worker.terminated
+    assert v.images_cancelled == 1 and v.ms_viewer.stopped == 1
+    v._teardown_workers()                     # closeEvent afterwards: a no-op
+    assert v.images_cancelled == 1 and v.ms_viewer.stopped == 1
+
+
+def test_teardown_is_wired_to_finished_and_to_close_event():
+    init = _init_source()
+    assert 'self.finished.connect(self._on_dialog_finished_teardown)' in init
+    # the PDF-scope handler was connected first, so it still runs first
+    assert (init.index('self._on_pdf_dialog_finished')
+            < init.index('self._on_dialog_finished_teardown'))
+    close_src = inspect.getsource(RD.closeEvent)
+    assert 'self._teardown_workers()' in close_src
+    assert 'requestInterruption' not in close_src   # one implementation, not two
+
+
+def test_deferred_highlight_scroll_checks_the_browser_still_exists():
+    src = inspect.getsource(RD._scroll_to_first_highlight)
+    assert 'sip.isdeleted(text_browser)' in src
+    assert (src.index('sip.isdeleted(text_browser)')
+            < src.index('plain = text_browser.toPlainText()'))
+
+
+def test_view_corrections_parents_its_dialog_to_the_viewer():
+    """The nesting rule in _show_result_dialog exists because of this parentage;
+    if it changes, that rule needs re-examining."""
+    src = inspect.getsource(RD.view_corrections)
+    assert re.search(r'CorrectionsViewerDialog\(\s*self,', src)
+
+
+def test_every_on_view_result_source_dialog_runs_modally():
+    """_show_result_dialog decides nesting by QApplication.activeModalWidget();
+    that only works while these dialogs are shown with exec()."""
+    src = _source(APP_PY)
+    sites = [m.end() for m in re.finditer(
+        r'on_view_result=lambda s: self\._open_document_result_dialog\(shelfmark=s\)', src)]
+    assert len(sites) >= 4, len(sites)
+    for end in sites:
+        assert 'dialog.exec()' in src[end:end + 200], src[end:end + 200]
 
 
 def test_host_initialises_the_reference_slot():

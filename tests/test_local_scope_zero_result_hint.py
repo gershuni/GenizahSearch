@@ -214,6 +214,36 @@ def test_tag_search_results_hide_the_hint():
     assert 'self._set_local_scope_strip_visible(False)' in src
 
 
+def test_tag_search_launch_hides_the_hint():
+    """Codex CLI (PR #343): hiding only when tag RESULTS arrive left the old
+    strip actionable for the whole tag search."""
+    src = inspect.getsource(APP._execute_tag_search)
+    assert 'self._set_local_scope_strip_visible(False)' in src
+    assert (src.index('_set_local_scope_strip_visible(False)')
+            < src.index('_pgp_tag_search_worker'))
+
+
+def test_history_restore_hides_the_hint_on_entry():
+    """History restores query and scope with signals blocked, and its re-run
+    may be deferred or skipped."""
+    src = inspect.getsource(APP._restore_regular_search_from_state)
+    assert 'self._set_local_scope_strip_visible(False)' in src
+
+
+def test_new_blocks_a_late_zero_result_completion_from_reshowing_the_hint():
+    """A LOCAL completion already queued when New was clicked arrives AFTER
+    the reset and would otherwise re-show the strip on the fresh screen."""
+    h = _Host('local')
+    h._local_scope_hint_blocked = True         # what _reset_search sets
+    assert h._update_local_scope_strip(0) is False
+    h._local_scope_hint_blocked = False        # what start_search sets
+    assert h._update_local_scope_strip(0) is True
+    reset_src = inspect.getsource(APP._reset_search)
+    assert 'self._local_scope_hint_blocked = True' in reset_src
+    start_src = inspect.getsource(APP.start_search)
+    assert 'self._local_scope_hint_blocked = False' in start_src
+
+
 def test_manual_scope_change_hides_the_hint():
     src = inspect.getsource(APP._on_corpus_scope_changed)
     assert 'self._set_local_scope_strip_visible(False)' in src
