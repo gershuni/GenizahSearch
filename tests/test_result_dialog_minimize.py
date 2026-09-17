@@ -313,6 +313,7 @@ class _Worker:
         self.running = True
         self.interrupted = self.terminated = False
         self.finishes = finishes
+        self.waits = []          # the timeout passed to each wait() call
 
     def isRunning(self):
         return self.running
@@ -321,6 +322,7 @@ class _Worker:
         self.interrupted = True
 
     def wait(self, _ms=None):
+        self.waits.append(_ms)
         if self.finishes or self.terminated:
             self.running = False
             return True
@@ -345,7 +347,7 @@ class _Viewer:
     def __init__(self):
         self.enrich_worker = _Worker()
         self._rd_pgp_worker = _Worker(finishes=False)
-        self.preload_meta_worker = None
+        self.preload_meta_worker = _Worker()
         self.ms_viewer = _MsViewer()
         self.images_cancelled = 0
         self._pdf_scope = 1
@@ -362,6 +364,12 @@ def test_teardown_stops_every_worker_once_and_is_idempotent():
     v._on_dialog_finished_teardown(0)         # the Esc / reject / accept / done path
     assert v.enrich_worker.interrupted and not v.enrich_worker.running
     assert v._rd_pgp_worker.interrupted and v._rd_pgp_worker.terminated
+    assert v.preload_meta_worker.interrupted and not v.preload_meta_worker.running
+    # the first wait is BOUNDED (a stuck worker must not hang the GUI thread);
+    # only the post-terminate wait may be open-ended
+    first_wait = v._rd_pgp_worker.waits[0]
+    assert isinstance(first_wait, int) and 0 < first_wait <= 5000, v._rd_pgp_worker.waits
+    assert v._rd_pgp_worker.waits[-1] is None
     assert v.images_cancelled == 1 and v.ms_viewer.stopped == 1
     v._teardown_workers()                     # closeEvent afterwards: a no-op
     assert v.images_cancelled == 1 and v.ms_viewer.stopped == 1

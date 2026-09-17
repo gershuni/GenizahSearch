@@ -3762,37 +3762,45 @@ class ResultDialog(QDialog):
         if getattr(self, '_workers_torn_down', False):
             return
         self._workers_torn_down = True
-        try:
-            for attr in ('enrich_worker', '_rd_pgp_worker', 'preload_meta_worker'):
+        # Each step is guarded on its own: one worker that fails to stop must
+        # not skip the others, or the viewer's _closing flag would never be set.
+        for attr in ('enrich_worker', '_rd_pgp_worker', 'preload_meta_worker'):
+            try:
                 worker = getattr(self, attr, None)
                 if worker and worker.isRunning():
                     worker.requestInterruption()
                     if not worker.wait(2000):
                         worker.terminate()
                         worker.wait()
+            except Exception:  # noqa: BLE001
+                logger.exception("ResultDialog: could not stop %s", attr)
 
-            # Stop dialog's own thumbnail image loaders (img_thread, ext_img_thread)
+        # Stop dialog's own thumbnail image loaders (img_thread, ext_img_thread)
+        try:
             self.cancel_image_thread()
+        except Exception:  # noqa: BLE001
+            logger.exception("ResultDialog: could not stop the image loaders")
 
-            # Stop manuscript viewer image threads (sets its _closing flag, so
-            # a late loader result is dropped instead of drawn)
+        # Stop manuscript viewer image threads (sets its _closing flag, so
+        # a late loader result is dropped instead of drawn)
+        try:
             if getattr(self, 'ms_viewer', None):
                 self.ms_viewer.stop_threads()
+        except Exception:  # noqa: BLE001
+            logger.exception("ResultDialog: could not stop the manuscript viewer")
 
+        try:
             # Phase 100 (REVIEWS HIGH-2 + R2-2 + R2-3): fully discard this dialog's transient
             # render scope so a late worker result cannot write into the closed dialog's ms_viewer,
             # the retained callbacks (closing over this dialog + viewer) are released, AND the
             # scope's debounce/watchdog QTimer dict entries are removed (not just stopped -- they
             # would otherwise accumulate one pair per opened PDF dialog for the app session).
             # Idempotent with _on_pdf_dialog_finished.
-            try:
-                ctrl = self._pdf_controller()
-                if ctrl is not None:
-                    ctrl.discard_scope(self._pdf_scope)
-            except Exception:  # noqa: BLE001
-                pass
+            ctrl = self._pdf_controller()
+            if ctrl is not None:
+                ctrl.discard_scope(self._pdf_scope)
         except Exception:  # noqa: BLE001
-            logger.exception("ResultDialog worker teardown failed")
+            pass
 
     def _on_dialog_finished_teardown(self, _result):
         self._teardown_workers()

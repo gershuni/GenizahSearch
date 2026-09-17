@@ -244,6 +244,45 @@ def test_new_blocks_a_late_zero_result_completion_from_reshowing_the_hint():
     assert 'self._local_scope_hint_blocked = False' in start_src
 
 
+def _top_level_statements(fn):
+    """The direct statements of a method body (nothing nested in if/try/for),"""
+    import ast
+    import textwrap
+    tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
+    body = tree.body[0].body
+    return [ast.unparse(stmt) for stmt in body]
+
+
+def _has_unconditional(fn, fragment):
+    return any(fragment in stmt for stmt in _top_level_statements(fn))
+
+
+def test_the_hide_and_block_statements_are_unconditional():
+    """Codex CLI (PR #343, round 2): each of these survived as a 'guarded by the
+    wrong condition' mutation because the tests only checked source membership.
+    They must be direct statements of the method body, not nested in an if."""
+    assert _has_unconditional(APP._reset_search, '_local_scope_hint_blocked = True')
+    assert _has_unconditional(APP.start_search, '_local_scope_hint_blocked = False')
+    assert _has_unconditional(APP._execute_tag_search, '_set_local_scope_strip_visible(False)')
+    assert _has_unconditional(APP._restore_regular_search_from_state,
+                              '_set_local_scope_strip_visible(False)')
+    assert _has_unconditional(APP.reset_ui, '_set_local_scope_strip_visible(False)')
+    assert _has_unconditional(APP._on_tag_search_results, '_set_local_scope_strip_visible(False)')
+
+
+def test_block_is_set_before_the_running_check_and_cleared_after_the_query_guard():
+    """New must block even when the worker already finished and its completion
+    is merely queued; start_search must unblock for every real run."""
+    reset = _top_level_statements(APP._reset_search)
+    i_block = next(i for i, s in enumerate(reset) if '_local_scope_hint_blocked = True' in s)
+    i_running = next(i for i, s in enumerate(reset) if 'search_thread.isRunning()' in s)
+    assert i_block < i_running
+    start = _top_level_statements(APP.start_search)
+    i_unblock = next(i for i, s in enumerate(start) if '_local_scope_hint_blocked = False' in s)
+    i_drain = next(i for i, s in enumerate(start) if '_drain_previous_worker' in s)
+    assert i_unblock < i_drain
+
+
 def test_manual_scope_change_hides_the_hint():
     src = inspect.getsource(APP._on_corpus_scope_changed)
     assert 'self._set_local_scope_strip_visible(False)' in src
