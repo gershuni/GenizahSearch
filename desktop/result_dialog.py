@@ -48,8 +48,24 @@ class ResultDialog(QDialog):
     thumb_resolved = pyqtSignal(str, object)
 
     def __init__(self, parent, all_results, current_index, meta_mgr, searcher):
-        super().__init__(parent)
+        # The viewer is an INDEPENDENT top-level window (2026-09-17): no Qt
+        # parent, non-modal, its own taskbar button. Parented to the main
+        # window it was a Win32 OWNED window -- always above its owner, no
+        # taskbar button of its own -- and .exec() made it application-modal,
+        # so minimizing it left the main window disabled and buried behind
+        # whatever app Windows activated next, which read as "the whole app
+        # minimized" (measured on the live desktop: IsIconic(main) stayed
+        # False in every parent/modality combination). `parent` is still
+        # the host for every callback, via `self._app`; only the Qt
+        # ownership is gone. Shown by GenizahGUI._show_result_dialog, which
+        # holds the one reference that keeps an unparented dialog alive.
+        super().__init__(None)
         self._app = parent
+        self.setModal(False)
+        self.setWindowFlags(
+            self.windowFlags()
+            | Qt.WindowType.WindowMinMaxButtonsHint
+            | Qt.WindowType.WindowCloseButtonHint)
         # D-03: result_detail feature_opened — single canonical construction site (covers all 6
         # ResultDialog(...) construction sites in genizah_app.py). Routed through the host's gated
         # _emit_feature_opened() (WR-01 / T-114-03): a ResultDialog opened in the ~700ms startup
@@ -3114,7 +3130,10 @@ class ResultDialog(QDialog):
             request_id = self.current_meta_request
             def worker():
                 meta = self.meta_mgr.fetch_nli_data(self.current_sys_id)
-                self.metadata_loaded.emit(request_id, meta or {})
+                try:
+                    self.metadata_loaded.emit(request_id, meta or {})
+                except RuntimeError:
+                    pass  # dialog deleted after close; the answer has no home
             threading.Thread(target=worker, daemon=True).start()
 
         if not cached_meta or 'marc' not in cached_meta:
@@ -3665,7 +3684,10 @@ class ResultDialog(QDialog):
 
         def worker(target_sid=sys_id):
             url = self.meta_mgr.get_thumbnail(target_sid)
-            self.thumb_resolved.emit(target_sid, url)
+            try:
+                self.thumb_resolved.emit(target_sid, url)
+            except RuntimeError:
+                pass  # dialog deleted after close; the answer has no home
 
         threading.Thread(target=worker, daemon=True).start()
 

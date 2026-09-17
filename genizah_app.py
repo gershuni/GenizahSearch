@@ -1527,6 +1527,7 @@ class GenizahGUI(QMainWindow):
 
         # Puzzle window singleton (Phase 48)
         self._puzzle_window = None
+        self._result_dialog = None  # the one open Manuscript Viewer
 
         # Join Workbench singleton (Phase 107)
         self._join_workbench = None
@@ -11572,7 +11573,7 @@ class GenizahGUI(QMainWindow):
                 target_index = i
 
         if adapted_results:
-            ResultDialog(self, adapted_results, target_index, self.meta_mgr, self.searcher).exec()
+            self._show_result_dialog(adapted_results, target_index)
 
     def _catalog_browse_manuscript_by_row(self, row):
         """Navigate to Browse by Shelfmark tab for the given row."""
@@ -13208,7 +13209,7 @@ class GenizahGUI(QMainWindow):
             }
         }
 
-        ResultDialog(self, [result], 0, self.meta_mgr, self.searcher).exec()
+        self._show_result_dialog([result], 0)
 
     def lists_browse_item(self):
         """Browse the current item in the Browse tab."""
@@ -13280,8 +13281,8 @@ class GenizahGUI(QMainWindow):
             }
 
             logger.debug("Opening ResultDialog")
-            ResultDialog(self, [result], 0, self.meta_mgr, self.searcher).exec()
-            logger.debug("ResultDialog closed")
+            self._show_result_dialog([result], 0)
+            logger.debug("ResultDialog shown")
         except Exception as e:
             logger.exception("Error in _open_document_result_dialog: %s", e)
 
@@ -14986,6 +14987,53 @@ class GenizahGUI(QMainWindow):
         self._puzzle_window.raise_()
         self._puzzle_window.activateWindow()
 
+    def _show_result_dialog(self, results, index):
+        """Open the Manuscript Viewer (ResultDialog) as an independent,
+        non-modal window, and keep the one reference that owns it.
+
+        Until 2026-09-17 every site constructed the dialog and ran exec():
+        application-modal, and Win32-owned by this window. Minimizing that
+        dialog hid it with no taskbar button to bring it back, and the
+        disabled main window could not take focus, so Windows activated
+        the next application over it -- the whole app appeared to
+        minimize. A user asked to see the search panel while reading
+        results, so the viewer is now a top-level window of its own (Qt
+        parent None, show() not exec()): its own taskbar button, minimized
+        and restored on its own, and this window stays usable beside it.
+
+        One viewer at a time, as before: opening another result closes the
+        open one first. The reference lives in ``self._result_dialog``
+        because an unparented dialog is garbage-collected the moment show()
+        returns; ``finished`` releases it and schedules the C++ object for
+        deletion after its closeEvent has stopped its workers.
+        """
+        previous = getattr(self, '_result_dialog', None)
+        if previous is not None and not sip.isdeleted(previous):
+            previous.close()
+        dlg = ResultDialog(self, results, index, self.meta_mgr, self.searcher)
+        self._result_dialog = dlg
+        dlg.finished.connect(
+            lambda _code, d=dlg: self._on_result_dialog_finished(d))
+        # Centre over this window: an unparented QDialog would otherwise
+        # land wherever the screen puts it.
+        try:
+            dlg.move(self.frameGeometry().center() - dlg.rect().center())
+        except Exception:  # noqa: BLE001
+            pass
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        return dlg
+
+    def _on_result_dialog_finished(self, dlg):
+        """Release the viewer once it has closed (any path: X, Esc, done())."""
+        if getattr(self, '_result_dialog', None) is dlg:
+            self._result_dialog = None
+        try:
+            dlg.deleteLater()
+        except RuntimeError:
+            pass
+
     def add_to_puzzle(self, sys_id, shelfmark, folio_label=None, fl_id=None):
         """Add a fragment to the puzzle canvas. Opens puzzle window if needed."""
         # D-03: Fragment Puzzle feature_opened (add-fragment path — REVIEWS MEDIUM-7).
@@ -16237,8 +16285,12 @@ class GenizahGUI(QMainWindow):
     # passed to setEnabled anywhere in this file (both by
     # `update_lab_ui_state`), so passage mode is the FIRST owner of the other
     # four and may re-enable them unconditionally -- while those two must be
-    # handed back to Lab's predicate instead, or turning passage mode off
-    # would re-enable a control Lab is legitimately holding disabled.
+    # re-derived from Lab's own predicate on revert instead of a blind
+    # setEnabled(True), or turning passage mode off would re-enable a
+    # control Lab is legitimately holding disabled. (Bug, fixed 2026-09-17:
+    # `_apply_passage_mode_ui`'s revert branch used to skip these two
+    # entirely rather than re-derive them, so they stayed disabled until Lab
+    # Mode was toggled by hand.)
     _PASSAGE_FORCED_CONTROLS = (
         ('comp_mode_combo', 'index', 0),        # Exact
         ('spin_chunk', 'value', 5),
@@ -18573,8 +18625,13 @@ class GenizahGUI(QMainWindow):
     def _apply_passage_mode_ui(self, on):
         """Force-set and disable the chunk knobs a letter-level search does
         not use, or hand them back. Reverting restores the cached value AND
-        the enabled state -- except for the two controls Lab also owns,
-        which go back through Lab's own predicate."""
+        the enabled state -- for the two controls Lab also owns, re-derived
+        from Lab's own predicate right here (`update_lab_ui_state` is not
+        called: it also touches the Search tab and re-enters
+        `_revalidate_comp_method`, neither of which belongs in this
+        function), so switching letter-level off never leaves them disabled
+        with nothing left to re-enable them until Lab Mode is toggled by
+        hand."""
         if on and not hasattr(self, '_passage_cached_chunk_state'):
             cache = {}
             for name, kind, _forced in self._PASSAGE_FORCED_CONTROLS:
@@ -18584,6 +18641,9 @@ class GenizahGUI(QMainWindow):
                 cache[name] = (w.currentIndex() if kind == 'index'
                                else w.value())
             self._passage_cached_chunk_state = cache
+
+        lab_btn = getattr(self, 'btn_lab_mode_toggle_comp', None)
+        lab_on = bool(lab_btn is not None and lab_btn.isChecked())
 
         for name, kind, forced in self._PASSAGE_FORCED_CONTROLS:
             w = getattr(self, name, None)
@@ -18608,7 +18668,9 @@ class GenizahGUI(QMainWindow):
                 w.blockSignals(False)
             if on:
                 w.setEnabled(False)
-            elif name not in self._PASSAGE_CONTROLS_LAB_ALSO_OWNS:
+            elif name in self._PASSAGE_CONTROLS_LAB_ALSO_OWNS:
+                w.setEnabled(not lab_on)
+            else:
                 w.setEnabled(True)
 
         # The whole paragraph row goes away in letter-level mode rather than
@@ -22354,7 +22416,7 @@ class GenizahGUI(QMainWindow):
                 if (candidate.get('display') or {}).get('id') == res_id:
                     target_index = idx
                     break
-        ResultDialog(self, sorted_results, target_index, self.meta_mgr, self.searcher).exec()
+        self._show_result_dialog(sorted_results, target_index)
 
     def open_result_in_browse_from_table(self, res):
         if not res:
@@ -27944,7 +28006,7 @@ class GenizahGUI(QMainWindow):
         if clicked_index == -1: return
 
         # 3. Open Dialog with List
-        ResultDialog(self, flat_list, clicked_index, self.meta_mgr, self.searcher).exec()
+        self._show_result_dialog(flat_list, clicked_index)
 
     def _refresh_comp_tree_metadata(self):
 
@@ -30879,8 +30941,7 @@ class GenizahGUI(QMainWindow):
         if target_index == -1: target_index = 0
 
         try:
-            dlg = ResultDialog(self, flat_list, target_index, self.meta_mgr, self.searcher)
-            dlg.exec()
+            self._show_result_dialog(flat_list, target_index)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open viewer: {e}")
 
