@@ -174,14 +174,16 @@ def test_every_termination_path_stops_the_workers_before_the_host_deletes(how):
 def test_teardown_wait_is_bounded_and_falls_back_to_terminate():
     """A worker that ignores interruption must not block the GUI thread for
     longer than the bounded wait; terminate() is the last resort."""
-    viewer = _Viewer(stubborn_seconds=6.0)
+    viewer = _Viewer(stubborn_seconds=12.0)
     viewer.show()
     _Host(viewer)
     t0 = time.monotonic()
     viewer.reject()
     elapsed = time.monotonic() - t0
     assert not viewer.preload_meta_worker.isRunning()
-    assert elapsed < 4.0, f"teardown blocked for {elapsed:.1f}s; the wait is not bounded"
+    # bounded wait is 2 s, then terminate(); 8 s leaves a loaded runner 6 s of
+    # slack while an unbounded wait would take the full 12 s
+    assert elapsed < 8.0, f"teardown blocked for {elapsed:.1f}s; the wait is not bounded"
     _flush_deferred_deletes()
 
 
@@ -192,15 +194,18 @@ def test_deferred_highlight_scroll_survives_deletion_of_the_browser():
     browser.setPlainText("alpha beta gamma")
     RD._scroll_to_first_highlight(object(), browser, "beta")   # schedules _do_scroll
     browser.deleteLater()
-    _flush_deferred_deletes()
-    assert sip.isdeleted(browser)
 
+    # The hook goes on BEFORE any event processing: flushing the deferred
+    # delete also fires the 0 ms timer, and PyQt aborts the process on an
+    # exception that escapes a Qt callback unless a Python hook is installed.
     caught = []
     previous_hook = sys.excepthook
     sys.excepthook = lambda *exc: caught.append(exc)
     try:
+        _flush_deferred_deletes()
+        assert sip.isdeleted(browser)
         for _ in range(5):
-            QCoreApplication.processEvents()          # fires the 0 ms timer
+            QCoreApplication.processEvents()          # in case the timer is still pending
     finally:
         sys.excepthook = previous_hook
     assert caught == [], f"deferred scroll raised on a deleted browser: {caught[0][1]!r}"

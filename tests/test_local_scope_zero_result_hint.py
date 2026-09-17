@@ -254,7 +254,16 @@ def _top_level_statements(fn):
 
 
 def _has_unconditional(fn, fragment):
-    return any(fragment in stmt for stmt in _top_level_statements(fn))
+    """True only if a SIMPLE statement (assignment or bare call) at the top level
+    of the method body contains the fragment. ast.unparse() of an `if` or `try`
+    includes its nested body, so matching every top-level statement would let
+    a hide moved under `if not tag:` still count (Codex, PR #343 round 3)."""
+    import ast
+    import textwrap
+    tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
+    return any(isinstance(stmt, (ast.Assign, ast.Expr))
+               and fragment in ast.unparse(stmt)
+               for stmt in tree.body[0].body)
 
 
 def test_the_hide_and_block_statements_are_unconditional():
