@@ -70,11 +70,15 @@ from tests.render_smoke.discovery_honesty_gate import (  # noqa: E402
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 MODEL_PATH = REPO_ROOT / "shared" / "discovery_panel_model.py"
-GATE1_DECISIONS = (
-    REPO_ROOT / ".planning" / "phases"
-    / "136-read-surfaces-connections-panel-work-witnesses"
-    / "136-GATE1-DECISIONS.md"
+# The v9.0.0 milestone close (2026-09-10) archived the phase directories under
+# .planning/milestones/v9.0.0-phases/; the decisions file is read from wherever
+# it lives, so the test does not go red on the commit that moves it.
+_GATE1_REL = pathlib.Path("136-read-surfaces-connections-panel-work-witnesses") / "136-GATE1-DECISIONS.md"
+_GATE1_CANDIDATES = (
+    REPO_ROOT / ".planning" / "phases" / _GATE1_REL,
+    REPO_ROOT / ".planning" / "milestones" / "v9.0.0-phases" / _GATE1_REL,
 )
+GATE1_DECISIONS = next((c for c in _GATE1_CANDIDATES if c.exists()), _GATE1_CANDIDATES[0])
 
 LANGS = ("en", "he")
 
