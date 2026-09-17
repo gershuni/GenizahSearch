@@ -15044,6 +15044,16 @@ class GenizahGUI(QMainWindow):
             dlg.move(self.frameGeometry().center() - dlg.rect().center())
         except Exception:  # noqa: BLE001
             pass
+        # Opened from INSIDE another dialog's exec() loop (the corrections,
+        # discoveries and my-comments viewers call on_view_result while
+        # application-modal), a non-modal viewer would sit blocked behind
+        # that loop. Run it modally there, as the nested exec() always did:
+        # the viewer still has its own taskbar button, and control returns
+        # to the source dialog when it closes (Codex, PR #343).
+        modal_source = QApplication.activeModalWidget()
+        if modal_source is not None and modal_source is not dlg:
+            dlg.exec()
+            return dlg
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()
@@ -20163,6 +20173,11 @@ class GenizahGUI(QMainWindow):
         self.reset_ui()
 
     def reset_ui(self):
+        # Every search exit path lands here (New, cancel, error, done), so a
+        # stale "nothing in your local files" strip cannot survive into the
+        # next state. The zero-result branch of on_search_finished decides
+        # afresh right after this call (Codex, PR #343).
+        self._set_local_scope_strip_visible(False)
         self.is_searching = False; self.btn_search.setText(tr("Search")); self.btn_search.setStyleSheet("background-color: #27ae60; color: white;")
         # reset_ui is the single funnel every search exit path reaches, so hiding
         # here guarantees no orphaned visible Pause button on any of them.
@@ -21817,6 +21832,9 @@ class GenizahGUI(QMainWindow):
         `token` is the per-run token bound at connect time (CR-114-01) — threaded into the
         emit helper so a stale slot from a superseded PGP-tag worker is skipped.
         """
+        # A tag search is never LOCAL and does not pass through start_search,
+        # so it clears the hint itself.
+        self._set_local_scope_strip_visible(False)
         if not results:
             # Phase 114 USAGE-03: zero-result completed tag search (D-07).
             # `tag` is the search term — MUST NOT appear in props (D-04).

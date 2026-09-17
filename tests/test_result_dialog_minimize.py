@@ -145,6 +145,7 @@ class _FakeDialog:
         self.finished = _Signal()
         self.shown = self.raised = self.activated = False
         self.closed = self.deleted = False
+        self.execd = False
         self.moved_to = None
         _FakeDialog.made.append(self)
 
@@ -171,11 +172,23 @@ class _FakeDialog:
     def deleteLater(self):
         self.deleted = True
 
+    def exec(self):
+        self.execd = True
+        return 0
+
 
 class _FakeSip:
     @staticmethod
     def isdeleted(obj):
         return getattr(obj, 'deleted', False)
+
+
+class _FakeQApp:
+    active_modal = None
+
+    @classmethod
+    def activeModalWidget(cls):
+        return cls.active_modal
 
 
 class _Host:
@@ -197,6 +210,8 @@ def host(monkeypatch):
     _FakeDialog.made = []
     monkeypatch.setattr(genizah_app, 'ResultDialog', _FakeDialog)
     monkeypatch.setattr(genizah_app, 'sip', _FakeSip)
+    _FakeQApp.active_modal = None
+    monkeypatch.setattr(genizah_app, 'QApplication', _FakeQApp)
     return _Host()
 
 
@@ -251,6 +266,23 @@ def test_main_window_close_event_closes_the_viewer_before_shutdown_state():
     # ...but only once the passage-index deferral has let the close proceed.
     assert (src.index('_defer_close_for_passage(event)')
             < src.index('self._close_result_dialog()'))
+
+
+def test_opened_from_inside_a_modal_dialog_the_viewer_runs_modally(host):
+    """Codex (PR #343): the corrections / discoveries / my-comments dialogs
+    call on_view_result from inside their own exec(). A non-modal viewer
+    would be blocked behind that loop, so there it runs modally, as the
+    old nested exec() did, and control returns to the source dialog."""
+    _FakeQApp.active_modal = object()
+    dlg = host._show_result_dialog(['a'], 0)
+    assert dlg.execd and not dlg.shown
+    assert host._result_dialog is dlg
+    assert dlg.moved_to is not None       # still centred over the host
+
+
+def test_opened_from_the_main_window_the_viewer_is_free_standing(host):
+    dlg = host._show_result_dialog(['a'], 0)
+    assert dlg.shown and not dlg.execd
 
 
 def test_host_initialises_the_reference_slot():

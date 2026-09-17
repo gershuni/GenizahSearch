@@ -197,6 +197,23 @@ def test_zero_result_branch_of_on_search_finished_evaluates_the_hint():
     assert src.index("was_cancelled = getattr(self, '_search_was_cancelled'") < m.start()
 
 
+def test_reset_ui_hides_the_hint_so_the_new_button_clears_it():
+    """Codex (PR #343): New runs _reset_search, which never re-searches or
+    changes scope, so the strip from the previous run stayed. reset_ui is
+    the funnel every exit path reaches, _reset_search included."""
+    assert 'self._set_local_scope_strip_visible(False)' in inspect.getsource(APP.reset_ui)
+    assert 'self.reset_ui()' in inspect.getsource(APP._reset_search)
+    # and the zero-result branch decides AFTER reset_ui has hidden it
+    src = inspect.getsource(APP.on_search_finished)
+    assert src.index('self.reset_ui()') < src.index('_update_local_scope_strip(0')
+
+
+def test_tag_search_results_hide_the_hint():
+    """A tag search bypasses start_search and is never LOCAL."""
+    src = inspect.getsource(APP._on_tag_search_results)
+    assert 'self._set_local_scope_strip_visible(False)' in src
+
+
 def test_manual_scope_change_hides_the_hint():
     src = inspect.getsource(APP._on_corpus_scope_changed)
     assert 'self._set_local_scope_strip_visible(False)' in src
