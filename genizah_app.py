@@ -15031,11 +15031,24 @@ class GenizahGUI(QMainWindow):
         returns; ``finished`` releases it and schedules the C++ object for
         deletion after its closeEvent has stopped its workers.
         """
+        # Opened from INSIDE another dialog's exec() loop (the corrections,
+        # discoveries and my-comments viewers call on_view_result while
+        # application-modal), a non-modal viewer would sit blocked behind
+        # that loop, so there the new viewer runs modally, NESTED, exactly as
+        # the old ResultDialog(...).exec() did. The open viewer is then left
+        # alone and keeps the reference slot: ResultDialog.view_corrections
+        # parents its corrections dialog to the viewer, so closing that
+        # viewer here would delete the very dialog whose callback we are in,
+        # mid-stack (Codex, PR #343). One free-standing viewer at a time is
+        # a rule for the main-window path only.
+        nested = QApplication.activeModalWidget() is not None
         previous = getattr(self, '_result_dialog', None)
-        if previous is not None and not sip.isdeleted(previous):
+        if (not nested and previous is not None
+                and not sip.isdeleted(previous)):
             previous.close()
         dlg = ResultDialog(self, results, index, self.meta_mgr, self.searcher)
-        self._result_dialog = dlg
+        if not nested:
+            self._result_dialog = dlg
         dlg.finished.connect(
             lambda _code, d=dlg: self._on_result_dialog_finished(d))
         # Centre over this window: an unparented QDialog would otherwise
@@ -15044,14 +15057,9 @@ class GenizahGUI(QMainWindow):
             dlg.move(self.frameGeometry().center() - dlg.rect().center())
         except Exception:  # noqa: BLE001
             pass
-        # Opened from INSIDE another dialog's exec() loop (the corrections,
-        # discoveries and my-comments viewers call on_view_result while
-        # application-modal), a non-modal viewer would sit blocked behind
-        # that loop. Run it modally there, as the nested exec() always did:
-        # the viewer still has its own taskbar button, and control returns
-        # to the source dialog when it closes (Codex, PR #343).
-        modal_source = QApplication.activeModalWidget()
-        if modal_source is not None and modal_source is not dlg:
+        if nested:
+            # Its own taskbar button, and control returns to the source
+            # dialog when it closes; `finished` still deleteLater()s it.
             dlg.exec()
             return dlg
         dlg.show()

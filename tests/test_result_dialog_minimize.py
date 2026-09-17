@@ -276,8 +276,25 @@ def test_opened_from_inside_a_modal_dialog_the_viewer_runs_modally(host):
     _FakeQApp.active_modal = object()
     dlg = host._show_result_dialog(['a'], 0)
     assert dlg.execd and not dlg.shown
-    assert host._result_dialog is dlg
     assert dlg.moved_to is not None       # still centred over the host
+    # nested viewers never take the free-standing slot
+    assert host._result_dialog is None
+
+
+def test_nesting_leaves_the_open_viewer_alone(host):
+    """Codex (PR #343, round 3): ResultDialog.view_corrections parents its
+    corrections dialog to the viewer. Closing that viewer from inside the
+    corrections dialog's own callback would delete the caller mid-stack, so
+    from a modal source the open viewer is kept and the new one nests."""
+    first = host._show_result_dialog(['a'], 0)
+    _FakeQApp.active_modal = object()     # e.g. first's corrections dialog
+    nested = host._show_result_dialog(['b'], 0)
+    assert not first.closed and not first.deleted
+    assert host._result_dialog is first
+    assert nested.execd and not nested.shown
+    nested.finished.emit(0)                # closing the nested one...
+    assert nested.deleted
+    assert host._result_dialog is first    # ...never disturbs the first
 
 
 def test_opened_from_the_main_window_the_viewer_is_free_standing(host):
