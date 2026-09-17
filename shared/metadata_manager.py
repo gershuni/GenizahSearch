@@ -36,6 +36,14 @@ from shared.sys_id_patterns import ANY_SYS_ID_RE, CORPUS_SYS_ID_RE
 OXFORD_IMAGE_CREDIT_EN = "Image provided by the Bodleian Libraries, University of Oxford"
 OXFORD_GENIZAH_FRAGMENTS_URL = "https://hebrew.bodleian.ox.ac.uk/"
 
+# NLI's Rosetta "thumbnail" endpoint answers HTTP 200 image/png with a generic
+# 94x73 "no image" placeholder (~1,615 bytes) for FL ids it will not deliver --
+# since 2026-09 that includes every Bodleian-held Ktiv copy (IIIF answers 500,
+# the Rosetta stream 401). A real thumbnail is always larger. Ceiling shared by
+# the desktop loader; web/api.py keeps its own literal (pinned by
+# tests/test_codex_review_333_round8.py) at the same value.
+ROSETTA_PLACEHOLDER_MAX_BYTES = 2000
+
 
 LOGGER = logging.getLogger("genizah." + __name__)
 

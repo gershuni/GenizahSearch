@@ -18,6 +18,7 @@ from shared.nli_circuit_breaker import (
     record_success as _nli_record_success,
 )
 from shared.nli_fetch import is_nli_host, nli_image_get
+from shared.metadata_manager import ROSETTA_PLACEHOLDER_MAX_BYTES
 
 logger = get_logger(__name__)
 
@@ -107,6 +108,18 @@ class ImageLoaderThread(QThread):
             logger.info("Rosetta stream failed for FL%s. Trying thumbnail fallback...", fl_digits)
             thumb_url = f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=thumbnail&dps_pid=FL{fl_digits}"
             data = self._download_bytes(thumb_url, headers)
+            # 260907: Rosetta answers a generic "no image" PNG (HTTP 200,
+            # image/png, ~1.6 KB) for FL ids it will not deliver -- the
+            # Bodleian-held Ktiv copies since 2026-09. It decodes fine, so
+            # without this guard the viewer would show the placeholder icon
+            # as if it were the manuscript. The web proxy applies the same
+            # ceiling (web/api.py::_ROSETTA_PLACEHOLDER_MAX_BYTES).
+            if self._is_rosetta_placeholder(data):
+                logger.info(
+                    "Rosetta thumbnail for FL%s is the 'no image' placeholder (%d bytes); treating as failure",
+                    fl_digits, len(data),
+                )
+                data = None
 
         # 3. Process Result
         if data:
@@ -129,6 +142,14 @@ class ImageLoaderThread(QThread):
                 self.load_failed.emit()
         else:
             self.load_failed.emit()
+
+    @staticmethod
+    def _is_rosetta_placeholder(data):
+        """True when ``data`` is small enough to be Rosetta's generic
+        "no image" thumbnail rather than a real one (see
+        ``ROSETTA_PLACEHOLDER_MAX_BYTES``). ``None`` is not a placeholder --
+        it is a plain failure the caller already handles."""
+        return data is not None and len(data) <= ROSETTA_PLACEHOLDER_MAX_BYTES
 
     def _download_bytes(self, target_url, headers):
         """Helper to download bytes safely.

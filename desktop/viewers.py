@@ -1,5 +1,6 @@
 """Image viewer widgets extracted from genizah_app.py (v7.9 decomposition)."""
 
+import html
 import re
 import threading
 
@@ -650,6 +651,11 @@ class ManuscriptViewerWidget(QWidget):
         # to that folio rather than a proportional guess (Codex P2, 2026-09-02).
         self._last_folio_by_source = {}
         self._nli_fallback_active = False  # 260421-aln: True when auto-flipped to NLI for a past-CUDL page
+        # 260907: the Bodleian URL that last failed (offered as a link in the
+        # notice strip), and whether the notice on screen describes only the
+        # page that just failed (retired by the next image that renders).
+        self._oxford_failed_url = ''
+        self._notice_transient = False
         self._load_generation = 0  # increments on each set_page/load_images to reject stale callbacks
         self.loader_thread = None
         self.preload_worker = None
@@ -977,6 +983,8 @@ class ManuscriptViewerWidget(QWidget):
         # auto-fallback-to-NLI state. _on_source_changed and the nav
         # block manage the flag after this point.
         self._nli_fallback_active = False
+        self._oxford_failed_url = ''
+        self._notice_transient = False
         self.lbl_fallback_notice.setVisible(False)
 
         # For Oxford: check if target_folio is missing and add dynamic images
@@ -1354,56 +1362,112 @@ class ManuscriptViewerWidget(QWidget):
         if gen != self._load_generation or self._closing:
             return
 
-        if (
-            self.external_provider == "oxford"
-            and self.current_source == "ext"
-            and not self._nli_fallback_active
-            and self.images_nli
-        ):
-            if self.current_source:
-                self._last_idx_by_source[self.current_source] = self.current_idx
-                self._remember_folio(self.current_source, self.active_list, self.current_idx)
-            new_idx = self._index_for_source_switch(self.active_list, self.current_idx,
-                                                    self.images_nli, "nli")
-            self._last_switch_landed_at = ("nli", new_idx)
+        if self.external_provider == "oxford" and self.current_source == "ext":
             # The Oxford URL that just failed: offered as a link so the reader's own
             # browser can pass the Bodleian's JS bot-challenge (an in-app fetch cannot).
             _failed_url = ''
             if 0 <= self.current_idx < len(self.active_list):
                 _failed_url = str(self.active_list[self.current_idx].get('url') or '')
+            self._oxford_failed_url = _failed_url
 
-            # Flip the combo without firing _on_source_changed -- that
-            # handler unconditionally clears _nli_fallback_active, which
-            # would undo the flag we're about to set.
-            self.combo_source.blockSignals(True)
-            for i in range(self.combo_source.count()):
-                if self.combo_source.itemData(i) == "nli":
-                    self.combo_source.setCurrentIndex(i)
-                    break
-            self.combo_source.blockSignals(False)
+            if not self._nli_fallback_active and self.images_nli:
+                if self.current_source:
+                    self._last_idx_by_source[self.current_source] = self.current_idx
+                    self._remember_folio(self.current_source, self.active_list, self.current_idx)
+                new_idx = self._index_for_source_switch(self.active_list, self.current_idx,
+                                                        self.images_nli, "nli")
+                self._last_switch_landed_at = ("nli", new_idx)
 
-            self.active_list = self.images_nli
-            self.current_source = "nli"
-            self._nli_fallback_active = True
-            self._apply_attribution_for_source()
-            _notice = tr("Oxford image unavailable — showing the NLI image instead")
-            if _failed_url.startswith("https://hebrew.bodleian.ox.ac.uk/"):
-                _notice += (
-                    f' · <a href="{_failed_url}" style="color:#1f5fa8;">'
-                    f'{tr("Open in Bodleian Libraries")}</a>'
+                # Flip the combo without firing _on_source_changed -- that
+                # handler unconditionally clears _nli_fallback_active, which
+                # would undo the flag we're about to set.
+                self.combo_source.blockSignals(True)
+                for i in range(self.combo_source.count()):
+                    if self.combo_source.itemData(i) == "nli":
+                        self.combo_source.setCurrentIndex(i)
+                        break
+                self.combo_source.blockSignals(False)
+
+                self.active_list = self.images_nli
+                self.current_source = "nli"
+                self._nli_fallback_active = True
+                self._apply_attribution_for_source()
+                self._show_fallback_notice(
+                    tr("Oxford image unavailable — showing the NLI image instead"),
+                    _failed_url, transient=False,
                 )
-            self.lbl_fallback_notice.setTextFormat(Qt.TextFormat.RichText)
-            self.lbl_fallback_notice.setOpenExternalLinks(True)
-            self.lbl_fallback_notice.setText(_notice)
-            self.lbl_fallback_notice.setVisible(True)
-            self.set_page(new_idx)
+                self.set_page(new_idx)
+                return
+
+            # 260907: nothing to fall back to (no NLI list for this part). Say
+            # why there is no image and hand over the one route that works --
+            # the reader's own browser -- instead of a bare "No Image".
+            self._show_fallback_notice(
+                tr("Oxford image unavailable — the Bodleian site shows it only in a web browser"),
+                _failed_url, transient=True,
+            )
+            self.scroll_area.set_status_message(tr("No Image"))
+            return
+
+        if (
+            self.external_provider == "oxford"
+            and self._nli_fallback_active
+            and self.current_source == "nli"
+        ):
+            # 260907: the fallback itself failed. NLI no longer delivers the
+            # Bodleian-held Ktiv copies (IIIF 500, Rosetta stream 401, Rosetta
+            # thumbnail = a placeholder the loader now rejects), so the standing
+            # notice must stop claiming an NLI image is on screen. Transient: the
+            # next NLI page that does render restores the standing notice.
+            self._show_fallback_notice(
+                tr("Oxford image unavailable, and the National Library copy could not be loaded"),
+                self._oxford_failed_url, transient=True,
+            )
+            self.scroll_area.set_status_message(tr("No Image"))
             return
 
         self.scroll_area.set_status_message(tr("No Image"))
 
+    def _show_fallback_notice(self, text, bodleian_url='', transient=False):
+        """Fill and show the red strip under the toolbar.
+
+        ``bodleian_url`` is appended as a link when it is on the Bodleian's
+        Genizah Fragments host (host-pinned: never link an arbitrary URL from an
+        image record) so the reader's own browser can pass the site's
+        bot-challenge. A ``transient`` notice describes only the page that just
+        failed; :meth:`display_image` retires it. A standing one (the Oxford->NLI
+        fallback) stays until the source changes or a new manuscript loads.
+        """
+        if bodleian_url.startswith("https://hebrew.bodleian.ox.ac.uk/"):
+            text += (
+                f' · <a href="{html.escape(bodleian_url, quote=True)}" style="color:#1f5fa8;">'
+                f'{tr("Open in Bodleian Libraries")}</a>'
+            )
+        self.lbl_fallback_notice.setTextFormat(Qt.TextFormat.RichText)
+        self.lbl_fallback_notice.setOpenExternalLinks(True)
+        self.lbl_fallback_notice.setText(text)
+        self.lbl_fallback_notice.setVisible(True)
+        self._notice_transient = transient
+
+    def _retire_transient_notice(self):
+        """The next image that actually renders retires a transient notice. If
+        the standing Oxford->NLI fallback is still in force, its notice comes
+        back (the reader is again looking at an NLI image in Oxford's place);
+        otherwise the strip is hidden."""
+        self._notice_transient = False
+        if self._nli_fallback_active and self.external_provider == "oxford":
+            self._show_fallback_notice(
+                tr("Oxford image unavailable — showing the NLI image instead"),
+                self._oxford_failed_url, transient=False,
+            )
+        else:
+            self.lbl_fallback_notice.setVisible(False)
+
     def display_image(self, image):
         if self._closing:
             return
+        if self._notice_transient:
+            self._retire_transient_notice()
         pix = QPixmap.fromImage(image)
         self.scroll_area.set_image(pix)
         self._sync_fullscreen_image()

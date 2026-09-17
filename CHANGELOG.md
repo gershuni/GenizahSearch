@@ -1641,6 +1641,29 @@ A major overhaul of how LOCAL Hebrew PDFs are read into the My Library index, dr
 
 ## [Unreleased]
 
+### Oxford images on the desktop: an honest failure state, in Hebrew too (2026-09-07)
+
+The Bodleian's Genizah Fragments host still answers every non-browser request with its
+bot-challenge page, and since early September the NLI no longer delivers its Ktiv copies of
+the Bodleian-held folios either (IIIF 500, Rosetta stream 401, and a generic 94×73 "no image"
+PNG from the Rosetta thumbnail endpoint). So an Oxford folio has no image any app can fetch,
+and the 2026-09-02 Oxford→NLI fallback lands on nothing.
+
+- **The notice strip is translated.** "Oxford image unavailable — showing the NLI image
+  instead" and its link showed in English inside the Hebrew UI; the key was missing from
+  `genizah_translations.py`. A source-text test now pins every notice key to the table.
+- **The Bodleian link is offered in every failure state**, not only when an NLI list exists:
+  when the part has no NLI list, and when the NLI copy fails as well — in which case the
+  strip stops claiming an NLI image is on screen and says the copy could not be loaded. The
+  link is host-pinned to `hebrew.bodleian.ox.ac.uk`; a transient notice is retired by the
+  next image that renders, and the standing fallback notice returns when an NLI page does.
+- **The loader rejects Rosetta's placeholder.** `ImageLoaderThread`'s third attempt accepted
+  any `image/*` body, so the 1,615-byte "no image" icon decoded and was displayed as if it
+  were the manuscript. `shared/metadata_manager.py::ROSETTA_PLACEHOLDER_MAX_BYTES` (2000,
+  the ceiling `web/api.py` already used) now turns it into a failure.
+- Desktop-only. Showing the Oxford image *inside* the desktop is still open: it needs an
+  embedded browser engine or a Bodleian allowlist (`docs/OPEN_ISSUES.md`, Bodleian row).
+
 ### One definition of a sys_id, and 97 is not a corpus prefix (2026-08-25)
 
 A manuscript `sys_id` was parsed out of a `raw_header` by ~24 hand-rolled regexes in two

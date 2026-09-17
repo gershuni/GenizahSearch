@@ -309,3 +309,171 @@ class TestOnImageLoadFailedAutoFallback:
 
         assert w.current_source == "ext"
         assert w._nli_fallback_active is False
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-07: the NLI copies of Bodleian-held images stopped being delivered
+# (IIIF 500 / Rosetta stream 401 / Rosetta thumbnail = a generic 94x73
+# placeholder PNG), so the Oxford->NLI fallback itself now fails -- and the
+# notice strip was English-only in the Hebrew UI.
+# ---------------------------------------------------------------------------
+
+NOTICE_KEYS = (
+    "Oxford image unavailable — showing the NLI image instead",
+    "Oxford image unavailable — the Bodleian site shows it only in a web browser",
+    "Oxford image unavailable, and the National Library copy could not be loaded",
+)
+
+
+class TestOxfordNoticeStringsLocalized:
+    def test_every_notice_key_has_a_hebrew_translation(self):
+        from genizah_translations import TRANSLATIONS
+
+        for key in NOTICE_KEYS:
+            assert key in TRANSLATIONS, key
+            assert any('א' <= ch <= 'ת' for ch in TRANSLATIONS[key]), key
+
+    def test_viewer_uses_exactly_these_keys(self):
+        """Rewording a tr() literal in the viewer must be mirrored in the
+        translation table -- otherwise the Hebrew UI silently shows English
+        again (the defect this batch fixes). Source-text pin, no Qt import."""
+        from pathlib import Path
+
+        src = (Path(__file__).resolve().parents[1] / "desktop" / "viewers.py").read_text(encoding="utf-8")
+        for key in NOTICE_KEYS:
+            assert f'tr("{key}")' in src, key
+
+
+@pytest.mark.skipif(
+    not IMAGE_LOADER_AVAILABLE,
+    reason="desktop.image_loader unavailable (PyQt6 QtGui could not load)",
+)
+class TestRosettaPlaceholderGuard:
+    """Rosetta's generic 'no image' thumbnail (~1,615 bytes) decodes as a valid
+    PNG, so it used to be displayed as if it were the manuscript."""
+
+    def test_placeholder_sized_thumbnail_is_rejected(self):
+        assert ImageLoaderThread._is_rosetta_placeholder(b"\x89PNG" + b"\0" * 1611) is True
+
+    def test_real_thumbnail_is_kept(self):
+        assert ImageLoaderThread._is_rosetta_placeholder(b"\x89PNG" + b"\0" * 5000) is False
+
+    def test_none_is_a_plain_failure_not_a_placeholder(self):
+        assert ImageLoaderThread._is_rosetta_placeholder(None) is False
+
+    def test_ceiling_matches_the_web_proxy(self):
+        """One number on both surfaces: web/api.py keeps a literal (pinned by
+        tests/test_codex_review_333_round8.py); the shared constant must agree."""
+        from pathlib import Path
+
+        from shared.metadata_manager import ROSETTA_PLACEHOLDER_MAX_BYTES
+
+        api_src = (Path(__file__).resolve().parents[1] / "web" / "api.py").read_text(encoding="utf-8")
+        assert f"_ROSETTA_PLACEHOLDER_MAX_BYTES = {ROSETTA_PLACEHOLDER_MAX_BYTES}" in api_src
+
+
+@pytest.mark.gui
+class TestRunRejectsRosettaPlaceholder:
+    def test_attempt_c_placeholder_reports_load_failed(self, monkeypatch, tmp_path):
+        import sys
+
+        from PyQt6.QtWidgets import QApplication
+
+        QApplication.instance() or QApplication(sys.argv[:1])
+        import desktop.image_loader as il
+
+        monkeypatch.setattr(il.Config, "IMAGE_CACHE_DIR", str(tmp_path))
+        loader = il.ImageLoaderThread(
+            "https://iiif.nli.org.il/IIIFv21/FL168181475/full/2000,/0/default.jpg"
+        )
+        calls = []
+
+        def fake_download(url, headers):
+            calls.append(url)
+            if "dps_func=thumbnail" in url:
+                return b"\x89PNG" + b"\0" * 1611   # the 1,615-byte placeholder
+            return None                            # IIIF 500 / Rosetta stream 401
+
+        monkeypatch.setattr(loader, "_download_bytes", fake_download)
+        outcome = []
+        loader.load_failed.connect(lambda: outcome.append("failed"))
+        loader.image_loaded.connect(lambda img: outcome.append("loaded"))
+
+        loader.run()   # synchronous: no thread started
+
+        assert outcome == ["failed"]
+        assert any("dps_func=thumbnail" in u for u in calls)
+
+
+@pytest.mark.gui
+class TestOxfordNoticeWhenNliCannotHelp:
+    def test_no_nli_list_still_offers_the_bodleian_link(self, monkeypatch):
+        w = _oxford_widget(monkeypatch)
+        w.images_nli = []
+        w.images_ext[w.current_idx]['url'] = OXFORD_URL
+        gen = w._load_generation
+
+        w._on_image_load_failed(gen)
+
+        assert w.current_source == "ext"
+        assert w._nli_fallback_active is False
+        assert w.lbl_fallback_notice.isHidden() is False
+        assert f'href="{OXFORD_URL}"' in w.lbl_fallback_notice.text()
+        assert w._notice_transient is True
+
+    def test_non_bodleian_url_is_never_linked(self, monkeypatch):
+        w = _oxford_widget(monkeypatch)
+        w.images_nli = []
+        w.images_ext[w.current_idx]['url'] = "https://evil.example/x.jpg"
+
+        w._on_image_load_failed(w._load_generation)
+
+        assert "href=" not in w.lbl_fallback_notice.text()
+
+    def test_nli_fallback_failing_too_rewrites_the_notice(self, monkeypatch):
+        w = _oxford_widget(monkeypatch)
+        w.images_ext[w.current_idx]['url'] = OXFORD_URL
+
+        # tr(): CURRENT_LANG is whatever this machine's desktop config says
+        # (Hebrew on the owner's), so compare against the translated strings.
+        from genizah_core import tr
+
+        w._on_image_load_failed(w._load_generation)   # Oxford fails -> NLI
+        assert w.current_source == "nli"
+        assert tr(NOTICE_KEYS[0]) in w.lbl_fallback_notice.text()
+
+        w._on_image_load_failed(w._load_generation)   # the NLI copy fails as well
+        text = w.lbl_fallback_notice.text()
+        assert tr(NOTICE_KEYS[0]) not in text
+        assert tr(NOTICE_KEYS[2]) in text
+        assert f'href="{OXFORD_URL}"' in text          # the Oxford side the reader wanted
+        assert w._nli_fallback_active is True          # do not retry the dead source
+        assert w.current_source == "nli"
+
+    def test_next_successful_image_retires_a_transient_notice(self, monkeypatch):
+        from PyQt6.QtGui import QImage
+
+        w = _oxford_widget(monkeypatch)
+        w.images_nli = []
+        w._on_image_load_failed(w._load_generation)
+        assert w._notice_transient is True
+
+        w.display_image(QImage(4, 4, QImage.Format.Format_RGB32))
+
+        assert w.lbl_fallback_notice.isHidden() is True
+        assert w._notice_transient is False
+
+    def test_standing_fallback_notice_is_restored_after_a_transient_one(self, monkeypatch):
+        from PyQt6.QtGui import QImage
+
+        w = _oxford_widget(monkeypatch)
+        w._on_image_load_failed(w._load_generation)   # -> NLI, standing notice
+        w._on_image_load_failed(w._load_generation)   # that NLI page failed -> transient
+
+        w.display_image(QImage(4, 4, QImage.Format.Format_RGB32))   # next NLI page renders
+
+        from genizah_core import tr
+
+        assert w.lbl_fallback_notice.isHidden() is False
+        assert tr(NOTICE_KEYS[0]) in w.lbl_fallback_notice.text()
+        assert w._notice_transient is False
