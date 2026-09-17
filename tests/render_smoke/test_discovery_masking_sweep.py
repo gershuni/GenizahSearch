@@ -2853,8 +2853,16 @@ def test_every_discovery_database_present_on_this_machine_is_in_the_record():
         "appear in no recorded scan: " + repr(unscanned))
 
 
-ATTESTATION_PATH = (".planning/phases/136-read-surfaces-connections-panel-"
-                    "work-witnesses/136-FLAG-ON-READINESS.md")
+# The v9.0.0 milestone close (2026-09-10) archived the phase directories under
+# .planning/milestones/v9.0.0-phases/; the attestation is read from whichever
+# location holds it, so the commit that moved it cannot turn this gate red.
+_ATTESTATION_REL = ("136-read-surfaces-connections-panel-work-witnesses/"
+                    "136-FLAG-ON-READINESS.md")
+ATTESTATION_PATH = next(
+    (rel for rel in (".planning/phases/" + _ATTESTATION_REL,
+                     ".planning/milestones/v9.0.0-phases/" + _ATTESTATION_REL)
+     if (REPO_ROOT / rel).exists()),
+    ".planning/phases/" + _ATTESTATION_REL)
 
 #: The figure ruling U retired. It was wrong -- built by adding main-pool
 #: `fills_gap` to UNFILTERED `refines_granularity` and `container_predicts` --

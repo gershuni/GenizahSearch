@@ -20,7 +20,18 @@ from scripts import discovery_ids as ids
 from scripts import verify_rebuild_preservation as vrp
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PHASE_DIR = REPO_ROOT / ".planning" / "phases" / "136-read-surfaces-connections-panel-work-witnesses"
+# The v9.0.0 milestone close (2026-09-10) archived the phase directories under
+# .planning/milestones/v9.0.0-phases/. Without this lookup the artifact tests
+# below skipped silently ("not present in this checkout") from that commit on.
+def _phase_dir(name):
+    for base in (REPO_ROOT / ".planning" / "phases",
+                 REPO_ROOT / ".planning" / "milestones" / "v9.0.0-phases"):
+        if (base / name).exists():
+            return base / name
+    return REPO_ROOT / ".planning" / "phases" / name
+
+
+PHASE_DIR = _phase_dir("136-read-surfaces-connections-panel-work-witnesses")
 
 # ---------------------------------------------------------------------------
 # Fixture geometry (fabricated, masking-safe -- synthetic ids/titles only)
@@ -448,8 +459,7 @@ def test_generate_refuses_to_overwrite_without_flag(tmp_path):
 def test_committed_expectation_matches_cert01_prereg_pinned_values():
     expected_path = PHASE_DIR / "136-REBUILD-PRESERVATION-EXPECTED.json"
     prereg_path = (
-        REPO_ROOT / ".planning" / "phases" / "135-precision-certificate-confidence-bands"
-        / "cert01_prereg.json"
+        _phase_dir("135-precision-certificate-confidence-bands") / "cert01_prereg.json"
     )
     if not expected_path.exists() or not prereg_path.exists():
         pytest.skip("committed artifacts not present in this checkout")

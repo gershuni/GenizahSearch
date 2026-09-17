@@ -2773,10 +2773,16 @@ def test_this_suite_defines_no_second_scanner_list_rule_or_detector():
 # H. THE DEPLOY GATE (ruling T) and the MASKING capture.
 # ===========================================================================
 
-_BROWSER_CHECK_SUMMARY = (
-    ".planning/phases/136-read-surfaces-connections-panel-work-witnesses/"
-    "136-16-SUMMARY.md"
-)
+# The v9.0.0 milestone close (2026-09-10) archived the phase directories under
+# .planning/milestones/v9.0.0-phases/; the summary is read from whichever
+# location holds it, so the commit that moved it cannot turn this gate red.
+_BROWSER_CHECK_REL = ("136-read-surfaces-connections-panel-work-witnesses/"
+                      "136-16-SUMMARY.md")
+_BROWSER_CHECK_SUMMARY = next(
+    (rel for rel in (".planning/phases/" + _BROWSER_CHECK_REL,
+                     ".planning/milestones/v9.0.0-phases/" + _BROWSER_CHECK_REL)
+     if (REPO_ROOT / rel).exists()),
+    ".planning/phases/" + _BROWSER_CHECK_REL)
 
 
 def browser_check_outcome() -> Tuple[bool, str]:
