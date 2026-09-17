@@ -2373,14 +2373,50 @@ def test_the_default_does_not_fire_where_letter_level_would_refuse(
 
 def test_a_stored_chunk_choice_outranks_the_new_default(monkeypatch):
     """The owner's correction, and the whole reason this is not simply a new
-    initial index: do not override the last search state."""
+    initial index: do not override the last search state -- when it WAS a
+    choice, which the session records as `comp_method_chosen`."""
+    w = _default_window(monkeypatch)
+    w._refresh_comp_method_enabled = lambda: None
+    w._refresh_witness_panel = lambda: None
+    APP._restore_comp_passage_preferences(
+        w, {'comp_method': 'chunk', 'comp_method_chosen': True})
+    APP._apply_default_comp_method(w)
+    assert w.comp_method_combo.currentData() == 'chunk', (
+        "the user's own last method was overwritten by the default")
+
+
+def test_an_autosaved_chunk_nobody_chose_does_not_block_the_default(monkeypatch):
+    """Owner, 2026-09-17: Composition Search must open on letter-level search
+    IF AND ONLY IF an index is ready. It did not, for anyone: the autosave
+    writes the live combo on every save, so every session since v9.1.0 held a
+    `chunk` nobody picked, and the restore read it as a decision."""
     w = _default_window(monkeypatch)
     w._refresh_comp_method_enabled = lambda: None
     w._refresh_witness_panel = lambda: None
     APP._restore_comp_passage_preferences(w, {'comp_method': 'chunk'})
+    assert getattr(w, '_comp_method_user_choice_seen', False) is False
     APP._apply_default_comp_method(w)
-    assert w.comp_method_combo.currentData() == 'chunk', (
-        "the user's own last method was overwritten by the default")
+    assert w.comp_method_combo.currentData() == 'passage', (
+        'an autosaved chunk still counts as a choice and blocks the default')
+
+
+def test_an_autosaved_chunk_stays_chunk_without_an_index(monkeypatch):
+    """The other half of IF AND ONLY IF."""
+    w = _default_window(monkeypatch, available=False)
+    w._refresh_comp_method_enabled = lambda: None
+    w._refresh_witness_panel = lambda: None
+    APP._restore_comp_passage_preferences(w, {'comp_method': 'chunk'})
+    APP._apply_default_comp_method(w)
+    assert w.comp_method_combo.currentData() == 'chunk'
+
+
+def test_the_session_records_whether_the_method_was_chosen():
+    src = _function_source('_comp_passage_preference_fields')
+    assert "'comp_method_chosen'" in src
+    assert '_comp_method_user_choice_seen' in src, (
+        'the flag written to the session must be the one the click handler sets')
+    handler = _function_source('_on_comp_method_changed')
+    assert '_comp_method_user_choice_seen = True' in handler
 
 
 def test_a_session_with_no_stored_method_leaves_the_default_standing(
@@ -2680,7 +2716,7 @@ def test_a_stored_method_is_read_before_the_restore_can_bail_out():
         'survives every early return')
 
 
-def _persist_window(stored):
+def _persist_window(stored, chosen=None):
     w = _unannounced(_Win())
     w._local_file_optouts = set()
     w.corpus_scope_combo = _Combo([('genizah', ''), ('local', ''),
@@ -2690,24 +2726,37 @@ def _persist_window(stored):
     state = {'composition_search': {}}
     if stored is not None:
         state['composition_search']['comp_method'] = stored
+    if chosen is not None:
+        state['composition_search']['comp_method_chosen'] = chosen
     APP._apply_persistent_session_preferences(w, state)
     return w
 
 
 def test_a_stored_chunk_survives_a_session_restore_that_never_ran():
-    w = _persist_window('chunk')
+    w = _persist_window('chunk', chosen=True)
     assert w._comp_method_user_choice_seen is True, (
         "the user's stored chunk is treated as no preference, so the "
         'letter-level default overrides it')
+
+
+def test_an_autosaved_chunk_on_that_path_is_still_no_preference():
+    """Owner, 2026-09-17: the flag, not the value, is what marks a choice --
+    on this early-return path exactly as on the full restore."""
+    w = _persist_window('chunk')
+    assert getattr(w, '_comp_method_user_choice_seen', False) is False
 
 
 def test_a_stored_passage_survives_it_too():
     """Same footing as the corpus scope (Phase 110): a preference has to
     outlive `restore_mode='never'`. The index has not loaded yet, so it goes
     through the same deferral the full restore uses."""
-    w = _persist_window('passage')
+    w = _persist_window('passage', chosen=True)
     assert w._comp_method_user_choice_seen is True
     assert w._comp_method_deferred == 'passage'
+    # an autosaved passage is restored the same way; only the flag differs
+    w2 = _persist_window('passage')
+    assert w2._comp_method_deferred == 'passage'
+    assert getattr(w2, '_comp_method_user_choice_seen', False) is False
 
 
 def test_no_stored_method_still_means_no_preference():
@@ -2886,6 +2935,29 @@ def test_the_restore_window_opens_before_any_ui_exists():
         'beats the restore timer is no longer refused')
 
 
+def test_a_fast_index_load_then_an_autosaved_chunk_still_gets_the_default(monkeypatch):
+    """Owner, 2026-09-17: same startup sequence, but the stored chunk carries no
+    `comp_method_chosen` -- the autosave wrote it. That is no preference, so
+    the `finally` default must land on letter-level."""
+    monkeypatch.setattr(pl, 'passage_available', lambda: True)
+    monkeypatch.setattr(pl, 'install_passage_state', lambda st: True)
+    w = _default_window(monkeypatch)
+    w._restoring_session = True
+    w._revalidate_comp_method = lambda: None
+    w._maybe_offer_passage_build = lambda: None
+    w._local_file_optouts = set()
+    w.corpus_scope_combo = _Combo([('genizah', ''), ('local', ''), ('all', '')], index=0)
+    w.comp_corpus_scope_combo = _Combo([('genizah', ''), ('local', ''), ('all', '')], index=0)
+    APP._on_passage_loaded(w, type('R', (), {
+        'index': object(), 'live_dir': 'd', 'status': 'live_ok'})())
+    APP._apply_persistent_session_preferences(
+        w, {'composition_search': {'comp_method': 'chunk'}})
+    w._restoring_session = False
+    APP._apply_default_comp_method(w)
+    assert w.comp_method_combo.currentData() == 'passage', (
+        'an autosaved chunk blocked the letter-level default on startup')
+
+
 def test_a_fast_index_load_cannot_override_a_stored_chunk(monkeypatch):
     """The proposed sequence, end to end: load first, then a restore that
     takes an early exit."""
@@ -2912,7 +2984,8 @@ def test_a_fast_index_load_cannot_override_a_stored_chunk(monkeypatch):
     #    (`restore_mode='never'`, a declined prompt, or no data) -- so
     #    `_restore_comp_passage_preferences` never runs.
     APP._apply_persistent_session_preferences(
-        w, {'composition_search': {'comp_method': 'chunk'}})
+        w, {'composition_search': {'comp_method': 'chunk',
+                                   'comp_method_chosen': True}})
 
     # 3. What the `finally` does on every one of those paths.
     w._restoring_session = False

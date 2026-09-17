@@ -16361,6 +16361,13 @@ class GenizahGUI(QMainWindow):
         Only ever called once the composition tab exists."""
         return {
             'comp_method': self._comp_method(),
+            # Only a method the user PICKED is a decision. This dict is
+            # written on every autosave, so `comp_method` alone says nothing
+            # about intent -- every session since v9.1.0 carried a `chunk`
+            # nobody chose, and the restore paths read it as a choice, which
+            # is why the letter-level default never fired (owner, 2026-09-17).
+            'comp_method_chosen': bool(
+                getattr(self, '_comp_method_user_choice_seen', False)),
             'comp_passage_width': self._comp_passage_axis('width'),
             'comp_passage_length': self._comp_passage_axis('length'),
             'comp_passage_depth': self._comp_passage_axis('depth'),
@@ -16934,14 +16941,18 @@ class GenizahGUI(QMainWindow):
         combo = getattr(self, 'comp_method_combo', None)
         if combo is None:
             return
-        # A stored method is a DECISION and outranks the new letter-level
-        # default -- `chunk` included, because "don't override the last
-        # search state" is the whole of the owner's correction. Only a
-        # session that predates the method (or no session at all) leaves the
-        # default free to apply, and those store nothing here.
+        # A method the user CHOSE is a decision and outranks the letter-level
+        # default -- `chunk` included ("don't override the last search state",
+        # owner 2026-08-28). But the autosave stores the live combo on every
+        # save, so a stored `chunk` by itself is no evidence of a choice: it
+        # is how every session since v9.1.0 kept the default from ever firing.
+        # `comp_method_chosen` is written only after a click on the combo; a
+        # session without it (pre-9.2.1) counts as no preference, and the
+        # default is free to apply once the index answers (owner, 2026-09-17).
         stored = comp.get('comp_method')
         if stored in ('chunk', 'passage'):
-            self._comp_method_user_choice_seen = True
+            self._comp_method_user_choice_seen = bool(
+                comp.get('comp_method_chosen', False))
             method = stored
         elif absent_method is None:
             # Not `= 'chunk'`: that would undo a default already applied by
@@ -30012,7 +30023,10 @@ class GenizahGUI(QMainWindow):
         # default exists for, and it must stay free to apply.
         _stored_method = comp_pref.get('comp_method')
         if _stored_method in ('chunk', 'passage'):
-            self._comp_method_user_choice_seen = True
+            # Same rule as `_restore_comp_passage_preferences`: only a method
+            # the user clicked is a choice; an autosaved value is not.
+            self._comp_method_user_choice_seen = bool(
+                comp_pref.get('comp_method_chosen', False))
             if _stored_method == 'passage':
                 # The index has not loaded yet, so the selection is made
                 # through the same deferral the full restore uses.
