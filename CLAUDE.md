@@ -345,6 +345,7 @@ every session's context.
 
 ### Releases
 
+- **v9.2.1 — Viewer window, Local-search hint, honest Oxford images (2026-09-17)** — the Manuscript Viewer is an unparented non-modal window (it was an owned modal dialog, which is why minimizing it buried the whole app); zero-result LOCAL searches offer the Genizah corpus; chunk controls re-enable after letter-level; Composition Search now really opens on letter-level when its index exists (the autosaved method was being read as a choice); Oxford failure strip translated with the Bodleian link everywhere and the Rosetta placeholder rejected. Seven Codex rounds, eleven extra defects. NOTE the span: the tag also carries the web-side ChatGPT/API commits (#338–#342), not deployed by this release. (desktop)
 - **v9.2.0 — Citations, Princeton links, and a round of repairs (2026-09-06)** — NOTE the
   span: this tag covers 67 commits, including PR #333 and PR #334, not one branch.
   Desktop gained **PGP links on three surfaces** and **separate Exclude Manuscripts

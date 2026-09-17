@@ -4,6 +4,571 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [9.2.1] - 2026-09-17 — The viewer is its own window, a hint for stray Local searches, honest Oxford images
+
+NOTE the span: this tag also carries the web-side ChatGPT research pilot, isolated
+research workers and public-API repairs merged from the cloud (#338–#342). This is a
+desktop release; the web deploys separately.
+
+**The Manuscript Viewer is a window of its own.** Minimizing it used to make the whole
+app vanish. It never minimized: the viewer was an application-modal dialog owned by the
+main window, so it hid with no taskbar button of its own while the disabled main window
+was buried behind the next application. A user asked to see the search panel while
+reading results, so the viewer is now an unparented, non-modal window with its own
+taskbar button and min/max buttons; the main window stays usable beside it, one viewer at
+a time, and it closes with the app. Opened from the Corrections, Discoveries or My
+Comments dialogs it still nests as before. Its background workers are now stopped on
+every way out, including Esc — the old design let them outlive the window harmlessly,
+the new one could not.
+
+**A hint when a Local search finds nothing.** Picking "Local" in the corpus scope by
+accident made manuscripts seem missing. After a completed zero-result Local search, a
+light-orange strip above the empty results offers the same search in the Genizah corpus
+in one click. It never shows for "ALL", after a cancelled run, or once you start a new
+search, change scope, press New or run a tag search.
+
+**Composition Search opens on letter-level search when its index is built — for real.**
+v9.1.0 made letter-level the default once an index exists, never over a stored choice.
+In practice the default never fired for anyone: the session autosave stored the live
+method on every save, and the restore read any stored method as a choice, so every
+session carried a `chunk` nobody had picked. The session now records whether the method
+was actually clicked, and only that outranks the default. A user who deliberately picked
+chunk before 9.2.1 lands on letter-level once and re-picks; from then on the choice
+sticks.
+
+### Bug Fixes
+- Composition Search: the search-type and frequency controls stayed disabled after
+  switching from Letter-level back to Chunk search.
+- Manuscript Viewer: closing the app left the viewer open; a cancelled Local search
+  showed the hint; a stale hint survived New, tag searches and history restore; a viewer
+  opened from a corrections dialog could delete its caller (all found in review, none
+  shipped).
+
+### Internal
+- Seven Codex review rounds (three on GitHub, four unsandboxed against the worktree)
+  found eleven defects beyond the three reported; the last round returned SHIP.
+- Real-Qt lifetime tests drive the viewer's teardown through reject, accept, done, Esc and
+  close; AST pins guard the hint's reset paths; mutation runs prove each test can fail.
+
+### Oxford images on the desktop: an honest failure state, in Hebrew too (2026-09-07)
+
+The Bodleian's Genizah Fragments host still answers every non-browser request with its
+bot-challenge page, and since early September the NLI no longer delivers its Ktiv copies of
+the Bodleian-held folios either (IIIF 500, Rosetta stream 401, and a generic 94×73 "no image"
+PNG from the Rosetta thumbnail endpoint). So an Oxford folio has no image any app can fetch,
+and the 2026-09-02 Oxford→NLI fallback lands on nothing.
+
+- **The notice strip is translated.** "Oxford image unavailable — showing the NLI image
+  instead" and its link showed in English inside the Hebrew UI; the key was missing from
+  `genizah_translations.py`. A source-text test now pins every notice key to the table.
+- **The Bodleian link is offered in every failure state**, not only when an NLI list exists:
+  when the part has no NLI list, and when the NLI copy fails as well — in which case the
+  strip stops claiming an NLI image is on screen and says the copy could not be loaded. The
+  link is host-pinned to `hebrew.bodleian.ox.ac.uk`; a transient notice is retired by the
+  next image that renders, and the standing fallback notice returns when an NLI page does.
+- **The loader rejects Rosetta's placeholder.** `ImageLoaderThread`'s third attempt accepted
+  any `image/*` body, so the 1,615-byte "no image" icon decoded and was displayed as if it
+  were the manuscript. `shared/metadata_manager.py::ROSETTA_PLACEHOLDER_MAX_BYTES` (2000,
+  the ceiling `web/api.py` already used) now turns it into a failure.
+- Desktop-only. Showing the Oxford image *inside* the desktop is still open: it needs an
+  embedded browser engine or a Bodleian allowlist (`docs/OPEN_ISSUES.md`, Bodleian row).
+
+### One definition of a sys_id, and 97 is not a corpus prefix (2026-08-25)
+
+A manuscript `sys_id` was parsed out of a `raw_header` by ~24 hand-rolled regexes in two
+incompatible dialects. They are now one shared definition in `shared/sys_id_patterns.py`,
+and a repo lint fails CI if a new site spells its own.
+
+- **The two dialects were answering different questions.** `99` is the Genizah corpus
+  namespace; `97` is the LOCAL "My Library" namespace (Phase 95) — a user's own files,
+  generated on the desktop, never a corpus record. Measured on `libraries.csv`: 255,723 of
+  255,723 records begin `99`, including all 473 NLI rows. So the corpus-facing sites were
+  right to be 99-only and the four wide ones were the drift; three were narrowed and the
+  two desktop LOCAL-aware parsers stay namespace-agnostic on purpose.
+- **The narrow pattern was not merely narrow — it mis-matched.** `re.search` scans anywhere,
+  so `(99\d{8,})` applied to a LOCAL header could match a `99` inside the LOCAL id's random
+  digits and return a truncated, wrong sys_id: 6.36% of LOCAL ids, measured. Both shared
+  patterns are now anchored on a digit boundary, so a LOCAL header misses cleanly instead.
+  **Correction to an earlier draft of this entry:** it claimed the mis-match was a live
+  defect on the desktop LAB path. It was not. `shared/lab_engine.py` does meet LOCAL headers,
+  but it tests the extracted id against `excluded_set`, which holds resolved CORPUS sys_ids —
+  always 18 digits — while a mis-match inside an 18-char LOCAL id is at most 16, so the test
+  could never be true. Old and new leave a LOCAL row unexcluded alike, and on corpus headers
+  the two patterns are identical (0 differences over 50,000 generated headers). No reachable
+  consequence was found at any migrated site. This is hardening that removes a trap, not a
+  bug fix.
+- **A drift guard, proven able to fail.** `tests/test_sys_id_patterns.py` pins the wiring,
+  the anti-corruption property and the Phase 95 regression; three mutations (re-widening a
+  site, un-anchoring the pattern, over-narrowing a desktop parser) each fail it distinctly.
+  `scripts/check_sys_id_prefixes.py` re-takes the measurement, since the corpus grows.
+- **The witness panel's pattern came in with the multi-witness merge and was narrowed too.**
+  `web/pages/parallels.py::WITNESS_SYS_ID_RE` had consolidated three copies on that page into
+  one — the right fix — but chose the wide dialect on the premise that 97-prefixed
+  *manuscripts* exist. They do not. And once the engine it deliberately mirrors
+  (`shared/passage_parallels.py`) became corpus-only, staying wide would have recreated the
+  divergence pointing the other way: the page admitting a witness the engine cannot resolve.
+  The page's own "exactly one pattern" guard is kept and strengthened — it now asserts the
+  page holds no pattern of its own at all.
+- **The verification script's index walk was broken, and a review caught it.** Two defects,
+  both on the one path nothing ever executed: the repo root was missing from `sys.path`, so
+  the documented `--index` invocation died on `ModuleNotFoundError`; and the walk called
+  `Searcher.segment_readers()`, which the Tantivy Python binding does not expose. It now
+  pages a match-all query through the supported API, and refuses to report a clean result off
+  a short walk — a partial scan is indistinguishable from a corpus with no 97 in it. Covered
+  now by tests that build a real index and run the script as documented.
+- **Then the completeness guard itself turned out to have two holes, found by a second review
+  pass.** Both made the script answer "no new prefix here" without having looked. It counted a
+  document as inspected *before* reading it, so an index whose schema lacks `full_header`
+  balanced its own books and reported clean off zero headers. And it detected prefixes using
+  the very constants it exists to check — a 99/97 pattern cannot match a `98`, so an index of
+  nothing but 98-prefixed records also reported clean. Prefix detection is now deliberately
+  independent of those constants, every document lands in exactly one of
+  classified/unreadable/unparsed and the three must sum to the index total, and the shared
+  corpus pattern is additionally cross-checked against every real header it should match. A
+  walk with any hole in it can no longer come back clean.
+
+### Download the computed identifications as a spreadsheet (2026-08-21)
+
+`/computed-identifications` now has a download control. It returns **the reader's whole
+filtered set** — not just the page on screen — as a bilingual xlsx, with the matched
+passages on the finding's own row.
+
+- **The evidence travels with the claim.** Five columns carry the manuscript passage, the
+  edition passage and their notes, with the matched words in **red and bold** — the same
+  highlighting the parallels export uses. The first draft put the passages on a second
+  sheet, which meant judging any single match required joining two sheets on a shelfmark
+  that repeats.
+- **"One row per work" and "one row per manuscript" now export what their expander opens
+  onto.** Those views are grouped, so the grouped row itself carries no manuscript and no
+  text — on the page you open it, but a spreadsheet has nothing to open. The export takes
+  its ORDER from the grouping and its ROWS from the identifications underneath, so the
+  grouping survives as columns you can sort and pivot on.
+- **A warning before a large download, and a card that clears after it.** Above 2,000 rows
+  the control asks first — with a different sentence for the grouped views, where a row
+  count would be the wrong number. The "Preparing your file" card now clears on every
+  outcome, including the failures.
+- **The file says where it came from.** An About sheet names the artifact it was built
+  from, credits the MiDRASH automatic transcriptions (Stoekl Ben Ezra et al., 2025) rather
+  than carrying thousands of lines of someone else's dataset anonymously, and marks which
+  passages are machine-read rather than a scholar's transcription. Where the artifact had
+  already abbreviated a passage, the sheet says so instead of leaving an unexplained
+  ellipsis inside a quotation.
+
+No confidence score, band or precision figure reaches a cell: the only number in the file
+is page coverage in matched letters, with its qualifier attached, exactly as the page
+renders it. Measured against the real artifact — 28,635 rows in 66 s, a 5.8 MB file.
+
+### The deploy path no longer runs an hour-long benchmark as its "smoke test" (2026-08-20)
+
+Four fixes to the discovery deploy path and its benchmark, none of them runtime code.
+
+- **A readiness smoke that takes a second.** `docs/specs/discovery-deploy.md` §2.6 told the
+  operator to run `scripts/bench_discovery.py --sample 50 --warm-passes 1`. Neither flag
+  bounds `bench_findings_page()`, which is invoked unconditionally and expands to ~15,363
+  filter/unit/sort combinations x 5 repeats — about **76,815 timed statements, one to two
+  hours**. On 2026-08-19 that hung the V4.2 deploy until the ssh connection reset, and the
+  deploy was recorded as **failed** when steps 0–7 had succeeded and the swap was live and
+  healthy. New `scripts/smoke_discovery_readiness.py` answers the actual question — can the
+  app load what it now serves, and does that asset answer real reads — through the real
+  `load_discovery_state()` and `web.discovery` paths, including a citation-range read over
+  the heaviest locus-bearing work. §2.7's "or read the benchmark's added RSS" is gone too;
+  the RSS comes from `/proc/<pid>/status`.
+- **Every statement in the benchmark is now wall-clock bounded.** Nothing in that file
+  bounded any query, which is how one pathological statement became an unbounded job. A
+  `BoundedConnection` installs a `set_progress_handler` deadline, so all four connection
+  sites are covered rather than each of eighteen `conn.execute` calls. `--query-timeout-s`
+  defaults to **30 s and is ON**; an abort raises a named `QueryBudgetExceeded`, distinct
+  from a cap breach — a cap breach means the statement finished, only too slowly.
+- **ssh keepalive.** Both deploy-script helpers pass `ServerAliveInterval=15
+  ServerAliveCountMax=8`. A silent reset is indistinguishable from a real failure, which is
+  precisely how the V4.2 outcome was misread.
+- **The benchmark's bucket picks now match the population it times.** They were drawn with a
+  hand-written `di.main_pool = 1` while the timed queries applied the default divergence
+  filter, which removes **12.6%** of the main pool and **38.8%** of "more". A pick could
+  therefore be emptied by the real query and the loud F14 abort would name a probe bug as an
+  asset fact. Picks now come from `_build_findings_filter`. `_state_skip`'s skip table also
+  gained `suppressed` and `sys_id`, which had been falling through its single-axis carve-out
+  entirely unverified.
+
+7 tests; 9 mutations each watched failing. One mutation exposed a gap in the tests
+themselves — asserting the new helper in isolation left the caller free to stop using it — so
+a behavioural test builds an asset whose raw-heaviest work is not its divergence-filtered
+heaviest and asserts the pick chooses the latter.
+
+### A CI timing gate that was a coin flip on Windows (2026-08-20)
+
+`tests/test_local_indexer_incremental.py::test_second_scan_fast` failed CI on a commit that
+changed one SQL predicate and one comment, neither of which that module imports. Its budget
+was `max(first_scan * 0.05, 0.5s)`; the Windows runner measured a 1.100 s second scan against
+the 0.5 s floor while taking **23m21s** for the suite versus ubuntu's **5m36s**. Both halves
+of that budget were wrong for a slow filesystem: per-scan overhead the cache cannot remove
+(opening the Tantivy index, the commit, 100 stat calls) does not shrink, so a percentage of a
+quick first scan falls below the fixed floor, and the 0.5 s constant was chosen against one
+machine's speed. The mechanism is proven deterministically by the same test's existing
+`indexed == 0` / `skipped == 100` assertions; the stopwatch only needs to catch pathology, so
+it is now `max(first * 0.75, 5.0)`.
+
+### The citation-range filter works (2026-08-20, web; DEPLOYED `4f6e31f4`)
+
+> Measured on production after deploy, through the real loader and service: the locus-filtered
+> read answers in **97 ms** (`status=ok`, 1,231 of 2,433 rows; a one-sided bound returns 366),
+> the journal carries no error signatures, and the owner confirmed the filter and the row
+> expansion in a browser.
+
+Two fixes to the same reader action — narrowing `/computed-identifications` to one part of
+one work. Code only: no artifact rebuild, no manifest change.
+
+- **The citation-range filter returned nothing on every heavy work, every time.** It was not
+  slow — it was non-functional. The locus predicate in
+  `shared/discovery_service.py::_build_findings_filter` was a **correlated** `EXISTS`, so
+  SQLite re-ran an interval search once per candidate row. Measured on the served artifact
+  for תנ"ך, תהלים over half its chapters: **10,478 ms against a 5.0 s findings timeout**, so
+  the reader always got "This took longer than expected." Pre-existing, and worse than one
+  slow page: `run_in_executor` threads cannot be cancelled, so a read that gave up at 5 s
+  kept its heavy worker for the remaining ~5–14 s, and four concurrent range readers pushed
+  other heavy reads to `busy`. Rewritten as an **uncorrelated `IN (SELECT …)`** driven from
+  `locus_unit` — `CORRELATED SCALAR SUBQUERY` becomes `LIST SUBQUERY`, evaluated once:
+  **61.3 ms, byte-identical result sets** across 15 probed work × bound-shape cases. The
+  predicate stays inside the `WHERE` clause, so the parameter order and every call site are
+  unchanged. A `WITH … AS MATERIALIZED` CTE measured the same (62.6 ms) and was rejected: it
+  cannot live in the filter, and its placeholders would precede the SELECT-list params — an
+  un-spliced params list returned wrong result sets on 6 of those 15 cases and silently
+  correct ones on the other 9, because those were empty.
+
+- **A range-filtered row expanded into children that ignored the range.**
+  `web/pages/findings.py::_fetch_children` never read `locus_from` / `locus_to` back out of
+  the child state, though `_child_state` copies them and its docstring promises "every axis
+  is carried over unchanged … its count and the rows underneath it come from ONE predicate
+  and cannot contradict each other". So a parent counted under a range opened onto an
+  unfiltered list. This was unreachable until now only because the parent query timed out
+  first — fixing the query above is what exposed it, and shipping that fix alone would have
+  turned a broken feature into a silently wrong one.
+
+Nine new tests. The three semantic ones cannot distinguish the two SQL forms by design, so
+the gate is a structural check that the subquery references the outer row nowhere, plus a
+query-plan and a wall-clock guard on the served artifact. All six mutations in the matrix
+were watched failing — reverting to the correlated form ran that test set for **3m28s**,
+which is the outage reproducing itself inside the gate.
+
+### Discovery V4.2 sidecar — 14 restored works, and citations that stop repeating themselves (2026-08-19, web; built, not yet deployed)
+
+A rebuilt discovery artifact. **708 works / 58,602 computed identifications /
+30,528 in the main pool / 51,571 passage excerpts**; the corpus-wide figure a reader
+sees on the homepage goes 555 → 646. Frame hash unchanged from the previous
+candidate, which is the point: everything below changes what a reader is *told*, not
+which manuscripts were matched. Deployed by the owner (`_tmp/deploy_v42_discovery.sh`);
+this entry records the build, not a live change.
+
+- **14 owner-approved works were silently missing, including all three Tur sections, the
+  SeMaG and all three parts of the Zohar.** `scripts/discovery_v4_reconcile.py` wrote the
+  ACQUISITION PROVIDER into `source_label`, a column that holds a masked, provider-agnostic
+  code frozen to `{sefaria, ja, msource}`. It survived two appends because 35 of the
+  append's 50 providers are literally named `sefaria`; the 15 Hebrew Wikisource sources
+  arrived as `hewikisource`, the consumer rejected the value, and a bare `continue`
+  discarded **9,715 claims and 5,517 tier-A witnesses — about 30% of the append — at exit
+  code 0**. The release verifier passed, because the artifact was internally consistent; it
+  simply lacked 14 works. `load_approved_works` now counts and prints every exclusion, and
+  an exclusion meaning a build INPUT disagrees with this consumer is fatal and names the
+  lost ids. Restored: Tur Yoreh Deah 91 identifications / 36 main pool, SeMaG 408/75, the
+  Zohar 416/320 across its three parts.
+
+- **A citation no longer repeats the work title printed beside it.** A fragment witnessing
+  nine passages of the Tur rendered `ארבעה טורים, חושן משפט קנג–קנה; ארבעה טורים, חושן משפט
+  קנז; …` — the title once per run, with the citation buried in it. Measured over the
+  artifact: **107 of 679 works with citation addresses, 4,708 identifications, and 44 of
+  those works have been live since the REF4 append** — so this was never specific to the
+  works restored above. `shared/discovery_locus.py::strip_work_title_prefix` removes the
+  title on the way into the asset, which fixes both the composed citation and the findings
+  page's address-range filter (they read the same column). The prefix is computed once per
+  work from what all its units share, never per label: a per-label draft corrupted the
+  Zohar, where `ג` is a word of `ספר הזוהר, חלק ג` and the one daf out of 596 that happened
+  to *be* ג rendered as a bare column letter.
+
+- **A range no longer repeats an address level.** `shorten_range_tail` now treats `/` as a
+  word boundary, so `ויקרא/כ–ויקרא/כג` reads `ויקרא/כ–כג`. It also slices the original
+  tokens instead of rejoining words with a space, fixing a latent bug that would have
+  flattened `א/ד/ה` to `א ד ה` — a different address, silently.
+
+- **Two work-display rulings.** Tur Orach Chaim is renamed `ארבעה טורים, אורח חיים` so the
+  four sections of one work are named the same way, and the Zohar's authorship line is
+  cleared rather than shortened (383 of 708 works already carry no author, so this is
+  the normal shape). Both applied through the approved review CSV's `owner_title` / `author`
+  columns, so no pinned build input moves.
+
+- **Composition dates for the restored works.** 14 owner-ratified years — four inheriting a
+  year already recorded for the same work or author, ten scholarly dates with no precedent.
+  Unresolved date comparisons fall **694 → 6** (the six pre-existing undated Tosefta
+  tractates). The SeMaG alone accounted for 543 of the 694.
+
+- **The novelty axis is cleaner than the previous candidate.** `verdict_entries_failed_closed`
+  377 → 0 and fingerprint mismatches 377 → 0. Two producer defects behind that:
+  `scripts/discovery_novelty_production_run.py` merged its whole checkpoint into its output,
+  including answers for pairs that are no longer candidates — and its coverage assertion
+  compares counts, so a surplus of stale keys could mask a deficit of real ones. The output
+  is now restricted to the current candidate set with every drop counted.
+
+- **Gates.** Nine mutations of the new guards, each caught by a named test; the assertions
+  read the built asset's own stored labels rather than a helper's return value. Two stale
+  test assertions were found and closed in passing — one still pinned the `source_label`
+  defect, one pinned the pre-ratification date count.
+
+### Pause/Resume for desktop searches (2026-08-19, desktop)
+
+A long search can now be parked and picked back up instead of being thrown away.
+A **Pause** button sits beside Search on the Search tab and beside Analyze on the
+Composition tab, appears only while a run is in flight, and covers all four
+workers — regular search, composition scan, and both Lab Mode variants.
+
+- **The button never claims more than it can do.** Clicking Pause shows a
+  disabled "Pausing…" until the worker actually reaches a checkpoint and
+  acknowledges; only then does it become "Resume". Grouping runs on a different
+  thread that is not pausable, so the button is hidden for that phase rather
+  than shown greyed-out beside a live Stop.
+- **Elapsed time and the composition ETA now exclude parked time**, and are
+  computed from `time.monotonic()`. They were `time.time() - start`, so a pause
+  inflated elapsed and halved the reported chunk rate — and a wall-clock base is
+  wrong regardless, since an NTP or DST step moves it under a running search.
+  The ETA is derived from elapsed, so one fix corrects both.
+- **New `shared/pause_gate.py`** — `PauseGate`, plain stdlib, no Qt and no
+  policy: it blocks and returns a bool, leaving the `InterruptedError` raise in
+  `gui_threads` beside every other cancel. `PausableSearchMixin` adds
+  `pause()` / `resume()` / `request_cancel()` and a `_checkpoint()` called as the
+  first statement of each progress callback, so a parked worker publishes no
+  progress and the bar freezes where it was.
+- **`request_cancel()` is now the single stop entry point** for all six cancel
+  paths: it sets the flag *and* un-parks in one call. A parked worker never
+  reaches the code that reads `cancel_flag`, so a flag alone would have left it
+  parked until the `wait()` budget expired and `QThread.terminate()` fired.
+
+**Fixed along the way** (each was live before this change):
+
+- **Lab Mode searches were never cancellable.** `LabSearchThread` had no
+  `cancel_flag`, so Stop set a dead attribute; `lab_search`'s `batch_cb`
+  swallowed the cancel in a bare `except Exception` (`InterruptedError` is an
+  `OSError` subclass); and a non-deep Lab search never ticked progress at all.
+- **The LOCAL (My Library) passes ignored Stop entirely** — `_query_local_index`
+  and the two LOCAL post-passes had no callback and no cancel check. Stopping one
+  now keeps the hits it had already materialised, like every other mode; an
+  earlier revision of this branch re-raised instead and cost the user every LOCAL
+  row under a label reading "(Partial results)".
+- **A stopped Title/Shelfmark search discarded its partial results.**
+  `_execute_metadata_search` was the one loop with no `try/except`, so the raise
+  escaped and became an empty result set, unlike every other mode.
+- **`perf_signal` fired for cancelled runs**, contradicting its own comment: the
+  core swallows `InterruptedError` and returns normally, so that line was
+  reached anyway.
+- **`closeEvent`'s `comp_thread.requestInterruption()` was a no-op** since it was
+  written — the composition threads only ever polled `cancel_flag`. The mixin's
+  `requestInterruption()` override repairs that call site in place.
+- The LOCAL phase now reports on a dedicated `phase_signal` and switches the bar
+  to indeterminate, instead of pushing unrelated hit counts down the numeric
+  channel (which rewinds the bar) or pinning at `(total, total)` (which reads as
+  100% complete while a long phase is still running).
+
+**Stop itself is unchanged.** It still blocks briefly and still falls back to a
+hard thread kill for a worker caught *between* checkpoints; a paused worker is
+specifically never in that state, and the wider non-blocking-stop rework is
+recorded in `docs/OPEN_ISSUES.md` rather than smuggled in here.
+
+Tests: `test_pause_gate.py`, `test_pause_ack_epoch.py`, `test_pause_elapsed_math.py`,
+`test_pause_resume_ui.py`, `test_pause_phase_signal.py`, `test_pause_core_ticks.py`,
+`test_pause_worker_wiring.py`, `test_pause_stop_lifecycle.py`,
+`test_pause_resume_i18n.py` (all Qt-free), plus `test_pause_integration_qt.py`
+in the `gui` lane for what needs a live event loop — thread affinity,
+queued-vs-direct delivery, a stale acknowledgement crossing a run boundary, and
+real `wait()` timing. New EN/HE keys: Pause / Resume / Pausing… / Paused.
+
+
+### Web memory — allocator-ratchet attribution + remediation (2026-07-08, web)
+
+The recurring "web process at 13.4G" was definitively attributed with live under-load probes: the bulk of RSS is **dead-but-resident allocator high-water** (pymalloc/glibc arenas absorbing per-request transient churn, never returned to the OS — smaps showed ~12G across ~300 arena-class anon regions while live Python allocations grew single-digit MB in a traced window), driven to the systemd `MemoryHigh` cap within ~12h of every restart by **SemrushBot** crawling `/browse` 24/7 (~7K req/day, 41% of traffic). Remediation shipped in two tiers (Codex pre-flight: APPROVE-WITH-CHANGES ×4, `_tmp/codex-tier2-critique-2026-07-08.md`):
+
+- **Ops (live on prod 2026-07-08):** nginx UA map + 403 for SEO-tool crawlers (SemrushBot/AhrefsBot/MJ12bot/DotBot/BLEXBot/DataForSeoBot/serpstatbot) + static robots.txt override; systemd drop-in `MALLOC_ARENA_MAX=2`; 8G swapfile (box had zero swap); prod `.env` `NLI_CACHE_MAX_ENTRIES=20000` + `IIIF_MANIFEST_CACHE_MAX_ENTRIES=1500`; restart timer twice-weekly → daily until the fix proves out.
+- **New: `web/malloc_trim.py`** — periodic glibc `malloc_trim(0)` daemon thread (started from `app.on_startup` only). Env knobs `GENIZAH_MALLOC_TRIM_SECONDS` (default 300; 0 disables) + `GENIZAH_MALLOC_TRIM_MIN_GROWTH_MB` (default 64 — adaptive: trims only when RssAnon grew that much since the last trim). Stats (runs/skips/duration/freed) surface in `/_internal/memstat` via the runtime-cache registry (new public alias `web/api.py::register_runtime_cache_stats`). Linux-only; graceful no-op elsewhere.
+- **SEO-bot policy in app code:** `web/crawler_visibility.py` gains `SEO_TOOL_USER_AGENT_TOKENS` / `SEO_TOOL_ROBOTS_AGENTS` / `is_seo_tool_crawler()` / `should_block_seo_tool_request()`; the noindex middleware in `web/main.py` returns a cheap 403 for SEO-tool UAs before any page render, with `/robots.txt` exempt (RFC 9309: a 4xx robots.txt means "allow all" — crawlers must read their Disallow group to deregister); `web/api.py::robots_txt` now emits the Disallow group. nginx remains the primary enforcement; the app layer is defense-in-depth.
+- **`.nicegui` storage-user retention:** `GENIZAH_STORAGE_RETENTION_DAYS` (default 90; 0 disables) in the startup compaction pass (`web/export_state.py`) deletes `storage-user-*.json` files untouched for the window (delete-before-parse, loaded-session guard, `files_deleted`/`bytes_deleted` counters). 53,592 files / 260 MB had accumulated. Note: a browser absent longer than the window is logged out on return (`auth_session` lives in the file); Supabase-side data unaffected.
+- Tests: `tests/test_seo_bot_block.py`, `tests/test_malloc_trim.py`, `tests/test_storage_retention.py` (52 new) + existing crawler/export/openapi regressions green.
+
+### Audit tail — a11y statement wording + stale-index diagnostics (2026-06-25, PR #314)
+
+Closes the last code items of the 2026-06-23 product-quality audit. **#27 (web /accessibility):** softened the over-claims to match reality after SEED-014 — "fully navigable using a keyboard" → "Most of the site can be navigated…", "clearly visible on all interactive elements" → "visible on interactive elements", "have appropriate alternative text" → "are given… where applicable"; bumped the stale "February 2025" date to June 2026 (EN + HE re-keyed in lockstep). **SEED-019 #28 (stale-index diagnostics, `genizah_core.py`):** extended SEED-006's one-shot reload warning into a reusable `content_search_staleness_messages()` helper + a queryable `SearchEngine.index_staleness_report()` (genizah/local/stale/messages) + LOCAL-side parity warning; ASCII-only messages (cp1255-console-safe). Standalone Codex APPROVE WITH NITS (nit fixed); 20 tests in `tests/test_audit_27_28_a11y_statement_and_stale_index.py`. Also (#31) `/_tmp/` added to `.gitignore` (scratch dir). **Planning:** SEED-020 god-file decomposition opened as GSD milestone **v8.3.0** (Phases 122–127, roadmap-only — execution deferred).
+
+### SEED-023 — Homepage corpus stats + catalog PGP/Editions filters (2026-06-24, web)
+
+**Part A — Homepage stats band (shipped):** five hardcoded headline numbers on the homepage — Manuscripts (255,723), Catalog entries (731,354), Images (1,019,886), Scholarly transcriptions (27,424), Automatic transcriptions (232,450). Constants live in `web/stats_service.py` (`CORPUS_STATS`); `compute_live_stats()` regenerates them from the sidecars after a data refresh (with `libraries.csv` / `browse_map.pkl` fallbacks so it works headless). Rendered synchronously (no per-request big-table COUNT, CLS-free) in `web/pages/home.py`.
+
+**Part B — Catalog "Browse by identification" availability filters:** two 3-state filter buttons (PGP: all / Has PGP / No PGP — link presence, "has PGP info"; Scholarly Transcriptions: all / Has Scholarly Transcription / No Scholarly Transcription — PGP `%Edition%` ∪ FGP `Digital Edition`, editions-only) in the catalog sidebar, each with a tooltip, removable chips, and persistence via the `safe_storage` chokepoint (Phase 87). Filters are pushed DOWN into `shared/fjms_service.py::get_browse_results` — each materializes a per-thread TEMP table of AlmaIds (built once, reused; works on the read-only connection) and adds an `[NOT] EXISTS` clause applied BEFORE `COUNT(DISTINCT AlmaId)` and pagination, so `total` + paging reflect the full filtered set (not the visible page). New helpers: `document_service.get_all_pgp_link_sys_ids()` / `get_sys_ids_with_editions(sys_ids=None)`, `fgp_service.get_sys_ids_with_fgp_editions(sys_ids=None)` (both dual-mode: list or full corpus). The corpus-wide membership sets are computed once per process, lock-protected, shared read-only. PGP badge, `/search` `pgp_filter`, and SEED-022 are untouched. Tests: `tests/test_seed023_catalog_filters.py` (10).
+
+### Phase 97.3 — My Library UAT Stability (2026-05-26 — internal hotfix, no version bump)
+
+Closes the six post-Phase-97.2 UAT defects reported 2026-05-26 against the desktop My Library tab. Internal hotfix on the v7.14 chain (97.1 → 97.2 → 97.3); no public release, no GitHub tag.
+
+**R97.3-A — UI-thread freeze on folder selection (Bug A).** Replaced the synchronous recursive walk in `_UnifiedFileTreeWidget._populate_node` with an async tree-worker design. `FolderWalkWorker` (Phase 97 U-03, previously unwired) now powers the tree fill: it walks with `os.walk(folder, followlinks=False)`, pre-filters by `_SUPPORTED_EXTENSIONS` imported from `shared/local_indexer.py` (single source of truth — also closes R97.3-N), runs `_canonical_filepath` inside the worker thread, and emits 4-tuples `(filepath, canonical, mtime_ns, size)` plus a monotonic generation token. All three worker signals (`batch_emitted`, `finished_signal`, `error_signal`) carry the token; stale payloads from a cancelled or superseded worker are dropped at the UI slot. `_UnifiedFileTreeWidget` gained `_tree_token`, `_tree_worker`, `_cancel_existing_tree_worker`, `_ensure_dir_node`, `_on_tree_batch`/`_on_tree_finished`/`_on_tree_error` slots. Tree now starts collapsed (no `expandAll()` — D-04). Cancel mid-populate clears the tree entirely (D-05).
+
+**R97.3-A — `prior_status` cache (Codex Critique #2 v7.14 blocker).** Added `MyLibraryTab._prior_status_cache` populated at `_init_indexer` and `_invalidate_prior_status_cache()` called BEFORE `_refresh_folder_list_ui` in `_on_worker_finished`, `_on_worker_error`, `_perform_reset`, folder-add, and folder-remove (D-12 ordering invariant — late clearing would leave the post-scan tree showing pre-scan status because `_refresh_folder_list_ui` calls `populate_for_folder` at line 1995 which reads the cache). The click path now never issues a `local_files` DB query.
+
+**R97.3-B — Reset button accessible after a crash (Bug B).** Simplified `_update_reset_button_state` to a single condition: enabled when `self._worker is None or not self._worker.isRunning()`. The Phase-97.2 `start_recovery_probe()` check is gone — orphan `scan_runs.status='running'` rows are exactly what Reset is supposed to clean up. `LocalIndexer.reset_my_library()`'s own 7-step protocol (path-safety pre-check + handle-close + retry-rename + LAB-rollback + fail-loud + deferred-GC) remains the load-bearing safety; the UI guard does not duplicate it. Phase 97.2 `test_reset_my_library_full_cycle` and `test_reset_my_library_lab_rename_failure_rolls_back_local` still GREEN.
+
+**R97.3-C — MuPDF stderr noise silenced (Bug C).** `shared/local_indexer.py` calls `fitz.TOOLS.mupdf_display_warnings(False)` at module import, wrapped in `try/except Exception` with `logger.debug` fallback (broad exception per Codex Critique #2 — a future PyMuPDF API change must not crash module import). User's smoke folder went from 624× "MuPDF error: ... unknown keyword: 'TF'" stderr lines to zero.
+
+**R97.3-D — Recovery-Skip suppresses same-launch auto-rescan (Bug D).** New one-shot `_skip_startup_rescan_once: bool` flag on `MyLibraryTab`. Initialised `False` before the recovery-modal call path. Set `True` in the Skip branch of `_show_recovery_modal`. Read-and-cleared at the entry of `_auto_rescan_on_startup`. Resume and Restart branches do NOT set the flag (both intentionally trigger a fresh scan). D-25 silent rescan on the no-modal path is unchanged. Bilingual status-bar message ("Recovery skipped. Use Refresh to rescan. / ההתאוששות דולגה. לחץ Refresh לסריקה מחדש.") auto-fades after 5 seconds.
+
+**R97.3-E — "Discovering files…" status during scan enumeration (Bug E).** `LocalIndexerWorker` emits new `status_updated(str)` signal with bilingual "Discovering files… / מאתר קבצים…" before `scan_all` enters its enumeration loop. `_start_worker` puts `QProgressBar` in indeterminate (busy) mode via `setRange(0, 0)`. First `progress_updated` signal flips back to determinate `setRange(0, 100)` and clears the status message. Finish/cancel/error all reset the range to `(0, 100)` so a future scan does not inherit busy state (D-21).
+
+**R97.3-N — UI tree shows the full supported-extensions set (Bug N3).** The UI-side `SUPPORTED = {'.pdf', '.docx', '.txt'}` literal at `desktop/my_library_tab.py:227` is DELETED. `FolderWalkWorker` imports `_SUPPORTED_EXTENSIONS = {".docx", ".pdf", ".txt", ".html", ".xlsx", ".csv"}` from `shared/local_indexer.py:81` (single source of truth). `.html`/`.xlsx`/`.csv` now appear in the opt-out tree; mixed-case (`.PDF`, `.Pdf`) is normalized via `.lower()`.
+
+**Tests added.** Seven new test files covering D-13 (token guard), D-14 (no canonicalize of unsupported), D-15 (no junction recurse via `mklink /J`), D-19 (cache invalidation ordering), D-20 (tri-state preservation across async populate), D-21 (progress range round-trips), D-22 (100ms responsiveness via `time.perf_counter()` + `QTimer.singleShot(0, marker)` + `QApplication.processEvents()`). Existing `tests/test_folder_walk_worker.py` extended for the 4-tuple + token signal shape.
+
+**Codex review trail.** `97.3-CODEX-CRITIQUE.md` (Area 1 sub-decisions — revised Option B + worker pre-filter; flagged the `prior_status` preload risk) and `97.3-CODEX-CRITIQUE-2.md` (full decision-set — surfaced D-11 broad-exception, D-12 cache ordering, D-16..D-22 + the inverted wave order for risk locality) both addressed before plan execution.
+
+**No version bump.** `version.py`, `version_info.txt`, `CompileScriptGenizah.iss`, `README.md`, `tests/test_release_artifacts.py` UNTOUCHED. Phase 97.3 rides the v7.14 internal-hotfix chain (97.1 → 97.2 → 97.3); the next user-facing release that bundles all three is a separate decision.
+
+### Phase 97.2 — LOCAL Recovery Cascade Fix + Reset My Library (internal; 2026-05-26)
+
+Internal closeout — not yet a user-facing release. Bundles the 97.1 MAX_PATH +
+non-blocking cancel hotfix (commit `2e1b846e`, 2026-05-25) with the 97.2 8-bug
+recovery cascade fix and the new "Reset My Library" / "אפס ספריה שלי" toolbar
+action in the desktop My Library tab.
+
+**Trigger:** 2026-05-26 cascade on the first post-97.1 run. User stopped a scan
+of a 100K-file Dropbox folder mid-run, restarted the app, clicked "Remove
+folder" — console emitted `Schema error -> LockBusy x3 -> 'Field scan_run_id is
+not defined' -> 'NoneType has no delete_documents'`. Codex critique identified
+the missing `.schema_version` marker check (Bug 6 / R97.2-F) as the actual root
+cause: Phase 95 installs have `meta.json` but no `.schema_version`, so the
+existing `actual_marker is not None and actual_marker != expected_marker` guard
+failed to trip the rebuild path on upgrade.
+
+**8 fixes landed in `shared/local_indexer.py` + `genizah_core.py`:**
+- R97.2-F (Bug 6) — schema-marker absence triggers rebuild in BOTH files
+- R97.2-A (Bug A) — redundant `tantivy.Index(...)` reopen deleted at
+  `local_indexer.py:1147`; temp-indexer in `genizah_core.py:6878-6896` now
+  explicitly closes via `_close_internal_writer_index()` in `try/finally`
+- R97.2-B (Bug B) — explicit `fresh_writer = None; fresh_index = None;
+  gc.collect()` at `:2745-2748` replaces `del` (Windows: `del` is weak,
+  Rust drop is delayed, `os.rename` then races a live lock file)
+- R97.2-C (Bug C) — `discard_run` step 2 introspects schema for
+  `scan_run_id` field; on absence (Phase 95 schema) falls back to per-uid
+  `delete_documents("unique_id", uid)` loop joined from
+  `local_pages × processed_files WHERE scan_run_id=?`
+- R97.2-G (Bug C2) — explicit `_del_writer = None; gc.collect()` in
+  `discard_run` step 2 `finally:` before step 5 reopens `self._writer`
+- R97.2-H (Bug C3) — `discard_run` raises `LocalIndexerError` BEFORE the
+  SQLite delete transaction when Tantivy delete fails; prevents
+  orphaned-docs state (SQLite empty, Tantivy still has the rows)
+- R97.2-D (Bug D) — new `LocalIndexerError(RuntimeError)` exception class
+  + new `_ensure_writer()` helper (fail-loud: raises on schema mismatch
+  or LockBusy, NO silent retry past `__init__`'s 3-attempt loop); wired
+  at `_delete_file`, `remove_folder`, `_recover_pending_deletes` call
+  sites
+- R97.2-E (Reset My Library) — new
+  `LocalIndexer.reset_my_library(close_searcher_cb, reload_searcher_cb)`
+  7-step protocol (close handles -> 7 path-safety pre-checks (basenames
+  must equal `LocalIndex`/`LocalLabIndex`, parents match, not root, etc.;
+  raise `LocalIndexerError` before any filesystem mutation) -> rename-aside
+  LOCAL to `.reset-quarantine-<ts>` -> rename-aside LAB with **rollback of
+  LOCAL on failure** -> recreate empty dirs -> schedule deferred cleanup
+  via `pending_dir_cleanup` (Phase 97 R-02 infrastructure; falls back to
+  best-effort `shutil.rmtree(ignore_errors=True)` only if the SQLite INSERT
+  fails) -> `__init__` reinit triggers migration ladder -> reload searcher).
+  New toolbar button in `desktop/my_library_tab.py` with destructive red
+  styling, bilingual EN/HE strings, proactive active-scan guard
+  (`_update_reset_button_state()` toggles `setEnabled` + tooltip on worker
+  lifecycle signals), and a custom `QDialog` two-step typed confirm
+  (`RESET` / `אפס` both accepted regardless of `CURRENT_LANG`). Enabled-state
+  tooltip explicitly reassures that source files and the Genizah corpus
+  are preserved.
+
+**97.1 work bundled in this entry:**
+- MAX_PATH long-path prefix (commit `2e1b846e`) — Windows-only handling
+  of paths > 260 chars via the `\\\\?\\` prefix
+- Non-blocking cancel + per-file cancel check — addressed UI freeze and
+  `WinError 3` storm during cancel on large folders
+
+**Reset scope:** LOCAL_INDEX_DIR + LOCAL_LAB_INDEX_DIR only. pgp.db,
+fjms_enrichment.db, nli_crossref.db, libraries.csv, Genizah_Index/ are NEVER
+touched by Reset. Source files (user's own .txt/.docx/.pdf) are NEVER touched.
+
+**5 RED tests (each landed RED before its fix):**
+- `tests/test_phase_97_2_schema_marker_absence.py` (R97.2-F)
+- `tests/test_phase_97_2_writer_handle_leak.py` (R97.2-A + R97.2-B)
+- `tests/test_phase_97_2_discard_writer_lifecycle.py` (R97.2-C + R97.2-G)
+- `tests/test_phase_97_2_sqlite_vs_tantivy_consistency.py` (R97.2-H)
+- `tests/test_phase_97_2_reset_my_library_full_cycle.py` (R97.2-E)
+
+**Origin trace:**
+`.planning/phases/97.2-recovery-cascade-lockbusy/97.2-CODEX-CRITIQUE.md` +
+`97.2-CODEX-BRIEF.md`. CONTEXT D-02 adopted Codex's expanded 5->8 bug list.
+
+**Deferred (out of scope):**
+- Centralized `try_open_or_rebuild()` helper (Codex recommended; deferred
+  to a future refactor phase per CONTEXT D-01).
+- Defensive stale-lockfile cleanup (Codex recommended conservatively;
+  deferred per CONTEXT D-06 — Bug A fix removes the actual lock-leak
+  vector).
+
+**Verification:**
+- `pytest tests -k phase_97_2 -x` — all 5 new tests pass
+- `pytest tests/test_phase_97_invariants.py tests/test_scan_run_id.py -x` — no regression
+- `pytest tests/test_phase_87_no_raw_storage_access.py -x` — web multitenant invariant unaffected
+- `python -m ruff check .` — clean
+
+(desktop — LOCAL is desktop-only per Phase 95 invariant; web LIBRARY_CODES `[]` unaffected)
+
+### Phase 98 — NLI Resilience (internal; 2026-05-25)
+
+Internal closeout — not yet a user-facing release.
+
+**Resilience hardening for NLI/IIIF code paths.** All 10 NLI fetch sites
+guarded by a new shared circuit breaker (`shared/nli_circuit_breaker.py`)
+that trips after 3 consecutive failures and short-circuits further calls
+for 60s. Per-call timeouts dropped from 15-30s to 3-5s via 6 new env knobs
+(`NLI_CIRCUIT_THRESHOLD=3`, `NLI_CIRCUIT_WINDOW=60`, `NLI_CONNECT_TIMEOUT=3`,
+`NLI_IIIF_READ_TIMEOUT=5`, `NLI_MARC_READ_TIMEOUT=3`,
+`NLI_IMAGE_READ_TIMEOUT=5`). `NLI_SEMAPHORE_TIMEOUT` default dropped 20→1.
+PostHog telemetry on breaker open/close via factored
+`shared/posthog_server.py`.
+
+Worst-case per-request blocking budget: 45s → ~9s. After 3 consecutive
+failures the breaker stays open for 60s and subsequent NLI fetches return
+empty in microseconds (negative-cache short-circuit). The Nyquist test in
+`tests/test_nli_circuit_breaker.py::TestNliCircuitBreakerConcurrency`
+proves 20 saturating threads complete in <10s wall time.
+
+Wired into all 10 NLI fetch sites: 4 in `web/api.py`
+(`fetch_fl_ids_from_nli`, `nli_image`, `_fetch_nli_image_bytes`,
+`proxy_image` — host-conditional for non-NLI), 3 in puzzle
+(`PuzzleImageService._fetch_iiif_image`, `_fetch_direct_url`
+host-conditional, `web/pages/puzzle.py::_resolve_folios`), 4 in
+`genizah_core.py` (`fetch_iiif_manifest`, `fetch_marc_data` migrated +
+new wirings at `_fetch_single_worker`, `_fetch_fl_ids`); legacy
+class-attribute breaker REMOVED (RESEARCH Pitfall 5).
+
+**Origin:** 2026-05-25 production hang — see
+`docs/INCIDENT-2026-05-25-nli-iiif-hang.md` +
+`docs/INCIDENT-2026-05-25-CODEX-CRITIQUE.md`. Closes the Minimum Ship
+Patch from the Codex critique.
+
+**Deferred (out of scope):** Async refactor to `httpx.AsyncClient`,
+event-loop watchdog, multi-worker uvicorn (CONTEXT D-05).
+
+**Production canary verification:**
+`curl -w "%{time_total}\n" https://genizahsearch.com/api/fl_ids/990001458630205171`
+10× in sequence. Expected: first 1-3 calls slow (1-5s), remaining < 0.1s.
+Journal pattern `Failed to fetch FL IDs` should appear at most 3 times
+per 60s window per sys_id.
+
+134/134 Phase 98 tests pass across 6 test files
+(`test_posthog_server.py`, `test_nli_circuit_breaker.py`,
+`test_api_nli_breaker_integration.py`,
+`test_puzzle_nli_breaker_integration.py`,
+`test_genizah_core_nli_breaker_migration.py`,
+`test_nli_breaker_cross_module_invariants.py`).
+
+(both web + desktop — desktop releases next milestone)
+
+---
+
 ## [9.2.0] - 2026-09-06 — Citations, Princeton links, and a round of repairs
 
 Three strands, and the release is mostly the third.
@@ -1636,530 +2201,6 @@ A major overhaul of how LOCAL Hebrew PDFs are read into the My Library index, dr
 - New `shared/local_indexer.py::_collapse_intra_block_newlines` + `_fix_sort_true_rtl_line` / `_fix_sort_true_rtl_page` helpers for the Hebrew extraction fixes.
 - New `LocalIndexer.mark_all_pending_for_reindex()` helper backs the Re-index All button by flipping `processed_files.status='committed'` → `'pending'`.
 - v7.15 milestone closed: 3 phases (99, 100, 101), 7 plans, 6/6 PDFIMG-* requirements satisfied.
-
----
-
-## [Unreleased]
-
-### Oxford images on the desktop: an honest failure state, in Hebrew too (2026-09-07)
-
-The Bodleian's Genizah Fragments host still answers every non-browser request with its
-bot-challenge page, and since early September the NLI no longer delivers its Ktiv copies of
-the Bodleian-held folios either (IIIF 500, Rosetta stream 401, and a generic 94×73 "no image"
-PNG from the Rosetta thumbnail endpoint). So an Oxford folio has no image any app can fetch,
-and the 2026-09-02 Oxford→NLI fallback lands on nothing.
-
-- **The notice strip is translated.** "Oxford image unavailable — showing the NLI image
-  instead" and its link showed in English inside the Hebrew UI; the key was missing from
-  `genizah_translations.py`. A source-text test now pins every notice key to the table.
-- **The Bodleian link is offered in every failure state**, not only when an NLI list exists:
-  when the part has no NLI list, and when the NLI copy fails as well — in which case the
-  strip stops claiming an NLI image is on screen and says the copy could not be loaded. The
-  link is host-pinned to `hebrew.bodleian.ox.ac.uk`; a transient notice is retired by the
-  next image that renders, and the standing fallback notice returns when an NLI page does.
-- **The loader rejects Rosetta's placeholder.** `ImageLoaderThread`'s third attempt accepted
-  any `image/*` body, so the 1,615-byte "no image" icon decoded and was displayed as if it
-  were the manuscript. `shared/metadata_manager.py::ROSETTA_PLACEHOLDER_MAX_BYTES` (2000,
-  the ceiling `web/api.py` already used) now turns it into a failure.
-- Desktop-only. Showing the Oxford image *inside* the desktop is still open: it needs an
-  embedded browser engine or a Bodleian allowlist (`docs/OPEN_ISSUES.md`, Bodleian row).
-
-### One definition of a sys_id, and 97 is not a corpus prefix (2026-08-25)
-
-A manuscript `sys_id` was parsed out of a `raw_header` by ~24 hand-rolled regexes in two
-incompatible dialects. They are now one shared definition in `shared/sys_id_patterns.py`,
-and a repo lint fails CI if a new site spells its own.
-
-- **The two dialects were answering different questions.** `99` is the Genizah corpus
-  namespace; `97` is the LOCAL "My Library" namespace (Phase 95) — a user's own files,
-  generated on the desktop, never a corpus record. Measured on `libraries.csv`: 255,723 of
-  255,723 records begin `99`, including all 473 NLI rows. So the corpus-facing sites were
-  right to be 99-only and the four wide ones were the drift; three were narrowed and the
-  two desktop LOCAL-aware parsers stay namespace-agnostic on purpose.
-- **The narrow pattern was not merely narrow — it mis-matched.** `re.search` scans anywhere,
-  so `(99\d{8,})` applied to a LOCAL header could match a `99` inside the LOCAL id's random
-  digits and return a truncated, wrong sys_id: 6.36% of LOCAL ids, measured. Both shared
-  patterns are now anchored on a digit boundary, so a LOCAL header misses cleanly instead.
-  **Correction to an earlier draft of this entry:** it claimed the mis-match was a live
-  defect on the desktop LAB path. It was not. `shared/lab_engine.py` does meet LOCAL headers,
-  but it tests the extracted id against `excluded_set`, which holds resolved CORPUS sys_ids —
-  always 18 digits — while a mis-match inside an 18-char LOCAL id is at most 16, so the test
-  could never be true. Old and new leave a LOCAL row unexcluded alike, and on corpus headers
-  the two patterns are identical (0 differences over 50,000 generated headers). No reachable
-  consequence was found at any migrated site. This is hardening that removes a trap, not a
-  bug fix.
-- **A drift guard, proven able to fail.** `tests/test_sys_id_patterns.py` pins the wiring,
-  the anti-corruption property and the Phase 95 regression; three mutations (re-widening a
-  site, un-anchoring the pattern, over-narrowing a desktop parser) each fail it distinctly.
-  `scripts/check_sys_id_prefixes.py` re-takes the measurement, since the corpus grows.
-- **The witness panel's pattern came in with the multi-witness merge and was narrowed too.**
-  `web/pages/parallels.py::WITNESS_SYS_ID_RE` had consolidated three copies on that page into
-  one — the right fix — but chose the wide dialect on the premise that 97-prefixed
-  *manuscripts* exist. They do not. And once the engine it deliberately mirrors
-  (`shared/passage_parallels.py`) became corpus-only, staying wide would have recreated the
-  divergence pointing the other way: the page admitting a witness the engine cannot resolve.
-  The page's own "exactly one pattern" guard is kept and strengthened — it now asserts the
-  page holds no pattern of its own at all.
-- **The verification script's index walk was broken, and a review caught it.** Two defects,
-  both on the one path nothing ever executed: the repo root was missing from `sys.path`, so
-  the documented `--index` invocation died on `ModuleNotFoundError`; and the walk called
-  `Searcher.segment_readers()`, which the Tantivy Python binding does not expose. It now
-  pages a match-all query through the supported API, and refuses to report a clean result off
-  a short walk — a partial scan is indistinguishable from a corpus with no 97 in it. Covered
-  now by tests that build a real index and run the script as documented.
-- **Then the completeness guard itself turned out to have two holes, found by a second review
-  pass.** Both made the script answer "no new prefix here" without having looked. It counted a
-  document as inspected *before* reading it, so an index whose schema lacks `full_header`
-  balanced its own books and reported clean off zero headers. And it detected prefixes using
-  the very constants it exists to check — a 99/97 pattern cannot match a `98`, so an index of
-  nothing but 98-prefixed records also reported clean. Prefix detection is now deliberately
-  independent of those constants, every document lands in exactly one of
-  classified/unreadable/unparsed and the three must sum to the index total, and the shared
-  corpus pattern is additionally cross-checked against every real header it should match. A
-  walk with any hole in it can no longer come back clean.
-
-### Download the computed identifications as a spreadsheet (2026-08-21)
-
-`/computed-identifications` now has a download control. It returns **the reader's whole
-filtered set** — not just the page on screen — as a bilingual xlsx, with the matched
-passages on the finding's own row.
-
-- **The evidence travels with the claim.** Five columns carry the manuscript passage, the
-  edition passage and their notes, with the matched words in **red and bold** — the same
-  highlighting the parallels export uses. The first draft put the passages on a second
-  sheet, which meant judging any single match required joining two sheets on a shelfmark
-  that repeats.
-- **"One row per work" and "one row per manuscript" now export what their expander opens
-  onto.** Those views are grouped, so the grouped row itself carries no manuscript and no
-  text — on the page you open it, but a spreadsheet has nothing to open. The export takes
-  its ORDER from the grouping and its ROWS from the identifications underneath, so the
-  grouping survives as columns you can sort and pivot on.
-- **A warning before a large download, and a card that clears after it.** Above 2,000 rows
-  the control asks first — with a different sentence for the grouped views, where a row
-  count would be the wrong number. The "Preparing your file" card now clears on every
-  outcome, including the failures.
-- **The file says where it came from.** An About sheet names the artifact it was built
-  from, credits the MiDRASH automatic transcriptions (Stoekl Ben Ezra et al., 2025) rather
-  than carrying thousands of lines of someone else's dataset anonymously, and marks which
-  passages are machine-read rather than a scholar's transcription. Where the artifact had
-  already abbreviated a passage, the sheet says so instead of leaving an unexplained
-  ellipsis inside a quotation.
-
-No confidence score, band or precision figure reaches a cell: the only number in the file
-is page coverage in matched letters, with its qualifier attached, exactly as the page
-renders it. Measured against the real artifact — 28,635 rows in 66 s, a 5.8 MB file.
-
-### The deploy path no longer runs an hour-long benchmark as its "smoke test" (2026-08-20)
-
-Four fixes to the discovery deploy path and its benchmark, none of them runtime code.
-
-- **A readiness smoke that takes a second.** `docs/specs/discovery-deploy.md` §2.6 told the
-  operator to run `scripts/bench_discovery.py --sample 50 --warm-passes 1`. Neither flag
-  bounds `bench_findings_page()`, which is invoked unconditionally and expands to ~15,363
-  filter/unit/sort combinations x 5 repeats — about **76,815 timed statements, one to two
-  hours**. On 2026-08-19 that hung the V4.2 deploy until the ssh connection reset, and the
-  deploy was recorded as **failed** when steps 0–7 had succeeded and the swap was live and
-  healthy. New `scripts/smoke_discovery_readiness.py` answers the actual question — can the
-  app load what it now serves, and does that asset answer real reads — through the real
-  `load_discovery_state()` and `web.discovery` paths, including a citation-range read over
-  the heaviest locus-bearing work. §2.7's "or read the benchmark's added RSS" is gone too;
-  the RSS comes from `/proc/<pid>/status`.
-- **Every statement in the benchmark is now wall-clock bounded.** Nothing in that file
-  bounded any query, which is how one pathological statement became an unbounded job. A
-  `BoundedConnection` installs a `set_progress_handler` deadline, so all four connection
-  sites are covered rather than each of eighteen `conn.execute` calls. `--query-timeout-s`
-  defaults to **30 s and is ON**; an abort raises a named `QueryBudgetExceeded`, distinct
-  from a cap breach — a cap breach means the statement finished, only too slowly.
-- **ssh keepalive.** Both deploy-script helpers pass `ServerAliveInterval=15
-  ServerAliveCountMax=8`. A silent reset is indistinguishable from a real failure, which is
-  precisely how the V4.2 outcome was misread.
-- **The benchmark's bucket picks now match the population it times.** They were drawn with a
-  hand-written `di.main_pool = 1` while the timed queries applied the default divergence
-  filter, which removes **12.6%** of the main pool and **38.8%** of "more". A pick could
-  therefore be emptied by the real query and the loud F14 abort would name a probe bug as an
-  asset fact. Picks now come from `_build_findings_filter`. `_state_skip`'s skip table also
-  gained `suppressed` and `sys_id`, which had been falling through its single-axis carve-out
-  entirely unverified.
-
-7 tests; 9 mutations each watched failing. One mutation exposed a gap in the tests
-themselves — asserting the new helper in isolation left the caller free to stop using it — so
-a behavioural test builds an asset whose raw-heaviest work is not its divergence-filtered
-heaviest and asserts the pick chooses the latter.
-
-### A CI timing gate that was a coin flip on Windows (2026-08-20)
-
-`tests/test_local_indexer_incremental.py::test_second_scan_fast` failed CI on a commit that
-changed one SQL predicate and one comment, neither of which that module imports. Its budget
-was `max(first_scan * 0.05, 0.5s)`; the Windows runner measured a 1.100 s second scan against
-the 0.5 s floor while taking **23m21s** for the suite versus ubuntu's **5m36s**. Both halves
-of that budget were wrong for a slow filesystem: per-scan overhead the cache cannot remove
-(opening the Tantivy index, the commit, 100 stat calls) does not shrink, so a percentage of a
-quick first scan falls below the fixed floor, and the 0.5 s constant was chosen against one
-machine's speed. The mechanism is proven deterministically by the same test's existing
-`indexed == 0` / `skipped == 100` assertions; the stopwatch only needs to catch pathology, so
-it is now `max(first * 0.75, 5.0)`.
-
-### The citation-range filter works (2026-08-20, web; DEPLOYED `4f6e31f4`)
-
-> Measured on production after deploy, through the real loader and service: the locus-filtered
-> read answers in **97 ms** (`status=ok`, 1,231 of 2,433 rows; a one-sided bound returns 366),
-> the journal carries no error signatures, and the owner confirmed the filter and the row
-> expansion in a browser.
-
-Two fixes to the same reader action — narrowing `/computed-identifications` to one part of
-one work. Code only: no artifact rebuild, no manifest change.
-
-- **The citation-range filter returned nothing on every heavy work, every time.** It was not
-  slow — it was non-functional. The locus predicate in
-  `shared/discovery_service.py::_build_findings_filter` was a **correlated** `EXISTS`, so
-  SQLite re-ran an interval search once per candidate row. Measured on the served artifact
-  for תנ"ך, תהלים over half its chapters: **10,478 ms against a 5.0 s findings timeout**, so
-  the reader always got "This took longer than expected." Pre-existing, and worse than one
-  slow page: `run_in_executor` threads cannot be cancelled, so a read that gave up at 5 s
-  kept its heavy worker for the remaining ~5–14 s, and four concurrent range readers pushed
-  other heavy reads to `busy`. Rewritten as an **uncorrelated `IN (SELECT …)`** driven from
-  `locus_unit` — `CORRELATED SCALAR SUBQUERY` becomes `LIST SUBQUERY`, evaluated once:
-  **61.3 ms, byte-identical result sets** across 15 probed work × bound-shape cases. The
-  predicate stays inside the `WHERE` clause, so the parameter order and every call site are
-  unchanged. A `WITH … AS MATERIALIZED` CTE measured the same (62.6 ms) and was rejected: it
-  cannot live in the filter, and its placeholders would precede the SELECT-list params — an
-  un-spliced params list returned wrong result sets on 6 of those 15 cases and silently
-  correct ones on the other 9, because those were empty.
-
-- **A range-filtered row expanded into children that ignored the range.**
-  `web/pages/findings.py::_fetch_children` never read `locus_from` / `locus_to` back out of
-  the child state, though `_child_state` copies them and its docstring promises "every axis
-  is carried over unchanged … its count and the rows underneath it come from ONE predicate
-  and cannot contradict each other". So a parent counted under a range opened onto an
-  unfiltered list. This was unreachable until now only because the parent query timed out
-  first — fixing the query above is what exposed it, and shipping that fix alone would have
-  turned a broken feature into a silently wrong one.
-
-Nine new tests. The three semantic ones cannot distinguish the two SQL forms by design, so
-the gate is a structural check that the subquery references the outer row nowhere, plus a
-query-plan and a wall-clock guard on the served artifact. All six mutations in the matrix
-were watched failing — reverting to the correlated form ran that test set for **3m28s**,
-which is the outage reproducing itself inside the gate.
-
-### Discovery V4.2 sidecar — 14 restored works, and citations that stop repeating themselves (2026-08-19, web; built, not yet deployed)
-
-A rebuilt discovery artifact. **708 works / 58,602 computed identifications /
-30,528 in the main pool / 51,571 passage excerpts**; the corpus-wide figure a reader
-sees on the homepage goes 555 → 646. Frame hash unchanged from the previous
-candidate, which is the point: everything below changes what a reader is *told*, not
-which manuscripts were matched. Deployed by the owner (`_tmp/deploy_v42_discovery.sh`);
-this entry records the build, not a live change.
-
-- **14 owner-approved works were silently missing, including all three Tur sections, the
-  SeMaG and all three parts of the Zohar.** `scripts/discovery_v4_reconcile.py` wrote the
-  ACQUISITION PROVIDER into `source_label`, a column that holds a masked, provider-agnostic
-  code frozen to `{sefaria, ja, msource}`. It survived two appends because 35 of the
-  append's 50 providers are literally named `sefaria`; the 15 Hebrew Wikisource sources
-  arrived as `hewikisource`, the consumer rejected the value, and a bare `continue`
-  discarded **9,715 claims and 5,517 tier-A witnesses — about 30% of the append — at exit
-  code 0**. The release verifier passed, because the artifact was internally consistent; it
-  simply lacked 14 works. `load_approved_works` now counts and prints every exclusion, and
-  an exclusion meaning a build INPUT disagrees with this consumer is fatal and names the
-  lost ids. Restored: Tur Yoreh Deah 91 identifications / 36 main pool, SeMaG 408/75, the
-  Zohar 416/320 across its three parts.
-
-- **A citation no longer repeats the work title printed beside it.** A fragment witnessing
-  nine passages of the Tur rendered `ארבעה טורים, חושן משפט קנג–קנה; ארבעה טורים, חושן משפט
-  קנז; …` — the title once per run, with the citation buried in it. Measured over the
-  artifact: **107 of 679 works with citation addresses, 4,708 identifications, and 44 of
-  those works have been live since the REF4 append** — so this was never specific to the
-  works restored above. `shared/discovery_locus.py::strip_work_title_prefix` removes the
-  title on the way into the asset, which fixes both the composed citation and the findings
-  page's address-range filter (they read the same column). The prefix is computed once per
-  work from what all its units share, never per label: a per-label draft corrupted the
-  Zohar, where `ג` is a word of `ספר הזוהר, חלק ג` and the one daf out of 596 that happened
-  to *be* ג rendered as a bare column letter.
-
-- **A range no longer repeats an address level.** `shorten_range_tail` now treats `/` as a
-  word boundary, so `ויקרא/כ–ויקרא/כג` reads `ויקרא/כ–כג`. It also slices the original
-  tokens instead of rejoining words with a space, fixing a latent bug that would have
-  flattened `א/ד/ה` to `א ד ה` — a different address, silently.
-
-- **Two work-display rulings.** Tur Orach Chaim is renamed `ארבעה טורים, אורח חיים` so the
-  four sections of one work are named the same way, and the Zohar's authorship line is
-  cleared rather than shortened (383 of 708 works already carry no author, so this is
-  the normal shape). Both applied through the approved review CSV's `owner_title` / `author`
-  columns, so no pinned build input moves.
-
-- **Composition dates for the restored works.** 14 owner-ratified years — four inheriting a
-  year already recorded for the same work or author, ten scholarly dates with no precedent.
-  Unresolved date comparisons fall **694 → 6** (the six pre-existing undated Tosefta
-  tractates). The SeMaG alone accounted for 543 of the 694.
-
-- **The novelty axis is cleaner than the previous candidate.** `verdict_entries_failed_closed`
-  377 → 0 and fingerprint mismatches 377 → 0. Two producer defects behind that:
-  `scripts/discovery_novelty_production_run.py` merged its whole checkpoint into its output,
-  including answers for pairs that are no longer candidates — and its coverage assertion
-  compares counts, so a surplus of stale keys could mask a deficit of real ones. The output
-  is now restricted to the current candidate set with every drop counted.
-
-- **Gates.** Nine mutations of the new guards, each caught by a named test; the assertions
-  read the built asset's own stored labels rather than a helper's return value. Two stale
-  test assertions were found and closed in passing — one still pinned the `source_label`
-  defect, one pinned the pre-ratification date count.
-
-### Pause/Resume for desktop searches (2026-08-19, desktop)
-
-A long search can now be parked and picked back up instead of being thrown away.
-A **Pause** button sits beside Search on the Search tab and beside Analyze on the
-Composition tab, appears only while a run is in flight, and covers all four
-workers — regular search, composition scan, and both Lab Mode variants.
-
-- **The button never claims more than it can do.** Clicking Pause shows a
-  disabled "Pausing…" until the worker actually reaches a checkpoint and
-  acknowledges; only then does it become "Resume". Grouping runs on a different
-  thread that is not pausable, so the button is hidden for that phase rather
-  than shown greyed-out beside a live Stop.
-- **Elapsed time and the composition ETA now exclude parked time**, and are
-  computed from `time.monotonic()`. They were `time.time() - start`, so a pause
-  inflated elapsed and halved the reported chunk rate — and a wall-clock base is
-  wrong regardless, since an NTP or DST step moves it under a running search.
-  The ETA is derived from elapsed, so one fix corrects both.
-- **New `shared/pause_gate.py`** — `PauseGate`, plain stdlib, no Qt and no
-  policy: it blocks and returns a bool, leaving the `InterruptedError` raise in
-  `gui_threads` beside every other cancel. `PausableSearchMixin` adds
-  `pause()` / `resume()` / `request_cancel()` and a `_checkpoint()` called as the
-  first statement of each progress callback, so a parked worker publishes no
-  progress and the bar freezes where it was.
-- **`request_cancel()` is now the single stop entry point** for all six cancel
-  paths: it sets the flag *and* un-parks in one call. A parked worker never
-  reaches the code that reads `cancel_flag`, so a flag alone would have left it
-  parked until the `wait()` budget expired and `QThread.terminate()` fired.
-
-**Fixed along the way** (each was live before this change):
-
-- **Lab Mode searches were never cancellable.** `LabSearchThread` had no
-  `cancel_flag`, so Stop set a dead attribute; `lab_search`'s `batch_cb`
-  swallowed the cancel in a bare `except Exception` (`InterruptedError` is an
-  `OSError` subclass); and a non-deep Lab search never ticked progress at all.
-- **The LOCAL (My Library) passes ignored Stop entirely** — `_query_local_index`
-  and the two LOCAL post-passes had no callback and no cancel check. Stopping one
-  now keeps the hits it had already materialised, like every other mode; an
-  earlier revision of this branch re-raised instead and cost the user every LOCAL
-  row under a label reading "(Partial results)".
-- **A stopped Title/Shelfmark search discarded its partial results.**
-  `_execute_metadata_search` was the one loop with no `try/except`, so the raise
-  escaped and became an empty result set, unlike every other mode.
-- **`perf_signal` fired for cancelled runs**, contradicting its own comment: the
-  core swallows `InterruptedError` and returns normally, so that line was
-  reached anyway.
-- **`closeEvent`'s `comp_thread.requestInterruption()` was a no-op** since it was
-  written — the composition threads only ever polled `cancel_flag`. The mixin's
-  `requestInterruption()` override repairs that call site in place.
-- The LOCAL phase now reports on a dedicated `phase_signal` and switches the bar
-  to indeterminate, instead of pushing unrelated hit counts down the numeric
-  channel (which rewinds the bar) or pinning at `(total, total)` (which reads as
-  100% complete while a long phase is still running).
-
-**Stop itself is unchanged.** It still blocks briefly and still falls back to a
-hard thread kill for a worker caught *between* checkpoints; a paused worker is
-specifically never in that state, and the wider non-blocking-stop rework is
-recorded in `docs/OPEN_ISSUES.md` rather than smuggled in here.
-
-Tests: `test_pause_gate.py`, `test_pause_ack_epoch.py`, `test_pause_elapsed_math.py`,
-`test_pause_resume_ui.py`, `test_pause_phase_signal.py`, `test_pause_core_ticks.py`,
-`test_pause_worker_wiring.py`, `test_pause_stop_lifecycle.py`,
-`test_pause_resume_i18n.py` (all Qt-free), plus `test_pause_integration_qt.py`
-in the `gui` lane for what needs a live event loop — thread affinity,
-queued-vs-direct delivery, a stale acknowledgement crossing a run boundary, and
-real `wait()` timing. New EN/HE keys: Pause / Resume / Pausing… / Paused.
-
-
-### Web memory — allocator-ratchet attribution + remediation (2026-07-08, web)
-
-The recurring "web process at 13.4G" was definitively attributed with live under-load probes: the bulk of RSS is **dead-but-resident allocator high-water** (pymalloc/glibc arenas absorbing per-request transient churn, never returned to the OS — smaps showed ~12G across ~300 arena-class anon regions while live Python allocations grew single-digit MB in a traced window), driven to the systemd `MemoryHigh` cap within ~12h of every restart by **SemrushBot** crawling `/browse` 24/7 (~7K req/day, 41% of traffic). Remediation shipped in two tiers (Codex pre-flight: APPROVE-WITH-CHANGES ×4, `_tmp/codex-tier2-critique-2026-07-08.md`):
-
-- **Ops (live on prod 2026-07-08):** nginx UA map + 403 for SEO-tool crawlers (SemrushBot/AhrefsBot/MJ12bot/DotBot/BLEXBot/DataForSeoBot/serpstatbot) + static robots.txt override; systemd drop-in `MALLOC_ARENA_MAX=2`; 8G swapfile (box had zero swap); prod `.env` `NLI_CACHE_MAX_ENTRIES=20000` + `IIIF_MANIFEST_CACHE_MAX_ENTRIES=1500`; restart timer twice-weekly → daily until the fix proves out.
-- **New: `web/malloc_trim.py`** — periodic glibc `malloc_trim(0)` daemon thread (started from `app.on_startup` only). Env knobs `GENIZAH_MALLOC_TRIM_SECONDS` (default 300; 0 disables) + `GENIZAH_MALLOC_TRIM_MIN_GROWTH_MB` (default 64 — adaptive: trims only when RssAnon grew that much since the last trim). Stats (runs/skips/duration/freed) surface in `/_internal/memstat` via the runtime-cache registry (new public alias `web/api.py::register_runtime_cache_stats`). Linux-only; graceful no-op elsewhere.
-- **SEO-bot policy in app code:** `web/crawler_visibility.py` gains `SEO_TOOL_USER_AGENT_TOKENS` / `SEO_TOOL_ROBOTS_AGENTS` / `is_seo_tool_crawler()` / `should_block_seo_tool_request()`; the noindex middleware in `web/main.py` returns a cheap 403 for SEO-tool UAs before any page render, with `/robots.txt` exempt (RFC 9309: a 4xx robots.txt means "allow all" — crawlers must read their Disallow group to deregister); `web/api.py::robots_txt` now emits the Disallow group. nginx remains the primary enforcement; the app layer is defense-in-depth.
-- **`.nicegui` storage-user retention:** `GENIZAH_STORAGE_RETENTION_DAYS` (default 90; 0 disables) in the startup compaction pass (`web/export_state.py`) deletes `storage-user-*.json` files untouched for the window (delete-before-parse, loaded-session guard, `files_deleted`/`bytes_deleted` counters). 53,592 files / 260 MB had accumulated. Note: a browser absent longer than the window is logged out on return (`auth_session` lives in the file); Supabase-side data unaffected.
-- Tests: `tests/test_seo_bot_block.py`, `tests/test_malloc_trim.py`, `tests/test_storage_retention.py` (52 new) + existing crawler/export/openapi regressions green.
-
-### Audit tail — a11y statement wording + stale-index diagnostics (2026-06-25, PR #314)
-
-Closes the last code items of the 2026-06-23 product-quality audit. **#27 (web /accessibility):** softened the over-claims to match reality after SEED-014 — "fully navigable using a keyboard" → "Most of the site can be navigated…", "clearly visible on all interactive elements" → "visible on interactive elements", "have appropriate alternative text" → "are given… where applicable"; bumped the stale "February 2025" date to June 2026 (EN + HE re-keyed in lockstep). **SEED-019 #28 (stale-index diagnostics, `genizah_core.py`):** extended SEED-006's one-shot reload warning into a reusable `content_search_staleness_messages()` helper + a queryable `SearchEngine.index_staleness_report()` (genizah/local/stale/messages) + LOCAL-side parity warning; ASCII-only messages (cp1255-console-safe). Standalone Codex APPROVE WITH NITS (nit fixed); 20 tests in `tests/test_audit_27_28_a11y_statement_and_stale_index.py`. Also (#31) `/_tmp/` added to `.gitignore` (scratch dir). **Planning:** SEED-020 god-file decomposition opened as GSD milestone **v8.3.0** (Phases 122–127, roadmap-only — execution deferred).
-
-### SEED-023 — Homepage corpus stats + catalog PGP/Editions filters (2026-06-24, web)
-
-**Part A — Homepage stats band (shipped):** five hardcoded headline numbers on the homepage — Manuscripts (255,723), Catalog entries (731,354), Images (1,019,886), Scholarly transcriptions (27,424), Automatic transcriptions (232,450). Constants live in `web/stats_service.py` (`CORPUS_STATS`); `compute_live_stats()` regenerates them from the sidecars after a data refresh (with `libraries.csv` / `browse_map.pkl` fallbacks so it works headless). Rendered synchronously (no per-request big-table COUNT, CLS-free) in `web/pages/home.py`.
-
-**Part B — Catalog "Browse by identification" availability filters:** two 3-state filter buttons (PGP: all / Has PGP / No PGP — link presence, "has PGP info"; Scholarly Transcriptions: all / Has Scholarly Transcription / No Scholarly Transcription — PGP `%Edition%` ∪ FGP `Digital Edition`, editions-only) in the catalog sidebar, each with a tooltip, removable chips, and persistence via the `safe_storage` chokepoint (Phase 87). Filters are pushed DOWN into `shared/fjms_service.py::get_browse_results` — each materializes a per-thread TEMP table of AlmaIds (built once, reused; works on the read-only connection) and adds an `[NOT] EXISTS` clause applied BEFORE `COUNT(DISTINCT AlmaId)` and pagination, so `total` + paging reflect the full filtered set (not the visible page). New helpers: `document_service.get_all_pgp_link_sys_ids()` / `get_sys_ids_with_editions(sys_ids=None)`, `fgp_service.get_sys_ids_with_fgp_editions(sys_ids=None)` (both dual-mode: list or full corpus). The corpus-wide membership sets are computed once per process, lock-protected, shared read-only. PGP badge, `/search` `pgp_filter`, and SEED-022 are untouched. Tests: `tests/test_seed023_catalog_filters.py` (10).
-
-### Phase 97.3 — My Library UAT Stability (2026-05-26 — internal hotfix, no version bump)
-
-Closes the six post-Phase-97.2 UAT defects reported 2026-05-26 against the desktop My Library tab. Internal hotfix on the v7.14 chain (97.1 → 97.2 → 97.3); no public release, no GitHub tag.
-
-**R97.3-A — UI-thread freeze on folder selection (Bug A).** Replaced the synchronous recursive walk in `_UnifiedFileTreeWidget._populate_node` with an async tree-worker design. `FolderWalkWorker` (Phase 97 U-03, previously unwired) now powers the tree fill: it walks with `os.walk(folder, followlinks=False)`, pre-filters by `_SUPPORTED_EXTENSIONS` imported from `shared/local_indexer.py` (single source of truth — also closes R97.3-N), runs `_canonical_filepath` inside the worker thread, and emits 4-tuples `(filepath, canonical, mtime_ns, size)` plus a monotonic generation token. All three worker signals (`batch_emitted`, `finished_signal`, `error_signal`) carry the token; stale payloads from a cancelled or superseded worker are dropped at the UI slot. `_UnifiedFileTreeWidget` gained `_tree_token`, `_tree_worker`, `_cancel_existing_tree_worker`, `_ensure_dir_node`, `_on_tree_batch`/`_on_tree_finished`/`_on_tree_error` slots. Tree now starts collapsed (no `expandAll()` — D-04). Cancel mid-populate clears the tree entirely (D-05).
-
-**R97.3-A — `prior_status` cache (Codex Critique #2 v7.14 blocker).** Added `MyLibraryTab._prior_status_cache` populated at `_init_indexer` and `_invalidate_prior_status_cache()` called BEFORE `_refresh_folder_list_ui` in `_on_worker_finished`, `_on_worker_error`, `_perform_reset`, folder-add, and folder-remove (D-12 ordering invariant — late clearing would leave the post-scan tree showing pre-scan status because `_refresh_folder_list_ui` calls `populate_for_folder` at line 1995 which reads the cache). The click path now never issues a `local_files` DB query.
-
-**R97.3-B — Reset button accessible after a crash (Bug B).** Simplified `_update_reset_button_state` to a single condition: enabled when `self._worker is None or not self._worker.isRunning()`. The Phase-97.2 `start_recovery_probe()` check is gone — orphan `scan_runs.status='running'` rows are exactly what Reset is supposed to clean up. `LocalIndexer.reset_my_library()`'s own 7-step protocol (path-safety pre-check + handle-close + retry-rename + LAB-rollback + fail-loud + deferred-GC) remains the load-bearing safety; the UI guard does not duplicate it. Phase 97.2 `test_reset_my_library_full_cycle` and `test_reset_my_library_lab_rename_failure_rolls_back_local` still GREEN.
-
-**R97.3-C — MuPDF stderr noise silenced (Bug C).** `shared/local_indexer.py` calls `fitz.TOOLS.mupdf_display_warnings(False)` at module import, wrapped in `try/except Exception` with `logger.debug` fallback (broad exception per Codex Critique #2 — a future PyMuPDF API change must not crash module import). User's smoke folder went from 624× "MuPDF error: ... unknown keyword: 'TF'" stderr lines to zero.
-
-**R97.3-D — Recovery-Skip suppresses same-launch auto-rescan (Bug D).** New one-shot `_skip_startup_rescan_once: bool` flag on `MyLibraryTab`. Initialised `False` before the recovery-modal call path. Set `True` in the Skip branch of `_show_recovery_modal`. Read-and-cleared at the entry of `_auto_rescan_on_startup`. Resume and Restart branches do NOT set the flag (both intentionally trigger a fresh scan). D-25 silent rescan on the no-modal path is unchanged. Bilingual status-bar message ("Recovery skipped. Use Refresh to rescan. / ההתאוששות דולגה. לחץ Refresh לסריקה מחדש.") auto-fades after 5 seconds.
-
-**R97.3-E — "Discovering files…" status during scan enumeration (Bug E).** `LocalIndexerWorker` emits new `status_updated(str)` signal with bilingual "Discovering files… / מאתר קבצים…" before `scan_all` enters its enumeration loop. `_start_worker` puts `QProgressBar` in indeterminate (busy) mode via `setRange(0, 0)`. First `progress_updated` signal flips back to determinate `setRange(0, 100)` and clears the status message. Finish/cancel/error all reset the range to `(0, 100)` so a future scan does not inherit busy state (D-21).
-
-**R97.3-N — UI tree shows the full supported-extensions set (Bug N3).** The UI-side `SUPPORTED = {'.pdf', '.docx', '.txt'}` literal at `desktop/my_library_tab.py:227` is DELETED. `FolderWalkWorker` imports `_SUPPORTED_EXTENSIONS = {".docx", ".pdf", ".txt", ".html", ".xlsx", ".csv"}` from `shared/local_indexer.py:81` (single source of truth). `.html`/`.xlsx`/`.csv` now appear in the opt-out tree; mixed-case (`.PDF`, `.Pdf`) is normalized via `.lower()`.
-
-**Tests added.** Seven new test files covering D-13 (token guard), D-14 (no canonicalize of unsupported), D-15 (no junction recurse via `mklink /J`), D-19 (cache invalidation ordering), D-20 (tri-state preservation across async populate), D-21 (progress range round-trips), D-22 (100ms responsiveness via `time.perf_counter()` + `QTimer.singleShot(0, marker)` + `QApplication.processEvents()`). Existing `tests/test_folder_walk_worker.py` extended for the 4-tuple + token signal shape.
-
-**Codex review trail.** `97.3-CODEX-CRITIQUE.md` (Area 1 sub-decisions — revised Option B + worker pre-filter; flagged the `prior_status` preload risk) and `97.3-CODEX-CRITIQUE-2.md` (full decision-set — surfaced D-11 broad-exception, D-12 cache ordering, D-16..D-22 + the inverted wave order for risk locality) both addressed before plan execution.
-
-**No version bump.** `version.py`, `version_info.txt`, `CompileScriptGenizah.iss`, `README.md`, `tests/test_release_artifacts.py` UNTOUCHED. Phase 97.3 rides the v7.14 internal-hotfix chain (97.1 → 97.2 → 97.3); the next user-facing release that bundles all three is a separate decision.
-
-### Phase 97.2 — LOCAL Recovery Cascade Fix + Reset My Library (internal; 2026-05-26)
-
-Internal closeout — not yet a user-facing release. Bundles the 97.1 MAX_PATH +
-non-blocking cancel hotfix (commit `2e1b846e`, 2026-05-25) with the 97.2 8-bug
-recovery cascade fix and the new "Reset My Library" / "אפס ספריה שלי" toolbar
-action in the desktop My Library tab.
-
-**Trigger:** 2026-05-26 cascade on the first post-97.1 run. User stopped a scan
-of a 100K-file Dropbox folder mid-run, restarted the app, clicked "Remove
-folder" — console emitted `Schema error -> LockBusy x3 -> 'Field scan_run_id is
-not defined' -> 'NoneType has no delete_documents'`. Codex critique identified
-the missing `.schema_version` marker check (Bug 6 / R97.2-F) as the actual root
-cause: Phase 95 installs have `meta.json` but no `.schema_version`, so the
-existing `actual_marker is not None and actual_marker != expected_marker` guard
-failed to trip the rebuild path on upgrade.
-
-**8 fixes landed in `shared/local_indexer.py` + `genizah_core.py`:**
-- R97.2-F (Bug 6) — schema-marker absence triggers rebuild in BOTH files
-- R97.2-A (Bug A) — redundant `tantivy.Index(...)` reopen deleted at
-  `local_indexer.py:1147`; temp-indexer in `genizah_core.py:6878-6896` now
-  explicitly closes via `_close_internal_writer_index()` in `try/finally`
-- R97.2-B (Bug B) — explicit `fresh_writer = None; fresh_index = None;
-  gc.collect()` at `:2745-2748` replaces `del` (Windows: `del` is weak,
-  Rust drop is delayed, `os.rename` then races a live lock file)
-- R97.2-C (Bug C) — `discard_run` step 2 introspects schema for
-  `scan_run_id` field; on absence (Phase 95 schema) falls back to per-uid
-  `delete_documents("unique_id", uid)` loop joined from
-  `local_pages × processed_files WHERE scan_run_id=?`
-- R97.2-G (Bug C2) — explicit `_del_writer = None; gc.collect()` in
-  `discard_run` step 2 `finally:` before step 5 reopens `self._writer`
-- R97.2-H (Bug C3) — `discard_run` raises `LocalIndexerError` BEFORE the
-  SQLite delete transaction when Tantivy delete fails; prevents
-  orphaned-docs state (SQLite empty, Tantivy still has the rows)
-- R97.2-D (Bug D) — new `LocalIndexerError(RuntimeError)` exception class
-  + new `_ensure_writer()` helper (fail-loud: raises on schema mismatch
-  or LockBusy, NO silent retry past `__init__`'s 3-attempt loop); wired
-  at `_delete_file`, `remove_folder`, `_recover_pending_deletes` call
-  sites
-- R97.2-E (Reset My Library) — new
-  `LocalIndexer.reset_my_library(close_searcher_cb, reload_searcher_cb)`
-  7-step protocol (close handles -> 7 path-safety pre-checks (basenames
-  must equal `LocalIndex`/`LocalLabIndex`, parents match, not root, etc.;
-  raise `LocalIndexerError` before any filesystem mutation) -> rename-aside
-  LOCAL to `.reset-quarantine-<ts>` -> rename-aside LAB with **rollback of
-  LOCAL on failure** -> recreate empty dirs -> schedule deferred cleanup
-  via `pending_dir_cleanup` (Phase 97 R-02 infrastructure; falls back to
-  best-effort `shutil.rmtree(ignore_errors=True)` only if the SQLite INSERT
-  fails) -> `__init__` reinit triggers migration ladder -> reload searcher).
-  New toolbar button in `desktop/my_library_tab.py` with destructive red
-  styling, bilingual EN/HE strings, proactive active-scan guard
-  (`_update_reset_button_state()` toggles `setEnabled` + tooltip on worker
-  lifecycle signals), and a custom `QDialog` two-step typed confirm
-  (`RESET` / `אפס` both accepted regardless of `CURRENT_LANG`). Enabled-state
-  tooltip explicitly reassures that source files and the Genizah corpus
-  are preserved.
-
-**97.1 work bundled in this entry:**
-- MAX_PATH long-path prefix (commit `2e1b846e`) — Windows-only handling
-  of paths > 260 chars via the `\\\\?\\` prefix
-- Non-blocking cancel + per-file cancel check — addressed UI freeze and
-  `WinError 3` storm during cancel on large folders
-
-**Reset scope:** LOCAL_INDEX_DIR + LOCAL_LAB_INDEX_DIR only. pgp.db,
-fjms_enrichment.db, nli_crossref.db, libraries.csv, Genizah_Index/ are NEVER
-touched by Reset. Source files (user's own .txt/.docx/.pdf) are NEVER touched.
-
-**5 RED tests (each landed RED before its fix):**
-- `tests/test_phase_97_2_schema_marker_absence.py` (R97.2-F)
-- `tests/test_phase_97_2_writer_handle_leak.py` (R97.2-A + R97.2-B)
-- `tests/test_phase_97_2_discard_writer_lifecycle.py` (R97.2-C + R97.2-G)
-- `tests/test_phase_97_2_sqlite_vs_tantivy_consistency.py` (R97.2-H)
-- `tests/test_phase_97_2_reset_my_library_full_cycle.py` (R97.2-E)
-
-**Origin trace:**
-`.planning/phases/97.2-recovery-cascade-lockbusy/97.2-CODEX-CRITIQUE.md` +
-`97.2-CODEX-BRIEF.md`. CONTEXT D-02 adopted Codex's expanded 5->8 bug list.
-
-**Deferred (out of scope):**
-- Centralized `try_open_or_rebuild()` helper (Codex recommended; deferred
-  to a future refactor phase per CONTEXT D-01).
-- Defensive stale-lockfile cleanup (Codex recommended conservatively;
-  deferred per CONTEXT D-06 — Bug A fix removes the actual lock-leak
-  vector).
-
-**Verification:**
-- `pytest tests -k phase_97_2 -x` — all 5 new tests pass
-- `pytest tests/test_phase_97_invariants.py tests/test_scan_run_id.py -x` — no regression
-- `pytest tests/test_phase_87_no_raw_storage_access.py -x` — web multitenant invariant unaffected
-- `python -m ruff check .` — clean
-
-(desktop — LOCAL is desktop-only per Phase 95 invariant; web LIBRARY_CODES `[]` unaffected)
-
-### Phase 98 — NLI Resilience (internal; 2026-05-25)
-
-Internal closeout — not yet a user-facing release.
-
-**Resilience hardening for NLI/IIIF code paths.** All 10 NLI fetch sites
-guarded by a new shared circuit breaker (`shared/nli_circuit_breaker.py`)
-that trips after 3 consecutive failures and short-circuits further calls
-for 60s. Per-call timeouts dropped from 15-30s to 3-5s via 6 new env knobs
-(`NLI_CIRCUIT_THRESHOLD=3`, `NLI_CIRCUIT_WINDOW=60`, `NLI_CONNECT_TIMEOUT=3`,
-`NLI_IIIF_READ_TIMEOUT=5`, `NLI_MARC_READ_TIMEOUT=3`,
-`NLI_IMAGE_READ_TIMEOUT=5`). `NLI_SEMAPHORE_TIMEOUT` default dropped 20→1.
-PostHog telemetry on breaker open/close via factored
-`shared/posthog_server.py`.
-
-Worst-case per-request blocking budget: 45s → ~9s. After 3 consecutive
-failures the breaker stays open for 60s and subsequent NLI fetches return
-empty in microseconds (negative-cache short-circuit). The Nyquist test in
-`tests/test_nli_circuit_breaker.py::TestNliCircuitBreakerConcurrency`
-proves 20 saturating threads complete in <10s wall time.
-
-Wired into all 10 NLI fetch sites: 4 in `web/api.py`
-(`fetch_fl_ids_from_nli`, `nli_image`, `_fetch_nli_image_bytes`,
-`proxy_image` — host-conditional for non-NLI), 3 in puzzle
-(`PuzzleImageService._fetch_iiif_image`, `_fetch_direct_url`
-host-conditional, `web/pages/puzzle.py::_resolve_folios`), 4 in
-`genizah_core.py` (`fetch_iiif_manifest`, `fetch_marc_data` migrated +
-new wirings at `_fetch_single_worker`, `_fetch_fl_ids`); legacy
-class-attribute breaker REMOVED (RESEARCH Pitfall 5).
-
-**Origin:** 2026-05-25 production hang — see
-`docs/INCIDENT-2026-05-25-nli-iiif-hang.md` +
-`docs/INCIDENT-2026-05-25-CODEX-CRITIQUE.md`. Closes the Minimum Ship
-Patch from the Codex critique.
-
-**Deferred (out of scope):** Async refactor to `httpx.AsyncClient`,
-event-loop watchdog, multi-worker uvicorn (CONTEXT D-05).
-
-**Production canary verification:**
-`curl -w "%{time_total}\n" https://genizahsearch.com/api/fl_ids/990001458630205171`
-10× in sequence. Expected: first 1-3 calls slow (1-5s), remaining < 0.1s.
-Journal pattern `Failed to fetch FL IDs` should appear at most 3 times
-per 60s window per sys_id.
-
-134/134 Phase 98 tests pass across 6 test files
-(`test_posthog_server.py`, `test_nli_circuit_breaker.py`,
-`test_api_nli_breaker_integration.py`,
-`test_puzzle_nli_breaker_integration.py`,
-`test_genizah_core_nli_breaker_migration.py`,
-`test_nli_breaker_cross_module_invariants.py`).
-
-(both web + desktop — desktop releases next milestone)
-
----
-
 ## [vNEXT] - Phase 97 Wave F Gap Closure - 2026-05-25
 
 ### Phase 97 Wave F — My Library Gap Closure (desktop)

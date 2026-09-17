@@ -153,8 +153,11 @@ class WhatsNewBar(QFrame):
         # credited MiDRASH for Princeton and Friedberg editions, which are what
         # the Browse tab shows by default -- so the bar says what it now does
         # rather than announcing a button alone.
+        # v9.2.1: the owner's own sentence (2026-09-17). The window change is the
+        # one users notice on day one; everything else is "further improvements
+        # and fixes", which is what the dialog is for.
         self.lbl_msg.setText(tr(
-            "New: a \"Cite this page\" button, prominent PGP links, and fixes to composition search and Oxford image links"))
+            "New: the search results viewer is now an independent window that can be minimized, plus further improvements and fixes"))
         self.show()
 
     def on_learn_more(self):
@@ -287,16 +290,15 @@ class WhatsNewDialog(QDialog):
         layout.addWidget(title)
 
         is_heb = CURRENT_LANG == 'he'
-        # v9.2.0. The owner cut the last three of a five-bullet draft
-        # (2026-09-06): the version line, the full author list and the
-        # Princeton/Friedberg fix. What is left is the control and the reason
-        # for it, which is the part a reader acts on.
+        # v9.2.1 (2026-09-17). Five bullets: the viewer window, the LOCAL-scope
+        # hint, the chunk controls, the Oxford failure state (the owner's own
+        # Hebrew), and the letter-level default that now really applies.
         items = [
-            tr("Prominent links to the Princeton Geniza Project (PGP) - in the search result window, on the Browse tab, and on the PGP badge in the results table."),
-            tr("A new \"Cite this page\" button, naming whoever made the transcription - MiDRASH, Princeton, Friedberg, a translator, or a community correction."),
-            tr("The citation bar at the foot of the app now also credits the application version."),
-            tr("The Search tab and the Composition Search tab now have separate exclusion lists (until now they shared one)."),
-            tr("Assorted composition-search bug fixes, and Bodleian (Oxford) images now carry a prominent link to their site."),
+            tr("The search results viewer is now a window of its own: minimize it, switch back to the main window, and keep searching while it stays open."),
+            tr("Searched \"Local\" by accident and found nothing? A notice now says so and offers the same search in the Genizah corpus with one click."),
+            tr("Composition Search: the search-type and frequency controls work again after switching from Letter-level back to Chunk search."),
+            tr("Oxford images: when the images are not available for display, a link to the Bodleian site is shown."),
+            tr("Composition Search now opens on Letter-level search whenever its index is built; without an index it stays on Chunk search. A method you pick yourself is kept."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)

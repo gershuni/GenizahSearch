@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 9.2.0
+# Dicta Genizah Search Pro 9.2.1
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -7,6 +7,23 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 > **Web Access:** [genizahsearch.com](https://genizahsearch.com) (אתר הגניזה של דיקטה) - Search, browse, and collaborate from any browser
 
 ---
+
+## What's New in Version 9.2.1?
+
+**The viewer is its own window, a hint for stray Local searches, honest Oxford images.**
+The manuscript viewer no longer takes the whole app down when you minimize it: it is a
+window of its own, so you can keep the search panel in view while reading a result. If you
+search your local library by accident and find nothing, the app says so and offers the
+Genizah corpus in one click. And when an Oxford folio has no image any app can fetch, the
+notice says exactly that, in Hebrew too, and links to the Bodleian's page.
+
+- Manuscript Viewer: independent window with its own taskbar button; main window usable
+  alongside; closes with the app
+- Local-scope search with no results: one-click "Search the Genizah corpus instead"
+- Composition Search opens on Letter-level search when its index is built
+- Composition Search: search type and frequency work again after Letter-level → Chunk
+- Oxford images: translated notice, Bodleian link in every failure state, placeholder
+  icon no longer shown as a manuscript
 
 ## What's New in Version 9.2.0?
 
@@ -629,7 +646,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Dicta Geniza
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V9.2.0_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V9.2.1_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

@@ -5215,3 +5215,21 @@ TRANSLATIONS.update({
     'Search the Genizah corpus instead':
         'לחפש במאגר הגניזה במקום',
 })
+
+
+# v9.2.1 desktop What's New bar and dialog (2026-09-17). Hebrew: the owner's
+# own for the bar and the Oxford bullet; the rest drafted for the release.
+TRANSLATIONS.update({
+    "New: the search results viewer is now an independent window that can be minimized, plus further improvements and fixes":
+        "חדש: חלונית הצפייה בתוצאות החיפוש היא כעת חלון עצמאי שניתן למזעור, ושיפורים ותיקונים נוספים",
+    "The search results viewer is now a window of its own: minimize it, switch back to the main window, and keep searching while it stays open.":
+        "חלונית הצפייה בתוצאות החיפוש היא כעת חלון עצמאי: אפשר למזער אותה, לחזור לחלון הראשי ולהמשיך לחפש בזמן שהיא פתוחה.",
+    "Searched \"Local\" by accident and found nothing? A notice now says so and offers the same search in the Genizah corpus with one click.":
+        "חיפשתם ב\"מקומי\" בטעות ולא מצאתם דבר? הודעה מציינת זאת ומציעה את אותו חיפוש במאגר הגניזה בלחיצה אחת.",
+    "Composition Search: the search-type and frequency controls work again after switching from Letter-level back to Chunk search.":
+        "חיפוש חיבורים: אפשרויות סוג החיפוש והתדירות חוזרות לפעול לאחר מעבר מחיפוש ברמת האות בחזרה לחיפוש מקטעים.",
+    "Oxford images: when the images are not available for display, a link to the Bodleian site is shown.":
+        "תמונות אוקספורד: כאשר התמונות אינן זמינות לתצוגה, מוצג קישור לאתר הבודליאנה",
+    "Composition Search now opens on Letter-level search whenever its index is built; without an index it stays on Chunk search. A method you pick yourself is kept.":
+        "חיפוש חיבורים נפתח כעת בחיפוש ברמת האות בכל פעם שהאינדקס שלו בנוי; בלי אינדקס הוא נשאר בחיפוש מקטעים. שיטה שבחרתם בעצמכם נשמרת.",
+})
