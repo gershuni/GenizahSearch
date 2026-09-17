@@ -120,6 +120,15 @@ def test_zero_results_in_genizah_or_all_scope_shows_nothing():
         assert h.local_scope_strip.visible is False, scope
 
 
+def test_a_cancelled_local_search_shows_nothing():
+    """Codex (PR #343): a cancelled run is incomplete -- 'Partial results' --
+    so 'nothing in your local files' would be a guess."""
+    h = _Host('local')
+    assert h._update_local_scope_strip(0, cancelled=True) is False
+    assert h.local_scope_strip.visible is False
+    assert h._update_local_scope_strip(0, cancelled=False) is True
+
+
 def test_local_scope_with_results_shows_nothing():
     h = _Host('local')
     assert h._update_local_scope_strip(3) is False
@@ -182,8 +191,10 @@ def test_start_search_hides_the_hint_before_running():
 def test_zero_result_branch_of_on_search_finished_evaluates_the_hint():
     src = inspect.getsource(APP.on_search_finished)
     m = re.search(r"if not results:\s*\n\s*self\.reset_ui\(\)\s*\n\s*"
-                  r"self\._update_local_scope_strip\(0\)", src)
+                  r"self\._update_local_scope_strip\(0, cancelled=was_cancelled\)", src)
     assert m, "the hint must be decided right where the empty result set is handled"
+    # ...and the cancelled flag it passes is the one computed just above.
+    assert src.index("was_cancelled = getattr(self, '_search_was_cancelled'") < m.start()
 
 
 def test_manual_scope_change_hides_the_hint():

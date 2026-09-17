@@ -26,6 +26,7 @@ risk (same approach as tests/test_desktop_passage_gate.py).
 from __future__ import annotations
 
 import ast
+import inspect
 import io
 import os
 import re
@@ -180,6 +181,7 @@ class _FakeSip:
 class _Host:
     _show_result_dialog = APP._show_result_dialog
     _on_result_dialog_finished = APP._on_result_dialog_finished
+    _close_result_dialog = APP._close_result_dialog
 
     def __init__(self):
         self.meta_mgr = object()
@@ -228,6 +230,27 @@ def test_a_stale_finished_does_not_drop_the_current_viewer(host):
     second = host._show_result_dialog(['b'], 0)
     first.finished.emit(0)          # late/second signal from the old one
     assert host._result_dialog is second
+
+
+def test_shutdown_closes_the_open_viewer(host):
+    """Codex (PR #343): an unparented viewer does not close with the main
+    window; left open it keeps the process alive and points at a torn-down
+    host."""
+    dlg = host._show_result_dialog(['a'], 0)
+    host._close_result_dialog()
+    assert dlg.closed and dlg.deleted
+    assert host._result_dialog is None
+    host._close_result_dialog()          # nothing open: no error
+
+
+def test_main_window_close_event_closes_the_viewer_before_shutdown_state():
+    src = inspect.getsource(APP.closeEvent)
+    assert 'self._close_result_dialog()' in src
+    assert (src.index('self._close_result_dialog()')
+            < src.index('self._app_shutting_down = True'))
+    # ...but only once the passage-index deferral has let the close proceed.
+    assert (src.index('_defer_close_for_passage(event)')
+            < src.index('self._close_result_dialog()'))
 
 
 def test_host_initialises_the_reference_slot():

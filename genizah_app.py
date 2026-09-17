@@ -15058,6 +15058,20 @@ class GenizahGUI(QMainWindow):
         except RuntimeError:
             pass
 
+    def _close_result_dialog(self):
+        """Close the open Manuscript Viewer, if any. Called at shutdown;
+        the viewer's own closeEvent stops its workers and `finished`
+        releases the reference."""
+        dlg = getattr(self, '_result_dialog', None)
+        if dlg is None:
+            return
+        try:
+            if not sip.isdeleted(dlg):
+                dlg.close()
+        except RuntimeError:
+            pass
+        self._result_dialog = None
+
     def add_to_puzzle(self, sys_id, shelfmark, folio_label=None, fl_id=None):
         """Add a fragment to the puzzle canvas. Opens puzzle window if needed."""
         # D-03: Fragment Puzzle feature_opened (add-fragment path — REVIEWS MEDIUM-7).
@@ -19637,11 +19651,15 @@ class GenizahGUI(QMainWindow):
                 "QLabel { color: %s; font-weight: 600; background: transparent; }"
                 % c['text'])
 
-    def _update_local_scope_strip(self, result_count):
-        """Show the hint only for a LOCAL-scope run that found nothing.
-        'all' includes the Genizah corpus, so the hint would be false there,
-        and a LOCAL run WITH results is exactly what the user asked for."""
-        show = (not result_count) and self._search_run_corpus() == 'local'
+    def _update_local_scope_strip(self, result_count, cancelled=False):
+        """Show the hint only for a LOCAL-scope run that COMPLETED and found
+        nothing. 'all' includes the Genizah corpus, so the hint would be
+        false there; a LOCAL run WITH results is exactly what the user asked
+        for; and a cancelled run is incomplete -- the status line already
+        says "Partial results", so steering the user elsewhere would be a
+        guess (Codex, PR #343)."""
+        show = ((not result_count) and not cancelled
+                and self._search_run_corpus() == 'local')
         self._set_local_scope_strip_visible(show)
         return show
 
@@ -20569,7 +20587,7 @@ class GenizahGUI(QMainWindow):
         was_cancelled = getattr(self, '_search_was_cancelled', False)
         if not results:
             self.reset_ui()
-            self._update_local_scope_strip(0)
+            self._update_local_scope_strip(0, cancelled=was_cancelled)
             if was_cancelled:
                 self.status_label.setText(f"{tr('No results found.')} ({tr('Partial results')})")
             else:
@@ -30660,6 +30678,12 @@ class GenizahGUI(QMainWindow):
         # telemetry and session-save paths are already disarmed.
         if self._defer_close_for_passage(event):
             return
+        # The Manuscript Viewer is an unparented top-level window
+        # (2026-09-17), so it does not close with this one. Left open it
+        # would keep the process alive (quitOnLastWindowClosed never fires)
+        # and keep pointing, via _app, at a host whose shared workers are
+        # about to be torn down. Close it before any shutdown state is set.
+        self._close_result_dialog()
         # Phase 114 D-09/D-15: set shutdown flag first so Plan-02 search/comp emit
         # guards (REVIEWS HIGH-2) and session_end exactly-once guard both see it
         # before any subsequent teardown fires events.
