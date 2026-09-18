@@ -41,22 +41,14 @@ GenizahSearch is a collaborative research platform for the Cairo Genizah, featur
 
 ## Architecture
 
-```
-Web App (NiceGUI) ──────────────┐
-         │                       │
-         ├── Tantivy Index       ├──► Supabase (PostgreSQL)
-         │   (local search)      │    - User auth
-         │                       │    - Lists, corrections
-         ├── pgp.db (SQLite)     │    - Comments, discoveries
-         │   (PGP reference data)│
-         ├── fjms_enrichment.db  │
-         │   (FJMS scholarly)    │
-         ├── nli_crossref.db     │
-         │   (NLI images/meta)   │
-         ├── joins.db (SQLite)   │
-         │   (saved puzzle joins)│
-Desktop App (PyQt6) ────────────┘
-```
+Two applications over one shared core: the NiceGUI web app (`web/`, with FastAPI serving
+`/api/*`) and the PyQt6 desktop app (`genizah_app.py` + `desktop/`), sharing `shared/`. Read-only
+reference data comes from Tantivy indexes and SQLite sidecars (`pgp.db`, `fjms_enrichment.db`,
+`nli_crossref.db`, `fgp_transcriptions.db`; `joins.db` holds saved joins); Supabase (PostgreSQL)
+holds community data only: auth, lists, corrections, comments, discoveries. The full picture --
+components by subsystem, the dependency rules and the tests that enforce them, who owns which
+state, and a decision for every top-level directory and root file -- is
+[`docs/architecture/OVERVIEW.md`](docs/architecture/OVERVIEW.md).
 
 The **standalone** backend service (the separate `genizah-backend` process on port 8000, with its own database and routers) was removed in January 2026. All read-only reference data is now served from local SQLite sidecars. Supabase is retained only for community features (auth, corrections, lists, comments).
 
@@ -64,55 +56,15 @@ The **standalone** backend service (the separate `genizah-backend` process on po
 
 ## Key Files
 
-### Core
-- `genizah_core.py` - Search engine, data models, core logic
-- `genizah_app.py` - Desktop application (PyQt6)
-
-### Web
-- `web/main.py` - Web app entry point
-- `web/pages/` - Page components (search.py, browse.py, lists.py, etc.)
-- `web/components/` - Reusable UI components
-- `web/supabase_client.py` - Supabase integration
-- `web/safe_storage.py` - Chokepoint for per-user state (post-Phase 87)
-
-### Puzzle (Fragment Puzzle / Join Documents)
-- `shared/puzzle_model.py` - PuzzleDocument/PuzzleFragment dataclasses
-- `shared/puzzle_service.py` - SQLite CRUD for joins.db sidecar
-- `shared/puzzle_export.py` - Composite PNG export, thumbnail generation
-- `shared/puzzle_image_service.py` - IIIF image fetch + background removal + cache versioning
-- `shared/background_removal.py` - HSV-based background removal engine
-- `web/pages/puzzle.py` - Web puzzle page (Fabric.js canvas + unified image loader)
-- `web/puzzle_tokens.py` - HMAC upload token generation/verification
-
-### Discovery (Computed Identifications — live beta)
-- `shared/discovery_service.py` - Async chokepoint for every discovery read (bounded concurrency, timeouts, LRU)
-- `shared/discovery_relation_matrix.py` - Frozen precedence matrix; the ONLY source of a rendered relation
-- `shared/discovery_locus.py` - Per-work citation-address ("locus") computation + range filtering
-- `shared/discovery_panel_model.py` / `discovery_main_pool.py` - Panel display model + main-pool/more-matches rule
-- `shared/discovery_band_labels.py` / `discovery_display_strings.py` - Honesty-safe vocabulary (no precision percentages)
-- `shared/discovery_surface_projection.py` - Public-audience projection from the private artifact
-- `web/discovery_assets.py` - Fail-closed sidecar loader + `discovery_available()` (flag AND sidecar readiness)
-- `web/pages/findings.py` - Corpus-wide findings page (`/computed-identifications`)
-- `web/pages/start.py` - Guided "Start Here" launchpad (`/start`)
-- `web/identification_reviews.py` - Community-review storage boundary (Supabase RPCs only, never a direct write)
-- `web/components/discovery_panel.py` / `findings_rows.py` / `identification_review.py` - Panel, rows, review dialog
-- `web/components/discovery_links.py` - The one folio-correct link builder (AST-guarded: no surface may hand-build a `/browse` URL)
-
-### Passage-Matching Parallels Search (web beta, Phase 145 — `method='passage'` on `/api/parallels`)
-- `shared/passage_index.py` / `passage_search.py` / `passage_normalize.py` / `passage_policy.py` - The engine (fail-closed mmap reader, seed-and-extend query, versioned normalizer, frozen policy presets)
-- `shared/passage_parallels.py` - `PassageSearcher`, a `CompositionSearcher` wrapper; bounded re-normalization builds highlight text for only the top-rendered rows
-- `web/passage_assets.py` - Fail-closed index loader + `passage_available()` (flag AND index readiness)
-
-### Browser Extension (GenizahSearch Image Helper)
-- `extension/manifest.json` - Chrome MV3 manifest with NLI host permissions
-- `extension/manifest.firefox.json` - Firefox MV3 manifest
-- `extension/background.js` - Service worker fetching NLI images as binary
-- `extension/content_script.js` - Page↔background bridge + extension detection
-- `extension/build.py` - Builds Chrome and Firefox ZIP packages
-
-### Desktop
-- `supabase_corrections_client.py` - Desktop Supabase client
-- `lists_sync.py` - Cloud sync for lists
+Where code and data live is documented once, in
+[`docs/architecture/OVERVIEW.md`](docs/architecture/OVERVIEW.md) (components by subsystem with the
+load-bearing modules named) and [`docs/architecture/DATA_LIFECYCLE.md`](docs/architecture/DATA_LIFECYCLE.md)
+(one row per data artifact: producer, consumers, where its location is decided). Binding
+decisions are one page each under [`docs/decisions/`](docs/decisions/README.md); the symbol-level
+index is `docs/CODE_INDEX.md`. The short version: `web/main.py` and `genizah_app.py` are the entry
+points; `shared/` is what both apps share and `genizah_core.py` is a permanent facade over it; the
+`shared/*_service.py` modules own the SQLite sidecars; `web/safe_storage.py` is the chokepoint for
+per-user web state; `shared/discovery_relation_matrix.py` is the only source of a rendered relation.
 
 ## Common Tasks
 
@@ -120,7 +72,7 @@ The **standalone** backend service (the separate `genizah-backend` process on po
 ```bash
 python -m web.main
 ```
-Opens on port 8080 or 8081.
+Opens on port 8081 by default (`GENIZAH_PORT`); in dev it takes the next free port above it.
 
 ### Running the Desktop App
 ```bash
@@ -164,6 +116,8 @@ Stores saved puzzle/join documents in `joins_data/`.
 ## Documentation
 
 See `docs/DOCUMENTATION_INDEX.md` for full documentation structure:
+- `docs/architecture/` - where code and data live (OVERVIEW.md, DATA_LIFECYCLE.md) -- authoritative
+- `docs/decisions/` - the binding decisions, one page each
 - `docs/guides/` - Admin and deployment guides
 - `docs/plans/` - Implementation plans
 - `docs/specs/` - Technical specifications
@@ -327,7 +281,8 @@ every session's context.
 - **Where code lives.** Search / metadata / variants / responsa / engines are in `shared/*.py`,
   not `genizah_core.py` (which is a 755-line facade re-exporting 27 names). Desktop dialogs,
   widgets, and update-UI are in `desktop/*.py`. **Grep `shared/` and `desktop/`**, not just the
-  old god-files. (v8.3.0 decomposition)
+  old god-files. (v8.3.0 decomposition) Layout, ownership and the guard tests:
+  [`docs/architecture/OVERVIEW.md`](docs/architecture/OVERVIEW.md).
 - **LOCAL extractor is at `extraction_format_version` 3.** Libraries indexed before that need a
   manual **Re-index All**; there is no auto-flip (bulk re-extraction must never run from
   `__init__` or the UI thread).

@@ -138,13 +138,14 @@ For detailed documentation, see the [docs/](docs/DOCUMENTATION_INDEX.md) directo
 ## Development
 
 ```bash
-python -m web.main            # web app on port 8080/8081
+python -m web.main            # web app on port 8081 (GENIZAH_PORT)
 python genizah_app.py         # desktop app
 python scripts/run_local_tests.py   # the test suite, in bounded lanes (never one pytest tests/ process)
 ```
 
-Python 3.11, NiceGUI (web), PyQt6 (desktop). Read [CLAUDE.md](CLAUDE.md) for how the repo is
-organised and [docs/guides/DEVELOPER_GUIDE.md](docs/guides/DEVELOPER_GUIDE.md) before changing
+Python 3.11, NiceGUI (web), PyQt6 (desktop). Read [docs/architecture/OVERVIEW.md](docs/architecture/OVERVIEW.md)
+for how the repo is organised, [CLAUDE.md](CLAUDE.md) for project context, and
+[docs/guides/DEVELOPER_GUIDE.md](docs/guides/DEVELOPER_GUIDE.md) before changing
 environment variables or data paths. Release process: `python scripts/bump_version.py X.Y.Z`,
 then the steps it prints.
 

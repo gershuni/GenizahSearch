@@ -1,6 +1,6 @@
 # Codebase Index
 
-> Last updated: 2026-08-19
+> Last updated: 2026-09-18
 
 Auto-generated index of classes and methods. New sections for modules can be
 appended via `python scripts/gen_code_index_section.py <file.py> ...` (walks
@@ -2061,3 +2061,416 @@ docs/specs/passage-matching-algorithm.md SS10.2b.
 - **Function** `passage_available` (Line 116) — The ONE predicate any future passage-matching surface must gate on.
 - **Function** `passage_multi_witness_available` — The ONE predicate for multi-witness passage search (its own flag ANDed with `passage_available()`).
 - **Function** `get_passage_searcher` (Line 127) — A fresh ``PassageSearcher``, or ``None`` when unavailable.
+
+# Discovery and passage-matching core modules (generated 2026-09-18)
+
+Generated with `python scripts/gen_code_index_section.py` for the thirteen `shared/discovery_*.py`
+modules and the four passage core modules (`passage_index`, `passage_search`, `passage_normalize`,
+`passage_policy`) that had no section. Their roles are described in
+[docs/architecture/OVERVIEW.md](architecture/OVERVIEW.md).
+
+## shared/discovery_band_labels.py
+
+- **Function** `_canon_band_key` (Line 73) — Normalize a stored `confidence_band` key to its v2 canonical form.
+- **Function** `band_label` (Line 123) — The EN or HE display label for a stored (evidence_source,
+- **Function** `review_overlay` (Line 155) — The review-status marker for a claim. Returns the
+- **Function** `format_precision_copy` (Line 194) — Render a `band_precision` row's precision as user-facing copy, per
+- **Function** `band_measurement_status` (Line 232) — A machine-readable status enum derived data-driven from a
+- **Function** `is_default_eligible` (Line 272) — Whether a claim shows on the DEFAULT (non-expanded, non-toggled)
+- **Function** `serialize_banded_claim` (Line 324) — Compose the ONE band-bearing presentation object every discovery
+
+## shared/discovery_display_strings.py
+
+- **Function** `_lang_key` (Line 103)
+- **Function** `_pick` (Line 107)
+- **Function** `relation_chip` (Line 174) — The reader-facing chip for a rendered relation -- "Matches this work" /
+- **Function** `relation_tooltip` (Line 192) — The frozen band label, UNMODIFIED, for use as the relation chip's
+- **Function** `_coverage_percent` (Line 258) — Parts-per-million -> a whole percent, clamped to [0, 100]. `None`
+- **Function** `row_headline` (Line 272) — The match-framing headline for one row.
+- **Function** `coverage_label` (Line 330) — The standalone name of the one permitted figure, for a tooltip, an
+- **Function** `low_coverage_note` (Line 344) — The optional note under a row whose match covers little of the page.
+- **Function** `granularity_subline` (Line 358) — The optional sub-line under a row whose identical-span group
+- **Function** `locus_subline` (Line 368) — The baked scholarly address, with one language-neutral structural cue.
+- **Function** `missing_title` (Line 392) — What a row shows when the work's title could not be resolved. Four of
+- **Function** `not_an_identification_note` (Line 406) — The italic qualifier the middle disclosure bucket carries. D-13e
+- **Function** `section_header` (Line 451) — One of the four panel/work-page section headers, in match framing.
+- **Function** `this_page_marker` (Line 473) — The reader-aid marker on a manuscript-pane work chip whose pages
+- **Function** `disclosure_toggle` (Line 547) — The label of one disclosure toggle.
+- **Function** `divergence_warning` (Line 565) — The warning ruling F requires beside a divergence control. It records
+- **Function** `divergence_chip` (Line 603) — The neutral marker one catalogue-divergent row carries.
+- **Function** `related_pages_label` (Line 635) — The bare label for the related-pages count.
+- **Function** `related_pages_count_line` (Line 640) — The related-pages count line, with singular agreement in both
+- **Function** `bucket_name` (Line 656) — The bilingual bucket name, straight from
+- **Function** `rule_sentence` (Line 666) — The ONE reader-facing sentence describing the two-bucket rule,
+- **Function** `recall_disclaimer` (Line 673) — The D-12 recall disclaimer, straight from
+- **Function** `novelty_strings` (Line 730) — The four candidacy strings, keyed `toggle` / `badge` / `subline` /
+- **Function** `novelty_unknown_badge` (Line 745) — The muted counterpart of the candidacy badge, for a row whose
+- **Function** `filter_codes` (Line 775) — Every relation filter code, in display order.
+- **Function** `filter_code` (Line 780) — The short code for a stored relation kind. Raises on an unknown kind
+- **Function** `is_filter_code` (Line 793) — Whether `code` is one of the three relation filter codes. A stored
+- **Function** `filter_label` (Line 800) — The reverse direction: a short code -> the label a reader sees for
+- **Function** `matches_filter_codes` (Line 813) — Whether a row of `relation_kind` survives a relation filter holding
+- **Function** `excerpt_strings` (Line 881) — Every excerpt-disclosure string, resolved for one language.
+- **Function** `service_state_message` (Line 920) — The reader-facing message for one envelope status. `ok` returns an
+- **Function** `retry_label` (Line 936) — The retry affordance that accompanies every non-ok service state.
+- **Function** `display_work_title` (Line 972) — The title a READER sees for a work, applying any owner-ruled curated
+
+## shared/discovery_errors.py
+
+- **Class** `DiscoveryUnavailable` (Line 16) — Raised when a ``DiscoveryService`` read cannot complete right now:
+- **Class** `DiscoveryOverload` (Line 24) — Raised specifically when the bounded heavy-query concurrency
+
+## shared/discovery_family.py
+
+- **Function** `base_family` (Line 60) — The A0c-frozen four-way: ja / bible / canonical / other_staged.
+- **Function** `assign_family` (Line 72) — The fam-v1 five-way: the base rule, then the pinned daf overrides.
+
+## shared/discovery_grouping.py
+
+- **Function** `collapse_canonical` (Line 50) — Collapse `rows` that share the same `canonical_work_id` into ONE
+- **Function** `lead_attribution` (Line 91) — Deterministic lead attribution for an identical-span group -- several
+- **Function** `normalize_title` (Line 147) — NFC + strip quote/geresh/gershayim marks + collapse whitespace.
+- **Function** `titles_share_prefix` (Line 163) — True when the two (already-normalized) titles share a >= min_len
+- **Function** `works_related_by_title` (Line 176) — D-13d's ratified separation predicate (136-GATE1-DECISIONS.md § A
+- **Function** `separate_granularity` (Line 219) — For an identical-span group (>=2 works claiming a byte-identical
+
+## shared/discovery_locus.py
+
+- **Class** `LocusAddress` (Line 99) — One parsed address. `sub` is the verse / mishnah / halakhah, if the header has one.
+- **Function** `parse_canonical_header` (Line 109) — Parse one `##...##` header body into an address, dropping provenance.
+- **Function** `norm_stream` (Line 157) — The reference corpus's coordinate system: (letter stream, offset map).
+- **Function** `stream_offset_for_raw` (Line 184) — Raw (NFC) character position -> offset in the normalized letter stream.
+- **Function** `heb_numeral` (Line 218) — 1 -> 'א', 15 -> 'טו', 176 -> 'קעו'. For addresses that arrive as integers.
+- **Function** `parse_unit_numeral` (Line 236) — 'קעו' -> 176, and '176' -> 176. None when the label is not a numeral.
+- **Function** `amud_ordinal` (Line 288) — 'א' -> 1 ... 'ד' -> 4; 0 when the label names no column.
+- **Function** `sefaria_daf` (Line 302) — Sefaria's flat Talmud section index -> (daf, amud), amud 1 = ע"א.
+- **Function** `daf_label_he` (Line 326) — (14, 1) -> 'יד ע"א'. `prefix` names a foliation that is not the tractate's.
+- **Function** `units_for_span` (Line 390) — Half-open stream interval ``[start, end)`` -> inclusive ``(lo_ord, hi_ord)``.
+- **Function** `_floor_index` (Line 444) — Index of the last unit starting at or before `offset` (0 when it precedes all).
+- **Function** `split_at_citation_breaks` (Line 456) — Split one unit range wherever the CITATION stops running forwards.
+- **Function** `compress_pieces` (Line 496) — Merge unit intervals into display runs -- BY CITATION ADJACENCY ONLY.
+- **Function** `citation_seq_for_daf` (Line 543) — [(daf, amud)] -> the dense citation positions `compress_pieces` wants.
+- **Function** `citation_runs` (Line 563) — Unit-ordinal ranges -> the runs of CITATION POSITIONS they witness.
+- **Function** `_label_at` (Line 606) — Look a label up by ordinal or by citation position, refusing a miss.
+- **Function** `label_segments` (Line 621) — Split a compound label on `, ` -- but NEVER inside brackets.
+- **Function** `_label_word_key` (Line 707) — A citation word folded for comparison against a title word.
+- **Function** `strip_work_title_prefix` (Line 714) — `labels` with the work's own title removed from the head of each one.
+- **Function** `shorten_range_tail` (Line 831) — The tail of a range, with whatever it already shares with the head removed.
+- **Function** `render_ranges` (Line 878) — Runs -> the displayed citation, e.g. ``ב–יא; טו–לב``.
+- **Function** `render_locus_label` (Line 901) — Render witnessed work-side spans in one work's citation system.
+- **Class** `RefSpanProjectionError` (Line 951) — Fail-closed error reading a match row's paired page/work spans.
+- **Class** `RefAlignment` (Line 955) — ONE dual-side alignment, exactly as the producer paired it.
+- **Function** `parse_ref_span_alignments` (Line 969) — EVERY dual-side alignment a match row carries, in the producer's own order.
+- **Function** `select_primary_alignment` (Line 1017) — The ONE alignment a single evidence row carries. This rule is FROZEN.
+- **Function** `merge_witnessed_spans` (Line 1039) — Half-open work-side spans -> the same witnessed text, without repetition.
+- **Function** `select_locus_work` (Line 1081) — Pick the ONE coordinate space an identification's address is rendered in.
+
+## shared/discovery_main_pool.py
+
+- **Function** `_field` (Line 126) — Read `name` off `obj`, which may be a plain Mapping (dict) OR the
+- **Class** `Identification` (Line 137) — One hand-built (manuscript x canonical work) identification record.
+- **Function** `main_pool_decision` (Line 186) — Decide whether `identification` belongs in the main pool.
+- **Function** `main_pool_sentence` (Line 289) — The ONE reader-facing sentence describing the two-bucket rule, in EN
+- **Function** `bucket_label` (Line 317) — The bilingual display name of the bucket `in_main_pool` selects --
+
+## shared/discovery_novelty.py
+
+- **Function** `is_candidate_for_new_finds` (Line 231) — The public "Candidates for new finds" predicate (decision E). Raises
+- **Function** `is_hidden_by_default` (Line 241) — Ruling F's divergence-shade predicate: True only for
+- **Function** `divergence_correctness_applicable` (Line 260) — True only for diverges_work/diverges_part -- callers (the build
+- **Function** `novelty_columns_for` (Line 269) — The pure verdict -> column mapping plan 136-12's build script calls,
+- **Function** `masked_provenance_label` (Line 359) — D-25: name the source where it is nameable ("recorded in the
+- **Function** `load_alias_groups` (Line 391) — Loads the curated work-id alias-group artifact (a JSON object shaped
+- **Function** `novelty_work_key` (Line 414) — The reviewed, alias-aware identity a novelty check keys on.
+- **Function** `normalize_free_text` (Line 462) — NFC-normalize, strip nikud (``shared.text_normalize.strip_nikud``)
+- **Class** `BatchResponseInvalid` (Line 585) — A batched response could not be safely aligned to the cases sent.
+- **Function** `resolve_batch_model_output` (Line 597) — Maps a raw BATCHED response to per-case stored columns, keyed by the
+- **Function** `build_cache_key` (Line 670) — Builds the novelty LLM gate's cache key deterministically over
+- **Function** `resolve_model_output` (Line 684) — Maps a raw structured model response to the stored
+
+## shared/discovery_panel_model.py
+
+- **Class** `ArbitrationOutcome` (Line 270) — What one (claims status, page-scope state) combination decides.
+- **Class** `PanelContractError` (Line 338) — A refusal this module composed ITSELF, and whose text is therefore safe
+- **Function** `_reduce_to_type` (Line 378) — Re-raise material for an exception this module did not compose.
+- **Function** `_int_or_refuse` (Line 387) — `int(value)`, with the conversion's own error message suppressed.
+- **Function** `_validate_envelope` (Line 408) — Reject anything that is not a four-key envelope.
+- **Class** `PanelServiceBundle` (Line 453) — The model's ONLY input: the five live envelopes, verbatim.
+    - Method `__post_init__` (Line 469)
+    - Method `with_related_rows` (Line 484) — A copy carrying the lazily-fetched related-page rows -- what a
+- **Function** `_is_ok` (Line 495)
+- **Function** `_envelope_total` (Line 499) — The envelope's own total. `total` is artifact content, so the
+- **Function** `_is_ok_zero` (Line 506) — A SUCCESSFUL zero -- the only state the entry control hides on.
+- **Function** `_items` (Line 511)
+- **Function** `_service_state` (Line 515) — The temporary-unavailable copy plus its retry, for a section whose own
+- **Function** `_scope_state` (Line 531) — Which of the four page-scope states the bundle describes.
+- **Function** `_routed_title` (Line 558) — `(display title, title_missing)` for one row.
+- **Function** `_display_work_id` (Line 573)
+- **Function** `_band_rank` (Line 577) — The row's band rank, with an out-of-lattice/absent rank sorting LAST.
+- **Function** `_split_confirmed` (Line 588) — `(confirmed, rest)`, order preserved.
+- **Function** `_in_ratified_order` (Line 602) — `members` in `lead_attribution`'s total order -- the ratified order, over
+- **Function** `_collapse_duplicates` (Line 614) — `grouping.collapse_canonical`, applied only to rows that HAVE a canonical
+- **Function** `_span_key` (Line 652)
+- **Function** `_group_by_span` (Line 659) — Split `rows` into standalone rows and identical-span groups (>=2 rows on
+- **Function** `_generic_group` (Line 677) — One identical-span group of genuinely different works, as it leaves the
+- **Function** `_is_shipped` (Line 717) — D-13g limb 1, read from the row's OWN routing status.
+- **Function** `_is_human_confirmed` (Line 722) — D-13g limb 2, and ONLY the explicit adjudication limb.
+- **Function** `_is_default_surface_eligible` (Line 740) — D-13g's eligibility predicate, EXACTLY: `routing_status == 'shipped'`
+- **Function** `_validate_claim_row` (Line 803) — The D-13g contract on ONE input claim, checked at the model boundary.
+- **Function** `_is_catalogue_divergent` (Line 889) — Whether this claim contradicts a catalogue identification (ruling F).
+- **Function** `_disclosure_level_for` (Line 920) — Which disclosure level one identification row belongs to.
+- **Function** `_anchor_identity` (Line 977) — The four anchor-identity fields the work expansion needs, ALL-OR-NONE.
+- **Function** `_expansion_descriptor` (Line 1021) — The "other manuscripts matching this work" expansion, as a DESCRIPTOR the
+- **Function** `_nested_entry` (Line 1036)
+- **Function** `_identification_row` (Line 1046) — One emitted identification row.
+- **Function** `_compose_rows` (Line 1154) — The pipeline, in the ONE order that is correct.
+- **Function** `_sort_offset` (Line 1249) — One passage offset as a sort key: `(present, magnitude)`.
+- **Function** `_lead_sort_key` (Line 1263) — Deterministic emission order: strongest band first, then the passage's
+- **Function** `related_page_row` (Line 1286) — ONE related-page row as the panel may render it -- and the composite
+- **Function** `_related_pages` (Line 1325)
+- **Function** `_work_chip` (Line 1387)
+- **Function** `_work_chip_sort_key` (Line 1423) — Strongest band first, then the widest page span, then the work id -- a
+- **Function** `_on_this_page_work_ids` (Line 1433) — The work ids claimed on the CURRENT page, for the manuscript pane's
+- **Function** `_manuscript_pane` (Line 1449)
+- **Function** `_manuscript_reports_identifications` (Line 1515) — Whether the WHOLE-MANUSCRIPT read is evidence of anything at all.
+- **Function** `_entry_control` (Line 1536) — Visibility is a FIELD on the model, not a render-time expression.
+- **Class** `PanelModel` (Line 1596) — Everything the renderer needs, and no judgement left for it to make.
+    - Property `related_pages` (Line 1618)
+    - Property `generic_groups` (Line 1624)
+    - Method `_level` (Line 1627)
+    - Method `as_dict` (Line 1633) — The whole emitted model as plain data -- what the honesty sweep
+- **Function** `iter_rows` (Line 1639) — Every emitted identification row, in disclosure-level order.
+- **Function** `build_panel_rows` (Line 1646) — The panel's whole display model, as a pure function of the envelope set.
+- **Function** `_build_panel_rows` (Line 1667)
+
+## shared/discovery_relation_matrix.py
+
+- **Class** `RelationMatrixError` (Line 87) — A parameterization or stored-value problem that must stop a build.
+- **Class** `MatrixParameterization` (Line 92) — The two open parameters of §2, and only those.
+    - Method `__post_init__` (Line 105)
+- **Class** `RelationInputs` (Line 130) — One identification's matrix inputs, all six of them.
+- **Function** `render_relation` (Line 159) — Return the rendered relation for one identification.
+- **Function** `cap_member_relation` (Line 231) — §3.2: what ONE member-grain row may assert, given its identification's
+- **Function** `relation_rank_sql` (Line 302) — A SQL expression ranking ``column``'s rendered relation, strongest = 0.
+- **Function** `relation_from_rank` (Line 327) — The inverse of :func:`relation_rank_sql`. Anything that is not an exact
+- **Function** `work_divergence_ratios` (Line 345) — Step 4a's per-work divergence ratios, from ``(canonical_work_id,
+- **Class** `RegionInputUnavailable` (Line 396) — Raised when step 3 is ACTIVE but no region source is present.
+- **Function** `iter_relation_inputs` (Line 413) — Yield ``(identification_id, RelationInputs)`` for every row of a
+- **Function** `region_bands_by_work` (Line 497) — This asset's region bands, grouped by ``work_id`` and sorted.
+- **Function** `covering_verdict` (Line 539) — The verdict of the band CONTAINING ``[w_start, w_end)``, or ``None``.
+- **Function** `footprint_verdicts` (Line 577) — ``identification_id -> footprint_all_non_discriminative``, the tri-state.
+- **Function** `curated_quoter_work_ids` (Line 614) — The canonical work ids on this asset's curated quoter list.
+- **Function** `recompute_and_store` (Line 634) — Recompute ``rendered_relation`` for every identification and store it.
+- **Function** `stored_relation_mismatches` (Line 658) — Row-for-row recompute-equality: return
+- **Function** `parameterization_meta_rows` (Line 682) — The ``(key, value)`` meta rows recording which parameterization an
+- **Function** `parameterization_from_meta` (Line 701) — Reconstruct the parameterization an asset was built under.
+
+## shared/discovery_service.py
+
+- **Function** `_get_float_env` (Line 309)
+- **Function** `_get_int_env` (Line 319)
+- **Function** `_get_positive_int_env` (Line 329) — Like ``_get_int_env``, but coerces to >= 1 (M3) -- a non-positive or
+- **Function** `_get_positive_float_env` (Line 339) — Like ``_get_float_env``, but coerces to > 0 (M3) -- a non-positive
+- **Function** `_shutdown_executors` (Line 348) — Retire a collected service's per-budget threadpools.
+- **Function** `_parse_json_field` (Line 364) — Best-effort JSON parse for the seed_spans/seed_ms_ids TEXT columns.
+- **Function** `_band_rank` (Line 408) — Lower is "stronger" (rank 0 = expert_verified, the strongest band).
+- **Function** `_page_number_from_page_id` (Line 417) — The folio number carried INSIDE a page id, or None.
+- **Function** `_volume_ie_from_page_id` (Line 443) — The inventory-entry (volume) id carried INSIDE a page id, or None.
+- **Function** `_browse_address_from_page_id` (Line 465) — `(folio, volume)` for a page id -- BOTH or NEITHER, never one of the two.
+- **Function** `_representative_browse_address` (Line 488) — The expansion row's two `/browse` address keys, as a dict to splat.
+- **Function** `_build_band_rank_case_sql` (Line 593) — Build the frozen band-rank lattice as a SQL CASE expression (H1) --
+- **Function** `eligibility_clause` (Line 680) — The `AND`-prefixed routing predicate for `mode`, or `''` for `all`.
+- **Function** `_review_toggle_mode` (Line 703) — `include_review` as an eligibility mode -- the one place the toggle's
+- **Function** `findings_novelty_offered` (Line 763) — Whether a row of `unit` can DISPLAY a single novelty verdict.
+- **Function** `novelty_view_shades` (Line 885) — The `novelty` argument for a selector view. THE authority on that mapping.
+- **Function** `findings_divergence_offered` (Line 899) — Whether the divergence axis can change ANYTHING, given the candidacy
+- **Function** `_validate_contribution_shades` (Line 1138) — Raise unless every contribution shade is in the novelty vocabulary.
+- **Function** `_build_launch_contribution_sql` (Line 1163) — The ONE grouped statement both contribution figures are computed with.
+- **Function** `_build_launch_manuscript_sql` (Line 1188) — Distinct CONTRIBUTING manuscripts, on the same basis as the total above.
+- **Function** `_like_prefix` (Line 1209) — `value` as a LIKE pattern matching its own children (`value / ...`),
+- **Function** `_build_findings_filter` (Line 1232) — The ONE findings predicate, shared by the row query and the facet
+- **Function** `_divergence_flag_sql` (Line 1507) — `(expression, params)` for a findings row's own divergence flag.
+- **Function** `_build_findings_query` (Line 1527) — Build the findings query for ONE unit. The single query builder -- all
+- **Function** `_build_manuscript_works_sql` (Line 1607) — The D-13h manuscript-scope query, as SQL, for `n_page_ids` bound
+- **Function** `_build_work_witnesses_ranked_cte_sql` (Line 1679) — The ranked CTE body. `restrict_work_id=False` builds the CORPUS-WIDE
+- **Function** `_validate_anchor_identity` (Line 1783) — Enforce the all-or-none invariant; return True when the anchor is
+- **Function** `_resolve_displayed_band` (Line 1808) — DATA-01: the WEAKER of the two claims' bands -- `(evidence_source,
+- **Function** `_build_work_expansion_pipeline` (Line 1856) — Build the shared `WITH ranked ... unit_best ... filtered` prefix and its
+- **Function** `build_work_expansion_rows_sql` (Line 1943) — The paginated expansion row query. Built from the shared pipeline, so it
+- **Function** `build_work_expansion_count_sql` (Line 1958) — The EXACT count of distinct witness UNITS the row query would return
+- **Function** `_project_work_witnesses` (Line 1977) — Group ``claim_rows`` (one row per real (page_id, work_id) witness
+- **Function** `_present_expansion_row` (Line 2162) — One raw expansion query row -> the INTERNAL expansion row.
+- **Function** `_export_page_guard` (Line 2249) — How many pages an export walk may fetch before it is treated as runaway.
+- **Class** `DiscoveryService` (Line 2262) — The one async read-only chokepoint over ``discovery.db``.
+    - Method `__init__` (Line 2271)
+    - Method `_get_conn` (Line 2368)
+    - Method `is_available` (Line 2425)
+    - Method `_has_locus_display` (Line 2434) — Whether this exact asset advertises the additive baked-label contract.
+    - Method `_has_locus_filter` (Line 2450) — Whether this asset carries the interval index used by range filters.
+    - Method `_clamp_page` (Line 2471)
+    - Method `_clamp_page_size` (Line 2479)
+    - Method `get_version` (Line 2508)
+    - Method `excerpts_available` (Line 2522) — PLAN-textvtext-excerpts.md: True iff the LOADED sidecar carries
+    - Method `get_band_precision` (Line 2573) — BAND-02: the matching ``scope='band'`` ``band_precision`` row, or
+    - Method `get_band_precision_collection` (Line 2604) — The ``scope='collection'`` ``band_precision`` row -- the
+    - Method `get_band_claim_counts` (Line 2634) — Codex #9/#B1: the version-aware, SHIPPED, DISPLAY-DEDUPLICATED
+    - Method `get_claims_for_page` (Line 2668) — PANEL-01/02: the manuscript's banded claims on this page, each at
+    - Method `_query_claims_for_page` (Line 2699) — The single page query: claim + display evidence + the materialized
+    - Method `_band_measurements` (Line 2817) — `(evidence_source, confidence_band) -> (measurement_status, ci_low)`
+    - Method `_present_claim_row` (Line 2857) — One raw query row -> the surface-safe panel row.
+    - Method `get_claims_for_page_enveloped` (Line 2911) — The SYNC enveloped shape of `get_claims_for_page` (D-13).
+    - Method `get_manuscript_works_enveloped` (Line 2947) — "Elsewhere in this manuscript", as NAMED works (D-13h).
+    - Method `get_related_page_count_enveloped` (Line 3019) — The header figure: DISTINCT opposite pages for this anchor,
+    - Method `get_related_pages_enveloped` (Line 3058) — The rows behind the toggle: ONE row per DISTINCT opposite page,
+    - Method `_clamp_findings_page_size` (Line 3170)
+    - Method `_first_match_pages` (Line 3179) — `{(sys_id, canonical_work_id): first matched page id}`, in ONE query.
+    - Method `get_locus_units_enveloped` (Line 3221) — Ordered address units for one selected work, when the asset supports it.
+    - Method `get_findings_enveloped` (Line 3255) — The corpus-wide findings query, in whichever of the three offered
+    - Method `_export_artifact_identity` (Line 3449) — `(resolved path, sidecar_version)` -- the identity the export pins
+    - Method `_export_timeout` (Line 3468)
+    - Method `_export_walk` (Line 3472) — Every page of ONE `get_findings_enveloped` query, as a flat list.
+    - Method `collect_findings_for_export` (Line 3550) — EVERY row matching the filters, plus its excerpt, in ONE envelope.
+    - Method `get_findings_facets_enveloped` (Line 3809) — The domain / author / work cascade, mirroring the catalogue page's
+    - Method `_project_facets` (Line 3919) — Shape the grouped rows into facet rows.
+    - Method `_findings_timeout` (Line 3973)
+    - Method `_query_launch_contribution` (Line 3981) — `(rows_by_shade, total, manuscript_count)` on ONE basis.
+    - Method `_copy_launch_envelope` (Line 4000) — A DEFENSIVE COPY of a cached launch envelope.
+    - Method `get_launch_stats_enveloped` (Line 4016) — Ruling U's launch statistics, computed from the LOADED artifact.
+    - Method `get_pages_related_to_page` (Line 4177) — PANEL-02: shared_text alignments touching this page, from EITHER
+    - Method `get_evidence` (Line 4224) — PANEL-03: every evidence row for a claim (offsets + text_layer +
+    - Method `_query_excerpt_for_identification` (Line 4267) — The excerpt row for `identification_id`, projected through
+    - Method `_decode_excerpt_row` (Line 4306) — Decode the stored JSON highlight intervals, IN PLACE, and return the
+    - Method `_query_excerpts_for_identifications` (Line 4322) — `{identification_id: projected excerpt row}` for a SET of ids, read
+    - Method `get_excerpts_for_identifications` (Line 4394) — `{}`-on-failure wrapper, mirroring `get_excerpt_for_identification`'s
+    - Method `get_excerpt_for_identification` (Line 4412) — LEGACY LIST CONTRACT (mirrors `get_work_witnesses`): `[]` on EVERY
+    - Method `get_excerpt_enveloped` (Line 4434) — The text-vs-text excerpt in the CLOSED four-key envelope (D-13):
+    - Method `get_work_witnesses` (Line 4460) — DATA-10 unit x work projection: witnesses of ``work_id``, one row
+    - Method `_query_work_expansion` (Line 4530) — The expansion's rows AND its EXACT total -- ``(rows, total)``.
+    - Method `get_work_expansion_enveloped` (Line 4630) — PANEL-02's expansion in the CLOSED four-key envelope (D-13):
+    - Method `_acquire_slot` (Line 4734)
+    - Method `_executor_for` (Line 4764) — This budget class's OWN threadpool, `max_workers` == its capacity.
+    - Method `_acquire_heavy_slot` (Line 4780) — The heavy budget, by its original name (kept: it is what the
+    - Method `_run_off_loop` (Line 4793)
+    - Method `_browse_timeout` (Line 4856)
+    - Method `_work_timeout` (Line 4859)
+    - Method `_browse_cached_call` (Line 4867)
+    - Method `get_version_async` (Line 4906)
+    - Method `excerpts_available_async` (Line 4909) — The async shape of `excerpts_available` -- a thin off-loop wrapper,
+    - Method `get_band_precision_async` (Line 4919)
+    - Method `get_band_precision_collection_async` (Line 4927)
+    - Method `get_band_claim_counts_async` (Line 4934)
+    - Method `get_claims_for_page_async` (Line 4937)
+    - Method `get_pages_related_to_page_async` (Line 4955)
+    - Method `_enveloped_off_loop` (Line 4975) — Run an enveloped SYNC callable off the loop and classify its failure
+    - Method `get_claims_for_page_enveloped_async` (Line 5020) — The async shape of `get_claims_for_page_enveloped` -- a thin wrapper
+    - Method `get_manuscript_works_enveloped_async` (Line 5033)
+    - Method `get_related_page_count_enveloped_async` (Line 5045)
+    - Method `get_related_pages_enveloped_async` (Line 5055)
+    - Method `get_locus_units_enveloped_async` (Line 5066)
+    - Method `get_findings_enveloped_async` (Line 5074) — Heavy by design: the corpus-wide query gets a bounded-concurrency
+    - Method `get_launch_stats_enveloped_async` (Line 5103) — The async shape of `get_launch_stats_enveloped` (ruling U).
+    - Method `get_findings_facets_enveloped_async` (Line 5131)
+    - Method `collect_findings_for_export_async` (Line 5156) — The export collector, off the loop, on the EXPORT budget.
+    - Method `run_off_loop` (Line 5191) — PUBLIC alias of the off-loop dispatch discipline, for the web
+    - Method `get_evidence_async` (Line 5212)
+    - Method `get_excerpt_enveloped_async` (Line 5219) — The async shape of `get_excerpt_enveloped` -- a thin wrapper over
+    - Method `get_work_witnesses_async` (Line 5262)
+    - Method `get_work_expansion_enveloped_async` (Line 5276) — The async shape of `get_work_expansion_enveloped` -- a thin wrapper
+
+## shared/discovery_surface_projection.py
+
+- **Function** `is_forbidden_surface_field` (Line 97) — True when `key` may never appear in surface-bound output.
+- **Function** `_assert_allowlist_safe` (Line 463) — Raise if `fields` names a forbidden field or repeats one.
+- **Function** `_project` (Line 494) — Project `row` onto exactly `fields`.
+- **Function** `surface_safe_claim` (Line 504) — The panel row a surface may receive (PANEL-01/02).
+- **Function** `surface_safe_work_summary` (Line 509) — One "elsewhere in this manuscript" work row (D-13h).
+- **Function** `surface_safe_related_page` (Line 514) — One unevaluated candidate alignment (D-11a).
+- **Function** `surface_safe_finding` (Line 519) — One corpus-wide findings row, in any of the three offered units (A-6).
+- **Function** `surface_safe_expansion` (Line 524) — One "Other manuscripts matching <work>" expansion row (PANEL-02).
+- **Function** `surface_safe_launch_shade` (Line 529) — One launch contribution-shade row (ruling U, plan 136-22).
+- **Function** `surface_safe_facet` (Line 534) — One domain / author / work facet row.
+- **Function** `surface_safe_locus_unit` (Line 539) — One addressable unit offered by the work-specific range control.
+- **Function** `surface_safe_excerpt` (Line 544) — One text-vs-text `discovery_excerpt` row (`PLAN-textvtext-excerpts.md`).
+- **Function** `_rate_or_interval_violation` (Line 643) — The reason `value` is a rendered rate/interval, or None.
+- **Function** `_walk_nodes` (Line 656) — Yield `(path, key, value)` for EVERY key/value pair reachable in `node`.
+- **Function** `_assert_surface_safe` (Line 678) — Re-check what the projection already guarantees.
+- **Function** `make_envelope` (Line 747) — Build the ONE shape every Discovery read returns to a surface.
+- **Function** `ok_envelope` (Line 787)
+- **Function** `unavailable_envelope` (Line 794) — The sidecar is not serving: flag off, asset absent, loader not ready.
+- **Function** `timeout_envelope` (Line 799) — The query exceeded its budget -- distinct from `unavailable`, because the
+- **Function** `busy_envelope` (Line 805) — Bounded concurrency rejected this call -- distinct from both above.
+- **Function** `is_outage` (Line 810) — True when the envelope reports an outage rather than a genuine result.
+
+## shared/discovery_visibility.py
+
+- **Function** `_corpus_code_to_visibility` (Line 93) — Fail-closed mapping from a raw MASKED `source_corpus` CODE (never a
+- **Function** `assertion_visibility` (Line 113) — D-22's FIRST axis: the visibility of the DISPLAYED ASSERTION -- derived
+- **Function** `identity_visibility` (Line 143) — D-22's SECOND axis: the visibility of the DISPLAYED WORK's own
+- **Function** `is_public` (Line 161) — The ONE public-eligibility rule (D-22): the conjunction of BOTH axes.
+- **Function** `_vis01_launch_scope_predicate` (Line 185) — VIS-01's OWN launch-scope shortcut, reproduced LITERALLY as a
+- **Function** `reconcile_launch_scope` (Line 212) — Reconcile VIS-01's launch-scope shortcut against the D-22 two-axis
+
+## shared/passage_index.py
+
+- **Class** `IndexFormatError` (Line 83) — Raised by build-side helpers; the reader never propagates it.
+- **Class** `BuildCancelled` (Line 87) — Raised by build_index (and the corpus hasher it depends on) when a
+- **Class** `PassageIndexClosed` (Line 92) — Raised by any access to a `PassageIndex` section after `close()`.
+- **Class** `_ClosedSection` (Line 100) — Poison stand-in `PassageIndex.close()` swaps each of the five
+    - Method `__getattr__` (Line 120)
+    - Method `__getitem__` (Line 123)
+    - Method `__len__` (Line 126)
+    - Method `__iter__` (Line 129)
+    - Method `__array__` (Line 132)
+- **Function** `require_little_endian` (Line 140) — The packed layouts are little-endian by definition, not by accident.
+- **Function** `pack_postings` (Line 148) — (pages, positions) -> uint8 array of POSTING_BYTES per posting.
+- **Function** `unpack_postings` (Line 172) — uint8 POSTING_BYTES-per-posting array -> (pages, positions).
+- **Function** `encode_stream` (Line 189) — Normalized letter stream -> uint8 letter indices (0..26).
+- **Function** `decode_stream` (Line 202) — uint8 letter indices -> normalized letter stream.
+- **Function** `layout_fingerprint` (Line 212) — The layout facts a reader must agree with before touching a byte.
+- **Function** `write_manifest` (Line 227) — Write manifest.json last, after every data file is closed and sized.
+- **Function** `_expected_sizes` (Line 239)
+- **Class** `PassageIndex` (Line 253) — Memory-mapped reader. Construct via `open_index`, never directly.
+    - Method `__post_init__` (Line 284)
+    - Method `close` (Line 287) — Close every section's underlying mapping, then REPLACE the
+    - Property `n_records` (Line 345)
+    - Property `n_postings` (Line 349)
+    - Method `df` (Line 352) — Postings for one gram code. Not distinct records -- postings.
+    - Method `dfs` (Line 358) — Vectorised `df` -- the query budget needs all of them at once.
+    - Method `postings_for` (Line 368)
+    - Method `stream` (Line 377)
+    - Method `record_id` (Line 382)
+- **Function** `open_index` (Line 388) — Open an index, or return None. Never raises on a bad artifact.
+- **Function** `diagnose_index` (Line 480) — Why would `open_index(index_dir)` return None? One human sentence.
+- **Function** `csr_is_monotone` (Line 565) — True when `gram_offsets` is non-decreasing. Chunked, ~1 MB transient.
+- **Function** `verify_csr_monotone` (Line 592) — Raising form, for the build/verify side.
+
+## shared/passage_search.py
+
+- **Class** `PassageHit` (Line 49)
+- **Class** `QueryReport` (Line 59) — Everything that happened to the query. Ships in the result envelope --
+    - Method `as_dict` (Line 81)
+- **Function** `_admit_grams` (Line 86) — Select which query grams to expand, under the posting budget.
+- **Function** `_candidates` (Line 168) — Diagonal two-hit with DISTINCT gram codes (spec section 6.1).
+- **Function** `_verify_and_merge` (Line 268) — Extend, align, accept, and merge per record.
+- **Function** `search_passage` (Line 338) — The full arrangement-C query. Returns (hits, report).
+
+## shared/passage_normalize.py
+
+- **Function** `nfc` (Line 71) — NFC-normalize. Offsets returned by norm_stream index THIS string.
+- **Function** `norm_stream_fast` (Line 76) — Space-free normalized Hebrew letter stream. No offset map.
+- **Function** `norm_stream` (Line 85) — Return (stream, offsets).
+- **Function** `project_span` (Line 102) — Map stream span [start, end) back onto orig_text, with `pad` context.
+- **Function** `gram_codes` (Line 120) — uint64 base-27 codes for every overlapping K-gram of `stream`.
+
+## shared/passage_policy.py
+
+- **Function** `_boundary_one_sided` (Line 48)
+- **Function** `_boundary_two_sided` (Line 54)
+- **Class** `PassagePolicy` (Line 64) — Everything about a query that can change its results.
+    - Method `__post_init__` (Line 102)
+    - Property `policy_id` (Line 122) — Content hash over every field. Stable across processes and runs.
+    - Method `as_dict` (Line 143)
+    - Method `max_density` (Line 150)
+    - Method `accepts` (Line 156)
+- **Function** `compose` (Line 303) — A width preset plus a passage-length profile plus a search depth,
+- **Function** `get_preset` (Line 351)

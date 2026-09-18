@@ -614,7 +614,7 @@ def main():
         print(f"   - Context-budget overruns: {len(oversize)}")
         print(f"   - Broken links: {len(broken)}")
         print(f"   - Contract-doc header drift: {len(header_drift)}")
-        print("\nReview docs/DOCUMENTATION_MAINTENANCE.md for guidance.")
+        print("\nReview docs/archive/DOCUMENTATION_MAINTENANCE.md for guidance.")
 
     return 0 if total_issues == 0 else 1
 
