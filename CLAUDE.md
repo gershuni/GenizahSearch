@@ -45,7 +45,8 @@ Two applications over one shared core: the NiceGUI web app (`web/`, with FastAPI
 `/api/*`) and the PyQt6 desktop app (`genizah_app.py` + `desktop/`), sharing `shared/`. Read-only
 reference data comes from Tantivy indexes and SQLite sidecars (`pgp.db`, `fjms_enrichment.db`,
 `nli_crossref.db`, `fgp_transcriptions.db`; `joins.db` holds saved joins); Supabase (PostgreSQL)
-holds community data only: auth, lists, corrections, comments, discoveries. The full picture --
+holds the community data (auth, lists, corrections, comments, discoveries) and the PGP reference
+tables that `pgp.db` is exported from. The full picture --
 components by subsystem, the dependency rules and the tests that enforce them, who owns which
 state, and a decision for every top-level directory and root file -- is
 [`docs/architecture/OVERVIEW.md`](docs/architecture/OVERVIEW.md).

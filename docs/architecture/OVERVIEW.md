@@ -29,7 +29,8 @@
 
 Both applications are maintained. They share the search engine, metadata, variants, the sidecar
 service layer, discovery and passage matching through `shared/`. Read-only reference data is
-served from local SQLite sidecars and Tantivy indexes; Supabase holds only community data
+served from local SQLite sidecars and Tantivy indexes; Supabase holds the community data and is
+the source the PGP sidecar is exported from
 ([decision 0002](../decisions/0002-sidecars-instead-of-a-backend-process.md)). There is no
 standalone backend process -- but **FastAPI is live**: NiceGUI's `app` is a FastAPI instance,
 `/api/*` routes are registered in [web/api.py](../../web/api.py) and a dedicated sub-app is
@@ -176,7 +177,9 @@ Details, one row per artifact, in [DATA_LIFECYCLE.md](DATA_LIFECYCLE.md). The sh
   Seven of those inputs are gitignored (the five sidecar databases, `libraries_translations.db`
   and `fist_data/vs_manifest.txt`), so the build is reproducible only on a machine that has been
   provisioned, never from a clean clone.
-- **Supabase** holds community data only ([docs/guides/SUPABASE_GUIDE.md](../guides/SUPABASE_GUIDE.md)).
+- **Supabase** holds the community data, and hosts the PGP reference tables that
+  `scripts/export_pgp_sidecar.py` turns into `pgp_data/pgp.db`; the apps read PGP from the sidecar
+  at runtime, never from Supabase ([docs/guides/SUPABASE_GUIDE.md](../guides/SUPABASE_GUIDE.md)).
 - **Secrets** (`.env`, `web/_secrets/`, the masking pattern file) are gitignored; the masking scan
   fails closed when its pattern file is not set ([decision 0009](../decisions/0009-masked-corpus-rule.md)).
 
@@ -184,7 +187,10 @@ Details, one row per artifact, in [DATA_LIFECYCLE.md](DATA_LIFECYCLE.md). The sh
 
 Every gated surface calls one predicate that ANDs its flag with a fail-closed check of its data:
 `discovery_available()`, `passage_available()`, `atlas_preview_available()`. A flag alone is never
-proof a feature is live ([decision 0004](../decisions/0004-flag-and-readiness.md)). The flag table
+proof a feature is live ([decision 0004](../decisions/0004-flag-and-readiness.md)). One deliberate
+exception: the browse connections panel's *existence* follows the flag alone so that a
+flag-ON/sidecar-missing window shows a "temporarily unavailable" panel instead of none
+(`web/pages/browse_enrichment.py`, pinned by `tests/test_discovery_panel_browse_wiring.py`). The flag table
 with defaults is in `CLAUDE.md`; every variable is in
 [docs/guides/ENV_VARS.md](../guides/ENV_VARS.md).
 

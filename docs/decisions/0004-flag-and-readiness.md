@@ -14,6 +14,13 @@ Every surface behind a feature flag (`DISCOVERY_ENABLED`, `ATLAS_PREVIEW_ENABLED
 ANDs the flag with a fail-closed readiness check of the data it needs. A flag alone is never treated
 as proof that a feature is live; a missing or invalid asset hides the surface cleanly.
 
+**One deliberate exception, kept on purpose:** the browse page's connections panel. Its
+*existence* is gated by the flag alone (`web/pages/browse_enrichment.py::discovery_panel_enabled`
+reads `DISCOVERY_ENABLED` directly) while its *status* is gated by `discovery_available()`, so a
+flag-ON/sidecar-missing window shows the panel in a "temporarily unavailable" state instead of
+making it vanish. `tests/test_discovery_panel_browse_wiring.py` pins that distinction; do not
+"fix" it into the blanket rule.
+
 ## Why
 
 Deploys are not atomic (assets go by `scp`, code by `git push`), and a flag can be flipped ahead of

@@ -14,8 +14,11 @@ by the `shared/*_service.py` modules -- `pgp_data/pgp.db`, `fist_data/fjms_enric
 `libraries_translations.db` -- plus the Tantivy indexes and, for the web app, the discovery
 sidecar (`discovery_data/`), the passage index (`passage_index/current/`) and the baked atlas asset
 (`atlas_data/`). `joins_data/joins.db` is different in kind: a **writable** puzzle-document store
-created at runtime by `shared/puzzle_service.py`. Supabase (PostgreSQL) holds only community data:
-auth, lists, corrections, comments, identification reviews. There is no separate backend process.
+created at runtime by `shared/puzzle_service.py`. Supabase (PostgreSQL) holds the community data
+-- auth, lists, corrections, comments, identification reviews -- and is also the **source** of the
+PGP reference tables (`documents`, `document_sources`, `document_footnotes`, `document_fragments`)
+from which `scripts/export_pgp_sidecar.py` builds `pgp_data/pgp.db`; at runtime both apps read PGP
+from the sidecar, never from Supabase. There is no separate backend process.
 
 **FastAPI itself is still live.** NiceGUI's `app` is a FastAPI instance; `/api/*` routes are
 registered by [web/api.py](../../web/api.py) (`init_api_routes`) and a dedicated FastAPI sub-app is
