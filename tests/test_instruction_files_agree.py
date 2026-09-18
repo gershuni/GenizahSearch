@@ -114,16 +114,28 @@ def names_a_path_narrower_than_tests(args: list[str]) -> bool:
     return False
 
 
+_CHAIN_SPLIT = re.compile(r"\s*(?:&&|\|\||;|\|)\s*")
+
+
 def offending_pytest_lines(text: str) -> list[tuple[int, str]]:
+    """Every fenced line whose executed command(s) include a broad pytest invocation.
+
+    The comment is stripped and chained commands are split BEFORE anything is judged, so
+    ``pytest tests/  # use scripts/run_local_tests.py instead`` and
+    ``python scripts/run_local_tests.py && pytest tests/`` are both flagged: a runner named in a
+    comment or in a sibling command does not excuse the broad invocation (Codex, PR #347).
+    The runner itself is never a pytest invocation, so it needs no exemption.
+    """
     bad: list[tuple[int, str]] = []
     for n, line in fenced_lines(text):
-        if any(r in line for r in BOUNDED_RUNNERS):
-            continue
-        args = pytest_invocation(line)
-        if args is None:
-            continue
-        if not names_a_path_narrower_than_tests(args):
-            bad.append((n, line.strip()))
+        code = line.split("#", 1)[0]
+        for segment in _CHAIN_SPLIT.split(code):
+            args = pytest_invocation(segment)
+            if args is None:
+                continue
+            if not names_a_path_narrower_than_tests(args):
+                bad.append((n, line.strip()))
+                break
     return bad
 
 
@@ -184,9 +196,11 @@ def test_rule_2_flags_the_forbidden_shapes():
         "python -m pytest -m slow\n"
         "pytest -m slow tests/\n"
         "PYTHONUTF8=1 python -m pytest tests/ -x -q\n"
+        "pytest tests/  # use scripts/run_local_tests.py instead\n"
+        "python scripts/run_local_tests.py && pytest tests/\n"
         "```\n"
     )
-    assert len(offending_pytest_lines(text)) == 5
+    assert len(offending_pytest_lines(text)) == 7
 
 
 def test_rule_2_allows_the_permitted_shapes():
