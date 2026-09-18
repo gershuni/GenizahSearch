@@ -116,26 +116,37 @@ repo-wide `addopts = -m "not slow"` default-exclude to `pyproject.toml`. That
 would silently exclude slow tests for every developer + CI invocation,
 changing behavior for tests unrelated to Phase 78.
 
-CI organisation (R2-#5 from round 2 review): `.github/workflows/ci.yml` has
-TWO test jobs:
+CI organisation: `.github/workflows/ci.yml` has seven jobs, six of which run
+tests (job names as in the workflow file):
 
-- `tests` (unchanged from pre-Phase-78): `pytest tests/` on ubuntu + windows
-  matrix. Slow tests are NOT excluded here — Concern #7 preservation.
-- `slow-tests` (NEW in Phase 78): `pytest -m slow tests/` on ubuntu only.
-  Dedicated gate for the new soak suite. R2-#5.
+- `lint-and-docs` -- `ruff check .` and `python scripts/check_docs.py`; no pytest.
+- `tests` -- `pytest tests/ -m "not gui and not render_smoke and not atlas_bake"`,
+  the same selection the runner splits locally. CI can afford it as one
+  process on a fresh runner; a developer machine cannot (see above). Slow
+  tests are NOT excluded here -- Concern #7 preservation.
+- `render-smoke-tests` -- `pytest tests/ -m render_smoke`, the NiceGUI lane.
+- `findings-browser-check` -- one named Playwright test in `tests/test_findings_page.py`.
+- `gui-tests` -- `python scripts/run_gui_tests.py`, the Qt lane.
+- `slow-tests` (Phase 78, R2-#5) -- `pytest -m slow tests/`, the dedicated gate
+  for the soak suite.
+- `atlas-bake-tests` -- `pytest tests/atlas_bake -m atlas_bake`.
 
 ### Running slow tests explicitly
 
 ```bash
-# Run ONLY slow tests:
-python -m pytest -m slow
+# ONLY the slow lane, through the bounded runner:
+python scripts/run_local_tests.py -m slow
 
-# Run only Phase 78's rate-limit soak:
-python -m pytest -m slow tests/test_search_api_soak.py
+# Only Phase 78's rate-limit soak (one named file is fine directly):
+pytest tests/test_search_api_soak.py -m slow
 
-# Run ONLY non-slow tests (opt-OUT for fast iteration):
-python -m pytest -m "not slow"
+# Everything but slow. The runner's -m REPLACES its default expression, so
+# the lanes it normally excludes must be repeated:
+python scripts/run_local_tests.py -m "not slow and not gui and not render_smoke and not atlas_bake"
 ```
+
+A path-less `pytest -m slow` collects from the rootdir and is the shape the
+section above forbids; do not write it.
 
 The `slow` marker is registered in `pyproject.toml` so `--strict-markers`
 workflows accept `@pytest.mark.slow` without UnknownMark warnings.

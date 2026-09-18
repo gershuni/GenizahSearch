@@ -178,7 +178,7 @@ See `docs/DOCUMENTATION_INDEX.md` for full documentation structure:
 
 ## Code Style
 
-- Python 3.10+
+- Python 3.11
 - NiceGUI for web UI
 - PyQt6 for desktop UI
 - Type hints encouraged

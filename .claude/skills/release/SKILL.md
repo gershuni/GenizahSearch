@@ -23,7 +23,9 @@ Send an agent (subagent_type=Explore) to verify the code is ready:
 
 **Checks:**
 - `git status` — working tree clean? Uncommitted changes?
-- `python -m pytest tests/ --tb=short -q` — all tests pass?
+- `python scripts/run_local_tests.py` — all tests pass? (the bounded runner; never one `pytest tests/`
+  process — see `tests/README.md`). For a desktop release also run `python scripts/run_gui_tests.py`,
+  the Qt lane CI runs as its own job.
 - **`python -m ruff check .` — explicit ruff pass** (per project memory: v7.12.0 CI failed on F401 unused imports; pre-flight must run ruff as its own line item, not implied by pytest)
 - `python scripts/check_docs.py` — documentation health OK? (NOTE: on Windows console may fail with UnicodeEncodeError on emoji — that's environment-only, not a blocker)
 - **`requirements.txt` vs `requirements-lock.txt` consistency** — every runtime dep in `requirements.txt` must have a matching pin in `requirements-lock.txt`. CI installs from the lock file, so a `requirements.txt` addition that's not lock-pinned breaks CI on the release commit. Diff check:
@@ -185,12 +187,11 @@ Ask: "Does this look right? Proceed with build and deploy?"
 
 1. Run `build_app.bat` (via the invocation above) — PyInstaller build (several minutes)
    - Verify `dist/GenizahSearchPro/GenizahSearchPro.exe` exists after build
-   - **`build_app.bat` REGENERATES (clobbers) `GenizahSearchPro.spec`** every run (command-line
-     PyInstaller writes a fresh minimal spec, stripping the maintained `collect_all('pymupdf')`/
-     `collect_all('zstandard')`/`collect_all('lxml')` + `fitz`/`openpyxl`/`defusedxml`
-     hidden-imports). The build still works (PyInstaller contrib hooks collect those deps), but
-     **after the build run `git restore GenizahSearchPro.spec`** so the maintained spec is never
-     committed clobbered.
+   - `build_app.bat` builds from the **checked-in** `GenizahSearchPro.spec`
+     (`python -m PyInstaller --noconfirm --clean GenizahSearchPro.spec`, `build_app.bat:13-21`), so the
+     maintained `collect_all('pymupdf')`/`collect_all('zstandard')`/`collect_all('lxml')` calls and the
+     `fitz`/`openpyxl`/`defusedxml` hidden imports are used as committed. The build does not rewrite
+     the spec; **commit any spec edit before building**.
 2. Run Inno Setup CLI to create installer (same CWD caveat — full paths):
    ```powershell
    Set-Location -LiteralPath 'C:\Genizahsearch'; [Environment]::CurrentDirectory = 'C:\Genizahsearch'; & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' 'C:\Genizahsearch\CompileScriptGenizah.iss'; Write-Output "ISCC_EXIT=$LASTEXITCODE"

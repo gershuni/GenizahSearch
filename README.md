@@ -143,7 +143,7 @@ python genizah_app.py         # desktop app
 python scripts/run_local_tests.py   # the test suite, in bounded lanes (never one pytest tests/ process)
 ```
 
-Python 3.10+, NiceGUI (web), PyQt6 (desktop). Read [CLAUDE.md](CLAUDE.md) for how the repo is
+Python 3.11, NiceGUI (web), PyQt6 (desktop). Read [CLAUDE.md](CLAUDE.md) for how the repo is
 organised and [docs/guides/DEVELOPER_GUIDE.md](docs/guides/DEVELOPER_GUIDE.md) before changing
 environment variables or data paths. Release process: `python scripts/bump_version.py X.Y.Z`,
 then the steps it prints.
