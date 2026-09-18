@@ -27,7 +27,10 @@ Send an agent (subagent_type=Explore) to verify the code is ready:
   process — see `tests/README.md`). Its default expression excludes the lanes CI runs as separate
   jobs, so add them explicitly: `python scripts/run_local_tests.py -m render_smoke` (the NiceGUI
   render-smoke lane; REQUIRED for a web release) and `python scripts/run_gui_tests.py` (the Qt lane;
-  REQUIRED for a desktop release).
+  REQUIRED for a desktop release). The render-smoke lane contains the masking sweep, which FAILS BY
+  DESIGN when `MASKING_SCAN_PATTERNS_FILE` is unset -- set it to the owner's gitignored pattern file
+  first (`$env:MASKING_SCAN_PATTERNS_FILE='.masking_patterns'`, the same value `scripts/init.ps1`
+  uses); a red lane with no file set is the gate working, not a release blocker to "fix".
 - **`python -m ruff check .` — explicit ruff pass** (per project memory: v7.12.0 CI failed on F401 unused imports; pre-flight must run ruff as its own line item, not implied by pytest)
 - `python scripts/check_docs.py` — documentation health OK? (NOTE: on Windows console may fail with UnicodeEncodeError on emoji — that's environment-only, not a blocker)
 - **`requirements.txt` vs `requirements-lock.txt` consistency** — every runtime dep in `requirements.txt` must have a matching pin in `requirements-lock.txt`. CI installs from the lock file, so a `requirements.txt` addition that's not lock-pinned breaks CI on the release commit. Diff check:
