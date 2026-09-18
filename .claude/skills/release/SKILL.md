@@ -24,8 +24,10 @@ Send an agent (subagent_type=Explore) to verify the code is ready:
 **Checks:**
 - `git status` — working tree clean? Uncommitted changes?
 - `python scripts/run_local_tests.py` — all tests pass? (the bounded runner; never one `pytest tests/`
-  process — see `tests/README.md`). For a desktop release also run `python scripts/run_gui_tests.py`,
-  the Qt lane CI runs as its own job.
+  process — see `tests/README.md`). Its default expression excludes the lanes CI runs as separate
+  jobs, so add them explicitly: `python scripts/run_local_tests.py -m render_smoke` (the NiceGUI
+  render-smoke lane; REQUIRED for a web release) and `python scripts/run_gui_tests.py` (the Qt lane;
+  REQUIRED for a desktop release).
 - **`python -m ruff check .` — explicit ruff pass** (per project memory: v7.12.0 CI failed on F401 unused imports; pre-flight must run ruff as its own line item, not implied by pytest)
 - `python scripts/check_docs.py` — documentation health OK? (NOTE: on Windows console may fail with UnicodeEncodeError on emoji — that's environment-only, not a blocker)
 - **`requirements.txt` vs `requirements-lock.txt` consistency** — every runtime dep in `requirements.txt` must have a matching pin in `requirements-lock.txt`. CI installs from the lock file, so a `requirements.txt` addition that's not lock-pinned breaks CI on the release commit. Diff check:

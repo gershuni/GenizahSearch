@@ -34,6 +34,7 @@ pip install ruff==0.15.10 pytest
 ruff check .
 python scripts/run_local_tests.py            # the test suite, in bounded lanes (CI's marker expression)
 python scripts/run_local_tests.py -m slow    # one marker lane, still through the runner
+python scripts/run_local_tests.py -m render_smoke   # the NiceGUI lane (CI job render-smoke-tests); -m REPLACES the default expression
 python scripts/run_gui_tests.py              # the Qt lane (CI job gui-tests)
 pytest tests/test_some_file.py               # one named file directly is fine
 PYTHONUTF8=1 python scripts/check_docs.py
