@@ -5233,3 +5233,9 @@ TRANSLATIONS.update({
     "Composition Search now opens on Letter-level search whenever its index is built; without an index it stays on Chunk search. A method you pick yourself is kept.":
         "חיפוש חיבורים נפתח כעת בחיפוש ברמת האות בכל פעם שהאינדקס שלו בנוי; בלי אינדקס הוא נשאר בחיפוש מקטעים. שיטה שבחרתם בעצמכם נשמרת.",
 })
+
+# Web What's New banner, v9.2.1 (2026-09-18): the GPT pilot went live.
+TRANSLATIONS.update({
+    "New: ask the Genizah in ChatGPT - the GenizahSearch GPT, a research skill for other AI assistants, and the public API, from the AI tools page.":
+        "חדש: שאלו את הגניזה ב־ ChatGPT – ה־GPT של GenizahSearch, סקיל מחקר לעוזרי AI אחרים וה־API הציבורי, הכול מעמוד כלי ה־AI.",
+})

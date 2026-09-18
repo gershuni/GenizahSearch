@@ -735,7 +735,7 @@ from version import APP_VERSION
 # Names the CONTENT wave, not a release: the seen flag is stored per browser
 # as this exact string, so it must change whenever the announcement does, and
 # "9.0.0" was already spent on the 2026-08-16 web release.
-WHATS_NEW_VERSION = "9.2.0-citations-and-print"
+WHATS_NEW_VERSION = "9.2.1-ai-tools"
 APP_PORT = int(os.environ.get('GENIZAH_PORT', 8081))
 
 # Initialize API routes (Image Proxy, Export)
@@ -1697,9 +1697,11 @@ def create_layout():
     # GATED surface whose flag is off -- is still real and still tested; what
     # is gone is only the "nothing at all to announce" case, which no longer
     # occurs. See the two rewritten tests in that file.
+    # v9.2.1 (2026-09-18): the GPT is live for every reader, so this entry is
+    # ungated too, and it points at the page that explains all three ways in.
     _new_surfaces.append(
-        (tr("New: a print-view button, and a prominent citation button - for "
-            "the site as a whole and for each page."), '/browse'))
+        (tr("New: ask the Genizah in ChatGPT - the GenizahSearch GPT, a research "
+            "skill for other AI assistants, and the public API, from the AI tools page."), '/ai'))
 
     _show_whats_new = bool(_new_surfaces) and current_page not in _WHATS_NEW_SUPPRESSED_ON
     _whats_new_unseen = safe_user_get('whats_new_dismissed') != WHATS_NEW_VERSION

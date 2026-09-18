@@ -208,7 +208,8 @@ def test_a_box_without_the_index_announces_only_what_it_actually_has():
             'page did not render')
         # `_texts` already returns a STRING; joining it splits every character.
         text = _texts(elements)
-        assert 'citation button' in text, (
+        # v9.2.1: the always-available entry is the GPT / AI tools one.
+        assert 'ChatGPT' in text, (
             'the toast does not name the always-available entry: %r' % text[:400])
         assert 'Letter-level' not in text, (
             'a GATED surface is advertised on a box whose index never opened')
