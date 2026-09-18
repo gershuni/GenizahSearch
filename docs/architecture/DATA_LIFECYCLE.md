@@ -193,8 +193,8 @@ All under `Config.INDEX_DIR` unless stated. None is bundled; only `lists.pkl` ev
 | the six 0-byte sidecar stubs | see §2b | |
 | `.server.pid` | PID file of the local dev server CLI `server.py` | **not gitignored** (`.gitignore` covers `app.pid` only); does not exist in the working tree today |
 | `_ie_volume_map_build.log` and similar build logs at the root | untracked debris | |
-| `reports/*_post_phase84.*`, `reports/synthetic_ambiguity_residue*.csv`, `reports/synthetic_coverage.md`, `pgp_data/*_report.*` | evidence outputs of one-off pipeline runs | the `_post_phase84` set moves to `docs/archive/reports/phase84/` in Round 1; `scripts/build_residue_patterns_artifact.py` reads the untracked `..._dryrun.csv` sibling, so that consumer has no committed input |
-| `char_merges_all.xlsx`, `char_merges_filtered.xlsx` | intermediate outputs of `scripts/analyze_char_merges.py` | archived in Round 1; the report stays |
+| `reports/*_post_phase84.*`, `reports/synthetic_ambiguity_residue*.csv`, `reports/synthetic_coverage.md`, `pgp_data/*_report.*` | evidence outputs of one-off pipeline runs | the `_post_phase84` set was moved to `docs/archive/reports/phase84/` (Round 1); `scripts/build_residue_patterns_artifact.py` reads the untracked `..._dryrun.csv` sibling, so that consumer has no committed input |
+| `char_merges_all.xlsx`, `char_merges_filtered.xlsx` | intermediate outputs of `scripts/analyze_char_merges.py` | archived under `docs/archive/data/char_merges/` (Round 1); the report stays at the root |
 | `<INDEX_DIR>/metadata_cache.pkl`, `nli_cache.pkl`, `images_cache/` | see §3 and §4 | |
 
 ## What this table found (facts for the tracker)
