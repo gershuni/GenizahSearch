@@ -22,7 +22,8 @@
    web/ (NiceGUI + FastAPI /api/*)          desktop/ + genizah_app.py (PyQt6)
    genizahsearch.com                        GenizahSearchPro.exe (PyInstaller + Inno Setup)
         |                                            |
-        +------------- Supabase (community data only: auth, lists, corrections, comments, reviews)
+        +------------- Supabase (community data: auth, lists, corrections, comments, reviews;
+        |                        + the PGP reference tables that pgp.db is exported from)
         |                                            |
    Tantivy indexes + SQLite sidecars           Tantivy indexes + SQLite sidecars (bundled)
 ```
@@ -166,8 +167,11 @@ Details, one row per artifact, in [DATA_LIFECYCLE.md](DATA_LIFECYCLE.md). The sh
   environment variable `GENIZAH_PASSAGE_DATA_DIR` overrides (read once at import); the discovery
   and atlas assets resolve the same way (`GENIZAH_DISCOVERY_DATA_DIR` for discovery). Per-user
   state is NiceGUI storage behind `web/safe_storage.py`; saved joins go to `joins_data/joins.db`.
-  Data reaches the server by `scp` **before** the code that reads it is pushed; `deploy.sh` itself
-  has no data step ([docs/guides/DEPLOYMENT_TECHNICAL.md](../guides/DEPLOYMENT_TECHNICAL.md)).
+  Sidecar databases and the baked discovery/atlas assets reach the server by `scp` **before** the
+  code that reads them is pushed; the passage index is the exception -- code first, then
+  `scripts/build_passage_index.py` builds it **on the server** against the corpus already served
+  there, never uploaded. `deploy.sh` itself has no data step
+  ([docs/guides/DEPLOYMENT_TECHNICAL.md](../guides/DEPLOYMENT_TECHNICAL.md)).
 - **Gitignored top-level directories that code resolves at runtime** -- and that a clean clone
   therefore lacks: `Genizah_Index/`, `passage_index/`, `discovery_data/`, `atlas_data/`,
   `nli_data/`, `fgp_data/`, `joins_data/`, `discovery_builds/`, plus the gitignored files inside
@@ -185,9 +189,12 @@ Details, one row per artifact, in [DATA_LIFECYCLE.md](DATA_LIFECYCLE.md). The sh
 
 ## Feature flags are ANDed with readiness
 
-Every gated surface calls one predicate that ANDs its flag with a fail-closed check of its data:
-`discovery_available()`, `passage_available()`, `atlas_preview_available()`. A flag alone is never
-proof a feature is live ([decision 0004](../decisions/0004-flag-and-readiness.md)). One deliberate
+Every surface behind an **asset-backed** flag (`DISCOVERY_ENABLED`, `ATLAS_PREVIEW_ENABLED`,
+`PASSAGE_PARALLELS_ENABLED`, `PASSAGE_MULTI_WITNESS_ENABLED`) calls one predicate that ANDs its
+flag with a fail-closed check of its data: `discovery_available()`, `passage_available()`,
+`atlas_preview_available()`. A flag alone is never proof such a feature is live
+([decision 0004](../decisions/0004-flag-and-readiness.md)); plain toggles with no data behind
+them (`WEB_PUZZLE_ENABLED`, `IDENTIFICATION_REVIEWS_ENABLED`) are read directly. One deliberate
 exception: the browse connections panel's *existence* follows the flag alone so that a
 flag-ON/sidecar-missing window shows a "temporarily unavailable" panel instead of none
 (`web/pages/browse_enrichment.py`, pinned by `tests/test_discovery_panel_browse_wiring.py`). The flag table

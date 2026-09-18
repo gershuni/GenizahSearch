@@ -1,4 +1,4 @@
-# 0004 -- A feature flag is necessary but never sufficient
+# 0004 -- An asset-backed feature flag is necessary but never sufficient
 
 - **Status:** binding
 - **Date:** 2026-07 (Phase 133/134 discovery launch work); restated in CLAUDE.md "Environment Variables"
@@ -9,10 +9,14 @@
 
 ## Decision
 
-Every surface behind a feature flag (`DISCOVERY_ENABLED`, `ATLAS_PREVIEW_ENABLED`,
-`PASSAGE_PARALLELS_ENABLED`, `PASSAGE_MULTI_WITNESS_ENABLED`, ...) is gated on **one** predicate that
-ANDs the flag with a fail-closed readiness check of the data it needs. A flag alone is never treated
-as proof that a feature is live; a missing or invalid asset hides the surface cleanly.
+Every surface behind a flag whose feature depends on a **provisioned asset** -- `DISCOVERY_ENABLED`
+(the discovery sidecar), `ATLAS_PREVIEW_ENABLED` (the baked atlas), `PASSAGE_PARALLELS_ENABLED` and
+`PASSAGE_MULTI_WITNESS_ENABLED` (the passage index), `FGP_TRANSCRIPTIONS_ENABLED` (`fgp_data/`) --
+is gated on **one** predicate that ANDs the flag with a fail-closed readiness check of that data.
+Such a flag alone is never treated as proof that the feature is live; a missing or invalid asset
+hides the surface cleanly. Plain toggles with no data behind them -- `WEB_PUZZLE_ENABLED`,
+`IDENTIFICATION_REVIEWS_ENABLED`, `SEARCH_API_MODE` -- are read directly, and this decision does
+not ask them to grow a readiness predicate.
 
 **One deliberate exception, kept on purpose:** the browse page's connections panel. Its
 *existence* is gated by the flag alone (`web/pages/browse_enrichment.py::discovery_panel_enabled`
