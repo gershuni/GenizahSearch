@@ -29,3 +29,9 @@ markers = [
 # to `test_*.py` excludes the smoke harness and keeps the project namespace
 # clean. No other `*_test.py` files exist in first-party code.
 python_files = ["test_*.py"]
+
+# Repo-structure Round 1 (2026-09-18): a bare `pytest` collects from tests/ only, instead of
+# walking the whole checkout (skills/, scripts/, docs/archive/ carry *.py too). This bounds
+# COLLECTION; it does nothing for process lifetime, which is scripts/run_local_tests.py's job
+# and the reason `pytest tests/` as one process is still not how the suite is run.
+testpaths = ["tests"]

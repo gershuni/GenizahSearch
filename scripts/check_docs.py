@@ -28,7 +28,24 @@ OUTDATED_TERMS = [
     ('genizah-backend', 'Service removed - only genizah-web exists', []),
     ('backend/requirements.txt', 'File no longer exists', []),
     ('DATABASE_URL', 'No longer used - replaced by SUPABASE_URL', []),
+    ('python -m backend.main', 'The standalone backend process was removed in Jan 2026', []),
 ]
+
+# The instruction files at the repository root. They are not under docs/, so until 2026-09-18
+# nothing checked their links or their vocabulary -- and they were the files that disagreed with
+# each other (Python 3.10+ vs 3.11, 'FastAPI was removed', 'pytest tests/'). Every one enters
+# the broken-link scan; the outdated-term scan skips the three that name the old terms on
+# purpose, as the 'do not say this' list.
+ROOT_INSTRUCTION_DOCS = (
+    'CLAUDE.md',
+    'AGENTS.md',
+    'CONTRIBUTING.md',
+    '.cursorrules',
+    'README.md',
+    'tests/README.md',
+    '.claude/skills/release/SKILL.md',
+)
+ROOT_INSTRUCTION_TERM_EXEMPT = ('CLAUDE.md', 'CONTRIBUTING.md', '.cursorrules')
 
 # Files to skip entirely (they intentionally reference old terms)
 SKIP_FILES = [
@@ -157,14 +174,27 @@ def check_critical_docs() -> list:
     return issues
 
 
+def _scanned_docs(*, term_scan: bool) -> list:
+    """docs/**/*.md (archive excluded) plus the root instruction files.
+
+    The term scan leaves out the instruction files that list the outdated terms as the
+    things not to say (ROOT_INSTRUCTION_TERM_EXEMPT); the link scan covers all of them.
+    """
+    files = [p for p in DOCS_DIR.rglob('*.md') if 'archive' not in str(p)]
+    for rel in ROOT_INSTRUCTION_DOCS:
+        if term_scan and rel in ROOT_INSTRUCTION_TERM_EXEMPT:
+            continue
+        path = ROOT_DIR / rel
+        if path.is_file():
+            files.append(path)
+    return files
+
+
 def check_outdated_terms() -> list:
     """Search for terms that may indicate outdated content."""
     issues = []
 
-    for md_file in DOCS_DIR.rglob('*.md'):
-        # Skip archived documents
-        if 'archive' in str(md_file):
-            continue
+    for md_file in _scanned_docs(term_scan=True):
 
         # Skip files that intentionally reference old terms
         if md_file.name in SKIP_FILES:
@@ -443,12 +473,10 @@ def check_context_budget() -> list:
 
 
 def check_broken_links() -> list:
-    """Check for broken internal links."""
+    """Check for broken internal links (docs/ and the root instruction files)."""
     issues = []
 
-    for md_file in DOCS_DIR.rglob('*.md'):
-        if 'archive' in str(md_file):
-            continue
+    for md_file in _scanned_docs(term_scan=False):
 
         try:
             content = md_file.read_text(encoding='utf-8')

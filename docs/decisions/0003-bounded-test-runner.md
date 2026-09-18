@@ -42,5 +42,6 @@ skill before 2026-09-18).
 ## Enforced by
 
 [tests/test_run_local_tests_gate.py](../../tests/test_run_local_tests_gate.py) for the runner
-itself. The commands the instruction files document are convention until the gates work that
-follows this page adds a consistency test over their fenced code blocks.
+itself; [tests/test_instruction_files_agree.py](../../tests/test_instruction_files_agree.py) for
+the commands the instruction files document (every pytest line in their fenced code blocks must
+name a path narrower than `tests/` or be the runner).

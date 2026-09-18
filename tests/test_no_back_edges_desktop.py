@@ -18,6 +18,7 @@ This is intentionally more thorough than a flat ast.iter_child_nodes scan
 """
 import ast
 import pathlib
+import subprocess
 
 import pytest
 
@@ -46,6 +47,13 @@ DESKTOP_MODULES = [
     "desktop/update_ui.py",   # Phase 127 (pre-registered; skip-until-exists guard)
     "desktop/viewers.py",
     "desktop/vs_cache.py",
+    # Registered 2026-09-18 (repo-structure Round 1): these five had no guard before the
+    # registry-completeness test below existed.
+    "desktop/passage_lifecycle.py",
+    "desktop/passage_witnesses.py",
+    "desktop/passage_workers.py",
+    "desktop/widgets/__init__.py",
+    "desktop/widgets/line_number_text_edit.py",
 ]
 
 # Compound statement types whose bodies run at import time
@@ -216,3 +224,35 @@ def test_guard_ignores_lazy_function_body_import():
         f"Guard incorrectly flagged a function-body lazy import: lines {violations}. "
         "FunctionDef bodies must be excluded from the import-time traversal."
     )
+
+
+# ---------------------------------------------------------------------------
+# Registry completeness (repo-structure Round 1, 2026-09-18)
+#
+# DESKTOP_MODULES is a hand-maintained list, and a list protects only the modules somebody remembered to
+# add: five desktop/ files (the passage_* trio and widgets/) and 77 shared/ files had no guard
+# until this test existed. Every tracked *.py under desktop/ must be registered; a new file fails
+# here until it is, and a registered file with a real module-level back-edge fails the
+# per-module test above -- never silently.
+# ---------------------------------------------------------------------------
+
+def _tracked_python_files(prefix: str) -> set[str]:
+    out = subprocess.run(
+        ["git", "ls-files", "-z", prefix], cwd=REPO_ROOT, capture_output=True, check=True,
+    ).stdout.decode("utf-8", "surrogateescape")
+    return {p for p in out.split("\0") if p.endswith(".py")}
+
+
+def test_registry_covers_every_tracked_module():
+    missing = sorted(_tracked_python_files("desktop") - set(DESKTOP_MODULES))
+    assert not missing, (
+        f"{missing} are tracked under desktop/ but not registered in DESKTOP_MODULES; add them so the "
+        "back-edge guard covers them (a real back-edge then fails the per-module test, not this one)."
+    )
+
+
+def test_registry_has_no_stale_entries():
+    """A registered path that git does not track is a leftover (or a pre-registration that never
+    happened); the per-module test would skip it forever."""
+    stale = sorted(set(DESKTOP_MODULES) - _tracked_python_files("desktop"))
+    assert not stale, f"{stale} are registered in DESKTOP_MODULES but not tracked under desktop/"
