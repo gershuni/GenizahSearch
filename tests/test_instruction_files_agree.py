@@ -140,7 +140,14 @@ def offending_pytest_lines(text: str) -> list[tuple[int, str]]:
 
 
 def fastapi_sentences_missing_scope(text: str) -> list[str]:
+    """Sentences that say FastAPI was removed/outdated without scoping it to the process.
+
+    Single line breaks are Markdown wrapping, not sentence boundaries, so they are folded into
+    spaces first; otherwise ``FastAPI backend was\\nremoved`` would split into two harmless
+    fragments and pass (Codex, PR #347). Blank lines still separate paragraphs.
+    """
     bad: list[str] = []
+    text = re.sub(r"[ \t]*\n(?!\n)[ \t]*", " ", text)
     for sentence in _SENTENCE_SPLIT.split(text):
         s = sentence.lower()
         if "fastapi" in s and ("removed" in s or "outdated" in s):
@@ -221,6 +228,12 @@ def test_rule_2_allows_the_permitted_shapes():
 def test_rule_3_flags_the_bare_claim_and_accepts_the_scoped_one():
     assert fastapi_sentences_missing_scope("FastAPI backend was REMOVED in January 2026.")
     assert fastapi_sentences_missing_scope("Avoid outdated terms (FastAPI, genizah-backend).")
+    # a Markdown line wrap inside the sentence must not hide it
+    assert fastapi_sentences_missing_scope("FastAPI backend was\nremoved in January 2026.")
     assert not fastapi_sentences_missing_scope(
         "The standalone backend process was removed in January 2026; FastAPI itself is still live."
+    )
+    # ...and a wrap between the qualifier and the claim must not reject valid wording
+    assert not fastapi_sentences_missing_scope(
+        "The standalone backend process was removed in\nJanuary 2026; FastAPI itself is still live."
     )
