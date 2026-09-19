@@ -1,4 +1,12 @@
-# GenizahSearch File Index
+# GenizahSearch File Index (archived 2026-09-18)
+
+> **Superseded.** This 2026-03-26 listing is replaced by
+> [docs/architecture/OVERVIEW.md](../architecture/OVERVIEW.md) (a decision for every directory and
+> root file) and [docs/architecture/DATA_LIFECYCLE.md](../architecture/DATA_LIFECYCLE.md) (data
+> artifacts). Known errors in the text below, kept as written: `genizah_core.py` is a permanent
+> facade, not a ~9.5K-line engine (v8.3.0); `image.png` is not the site's Open Graph image
+> (`web/static/og-image.png` is); the LICENSE is CC BY-NC-SA 4.0, not MIT; many listed scripts no
+> longer exist.
 
 > Last updated: 2026-03-26
 

@@ -1,6 +1,6 @@
 # GenizahSearch Documentation Index
 
-> Last updated: 2026-08-16
+> Last updated: 2026-09-18
 
 This directory contains all project documentation, organized by category.
 
@@ -11,12 +11,14 @@ This directory contains all project documentation, organized by category.
 | Need to... | Read this |
 |------------|-----------|
 | **See open bugs & issues** | [OPEN_ISSUES.md](OPEN_ISSUES.md) |
+| **Understand where code and data live, and who owns what** | [architecture/OVERVIEW.md](architecture/OVERVIEW.md), [architecture/DATA_LIFECYCLE.md](architecture/DATA_LIFECYCLE.md) |
+| **See why a decision was made (and not re-open it)** | [decisions/](decisions/README.md) |
 | **See feature ideas / what to build next** | [FEATURE_IDEAS.md](FEATURE_IDEAS.md) |
 | **Know what v9.0.0 actually shipped vs. planned** | [v9.0.0 Milestone Audit](../.planning/milestones/v9.0.0-MILESTONE-AUDIT.md) — 81 verified gaps, ranked; supersedes the archived v9.0.0 roadmap wherever they disagree |
 | Deploy the website | [guides/DEPLOYMENT_TECHNICAL.md](guides/DEPLOYMENT_TECHNICAL.md) |
 | Manage browser extension | [guides/DEPLOYMENT_TECHNICAL.md#browser-extension](guides/DEPLOYMENT_TECHNICAL.md#browser-extension-genizahsearch-image-helper) |
 | Manage the website (non-technical) | [guides/WEBSITE_ADMIN_GUIDE.md](guides/WEBSITE_ADMIN_GUIDE.md) |
-| Find a specific file | [FILE_INDEX.md](FILE_INDEX.md) |
+| Find where a file belongs | [architecture/OVERVIEW.md](architecture/OVERVIEW.md) -- the 2026-03 file listing is archived at `archive/FILE_INDEX_2026-03-26.md` |
 | Understand the code structure | [CODE_INDEX.md](CODE_INDEX.md) |
 | See future implementation plans | [plans/PLANS_INDEX.md](plans/PLANS_INDEX.md) |
 | Check translation stats | [TRANSLATION_STATS.md](TRANSLATION_STATS.md) |
@@ -29,8 +31,13 @@ This directory contains all project documentation, organized by category.
 docs/
 ├── DOCUMENTATION_INDEX.md    # This file
 ├── OPEN_ISSUES.md            # Active issue tracker (AI agents MUST update)
-├── FILE_INDEX.md             # Complete file listing for the project
-├── CODE_INDEX.md             # Code structure and architecture
+├── CODE_INDEX.md             # Symbol-level index of the code
+│
+├── architecture/             # CURRENT ARCHITECTURE -- authoritative for where code and data live
+│   ├── OVERVIEW.md               # Components, dependency rules + their tests, state ownership, decision tables
+│   └── DATA_LIFECYCLE.md         # One row per data artifact
+│
+├── decisions/                # One page per binding decision (README.md indexes them)
 ├── TRANSLATION_STATS.md      # Translation coverage stats
 ├── FJMS_API_REFERENCE.md     # FJMS API working reference
 ├── FIST_GAP_FILL_STATS.md    # FIST gap-fill import statistics
@@ -53,8 +60,10 @@ docs/
 │   ├── JOINS_SIMPLIFIED_SPEC.md
 │   └── PUZZLE_WEB_TECHNICAL_SPEC.md
 │
-└── archive/                  # 40+ historical documents
-    ├── plans/                    # 15 completed plan files + responsa-search/
+└── archive/                  # Historical documents; each names its successor where one exists
+    ├── plans/                    # Completed plan files + responsa-search/
+    ├── codebase-snapshot-2026-02-05/  # The GSD codebase map, pre-v8.3.0 (superseded by architecture/)
+    ├── FILE_INDEX_2026-03-26.md  # The old file listing (superseded by architecture/OVERVIEW.md)
     ├── CODE_REVIEW_*.md          # One-time code reviews
     ├── POSTHOG_ANALYTICS_*.md    # Point-in-time analytics snapshots
     ├── TEST_REPORT_AREAS_*.md    # One-time test reports
@@ -62,6 +71,31 @@ docs/
     ├── SUPABASE_MIGRATION_PLAN.md
     └── ...                       # Other historical docs
 ```
+
+---
+
+## Architecture and decisions (start here)
+
+| Page | What it answers |
+|------|-----------------|
+| [architecture/OVERVIEW.md](architecture/OVERVIEW.md) | Where code lives, the dependency rules and the tests that enforce them, who owns which state, and a decision for every top-level directory and root file |
+| [architecture/DATA_LIFECYCLE.md](architecture/DATA_LIFECYCLE.md) | One row per data artifact: producer, consumers, class, where its location is decided, rebuild, validation, distribution |
+| [decisions/](decisions/README.md) | The binding decisions -- permanent facade, sidecars instead of a backend process, bounded test runner, flag AND readiness, document classes, scripts namespace, flat tests, root assets, masked-corpus rule |
+
+### Which document is authoritative for what
+
+| Class | Lives in | Rule |
+|-------|----------|------|
+| Current architecture | `architecture/`, `guides/`, `specs/` pages marked current | authoritative; kept current by `scripts/check_docs.py` and the tests |
+| Active planning | `.planning/ROADMAP.md`, `STATE.md`, `PROJECT.md`, `.planning/phases/` | owned by the GSD tooling; edited only through it |
+| Audit evidence | `.planning/milestones/*-MILESTONE-AUDIT.md`, `.planning/phase87_storage_allowlist.yaml`, phase decision files tests read by path | cited as evidence; never moved |
+| Archived history | `archive/`, `.planning/milestones/*-phases/`, `.planning/quick/`, `.planning/debug/` | banner names the successor; excluded from the doc gates |
+
+The instruction files at the repository root -- [AGENTS.md](../AGENTS.md) (canonical commands and
+layout rules), [CLAUDE.md](../CLAUDE.md) (project context for Claude Code),
+[CONTRIBUTING.md](../CONTRIBUTING.md), [.cursorrules](../.cursorrules) and
+[tests/README.md](../tests/README.md) (why the suite runs in bounded lanes) -- are kept consistent
+with each other by the doc gates; AGENTS.md states each rule once and the others follow it.
 
 ---
 
@@ -114,6 +148,8 @@ Detailed specifications for complex features:
 | [discovery-v3-naming.md](specs/discovery-v3-naming.md) | Resolves the "v2.1" naming collision between the deployed rebuild and the gen-2 refresh |
 | [discovery-v3-masking-evidence.md](specs/discovery-v3-masking-evidence.md) | Masking-scan evidence for the discovery-v3 track |
 | [discovery-v4-public-reference-expansion.md](specs/discovery-v4-public-reference-expansion.md) | V4 public Sefaria/Wikisource reference expansion — built, deployment owner-gated |
+| [discovery-v4.1-public-source-and-r-shadow-plan.md](specs/discovery-v4.1-public-source-and-r-shadow-plan.md) | V4.1 public-source expansion and the R-source shadow track |
+| [discovery-v4.2-combined-bake-and-public-first-plan.md](specs/discovery-v4.2-combined-bake-and-public-first-plan.md) | V4.2 combined bake, container sources, and public-first identities |
 | [discovery-band-labels-v1.md](specs/discovery-band-labels-v1.md) | Honesty-safe band/label vocabulary (no precision percentages) |
 | [discovery-relation-matrix-v1.md](specs/discovery-relation-matrix-v1.md) | Frozen relation precedence matrix (semantics frozen 2026-08-12) |
 | [discovery-budgets.md](specs/discovery-budgets.md) | Discovery acceptance/performance budgets (PERF-01) |
@@ -144,18 +180,18 @@ Detailed specifications for complex features:
 
 ## Code Reference
 
-- **[CODE_INDEX.md](CODE_INDEX.md)** - Overview of codebase structure
-  - File organization
-  - Key modules and their responsibilities
-  - Data flow diagrams
+- **[architecture/OVERVIEW.md](architecture/OVERVIEW.md)** - Where code lives and why (authoritative)
+- **[CODE_INDEX.md](CODE_INDEX.md)** - Symbol-level index (classes, functions, line numbers), generated per module with `scripts/gen_code_index_section.py`
 
 ---
 
 ## Archive
 
-The `archive/` directory contains 40+ historical documents that are no longer actively maintained:
+The `archive/` directory contains the historical documents that are no longer maintained (see the
+directory listing; each names its successor where one exists):
 
-- **Completed plans** - `archive/plans/` (15 plan files + responsa-search design docs)
+- **Superseded structure docs** - `archive/FILE_INDEX_2026-03-26.md`, `archive/codebase-snapshot-2026-02-05/` (replaced by `architecture/`)
+- **Completed plans** - `archive/plans/` (plan files + responsa-search design docs)
 - **One-time reports** - Code reviews, analytics snapshots, bug reports
 - **Test reports** - One-time code review/test reports
 - **Handoff documents** - Session handoffs between developers
@@ -195,8 +231,11 @@ These files remain in the project root:
 |------|---------|
 | `README.md` | Project overview and quick start |
 | `CHANGELOG.md` | Version history |
-| `CLAUDE.md` | Instructions for AI assistants |
+| `AGENTS.md` | Canonical commands and layout rules (tool-neutral; the other instruction files follow it) |
+| `CLAUDE.md` | Project context for Claude Code |
+| `CONTRIBUTING.md` | Contributor quick start and the pre-PR gates |
+| `.cursorrules` | Cursor IDE rules (points at AGENTS.md) |
 
 ---
 
-*Last reorganization: 2026-03-26*
+*Last reorganization: 2026-09-18 (architecture/ and decisions/ added; FILE_INDEX archived)*
