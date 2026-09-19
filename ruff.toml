@@ -3,6 +3,10 @@
 # Expand ruleset in future milestones
 
 line-length = 120  # Future-friendly default (not enforced yet)
+# The version floor the docs state and CI proves (.github/workflows/ci.yml runs 3.11 only).
+# Recorded here rather than in a pyproject [project] table: the repo has no build backend, so
+# `dynamic = ["version"]` would be invalid and a static version would drift from version.py.
+target-version = "py311"
 
 extend-exclude = [
     ".claude",

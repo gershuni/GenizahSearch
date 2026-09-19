@@ -2,7 +2,9 @@
 
 ## Project Context
 This is a Hebrew manuscript search platform using NiceGUI (web) and PyQt6 (desktop).
-Backend is Supabase (PostgreSQL cloud). FastAPI backend was REMOVED in January 2026.
+Backend is Supabase (PostgreSQL cloud). The standalone backend process was removed in January 2026;
+FastAPI itself is still live inside the NiceGUI app and serves `/api/*`.
+Read AGENTS.md first: it holds the canonical commands and the layout rules.
 
 ## Documentation Requirements
 
@@ -19,7 +21,7 @@ python scripts/check_docs.py
 ```
 
 ### Outdated terms to AVOID in documentation:
-- FastAPI, backend server (removed)
+- `genizah-backend` / the standalone backend server process (removed Jan 2026 -- FastAPI the framework is still live)
 - genizah-backend service (removed)
 - DATABASE_URL (use SUPABASE_URL)
 - port 8000 (removed)
@@ -32,6 +34,7 @@ python scripts/check_docs.py
 - PyQt6 for desktop UI
 
 ## Key Files
+- AGENTS.md - canonical commands and layout rules (read this first)
 - web/supabase_client.py - Database operations
 - genizah_core.py - Search engine
 - web/pages/ - Web app pages
