@@ -236,12 +236,12 @@ doc gates.
 | `integrations/` | the ChatGPT integration's OpenAPI schema and privacy page | stays; served to the GPT |
 | `migrations/` | Supabase SQL migrations | stays; a `supabase/` regrouping with `supabase_setup.sql` is a Round 2 item |
 | `pgp_data/` | PGP sidecar (`pgp.db`, gitignored) and its tracked companions | stays |
-| `reports/` | CSV/TXT evidence from data pipelines; one is read at runtime (`leading_zero_collisions.csv`) and one is written at start-up (`cudl_alias_collisions.csv`, untracked) | stays; the four phase-84 leftovers move to `docs/archive/reports/phase84/` in the Round 1 archiving PR that follows this page |
+| `reports/` | CSV/TXT evidence from data pipelines; one is read at runtime (`leading_zero_collisions.csv`) and one is written at start-up (`cudl_alias_collisions.csv`, untracked) | stays; the four phase-84 leftovers were moved to `docs/archive/reports/phase84/` (Round 1) |
 | `scripts/` | tooling, flat namespace package | stays flat; regrouping is Round 2 |
 | `shared/` | code both apps use | grows: cross-app root modules are proposed to move here (Stage 2) |
 | `skills/` | the published research skill | **frozen in place** (published contract, CI-exercised, namespace pin) |
 | `tests/` | the suite, flat plus lane subdirectories | stays flat |
-| `verification/` | 2026-04 accessibility verification scripts and the screenshots they emit; nothing reads them | still at the root; moves to `docs/archive/verification-2026-04-a11y/` in the Round 1 archiving PR that follows this page |
+| `verification/` | 2026-04 accessibility verification scripts and the screenshots they emit; nothing read them | moved to `docs/archive/verification-2026-04-a11y/` (Round 1); the directory no longer exists |
 | `web/` | the NiceGUI app | stays |
 
 ## Decision table: every tracked root file
@@ -292,8 +292,7 @@ the server's variables.
 **Instruction files and repository metadata** -- stay: `README.md`, `CHANGELOG.md`, `CLAUDE.md`,
 `AGENTS.md`, `CONTRIBUTING.md`, `.cursorrules`, `LICENSE`, `.gitignore`, `.gitattributes`.
 
-**Scheduled for archiving in the Round 1 archiving PR that follows this page** (a move under
-`docs/archive/`, nothing deleted; all five are still tracked at the root as this page is written):
+**Archived in Round 1** (moved under `docs/archive/`, nothing deleted):
 `start_servers.sh` (launches the removed backend process), `web_pilot.py` (unreferenced),
 `image.png` (not the site's OG image, which is `web/static/og-image.png`), `char_merges_all.xlsx`
 and `char_merges_filtered.xlsx` (intermediate outputs of the character-merge analysis; the report

@@ -4,6 +4,33 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Internal -- repo structure Round 1, stage 1 (2026-09-18; docs, gates, archiving; no behaviour change)
+
+- **Instruction files agree.** `AGENTS.md` is the tool-neutral command sheet (bounded test runner,
+  `ruff==0.15.10`, layout rules); `CLAUDE.md`, `CONTRIBUTING.md`, `.cursorrules`, `README.md`,
+  `tests/README.md` and the release skill follow it: Python 3.11, no `pytest tests/` as one process,
+  "the standalone backend process was removed" rather than "FastAPI was removed".
+- **Authoritative architecture pages.** `docs/architecture/OVERVIEW.md` (where code lives, the guard
+  tests, who owns which state, a decision for every top-level directory and root file),
+  `docs/architecture/DATA_LIFECYCLE.md` (one row per data artifact), `docs/decisions/` (nine binding
+  decisions). `CLAUDE.md` points at them instead of carrying the diagram and file list;
+  `docs/FILE_INDEX.md` and the 2026-02 GSD codebase map are archived with banners.
+- **Gates.** `tests/test_instruction_files_agree.py`; registry-completeness checks in both back-edge
+  guards (5 desktop and 77 shared modules were unguarded); `tests/test_canonical_module_locations.py`;
+  `scripts/check_docs.py` scans the root instruction files; `pyproject.toml` `testpaths`;
+  `.gitignore` negations for nine tracked assets a blanket rule matched. The packaging smoke looked
+  for the EXE at a path the build never writes and skipped for months; repaired, made fail-not-skip
+  under `GENIZAH_PACKAGING_SMOKE=1`, and the frozen `--self-test-pymupdf` now finds its fixture from
+  the current directory (the only change outside tests and docs).
+- **Archived, nothing deleted:** `start_servers.sh`, `web_pilot.py`, `image.png`,
+  `char_merges_all/filtered.xlsx`, `web/Transcriptions_part.txt`, the phase-84 CUDL scans and
+  `verification/`, all under `docs/archive/` with README banners.
+- The module moves proposed for stage 2 are not part of this entry; they wait for the owner's decision.
+
+---
+
 ## [9.2.1] - 2026-09-17 — The viewer is its own window, a hint for stray Local searches, honest Oxford images
 
 **On the web, deployed the same day (#338–#342, merged from the cloud).** *Ask the Genizah

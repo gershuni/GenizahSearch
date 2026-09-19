@@ -1,6 +1,7 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-09-18 (tracker split, before the repo-structure Round 1 work) -- five superseded session headers (2026-09-06 to 2026-09-17, 4.6 KB) moved verbatim to the archive's 2026-09-18 block, and `scripts/archive_closed_issues.py --apply` moved the closed body of section 6. No open item changed.
+> **Last Updated:** 2026-09-18 (evening) -- **Repo structure Round 1, stage 1 closed** (PRs #344, #345, #346, #347 and the archiving PR that carries this entry: docs, gates, archiving; no behaviour change). The instruction files agree (Python 3.11, bounded runner, "standalone backend process" not "FastAPI"); `docs/architecture/OVERVIEW.md`, `DATA_LIFECYCLE.md` and `docs/decisions/` are the authority on where things live; new gates keep them true (instruction-file consistency, registry completeness for both back-edge guards, canonical module table, `check_docs` over the root instruction files); the packaging smoke was repaired and exposed a frozen self-test that could never pass (fixed, verify on a fresh build); nine unreferenced items moved under `docs/archive/`. Ten findings from the data inventory are recorded in §5. Stage 2 (moving eleven root modules into `desktop/` and `shared/`) is written up in the plan and waits for the owner's decision.
+> Previous: 2026-09-18 (tracker split, before the repo-structure Round 1 work) -- five superseded session headers (2026-09-06 to 2026-09-17, 4.6 KB) moved verbatim to the archive's 2026-09-18 block, and `scripts/archive_closed_issues.py --apply` moved the closed body of section 6. No open item changed.
 > Previous: 2026-09-18 -- **Branch and worktree tidy-up.** 15 stale worktrees (4 under `.worktrees/`, 3 under `scratch/`+`tmp/`, 8 Codex-created under `~/.codex/worktrees/`) removed and 101 local branches deleted after a read-only triage proved each one landed, superseded or PR-closed; 16 merged remote branches queued for deletion on GitHub (owner runs the push). Nothing is lost: every tip is pinned under `refs/tidy-backup/*` and in the `_tmp/tidy-backup-2026-09-18/` bundle. Two remote branches KEPT because they hold real unmerged fixes -- `claude/quirky-archimedes-yz7bp7` (repo-wide CRLF/bare-LF guard test + normalize script) and `claude/genizahsearch-error-spike-y9jlug` (PostHog `before_send` filter so the weekly error digest measures this app, not visitors' browsers). The P3 worktree-scan row below records the cleared symptom; its prune-list cause stays open.
 > 
 > See `docs/archive/OPEN_ISSUES_ARCHIVE.md` for the dated header log; this tracker holds only what is still open.
@@ -64,12 +65,12 @@ Move to "Completed Issues" section at bottom with date
 | P2 Medium Bugs | 35 |
 | P3 Low Priority | 15 |
 | Documentation Issues | 2 |
-| Code Quality Debt | 1 |
+| Code Quality Debt | 11 |
 | Untested Areas | 4 |
 | Deferred to v7.15+ | 9 |
 | 2026-05-29 audit follow-up | 4 |
 | FGP integration (§4.5) | 3 |
-| **Total open** | **73** |
+| **Total open** | **83** |
 
 > Counts recomputed from the tables on 2026-08-14 by counting rows carrying ❌ / ⏸ / ⏳
 > (template rows in the maintenance protocol excluded). The old "Fixed/Implemented" column
@@ -81,6 +82,7 @@ Move to "Completed Issues" section at bottom with date
 > P2 +2 on 2026-09-03: the two Codex round-16 follow-ups on PR #333 (stale `highlight` URL param; credit-switch selector).
 > +5 on 2026-09-08 (P2 +3, Documentation +2): the public-API contract findings surfaced by reviewing the third-party `genizahsearch-mcp` wrapper — undeliverable 300 s ceilings, single-text passage over budget, non-deterministic multi-witness latency, the stale `SEARCH_API.md` header, and no capability-discovery path.
 > Then −2 the same day (2026-09-08), net **−1**: the stale `SEARCH_API.md` header and the missing capability-discovery path were both fixed and archived, and one new P2 was opened (`get_filter_sys_ids` synchronous on the event loop), found while investigating the passage 504.
+> +10 on 2026-09-18 (Code Quality Debt): the repo-structure Round 1 findings (§5), recorded from `docs/architecture/DATA_LIFECYCLE.md`; one of them (the packaging smoke / frozen self-test) has its fix in PR #347 and closes when the owner's fresh-build baseline is green.
 
 > **Open (2026-06-22) — FGP per-folio alignment to V0.8 (UNCOMMITTED, UAT pending).** The FGP chooser aligns each page's FGP **edition** to the displayed **V0.8 (HTR)** text by **textual similarity** (same folio shares most words — `shared/fgp_service.py::_select_fgp_editions_by_similarity`, Hebrew word-overlap, floor 0.18), with the folio/positional match (`fgp_image_number_id` ↔ `c_number`) as the **safe default** (a confident single folio match is never overridden → no regression on the ~5,427 already-correct foliated MSS). For structurally-unalignable MSS (folio gave keep-all, or a single wrong pick) it narrows to the **single best match (argmax ≥ floor)** so each page shows ONE transcription (per user direction — no runner-up margin, which on a continuous work would leave many pages showing every transcription). UAT: 16/17 of the targeted foliated MSS now correct (multi-volume, uneven editions, page≠image count — e.g. Columbia `990001372620205171`, Manchester `990002088790205171`). **Known residual limitations:** (a) **Toronto `990001996710205171`** is one *continuous* work (44 folios, garbled microfilm HTR) so adjacent folios are textually close (inter-folio sim up to 0.39 vs ~0.15 elsewhere) — argmax usually picks the right folio but may occasionally land on an adjacent one; a more discriminative metric (rare-word/TF-IDF weighting or word-sequence overlap) is the future improvement; (b) FGP **translations** can't be similarity-aligned (different language than the Hebrew V0.8) — kept by folio match (keep-all on unalignable MSS); (c) the SEPARATE **base page↔image** misalignment (displayed IMAGE not matching V0.8/FGP on some MSS — NLI `990035100760205171`, Columbia) is NOT addressed here — pre-existing, affects V0.8 too, image-selection code left untouched per user direction. Thresholds need live UAT. Tests: `tests/test_fgp_service.py::TestFgpSimilarityAlignment` (9). ❌ Open (UAT pending; UNCOMMITTED).
 
@@ -346,6 +348,23 @@ sidecars. The chooser feature degrades to a no-op until the DB is present AND th
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
+
+### Repo structure Round 1 findings (2026-09-18)
+
+Surfaced while writing `docs/architecture/DATA_LIFECYCLE.md` (every row verified against the code; the page's "What this table found" list is the source). Stage 1 changed docs, gates and archive paths only; these are the code/data facts it left for a decision.
+
+| Issue | File | Status | Notes |
+|-------|------|--------|-------|
+| **Frozen desktop build never bundles `data/`, so the few-shot translation prompts are silently absent in the EXE** | `gui_threads.py` (`data_dir` anchored on `__file__`), `GenizahSearchPro.spec` (no `data` entry), `shared/dicta_client.py` | ❌ Open | In the frozen app `__file__` resolves inside `_internal/`, the read fails and is swallowed with a warning; field translation runs without its prompts. Fix is either a `('data','data')` spec entry or anchoring on `Config`. Pre-existing; found by the Round 1 inventory. |
+| **Packaging smoke skipped forever, and the frozen `--self-test-pymupdf` could never pass** | `tests/test_local_pyinstaller_smoke.py`, `genizah_app.py` self-test branch | ⏳ Fix landed (PR #347), verify against a fresh build | The test looked for `dist/GenizahSearchPro.exe` (COLLECT writes `dist/GenizahSearchPro/GenizahSearchPro.exe`); once repaired it exposed that the frozen self-test resolved its fixture under `_MEIPASS`, where `tests/` is never bundled. Both fixed; the owner's baseline run after `build_app.bat` with `GENIZAH_PACKAGING_SMOKE=1` closes this row. |
+| **`bodleian_master_index.csv` has no code reader but ships in every installer** | `GenizahSearchPro.spec` datas | ❌ Open (owner call) | `.gitignore` already files it under "legacy, unreferenced" (Phase 65). Dropping it from the spec removes 89 KB from each installer; no code path changes. |
+| **`fgp_data/fgp_transcriptions.db` is already in the spec while §4.5 says shipping is pending; its producer scripts are gitignored** | `GenizahSearchPro.spec`, `fgp_data/fgp_*.py` (untracked), `gui_threads.py` sidecar-updater map | ❌ Open | 405 MB rides in every installer with the flag off; the scripts that build it and the schema README exist only on the owner's machine (`fgp_data/` is ignored whole); FGP is absent from the post-install updater map. |
+| **Supabase DDL gaps** | `supabase_setup.sql`, `migrations/` | ❌ Open | `published_joins`, `published_join_fragments`, `discovery_responses` are written by code and have no DDL anywhere in the repo; `document_sources` is defined only in `migrations/`; no ledger records which migrations have been applied to production. |
+| **`config.pkl` is written without an atomic replace and its loader swallows every exception** | `genizah_core.py` `save_app_config`/`load_app_config` | ❌ Open | A corrupt pickle silently resets every desktop preference, telemetry consent, update state and export default at once. `session.json` and `search_history.json` already use tmp+`os.replace`. |
+| **`images_cache/` grows without bound** | `desktop/image_loader.py` | ❌ Open | No eviction, no size cap, no clear action; the `_v2` filename bump orphaned the older 600px files instead of deleting them. |
+| **Desktop Supabase refresh token stored as plaintext JSON with default permissions** | `supabase_corrections_client.py` (`~/.genizah_corrections/supabase_credentials.json`) | ❌ Open | The password goes to the OS keyring but the long-lived refresh token does not. Owner decision on whether to move the token to the keyring too. |
+| **Stale operational facts in the guides and CI comments** | `docs/guides/DEPLOYMENT_TECHNICAL.md`, `docs/guides/ENV_VARS.md`, `.github/workflows/ci.yml`, `scripts/ci_materialize_discovery_fixture.py` | ❌ Open | `libraries.csv` "~15 MB / ~217K" (49.5 MB / 255,723), `fjms_enrichment.db` "941 MB" (1.6 GB), `Genizah_OLD.txt` (code: `AllGenizah_OLD.txt`), an `extension/store/` that does not exist; all three CI-side texts credit `tests/test_cert01_grading_validator.py` with resolving the real artifact through `discovery_data/manifest.json`, which `scripts/cert01_freeze.py` does. |
+| **Small hygiene gaps found by the inventory** | `.gitignore`, `desktop/settings_dialogs.py` + `genizah_app.py`, `version.py` + `version_info.txt`, `scripts/verify_passage_index.py`, `scripts/build_cudl_fixture.py`, `scripts/build_residue_patterns_artifact.py` | ❌ Open | `.server.pid` is not gitignored; `icon.ico` is resolved by two different rules (`Config.BASE_DIR` vs `resource_path()`); nothing checks `version.py` against `version_info.txt`; `verify_passage_index.py` is run by no test or job (audit M32); the two scripts read untracked `reports/*` inputs (`cudl_orphans_all.csv`, `synthetic_ambiguity_residue_dryrun.csv`). |
 
 ---
 

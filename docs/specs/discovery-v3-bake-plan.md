@@ -1153,7 +1153,7 @@ in tracked content.** The full `--scan-repo` is **RED**, and every hit is a fals
 
 Neither has anything to do with the restricted corpus. The word is common Hebrew (*handing over / transmission
 / delivery*), so as a bare substring it cannot distinguish the fingerprint sense from ordinary usage — and
-`web/Transcriptions_part.txt` is 15 MB of exactly the Hebrew this project exists to search.
+`web/Transcriptions_part.txt` (moved to `docs/archive/data/Transcriptions_part.txt` on 2026-09-18) is 15 MB of exactly the Hebrew this project exists to search.
 
 **This matters beyond one red scan: `.github/workflows/ci.yml` provisions the same pattern set from the
 `MASKING_SCAN_PATTERNS` secret and runs `--scan-repo` in `render-smoke-tests`. If the Hebrew forms were added
