@@ -31296,12 +31296,19 @@ if __name__ == "__main__":
         except Exception as _e:
             print(f"PYMUPDF_FAIL: import failed: {_e}", file=sys.stderr)
             sys.exit(1)
-        # Resolve fixture path: frozen EXE uses _MEIPASS, dev uses script dir.
+        # Resolve fixture path. The fixture is NOT bundled (GenizahSearchPro.spec has no
+        # tests/ entry), so the frozen EXE could never find it under _MEIPASS -- and the
+        # packaging smoke that would have shown this skipped for months because it looked
+        # for the EXE at the wrong path (repaired 2026-09-18). tests/test_local_pyinstaller_smoke.py
+        # runs the EXE from the repository root, so try the current directory first; keep the
+        # _MEIPASS / script-dir candidate for a build that does bundle the fixture.
         if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
             _base = _pathlib.Path(sys._MEIPASS)
         else:
             _base = _pathlib.Path(__file__).parent
-        _fixture = _base / "tests" / "fixtures" / "local_indexer" / "hebrew_sample.pdf"
+        _rel = _pathlib.Path("tests") / "fixtures" / "local_indexer" / "hebrew_sample.pdf"
+        _candidates = [_pathlib.Path.cwd() / _rel, _base / _rel]
+        _fixture = next((c for c in _candidates if c.exists()), _candidates[-1])
         if not _fixture.exists():
             print(
                 "PYMUPDF_FAIL: fixture missing "

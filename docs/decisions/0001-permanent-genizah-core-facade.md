@@ -27,9 +27,8 @@ the move a zero-behaviour change and keeps it one for anything outside the repos
 - The facade is one-directional: no `shared/` module may import `genizah_core` at module level.
   GUARD-01 ([tests/test_no_back_edges_core.py](../../tests/test_no_back_edges_core.py)) enforces
   this for the modules in its `EXTRACTED_MODULES` registry -- a new `shared/` module must be added
-  there to be covered (the rule holds for all of `shared/` today; the registry-completeness check
-  that makes registration unforgettable is part of the gates work that follows). Lazy imports
-  inside function bodies are allowed and are not scanned.
+  there to be covered, and the same file asserts the registry covers every tracked `shared/*.py`,
+  so forgetting fails loudly. Lazy imports inside function bodies are allowed and are not scanned.
 - `genizah_core.py` imports neither PyQt6 nor NiceGUI, so both apps and the tests can import it.
 
 ## Supersedes

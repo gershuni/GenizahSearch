@@ -17,18 +17,48 @@ Tier 1 (always-on, no EXE required):
     This is the development-time signal — catches requirements.txt regressions.
 
 Tier 2 (release-gated, EXE required):
-    Subprocess-invokes ``dist/GenizahSearchPro.exe --self-test-pymupdf`` and
-    asserts ``returncode == 0`` AND ``b"PYMUPDF_OK"`` in stdout. This is the
+    Subprocess-invokes ``dist/GenizahSearchPro/GenizahSearchPro.exe --self-test-pymupdf``
+    and asserts ``returncode == 0`` AND ``b"PYMUPDF_OK"`` in stdout. This is the
     deployment-time signal — the ONLY tier that catches ``fitz._fitz``
     packaged-binary collection failure that D-43 was designed to surface.
-    Gracefully SKIPs when the EXE is absent (dev environments, web CI).
+
+    SKIPS when the EXE is absent (dev environments, web CI) -- UNLESS
+    ``GENIZAH_PACKAGING_SMOKE=1`` is set, in which case a missing EXE is a FAILURE. Set the
+    flag after ``build_app.bat`` and before a release: from 2026-04 to 2026-09-18 this test
+    looked for ``dist/GenizahSearchPro.exe`` (the COLLECT build writes
+    ``dist/GenizahSearchPro/GenizahSearchPro.exe``), so it skipped on every machine that had
+    just built the app and nobody noticed. The fail-not-skip flag is what makes that visible.
+
+    ``test_packaged_exe_self_test_imports`` runs the EXE with ``--self-test-imports`` and
+    expects ``IMPORTS_OK``. genizah_app.py does not have that flag yet (Stage 2 of the
+    repo-structure plan adds it together with the module moves it exists to verify), so the
+    test skips with that reason until the flag appears in the source.
 """
+import os
 import pathlib
 import subprocess
 
 import pytest
 
 pytestmark = pytest.mark.packaging
+
+REPO_ROOT = pathlib.Path(__file__).parent.parent
+# The COLLECT build (GenizahSearchPro.spec) writes a directory, not a one-file EXE.
+EXE_PATH = REPO_ROOT / "dist" / "GenizahSearchPro" / "GenizahSearchPro.exe"
+FORCE_ENV = "GENIZAH_PACKAGING_SMOKE"
+
+
+def _require_exe() -> pathlib.Path:
+    """The packaged EXE, or skip -- or FAIL when GENIZAH_PACKAGING_SMOKE=1 says it must exist."""
+    if EXE_PATH.exists():
+        return EXE_PATH
+    msg = (
+        f"Packaged EXE not built at {EXE_PATH} -- run build_app.bat first "
+        "(python -m PyInstaller --noconfirm --clean GenizahSearchPro.spec)."
+    )
+    if os.environ.get(FORCE_ENV, "").strip() in ("1", "true", "yes"):
+        pytest.fail(f"{FORCE_ENV}={os.environ[FORCE_ENV]!r} but " + msg)
+    pytest.skip(msg + f" Set {FORCE_ENV}=1 to make this a failure instead of a skip.")
 
 
 # ---------------------------------------------------------------------------
@@ -133,18 +163,10 @@ def test_packaged_exe_self_test_pymupdf_subprocess():
     fitz, not the bundled one). D-43 was designed specifically to surface
     this failure mode.
 
-    SKIPS gracefully when ``dist/GenizahSearchPro.exe`` is absent (dev
-    environments and web CI). Release CI MUST have the EXE built and this
-    test MUST pass before a release is tagged.
+    Skips when the EXE is absent unless GENIZAH_PACKAGING_SMOKE=1 (then it fails). A release
+    MUST run this against a fresh build with the flag set.
     """
-    repo_root = pathlib.Path(__file__).parent.parent
-    exe_path = repo_root / "dist" / "GenizahSearchPro.exe"
-    if not exe_path.exists():
-        pytest.skip(
-            f"Packaged EXE not built at {exe_path} — "
-            "Tier 2 smoke is release-CI only. "
-            "Build with PyInstaller first: pyinstaller GenizahSearchPro.spec"
-        )
+    exe_path = _require_exe()
 
     try:
         result = subprocess.run(
@@ -154,16 +176,46 @@ def test_packaged_exe_self_test_pymupdf_subprocess():
         )
     except subprocess.TimeoutExpired:
         pytest.fail(
-            "HIGH-5: dist/GenizahSearchPro.exe --self-test-pymupdf timed out "
+            "HIGH-5: dist/GenizahSearchPro/GenizahSearchPro.exe --self-test-pymupdf timed out "
             "after 30s — likely the CLI flag was not honored before the Qt "
             "event loop started (check the if __name__ == '__main__' block)"
         )
 
     assert result.returncode == 0, (
         f"HIGH-5: packaged-EXE self-test returned {result.returncode}. "
-        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        f"stdout={result.stdout!r} stderr={result.stderr!r}. "
+        "If stderr says the fixture is missing, the EXE predates the 2026-09-18 fix that lets the "
+        "self-test find tests/fixtures/ from the current directory: rebuild with build_app.bat."
     )
     assert b"PYMUPDF_OK" in result.stdout, (
         f"HIGH-5: packaged-EXE self-test did not print PYMUPDF_OK marker. "
         f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+
+
+def test_packaged_exe_self_test_imports():
+    """Tier 2: the frozen app can import every canonical module by its real dotted path.
+
+    Runs ``GenizahSearchPro.exe --self-test-imports`` and expects ``IMPORTS_OK`` on stdout. The
+    flag is added by Stage 2 of the repo-structure plan together with the module moves it
+    verifies (an alias stub at an old path is not in the PyInstaller graph once consumers are
+    rewritten, so only the frozen process can prove the new paths resolve). Until the flag exists
+    in genizah_app.py this test skips with that reason; it never goes red for a missing feature.
+    """
+    app_source = (REPO_ROOT / "genizah_app.py").read_text(encoding="utf-8", errors="replace")
+    if "--self-test-imports" not in app_source:
+        pytest.skip(
+            "genizah_app.py has no --self-test-imports flag yet (Stage 2 of the repo-structure "
+            "plan adds it with the module moves); nothing to run."
+        )
+    exe_path = _require_exe()
+    try:
+        result = subprocess.run([str(exe_path), "--self-test-imports"], capture_output=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        pytest.fail("GenizahSearchPro.exe --self-test-imports timed out after 60s")
+    assert result.returncode == 0, (
+        f"--self-test-imports returned {result.returncode}. stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert b"IMPORTS_OK" in result.stdout, (
+        f"--self-test-imports did not print IMPORTS_OK. stdout={result.stdout!r} stderr={result.stderr!r}"
     )

@@ -179,7 +179,9 @@ def test_browse_service_has_no_runtime_web_import():
 
 @pytest.mark.parametrize(
     'module_path',
-    sorted((_REPO_ROOT / 'shared').glob('*.py'), key=lambda p: p.name),
+    # rglob, not glob: a future shared/ sub-package must enter this sweep the day it appears
+    # (shared/ is flat today, so this changes nothing yet).
+    sorted((_REPO_ROOT / 'shared').rglob('*.py'), key=lambda p: p.as_posix()),
     ids=lambda p: p.name,
 )
 def test_no_shared_module_has_a_runtime_web_import(module_path):

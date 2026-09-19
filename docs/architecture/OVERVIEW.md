@@ -123,10 +123,11 @@ The rules are enforced by tests, not by convention. One row per guard:
 | [tests/conftest.py](../../tests/conftest.py) (`_pin_root_scripts_namespace`) | not a test but the pin that keeps `scripts` bound to the root namespace package |
 
 The two back-edge guards are **registries**: a new `shared/` or `desktop/` module must be added to
-their lists, and until the registry-completeness check that follows this page lands, forgetting is
-silent -- today `desktop/passage_lifecycle.py`, `passage_witnesses.py`, `passage_workers.py` and
-`desktop/widgets/` are unregistered, and so is every `shared/` module created after the v8.3.0
-extraction list stopped growing.
+their lists. Forgetting is no longer silent: each guard file also asserts that its registry covers
+every tracked `*.py` under its directory (and has no stale entries), so an unregistered module
+fails that test until it is added -- and a registered module with a real module-level back-edge
+fails the per-module test. Until 2026-09-18 five `desktop/` files and 77 `shared/` files were
+unregistered; they are all registered now.
 
 ## The permanent facade
 

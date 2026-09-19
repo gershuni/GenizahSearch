@@ -33,9 +33,9 @@ consolidation project, not a tidy-up.
   `shared/config.py`; until then, moving any listed asset is out of scope.
 - `.gitignore` rules still match several of these tracked assets (`bodleian_master_index.csv`,
   `char_merges_report.xlsx`, the `fist_gap_*` files, `GenizahSearchPro.spec`); they stay in the
-  repository only because they are already tracked, and a deleted-and-recreated copy would need
-  `git add -f`. The gates work that follows this page appends explicit negations so a clean clone
-  can re-add them.
+  repository because they are already tracked; since 2026-09-18 `.gitignore` ends with explicit
+  negations for them, so a deleted-and-recreated copy, or a clean clone, can re-add them
+  (`git check-ignore --no-index -q <path>` exits 1).
 
 ## Supersedes
 

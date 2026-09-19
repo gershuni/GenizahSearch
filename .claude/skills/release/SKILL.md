@@ -192,6 +192,12 @@ Ask: "Does this look right? Proceed with build and deploy?"
 
 1. Run `build_app.bat` (via the invocation above) — PyInstaller build (several minutes)
    - Verify `dist/GenizahSearchPro/GenizahSearchPro.exe` exists after build
+   - **REQUIRED -- run the packaging smoke against the fresh build**, with the flag that turns a
+     missing EXE into a failure instead of a skip:
+     `$env:GENIZAH_PACKAGING_SMOKE='1'; python -m pytest tests/test_local_pyinstaller_smoke.py`
+     (Tier 2 runs the EXE's `--self-test-pymupdf`; from 2026-04 to 2026-09-18 this test looked for
+     the EXE at the wrong path and skipped on every release, which is how a frozen self-test that
+     could never pass went unnoticed. It must be green before the installer is compiled.)
    - `build_app.bat` builds from the **checked-in** `GenizahSearchPro.spec`
      (`python -m PyInstaller --noconfirm --clean GenizahSearchPro.spec`, `build_app.bat:13-21`), so the
      maintained `collect_all('pymupdf')`/`collect_all('zstandard')`/`collect_all('lxml')` calls and the

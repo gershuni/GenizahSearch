@@ -19,6 +19,7 @@ This is intentionally more thorough than a flat ast.iter_child_nodes scan
 import ast
 import os
 import pathlib
+import subprocess
 
 import pytest
 
@@ -44,6 +45,86 @@ EXTRACTED_MODULES = [
     "shared/lab_settings.py",        # Phase 125b
     "shared/lab_engine.py",          # Phase 125c
     "shared/search_engine.py",       # Phase 125d
+    # Registered 2026-09-18 (repo-structure Round 1): every other tracked shared/*.py. They
+    # were extracted or created after the phase-by-phase list above stopped growing, and the
+    # registry-completeness test below now makes forgetting one impossible.
+    "shared/__init__.py",
+    "shared/api_errors.py",
+    "shared/background_removal.py",
+    "shared/browse_service.py",
+    "shared/canonical_works.py",
+    "shared/corrections_service.py",
+    "shared/dicta_client.py",
+    "shared/discovery_band_labels.py",
+    "shared/discovery_display_strings.py",
+    "shared/discovery_errors.py",
+    "shared/discovery_family.py",
+    "shared/discovery_grouping.py",
+    "shared/discovery_locus.py",
+    "shared/discovery_main_pool.py",
+    "shared/discovery_novelty.py",
+    "shared/discovery_panel_model.py",
+    "shared/discovery_relation_matrix.py",
+    "shared/discovery_service.py",
+    "shared/discovery_surface_projection.py",
+    "shared/discovery_visibility.py",
+    "shared/document_service.py",
+    "shared/docx_export.py",
+    "shared/domain_hierarchy.py",
+    "shared/exclusion_service.py",
+    "shared/export_dossier.py",
+    "shared/export_utils.py",
+    "shared/fgp_service.py",
+    "shared/fist_cudl_bridge.py",
+    "shared/fjms_service.py",
+    "shared/joins_lab.py",
+    "shared/local_index_leases.py",
+    "shared/local_indexer.py",
+    "shared/local_indexer_migrations.py",
+    "shared/local_indexer_rtl.py",
+    "shared/local_sys_id.py",
+    "shared/manuscript_details.py",
+    "shared/nli_circuit_breaker.py",
+    "shared/nli_crossref_service.py",
+    "shared/nli_fetch.py",
+    "shared/parallels_service.py",
+    "shared/passage_builder.py",
+    "shared/passage_corpus.py",
+    "shared/passage_fusion.py",
+    "shared/passage_hygiene.py",
+    "shared/passage_index.py",
+    "shared/passage_normalize.py",
+    "shared/passage_parallels.py",
+    "shared/passage_policy.py",
+    "shared/passage_search.py",
+    "shared/passage_witness_source.py",
+    "shared/pause_gate.py",
+    "shared/posthog_server.py",
+    "shared/puzzle_export.py",
+    "shared/puzzle_image_service.py",
+    "shared/puzzle_model.py",
+    "shared/puzzle_publish_service.py",
+    "shared/puzzle_service.py",
+    "shared/reading_desk_model.py",
+    "shared/refinement.py",
+    "shared/research_limits.py",
+    "shared/research_worker.py",
+    "shared/retrieval_adapters.py",
+    "shared/retrieval_eval.py",
+    "shared/search_regex.py",
+    "shared/search_serializer.py",
+    "shared/search_tokenizer.py",
+    "shared/session_persistence.py",
+    "shared/shelfmark_bridge.py",
+    "shared/supabase_provider.py",
+    "shared/synthetic_sys_id.py",
+    "shared/sys_id_patterns.py",
+    "shared/thread_local_db.py",
+    "shared/transcription_credits.py",
+    "shared/transcription_service.py",
+    "shared/translation_qc.py",
+    "shared/translation_service.py",
+    "shared/visual_similarity_service.py",
 ]
 
 # Compound statement types whose bodies run at import time
@@ -658,3 +739,35 @@ def test_search_engine_standalone_import():
     )
     assert hasattr(shared.search_engine, '_ChunkPlan'), "_ChunkPlan must be in shared.search_engine"
     assert hasattr(shared.search_engine, '_LabChunkPlan'), "_LabChunkPlan must be in shared.search_engine"
+
+
+# ---------------------------------------------------------------------------
+# Registry completeness (repo-structure Round 1, 2026-09-18)
+#
+# EXTRACTED_MODULES is a hand-maintained list, and a list protects only the modules somebody remembered to
+# add: five desktop/ files (the passage_* trio and widgets/) and 77 shared/ files had no guard
+# until this test existed. Every tracked *.py under shared/ must be registered; a new file fails
+# here until it is, and a registered file with a real module-level back-edge fails the
+# per-module test above -- never silently.
+# ---------------------------------------------------------------------------
+
+def _tracked_python_files(prefix: str) -> set[str]:
+    out = subprocess.run(
+        ["git", "ls-files", "-z", prefix], cwd=REPO_ROOT, capture_output=True, check=True,
+    ).stdout.decode("utf-8", "surrogateescape")
+    return {p for p in out.split("\0") if p.endswith(".py")}
+
+
+def test_registry_covers_every_tracked_module():
+    missing = sorted(_tracked_python_files("shared") - set(EXTRACTED_MODULES))
+    assert not missing, (
+        f"{missing} are tracked under shared/ but not registered in EXTRACTED_MODULES; add them so the "
+        "back-edge guard covers them (a real back-edge then fails the per-module test, not this one)."
+    )
+
+
+def test_registry_has_no_stale_entries():
+    """A registered path that git does not track is a leftover (or a pre-registration that never
+    happened); the per-module test would skip it forever."""
+    stale = sorted(set(EXTRACTED_MODULES) - _tracked_python_files("shared"))
+    assert not stale, f"{stale} are registered in EXTRACTED_MODULES but not tracked under shared/"
