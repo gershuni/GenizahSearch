@@ -1,43 +1,12 @@
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QLineEdit, QCheckBox, QHBoxLayout, QPushButton
-from genizah_core import tr
+"""Compatibility alias (repo-structure Round 1, Stage 2 trial, 2026-09-19).
 
+Real module: desktop/column_filter_dialog.py. Import ``desktop.column_filter_dialog``; this file only
+rebinds the old name to that module so ``import column_filter_dialog`` and
+``from column_filter_dialog import ColumnFilterDialog`` keep working in the source tree. Remove in
+Round 2 once nothing imports the old name (tests/test_root_alias_stubs.py pins the identity).
+"""
+import sys
 
-class ColumnFilterDialog(QDialog):
-    """Dialog to filter a column by include/exclude text."""
-    def __init__(self, parent, column_label, current_text="", exclude=False):
-        super().__init__(parent)
-        self.setWindowTitle(tr("Filter {}").format(column_label))
-        self.resize(420, 160)
+from desktop import column_filter_dialog as _real
 
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel(tr("Enter text to filter this column:")))
-
-        self.text_input = QLineEdit()
-        self.text_input.setPlaceholderText(tr("Filter text..."))
-        self.text_input.setText(current_text)
-        layout.addWidget(self.text_input)
-
-        self.exclude_checkbox = QCheckBox(tr("Exclude matches (must NOT contain the text)"))
-        self.exclude_checkbox.setChecked(exclude)
-        layout.addWidget(self.exclude_checkbox)
-
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        btn_cancel = QPushButton(tr("Cancel"))
-        btn_cancel.clicked.connect(self.reject)
-        btn_ok = QPushButton(tr("OK"))
-        btn_ok.clicked.connect(self.accept)
-        btn_ok.setDefault(True)
-        btn_ok.setAutoDefault(True)
-        btn_cancel.setAutoDefault(False)
-        btn_row.addWidget(btn_cancel)
-        btn_row.addWidget(btn_ok)
-        layout.addLayout(btn_row)
-
-        self.setLayout(layout)
-
-    def get_text(self):
-        return self.text_input.text()
-
-    def is_exclude(self):
-        return self.exclude_checkbox.isChecked()
+sys.modules[__name__] = _real

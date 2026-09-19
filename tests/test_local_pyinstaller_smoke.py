@@ -22,17 +22,19 @@ Tier 2 (release-gated, EXE required):
     deployment-time signal — the ONLY tier that catches ``fitz._fitz``
     packaged-binary collection failure that D-43 was designed to surface.
 
-    SKIPS when the EXE is absent (dev environments, web CI) -- UNLESS
-    ``GENIZAH_PACKAGING_SMOKE=1`` is set, in which case a missing EXE is a FAILURE. Set the
+    SKIPS when the EXE is absent (dev environments, web CI) or OLDER than genizah_app.py (a
+    stale build does not know the current self-test flags and would start the GUI) -- UNLESS
+    ``GENIZAH_PACKAGING_SMOKE=1`` is set, in which case either is a FAILURE. Set the
     flag after ``build_app.bat`` and before a release: from 2026-04 to 2026-09-18 this test
     looked for ``dist/GenizahSearchPro.exe`` (the COLLECT build writes
     ``dist/GenizahSearchPro/GenizahSearchPro.exe``), so it skipped on every machine that had
     just built the app and nobody noticed. The fail-not-skip flag is what makes that visible.
 
     ``test_packaged_exe_self_test_imports`` runs the EXE with ``--self-test-imports`` and
-    expects ``IMPORTS_OK``. genizah_app.py does not have that flag yet (Stage 2 of the
-    repo-structure plan adds it together with the module moves it exists to verify), so the
-    test skips with that reason until the flag appears in the source.
+    expects ``IMPORTS_OK`` (added 2026-09-19 with the first module move; the test skips only if
+    the flag ever disappears from genizah_app.py). ``GENIZAH_PACKAGING_EXE=<path>`` points both
+    Tier-2 tests at a build made with ``--distpath`` elsewhere, so a scratch build never has to
+    overwrite ``dist/``.
 """
 import os
 import pathlib
@@ -44,21 +46,49 @@ pytestmark = pytest.mark.packaging
 
 REPO_ROOT = pathlib.Path(__file__).parent.parent
 # The COLLECT build (GenizahSearchPro.spec) writes a directory, not a one-file EXE.
-EXE_PATH = REPO_ROOT / "dist" / "GenizahSearchPro" / "GenizahSearchPro.exe"
+# GENIZAH_PACKAGING_EXE points the Tier-2 tests at a build made elsewhere (PyInstaller --distpath), so
+# a baseline or trial build can be checked without overwriting the release build in dist/.
+EXE_OVERRIDE_ENV = "GENIZAH_PACKAGING_EXE"
+EXE_PATH = (
+    pathlib.Path(os.environ[EXE_OVERRIDE_ENV])
+    if os.environ.get(EXE_OVERRIDE_ENV, "").strip()
+    else REPO_ROOT / "dist" / "GenizahSearchPro" / "GenizahSearchPro.exe"
+)
 FORCE_ENV = "GENIZAH_PACKAGING_SMOKE"
 
 
-def _require_exe() -> pathlib.Path:
-    """The packaged EXE, or skip -- or FAIL when GENIZAH_PACKAGING_SMOKE=1 says it must exist."""
-    if EXE_PATH.exists():
-        return EXE_PATH
-    msg = (
-        f"Packaged EXE not built at {EXE_PATH} -- run build_app.bat first "
-        "(python -m PyInstaller --noconfirm --clean GenizahSearchPro.spec)."
-    )
-    if os.environ.get(FORCE_ENV, "").strip() in ("1", "true", "yes"):
+def _forced() -> bool:
+    return os.environ.get(FORCE_ENV, "").strip() in ("1", "true", "yes")
+
+
+def _skip_or_fail(msg: str) -> None:
+    if _forced():
         pytest.fail(f"{FORCE_ENV}={os.environ[FORCE_ENV]!r} but " + msg)
     pytest.skip(msg + f" Set {FORCE_ENV}=1 to make this a failure instead of a skip.")
+
+
+def _require_exe() -> pathlib.Path:
+    """The packaged EXE, or skip -- or FAIL when GENIZAH_PACKAGING_SMOKE=1 says it must be there and fresh.
+
+    "Fresh" means newer than genizah_app.py. An EXE built before the current entry-point source does
+    not know the current self-test flags, and an unknown flag makes that old EXE start the full GUI
+    (measured 2026-09-19: a 60 s timeout with the application window on screen, inside the bounded
+    suite). So a stale EXE is never executed: it skips loudly, or fails under the flag, and both
+    messages carry the rebuild command.
+    """
+    if not EXE_PATH.exists():
+        _skip_or_fail(
+            f"Packaged EXE not built at {EXE_PATH} -- run build_app.bat first "
+            "(python -m PyInstaller --noconfirm --clean GenizahSearchPro.spec)."
+        )
+    app_source = REPO_ROOT / "genizah_app.py"
+    if EXE_PATH.stat().st_mtime < app_source.stat().st_mtime:
+        _skip_or_fail(
+            f"Packaged EXE {EXE_PATH} is older than genizah_app.py, so it predates the current "
+            "self-test flags and would start the GUI instead of answering them -- rebuild with "
+            "build_app.bat, or point GENIZAH_PACKAGING_EXE at a fresh --distpath build."
+        )
+    return EXE_PATH
 
 
 # ---------------------------------------------------------------------------

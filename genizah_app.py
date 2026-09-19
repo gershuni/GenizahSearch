@@ -88,7 +88,7 @@ from shared import passage_witness_source  # witness resolution (pure, shared wi
 from shared import passage_fusion  # RRF fusion (pure, shared with web + API)
 from desktop.update_ui import UpdateNotificationBar, WhatsNewBar, WhatsNewDialog, UpdateProgressDialog, TelemetryConsentBar  # Phase 127 update_ui; SEED-031 re-ask bar
 from filter_text_dialog import FilterTextDialog
-from column_filter_dialog import ColumnFilterDialog
+from desktop.column_filter_dialog import ColumnFilterDialog  # moved 2026-09-19; alias stub at the root
 from list_filter_dialog import ListFilterDialog
 from shared_export_utils import sanitize_text_for_excel as shared_sanitize_excel
 from shared_export_utils import coerce_img_page_cell
@@ -31241,6 +31241,28 @@ def resource_path(relative_path):
         base_path = os.path.dirname(os.path.abspath(__file__))  # Path resolution failed; use script directory
     return os.path.join(base_path, relative_path)
 
+# Every app module the crash classifier knows by basename (desktop/telemetry.py::_APP_SOURCE_FILES),
+# by its canonical dotted name -- the mirror of tests/test_canonical_module_locations.py::CANONICAL
+# minus this file; a test there keeps the two equal. ``--self-test-imports`` (below) imports each
+# one inside the frozen process, which is the only place a moved module can prove its new name
+# resolves (the alias stub at the old root path is not in the PyInstaller graph).
+_SELF_TEST_IMPORT_MODULES = (
+    "corrections_client",
+    "corrections_ui",
+    "desktop.column_filter_dialog",
+    "filter_text_dialog",
+    "genizah_core",
+    "genizah_translations",
+    "gui_threads",
+    "list_filter_dialog",
+    "lists_sync",
+    "pgp_tag_translations",
+    "sefaria_utils",
+    "shared_export_utils",
+    "supabase_corrections_client",
+    "unified_variants",
+)
+
 if __name__ == "__main__":
     # Phase 116 — telemetry pipeline + SSL self-test (D-04/D-05).
     # MUST be checked BEFORE QApplication construction so the EXE runs
@@ -31338,6 +31360,26 @@ if __name__ == "__main__":
         except Exception as _e:
             print(f"PYMUPDF_FAIL: extraction raised: {_e!r}", file=sys.stderr)
             sys.exit(1)
+
+    # Repo-structure Round 1, Stage 2 -- frozen import self-test. Every module in
+    # _SELF_TEST_IMPORT_MODULES is imported by its canonical dotted name; a module that moved out
+    # of the repository root can only prove its new name resolves inside the frozen process,
+    # because the alias stub at the old path is not in the PyInstaller graph once its consumers
+    # are rewritten. tests/test_local_pyinstaller_smoke.py runs this and expects IMPORTS_OK.
+    # MUST be checked BEFORE QApplication construction so the EXE runs headlessly.
+    if "--self-test-imports" in sys.argv:
+        import importlib as _importlib
+        _failed = []
+        for _name in _SELF_TEST_IMPORT_MODULES:
+            try:
+                _importlib.import_module(_name)
+            except Exception as _e:
+                _failed.append(f"{_name}: {_e!r}")
+        if _failed:
+            print("IMPORTS_FAIL: " + "; ".join(_failed), file=sys.stderr)
+            sys.exit(1)
+        print("IMPORTS_OK")
+        sys.exit(0)
 
     try:
         import ctypes
