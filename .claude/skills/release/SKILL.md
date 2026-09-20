@@ -268,7 +268,7 @@ After user confirms:
 
 6. **Create GitHub Release** — **DESKTOP OR BOTH ONLY. NEVER for web-only releases.**
 
-   **Why this matters:** the installed desktop app polls `https://api.github.com/repos/gershuni/GenizahSearch/releases/latest` (`UpdateCheckerThread` in `gui_threads.py:445`) and prompts every desktop user to update whenever a new tag becomes `latest`. A web-only GitHub release has no installer attached, so the prompt sends users to a release page they cannot install from. **Past incident: v7.9.3 (web-only) created a release, every desktop user was prompted to "update" to a no-installer page.**
+   **Why this matters:** the installed desktop app polls `https://api.github.com/repos/gershuni/GenizahSearch/releases/latest` (`UpdateCheckerThread` in `desktop/gui_threads.py`) and prompts every desktop user to update whenever a new tag becomes `latest`. A web-only GitHub release has no installer attached, so the prompt sends users to a release page they cannot install from. **Past incident: v7.9.3 (web-only) created a release, every desktop user was prompted to "update" to a no-installer page.**
 
    - **If web-only:** SKIP this step entirely. Do NOT run `gh release create`. The git tag itself is fine (tags do not appear in `/releases/latest`); only the GitHub Release object triggers the desktop update prompt.
    - **If desktop or both:**

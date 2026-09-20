@@ -221,7 +221,10 @@ def test_result_dialog_regex_error_sites_log():
 # #39 — gui_threads sleep-prevention handlers log (debug) instead of pass.
 # ---------------------------------------------------------------------------
 def test_sleep_prevention_handlers_log():
-    src = (ROOT / "gui_threads.py").read_text(encoding="utf-8")
+    src = (ROOT / "desktop" / "gui_threads.py").read_text(encoding="utf-8")
+    assert "sys.modules[__name__]" not in src, (
+        "read the real module, not the root alias stub (see tests/test_root_alias_stubs.py)"
+    )
     tree = ast.parse(src)
     for fn in ("_prevent_sleep", "_allow_sleep"):
         handlers = _handlers_in_func(tree, fn)

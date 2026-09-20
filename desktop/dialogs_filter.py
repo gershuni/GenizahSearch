@@ -12,7 +12,7 @@ from PyQt6.QtCore import QEvent, Qt
 from PyQt6.QtGui import QColor, QCursor, QFontMetrics
 
 from genizah_core import CURRENT_LANG, normalize_shelfmark, tr
-from gui_threads import FilterCountWorker
+from desktop.gui_threads import FilterCountWorker
 from shared.exclusion_service import (
     ExclusionSource, parse_csv_shelfmarks, resolve_shelfmarks,
 )

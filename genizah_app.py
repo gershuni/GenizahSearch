@@ -49,7 +49,7 @@ if _CORE_IMPORT_ERROR:
         raise _CORE_IMPORT_ERROR
 from shared.search_engine import PHASE_LOCAL_SEARCH
 from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
-from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, PuzzleMetaLoaderThread, FilterCountWorker, RefinementReplayThread
+from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, PuzzleMetaLoaderThread, FilterCountWorker, RefinementReplayThread
 from desktop.widgets import (
     text_has_pattern_markers,
     ActionsHoverWidget, _format_add_to_list_label,
@@ -87,9 +87,9 @@ from desktop import passage_witnesses  # multi-witness state machine (pure)
 from shared import passage_witness_source  # witness resolution (pure, shared with web)
 from shared import passage_fusion  # RRF fusion (pure, shared with web + API)
 from desktop.update_ui import UpdateNotificationBar, WhatsNewBar, WhatsNewDialog, UpdateProgressDialog, TelemetryConsentBar  # Phase 127 update_ui; SEED-031 re-ask bar
-from filter_text_dialog import FilterTextDialog
+from desktop.filter_text_dialog import FilterTextDialog
 from desktop.column_filter_dialog import ColumnFilterDialog  # moved 2026-09-19; alias stub at the root
-from list_filter_dialog import ListFilterDialog
+from desktop.list_filter_dialog import ListFilterDialog
 from shared_export_utils import sanitize_text_for_excel as shared_sanitize_excel
 from shared_export_utils import coerce_img_page_cell
 from shared.reading_desk_model import ReadingDeskEntry, ReadingDeskState
@@ -108,8 +108,8 @@ except ImportError:
     _HAS_NLI_CROSSREF = False
 
 # Community features - corrections, comments, discoveries
-from corrections_client import get_corrections_client
-from corrections_ui import (
+from desktop.corrections_client import get_corrections_client
+from desktop.corrections_ui import (
     LoginDialog, RegisterDialog,
     CorrectionSubmitDialog, CorrectionsViewerDialog, CorrectionDetailDialog,
     MyCorrectionsDialog, AllCorrectionsDialog,
@@ -7284,7 +7284,7 @@ class GenizahGUI(QMainWindow):
         if self.current_browse_sid not in self.meta_mgr.nli_cache: return
 
         # Clear field translation cache for new manuscript
-        from gui_threads import _field_translation_cache
+        from desktop.gui_threads import _field_translation_cache
         for k in list(_field_translation_cache):
             if k.startswith('br_'):
                 del _field_translation_cache[k]
@@ -8085,7 +8085,7 @@ class GenizahGUI(QMainWindow):
         _show_trans = _lac2().get('show_translations', False)
         _ft_cache = {}
         if _show_trans:
-            from gui_threads import _field_translation_cache
+            from desktop.gui_threads import _field_translation_cache
             _ft_cache = _field_translation_cache
             # Pre-populate cache with Oxford pre-computed translations for part fields
             if part_meta:
@@ -8504,7 +8504,7 @@ class GenizahGUI(QMainWindow):
             context: 'rd' for ResultDialog, 'browse' for browse tab
             rd_dialog: ResultDialog instance (when context='rd')
         """
-        from gui_threads import _field_translation_cache, TranslateTextThread
+        from desktop.gui_threads import _field_translation_cache, TranslateTextThread
 
         # Already cached — just refresh
         if field_key in _field_translation_cache:
@@ -8590,7 +8590,7 @@ class GenizahGUI(QMainWindow):
     def _on_field_translated(self, field_key, original, translated, context, rd_dialog=None):
         """Handle completed field translation — refresh the relevant panel."""
         self.statusBar().clearMessage()
-        from gui_threads import _field_translation_cache
+        from desktop.gui_threads import _field_translation_cache
         if not translated:
             # Remove sentinel so badge reverts to "Translate"
             _field_translation_cache.pop(field_key, None)
@@ -9844,7 +9844,7 @@ class GenizahGUI(QMainWindow):
     def _refresh_browse_images_for_volume(self, ie_id):
         """Launch lightweight manifest-only worker for volume switch (no full enrichment)."""
         from genizah_core import resolve_volume_suffix
-        from gui_threads import VolumeManifestThread
+        from desktop.gui_threads import VolumeManifestThread
         sid = self.current_browse_sid
         if not sid:
             return
@@ -14990,7 +14990,7 @@ class GenizahGUI(QMainWindow):
 
     def _show_joins_feed_dialog(self):
         """Show the full joins feed dialog."""
-        from corrections_ui import JoinsFeedDialog
+        from desktop.corrections_ui import JoinsFeedDialog
 
         def browse_shelfmark(shelfmark):
             self.browse_shelf_input.setText(shelfmark)
@@ -15248,7 +15248,7 @@ class GenizahGUI(QMainWindow):
             self._set_last_browse_field("shelf")
             self.browse_load()
 
-        from corrections_ui import JoinsDialog
+        from desktop.corrections_ui import JoinsDialog
         dialog = JoinsDialog(
             self, self.corrections_client,
             document_id=anchor_sys_id,
@@ -21085,7 +21085,7 @@ class GenizahGUI(QMainWindow):
     def _launch_enrichment_workers(self, results, defer=False):
         """Launch domain, PGP badge, printed badge, and measurement enrichment workers."""
         def _start():
-            from gui_threads import DomainEnrichmentWorker
+            from desktop.gui_threads import DomainEnrichmentWorker
             from shared.local_sys_id import is_local_sys_id as _is_local
             # v7.16 BUG-6: Genizah enrichment (domain / PGP / printed / measurement)
             # does NOT apply to LOCAL hits (97-prefix synthetic ids). Skip them so a
@@ -31247,19 +31247,19 @@ def resource_path(relative_path):
 # one inside the frozen process, which is the only place a moved module can prove its new name
 # resolves (the alias stub at the old root path is not in the PyInstaller graph).
 _SELF_TEST_IMPORT_MODULES = (
-    "corrections_client",
-    "corrections_ui",
     "desktop.column_filter_dialog",
-    "filter_text_dialog",
+    "desktop.corrections_client",
+    "desktop.corrections_ui",
+    "desktop.filter_text_dialog",
+    "desktop.gui_threads",
+    "desktop.list_filter_dialog",
+    "desktop.supabase_corrections_client",
     "genizah_core",
     "genizah_translations",
-    "gui_threads",
-    "list_filter_dialog",
     "lists_sync",
     "pgp_tag_translations",
     "sefaria_utils",
     "shared_export_utils",
-    "supabase_corrections_client",
     "unified_variants",
 )
 

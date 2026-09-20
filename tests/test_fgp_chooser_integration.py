@@ -89,7 +89,8 @@ class TestWebChooserWiring:
 
 class TestDesktopChooserWiring:
     def test_worker_merges_and_aligns_fgp_by_folio(self):
-        src = _read("gui_threads.py")
+        src = _read("desktop/gui_threads.py")
+        assert "sys.modules[__name__]" not in src, "read the real module, not the root alias stub"
         assert "get_fgp_sources_for_fragment" in src
         # Merged in BOTH the per-fragment worker and the reading-desk batch worker.
         assert src.count("get_fgp_sources_for_fragment(") >= 2

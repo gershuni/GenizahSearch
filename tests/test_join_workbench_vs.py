@@ -777,7 +777,10 @@ def test_joinsdialog_opens_plain_and_closes():
     Static source scan of corrections_ui.py — keeps test headless (no Qt construction).
     """
     import pathlib
-    src = (pathlib.Path(__file__).parent.parent / "corrections_ui.py").read_text(encoding="utf-8")
+    src = (pathlib.Path(__file__).parent.parent / "desktop" / "corrections_ui.py").read_text(encoding="utf-8")
+    assert "sys.modules[__name__]" not in src, (
+        "read the real module, not the root alias stub (tests/test_root_alias_stubs.py)"
+    )
 
     # Find _show_vs_picker method body
     method_start = src.find("def _show_vs_picker(")

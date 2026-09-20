@@ -260,7 +260,7 @@ def test_lab_search_thread_and_ui_wire_corpus_scope():
     import inspect
     import os
     from genizah_core import LabEngine
-    from gui_threads import LabSearchThread
+    from desktop.gui_threads import LabSearchThread
 
     assert "corpus_scope" in inspect.signature(LabEngine.lab_search).parameters, (
         "LabEngine.lab_search must accept corpus_scope"
@@ -268,7 +268,7 @@ def test_lab_search_thread_and_ui_wire_corpus_scope():
     assert "corpus_scope" in inspect.signature(LabSearchThread.__init__).parameters, (
         "LabSearchThread.__init__ must accept corpus_scope"
     )
-    import gui_threads as _gt
+    from desktop import gui_threads as _gt
     gt_src = inspect.getsource(_gt.LabSearchThread.run)
     assert "corpus_scope=self.corpus_scope" in gt_src, (
         "LabSearchThread.run must pass corpus_scope through to lab_search"

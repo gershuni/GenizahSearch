@@ -284,10 +284,12 @@ every session's context.
   widgets, and update-UI are in `desktop/*.py`. **Grep `shared/` and `desktop/`**, not just the
   old god-files. (v8.3.0 decomposition) Layout, ownership and the guard tests:
   [`docs/architecture/OVERVIEW.md`](docs/architecture/OVERVIEW.md).
-- **Root alias stubs are temporary.** `column_filter_dialog.py` at the root is a four-line alias for
-  `desktop/column_filter_dialog.py` (Round 1 Stage 2 trial, 2026-09-19); import the `desktop.` name.
-  Round 2 removes each stub once no in-repo importer uses the old name -- and with it that basename's
-  exemption in `tests/test_dependencies_declared.py`. The other ten root-module moves are unapproved.
+- **Root alias stubs are temporary; never import through one.** Seven root modules now live under
+  `desktop/` -- `gui_threads`, `corrections_ui`, `corrections_client`, `supabase_corrections_client`,
+  `filter_text_dialog`, `list_filter_dialog` (2026-09-20) and `column_filter_dialog` (2026-09-19) --
+  each leaving a four-line alias at the old path. **Import `desktop.<name>`**;
+  `tests/test_root_alias_stubs.py` fails any tracked file that imports the old name, because Round 2
+  deletes the stubs (and with them those basenames' exemption in `tests/test_dependencies_declared.py`).
 - **LOCAL extractor is at `extraction_format_version` 3.** Libraries indexed before that need a
   manual **Re-index All**; there is no auto-flip (bulk re-extraction must never run from
   `__init__` or the UI thread).

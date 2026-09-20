@@ -260,16 +260,24 @@ that `Config` or the spec resolve there. Everything else has a reason or a plan.
 | `shared_export_utils.py` | compatibility shim over `shared/export_utils.py`; stays while call sites use it |
 | `genizah_translations.py` | translation tables imported across both apps; stays for now (Round 2 candidate for `shared/`) |
 
-**Modules at the root whose home is `desktop/` or `shared/`** -- Stage 2 moves, each leaving a
-four-line alias stub at the old path (removed in Round 2). The trial move landed 2026-09-19:
-`column_filter_dialog.py` now lives at [`desktop/column_filter_dialog.py`](../../desktop/column_filter_dialog.py)
-with the stub at the root ([tests/test_root_alias_stubs.py](../../tests/test_root_alias_stubs.py) pins that
-the two names are one module; `GenizahSearchPro.exe --self-test-imports` proves the new name resolves
-in the frozen app). The owner chose the trial only; the rest stay proposed:
+**Modules moved out of the root in Stage 2**, each leaving a four-line alias stub at the old path
+(Round 2 removes the stubs). [tests/test_root_alias_stubs.py](../../tests/test_root_alias_stubs.py) pins
+that each old name IS the real module, that the stub contains nothing but the aliasing, and that **no
+tracked file imports a moved module by its old name**; `GenizahSearchPro.exe --self-test-imports`
+proves every new dotted name resolves inside the frozen app.
+
+Landed 2026-09-19 (trial): [`desktop/column_filter_dialog.py`](../../desktop/column_filter_dialog.py).
+Landed 2026-09-20: [`desktop/gui_threads.py`](../../desktop/gui_threads.py),
+[`desktop/corrections_ui.py`](../../desktop/corrections_ui.py),
+[`desktop/corrections_client.py`](../../desktop/corrections_client.py),
+[`desktop/supabase_corrections_client.py`](../../desktop/supabase_corrections_client.py),
+[`desktop/filter_text_dialog.py`](../../desktop/filter_text_dialog.py),
+[`desktop/list_filter_dialog.py`](../../desktop/list_filter_dialog.py).
+
+Still at the root:
 
 | File | Proposed home | Why it is not there yet |
 |---|---|---|
-| `gui_threads.py`, `corrections_ui.py`, `corrections_client.py`, `supabase_corrections_client.py`, `filter_text_dialog.py`, `list_filter_dialog.py` | `desktop/` | tests read some of them by path, loggers are named after `__name__`, and the frozen build must be re-verified |
 | `sefaria_utils.py`, `pgp_tag_translations.py`, `unified_variants.py` (generated), `lists_sync.py` | `shared/` | the spec bundles `pgp_tag_translations.py` by name; `lists_sync`'s logger is named after the module and `tests/test_local_namespace_no_lists_leak.py` filters `caplog` on that name, so a move renames what the tests listen to |
 | `server.py` | `scripts/` | anchors the repo root from its own location |
 

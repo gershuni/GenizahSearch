@@ -202,7 +202,7 @@ All under `Config.INDEX_DIR` unless stated. None is bundled; only `lists.pkl` ev
 Recorded here so the rows above stay descriptive; each becomes a tracker row or a Round 2 item.
 
 - `bodleian_master_index.csv` has no code reader but ships in every installer via the spec.
-- `data/` is not bundled, yet `gui_threads.py` anchors `data/few_shot_*.json` on its own `__file__`; in the frozen app the read fails and is swallowed (field translation silently loses its few-shot prompts).
+- `data/` is not bundled, yet the desktop translation worker reads `data/few_shot_*.json` through a path anchored on its own `__file__` (`desktop/gui_threads.py::few_shot_data_dir`, which climbs to the repository root and is pinned by `tests/test_stage2_move_invariants.py`); in the **frozen** app that directory does not exist, the read fails, and the failure is swallowed -- field translation silently loses its few-shot prompts.
 - `fgp_data/fgp_transcriptions.db` is already in the spec while the tracker lists shipping as pending; the scripts that build it are gitignored with the rest of `fgp_data/`.
 - Three tables the code writes (`published_joins`, `published_join_fragments`, `discovery_responses`) have no DDL anywhere in the repo; a fourth, `document_sources`, is defined only in `migrations/`, not in `supabase_setup.sql`.
 - `config.pkl` is the one personal-state file written without an atomic replace, and its loader swallows every exception.

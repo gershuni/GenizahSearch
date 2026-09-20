@@ -127,7 +127,7 @@ def test_start_search_rearms_the_context_each_run():
 def test_phase_signal_is_distinct_from_the_numeric_channel():
     """A phase is not a status string and not a progress pair. Keeping it its own
     signal is what stops the UI pattern-matching on prose."""
-    import gui_threads
+    from desktop import gui_threads
     sigs = gui_threads.SearchThread.phase_signal.signatures
     assert any('QString' in s or 'str' in s for s in sigs), sigs
     prog = gui_threads.SearchThread.progress_signal.signatures

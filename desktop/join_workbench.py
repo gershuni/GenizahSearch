@@ -597,7 +597,7 @@ try:
     from PyQt6.QtGui import QPalette, QPixmap, QImage
     from desktop.image_loader import ImageLoaderThread
     from desktop.widgets.line_number_text_edit import apply_line_numbered_text
-    from gui_threads import SearchThread
+    from desktop.gui_threads import SearchThread
     _QT_AVAILABLE = True
 except ImportError:
     _QT_AVAILABLE = False

@@ -15,8 +15,8 @@ import textwrap
 
 import pytest
 
-import gui_threads
-from gui_threads import (CompositionThread, GroupingThread, LabCompositionThread,
+from desktop import gui_threads
+from desktop.gui_threads import (CompositionThread, GroupingThread, LabCompositionThread,
                          LabSearchThread, MultiWitnessCompositionThread,
                          PausableSearchMixin, SearchThread)
 

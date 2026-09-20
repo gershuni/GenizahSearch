@@ -397,7 +397,7 @@ def test_catalog_build_browse_filters_omits_library_when_empty(monkeypatch):
 @pytest.mark.gui
 def test_filter_count_worker_intersects_library_with_meta_mgr(monkeypatch):
     """FINDING 2: FilterCountWorker with meta_mgr intersects filters['library'] into result set."""
-    from gui_threads import FilterCountWorker
+    from desktop.gui_threads import FilterCountWorker
 
     # CUL sys_ids (smaller set)
     cul_sys_ids = {'990001', '990002'}
@@ -441,7 +441,7 @@ def test_filter_count_worker_intersects_library_with_meta_mgr(monkeypatch):
 @pytest.mark.gui
 def test_filter_count_worker_no_meta_mgr_is_safe_noop(monkeypatch):
     """FINDING 2 (no-meta_mgr path): FilterCountWorker without meta_mgr must not raise."""
-    from gui_threads import FilterCountWorker
+    from desktop.gui_threads import FilterCountWorker
 
     broader_set = {'990001', '990002', '990003'}
 

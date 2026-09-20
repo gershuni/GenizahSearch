@@ -6,6 +6,25 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ## [Unreleased]
 
+### Internal -- repo structure Round 1, stage 2: the desktop-only root modules (2026-09-20; no behaviour change)
+
+- **Six modules moved into `desktop/`** behind four-line alias stubs, every consumer rewritten to the
+  dotted name in the same commit: `gui_threads.py`, `corrections_ui.py`, `corrections_client.py`,
+  `supabase_corrections_client.py`, `filter_text_dialog.py`, `list_filter_dialog.py`.
+- **Two silent-failure sites fixed on the way.** `desktop/join_workbench.py` imports Qt and the worker
+  module inside one `try`, whose handler sets `_QT_AVAILABLE = False` and undefines the whole Join
+  Workbench UI; `desktop/corrections_client.py::get_corrections_client` catches `ImportError` and
+  downgrades to the REST client. Both now have gates: no tracked file may import a moved module by its
+  old name (`tests/test_root_alias_stubs.py`), and `_QT_AVAILABLE` must be true under PyQt6
+  (`tests/test_stage2_move_invariants.py`).
+- **The few-shot prompt path was repaired for the dev tree.** `gui_threads` anchored `data/` on its own
+  directory, which the move turned into `desktop/data`; it is now the named
+  `few_shot_data_dir()`, climbing to the repository root and pinned by a test. (The frozen build still
+  bundles no `data/` at all -- a separate, recorded defect.)
+- **`supabase_corrections_client` stopped putting `<root>/web` on `sys.path`**: the hack resolved
+  nothing, and after the move it pointed at a directory that does not exist. Its now-unused `os` and
+  `sys` imports went with it.
+
 ### Internal -- repo structure Round 1, stage 2 trial (2026-09-19; one module moved behind an alias stub; no behaviour change)
 
 - **`column_filter_dialog.py` -> `desktop/column_filter_dialog.py`** (43 lines, one importer). A

@@ -56,6 +56,13 @@ DESKTOP_MODULES = [
     "desktop/widgets/line_number_text_edit.py",
     # Moved out of the repository root (repo-structure Round 1, Stage 2 trial, 2026-09-19).
     "desktop/column_filter_dialog.py",
+    # Stage 2 batch 1 (2026-09-20): the desktop-only root modules.
+    "desktop/corrections_client.py",
+    "desktop/corrections_ui.py",
+    "desktop/filter_text_dialog.py",
+    "desktop/gui_threads.py",
+    "desktop/list_filter_dialog.py",
+    "desktop/supabase_corrections_client.py",
 ]
 
 # Compound statement types whose bodies run at import time

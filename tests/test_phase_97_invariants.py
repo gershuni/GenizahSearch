@@ -63,7 +63,10 @@ def test_cloud_write_gates_at_top():
     )
 
     # Gate 2: corrections_client.py :: create_correction — is_local_sys_id in body[:5]
-    corrections_path = REPO_ROOT / "corrections_client.py"
+    corrections_path = REPO_ROOT / "desktop" / "corrections_client.py"
+    assert "sys.modules[__name__]" not in corrections_path.read_text(encoding="utf-8"), (
+        "read the real module, not the root alias stub (tests/test_root_alias_stubs.py)"
+    )
     tree = ast.parse(corrections_path.read_text(encoding="utf-8"))
     create_fn = _find_function(tree, "create_correction")
     assert create_fn is not None, (

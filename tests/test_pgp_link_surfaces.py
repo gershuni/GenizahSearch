@@ -164,7 +164,7 @@ def _run_badge_worker(monkeypatch, link_ids, manual_ids, urls,
                       url_error=False):
     import shared.document_service as ds
     import shared.transcription_service as ts
-    from gui_threads import PGPBadgeWorker
+    from desktop.gui_threads import PGPBadgeWorker
 
     monkeypatch.setattr(ds, "get_sys_ids_with_transcriptions",
                         lambda ids: set(link_ids))
@@ -203,7 +203,7 @@ def test_worker_url_failure_leaves_the_badges_intact(monkeypatch):
 def test_worker_skips_the_url_query_when_no_row_has_pgp(monkeypatch):
     import shared.document_service as ds
     import shared.transcription_service as ts
-    from gui_threads import PGPBadgeWorker
+    from desktop.gui_threads import PGPBadgeWorker
 
     calls = []
     monkeypatch.setattr(ds, "get_sys_ids_with_transcriptions", lambda ids: set())
@@ -223,7 +223,7 @@ def test_worker_still_feeds_a_two_argument_slot(monkeypatch):
     """The third argument was APPENDED; old-shape slots must keep working."""
     import shared.document_service as ds
     import shared.transcription_service as ts
-    from gui_threads import PGPBadgeWorker
+    from desktop.gui_threads import PGPBadgeWorker
 
     monkeypatch.setattr(ds, "get_sys_ids_with_transcriptions", lambda ids: {"a"})
     monkeypatch.setattr(ts, "get_sys_ids_with_manual_transcriptions",

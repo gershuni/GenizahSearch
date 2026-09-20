@@ -116,7 +116,7 @@ class TestCommentsRoundTrip:
     def _make_client_with_mock_supabase(self):
         """Build a SupabaseCorrectionsClient with the auth/client checks stubbed
         out so create_comment proceeds to the insert call."""
-        from supabase_corrections_client import SupabaseCorrectionsClient
+        from desktop.supabase_corrections_client import SupabaseCorrectionsClient
         client = SupabaseCorrectionsClient.__new__(SupabaseCorrectionsClient)
         # Stub the authenticated-user gate at the top of create_comment.
         user = MagicMock()
@@ -372,7 +372,7 @@ class TestCorrectionsWriteRejected:
     def test_create_correction_rejects_synthetic_sys_id_supabase_client(self):
         """SupabaseCorrectionsClient.create_correction rejects synthetic document_id
         BEFORE the line-811 client.table('corrections').insert call."""
-        from supabase_corrections_client import SupabaseCorrectionsClient
+        from desktop.supabase_corrections_client import SupabaseCorrectionsClient
 
         client = SupabaseCorrectionsClient.__new__(SupabaseCorrectionsClient)
         # Stub the auth gate so we reach the synthetic-rejection branch.
@@ -404,7 +404,7 @@ class TestCorrectionsWriteRejected:
     def test_create_correction_rejects_synthetic_sys_id_corrections_client(self):
         """corrections_client.CorrectionsClient.create_correction rejects synthetic
         document_id at method entry."""
-        from corrections_client import CorrectionsClient
+        from desktop.corrections_client import CorrectionsClient
 
         client = CorrectionsClient.__new__(CorrectionsClient)
         # Match the REST-wrapper's idiom — the gate fires before any HTTP call.
@@ -427,7 +427,7 @@ class TestCorrectionsWriteRejected:
     def test_real_alma_correction_not_rejected_supabase_client(self):
         """Regression guard: real-Alma sys_id passes the synthetic-rejection branch
         and reaches the existing insert path."""
-        from supabase_corrections_client import SupabaseCorrectionsClient
+        from desktop.supabase_corrections_client import SupabaseCorrectionsClient
 
         client = SupabaseCorrectionsClient.__new__(SupabaseCorrectionsClient)
         user = MagicMock()

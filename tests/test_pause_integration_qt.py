@@ -19,7 +19,7 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from genizah_app import _PauseCtx  # noqa: E402
-from gui_threads import SearchThread  # noqa: E402
+from desktop.gui_threads import SearchThread  # noqa: E402
 
 # The budget stop_search actually allows before it reaches terminate().
 STOP_WAIT_BUDGET_MS = 5000
