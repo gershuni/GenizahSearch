@@ -162,7 +162,7 @@ All under `Config.INDEX_DIR` unless stated. None is bundled; only `lists.pkl` ev
 | `Documents\GenizahSearchPro\Reports\` | exported reports and sheets | export code in `genizah_app.py` | the user | `Config.REPORTS_DIR` (probes writability at import; falls back to `INDEX_DIR/Reports`) | user files | |
 | `~/.genizah_corrections/supabase_credentials.json`, `community_cache.json` | the desktop Supabase session (access + refresh token, cached user) and a cache of community payloads | `supabase_corrections_client.py` | same | **module-private**: `Path.home() / ".genizah_corrections"`, never `Config` | user is logged out; cache refills | none. Tokens are stored as plaintext JSON with default file permissions; the password goes to the OS keyring instead |
 | OS keyring, service `GenizahSearch` | the saved password for "Remember me" | `supabase_corrections_client.py` via `keyring` (optional dependency; silently skipped when missing) | same | n/a | user re-enters the password | none |
-| `~/.genizah_search/sefaria_cache/` | Sefaria API responses | `sefaria_utils.py` | `filter_text_dialog.py`, `web/pages/parallels.py` | module-private in `sefaria_utils.py` | re-fetched | none |
+| `~/.genizah_search/sefaria_cache/` | Sefaria API responses | `shared/sefaria_utils.py` | `desktop/filter_text_dialog.py`, `web/pages/parallels.py` | module-private in `sefaria_utils.py` | re-fetched | none |
 
 ## 5. Mutable shared state (web server)
 
@@ -191,7 +191,7 @@ All under `Config.INDEX_DIR` unless stated. None is bundled; only `lists.pkl` ev
 | Artifact | What | Notes |
 |---|---|---|
 | the six 0-byte sidecar stubs | see §2b | |
-| `.server.pid` | PID file of the local dev server CLI `server.py` | **not gitignored** (`.gitignore` covers `app.pid` only); does not exist in the working tree today |
+| `.server.pid` | PID file of the local dev server CLI `scripts/server.py` (which anchors the repository root two levels up from itself) | **not gitignored** (`.gitignore` covers `app.pid` only); does not exist in the working tree today |
 | `_ie_volume_map_build.log` and similar build logs at the root | untracked debris | |
 | `reports/*_post_phase84.*`, `reports/synthetic_ambiguity_residue*.csv`, `reports/synthetic_coverage.md`, `pgp_data/*_report.*` | evidence outputs of one-off pipeline runs | the `_post_phase84` set was moved to `docs/archive/reports/phase84/` (Round 1); `scripts/build_residue_patterns_artifact.py` reads the untracked `..._dryrun.csv` sibling, so that consumer has no committed input |
 | `char_merges_all.xlsx`, `char_merges_filtered.xlsx` | intermediate outputs of `scripts/analyze_char_merges.py` | archived under `docs/archive/data/char_merges/` (Round 1); the report stays at the root |

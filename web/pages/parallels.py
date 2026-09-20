@@ -33,7 +33,7 @@ from web.components.filter_panel import (
 logger = logging.getLogger(__name__)
 
 # Import Sefaria sources and text cleaning from the shared sefaria_utils module (no PyQt6 dependency)
-from sefaria_utils import SEFARIA_SOURCES, clean_hebrew_text, get_cache_dir, get_sefaria_library
+from shared.sefaria_utils import SEFARIA_SOURCES, clean_hebrew_text, get_cache_dir, get_sefaria_library
 
 # Import shared sanitization utility
 from shared_export_utils import sanitize_cache_filename as _sanitize_cache_filename

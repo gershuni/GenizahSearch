@@ -28,6 +28,11 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 # old root module name -> the real dotted module it aliases
 ALIASES: dict[str, str] = {
     "column_filter_dialog": "desktop.column_filter_dialog",  # Stage 2 trial, 2026-09-19
+    # Stage 2 batch 2 (2026-09-20): the cross-app modules.
+    "lists_sync": "shared.lists_sync",
+    "pgp_tag_translations": "shared.pgp_tag_translations",
+    "sefaria_utils": "shared.sefaria_utils",
+    "unified_variants": "shared.unified_variants",
     # Stage 2 batch 1 (2026-09-20): the desktop-only root modules.
     "corrections_client": "desktop.corrections_client",
     "corrections_ui": "desktop.corrections_ui",

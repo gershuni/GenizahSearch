@@ -21743,7 +21743,7 @@ class GenizahGUI(QMainWindow):
 
     def _on_pgp_tags_loaded(self, tags):
         """Handle PGP tags worker results - populate tag dropdown with categorized Hebrew translations."""
-        from pgp_tag_translations import get_categorized_tags_for_display
+        from shared.pgp_tag_translations import get_categorized_tags_for_display
         self._pgp_tags = tags
         lang = CURRENT_LANG  # 'he' or 'en'
         self.tag_search_combo.blockSignals(True)
@@ -31256,11 +31256,11 @@ _SELF_TEST_IMPORT_MODULES = (
     "desktop.supabase_corrections_client",
     "genizah_core",
     "genizah_translations",
-    "lists_sync",
-    "pgp_tag_translations",
-    "sefaria_utils",
+    "shared.lists_sync",
+    "shared.pgp_tag_translations",
+    "shared.sefaria_utils",
+    "shared.unified_variants",
     "shared_export_utils",
-    "unified_variants",
 )
 
 if __name__ == "__main__":

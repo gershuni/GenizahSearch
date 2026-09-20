@@ -3,13 +3,13 @@
 CLI to manage the Genizah Search web server.
 
 Usage:
-    python server.py              - Interactive server management menu
-    python server.py start        - Start the web server
-    python server.py stop         - Stop the web server
-    python server.py restart      - Restart the web server
-    python server.py status       - Check server status
-    python server.py check        - Quick port check
-    python server.py kill         - Force kill server process on port
+    python scripts/server.py              - Interactive server management menu
+    python scripts/server.py start        - Start the web server
+    python scripts/server.py stop         - Stop the web server
+    python scripts/server.py restart      - Restart the web server
+    python scripts/server.py status       - Check server status
+    python scripts/server.py check        - Quick port check
+    python scripts/server.py kill         - Force kill server process on port
 """
 import subprocess
 import sys
@@ -19,8 +19,10 @@ import time
 from pathlib import Path
 from typing import Optional, Tuple
 
-# Config
-PROJECT_DIR = Path(__file__).parent
+# Config -- this file lives in scripts/, so the repository root is TWO levels up. Both uses
+# below depend on it: .server.pid belongs at the root, and start() chdir()s here before
+# launching `python -m web.main`, which can only resolve the `web` package from the root.
+PROJECT_DIR = Path(__file__).resolve().parent.parent
 PID_FILE = PROJECT_DIR / '.server.pid'
 DEFAULT_PORT = 8081
 MODULE = 'web.main'

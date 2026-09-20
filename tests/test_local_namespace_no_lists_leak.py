@@ -20,7 +20,7 @@ def _make_manager(items=None, lists=None):
     Uses a simple MagicMock for lists_manager so we don't need the real
     ListsManager (which requires a file path).
     """
-    from lists_sync import ListsCloudSync
+    from shared.lists_sync import ListsCloudSync
 
     lm = MagicMock()
     lm.data = {
@@ -34,7 +34,7 @@ def _make_manager(items=None, lists=None):
     # simulating SUPABASE_AVAILABLE=True / SUPABASE_ANON_KEY set.
     manager._user_id = 'test-user-uuid'
     # Patch module-level SUPABASE_AVAILABLE and SUPABASE_ANON_KEY
-    import lists_sync as ls_mod
+    from shared import lists_sync as ls_mod
     ls_mod.SUPABASE_AVAILABLE = True
     ls_mod.SUPABASE_ANON_KEY = 'fake-anon-key'
     return manager
@@ -68,7 +68,7 @@ def test_sync_item_to_cloud_zero_get_client_calls_for_local(caplog):
     manager._get_client = mock_get_client
     manager.sync_list_to_cloud = mock_sync_list
 
-    with caplog.at_level(logging.INFO, logger='lists_sync'):
+    with caplog.at_level(logging.INFO, logger='shared.lists_sync'):
         result = manager.sync_item_to_cloud(
             item_id='fake-item-id', list_id='fake-list-id'
         )
@@ -101,7 +101,7 @@ def test_sync_item_to_cloud_local_item_id_missing_data(caplog):
     manager._get_client = mock_get_client
     manager.sync_list_to_cloud = mock_sync_list
 
-    with caplog.at_level(logging.INFO, logger='lists_sync'):
+    with caplog.at_level(logging.INFO, logger='shared.lists_sync'):
         result = manager.sync_item_to_cloud(
             item_id=LOCAL_SYS_ID, list_id='fake-list-id'
         )
@@ -219,7 +219,7 @@ def test_sync_list_to_cloud_aborts_if_any_item_local(caplog):
     mock_get_client = MagicMock(return_value=None)
     manager._get_client = mock_get_client
 
-    with caplog.at_level(logging.INFO, logger='lists_sync'):
+    with caplog.at_level(logging.INFO, logger='shared.lists_sync'):
         result = manager.sync_list_to_cloud(list_id='fake-list-id')
 
     assert result is False, "Expected False when list contains LOCAL items"

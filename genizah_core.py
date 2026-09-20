@@ -67,7 +67,7 @@ from shared.variants import VariantManager  # noqa: F401
 # itself); these names were importable from genizah_core at v8.2.x, so the
 # try/except re-export is preserved verbatim for zero behavior change.
 try:
-    from unified_variants import UNIFIED_VARIANT_PAIRS, get_top_pairs  # noqa: F401
+    from shared.unified_variants import UNIFIED_VARIANT_PAIRS, get_top_pairs  # noqa: F401
 except ImportError:
     UNIFIED_VARIANT_PAIRS = []
     def get_top_pairs(n): return []

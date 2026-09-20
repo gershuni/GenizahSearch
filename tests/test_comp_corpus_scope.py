@@ -605,7 +605,7 @@ def test_no_cloud_write_on_local_comp():
     LOCAL composition directly via the engine (NOT via the UI)."""
     import shared.search_serializer as _serializer
     import shared.corrections_service as _corrections
-    import lists_sync as _lists_sync
+    from shared import lists_sync as _lists_sync
 
     with patch.object(_serializer, "_is_local_item", create=True) as spy_serialize, \
             patch.object(_corrections, "save_correction", create=True) as spy_corr, \

@@ -13,7 +13,7 @@ from typing import Mapping
 from shared.config import Config
 
 try:
-    from unified_variants import UNIFIED_VARIANT_PAIRS
+    from shared.unified_variants import UNIFIED_VARIANT_PAIRS
 except ImportError:
     UNIFIED_VARIANT_PAIRS = []
 

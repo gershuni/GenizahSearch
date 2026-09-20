@@ -563,7 +563,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                     # Load PGP tags asynchronously with categorized Hebrew translations
                     async def load_pgp_tags():
-                        from pgp_tag_translations import get_categorized_tags_for_display
+                        from shared.pgp_tag_translations import get_categorized_tags_for_display
                         from web.translations import get_language
                         tags = await run.io_bound(get_all_distinct_tags)
                         lang = get_language()
