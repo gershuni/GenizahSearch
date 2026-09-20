@@ -472,6 +472,59 @@ def check_context_budget() -> list:
     return issues
 
 
+# A citation like `docs/OPEN_ISSUES.md:161` is wrong the moment anything above line 161 is
+# archived, and it then points at an unrelated issue instead of failing loudly. Four such
+# citations in .planning/milestones/v9.0.0-MILESTONE-AUDIT.md broke exactly that way when the
+# tracker was trimmed on 2026-09-20 (Codex, PR #350). Quote the entry's headline instead.
+LINE_CITATION_FILES = ('OPEN_ISSUES.md', 'CHANGELOG.md', 'CLAUDE.md')
+# Both spellings a reader can click: ``file.md:161`` (editor/grep form) and ``file.md#L161``
+# (GitHub's anchor form, with or without a ``-L170`` range end).
+LINE_CITATION_RE = re.compile(
+    r'(?:docs/)?(' + '|'.join(re.escape(f) for f in LINE_CITATION_FILES) + r')[:#]L?(\d+)'
+)
+# Verbatim tool output and historical dumps quote line numbers as data, not as a citation.
+# Archived history is exempt: ``docs/archive/``, ``.planning/milestones/<version>-phases/``,
+# ``.planning/quick/`` and ``.planning/debug/`` record what a file said at the time, so a line
+# number there is a historical statement, not a pointer a reader is meant to follow today.
+LINE_CITATION_SKIP_DIRS = ('docs/archive/', '.planning/quick/', '.planning/debug/')
+LINE_CITATION_SKIP_RE = re.compile(r'^\.planning/milestones/[^/]+-phases/')
+
+
+def _line_citation_candidates() -> list:
+    """Tracked Markdown that a human is expected to follow a citation in."""
+    out = subprocess.run(
+        ['git', 'ls-files', '-z', '*.md'], cwd=ROOT_DIR, capture_output=True, check=True,
+    ).stdout.decode('utf-8', 'surrogateescape')
+    files = []
+    for rel in out.split('\0'):
+        if not rel or not rel.endswith('.md'):
+            continue
+        if any(rel.startswith(d) for d in LINE_CITATION_SKIP_DIRS) or LINE_CITATION_SKIP_RE.match(rel):
+            continue
+        files.append(rel)
+    return files
+
+
+def check_line_number_citations() -> list:
+    """No tracked doc may cite a moving document by line number."""
+    issues = []
+    for rel in _line_citation_candidates():
+        path = ROOT_DIR / rel
+        try:
+            text = path.read_text(encoding='utf-8', errors='replace')
+        except OSError:
+            continue
+        for n, line in enumerate(text.splitlines(), start=1):
+            for m in LINE_CITATION_RE.finditer(line):
+                issues.append(
+                    f"{rel}:{n} cites {m.group(1)} by line number ({m.group(0)}). "
+                    f"Rows move whenever anything above them is archived, so the citation "
+                    f"silently points at an unrelated entry. Quote the entry's headline "
+                    f"instead (grep finds it wherever it sits)."
+                )
+    return issues
+
+
 def check_broken_links() -> list:
     """Check for broken internal links (docs/ and the root instruction files)."""
     issues = []
@@ -611,7 +664,18 @@ def main():
             pct = 100 * size / ceiling
             print_status(True, f"{rel_path}: {size:,} / {ceiling:,} bytes ({pct:.0f}%)")
 
-    # 5. Check for broken links
+    # 5. Check that nothing cites a moving document by line number
+    print("\n\U0001f4cd Stable Citations")
+    print("-" * 40)
+    line_cites = check_line_number_citations()
+    if line_cites:
+        for c in line_cites:
+            print_status(False, c)
+        total_issues += len(line_cites)
+    else:
+        print_status(True, "No line-numbered citations of OPEN_ISSUES.md / CHANGELOG.md / CLAUDE.md")
+
+    # 6. Check for broken links
     print("\n🔗 Internal Links")
     print("-" * 40)
     broken = check_broken_links()

@@ -67,7 +67,8 @@ These mitigations attenuate but do not eliminate the problem:
 
 - **Negative cache** ([web/api.py:29](web/api.py:29)): `NLI_FAIL_CACHE_TTL=60s` — once a sys_id
   fails, subsequent calls return empty immediately for 60 seconds. Was added 2026-03-25
-  (see [docs/OPEN_ISSUES.md:147](docs/OPEN_ISSUES.md)).
+  (the tracker entry closed with it: grep *"NLI manifest failures are retried immediately"* in
+  [docs/archive/OPEN_ISSUES_ARCHIVE.md](archive/OPEN_ISSUES_ARCHIVE.md)).
 - **Concurrency cap** ([web/api.py:32](web/api.py:32), [web/api.py:41](web/api.py:41)):
   `NLI_MAX_CONCURRENT_FETCHES=8` via `threading.Semaphore`.
 - **Persistent session** with connection pooling ([web/api.py:49-57](web/api.py:49)).
