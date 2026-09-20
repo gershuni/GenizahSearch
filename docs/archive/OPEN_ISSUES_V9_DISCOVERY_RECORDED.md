@@ -1,6 +1,9 @@
 # v9.0.0 Discovery Milestone -- recorded findings (archived 2026-09-20)
 
-> **Archived from [`docs/OPEN_ISSUES.md`](../OPEN_ISSUES.md) on 2026-09-20, unchanged and in order.**
+> **Archived from [`docs/OPEN_ISSUES.md`](../OPEN_ISSUES.md) on 2026-09-20, in order and otherwise
+> unchanged.** One bullet carries an added *[Archived 2026-09-20: ...]* note in square brackets, because
+> its sentence ended with a colon whose continuation is two **Open** bullets that stayed in the tracker.
+> That bracketed note is the only text in this file that was not copied verbatim.
 > These are the dated ***Recorded*** bullets of the v9.0.0 discovery coordination log: measurements
 > taken and owner rulings made between 2026-07-30 and 2026-08-10. They were never open work, and the
 > milestone closed 2026-09-10, so they were moved out to keep the tracker under its 180,000-byte

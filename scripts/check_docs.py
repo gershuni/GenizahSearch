@@ -476,6 +476,7 @@ def check_context_budget() -> list:
 # archived, and it then points at an unrelated issue instead of failing loudly. Four such
 # citations in .planning/milestones/v9.0.0-MILESTONE-AUDIT.md broke exactly that way when the
 # tracker was trimmed on 2026-09-20 (Codex, PR #350). Quote the entry's headline instead.
+FENCE_RE = re.compile(r'^\s*(?:```|~~~)')
 LINE_CITATION_FILES = ('OPEN_ISSUES.md', 'CHANGELOG.md', 'CLAUDE.md')
 # Both spellings a reader can click: ``file.md:161`` (editor/grep form) and ``file.md#L161``
 # (GitHub's anchor form, with or without a ``-L170`` range end).
@@ -506,7 +507,13 @@ def _line_citation_candidates() -> list:
 
 
 def check_line_number_citations() -> list:
-    """No tracked doc may cite a moving document by line number."""
+    """No tracked doc may CITE a moving document by line number.
+
+    Fenced code blocks are skipped: a pasted `rg`/pytest/compiler transcript quoting
+    ``CHANGELOG.md:42`` is verbatim tool output, i.e. data about a moment in time, not a pointer a
+    reader is meant to follow. Inline code is NOT skipped -- `docs/OPEN_ISSUES.md:161` in running
+    prose is exactly the citation this check exists to stop.
+    """
     issues = []
     for rel in _line_citation_candidates():
         path = ROOT_DIR / rel
@@ -514,7 +521,13 @@ def check_line_number_citations() -> list:
             text = path.read_text(encoding='utf-8', errors='replace')
         except OSError:
             continue
+        in_fence = False
         for n, line in enumerate(text.splitlines(), start=1):
+            if FENCE_RE.match(line):
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                continue
             for m in LINE_CITATION_RE.finditer(line):
                 issues.append(
                     f"{rel}:{n} cites {m.group(1)} by line number ({m.group(0)}). "
