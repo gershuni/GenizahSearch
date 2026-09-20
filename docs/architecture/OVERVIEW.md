@@ -306,7 +306,7 @@ section (it is not in the installer itself).
 **Data assets resolved at the root** -- stay ([decision 0008](../decisions/0008-root-assets-stay.md)):
 `libraries.csv`, `oxford_full_db.json`, `ie_volume_map.json`, `Help.html`,
 `cambridge_genizah.json` (a build-time input of `nli_crossref.db`), `char_merges_report.xlsx`
-(the input of the generated `unified_variants.py`), `fist_gap_rows.csv`,
+(the input of the generated `shared/unified_variants.py`), `fist_gap_rows.csv`,
 `fist_gap_manifest.txt`, `fist_gap_ambiguous_titles.txt`; and `bodleian_master_index.csv`, which
 no code reads but the spec still bundles -- dropping it from the spec is an owner call recorded
 in the Round 2 backlog.
