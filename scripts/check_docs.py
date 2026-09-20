@@ -476,7 +476,9 @@ def check_context_budget() -> list:
 # archived, and it then points at an unrelated issue instead of failing loudly. Four such
 # citations in .planning/milestones/v9.0.0-MILESTONE-AUDIT.md broke exactly that way when the
 # tracker was trimmed on 2026-09-20 (Codex, PR #350). Quote the entry's headline instead.
-FENCE_RE = re.compile(r'^\s*(?:```|~~~)')
+# CommonMark: a fence closes only on the SAME character, at least as long as the opener. A
+# four-backtick fence quoting a transcript that itself contains ``` must not close early.
+FENCE_RE = re.compile(r'^\s*(`{3,}|~{3,})')
 LINE_CITATION_FILES = ('OPEN_ISSUES.md', 'CHANGELOG.md', 'CLAUDE.md')
 # Both spellings a reader can click: ``file.md:161`` (editor/grep form) and ``file.md#L161``
 # (GitHub's anchor form, with or without a ``-L170`` range end).
@@ -521,12 +523,18 @@ def check_line_number_citations() -> list:
             text = path.read_text(encoding='utf-8', errors='replace')
         except OSError:
             continue
-        in_fence = False
+        fence = None  # the opening delimiter, while inside a fenced block
         for n, line in enumerate(text.splitlines(), start=1):
-            if FENCE_RE.match(line):
-                in_fence = not in_fence
-                continue
-            if in_fence:
+            m_fence = FENCE_RE.match(line)
+            if m_fence:
+                marker = m_fence.group(1)
+                if fence is None:
+                    fence = marker
+                    continue
+                if marker[0] == fence[0] and len(marker) >= len(fence):
+                    fence = None
+                    continue
+            if fence is not None:
                 continue
             for m in LINE_CITATION_RE.finditer(line):
                 issues.append(
