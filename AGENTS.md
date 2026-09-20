@@ -75,6 +75,18 @@ build_app.bat
 pip freeze > requirements-lock.txt
 ```
 
+After the build, prove the packaged app from the repository root -- **PowerShell, so the variable is set
+separately; the `VAR=1 cmd` prefix is bash and fails here**:
+
+```powershell
+$env:GENIZAH_PACKAGING_SMOKE='1'; python -m pytest tests/test_local_pyinstaller_smoke.py
+Remove-Item Env:\GENIZAH_PACKAGING_SMOKE
+```
+
+Without that variable a missing or stale EXE SKIPS instead of failing. `GENIZAH_PACKAGING_EXE=<path>`
+(same PowerShell form) points the check at a build made elsewhere with `--distpath`, so a trial build
+never has to overwrite `dist/`.
+
 `deploy.sh` runs on the server (`deploy.bat` is its Windows trigger); never run it locally.
 `build_app.bat` builds from the checked-in `GenizahSearchPro.spec`; commit spec edits before building.
 
