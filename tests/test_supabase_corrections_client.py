@@ -28,7 +28,7 @@ if ROOT not in sys.path:
 def client_with_mocked_supabase():
     """Build a SupabaseCorrectionsClient with the Supabase client mocked so we
     can capture insert payloads without hitting the network."""
-    from supabase_corrections_client import SupabaseCorrectionsClient
+    from desktop.supabase_corrections_client import SupabaseCorrectionsClient
 
     cli = SupabaseCorrectionsClient.__new__(SupabaseCorrectionsClient)
 

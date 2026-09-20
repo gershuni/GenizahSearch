@@ -179,7 +179,7 @@ class _StubSearcher:
 def _worker(witnesses, searcher, pinned=None, abort_after=None, cap=None,
             roster=None, prior_rows=None, prior_filtered=None):
     """A stub carrying the real `run` and the real cancel plumbing."""
-    from gui_threads import MultiWitnessCompositionThread as MW
+    from desktop.gui_threads import MultiWitnessCompositionThread as MW
 
     class _W:
         # The REAL methods, borrowed. A re-implementation would only prove
@@ -235,7 +235,7 @@ def _rows(*pairs):
             'filtered': []}
 
 
-import gui_threads  # noqa: E402
+from desktop import gui_threads  # noqa: E402
 pl_mixin = gui_threads.PausableSearchMixin
 
 
@@ -502,7 +502,7 @@ def test_the_thread_declares_every_signal_dispatch_reaches_for():
     """Dispatch in genizah_app.py accesses progress, error, status, pause_ack
     and perf unconditionally. A partial interface either raises before the
     thread starts or silently drops Pause, status and telemetry."""
-    from gui_threads import CompositionThread, MultiWitnessCompositionThread
+    from desktop.gui_threads import CompositionThread, MultiWitnessCompositionThread
     required = {n for n in dir(CompositionThread)
                 if n.endswith('_signal')}
     have = {n for n in dir(MultiWitnessCompositionThread)
@@ -515,7 +515,7 @@ def test_the_single_witness_thread_is_untouched():
     """Phase 146 kept `CompositionThread` byte-unchanged and 97 tests pin the
     fact; the multi-witness path is a SIBLING, not a mode of it."""
     import inspect
-    from gui_threads import CompositionThread
+    from desktop.gui_threads import CompositionThread
     src = inspect.getsource(CompositionThread)
     assert 'witness' not in src.lower()
     assert 'fuse' not in src.lower()
@@ -2761,8 +2761,11 @@ def test_the_witness_marker_is_not_spent_off_tab(monkeypatch):
 
 
 def _worker_src():
-    return _io.open(_os.path.join(_os.path.dirname(_APP_PATH),
-                                  'gui_threads.py'), encoding='utf-8').read()
+    src = _io.open(_os.path.join(_os.path.dirname(_APP_PATH), 'desktop',
+                                 'gui_threads.py'), encoding='utf-8').read()
+    assert 'sys.modules[__name__]' not in src, (
+        'read the real module, not the root alias stub (tests/test_root_alias_stubs.py)')
+    return src
 
 
 def _worker_run_src():

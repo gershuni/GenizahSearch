@@ -14,7 +14,7 @@ REAL_SYS_ID = '990025143260205171'
 
 def _make_client():
     """Return a CorrectionsClient without touching the filesystem."""
-    from corrections_client import CorrectionsClient
+    from desktop.corrections_client import CorrectionsClient
     from unittest.mock import patch as _patch
     import pathlib
 

@@ -420,7 +420,7 @@ class UpdateProgressDialog(QDialog):
         target_path = os.path.join(temp_dir, f"GenizahSearchPro_{safe_version}_Setup.exe")
 
         # Import and start download thread
-        from gui_threads import UpdateDownloaderThread
+        from desktop.gui_threads import UpdateDownloaderThread
         self.download_thread = UpdateDownloaderThread(self.installer_url, target_path)
         self.download_thread.progress_signal.connect(self.on_progress)
         self.download_thread.finished_signal.connect(self.on_download_finished)

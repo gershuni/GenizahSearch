@@ -156,7 +156,7 @@ The desktop app has been decomposed from a monolithic `genizah_app.py` into focu
 
 **Re-exports in `genizah_app.py`** are intentional back-compat shims (per D-10/D-11). All extracted classes are re-exported at their original import paths so that any external code referencing `from genizah_app import ResultDialog` (etc.) continues to work. These re-exports are removable after an external import audit confirms no consumers.
 
-**Import graph:** All `desktop/` modules import only from `genizah_core`, `shared/`, `gui_threads`, standard library, and other `desktop/` modules. Zero back-edges to `genizah_app.py`.
+**Import graph:** All `desktop/` modules import only from `genizah_core`, `shared/`, standard library, and other `desktop/` modules (`gui_threads` became `desktop.gui_threads` on 2026-09-20). Zero back-edges to `genizah_app.py`.
 
 ---
 

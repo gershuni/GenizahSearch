@@ -173,7 +173,7 @@ class TestCorrectionDataclass:
 
     def test_correction_dataclass_has_required_fields(self):
         """Correction dataclass has all fields needed for pending corrections display."""
-        from supabase_corrections_client import Correction
+        from desktop.supabase_corrections_client import Correction
 
         field_names = {f.name for f in dataclasses.fields(Correction)}
 

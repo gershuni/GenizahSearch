@@ -21,7 +21,7 @@ from PyQt6.QtGui import (
 from PyQt6 import sip
 
 from genizah_core import get_logger, normalize_shelfmark, tr
-from gui_threads import PuzzleImageLoaderThread, PuzzleMetaLoaderThread
+from desktop.gui_threads import PuzzleImageLoaderThread, PuzzleMetaLoaderThread
 
 logger = get_logger(__name__)
 

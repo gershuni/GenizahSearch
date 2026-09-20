@@ -25,7 +25,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TARGET_FILES = [
     REPO_ROOT / 'genizah_app.py',
-    REPO_ROOT / 'gui_threads.py',
+    REPO_ROOT / 'desktop' / 'gui_threads.py',
     REPO_ROOT / 'desktop' / 'result_dialog.py',
     # Phase 115 REVIEWS finding 7: scan indexing telemetry call sites in my_library_tab.py.
     # track_performance(INDEXING_COMPLETE, ...) and accumulate_performance(...) land in plan 04.

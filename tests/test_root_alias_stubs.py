@@ -18,6 +18,7 @@ import ast
 import importlib
 import importlib.util
 import pathlib
+import subprocess
 import sys
 
 import pytest
@@ -27,6 +28,13 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 # old root module name -> the real dotted module it aliases
 ALIASES: dict[str, str] = {
     "column_filter_dialog": "desktop.column_filter_dialog",  # Stage 2 trial, 2026-09-19
+    # Stage 2 batch 1 (2026-09-20): the desktop-only root modules.
+    "corrections_client": "desktop.corrections_client",
+    "corrections_ui": "desktop.corrections_ui",
+    "filter_text_dialog": "desktop.filter_text_dialog",
+    "gui_threads": "desktop.gui_threads",
+    "list_filter_dialog": "desktop.list_filter_dialog",
+    "supabase_corrections_client": "desktop.supabase_corrections_client",
 }
 
 
@@ -74,4 +82,56 @@ def test_alias_table_matches_canonical():
     assert moved == ALIASES, (
         f"CANONICAL says these modules left the root: {moved}; ALIASES says {ALIASES}. "
         "Update both in the same commit."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The stubs exist for compatibility, not for use.
+# ---------------------------------------------------------------------------
+
+def _tracked_python_files() -> list:
+    out = subprocess.run(
+        ["git", "ls-files", "-z", "*.py"], cwd=REPO_ROOT, capture_output=True, check=True,
+    ).stdout.decode("utf-8", "surrogateescape")
+    return [p for p in out.split("\0") if p.endswith(".py")]
+
+
+def _imports_of(source: str, name: str) -> list:
+    """Line numbers where ``source`` imports the bare module ``name`` (any nesting)."""
+    hits = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            hits += [node.lineno for a in node.names if a.name == name]
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == name:
+            hits.append(node.lineno)
+    return hits
+
+
+def test_no_tracked_file_imports_a_moved_module_by_its_old_name():
+    """Every consumer must name the real module, not the stub.
+
+    Why this gate and not a grep: two of the rewritten import sites are inside
+    ``try: ... except ImportError:`` blocks -- ``desktop/join_workbench.py`` (a failure there sets
+    ``_QT_AVAILABLE = False`` and silently deletes the whole Join Workbench UI) and
+    ``desktop/corrections_client.py::get_corrections_client`` (a failure there silently downgrades
+    the app to the REST client). A missed rewrite in either place raises nothing at runtime and
+    passes ``--self-test-imports``, which only proves the module itself is importable. A static
+    check over every tracked file is the only thing that sees them.
+
+    The stub files themselves are exempt: aliasing the real module is their whole job.
+    """
+    offenders = []
+    for rel in _tracked_python_files():
+        stem = pathlib.PurePosixPath(rel).stem
+        if rel.count("/") == 0 and stem in ALIASES:
+            continue  # the stub itself
+        source = (REPO_ROOT / rel).read_text(encoding="utf-8", errors="replace")
+        for old in ALIASES:
+            if old not in source:
+                continue
+            for lineno in _imports_of(source, old):
+                offenders.append(f"{rel}:{lineno} imports `{old}` (use `{ALIASES[old]}`)")
+    assert not offenders, (
+        "these files still import a moved module by its old root name, so they resolve through "
+        "the alias stub that Round 2 deletes:\n  " + "\n  ".join(sorted(offenders))
     )

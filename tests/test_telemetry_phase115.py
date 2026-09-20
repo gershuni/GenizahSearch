@@ -92,7 +92,7 @@ def test_search_thread_emits_perf_signal():
     perf_signal = pyqtSignal(float, int) is added to SearchThread in plan 03.
     The test constructs SearchThread with a FakeSearcher and runs it synchronously.
     """
-    from gui_threads import SearchThread
+    from desktop.gui_threads import SearchThread
 
     received = []
 

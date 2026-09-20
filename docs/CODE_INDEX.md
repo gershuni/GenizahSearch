@@ -730,7 +730,7 @@ desktop.Y.X` identity holds via the facades.
 - **Function** `tr` (Line 583) — Translate text if current language is Hebrew.
 - **Function** `calculate_smart_weights` (Line 627) — Analyzes corpus to generate HTR-aware letter frequency weights.
 
-## supabase_corrections_client.py
+## desktop/supabase_corrections_client.py
 
 - **Class** `User` (Line 87)
 - **Class** `Correction` (Line 102)
@@ -822,7 +822,7 @@ desktop.Y.X` identity holds via the facades.
     - Method `unhide_discovery` (Line 2073)
 - **Function** `get_supabase_corrections_client` (Line 2093)
 
-## gui_threads.py
+## desktop/gui_threads.py
 
 - **Function** `_prevent_sleep` (Line 15) — Prevent OS sleep while search is running (Windows only).
 - **Function** `_allow_sleep` (Line 26) — Re-allow OS sleep after search completes (Windows only).

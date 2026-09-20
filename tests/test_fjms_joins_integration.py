@@ -365,7 +365,7 @@ class TestFjmsJoinsDesktopDialog:
 
     def _make_dialog_stub(self, document_id, shelfmark, meta_mgr):
         """Create a lightweight stub with the attributes _get_fjms_joins needs."""
-        from corrections_ui import JoinsDialog
+        from desktop.corrections_ui import JoinsDialog
 
         stub = MagicMock()
         stub.document_id = document_id
@@ -498,7 +498,7 @@ class TestDesktopDualSourceMerge:
 
     def test_desktop_dual_source_merge(self, fjms_service, mock_meta_mgr):
         """When both PGP and FJMS return the same fragment pair, source column shows 'PGP, FJMS'."""
-        from corrections_ui import JoinsDialog
+        from desktop.corrections_ui import JoinsDialog
 
         stub = MagicMock()
         stub.document_id = "SYS001"

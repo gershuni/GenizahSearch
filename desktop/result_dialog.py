@@ -16,8 +16,8 @@ from genizah_core import (
     CURRENT_LANG, get_library_display, get_logger,
     load_app_config, save_app_config, tr,
 )
-from gui_threads import EnrichMetadataThread, PGPSourceWorker
-from corrections_ui import (
+from desktop.gui_threads import EnrichMetadataThread, PGPSourceWorker
+from desktop.corrections_ui import (
     CommentDialog, CommentsViewerDialog, CorrectionsViewerDialog, JoinsDialog,
 )
 from desktop.widgets import (
@@ -1768,7 +1768,7 @@ class ResultDialog(QDialog):
         _show_trans = _lac().get('show_translations', False)
         _ft_cache = {}
         if _show_trans:
-            from gui_threads import _field_translation_cache
+            from desktop.gui_threads import _field_translation_cache
             _ft_cache = _field_translation_cache
             # Pre-populate cache with Oxford pre-computed translations for part fields
             if part_meta:
@@ -3118,7 +3118,7 @@ class ResultDialog(QDialog):
         self.lbl_img_label.setText("")
 
         # Clear field translation cache when navigating to a new manuscript
-        from gui_threads import _field_translation_cache
+        from desktop.gui_threads import _field_translation_cache
         _field_translation_cache.clear()
         parent = self._app
         if parent:
@@ -3276,7 +3276,7 @@ class ResultDialog(QDialog):
 
     def _rd_auto_translate_all(self):
         """Auto-fire translations for all translatable fields that aren't cached yet."""
-        from gui_threads import _field_translation_cache
+        from desktop.gui_threads import _field_translation_cache
         rd_meta = getattr(self, '_rd_enrichment_meta', None)
         if not rd_meta:
             return

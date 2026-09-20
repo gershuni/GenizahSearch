@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 # Mock dependencies to import genizah_app
 sys.modules['genizah_core'] = MagicMock()
-sys.modules['gui_threads'] = MagicMock()
-sys.modules['filter_text_dialog'] = MagicMock()
+sys.modules['desktop.gui_threads'] = MagicMock()
+sys.modules['desktop.filter_text_dialog'] = MagicMock()
 sys.modules['version'] = MagicMock()
 sys.modules['PyQt6'] = MagicMock()
 sys.modules['PyQt6.QtWidgets'] = MagicMock()

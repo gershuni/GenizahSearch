@@ -25,7 +25,7 @@ def test_pgp_badge_worker_emits_link_and_manual(monkeypatch):
     monkeypatch.setattr(ds, 'get_sys_ids_with_transcriptions', lambda ids: {'a', 'b', 'c'})
     monkeypatch.setattr(ts, 'get_sys_ids_with_manual_transcriptions', lambda ids: {'b'})
 
-    from gui_threads import PGPBadgeWorker
+    from desktop.gui_threads import PGPBadgeWorker
     captured = {}
     w = PGPBadgeWorker(['a', 'b', 'c'])
     w.finished.connect(lambda pgp, manual: captured.update(pgp=pgp, manual=manual))
@@ -46,7 +46,7 @@ def _run_worker(monkeypatch, *, pgp, manual):
     import shared.transcription_service as ts
     monkeypatch.setattr(ds, 'get_sys_ids_with_transcriptions', pgp if callable(pgp) else (lambda ids: pgp))
     monkeypatch.setattr(ts, 'get_sys_ids_with_manual_transcriptions', manual if callable(manual) else (lambda ids: manual))
-    from gui_threads import PGPBadgeWorker
+    from desktop.gui_threads import PGPBadgeWorker
     captured = {}
     w = PGPBadgeWorker(['a', 'b'])
     w.finished.connect(lambda p, m: captured.update(pgp=p, manual=m))
