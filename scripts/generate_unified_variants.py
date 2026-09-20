@@ -4,7 +4,7 @@
 ממוינת לפי שכיחות - לשימוש עם סליידר וריאנטים
 
 שימוש:
-    python generate_unified_variants.py char_merges_report.xlsx --output unified_variants.py
+    python scripts/generate_unified_variants.py char_merges_report.xlsx --output shared/unified_variants.py
 """
 
 import argparse
@@ -134,7 +134,7 @@ def print_summary(merged_data: list):
 def main():
     parser = argparse.ArgumentParser(description='יצירת רשימת וריאנטים מאוחדת')
     parser.add_argument('input', help='קובץ קלט (xlsx מתוצאות analyze_char_merges)')
-    parser.add_argument('--output', '-o', default='unified_variants.py',
+    parser.add_argument('--output', '-o', default='shared/unified_variants.py',
                         help='קובץ פלט')
     parser.add_argument('--max', type=int, default=None,
                         help='מספר מקסימלי של זוגות לכלול')

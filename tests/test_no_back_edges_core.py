@@ -36,6 +36,11 @@ EXTRACTED_MODULES = [
     "shared/browse_map_utils.py",
     "shared/text_normalize.py",
     "shared/variants.py",
+    # Stage 2 batch 2 (2026-09-20): moved out of the repository root.
+    "shared/lists_sync.py",
+    "shared/pgp_tag_translations.py",
+    "shared/sefaria_utils.py",
+    "shared/unified_variants.py",
     "shared/responsa.py",
     "shared/codicological.py",
     "shared/joins_manager.py",

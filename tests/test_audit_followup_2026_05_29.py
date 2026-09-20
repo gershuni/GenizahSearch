@@ -92,7 +92,7 @@ class _FakeListsManager:
 
 
 def _make_sync(monkeypatch, fail_list_items_insert=False, manager=None):
-    import lists_sync
+    from shared import lists_sync
     monkeypatch.setattr(lists_sync, 'SUPABASE_AVAILABLE', True)
     monkeypatch.setattr(lists_sync, 'SUPABASE_ANON_KEY', 'test-key')
     sync = lists_sync.ListsCloudSync(manager or _FakeListsManager())

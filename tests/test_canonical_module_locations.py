@@ -40,15 +40,15 @@ CANONICAL: dict[str, str] = {
     "corrections_client.py": "desktop/corrections_client.py",
     "corrections_ui.py": "desktop/corrections_ui.py",
     "supabase_corrections_client.py": "desktop/supabase_corrections_client.py",
-    "lists_sync.py": "lists_sync.py",
+    "lists_sync.py": "shared/lists_sync.py",
     "filter_text_dialog.py": "desktop/filter_text_dialog.py",
     "column_filter_dialog.py": "desktop/column_filter_dialog.py",  # moved 2026-09-19 (Stage 2 trial)
     "list_filter_dialog.py": "desktop/list_filter_dialog.py",
     "genizah_translations.py": "genizah_translations.py",
-    "pgp_tag_translations.py": "pgp_tag_translations.py",
-    "sefaria_utils.py": "sefaria_utils.py",
+    "pgp_tag_translations.py": "shared/pgp_tag_translations.py",
+    "sefaria_utils.py": "shared/sefaria_utils.py",
     "shared_export_utils.py": "shared_export_utils.py",
-    "unified_variants.py": "unified_variants.py",
+    "unified_variants.py": "shared/unified_variants.py",
 }
 
 # What an alias stub looks like (see the Round 1 plan, "Root alias stub"): it rebinds its own

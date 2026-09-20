@@ -80,7 +80,10 @@ def test_cloud_write_gates_at_top():
     )
 
     # Gate 3: lists_sync.py :: sync_item_to_cloud — is_local_sys_id in body[:5]
-    lists_path = REPO_ROOT / "lists_sync.py"
+    lists_path = REPO_ROOT / "shared" / "lists_sync.py"
+    assert "sys.modules[__name__]" not in lists_path.read_text(encoding="utf-8"), (
+        "read the real module, not the root alias stub (tests/test_root_alias_stubs.py)"
+    )
     tree = ast.parse(lists_path.read_text(encoding="utf-8"))
     sync_item_fn = _find_function(tree, "sync_item_to_cloud")
     assert sync_item_fn is not None, (

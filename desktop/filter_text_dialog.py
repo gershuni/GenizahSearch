@@ -13,7 +13,7 @@ import requests
 from shared_export_utils import sanitize_cache_filename as _sanitize_cache_filename
 
 # Import shared utilities (no PyQt6 dependency)
-from sefaria_utils import (
+from shared.sefaria_utils import (
     get_sefaria_library, SEFARIA_SOURCES,
     get_cache_dir, clean_hebrew_text
 )

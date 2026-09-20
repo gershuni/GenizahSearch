@@ -181,7 +181,7 @@ class ListsManager:
             supabase_client: Optional authenticated Supabase client for RLS
         """
         try:
-            from lists_sync import get_lists_sync
+            from shared.lists_sync import get_lists_sync
             sync = get_lists_sync(self)
             sync.set_user(user_id)
             if supabase_client:
@@ -195,7 +195,7 @@ class ListsManager:
     def disable_cloud_sync(self):
         """Disable cloud sync (call on logout)."""
         try:
-            from lists_sync import get_lists_sync
+            from shared.lists_sync import get_lists_sync
             sync = get_lists_sync(self)
             sync.clear_user()
         except Exception:
@@ -204,7 +204,7 @@ class ListsManager:
     def sync_from_cloud(self):
         """Pull lists from cloud and merge with local data."""
         try:
-            from lists_sync import get_lists_sync
+            from shared.lists_sync import get_lists_sync
             sync = get_lists_sync(self)
             return sync.sync_from_cloud()
         except ImportError:
@@ -215,7 +215,7 @@ class ListsManager:
     def is_sync_available(self):
         """Check if cloud sync is available (user logged in, network ok)."""
         try:
-            from lists_sync import get_lists_sync
+            from shared.lists_sync import get_lists_sync
             sync = get_lists_sync(self)
             return sync.is_sync_available()
         except ImportError:
@@ -227,7 +227,7 @@ class ListsManager:
     def _last_sync(self):
         """Get timestamp of last sync (for debouncing)."""
         try:
-            from lists_sync import get_lists_sync
+            from shared.lists_sync import get_lists_sync
             sync = get_lists_sync(self)
             return getattr(sync, '_last_sync', 0)
         except Exception:
@@ -236,7 +236,7 @@ class ListsManager:
     def sync_to_cloud(self):
         """Push local lists to cloud."""
         try:
-            from lists_sync import get_lists_sync
+            from shared.lists_sync import get_lists_sync
             sync = get_lists_sync(self)
             return sync.sync_to_cloud()
         except ImportError:
@@ -247,7 +247,7 @@ class ListsManager:
     def get_cloud_lists_preview(self):
         """Get preview of cloud lists without syncing (for dialog display)."""
         try:
-            from lists_sync import get_lists_sync
+            from shared.lists_sync import get_lists_sync
             sync = get_lists_sync(self)
             return sync.get_cloud_lists_preview()
         except ImportError:

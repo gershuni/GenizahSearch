@@ -6,6 +6,23 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ## [Unreleased]
 
+### Internal -- repo structure Round 1, stage 2: the cross-app modules and the dev-server CLI (2026-09-20; no behaviour change)
+
+- **Four modules moved into `shared/`** behind alias stubs, consumers rewritten: `sefaria_utils.py`,
+  `pgp_tag_translations.py`, `unified_variants.py` (generated) and `lists_sync.py`. **The dev-server
+  CLI moved to `scripts/server.py`** with no stub, since nothing imported it.
+- **`lists_sync`'s logger changed name with the module** (`getLogger(__name__)`), and three tests
+  filter `caplog` on that name; they now filter on `shared.lists_sync`. Without that edit the log
+  records vanish from the fixture and the tests fail rather than silently pass.
+- **`scripts/server.py` now anchors the repository root two levels up.** It `chdir`s there before
+  launching `python -m web.main` with output to DEVNULL, so a one-level anchor would have made the
+  child die with `ModuleNotFoundError: web` and reported only "not running".
+- **The installer no longer bundles `pgp_tag_translations.py` by name.** After the move that tuple
+  would have shipped the four-line alias stub into `_internal/`, which is on `sys.path` in a onedir
+  build -- putting the old top-level name back inside the frozen app. The real module ships with the
+  rest of `shared/`. A new test fails if any spec entry names a stub.
+- `scripts/generate_unified_variants.py` writes to `shared/unified_variants.py` by default.
+
 ### Internal -- repo structure Round 1, stage 2: the desktop-only root modules (2026-09-20; no behaviour change)
 
 - **Six modules moved into `desktop/`** behind four-line alias stubs, every consumer rewritten to the
