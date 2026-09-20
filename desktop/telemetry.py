@@ -1055,7 +1055,10 @@ def _is_enabled_nolock() -> bool:
 #   _APP_SOURCE_FILES:   in-app top-level module BASENAMES (matched by basename).
 #                        These live at the repo/bundle root with no '/desktop/'
 #                        or '/shared/' segment, so a segment match can't catch
-#                        them — they must be named explicitly. Only DISTINCTIVE
+#                        them — they must be named explicitly. (A module moved under
+#                        desktop/ in Round 1 keeps its basename here: the segment match
+#                        catches it too, and frames from older builds still resolve.)
+#                        Only DISTINCTIVE
 #                        app-owned names are listed; generic names that collide
 #                        with third-party packages (server.py, version.py) are
 #                        deliberately excluded to avoid false positives.

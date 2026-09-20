@@ -15,9 +15,11 @@ stub. It also asserts the telemetry set is a subset of the table, so a new basen
 row here in the same commit. Stage 1 of Round 1 maps every name to its root path; a move updates
 the row.
 
-Alias identity (``import old is import new``) is a separate concern and gets its own test file
-when the first stub appears; crash-frame classification itself stays covered by
-``tests/test_crash_payload.py``.
+Alias identity (``import old is import new``) is pinned by ``tests/test_root_alias_stubs.py``, whose
+table must list every row here whose path left the root; crash-frame classification itself stays
+covered by ``tests/test_crash_payload.py``. ``genizah_app.py::_SELF_TEST_IMPORT_MODULES`` -- what
+``GenizahSearchPro.exe --self-test-imports`` imports inside the frozen process -- must equal this
+table minus the entry point; the last test below keeps it so.
 """
 from __future__ import annotations
 
@@ -40,7 +42,7 @@ CANONICAL: dict[str, str] = {
     "supabase_corrections_client.py": "supabase_corrections_client.py",
     "lists_sync.py": "lists_sync.py",
     "filter_text_dialog.py": "filter_text_dialog.py",
-    "column_filter_dialog.py": "column_filter_dialog.py",
+    "column_filter_dialog.py": "desktop/column_filter_dialog.py",  # moved 2026-09-19 (Stage 2 trial)
     "list_filter_dialog.py": "list_filter_dialog.py",
     "genizah_translations.py": "genizah_translations.py",
     "pgp_tag_translations.py": "pgp_tag_translations.py",
@@ -116,4 +118,35 @@ def test_canonical_rows_are_not_stale():
     assert not extra, (
         f"CANONICAL has rows {extra} that _APP_SOURCE_FILES does not classify; remove them or "
         "add the basename to the telemetry set on purpose."
+    )
+
+
+def _self_test_import_modules() -> tuple:
+    """``_SELF_TEST_IMPORT_MODULES`` from genizah_app.py, read from the AST (importing the app is Qt)."""
+    src = (REPO_ROOT / "genizah_app.py").read_text(encoding="utf-8", errors="replace")
+    for node in ast.parse(src).body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "_SELF_TEST_IMPORT_MODULES" for t in node.targets
+        ):
+            return tuple(ast.literal_eval(node.value))
+    raise AssertionError(
+        "genizah_app.py no longer defines _SELF_TEST_IMPORT_MODULES as a module-level tuple literal"
+    )
+
+
+def dotted(rel_path: str) -> str:
+    """``desktop/x.py`` -> ``desktop.x``; a root file is its bare name."""
+    return rel_path[:-3].replace("/", ".")
+
+
+def test_frozen_self_test_imports_exactly_the_canonical_modules():
+    """``GenizahSearchPro.exe --self-test-imports`` imports every canonical module by its dotted name,
+    minus the entry point (``__main__`` in the frozen process). A move that updates CANONICAL without
+    the tuple -- or the tuple without CANONICAL -- fails here, before any build."""
+    expected = {dotted(p) for b, p in CANONICAL.items() if b != "genizah_app.py"}
+    actual = _self_test_import_modules()
+    assert len(actual) == len(set(actual)), f"duplicates in _SELF_TEST_IMPORT_MODULES: {actual}"
+    assert set(actual) == expected, (
+        "genizah_app.py::_SELF_TEST_IMPORT_MODULES disagrees with CANONICAL: "
+        f"missing {sorted(expected - set(actual))}, extra {sorted(set(actual) - expected)}"
     )

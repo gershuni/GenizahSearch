@@ -6,6 +6,20 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ## [Unreleased]
 
+### Internal -- repo structure Round 1, stage 2 trial (2026-09-19; one module moved behind an alias stub; no behaviour change)
+
+- **`column_filter_dialog.py` -> `desktop/column_filter_dialog.py`** (43 lines, one importer). A
+  four-line alias stub stays at the old path, so `import column_filter_dialog` still yields the same
+  module object; `genizah_app.py` imports the `desktop.` name. `tests/test_root_alias_stubs.py` pins
+  the identity and the stub's shape; `tests/test_canonical_module_locations.py` points at the new path
+  and keeps `genizah_app.py::_SELF_TEST_IMPORT_MODULES` equal to its table.
+- **Frozen import self-test.** `GenizahSearchPro.exe --self-test-imports` imports every canonical app
+  module by its dotted name inside the frozen process and prints `IMPORTS_OK`;
+  `tests/test_local_pyinstaller_smoke.py` now runs it. `GENIZAH_PACKAGING_EXE=<path>` points the
+  packaging tests at a build made with `--distpath` elsewhere, so a baseline or trial build never
+  overwrites `dist/`.
+- The remaining ten root-module moves stay in the Round 1 plan; the owner chose the trial only.
+
 ### Internal -- repo structure Round 1, stage 1 (2026-09-18; docs, gates, archiving; no behaviour change)
 
 - **Instruction files agree.** `AGENTS.md` is the tool-neutral command sheet (bounded test runner,

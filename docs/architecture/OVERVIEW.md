@@ -260,14 +260,23 @@ that `Config` or the spec resolve there. Everything else has a reason or a plan.
 | `shared_export_utils.py` | compatibility shim over `shared/export_utils.py`; stays while call sites use it |
 | `genizah_translations.py` | translation tables imported across both apps; stays for now (Round 2 candidate for `shared/`) |
 
-**Modules at the root whose home is `desktop/` or `shared/`** -- proposed Stage 2 moves, each with
-an alias stub at the old path; not yet approved:
+**Modules at the root whose home is `desktop/` or `shared/`** -- Stage 2 moves, each leaving a
+four-line alias stub at the old path (removed in Round 2). The trial move landed 2026-09-19:
+`column_filter_dialog.py` now lives at [`desktop/column_filter_dialog.py`](../../desktop/column_filter_dialog.py)
+with the stub at the root ([tests/test_root_alias_stubs.py](../../tests/test_root_alias_stubs.py) pins that
+the two names are one module; `GenizahSearchPro.exe --self-test-imports` proves the new name resolves
+in the frozen app). The owner chose the trial only; the rest stay proposed:
 
 | File | Proposed home | Why it is not there yet |
 |---|---|---|
-| `gui_threads.py`, `corrections_ui.py`, `corrections_client.py`, `supabase_corrections_client.py`, `filter_text_dialog.py`, `list_filter_dialog.py`, `column_filter_dialog.py` | `desktop/` | tests read some of them by path, loggers are named after `__name__`, and the frozen build must be re-verified |
+| `gui_threads.py`, `corrections_ui.py`, `corrections_client.py`, `supabase_corrections_client.py`, `filter_text_dialog.py`, `list_filter_dialog.py` | `desktop/` | tests read some of them by path, loggers are named after `__name__`, and the frozen build must be re-verified |
 | `sefaria_utils.py`, `pgp_tag_translations.py`, `unified_variants.py` (generated), `lists_sync.py` | `shared/` | the spec bundles `pgp_tag_translations.py` by name; `lists_sync`'s logger is named after the module and `tests/test_local_namespace_no_lists_leak.py` filters `caplog` on that name, so a move renames what the tests listen to |
 | `server.py` | `scripts/` | anchors the repo root from its own location |
+
+**Compatibility alias stubs** -- `column_filter_dialog.py` (docstring plus three lines: it rebinds
+its own `sys.modules` entry to `desktop.column_filter_dialog`). Temporary: Round 2 removes each stub
+once nothing in the repo imports the old name; [tests/test_dependencies_declared.py](../../tests/test_dependencies_declared.py)
+exempts root basenames from its third-party check, so removing a stub also removes that exemption.
 
 **Build inputs** -- stay: `GenizahSearchPro.spec`, `build_app.bat`, `CompileScriptGenizah.iss`,
 `version_info.txt`, `icon.ico`, `requirements.txt`, `requirements-lock.txt`,

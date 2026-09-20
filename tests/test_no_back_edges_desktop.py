@@ -54,6 +54,8 @@ DESKTOP_MODULES = [
     "desktop/passage_workers.py",
     "desktop/widgets/__init__.py",
     "desktop/widgets/line_number_text_edit.py",
+    # Moved out of the repository root (repo-structure Round 1, Stage 2 trial, 2026-09-19).
+    "desktop/column_filter_dialog.py",
 ]
 
 # Compound statement types whose bodies run at import time
