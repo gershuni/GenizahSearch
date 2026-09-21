@@ -16,7 +16,8 @@ Features:
 - Checkpointing: saves progress to a JSON file every batch_size translations
 - Resume: skips already-translated rows on restart
 - Sequential with throttle by default; concurrent (--workers, 5 under god mode)
-- Refuses to resume from a checkpoint the database cannot confirm
+- Refuses to resume from a checkpoint the database cannot confirm (exit 2)
+- Exit codes: 0 clean, 1 incomplete, 2 refused to start, 130 interrupted
 - Dry-run: count candidates without making API calls
 - SIGINT: graceful shutdown with checkpoint save
 
@@ -207,13 +208,26 @@ def translate_with_retry(
         few_shot_prompt: Pre-built few-shot prefix.
         direction: Translation direction.
 
+    A blank answer counts as a failure and is retried. Dicta returns an empty
+    string rather than an error for some inputs -- observed on descriptions
+    carrying long stretches of Arabic script -- and an `is not None` test accepts
+    that on the first attempt, spending none of the retry budget on a response
+    that a second request may well fill in. The corpus has 0 blank rows today,
+    so the retries this adds cost effectively nothing.
+
     Returns:
-        Translated text, or None after all retries exhausted.
+        Translated text, or None after all retries exhausted (which now includes
+        the case where every attempt came back blank).
     """
     for attempt in range(MAX_RETRIES):
         result = translate_text(text, few_shot_prompt, direction)
-        if result is not None:
+        if result is not None and result.strip():
             return result
+        if result is not None:
+            logger.info(
+                "Blank answer on attempt %d/%d for text: %.50s...",
+                attempt + 1, MAX_RETRIES, text[:50],
+            )
         if attempt < MAX_RETRIES - 1:
             delay = RETRY_BASE_DELAY * (2 ** attempt)
             logger.info(
@@ -294,11 +308,17 @@ def flush_batch(
     return len(results)
 
 
-def run_batch(args: argparse.Namespace) -> None:
+def run_batch(args: argparse.Namespace) -> int:
     """Execute the batch translation pipeline.
 
     Args:
         args: Parsed CLI arguments.
+
+    Returns:
+        A process exit code. 0 clean, 1 ran but did not fully succeed (a fatal
+        error in the loop, or any row that failed to translate), 2 refused to
+        start, 130 interrupted. A wrapper or cron job reads this; printing a
+        diagnostic and returning 0 is how a refusal gets mistaken for a run.
     """
     # Try importing tqdm for progress bar; fall back to no-op if unavailable
     try:
@@ -327,7 +347,7 @@ def run_batch(args: argparse.Namespace) -> None:
         mapped = sum(1 for _, _, dt in candidates if dt and dt in PGP_DOCUMENT_TYPE_HE)
         print(f"\nDocument types with manual HE mapping: {mapped}/{total_candidates}")
         print("Dry run complete. No translations performed.")
-        return
+        return 0
 
     # Load checkpoint
     completed_ids = load_checkpoint(args.checkpoint_file)
@@ -347,7 +367,7 @@ def run_batch(args: argparse.Namespace) -> None:
                 "Move the checkpoint file aside to re-translate them, or pass "
                 "--ignore-stale-checkpoint if you really mean to skip them."
             )
-            return
+            return 2
         if stale:
             logger.warning(
                 "Proceeding with %d stale checkpoint ids; they will NOT be translated.",
@@ -368,7 +388,7 @@ def run_batch(args: argparse.Namespace) -> None:
 
     if total_pending == 0:
         print("Nothing to translate. All candidates already completed.")
-        return
+        return 0
 
     # Load few-shot template
     few_shot_path = args.few_shot or DEFAULT_FEW_SHOT
@@ -434,6 +454,7 @@ def run_batch(args: argparse.Namespace) -> None:
             logger.warning("Translation failed for pgpid=%d", pgpid)
 
     pool = None
+    fatal_error = False
     try:
         pool = ThreadPoolExecutor(max_workers=workers) if workers > 1 else None
         if pool is not None:
@@ -488,6 +509,7 @@ def run_batch(args: argparse.Namespace) -> None:
                 time.sleep(delay)
 
     except Exception as e:
+        fatal_error = True
         logger.error("Fatal error in translation loop: %s", e, exc_info=True)
     finally:
         # Never leave worker threads running past the loop: the flush below and
@@ -532,6 +554,12 @@ def run_batch(args: argparse.Namespace) -> None:
             print(f"  Remaining:          {remaining} docs (~{eta_min:.0f} min)")
     print(f"  Checkpoint:         {args.checkpoint_file}")
     print(f"{'=' * 60}")
+
+    if _shutdown_requested:
+        return 130
+    if fatal_error or failed_count:
+        return 1
+    return 0
 
 
 # =============================================================================
@@ -634,8 +662,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> None:
-    """Main entry point."""
+def main(argv: list[str] | None = None) -> int:
+    """Main entry point. Returns the process exit code (see run_batch)."""
     args = parse_args(argv)
 
     # Configure logging (console + file)
@@ -651,9 +679,9 @@ def main(argv: list[str] | None = None) -> None:
         handlers=handlers,
     )
 
-    run_batch(args)
+    return run_batch(args)
 
 
 if __name__ == "__main__":
     _configure_utf8_stdio()
-    main()
+    raise SystemExit(main())

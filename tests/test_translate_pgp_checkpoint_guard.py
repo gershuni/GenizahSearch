@@ -9,10 +9,15 @@ which is exactly how the table stayed missing from 2026-04-22 to 2026-09-21.
 
 This guard turns that into a stop condition, so it is worth a test that can fail: the first run
 against the real 2026-09 checkpoint found 221 such ids.
+
+The last two tests cover Codex's round-1 findings on the same guard: a refusal has to reach the
+process exit code, or a wrapper reads it as a successful run; and a blank API answer has to be
+retried rather than accepted and then recorded as a failure the retries never fought.
 """
 from __future__ import annotations
 
 import importlib.util
+import json
 import pathlib
 import sqlite3
 
@@ -99,3 +104,87 @@ def test_a_missing_database_is_not_silently_treated_as_clean(script, tmp_path):
     reporting an empty stale set (which would read as 'checkpoint confirmed')."""
     with pytest.raises(sqlite3.OperationalError):
         script.stale_checkpoint_ids(str(tmp_path / "does_not_exist.db"), {1})
+
+
+# ---------------------------------------------------------------------------
+# Codex round 1 on PR #355. Both of these were exit-code/retry blindness, not
+# logic errors -- the kind a green test suite happily reports as healthy.
+# ---------------------------------------------------------------------------
+
+def _args(script, **overrides):
+    """A real parsed namespace, so the test breaks if a flag is renamed."""
+    argv = []
+    for key, value in overrides.items():
+        flag = "--" + key.replace("_", "-")
+        if value is True:
+            argv.append(flag)
+        else:
+            argv += [flag, str(value)]
+    return script.parse_args(argv)
+
+
+def test_a_refused_run_exits_nonzero(script, tmp_path, capsys):
+    """The guard printing a diagnostic and returning 0 is how a refusal gets read as a run."""
+    db = tmp_path / "pgp.db"
+    conn = sqlite3.connect(str(db))
+    try:
+        conn.execute("CREATE TABLE documents (pgpid INTEGER PRIMARY KEY, description TEXT, document_type TEXT)")
+        conn.execute("INSERT INTO documents VALUES (1, 'a description long enough to qualify', 'Letter')")
+        conn.execute("CREATE TABLE pgp_translations (pgpid INTEGER PRIMARY KEY, description_he TEXT)")
+        conn.commit()
+    finally:
+        conn.close()
+
+    checkpoint = tmp_path / "checkpoint.json"
+    checkpoint.write_text(json.dumps({"completed_ids": [1]}), encoding="utf-8")
+
+    code = script.run_batch(_args(script, pgp_db=db, checkpoint_file=checkpoint))
+    assert code == 2, "a refused run must not exit 0"
+    assert "ERROR" in capsys.readouterr().out
+
+
+def test_ignoring_the_stale_checkpoint_does_not_return_the_refusal_code(script, tmp_path):
+    """--ignore-stale-checkpoint means 'go on', so the refusal code must not leak out of it."""
+    db = tmp_path / "pgp.db"
+    conn = sqlite3.connect(str(db))
+    try:
+        conn.execute("CREATE TABLE documents (pgpid INTEGER PRIMARY KEY, description TEXT, document_type TEXT)")
+        conn.execute("INSERT INTO documents VALUES (1, 'a description long enough to qualify', 'Letter')")
+        conn.execute("CREATE TABLE pgp_translations (pgpid INTEGER PRIMARY KEY, description_he TEXT)")
+        conn.commit()
+    finally:
+        conn.close()
+
+    checkpoint = tmp_path / "checkpoint.json"
+    checkpoint.write_text(json.dumps({"completed_ids": [1]}), encoding="utf-8")
+
+    # id 1 is both stale AND the only candidate, so with the guard waived there is nothing
+    # pending and the run ends cleanly without an API call.
+    code = script.run_batch(
+        _args(script, pgp_db=db, checkpoint_file=checkpoint, ignore_stale_checkpoint=True)
+    )
+    assert code == 0
+
+
+def test_a_blank_answer_is_retried(script, monkeypatch):
+    """Dicta answers some inputs with '' rather than an error. Accepting that on attempt 1
+    spends none of the retry budget on a response a second request may well fill in."""
+    answers = ["", "   ", "\u05ea\u05e8\u05d2\u05d5\u05dd"]
+    calls = []
+
+    def fake_translate(text, prompt, direction):
+        calls.append(text)
+        return answers[len(calls) - 1]
+
+    monkeypatch.setattr(script, "translate_text", fake_translate)
+    monkeypatch.setattr(script.time, "sleep", lambda _s: None)
+
+    out = script.translate_with_retry("some english", "prompt", "en2he")
+    assert out == "\u05ea\u05e8\u05d2\u05d5\u05dd"
+    assert len(calls) == 3, "the two blank answers should each have cost an attempt"
+
+
+def test_all_blank_answers_report_failure(script, monkeypatch):
+    monkeypatch.setattr(script, "translate_text", lambda *a: "")
+    monkeypatch.setattr(script.time, "sleep", lambda _s: None)
+    assert script.translate_with_retry("some english", "prompt", "en2he") is None
