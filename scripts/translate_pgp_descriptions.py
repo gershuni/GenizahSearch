@@ -425,9 +425,10 @@ def run_batch(args: argparse.Namespace) -> int:
             workers,
         )
     if workers > 1 and delay > 0:
-        logger.warning(
-            "--delay %.1fs with %d workers throttles the consumer, not each worker; "
-            "the effective request rate is roughly %d x that.", delay, workers, workers
+        logger.info(
+            "--delay %.1fs applies per worker, so %d workers issue roughly %.2f "
+            "requests/second between them (plus API latency).",
+            delay, workers, workers / delay,
         )
     print(f"Workers: {workers} (god mode: {GOD_MODE})")
 
@@ -453,14 +454,26 @@ def run_batch(args: argparse.Namespace) -> int:
             failed_count += 1
             logger.warning("Translation failed for pgpid=%d", pgpid)
 
+    def _translate_one(desc):
+        """Worker body. The throttle lives HERE, not in the consumer.
+
+        Every task is submitted up front, so the pool always has a full queue and a
+        worker starts its next request the moment the previous one returns. Sleeping
+        in the as_completed loop would pace result PROCESSING on the main thread while
+        the workers carried on at full speed -- no throttle at all, and delay x
+        total_pending of wall clock for nothing.
+        """
+        if delay > 0:
+            time.sleep(delay)
+        return translate_with_retry(desc, few_shot_prompt, "en2he")
+
     pool = None
     fatal_error = False
     try:
         pool = ThreadPoolExecutor(max_workers=workers) if workers > 1 else None
         if pool is not None:
             futures = {
-                pool.submit(translate_with_retry, desc, few_shot_prompt, "en2he"):
-                    (pgpid, dtype)
+                pool.submit(_translate_one, desc): (pgpid, dtype)
                 for pgpid, desc, dtype in pending
             }
             stream = enumerate(as_completed(futures))
@@ -504,8 +517,9 @@ def run_batch(args: argparse.Namespace) -> int:
                 save_checkpoint(args.checkpoint_file, completed_ids)
                 batch_buffer.clear()
 
-            # Throttle between API calls
-            if delay > 0 and i < total_pending - 1:
+            # Throttle between API calls -- sequential path only; the pool applies
+            # the delay inside each worker (see _translate_one).
+            if pool is None and delay > 0 and i < total_pending - 1:
                 time.sleep(delay)
 
     except Exception as e:
@@ -595,7 +609,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--delay",
         type=float,
         default=REQUEST_DELAY,
-        help=f"Seconds between API calls (default: {REQUEST_DELAY})",
+        help=(
+            f"Seconds between API calls (default: {REQUEST_DELAY}). With --workers N "
+            "this is per worker, so the aggregate rate is about N/delay per second."
+        ),
     )
     parser.add_argument(
         "--workers",

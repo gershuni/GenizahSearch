@@ -20,6 +20,8 @@ import importlib.util
 import json
 import pathlib
 import sqlite3
+import threading
+import time
 
 import pytest
 
@@ -188,3 +190,79 @@ def test_all_blank_answers_report_failure(script, monkeypatch):
     monkeypatch.setattr(script, "translate_text", lambda *a: "")
     monkeypatch.setattr(script.time, "sleep", lambda _s: None)
     assert script.translate_with_retry("some english", "prompt", "en2he") is None
+
+
+def _seed_db(path, pgpids):
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute(
+            "CREATE TABLE documents (pgpid INTEGER PRIMARY KEY, description TEXT, document_type TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO documents VALUES (?, ?, ?)",
+            [(p, "an english description long enough to qualify for translation", "Letter")
+             for p in pgpids],
+        )
+        conn.execute(
+            "CREATE TABLE pgp_translations ("
+            " pgpid INTEGER PRIMARY KEY, description_he TEXT, document_type_he TEXT,"
+            " model_version TEXT, translated_at TEXT)"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return str(path)
+
+
+def test_the_delay_throttles_the_workers_not_the_consumer(script, tmp_path, monkeypatch):
+    """Codex round 3. Every task is submitted up front, so a sleep in the as_completed loop
+    paces result processing on the main thread while the pool runs flat out -- no throttle at
+    all. The delay has to be inside the worker, which is what this asserts by thread name."""
+    db = _seed_db(tmp_path / "pgp.db", range(1, 9))
+    delay = 0.01
+    sleeps = []
+    real_sleep = time.sleep
+
+    def recording_sleep(seconds):
+        sleeps.append((threading.current_thread().name, seconds))
+        real_sleep(0)
+
+    monkeypatch.setattr(script.time, "sleep", recording_sleep)
+    monkeypatch.setattr(script, "translate_with_retry", lambda *a, **k: "\u05ea\u05e8\u05d2\u05d5\u05dd")
+
+    code = script.run_batch(_args(
+        script, pgp_db=db, checkpoint_file=tmp_path / "cp.json",
+        workers=2, delay=delay, batch_size=100,
+    ))
+    assert code == 0
+
+    throttle = [(name, sec) for name, sec in sleeps if sec == delay]
+    assert throttle, "the delay never reached anything"
+    assert not [n for n, _ in throttle if n == "MainThread"], (
+        "the consumer is sleeping, so --delay paces result processing and not the API calls: "
+        + repr(throttle)
+    )
+
+
+def test_the_sequential_path_still_throttles_on_the_main_thread(script, tmp_path, monkeypatch):
+    """The counterpart: with one worker there is no pool, and the consumer IS the caller."""
+    db = _seed_db(tmp_path / "pgp.db", range(1, 4))
+    delay = 0.01
+    sleeps = []
+    real_sleep = time.sleep
+
+    def recording_sleep(seconds):
+        sleeps.append((threading.current_thread().name, seconds))
+        real_sleep(0)
+
+    monkeypatch.setattr(script.time, "sleep", recording_sleep)
+    monkeypatch.setattr(script, "translate_with_retry", lambda *a, **k: "\u05ea\u05e8\u05d2\u05d5\u05dd")
+
+    code = script.run_batch(_args(
+        script, pgp_db=db, checkpoint_file=tmp_path / "cp.json",
+        workers=1, delay=delay, batch_size=100,
+    ))
+    assert code == 0
+    assert [n for n, sec in sleeps if sec == delay and n == "MainThread"], (
+        "the sequential path lost its throttle: " + repr(sleeps)
+    )
