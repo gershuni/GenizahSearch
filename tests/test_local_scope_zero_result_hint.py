@@ -32,7 +32,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 import genizah_app                       # noqa: E402
-import genizah_translations as gt        # noqa: E402
+from shared import genizah_translations as gt        # noqa: E402
 
 APP = genizah_app.GenizahGUI
 

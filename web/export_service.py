@@ -111,7 +111,7 @@ def _localize_search_mode(raw_mode: Optional[str], lang: str = 'en') -> Optional
     if lang == 'en':
         return label_key
     try:
-        from genizah_translations import TRANSLATIONS
+        from shared.genizah_translations import TRANSLATIONS
         return TRANSLATIONS.get(label_key, label_key)
     except Exception:
         return label_key

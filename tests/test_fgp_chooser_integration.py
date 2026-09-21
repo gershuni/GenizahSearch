@@ -193,6 +193,6 @@ class TestDesktopChooserWiring:
 
 class TestFgpI18n:
     def test_hebrew_strings_present(self):
-        src = _read("genizah_translations.py")
+        src = _read("shared/genizah_translations.py")
         assert '"FGP Transcription"' in src
         assert '"FGP Transcriptions"' in src

@@ -31255,7 +31255,7 @@ _SELF_TEST_IMPORT_MODULES = (
     "desktop.list_filter_dialog",
     "desktop.supabase_corrections_client",
     "genizah_core",
-    "genizah_translations",
+    "shared.genizah_translations",
     "shared.lists_sync",
     "shared.pgp_tag_translations",
     "shared.sefaria_utils",

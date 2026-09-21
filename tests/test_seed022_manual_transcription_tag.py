@@ -96,7 +96,7 @@ def test_web_manual_ids_respect_web_fgp_killswitch(monkeypatch):
 # --- i18n ------------------------------------------------------------------
 
 def test_tooltip_key_present_en_he():
-    import genizah_translations as gt
+    from shared import genizah_translations as gt
     key = 'scholarly transcription/translation available'
     assert key in gt.TRANSLATIONS
     assert gt.TRANSLATIONS[key] == 'תעתיק/תרגום מדעי זמין'

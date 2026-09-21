@@ -33,7 +33,7 @@ import json
 # Phase 123: LIBRARY_CODES_HE retained on the compat facade (GUARD-04). It is now
 # consumed only inside shared/ (browse_map_utils), but was importable from
 # genizah_core at v8.2.x, so the re-export is preserved for zero behavior change.
-from genizah_translations import TRANSLATIONS, LIBRARY_CODES_HE  # noqa: F401
+from shared.genizah_translations import TRANSLATIONS, LIBRARY_CODES_HE  # noqa: F401
 
 # Phase 98 D-03 + D-22 + D-23: shared NLI circuit breaker (replaces the
 # class-attribute breaker that used to live on MetadataManager). Module-level

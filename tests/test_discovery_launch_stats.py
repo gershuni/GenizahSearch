@@ -826,7 +826,7 @@ _SCAN_GLOBS = (
 #: The translation table, scanned alongside the source tree. A translated
 #: headline is a string, and a number baked into one is invisible to any code
 #: review that greps for digits in `.py` files.
-_TRANSLATIONS_REL = "genizah_translations.py"
+_TRANSLATIONS_REL = "shared/genizah_translations.py"
 
 #: The modules that can render or carry these numbers TODAY. A FLOOR on the
 #: derivation above -- asserted to be inside it -- never a substitute for it.

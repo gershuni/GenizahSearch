@@ -238,7 +238,7 @@ def test_all_tr_keys_covered():
     Catches future additions of tr("new key") without a corresponding HE entry.
     BADGE_STRINGS (tr(variable) call sites) are covered by test_badge_strings_covered.
     """
-    from genizah_translations import TRANSLATIONS
+    from shared.genizah_translations import TRANSLATIONS
 
     all_missing = []
     for rel_path in FULL_SCAN_FILES:
@@ -279,7 +279,7 @@ def test_badge_strings_covered():
     - candidate_grid.py:760: ui.icon(icon_name).tooltip(tr(tooltip_text))
     - compare_modal.py:470-471: same pattern (REVIEWS #5)
     """
-    from genizah_translations import TRANSLATIONS
+    from shared.genizah_translations import TRANSLATIONS
 
     missing = [k for k in BADGE_STRINGS if k not in TRANSLATIONS]
     assert not missing, (
@@ -308,7 +308,7 @@ def test_entry_point_keys():
     For 'Open in Joins Lab' specifically, this pins the Pitfall-5 invariant:
     the key resolves AND tr('Open in Joins Lab') still appears in lists.py.
     """
-    from genizah_translations import TRANSLATIONS
+    from shared.genizah_translations import TRANSLATIONS
 
     failures = []
     for key, rel_host in ENTRY_POINT_KEYS.items():
@@ -367,7 +367,7 @@ def test_glossary_drift_values_pinned():
     *resolved* value so reintroducing the wrong term (e.g. מעבדת החיבורים or
     הוסף כחיבור) fails CI regardless of where the duplicate is added.
     """
-    from genizah_translations import TRANSLATIONS
+    from shared.genizah_translations import TRANSLATIONS
 
     failures = []
     for key, expected in DRIFT_PINNED_VALUES.items():

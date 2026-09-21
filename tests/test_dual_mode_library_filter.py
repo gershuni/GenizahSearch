@@ -866,7 +866,7 @@ def test_library_codes_with_manuscripts_fail_open_when_csv_missing(tmp_path):
 
 def test_ast_btn_template_keys_in_translations():
     """The 4 new template keys must exist in TRANSLATIONS (HE table)."""
-    from genizah_translations import TRANSLATIONS
+    from shared.genizah_translations import TRANSLATIONS
     expected_keys = (
         "Showing {shown}/{total} library",
         "Showing {shown}/{total} libraries",
@@ -893,7 +893,7 @@ def test_ast_btn_template_keys_format_correctly():
     assert '3' in "Hiding {n} libraries".format(n=3)
 
     # Verify the HE translations also format without KeyError.
-    from genizah_translations import TRANSLATIONS
+    from shared.genizah_translations import TRANSLATIONS
     he_showing_one = TRANSLATIONS["Showing {shown}/{total} library"]
     he_showing_many = TRANSLATIONS["Showing {shown}/{total} libraries"]
     he_hiding_one = TRANSLATIONS["Hiding {n} library"]

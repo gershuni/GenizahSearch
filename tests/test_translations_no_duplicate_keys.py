@@ -26,7 +26,7 @@ import ast
 import collections
 from pathlib import Path
 
-TABLE = Path(__file__).resolve().parents[1] / 'genizah_translations.py'
+TABLE = Path(__file__).resolve().parents[1] / 'shared/genizah_translations.py'
 
 
 def _dicts():
@@ -62,7 +62,7 @@ def test_a_key_may_appear_in_two_different_tables():
     """
     import sys
     sys.path.insert(0, str(TABLE.parent))
-    from genizah_translations import LIBRARY_CODES_HE, TRANSLATIONS
+    from shared.genizah_translations import LIBRARY_CODES_HE, TRANSLATIONS
     assert TRANSLATIONS.get('Oxford'), 'TRANSLATIONS lost its Oxford entry'
     assert LIBRARY_CODES_HE.get('Oxford'), 'LIBRARY_CODES_HE lost its Oxford entry'
     assert TRANSLATIONS['Oxford'] != LIBRARY_CODES_HE['Oxford'], (
@@ -79,7 +79,7 @@ def test_the_tables_are_still_the_expected_size():
     """
     import sys
     sys.path.insert(0, str(TABLE.parent))
-    from genizah_translations import LIBRARY_CODES_HE, TRANSLATIONS
+    from shared.genizah_translations import LIBRARY_CODES_HE, TRANSLATIONS
     assert len(TRANSLATIONS) >= 3758, len(TRANSLATIONS)
     assert len(LIBRARY_CODES_HE) >= 89, len(LIBRARY_CODES_HE)
 

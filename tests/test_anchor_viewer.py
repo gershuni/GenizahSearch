@@ -1331,6 +1331,6 @@ class TestFullscreenControls:
 
     def test_rotate_buttons_use_translated_strings(self):
         """Rotate/Fullscreen aria/tooltips use keys present in TRANSLATIONS (no HE leak)."""
-        from genizah_translations import TRANSLATIONS
+        from shared.genizah_translations import TRANSLATIONS
         for key in ("Rotate left", "Rotate right", "Fullscreen"):
             assert key in TRANSLATIONS, f"{key!r} must be translated (Hebrew UI would leak English)"

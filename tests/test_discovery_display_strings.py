@@ -691,7 +691,7 @@ DISCOVERY_TR_KEYS = (
 
 
 def test_new_translation_keys_have_hebrew_values():
-    import genizah_translations as gt
+    from shared import genizah_translations as gt
 
     for key in DISCOVERY_TR_KEYS:
         assert key in gt.TRANSLATIONS, "missing tr() entry: {!r}".format(key)
@@ -716,7 +716,7 @@ def test_no_new_translation_key_introduces_the_word_discoveries():
 def test_no_translation_key_duplicates_a_display_string():
     """A string lives in exactly ONE of `tr()` and
     `shared/discovery_display_strings.py` -- never both."""
-    import genizah_translations as gt
+    from shared import genizah_translations as gt
 
     display_values = set()
     functions = public_callables()
@@ -756,7 +756,7 @@ def test_no_translation_key_duplicates_a_display_string():
 
 
 def test_translations_split_is_documented_in_a_comment():
-    source = (REPO_ROOT / "genizah_translations.py").read_text(encoding="utf-8")
+    source = (REPO_ROOT / "shared/genizah_translations.py").read_text(encoding="utf-8")
     assert "discovery_display_strings" in source, (
         "genizah_translations.py must state the tr()/display-strings split in a comment"
     )
