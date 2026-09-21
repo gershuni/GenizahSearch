@@ -44,7 +44,7 @@ CANONICAL: dict[str, str] = {
     "filter_text_dialog.py": "desktop/filter_text_dialog.py",
     "column_filter_dialog.py": "desktop/column_filter_dialog.py",  # moved 2026-09-19 (Stage 2 trial)
     "list_filter_dialog.py": "desktop/list_filter_dialog.py",
-    "genizah_translations.py": "genizah_translations.py",
+    "genizah_translations.py": "shared/genizah_translations.py",
     "pgp_tag_translations.py": "shared/pgp_tag_translations.py",
     "sefaria_utils.py": "shared/sefaria_utils.py",
     "shared_export_utils.py": "shared_export_utils.py",

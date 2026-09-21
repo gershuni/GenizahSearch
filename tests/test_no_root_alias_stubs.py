@@ -4,17 +4,20 @@ has no compatibility stub left to fall back on.
 
 Round 1 Stage 2 moved eleven modules into ``desktop/`` and ``shared/`` and left a four-line alias
 stub at each old path so ``import gui_threads`` kept working while the consumers were rewritten.
-Round 2 deleted those stubs. This file is the successor to
-``tests/test_root_alias_stubs.py``: where that one proved each stub WAS the real module, this one
-proves the stub is gone and that nothing reaches for it.
+Round 2 deleted those stubs, and moved a twelfth module -- ``genizah_translations`` -- with no stub
+at all, because its consumers were rewritten in the move commit itself. This file is the successor
+to ``tests/test_root_alias_stubs.py``: where that one proved each stub WAS the real module, this one
+proves no root file by any of these names exists and that nothing reaches for one.
 
-Why a static sweep and not "the import would just fail": two of the rewritten import sites sit
-inside ``try: ... except ImportError:``. ``desktop/join_workbench.py:600`` imports
-``desktop.gui_threads``, and a failure there sets ``_QT_AVAILABLE = False``, which silently deletes
-the whole Join Workbench UI; ``desktop/corrections_client.py:1614`` imports
-``desktop.supabase_corrections_client``, and a failure there silently downgrades the app to the
-REST client. A regression in either raises nothing at run time and passes ``--self-test-imports``,
-which only proves the module itself is importable. Only a check over every tracked file sees them.
+Why a static sweep and not "the import would just fail": three of the rewritten import sites sit
+inside a handler that swallows the failure, so a regression there is silent.
+``desktop/join_workbench.py:600`` imports ``desktop.gui_threads`` under ``except ImportError``, and
+a failure sets ``_QT_AVAILABLE = False``, which deletes the whole Join Workbench UI;
+``desktop/corrections_client.py:1614`` imports ``desktop.supabase_corrections_client`` the same way
+and downgrades the app to the REST client; ``web/export_service.py::_localize_search_mode`` imports
+``shared.genizah_translations`` under ``except Exception`` and returns the ENGLISH label in a Hebrew
+export. None of the three raises at run time, and all three pass ``--self-test-imports``, which only
+proves the module itself is importable. Only a check over every tracked file sees them.
 """
 from __future__ import annotations
 
@@ -39,6 +42,8 @@ MOVED: dict[str, str] = {
     "gui_threads": "desktop.gui_threads",
     "list_filter_dialog": "desktop.list_filter_dialog",
     "supabase_corrections_client": "desktop.supabase_corrections_client",
+    # Round 2, 2026-09-21: moved with no stub, so the sweep below is its only static guard.
+    "genizah_translations": "shared.genizah_translations",
     "lists_sync": "shared.lists_sync",
     "pgp_tag_translations": "shared.pgp_tag_translations",
     "sefaria_utils": "shared.sefaria_utils",

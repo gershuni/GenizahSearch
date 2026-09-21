@@ -576,6 +576,6 @@ class TestWiring:
         assert "must_contain=getattr(self, '_rd_search_match_text', None)" in rd
 
     def test_hint_is_translated(self):
-        import genizah_translations as t
+        from shared import genizah_translations as t
 
         assert t.TRANSLATIONS.get("shorter than V0.8")

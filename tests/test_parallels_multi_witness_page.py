@@ -1926,7 +1926,7 @@ def test_a_skipped_duplicate_is_reported_not_dropped():
     assert page.count("'({n} skipped: already added)'") >= 2, (
         'an add path drops duplicates without telling the user'
     )
-    from genizah_translations import TRANSLATIONS
+    from shared.genizah_translations import TRANSLATIONS
     assert '({n} skipped: already added)' in TRANSLATIONS, (
         'tr() falls back to English, so an untranslated notice renders '
         'perfectly in the wrong language'
@@ -2075,7 +2075,7 @@ def test_a_removal_that_cannot_strip_its_rows_says_so():
 def test_the_removal_disclosure_is_translated():
     """`tr()` falls back to English, so an untranslated notice renders
     perfectly in the wrong language."""
-    from genizah_translations import TRANSLATIONS
+    from shared.genizah_translations import TRANSLATIONS
     key = ('Witness removed. The results on screen were found with the '
            'previous witness list — run the search again to update them.')
     assert key in TRANSLATIONS, 'the removal disclosure has no Hebrew'

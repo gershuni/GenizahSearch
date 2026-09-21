@@ -165,7 +165,7 @@ def test_current_idx_is_ordinal_not_p_num():
 def test_chunk_key_in_translations():
     """Codex C: 'Chunk' must be in genizah_translations for Browse i18n."""
     try:
-        from genizah_translations import TRANSLATIONS
+        from shared.genizah_translations import TRANSLATIONS
     except ImportError:
         pytest.skip("genizah_translations not importable")
     assert "Chunk" in TRANSLATIONS, (
@@ -177,7 +177,7 @@ def test_chunk_key_in_translations():
 def test_per_page_key_in_translations():
     """Codex C: 'Per page' must be in genizah_translations for view-toggle label."""
     try:
-        from genizah_translations import TRANSLATIONS
+        from shared.genizah_translations import TRANSLATIONS
     except ImportError:
         pytest.skip("genizah_translations not importable")
     assert "Per page" in TRANSLATIONS, (

@@ -529,7 +529,7 @@ _REUSED_KEYS = [
 
 
 def test_new_recovery_translation_keys_present_and_translated():
-    from genizah_translations import TRANSLATIONS
+    from shared.genizah_translations import TRANSLATIONS
 
     for key in _NEW_KEYS:
         assert key in TRANSLATIONS, f"Missing Hebrew translation for new key: {key!r}"
@@ -541,7 +541,7 @@ def test_new_recovery_translation_keys_present_and_translated():
 
 
 def test_reused_translation_keys_still_present():
-    from genizah_translations import TRANSLATIONS
+    from shared.genizah_translations import TRANSLATIONS
 
     missing = [k for k in _REUSED_KEYS if k not in TRANSLATIONS]
     assert not missing, f"Keys the recovery feature reuses are missing from TRANSLATIONS: {missing}"

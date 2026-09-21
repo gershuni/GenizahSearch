@@ -25,7 +25,7 @@ except ImportError:
     # to match the first guard that fired at base genizah_core.py.
     raise ImportError("Tantivy library missing. Please install it.")
 
-from genizah_translations import TRANSLATIONS
+from shared.genizah_translations import TRANSLATIONS
 
 from shared.config import Config
 from shared.search_tokenizer import register_search_tokenizers

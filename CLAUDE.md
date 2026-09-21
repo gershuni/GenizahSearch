@@ -284,14 +284,16 @@ every session's context.
   widgets, and update-UI are in `desktop/*.py`. **Grep `shared/` and `desktop/`**, not just the
   old god-files. (v8.3.0 decomposition) Layout, ownership and the guard tests:
   [`docs/architecture/OVERVIEW.md`](docs/architecture/OVERVIEW.md).
-- **The root alias stubs are GONE; the old names no longer resolve.** Eleven root modules moved in
+- **The root alias stubs are GONE; the old names no longer resolve.** Twelve root modules moved in
   September 2026: `gui_threads`, `corrections_ui`, `corrections_client`,
   `supabase_corrections_client`, `filter_text_dialog`, `list_filter_dialog`, `column_filter_dialog`
   to `desktop/`; `sefaria_utils`, `pgp_tag_translations`, `unified_variants`, `lists_sync` to
   `shared/`; and the dev-server CLI to `scripts/server.py`. Each left a four-line stub at the old
   path while consumers were rewritten; Round 2 deleted all eleven (2026-09-21), and with them those
-  basenames' exemption in `tests/test_dependencies_declared.py`. **Import `desktop.<name>` /
-  `shared.<name>`** -- `import gui_threads` is now an ImportError.
+  basenames' exemption in `tests/test_dependencies_declared.py`. The same day
+  `genizah_translations` moved to `shared/` with no stub. **Import `desktop.<name>` /
+  `shared.<name>`** -- `import gui_threads` and `import genizah_translations` are now ImportErrors;
+  `TRANSLATIONS` also still comes off the `genizah_core` facade.
   `tests/test_no_root_alias_stubs.py` fails any tracked file that still names one, which matters
   because two rewritten sites sit inside `except ImportError` (`desktop/join_workbench.py` ->
   `desktop.gui_threads`; `desktop/corrections_client.py` -> `desktop.supabase_corrections_client`)

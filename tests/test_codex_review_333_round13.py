@@ -119,4 +119,4 @@ class TestProgrammaticSwitchesRefreshTheCredit:
 
     def test_translation_key_exists(self):
         assert '"From the collections of the National Library of Israel"' in _read(
-            "genizah_translations.py")
+            "shared/genizah_translations.py")

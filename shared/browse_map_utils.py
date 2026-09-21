@@ -11,7 +11,7 @@ import logging
 import os
 import re
 
-from genizah_translations import LIBRARY_CODES_HE
+from shared.genizah_translations import LIBRARY_CODES_HE
 from shared.config import Config
 
 LOGGER = logging.getLogger("genizah." + __name__)

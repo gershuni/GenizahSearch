@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from genizah_translations import TRANSLATIONS
+from shared.genizah_translations import TRANSLATIONS
 
 from shared.config import Config
 

@@ -59,7 +59,7 @@ def _tr(text: str) -> str:
     GUARD-01-safe: the import is function-body-only, not module-level.
     """
     from genizah_core import CURRENT_LANG  # noqa: PLC0415 -- intentional lazy; GUARD-01 safe
-    from genizah_translations import TRANSLATIONS  # noqa: PLC0415 -- intentional lazy; GUARD-01 safe
+    from shared.genizah_translations import TRANSLATIONS  # noqa: PLC0415 -- intentional lazy; GUARD-01 safe
     if CURRENT_LANG == 'he':
         return TRANSLATIONS.get(text, text)
     return text

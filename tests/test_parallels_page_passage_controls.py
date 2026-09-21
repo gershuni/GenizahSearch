@@ -241,7 +241,7 @@ def test_every_passage_ui_string_has_a_hebrew_translation():
     recur silently."""
     import re as _re
 
-    from genizah_translations import TRANSLATIONS
+    from shared.genizah_translations import TRANSLATIONS
 
     src = _read_source()
     # Every tr('...') literal mentioning passage, with implicit-concat parts
@@ -265,7 +265,7 @@ def test_the_truncation_string_used_matches_its_translation_key():
     """The notify builds its string by implicit concatenation; a one-space
     drift between the source and the translations key silently reverts
     Hebrew users to English. Pin the exact joined string."""
-    from genizah_translations import TRANSLATIONS
+    from shared.genizah_translations import TRANSLATIONS
 
     key = ('Letter-level search checked the {n} best-evidenced '
            'candidates of {m}.')
@@ -346,7 +346,7 @@ def test_width_ladder_has_no_rung_above_widest():
 
 
 def test_every_width_control_string_has_a_hebrew_translation():
-    from genizah_translations import TRANSLATIONS
+    from shared.genizah_translations import TRANSLATIONS
 
     slice_ = _passage_width_creation_slice()
     calls = re.findall(r"tr\(\s*((?:'[^']*'\s*)+)\)", slice_)

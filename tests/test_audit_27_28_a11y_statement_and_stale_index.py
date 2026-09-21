@@ -63,7 +63,7 @@ class TestFinding27AccessibilityStatement:
     def test_softened_strings_have_hebrew_translations(self):
         # Each reworded English string is a new tr() key; without a HE entry the
         # Hebrew (default) UI would silently fall back to English.
-        from genizah_translations import TRANSLATIONS
+        from shared.genizah_translations import TRANSLATIONS
 
         for soft in self.SOFTENED:
             assert soft in TRANSLATIONS, f"no HE translation for new key: {soft!r}"
@@ -75,7 +75,7 @@ class TestFinding27AccessibilityStatement:
     def test_old_overclaim_keys_not_left_dangling(self):
         # The renamed keys should not linger in the page (the dict may keep them
         # harmlessly, but the page must not reference the old wording).
-        from genizah_translations import TRANSLATIONS
+        from shared.genizah_translations import TRANSLATIONS
 
         # Sanity: at least the page no longer references the old keys (covered
         # above); confirm the dict was actually re-keyed for the new strings.

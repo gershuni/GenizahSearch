@@ -91,7 +91,7 @@ def test_about_dialog_contains_local_cache_disclosure_he():
     phrase is accepted in either source file.
     """
     app_src = (REPO_ROOT / "genizah_app.py").read_text(encoding="utf-8")
-    tr_src = (REPO_ROOT / "genizah_translations.py").read_text(encoding="utf-8")
+    tr_src = (REPO_ROOT / "shared/genizah_translations.py").read_text(encoding="utf-8")
     combined = app_src + tr_src
     assert (
         "לא מוצפן" in combined
@@ -101,5 +101,5 @@ def test_about_dialog_contains_local_cache_disclosure_he():
     ), (
         "Hebrew About-dialog cache disclosure missing (Phase 97 D-NEW-6): expected one of "
         "'לא מוצפן' / 'אינו מועלה' / 'אינו מוצפן' / 'לא הצפנה' in genizah_app.py or "
-        "genizah_translations.py"
+        "shared/genizah_translations.py"
     )

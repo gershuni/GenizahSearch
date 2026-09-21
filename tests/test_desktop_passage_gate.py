@@ -510,7 +510,7 @@ def test_the_retired_refusal_string_is_gone_from_the_code():
     explaining why it was has no caller. A string left behind outlives the
     behaviour it described and reappears in the next translation sweep."""
     assert 'Recursive search uses chunk search for now' not in _app_source()
-    import genizah_translations
+    from shared import genizah_translations
     assert not [k for k in genizah_translations.TRANSLATIONS
                 if 'Recursive search uses chunk search' in k], (
         'the retired message is still in the translation table')
@@ -640,7 +640,7 @@ def test_every_tr_string_has_a_hebrew_entry(rel_path):
     Both files, because these two surfaces share one table: an English string
     added to either without an entry is the same defect.
     """
-    import genizah_translations
+    from shared import genizah_translations
 
     used = _tr_strings(rel_path)
     missing = sorted(
@@ -716,7 +716,7 @@ def _phase146_translation_keys():
     """The keys of the Phase 146 block in genizah_translations.py, read from
     the source rather than by diffing against a base commit -- this has to
     keep working long after the branch is merged."""
-    src = io.open(os.path.join(REPO_ROOT, 'genizah_translations.py'),
+    src = io.open(os.path.join(REPO_ROOT, 'shared/genizah_translations.py'),
                   encoding='utf-8').read()
     start = src.index(_PHASE146_BLOCK_MARKER)
     block = src[start:]
