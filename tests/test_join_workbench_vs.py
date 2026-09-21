@@ -1159,7 +1159,7 @@ def test_compare_nav_arrows_point_outward():
     direction — that would push the bracket to the wrong edge for these strings (the old
     "prev >" / "< next" design did force LTR; this one must not)."""
     import pathlib
-    from genizah_translations import TRANSLATIONS
+    from shared.genizah_translations import TRANSLATIONS
 
     # The HE translations place the arrow on the outward edge (prev leads ▶, next trails ◀).
     assert TRANSLATIONS.get("◀ Prev Result") == "▶ לתוצאה קודמת", (

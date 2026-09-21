@@ -222,7 +222,7 @@ def test_the_label_goes_through_translation():
     text = BROWSE.read_text(encoding='utf-8')
     assert "tr('Print / Save as PDF')" in text, (
         'the Print label is not wrapped in tr()')
-    translations = (Path(__file__).resolve().parents[1] / 'genizah_translations.py'
+    translations = (Path(__file__).resolve().parents[1] / 'shared/genizah_translations.py'
                     ).read_text(encoding='utf-8')
     assert '"Print / Save as PDF"' in translations, (
         'no Hebrew entry for the Print label -- tr() answers a miss by handing '

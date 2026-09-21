@@ -154,5 +154,5 @@ class TestBodleianDirectLinkWiring:
         assert "setOpenExternalLinks(True)" in src
 
     def test_translation_key_exists_in_hebrew(self):
-        src = open("genizah_translations.py", encoding="utf-8").read()
+        src = open("shared/genizah_translations.py", encoding="utf-8").read()
         assert '"Open in Bodleian Libraries"' in src

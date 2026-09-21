@@ -13,7 +13,7 @@ import pathlib
 
 import pytest
 
-from genizah_translations import TRANSLATIONS
+from shared.genizah_translations import TRANSLATIONS
 
 HOST = pathlib.Path(__file__).parent.parent / "genizah_app.py"
 

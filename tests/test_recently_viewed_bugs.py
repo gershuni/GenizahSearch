@@ -96,7 +96,7 @@ def test_w2_recent_count_uses_recent_items():
 # --------------------------------------------------------------------------- #
 
 def test_w1_recently_viewed_translation_key_exists():
-    from genizah_translations import TRANSLATIONS
+    from shared.genizah_translations import TRANSLATIONS
     assert TRANSLATIONS.get('Recently Viewed') == 'נצפו לאחרונה'
 
 
@@ -179,7 +179,7 @@ def test_w3_resolve_count_legacy_path_recent_still_routes():
 # --------------------------------------------------------------------------- #
 
 def test_w4_general_translation_key_exists():
-    from genizah_translations import TRANSLATIONS
+    from shared.genizah_translations import TRANSLATIONS
     assert TRANSLATIONS.get('General') == 'כללי'
 
 

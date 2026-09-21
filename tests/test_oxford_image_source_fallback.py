@@ -327,7 +327,7 @@ NOTICE_KEYS = (
 
 class TestOxfordNoticeStringsLocalized:
     def test_every_notice_key_has_a_hebrew_translation(self):
-        from genizah_translations import TRANSLATIONS
+        from shared.genizah_translations import TRANSLATIONS
 
         for key in NOTICE_KEYS:
             assert key in TRANSLATIONS, key

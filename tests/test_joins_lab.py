@@ -1089,7 +1089,7 @@ class TestBulkAnchorAlwaysIncluded:
     def test_translation_keys_for_add_to_puzzle(self):
         """New tr() keys for add_to_puzzle and puzzle_staging_truncated must exist in translations."""
         import pathlib
-        src = pathlib.Path("genizah_translations.py").read_text(encoding="utf-8")
+        src = pathlib.Path("shared/genizah_translations.py").read_text(encoding="utf-8")
         assert "Add to Puzzle" in src, (
             "genizah_translations.py must include 'Add to Puzzle' translation key"
         )
@@ -1306,7 +1306,7 @@ class TestAddToList:
 
     def test_translation_keys_for_add_to_list(self):
         """Translation keys for Add-to-List flow must exist in genizah_translations.py."""
-        src = pathlib.Path('genizah_translations.py').read_text(encoding='utf-8')
+        src = pathlib.Path('shared/genizah_translations.py').read_text(encoding='utf-8')
         required_keys = [
             'Add to List',
             'Sign in to add candidates to a list',
@@ -1487,7 +1487,7 @@ class TestExport:
 
     def test_export_translation_keys(self):
         """Translation keys for the export flow must exist in genizah_translations.py."""
-        src = pathlib.Path('genizah_translations.py').read_text(encoding='utf-8')
+        src = pathlib.Path('shared/genizah_translations.py').read_text(encoding='utf-8')
         required_keys = [
             'Export',
             'CSV',

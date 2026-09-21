@@ -15,7 +15,7 @@ import pickle
 import re
 import time
 
-from genizah_translations import TRANSLATIONS
+from shared.genizah_translations import TRANSLATIONS
 
 from shared.config import Config
 

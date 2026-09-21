@@ -605,7 +605,7 @@ def test_my_library_tab_tr_keys_have_hebrew_translations():
     Missing translations cause Hebrew users to see English UI labels.
     """
     import re
-    from genizah_translations import TRANSLATIONS
+    from shared.genizah_translations import TRANSLATIONS
 
     with open("desktop/my_library_tab.py", encoding="utf-8") as f:
         source = f.read()
@@ -652,7 +652,7 @@ def test_seewald_hebrew_spelling_in_translations():
     """Bug 5 regression: the Seewald attribution in genizah_translations.py
     (desktop About dialog) must use 'יהודה זייבלד' (not 'זיוואלד').
     """
-    with open("genizah_translations.py", encoding="utf-8") as f:
+    with open("shared/genizah_translations.py", encoding="utf-8") as f:
         content = f.read()
 
     # The WRONG spelling that was in the original code

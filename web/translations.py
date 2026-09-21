@@ -6,7 +6,7 @@ Uses a simple key-value approach where English is the key
 and translations are the values. Supports RTL languages.
 """
 
-from genizah_translations import TRANSLATIONS
+from shared.genizah_translations import TRANSLATIONS
 
 # Current language state
 _current_lang = 'he'  # Default to Hebrew

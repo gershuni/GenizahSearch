@@ -54,7 +54,7 @@ def _extract_tr_keys(source: str) -> list:
 
 def test_all_tr_keys_in_translations():
     """SC#6: every tr() key in desktop/join_workbench.py must be in TRANSLATIONS."""
-    from genizah_translations import TRANSLATIONS
+    from shared.genizah_translations import TRANSLATIONS
 
     source = TARGET.read_text(encoding="utf-8")
     keys = _extract_tr_keys(source)
@@ -85,7 +85,7 @@ def test_phase107_host_keys_in_translations():
     This assertion runs unconditionally from Plan 01 because Plan-01 Task-1
     bootstraps all phase keys (including 'Find joins').
     """
-    from genizah_translations import TRANSLATIONS
+    from shared.genizah_translations import TRANSLATIONS
 
     missing_tr = [k for k in PHASE_107_HOST_KEYS if k not in TRANSLATIONS]
     assert not missing_tr, (
@@ -108,7 +108,7 @@ GAP_ROUND_3_KEYS = [
 
 def test_gap_round_3_keys_in_translations():
     """G-06/G-13/G-08: every gap-round-3 key resolves in TRANSLATIONS (D-17)."""
-    from genizah_translations import TRANSLATIONS
+    from shared.genizah_translations import TRANSLATIONS
     missing = [k for k in GAP_ROUND_3_KEYS if k not in TRANSLATIONS]
     assert not missing, (
         f"Gap-round-3 keys absent from TRANSLATIONS: {missing}\n"
@@ -129,7 +129,7 @@ def test_phase107_host_keys_translated_and_wrapped():
     call; if not, mark the test as xfail(strict=False) so Plan 01/02 pass and
     Plan 03 flips it to xpass/pass.
     """
-    from genizah_translations import TRANSLATIONS
+    from shared.genizah_translations import TRANSLATIONS
 
     hosts = [
         pathlib.Path(__file__).parent.parent / "genizah_app.py",

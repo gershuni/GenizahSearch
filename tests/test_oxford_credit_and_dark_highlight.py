@@ -42,7 +42,7 @@ class TestOxfordCreditWording:
             assert "From the collections of the Bodleian Libraries, Oxford" not in _read(path), path
 
     def test_desktop_translates_the_credit(self):
-        assert '"Image provided by the Bodleian Libraries, University of Oxford"' in _read("genizah_translations.py")
+        assert '"Image provided by the Bodleian Libraries, University of Oxford"' in _read("shared/genizah_translations.py")
         assert "tr(OXFORD_IMAGE_CREDIT_EN)" in _read("genizah_app.py")
 
 

@@ -29,7 +29,7 @@ import pytest
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
 
-from genizah_translations import TRANSLATIONS  # noqa: E402
+from shared.genizah_translations import TRANSLATIONS  # noqa: E402
 
 MAIN = os.path.join(REPO_ROOT, 'web', 'main.py')
 

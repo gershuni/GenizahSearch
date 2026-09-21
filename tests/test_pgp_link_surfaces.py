@@ -559,7 +559,7 @@ def test_result_dialog_adds_both_pgp_buttons_to_their_rows():
 
 
 def test_the_new_tooltip_string_is_translated():
-    import genizah_translations as t
+    from shared import genizah_translations as t
 
     he = t.TRANSLATIONS["Open on the Princeton Geniza Project website"]
     assert he and he != "Open on the Princeton Geniza Project website"

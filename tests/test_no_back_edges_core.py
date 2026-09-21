@@ -37,6 +37,7 @@ EXTRACTED_MODULES = [
     "shared/text_normalize.py",
     "shared/variants.py",
     # Stage 2 batch 2 (2026-09-20): moved out of the repository root.
+    "shared/genizah_translations.py",   # Round 2, 2026-09-21
     "shared/lists_sync.py",
     "shared/pgp_tag_translations.py",
     "shared/sefaria_utils.py",
