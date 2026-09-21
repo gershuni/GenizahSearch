@@ -5,19 +5,19 @@
 ``_APP_SOURCE_FILES`` (root-level modules that carry no ``desktop/``/``shared/`` path segment to
 match on). That set is a list of names, not of locations, so nothing so far asserted that the
 file behind each name exists, is tracked, or is the real module rather than a compatibility
-stub. When a module moves (the Round 1 plan proposes moving several of these into ``desktop/``
-and ``shared/``), the old path may keep a four-line alias stub -- and a test that resolved the
-name through the import system would happily resolve the stub and pass.
+stub. While the Round 1 moves were in flight the old path kept a four-line alias stub -- and a
+test that resolved the name through the import system would happily resolve the stub and pass.
+The stubs are gone now, but the check stays: it is what would catch one coming back.
 
 So this file keeps an explicit table instead: basename -> the canonical path, maintained by hand
 and checked three ways: the path exists, ``git ls-files`` knows it, and its source is not an alias
 stub. It also asserts the telemetry set is a subset of the table, so a new basename there needs a
-row here in the same commit. Stage 1 of Round 1 maps every name to its root path; a move updates
-the row.
+row here in the same commit. A move updates the row.
 
-Alias identity (``import old is import new``) is pinned by ``tests/test_root_alias_stubs.py``, whose
-table must list every row here whose path left the root; crash-frame classification itself stays
-covered by ``tests/test_crash_payload.py``. ``genizah_app.py::_SELF_TEST_IMPORT_MODULES`` -- what
+``tests/test_no_root_alias_stubs.py`` is the successor to the stub-identity gate: its table must
+list every row here whose path left the root, and it proves the old root path is gone and that no
+tracked file still imports the old bare name. Crash-frame classification itself stays covered by
+``tests/test_crash_payload.py``. ``genizah_app.py::_SELF_TEST_IMPORT_MODULES`` -- what
 ``GenizahSearchPro.exe --self-test-imports`` imports inside the frozen process -- must equal this
 table minus the entry point; the last test below keeps it so.
 """

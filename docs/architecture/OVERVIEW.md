@@ -260,11 +260,12 @@ that `Config` or the spec resolve there. Everything else has a reason or a plan.
 | `shared_export_utils.py` | compatibility shim over `shared/export_utils.py`; stays while call sites use it |
 | `genizah_translations.py` | translation tables imported across both apps; stays for now (Round 2 candidate for `shared/`) |
 
-**Modules moved out of the root in Stage 2**, each leaving a four-line alias stub at the old path
-(Round 2 removes the stubs). [tests/test_root_alias_stubs.py](../../tests/test_root_alias_stubs.py) pins
-that each old name IS the real module, that the stub contains nothing but the aliasing, and that **no
-tracked file imports a moved module by its old name**; `GenizahSearchPro.exe --self-test-imports`
-proves every new dotted name resolves inside the frozen app.
+**Modules moved out of the root in Stage 2.** Each left a four-line alias stub at the old path while
+its consumers were rewritten; Round 2 deleted all eleven on 2026-09-21, so **the old names no longer
+resolve at all**. [tests/test_no_root_alias_stubs.py](../../tests/test_no_root_alias_stubs.py) pins that
+each old root path is gone, that the real module is where the table says, and that **no tracked file
+imports a moved module by its old name**; `GenizahSearchPro.exe --self-test-imports` proves every new
+dotted name resolves inside the frozen app.
 
 Landed 2026-09-19 (trial): [`desktop/column_filter_dialog.py`](../../desktop/column_filter_dialog.py).
 Landed 2026-09-20 into `desktop/`: [`desktop/gui_threads.py`](../../desktop/gui_threads.py),
@@ -290,12 +291,20 @@ No root Python module is now waiting to move. What stays, and why:
 |---|---|---|
 | `genizah_translations.py` | `shared/` | 30 importers and 16 tests that read it by path; Round 2 |
 
-**Compatibility alias stubs** -- eleven of them, one per module moved out of the root in Stage 2
-(seven aliasing `desktop.*`, four aliasing `shared.*`). Each is a docstring plus three lines that
-rebind its own `sys.modules` entry to the real module. Temporary: Round 2 removes each stub once
-nothing in the repo imports the old name, which
-[tests/test_root_alias_stubs.py](../../tests/test_root_alias_stubs.py) already enforces; [tests/test_dependencies_declared.py](../../tests/test_dependencies_declared.py)
-exempts root basenames from its third-party check, so removing a stub also removes that exemption.
+**Compatibility alias stubs -- removed 2026-09-21.** There were eleven, one per module moved out of
+the root in Stage 2 (seven aliasing `desktop.*`, four aliasing `shared.*`), each a docstring plus three
+lines rebinding its own `sys.modules` entry to the real module. They were always temporary, and Round 2
+deleted them once nothing in the repo named the old module. Two consequences worth knowing:
+[tests/test_dependencies_declared.py](../../tests/test_dependencies_declared.py) exempts root basenames
+from its third-party check, so those eleven names lost that exemption in the same commit; and an
+unrewritten import is now a hard `ImportError` rather than a silent second route to the same module --
+except in the two places that swallow it, both `except ImportError`
+([desktop/join_workbench.py](../../desktop/join_workbench.py) imports `desktop.gui_threads` and on
+failure sets `_QT_AVAILABLE = False`, deleting the Join Workbench UI;
+[desktop/corrections_client.py](../../desktop/corrections_client.py) imports
+`desktop.supabase_corrections_client` and on failure downgrades to the REST client),
+which is why the static sweep in
+[tests/test_no_root_alias_stubs.py](../../tests/test_no_root_alias_stubs.py) outlived the stubs.
 
 **Build inputs** -- stay: `GenizahSearchPro.spec`, `build_app.bat`, `CompileScriptGenizah.iss`,
 `version_info.txt`, `icon.ico`, `requirements.txt`, `requirements-lock.txt`,
