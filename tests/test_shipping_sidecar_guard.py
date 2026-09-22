@@ -421,17 +421,30 @@ def _powershell():
     return exe
 
 
-def _stubs(tmp_path, **exit_codes):
+def _stubs(tmp_path, fail_on=None, **exit_codes):
+    """Each stub logs its invocation and exits with `exit_codes[name]`. With `fail_on=<the
+    full argument string of one invocation>` that invocation exits 7 instead -- so a step
+    in the MIDDLE of a sequence can be made to fail, not only the first.
+
+    Deliberately no `find`/`type` tricks: on this machine Git's usr/bin precedes System32
+    on PATH, so `find /c /v ""` is GNU find walking the C: drive."""
     stubs = tmp_path / "stubs"
     stubs.mkdir()
     for name, code in exit_codes.items():
         (stubs / (name + ".cmd")).write_text(
-            "@echo off\r\necho %s %%* >> \"%%STUB_LOG%%\"\r\nexit /b %d\r\n" % (name, code),
+            "@echo off\r\n"
+            "echo " + name + " %* >> \"%STUB_LOG%\"\r\n"
+            # ssh's arguments carry double quotes; strip them before comparing, and prefix
+            # with x so an empty argument list cannot break the substitution.
+            "set \"ARGS=x%*\"\r\n"
+            "set \"ARGS=%ARGS:\"=%\"\r\n"
+            "if \"%ARGS%\"==\"x%STUB_FAIL_ON%\" exit /b 7\r\n"
+            "exit /b " + str(code) + "\r\n",
             encoding="ascii",
         )
     log = tmp_path / "stub.log"
     env = dict(os.environ, PATH=str(stubs) + os.pathsep + os.environ.get("PATH", ""),
-               STUB_LOG=str(log))
+               STUB_LOG=str(log), STUB_FAIL_ON=fail_on or "<never>")
     return env, log
 
 
@@ -500,3 +513,40 @@ def test_no_script_resets_the_exit_code_it_is_about_to_check():
         code = [ln for ln in script.read_text(encoding="utf-8").splitlines()
                 if not ln.strip().startswith("#")]
         assert not any(re.search(r"\$LASTEXITCODE\s*=[^=]", ln) for ln in code), script.name
+
+
+WRITE_STEPS = [
+    (4, "scripts/import_pgp_full.py --execute"),
+    (5, "scripts/update_doc_relation.py --execute"),
+    (6, "scripts/import_pgp_sections.py --execute"),
+    (7, "scripts/export_pgp_sidecar.py"),
+    (8, "scripts/check_shipping_sidecar.py --sidecar pgp_data/pgp.db"),
+]
+
+
+@pytest.mark.parametrize("step, command", WRITE_STEPS)
+def test_refresh_really_stops_when_a_write_step_fails(tmp_path, step, command):
+    """gpt-6-astra, round 7: only step 0 failing was exercised, so
+    `& python @Command; if ($Number -ge 4) { cmd /c exit 0 }` ran every write step after
+    one failed, printed "Refresh complete" and exited 0 -- with every test green."""
+    env, log = _stubs(tmp_path, fail_on=command, python=0)
+    rc, out, err = _run_ps1(REFRESH_PS1, ["-Execute", "-StartAt", "4"], env)
+    assert rc == 7
+    assert "REFRESH STOPPED at step %d" % step in err
+    assert "Refresh complete" not in out
+    assert _log_lines(log) == ["python"] * (step - 3), "nothing after the failed step may run"
+
+
+def test_refresh_runs_the_whole_write_route_when_every_step_passes(tmp_path):
+    env, log = _stubs(tmp_path, python=0)
+    rc, out, _err = _run_ps1(REFRESH_PS1, ["-Execute", "-StartAt", "4"], env)
+    assert rc == 0
+    assert "Refresh complete" in out
+    assert _log_lines(log) == ["python"] * 5, "steps 4-8"
+
+
+def test_refresh_execute_without_start_at_runs_all_nine_steps(tmp_path):
+    env, log = _stubs(tmp_path, python=0)
+    rc, out, _err = _run_ps1(REFRESH_PS1, ["-Execute"], env)
+    assert rc == 0
+    assert _log_lines(log) == ["python"] * 9

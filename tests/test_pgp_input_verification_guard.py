@@ -378,3 +378,16 @@ def test_the_bytes_loader_and_the_path_loader_agree(exporter, tmp_path):
     assert by_path["moss. ix 1.1"] == "9900000002"
     assert exporter.load_genizahsearch_shelfmarks(str(lib), None) == \
         exporter.load_genizahsearch_shelfmarks_from_bytes(lib.read_bytes(), None)
+
+
+def test_the_bytes_loader_keeps_the_old_loaders_newline_tolerance(exporter):
+    """The path loader used text-mode open(), which translates bare CR and CRLF to LF before
+    the csv module sees them. io.StringIO does not unless told (gpt-6-astra, round 7), and a
+    bare-CR file that used to parse raised csv.Error."""
+    for raw in (b"id,x,call\r1,,T-S 12.123\r", b"id,x,call\r\n1,,T-S 12.123\r\n",
+                b"id,x,call\n1,,T-S 12.123\n"):
+        assert exporter.load_genizahsearch_shelfmarks_from_bytes(raw) == {"t-s 12.123": "1"}, raw
+    supplement = b"\xef\xbb\xbfshelfmark,alma_id\rMoss. IX 1.1,9900000002\r"
+    assert exporter.load_genizahsearch_shelfmarks_from_bytes(b"id,x,call\n", supplement) == {
+        "moss. ix 1.1": "9900000002"
+    }

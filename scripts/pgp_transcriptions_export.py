@@ -360,8 +360,9 @@ def load_genizahsearch_shelfmarks_from_bytes(libraries_raw: bytes,
     """
     gs_lookup = {}
 
-    # Main libraries.csv
-    reader = csv.reader(io.StringIO(libraries_raw.decode('utf-8')))
+    # Main libraries.csv. newline=None: the text-mode open() this replaced translated
+    # bare CR and CRLF to LF before the csv module saw them; StringIO does not unless told.
+    reader = csv.reader(io.StringIO(libraries_raw.decode('utf-8'), newline=None))
     next(reader, None)  # Skip header
 
     for row in reader:
@@ -381,7 +382,7 @@ def load_genizahsearch_shelfmarks_from_bytes(libraries_raw: bytes,
 
     # FIST supplement, if it was there
     if supplement_raw is not None:
-        reader = csv.DictReader(io.StringIO(supplement_raw.decode('utf-8-sig')))
+        reader = csv.DictReader(io.StringIO(supplement_raw.decode('utf-8-sig'), newline=None))
         fist_count = 0
         for row in reader:
             shelfmark = row.get('shelfmark', '')
