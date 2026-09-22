@@ -1,6 +1,6 @@
 # GenizahSearch - Plans Index
 
-**Last Updated:** 2026-09-18
+**Last Updated:** 2026-09-21
 
 ---
 
@@ -12,6 +12,7 @@
 | [JOIN_FINDER_IMPLEMENTATION_PLAN.md](JOIN_FINDER_IMPLEMENTATION_PLAN.md) | Planned | Direction-aware join finder, caching, and manuscript-view UI |
 | [USER_TEXT_SEARCH_PLAN.md](USER_TEXT_SEARCH_PLAN.md) | Planned | User-added text search for parallels |
 | [FGP_TRANSCRIPTIONS_INTEGRATION_PLAN.md](FGP_TRANSCRIPTIONS_INTEGRATION_PLAN.md) | Data ready, integration pending | Incorporate the FGP transcription corpus (45K rows, `sys_id`-keyed, in gitignored `fgp_data/`) into search + the transcription chooser |
+| [PGP_TRANSLATION_QUALITY.md](PGP_TRANSLATION_QUALITY.md) | Deferred (2026-09-21) | ~28% of the restored PGP Hebrew translations are materially wrong; why the mechanical QC cannot see it, and the four remediation options |
 | [FGP_CHOOSER_MILESTONE.md](FGP_CHOOSER_MILESTONE.md) | Readiness doc (prepared 2026-06-18; see its status header) | Milestone readiness doc for FGP transcriptions as a version-chooser source; the runbook says when to instantiate it as a GSD milestone |
 
 ---

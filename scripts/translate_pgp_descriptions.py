@@ -15,7 +15,9 @@ translation is more reliable.
 Features:
 - Checkpointing: saves progress to a JSON file every batch_size translations
 - Resume: skips already-translated rows on restart
-- Sequential execution with throttle (safe for Dicta rate limits)
+- Sequential with throttle by default; concurrent (--workers, 5 under god mode)
+- Refuses to resume from a checkpoint the database cannot confirm (exit 2)
+- Exit codes: 0 clean, 1 incomplete, 2 refused to start, 130 interrupted
 - Dry-run: count candidates without making API calls
 - SIGINT: graceful shutdown with checkpoint save
 
@@ -36,6 +38,7 @@ import sqlite3
 import sys
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -60,6 +63,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from shared.dicta_client import (
     GOD_MODE,
+    MAX_WORKERS,
     PGP_DOCUMENT_TYPE_HE,
     build_few_shot_prompt,
     load_few_shot_template,
@@ -83,7 +87,10 @@ _shutdown_requested = False
 def _signal_handler(signum, frame):
     global _shutdown_requested
     _shutdown_requested = True
-    print("\n[SIGINT] Shutdown requested - saving checkpoint after current item...")
+    print(
+        "\n[SIGINT] Shutdown requested - cancelling queued work, letting in-flight "
+        "translations finish, then saving the checkpoint..."
+    )
 
 signal.signal(signal.SIGINT, _signal_handler)
 
@@ -111,6 +118,48 @@ def load_checkpoint(path: str) -> set:
     except (json.JSONDecodeError, IOError) as e:
         logger.warning("Failed to load checkpoint from %s: %s", path, e)
         return set()
+
+
+def stale_checkpoint_ids(db_path: str, completed_ids: set) -> set:
+    """Return the checkpointed pgpids that have NO row in pgp_translations.
+
+    The checkpoint records only IDs, never translated text, and the loop skips
+    every ID it names. If the sidecar was rebuilt since the checkpoint was
+    written -- ``scripts/export_pgp_sidecar.py`` deletes pgp.db and recreates it
+    without pgp_translations -- those rows are gone but still look "done", so a
+    resumed run would leave them permanently untranslated and report success.
+    Callers must treat a non-empty result as a stop condition.
+
+    Args:
+        db_path: Path to pgp.db.
+        completed_ids: pgpids loaded from the checkpoint file.
+
+    Returns:
+        Set of pgpids named by the checkpoint that the database cannot confirm.
+    """
+    if not completed_ids:
+        return set()
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        has_table = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='pgp_translations'"
+        ).fetchone()
+        if not has_table:
+            return set(completed_ids)
+        present = set()
+        ids = list(completed_ids)
+        for i in range(0, len(ids), 400):
+            batch = ids[i:i + 400]
+            placeholders = ",".join("?" * len(batch))
+            present.update(
+                row[0] for row in conn.execute(
+                    f"SELECT pgpid FROM pgp_translations WHERE pgpid IN ({placeholders})",
+                    batch,
+                )
+            )
+        return set(completed_ids) - present
+    finally:
+        conn.close()
 
 
 def save_checkpoint(path: str, completed_ids: set) -> None:
@@ -159,13 +208,26 @@ def translate_with_retry(
         few_shot_prompt: Pre-built few-shot prefix.
         direction: Translation direction.
 
+    A blank answer counts as a failure and is retried. Dicta returns an empty
+    string rather than an error for some inputs -- observed on descriptions
+    carrying long stretches of Arabic script -- and an `is not None` test accepts
+    that on the first attempt, spending none of the retry budget on a response
+    that a second request may well fill in. The corpus has 0 blank rows today,
+    so the retries this adds cost effectively nothing.
+
     Returns:
-        Translated text, or None after all retries exhausted.
+        Translated text, or None after all retries exhausted (which now includes
+        the case where every attempt came back blank).
     """
     for attempt in range(MAX_RETRIES):
         result = translate_text(text, few_shot_prompt, direction)
-        if result is not None:
+        if result is not None and result.strip():
             return result
+        if result is not None:
+            logger.info(
+                "Blank answer on attempt %d/%d for text: %.50s...",
+                attempt + 1, MAX_RETRIES, text[:50],
+            )
         if attempt < MAX_RETRIES - 1:
             delay = RETRY_BASE_DELAY * (2 ** attempt)
             logger.info(
@@ -246,11 +308,17 @@ def flush_batch(
     return len(results)
 
 
-def run_batch(args: argparse.Namespace) -> None:
+def run_batch(args: argparse.Namespace) -> int:
     """Execute the batch translation pipeline.
 
     Args:
         args: Parsed CLI arguments.
+
+    Returns:
+        A process exit code. 0 clean, 1 ran but did not fully succeed (a fatal
+        error in the loop, or any row that failed to translate), 2 refused to
+        start, 130 interrupted. A wrapper or cron job reads this; printing a
+        diagnostic and returning 0 is how a refusal gets mistaken for a run.
     """
     # Try importing tqdm for progress bar; fall back to no-op if unavailable
     try:
@@ -279,12 +347,32 @@ def run_batch(args: argparse.Namespace) -> None:
         mapped = sum(1 for _, _, dt in candidates if dt and dt in PGP_DOCUMENT_TYPE_HE)
         print(f"\nDocument types with manual HE mapping: {mapped}/{total_candidates}")
         print("Dry run complete. No translations performed.")
-        return
+        return 0
 
     # Load checkpoint
     completed_ids = load_checkpoint(args.checkpoint_file)
     if completed_ids:
         print(f"Checkpoint loaded: {len(completed_ids)} already completed.")
+        stale = stale_checkpoint_ids(args.pgp_db, completed_ids)
+        if stale and not args.ignore_stale_checkpoint:
+            print(
+                f"\nERROR: the checkpoint claims {len(completed_ids)} documents are done, but "
+                f"{len(stale)} of them have no row in pgp_translations.\n"
+                f"  checkpoint: {args.checkpoint_file}\n"
+                f"  database:   {args.pgp_db}\n"
+                "The sidecar was almost certainly rebuilt since the checkpoint was written "
+                "(scripts/export_pgp_sidecar.py drops and recreates pgp.db without the\n"
+                "pgp_translations table). Continuing would SKIP those documents and leave them "
+                "untranslated while reporting success.\n"
+                "Move the checkpoint file aside to re-translate them, or pass "
+                "--ignore-stale-checkpoint if you really mean to skip them."
+            )
+            return 2
+        if stale:
+            logger.warning(
+                "Proceeding with %d stale checkpoint ids; they will NOT be translated.",
+                len(stale),
+            )
 
     # Filter out already-completed (skip filter for --retranslate-nulls since
     # those pgpids are in the checkpoint but need re-translation)
@@ -300,7 +388,7 @@ def run_batch(args: argparse.Namespace) -> None:
 
     if total_pending == 0:
         print("Nothing to translate. All candidates already completed.")
-        return
+        return 0
 
     # Load few-shot template
     few_shot_path = args.few_shot or DEFAULT_FEW_SHOT
@@ -321,25 +409,96 @@ def run_batch(args: argparse.Namespace) -> None:
 
     delay = getattr(args, 'delay', REQUEST_DELAY)
 
+    # Concurrency. Without god mode Dicta rate-limits hard (100 req/900s), so the
+    # default stays strictly sequential and byte-for-byte identical to the old
+    # behaviour; god mode lifts the limit and the sibling scripts
+    # (translate_fjms_catalog.py, translate_libraries_titles.py) already run 5-wide.
+    workers = args.workers or (min(MAX_WORKERS, 5) if GOD_MODE else 1)
+    if workers > MAX_WORKERS:
+        logger.warning(
+            "Capping --workers %d at the client's MAX_WORKERS=%d.", workers, MAX_WORKERS
+        )
+        workers = MAX_WORKERS
+    if workers > 1 and not GOD_MODE:
+        logger.warning(
+            "%d workers requested without DICTA_GOD_MODE; expect 429s and retry backoff.",
+            workers,
+        )
+    if workers > 1 and delay > 0:
+        logger.info(
+            "--delay %.1fs applies per worker, so %d workers issue roughly %.2f "
+            "requests/second between them (plus API latency).",
+            delay, workers, workers / delay,
+        )
+    print(f"Workers: {workers} (god mode: {GOD_MODE})")
+
+    def _consume(pgpid, dtype, desc_he):
+        """Record one finished translation. MAIN THREAD ONLY.
+
+        Every mutation of batch_buffer/completed_ids/counters and every sqlite
+        write happens here, on the thread running the as_completed loop, so no
+        lock is needed and the sqlite connection is never touched by a worker.
+        """
+        nonlocal translated_count, failed_count
+        dtype_he = PGP_DOCUMENT_TYPE_HE.get(dtype, None) if dtype else None
+        # Dicta answers some inputs with an empty string rather than an error --
+        # observed on descriptions carrying long stretches of Arabic script. A
+        # `is not None` test counts that as a success, writes '' into
+        # description_he and reports failed=0, which also makes
+        # --retranslate-nulls a permanent no-op on those rows. Treat blank as failure.
+        if desc_he is not None and desc_he.strip():
+            batch_buffer.append((pgpid, desc_he, dtype_he))
+            completed_ids.add(pgpid)
+            translated_count += 1
+        else:
+            failed_count += 1
+            logger.warning("Translation failed for pgpid=%d", pgpid)
+
+    def _translate_one(desc):
+        """Worker body. The throttle lives HERE, not in the consumer.
+
+        Every task is submitted up front, so the pool always has a full queue and a
+        worker starts its next request the moment the previous one returns. Sleeping
+        in the as_completed loop would pace result PROCESSING on the main thread while
+        the workers carried on at full speed -- no throttle at all, and delay x
+        total_pending of wall clock for nothing.
+        """
+        if delay > 0:
+            time.sleep(delay)
+        return translate_with_retry(desc, few_shot_prompt, "en2he")
+
+    pool = None
+    fatal_error = False
     try:
-        for i, (pgpid, desc, dtype) in enumerate(pending):
+        pool = ThreadPoolExecutor(max_workers=workers) if workers > 1 else None
+        if pool is not None:
+            futures = {
+                pool.submit(_translate_one, desc): (pgpid, dtype)
+                for pgpid, desc, dtype in pending
+            }
+            stream = enumerate(as_completed(futures))
+        else:
+            stream = enumerate(iter(pending))
+
+        for i, item in stream:
             if _shutdown_requested:
                 logger.info("Shutdown requested - saving checkpoint")
+                if pool is not None:
+                    pool.shutdown(wait=False, cancel_futures=True)
                 break
 
-            # Translate description via API
-            desc_he = translate_with_retry(desc, few_shot_prompt, "en2he")
-
-            # Document type via manual mapping (no API call)
-            dtype_he = PGP_DOCUMENT_TYPE_HE.get(dtype, None) if dtype else None
-
-            if desc_he is not None:
-                batch_buffer.append((pgpid, desc_he, dtype_he))
-                completed_ids.add(pgpid)
-                translated_count += 1
+            if pool is not None:
+                pgpid, dtype = futures[item]
+                try:
+                    desc_he = item.result()
+                except Exception as exc:  # a worker raised rather than returning None
+                    desc_he = None
+                    logger.error("Exception translating pgpid=%s: %s", pgpid, exc)
             else:
-                failed_count += 1
-                logger.warning("Translation failed for pgpid=%d", pgpid)
+                pgpid, desc, dtype = item
+                desc_he = translate_with_retry(desc, few_shot_prompt, "en2he")
+
+            _consume(pgpid, dtype, desc_he)
 
             # Log progress every 100 items
             if (i + 1) % 100 == 0:
@@ -358,12 +517,29 @@ def run_batch(args: argparse.Namespace) -> None:
                 save_checkpoint(args.checkpoint_file, completed_ids)
                 batch_buffer.clear()
 
-            # Throttle between API calls
-            if delay > 0 and i < total_pending - 1:
+            # Throttle between API calls -- sequential path only; the pool applies
+            # the delay inside each worker (see _translate_one).
+            if pool is None and delay > 0 and i < total_pending - 1:
                 time.sleep(delay)
 
     except Exception as e:
+        fatal_error = True
         logger.error("Fatal error in translation loop: %s", e, exc_info=True)
+    finally:
+        # Never leave worker threads running past the loop: the flush below and
+        # the summary must not race with in-flight translations, and the summary
+        # must not claim the run is done while requests are still open. Joining
+        # here rather than silently at interpreter exit keeps the banner honest --
+        # otherwise Ctrl-C prints the full summary and the process then sits mute
+        # for one request, which reads as a hang and invites a second instance.
+        if pool is not None:
+            if _shutdown_requested:
+                print(
+                    f"Waiting for up to {workers} in-flight translations to finish "
+                    "(queued work already cancelled)...",
+                    flush=True,
+                )
+            pool.shutdown(wait=True, cancel_futures=True)
 
     # Flush remaining buffer
     if batch_buffer:
@@ -393,6 +569,12 @@ def run_batch(args: argparse.Namespace) -> None:
     print(f"  Checkpoint:         {args.checkpoint_file}")
     print(f"{'=' * 60}")
 
+    if _shutdown_requested:
+        return 130
+    if fatal_error or failed_count:
+        return 1
+    return 0
+
 
 # =============================================================================
 # CLI Entry Point
@@ -415,7 +597,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
   python scripts/translate_pgp_descriptions.py                    # Full run
   python scripts/translate_pgp_descriptions.py --dry-run          # Count candidates
   python scripts/translate_pgp_descriptions.py --limit 50         # Test with 50 items
-  python scripts/translate_pgp_descriptions.py --workers 10       # Faster (more concurrent)
+  python scripts/translate_pgp_descriptions.py --workers 5        # Concurrent (needs god mode)
 """,
     )
     parser.add_argument(
@@ -427,7 +609,29 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--delay",
         type=float,
         default=REQUEST_DELAY,
-        help=f"Seconds between API calls (default: {REQUEST_DELAY})",
+        help=(
+            f"Seconds between API calls (default: {REQUEST_DELAY}). With --workers N "
+            "this is per worker, so the aggregate rate is about N/delay per second."
+        ),
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=0,
+        help=(
+            f"Concurrent API requests, capped at {MAX_WORKERS}. "
+            f"0 (default) means {min(MAX_WORKERS, 5)} when DICTA_GOD_MODE is set, "
+            "otherwise 1, because Dicta rate-limits unauthenticated callers hard."
+        ),
+    )
+    parser.add_argument(
+        "--ignore-stale-checkpoint",
+        action="store_true",
+        help=(
+            "Run even when the checkpoint names documents that have no row in "
+            "pgp_translations. Those documents stay untranslated -- only use this "
+            "if you mean to skip them."
+        ),
     )
     parser.add_argument(
         "--batch-size",
@@ -475,8 +679,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> None:
-    """Main entry point."""
+def main(argv: list[str] | None = None) -> int:
+    """Main entry point. Returns the process exit code (see run_batch)."""
     args = parse_args(argv)
 
     # Configure logging (console + file)
@@ -492,9 +696,9 @@ def main(argv: list[str] | None = None) -> None:
         handlers=handlers,
     )
 
-    run_batch(args)
+    return run_batch(args)
 
 
 if __name__ == "__main__":
     _configure_utf8_stdio()
-    main()
+    raise SystemExit(main())
