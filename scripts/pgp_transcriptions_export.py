@@ -152,12 +152,17 @@ def _require_verified_inputs(pgp_data_dir) -> bool:
     import sys as _sys
 
     _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    global _INPUTS_VERIFIED
     try:
         from fetch_pgp_metadata import verify_against_provenance
     except ImportError:
-        return
+        # Cannot verify => must not certify. Returning None here read as "carry on"
+        # while being falsy downstream, which is the worst of both.
+        print("WARNING: could not import the provenance verifier; the derived file "
+              "will carry no upstream commit.")
+        _INPUTS_VERIFIED = False
+        return False
 
-    global _INPUTS_VERIFIED
     problems = verify_against_provenance(str(pgp_data_dir), check_derived=False)
     if not problems:
         _INPUTS_VERIFIED = True
@@ -174,7 +179,12 @@ def _require_verified_inputs(pgp_data_dir) -> bool:
         # original CSVs are restored everything verifies clean while the derived output
         # came from different inputs.
         return False
-    return True
+
+    # No override, and the inputs do not match their manifest: this is fatal. A stray
+    # `return True` used to sit here and made everything below unreachable, so a
+    # mismatch silently reported success and the derived file was stamped with the
+    # rejected commit.
+    _INPUTS_VERIFIED = False
     print("ERROR: the CSVs in pgp_data/ do not match upstream_provenance.json:",
           file=__import__("sys").stderr)
     for problem in problems:
