@@ -118,7 +118,7 @@ GenizahSearch uses a simplified architecture with Supabase as the backend and SQ
 ├── nli_data/              # NLI crossref sidecar (NOT in git)
 │   └── nli_crossref.db   # SQLite sidecar v1.2.0 (248MB)
 ├── pgp_data/              # PGP data + sidecar (NOT in git)
-│   ├── pgp.db             # SQLite sidecar (~165MB, includes translations)
+│   ├── pgp.db             # SQLite sidecar (~156MB; pgp_translations is WITHHELD, see below)
 │   ├── documents.csv      # 35K PGP document records (export source)
 │   ├── fragments.csv      # 36K fragment links (export source)
 │   ├── footnotes.csv      # 23K footnotes (export source)
@@ -795,7 +795,7 @@ All sidecar databases are **NOT in git** (listed in `.gitignore`). They must be 
 |----------|-----------|------|---------|----------|
 | `fjms_enrichment.db` | `fist_data/` | ~941 MB | v5.0.0 | FJMS domains (390K), joins (48K), catalog (685K, 37 cols), bibliography (542K), catalog_refs (64K), genizah_persons (2,286), genizah_titles (775), code_values (3,440), translations |
 | `nli_crossref.db` | `nli_data/` | 248 MB | v1.2.0 | NLI crossref images (815K), Cambridge manifests (141K), Manchester LUNA (28K), JTS DPUL (453) |
-| `pgp.db` | `pgp_data/` | ~165 MB | - | PGP documents (35K), sources (9K), footnotes (23K), fragments (36K), pgp_translations (35K) |
+| `pgp.db` | `pgp_data/` | ~156 MB | 1.1.0 | PGP documents (36.6K), sources (10.4K), footnotes (23.8K), fragments (37.4K), meta. **No `pgp_translations`** -- withheld by owner decision (`docs/plans/PGP_TRANSLATION_QUALITY.md`); `scripts/check_shipping_sidecar.py` refuses a copy that carries it |
 | `libraries_translations.db` | project root | 76 MB | - | Dicta translations for library titles (~185K records, Hebrew↔English) |
 
 #### Initial Upload to Server
@@ -805,10 +805,11 @@ All sidecar databases are **NOT in git** (listed in `.gitignore`). They must be 
 scp fist_data/fjms_enrichment.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/fist_data/
 scp nli_data/nli_crossref.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/nli_data/
 
-# pgp.db is CHAINED behind the shipping check: the web reads pgp_translations through
-# TranslationService, so an unconditional upload can publish a withheld corpus.
-python scripts/check_shipping_sidecar.py --sidecar pgp_data/pgp.db && \
-  scp pgp_data/pgp.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/pgp_data/
+# pgp.db goes through the guarded deploy script, never a bare scp: the web reads
+# pgp_translations through TranslationService, so an unconditional upload can publish a
+# withheld corpus. (Deploys run from PowerShell 5.1 with native OpenSSH, where a bash
+# `&&` chain is a parse error -- so the guard and the upload live in one script.)
+#   powershell -File scripts/deploy_pgp_sidecar.ps1
 
 scp libraries_translations.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/
 
@@ -872,54 +873,50 @@ the staging area, not the thing the apps read; at runtime PGP is served entirely
 sidecar (see [decision 0002](../decisions/0002-sidecars-instead-of-a-backend-process.md)).
 That is why a refresh is not finished until the sidecar is rebuilt and deployed.
 
-**Steps 1-7 run on your workstation** -- they need `libraries.csv`, download ~65 MB of
-CSVs and build a 156 MB sidecar. Only step 8 touches the server.
+**Steps 0-8 run on your workstation** -- they need `libraries.csv`, download ~65 MB of
+CSVs and build a 156 MB sidecar. Only the deploy touches the server.
+
+**Run them as ONE sequence, not as pasted lines.** Every step exits non-zero when it must
+not be followed (a checksum mismatch, a classification that was not applied, an export
+that came back short) -- but a pasted block does not consume exit codes: line 5 runs after
+line 4 failed. That was demonstrated end to end on this very procedure: `update_doc_relation.py`
+exited 1, the export ran anyway, and the shipping guard said "fit to ship". So the sequence
+is a script, and each step is followed by an exit-code check:
+
+```powershell
+# Steps 0-3 (FIST supplement, pinned fetch, derive transcriptions_linked.csv, import DRY RUN).
+# Stops at the first failure. Then read pgp_data/full_import_report.txt.
+powershell -File scripts/refresh_pgp_data.ps1
+
+# Steps 4-8: import --execute, classify doc_relation (verified by read-back), sections,
+# export the sidecar, run the shipping guard on it.
+powershell -File scripts/refresh_pgp_data.ps1 -Execute -StartAt 4
+
+# Deploy: guard, scp, restart -- each gated on the previous exit code. (Web is not
+# continuous-deploy; push the code after the sidecar is up.)
+powershell -File scripts/deploy_pgp_sidecar.ps1
+```
+
+What each step is, for when one fails and you need to re-run it by hand (the runner prints
+the exact command it ran, and `-StartAt N` resumes there):
+
+| Step | Command | Why it exists / what stops it |
+|---|---|---|
+| 0 | `python scripts/fist_shelfmarks_export.py` | ~35,600 shelfmarks `libraries.csv` lacks. Without it the fragment match rate falls 94.5% -> 87.5% (~2,900 fragments lose their IIIF images). Steps 2 and 4 refuse to run without it. |
+| 1 | `python scripts/fetch_pgp_metadata.py` | The three upstream CSVs, all at ONE commit, with a per-file SHA-256 manifest (`upstream_provenance.json`). `--dry-run` prints row deltas against the current `pgp.db`. |
+| 2 | `python scripts/pgp_transcriptions_export.py` | Derives `transcriptions_linked.csv` (NOT an upstream file) from documents + footnotes + `libraries.csv` + the supplement. Refuses CSVs that fail the manifest; refuses to overwrite with an empty result; stamps `derived_provenance.json` with the commit, the output's hash, and the hashes of `libraries.csv` and the supplement. |
+| 3 | `python scripts/import_pgp_full.py` | Dry run: validates and writes `full_import_report.txt`. Read it. |
+| 4 | `python scripts/import_pgp_full.py --execute` | Refuses inputs that fail their checksums (`--no-provenance-check` imports anyway but records no commit). Removes the previous `import_provenance.json` before the first push and writes a new one only on completion -- so an interrupted import cannot be stamped. |
+| 5 | `python scripts/update_doc_relation.py --execute` | Same provenance check as step 4 on the same derived file. Fatal if any row is unusable, if nothing was classified, if any pgpid matched no row, if any update raised -- and every classification is READ BACK and compared before it reports success. |
+| 6 | `python scripts/import_pgp_sections.py --execute` | Per-canvas sections from the `pgp-text` repo (clones/pulls it first). |
+| 7 | `python scripts/export_pgp_sidecar.py` | Builds `pgp.db.new` beside the live file and swaps it in only after validation. Fatal on an EMPTY core table and on a core table that came back SMALLER than the live sidecar's (upserts never delete; a shrink is a restricted client returning part of the corpus). Stamps the upstream commit only when `import_provenance.json` says its inputs were verified, names this Supabase project, and its counts match. |
+| 8 | `python scripts/check_shipping_sidecar.py --sidecar pgp_data/pgp.db` | The same guard `build_app.bat` and the installer run. |
+
+Sanity-check what you are about to ship (read-only):
 
 ```bash
-# 0. Regenerate the FIST shelfmark supplement (needs fist_data/FIST.db).
-#    It contributes ~35,600 shelfmarks libraries.csv does not carry. Skip it and the
-#    fragment match rate falls 94.5% -> 87.5%: ~2,900 fragments stop linking and lose
-#    their IIIF image URLs, which is most of what a refresh is for. Steps 2 and 3
-#    refuse to run without it.
-python scripts/fist_shelfmarks_export.py
-
-# 1. Download the upstream CSVs, all pinned to one commit.
-#    (--dry-run first: it prints the row deltas against the current pgp.db.)
-python scripts/fetch_pgp_metadata.py --dry-run
-python scripts/fetch_pgp_metadata.py
-
-# 2. Generate transcriptions_linked.csv. This is NOT an upstream file -- it is built
-#    from documents.csv + footnotes.csv + libraries.csv, and step 3 requires it.
-python scripts/pgp_transcriptions_export.py
-
-# 3. Import everything into Supabase. One pass, four tables.
-#    WITHOUT --execute this only validates; that is the default, on purpose.
-python scripts/import_pgp_full.py              # dry run: read the report first
-python scripts/import_pgp_full.py --execute
-
-# 4. Classify each document as Digital Edition / Digital Translation.
-#    Skipping this leaves documents.doc_relation stale, and translations are then
-#    presented as transcriptions in Browse and in Advanced View.
-python scripts/update_doc_relation.py --execute
-
-# 5. Import per-canvas sections from the pgp-text repo (clones/pulls it first).
-python scripts/import_pgp_sections.py --execute
-
-# 6. Rebuild the sidecar. Builds pgp.db.new beside the live file and swaps it in only
-#    after validation, so a failed export leaves the working pgp.db alone.
-python scripts/export_pgp_sidecar.py
-
-# 7. Sanity-check what you are about to ship.
 python -c "import sqlite3; c=sqlite3.connect('file:pgp_data/pgp.db?mode=ro',uri=True); \
 print(dict(c.execute('SELECT key,value FROM meta')))"
-
-# 8. Deploy: sidecar first, then restart. (Web is not continuous-deploy.)
-#    The check is CHAINED, not merely run first: the web reads pgp_translations through
-#    TranslationService, so an unconditional scp can republish the withheld corpus that
-#    build_app.bat blocks for desktop.
-python scripts/check_shipping_sidecar.py --sidecar pgp_data/pgp.db && \
-  scp pgp_data/pgp.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/pgp_data/ && \
-  ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "sudo systemctl restart genizah-web"
 ```
 
 **What the desktop needs.** `GenizahSearchPro.spec` bundles `pgp_data/pgp.db` into the

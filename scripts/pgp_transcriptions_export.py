@@ -21,6 +21,7 @@ Usage:
 
 import csv
 import re
+import sys
 import os
 from collections import defaultdict
 from datetime import datetime
@@ -138,7 +139,12 @@ def normalize_shelfmark(shelf: str) -> str:
 
 # Set by _require_verified_inputs(), read by _record_derived_provenance(). They run in
 # different functions, and the stamp must never certify inputs that failed their manifest.
-_INPUTS_VERIFIED = True
+#
+# False until the guard has actually run and passed. It used to start True, which meant
+# any path that skipped the guard -- or a single dropped `verified=` kwarg at the call
+# site -- produced a fully certified stamp for inputs nobody had checked. The unsafe
+# state must be unreachable by omission.
+_INPUTS_VERIFIED = False
 
 
 def _require_verified_inputs(pgp_data_dir) -> bool:
@@ -196,11 +202,44 @@ def _require_verified_inputs(pgp_data_dir) -> bool:
     raise SystemExit(1)
 
 
-def _record_derived_provenance(pgp_data_dir, verified: bool = True) -> None:
+def _invalidate_derived_stamp(pgp_data_dir) -> None:
+    """Remove derived_provenance.json. Called BEFORE the derived file is touched.
+
+    The stamp describes a specific transcriptions_linked.csv. From the moment this run
+    starts rewriting that file, the old stamp describes nothing that exists -- and if the
+    run dies between the write and the re-stamp (an empty footnotes.csv used to do that,
+    via ZeroDivisionError in the report), a stale stamp would vouch for a header-only file.
+    """
+    stale = os.path.join(str(pgp_data_dir), 'derived_provenance.json')
+    if os.path.exists(stale):
+        os.remove(stale)
+
+
+def _fingerprint(path):
+    """{bytes, sha256} of a file, or the string 'absent' when there is no such file."""
+    import hashlib
+
+    if not path or not os.path.exists(path):
+        return 'absent'
+    with open(path, 'rb') as fh:
+        raw = fh.read()
+    return {'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}
+
+
+def _record_derived_provenance(pgp_data_dir, verified: bool = False, inputs=()) -> None:
     """Stamp transcriptions_linked.csv with its upstream commit AND its own checksum.
 
     The commit alone was not enough: replacing the file with two lines of CSV while
     leaving the stamp alone passed verification, because nothing read the content.
+
+    `inputs` are the NON-upstream files the derivation read -- libraries.csv and the FIST
+    supplement -- as (label, path) pairs. They decide which manuscript a transcription is
+    attributed to, and they were covered by no checksum: editing one line of libraries.csv
+    re-attributed a transcription to the wrong manuscript while every check stayed clean.
+    Their fingerprints are recorded here and compared by fetch_pgp_metadata._verify_derived.
+
+    `verified` defaults to False on purpose: forgetting to pass it must produce no stamp,
+    never a certified one.
     """
     import hashlib
     import json
@@ -208,9 +247,7 @@ def _record_derived_provenance(pgp_data_dir, verified: bool = True) -> None:
     # Invalidate FIRST, before any early return. A stale derived_provenance.json left
     # behind by a previous run would otherwise vouch for output this run produced from
     # unverified -- or unknown -- inputs.
-    stale = os.path.join(str(pgp_data_dir), 'derived_provenance.json')
-    if os.path.exists(stale):
-        os.remove(stale)
+    _invalidate_derived_stamp(pgp_data_dir)
 
     upstream_path = os.path.join(str(pgp_data_dir), 'upstream_provenance.json')
     if not os.path.exists(upstream_path):
@@ -251,6 +288,7 @@ def _record_derived_provenance(pgp_data_dir, verified: bool = True) -> None:
                     'sha256': hashlib.sha256(raw).hexdigest(),
                 },
             },
+            'inputs': {label: _fingerprint(path) for label, path in inputs},
         }, fh, indent=2, sort_keys=True)
         fh.write('\n')
     print("  Recorded derived provenance (upstream %s, sha %s)"
@@ -517,6 +555,25 @@ def export_transcriptions(
     print(f"  Unique unmatched documents: {len(unmatched_pgpids):,}")
     print()
 
+    # A derivation that links nothing is not a result, it is a broken input: an upstream
+    # column rename or a truncated footnotes.csv used to replace a 10,000-row file with a
+    # header and then crash in the report (ZeroDivisionError), leaving the old stamp
+    # behind. Refuse before touching the output.
+    if not transcriptions or not linked:
+        print("ERROR: the derivation produced %d transcription records and %d linked rows; "
+              "refusing to overwrite transcriptions_linked.csv with an empty result."
+              % (len(transcriptions), len(linked)), file=sys.stderr)
+        print("  footnotes.csv: %s" % footnotes_path, file=sys.stderr)
+        print("  libraries.csv: %s" % libraries_path, file=sys.stderr)
+        raise SystemExit(1)
+
+    # From here on the previous transcriptions_linked.csv is being replaced, so the stamp
+    # that described it must go NOW -- before the write, not after it, where a crash in
+    # between (the report's ZeroDivisionError on an empty footnotes.csv) left a stale
+    # stamp vouching for a header-only file. Not earlier either: a derivation refused
+    # above leaves the old file intact, and its stamp still describes it.
+    _invalidate_derived_stamp(output_dir)
+
     # Write linked transcriptions
     linked_path = os.path.join(output_dir, 'transcriptions_linked.csv')
     print(f"Writing {linked_path}...")
@@ -560,7 +617,7 @@ def export_transcriptions(
         f.write("Matching Results:\n")
         f.write(f"  Linked records: {stats['linked']:,}\n")
         f.write(f"  Unmatched records: {stats['unmatched']:,}\n")
-        f.write(f"  Match rate: {stats['linked']/len(transcriptions)*100:.1f}%\n\n")
+        f.write(f"  Match rate: {stats['linked']/max(len(transcriptions), 1)*100:.1f}%\n\n")
 
         f.write("Unique Documents:\n")
         f.write(f"  Linked: {len(linked_pgpids):,}\n")
@@ -589,7 +646,14 @@ def export_transcriptions(
     # from them and is what actually carries transcription content -- so fetching a new
     # commit and keeping an old derived file passed verification while the importer
     # consumed the old text.
-    _record_derived_provenance(output_dir, verified=_INPUTS_VERIFIED)
+    _record_derived_provenance(
+        output_dir,
+        verified=_INPUTS_VERIFIED,
+        inputs=(
+            ('libraries.csv', libraries_path),
+            ('fist_shelfmarks_supplement.csv', fist_supplement_path),
+        ),
+    )
 
     print("Export complete!")
     print(f"  Linked: {linked_path}")

@@ -3,7 +3,7 @@ REM Build GenizahSearchPro desktop application
 REM Run from the project root directory with venv activated
 
 REM Checkpoint any WAL journals into main .db files before bundling.
-REM PyInstaller copies only the .db file — WAL/SHM journals are lost,
+REM PyInstaller copies only the .db file -- WAL/SHM journals are lost,
 REM which can cause empty tables in the installed copy.
 echo Checkpointing sidecar databases...
 python scripts\checkpoint_sidecars.py

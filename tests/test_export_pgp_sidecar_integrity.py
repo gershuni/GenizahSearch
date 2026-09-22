@@ -256,7 +256,15 @@ def test_provenance_is_read_from_the_import_not_the_download(exporter):
     fetched but never imported, or Supabase refreshed from another machine. A false
     provenance claim is worse than none, because it invites trust."""
     assert exporter.IMPORT_PROVENANCE_FILENAME == "import_provenance.json"
-    assert exporter.IMPORT_PROVENANCE_FILENAME != exporter.PROVENANCE_FILENAME
+    # The download-time manifest is not read here at all. A constant naming it used to
+    # sit in this module with a comment claiming it was "still read"; it was dead code,
+    # and dead code that asserts the opposite of the truth is how the next reader gets
+    # the design wrong.
+    assert not hasattr(exporter, "PROVENANCE_FILENAME")
+    source = SCRIPT_PATH.read_text(encoding="utf-8")
+    assert "upstream_provenance.json" not in source.replace(
+        "# Deliberately NOT upstream_provenance.json", ""
+    ), "the exporter must not read the fetch-time manifest"
 
 
 COUNTS = {
@@ -272,6 +280,8 @@ def _record(**overrides):
         "upstream_commit": "a94528cccfdb732374f3964b9879f8b30444fb23",
         "upstream_repo": "princetongenizalab/pgp-metadata",
         "supabase_counts_after": dict(COUNTS),
+        "inputs_verified": True,
+        "supabase_url": "https://ylcpglwxompwjcufdemz.supabase.co",
     }
     record.update(overrides)
     return record
@@ -309,3 +319,57 @@ def test_an_import_record_without_a_commit_is_not_corroboration(exporter):
     del record["upstream_commit"]
     ok, _reason = exporter.corroborate_provenance(record, COUNTS)
     assert not ok
+
+
+def test_a_record_that_does_not_say_verified_is_not_trusted(exporter):
+    """A record without the key is indistinguishable from one written by an importer that
+    predates verification -- and the live import_provenance.json had exactly that shape.
+    Only an explicit True earns a stamp."""
+    record = _record()
+    del record["inputs_verified"]
+    ok, reason = exporter.corroborate_provenance(record, COUNTS)
+    assert not ok
+    assert "verified" in reason
+
+    ok, reason = exporter.corroborate_provenance(_record(inputs_verified=False), COUNTS)
+    assert not ok
+
+
+def test_an_import_into_another_project_is_not_stamped_here(exporter):
+    """SUPABASE_URL is env-overridable at export time. An import into project A and an
+    export from project B were indistinguishable whenever the counts coincided."""
+    ok, reason = exporter.corroborate_provenance(
+        _record(), COUNTS, supabase_url="https://a-totally-different-project.supabase.co"
+    )
+    assert not ok
+    assert "different-project" in reason
+
+    # ...and a record that names no project cannot be tied to this one either.
+    record = _record()
+    del record["supabase_url"]
+    ok, reason = exporter.corroborate_provenance(
+        record, COUNTS, supabase_url="https://ylcpglwxompwjcufdemz.supabase.co"
+    )
+    assert not ok
+
+    ok, _ = exporter.corroborate_provenance(
+        _record(), COUNTS, supabase_url="https://ylcpglwxompwjcufdemz.supabase.co/"
+    )
+    assert ok, "a trailing slash is not a different project"
+
+
+def test_a_shrunken_core_table_is_refused(exporter):
+    """The empty-table guard catches zero rows. This catches 1 of 36,000: a restricted
+    client (rotated key, RLS change) returning PART of a table, which validate_export()
+    cannot see because it counts through the same client."""
+    previous = {"documents": 36642, "document_sources": 10389}
+    with pytest.raises(RuntimeError) as excinfo:
+        exporter.assert_no_shrink(previous, {"documents": 1, "document_sources": 10389})
+    assert "documents: 36,642 -> 1" in str(excinfo.value)
+
+    # Equal or larger is normal; a table the previous sidecar lacked is not compared.
+    exporter.assert_no_shrink(previous, {"documents": 36642, "document_sources": 10400,
+                                         "document_footnotes": 5})
+    # The explicit override exists for the day rows are deliberately deleted upstream.
+    exporter.assert_no_shrink(previous, {"documents": 1, "document_sources": 1},
+                              allow_shrink=True)

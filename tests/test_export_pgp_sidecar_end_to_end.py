@@ -251,6 +251,7 @@ def test_provenance_is_only_stamped_when_it_is_corroborated(exporter, tmp_path):
     # A record whose counts match what we export -> stamped.
     (tmp_path / exporter.IMPORT_PROVENANCE_FILENAME).write_text(
         '{"upstream_commit": "a94528cc", "upstream_repo": "princetongenizalab/pgp-metadata",'
+        ' "inputs_verified": true, "supabase_url": "https://fake",'
         ' "supabase_counts_after": {"documents": 2, "document_sources": 1,'
         ' "document_footnotes": 1, "document_fragments": 1}}',
         encoding="utf-8",
@@ -262,6 +263,15 @@ def test_provenance_is_only_stamped_when_it_is_corroborated(exporter, tmp_path):
     finally:
         conn.close()
     assert meta["upstream_commit"] == "a94528cc"
+
+    # Same record, exported from a different project -> no stamp.
+    assert exporter.build_sidecar(FakeSupabase(), tmp_path, "https://another") == 0
+    conn = sqlite3.connect(str(tmp_path / "pgp.db"))
+    try:
+        meta = dict(conn.execute("SELECT key, value FROM meta"))
+    finally:
+        conn.close()
+    assert "upstream_commit" not in meta
 
 
 def test_a_stale_import_record_is_not_stamped(exporter, tmp_path):
@@ -282,7 +292,9 @@ def test_a_stale_import_record_is_not_stamped(exporter, tmp_path):
     assert "upstream_commit" not in meta
 
 
-@pytest.mark.parametrize("table", ["documents", "document_sources", "document_fragments"])
+@pytest.mark.parametrize(
+    "table", ["documents", "document_sources", "document_footnotes", "document_fragments"]
+)
 def test_an_empty_core_table_aborts_the_export(exporter, tmp_path, table):
     """A core PGP table is never legitimately empty. If one comes back with no rows --
     a rotated key, an RLS change, the wrong project -- the exporter would build an empty
@@ -295,3 +307,43 @@ def test_an_empty_core_table_aborts_the_export(exporter, tmp_path, table):
         exporter.build_sidecar(fake, tmp_path, "https://fake")
     assert table in str(excinfo.value)
     assert not (tmp_path / "pgp.db").exists()
+
+
+@pytest.mark.parametrize(
+    "table", ["documents", "document_sources", "document_footnotes", "document_fragments"]
+)
+def test_a_core_table_that_came_back_short_aborts_the_export(exporter, tmp_path, table):
+    """Same threat as the empty-table guard, one row up: a restricted client returning
+    1 of N rows passed everything and replaced the live sidecar with the 1-row one, because
+    validate_export() counts through the same restricted client. Upserts never delete, so
+    a core table that shrank between two exports is never a smaller corpus."""
+    # First build: the fake corpus, with one extra row in the table under test, becomes
+    # the live sidecar.
+    bigger = FakeSupabase()
+    extra = dict(bigger.tables[table][0])
+    for key in ("id", "pgpid", "document_id"):
+        if key in extra:
+            extra[key] = 999
+    bigger.tables[table] = bigger.tables[table] + [extra]
+    assert exporter.build_sidecar(bigger, tmp_path, "https://fake") == 0
+    before = (tmp_path / "pgp.db").read_bytes()
+
+    # Second build: the same table now comes back one row short -- still non-empty, so
+    # only the shrink guard can catch it.
+    with pytest.raises(RuntimeError) as excinfo:
+        exporter.build_sidecar(FakeSupabase(), tmp_path, "https://fake")
+    assert table in str(excinfo.value)
+    assert "->" in str(excinfo.value), "must be the shrink guard, not the empty-table guard"
+    assert (tmp_path / "pgp.db").read_bytes() == before, "the live sidecar must be untouched"
+    assert not (tmp_path / "pgp.db.new").exists()
+
+
+def test_the_shrink_override_is_wired_in(exporter, tmp_path):
+    assert exporter.build_sidecar(FakeSupabase(), tmp_path, "https://fake") == 0
+    fake = FakeSupabase(documents=DOCUMENTS[:1])
+    assert exporter.build_sidecar(fake, tmp_path, "https://fake", allow_shrink=True) == 0
+    conn = sqlite3.connect(str(tmp_path / "pgp.db"))
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1
+    finally:
+        conn.close()

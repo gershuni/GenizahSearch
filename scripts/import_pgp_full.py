@@ -295,6 +295,7 @@ def load_transcriptions(transcriptions_path: str) -> List[Dict]:
     Returns: List of all source records
     """
     records = []
+    skipped = {'blank_pgpid': 0, 'non_integer_pgpid': 0}
 
     with open(transcriptions_path, 'r', encoding='utf-8-sig') as f:
         reader = csv.DictReader(f)
@@ -314,11 +315,13 @@ def load_transcriptions(transcriptions_path: str) -> List[Dict]:
                 pgpid_str = row['\ufeffpgpid']
 
             if not pgpid_str:
+                skipped['blank_pgpid'] += 1
                 continue
 
             try:
                 pgpid = int(pgpid_str)
             except ValueError:
+                skipped['non_integer_pgpid'] += 1
                 continue
 
             records.append({
@@ -329,6 +332,17 @@ def load_transcriptions(transcriptions_path: str) -> List[Dict]:
                 'content': row.get('content', ''),
                 'content_length': row.get('content_length', ''),
             })
+
+    # Every row scripts/pgp_transcriptions_export.py writes carries an integer pgpid
+    # (measured 2026-09-22: 10,037 rows, 0 skipped). A row this loop cannot use is a
+    # format change under this importer, and a bare `continue` used to hide it.
+    if any(skipped.values()):
+        raise SystemExit(
+            "ERROR: %d row(s) in transcriptions_linked.csv have no usable pgpid (%s). "
+            "Regenerate it with scripts/pgp_transcriptions_export.py."
+            % (sum(skipped.values()),
+               ", ".join("%s=%d" % kv for kv in sorted(skipped.items()) if kv[1]))
+        )
 
     return records
 
@@ -803,12 +817,30 @@ def upsert_in_batches(
     return processed
 
 
+def invalidate_import_provenance(pgp_data_dir: str) -> None:
+    """Remove the previous import record BEFORE the first row is pushed.
+
+    The record is written last, after all four passes. Until then the old record still
+    describes the previous import -- with the same row counts, because upserts change
+    content, not counts -- so a run that dies between the first push and the final write
+    (Ctrl-C, a PostgREST error, a locked report file) left a record the exporter would
+    corroborate and stamp onto half-applied data. With no record on disk, an interrupted
+    import simply cannot be stamped until it is re-run to completion.
+    """
+    path = os.path.join(pgp_data_dir, IMPORT_PROVENANCE_FILENAME)
+    if os.path.exists(path):
+        os.remove(path)
+        print(f"Removed the previous {IMPORT_PROVENANCE_FILENAME}; a new one is written only "
+              "if this import completes.")
+
+
 def write_import_provenance(pgp_data_dir: str, after_counts: Dict[str, int],
-                            verified: bool = True) -> None:
+                            verified: bool = True, supabase_url: Optional[str] = None) -> None:
     """Write what this import pushed, and the row counts it left behind.
 
     The sidecar export reads THIS file, not the fetch-time one, and only stamps the
-    upstream commit into pgp.db's meta if the counts it exports corroborate these.
+    upstream commit into pgp.db's meta if the counts it exports corroborate these -- and
+    if it is exporting from the same project this record names.
     """
     import json
     from datetime import timezone
@@ -830,9 +862,13 @@ def write_import_provenance(pgp_data_dir: str, after_counts: Dict[str, int],
         'imported_at': datetime.now(timezone.utc).isoformat(),
         'imported_by': 'scripts/import_pgp_full.py',
         'supabase_counts_after': dict(after_counts),
+        # Explicit either way. A record without the key used to be indistinguishable
+        # from one written by an older importer that did not know about verification.
+        'inputs_verified': bool(verified),
     }
+    if supabase_url:
+        record['supabase_url'] = supabase_url
     if not verified:
-        record['inputs_verified'] = False
         record['note'] = ('imported with --no-provenance-check; no upstream commit is '
                           'recorded because the CSVs did not match their manifest')
     for key in ('upstream_repo', 'upstream_commit', 'upstream_committed'):
@@ -847,14 +883,20 @@ def write_import_provenance(pgp_data_dir: str, after_counts: Dict[str, int],
 
 
 def capture_table_counts(client) -> Dict[str, int]:
-    """Capture current row counts for all PGP tables."""
+    """Capture current row counts for all PGP tables.
+
+    A failed count query used to be recorded as 0. These numbers go into
+    import_provenance.json, which is the sidecar exporter's only corroboration, so a
+    transient error here silently turned a good import into one the exporter must reject
+    (or, before the push, into a before-count of 0 and a report full of false deltas).
+    Let it raise: no record is better than a wrong one.
+    """
     counts = {}
     for table in ['documents', 'document_fragments', 'document_sources', 'document_footnotes']:
-        try:
-            response = client.table(table).select('*', count='exact', head=True).execute()
-            counts[table] = response.count or 0
-        except Exception:
-            counts[table] = 0
+        response = client.table(table).select('*', count='exact', head=True).execute()
+        if response.count is None:
+            raise RuntimeError(f"Supabase returned no row count for {table}")
+        counts[table] = response.count
     return counts
 
 
@@ -1194,6 +1236,12 @@ Prerequisites:
     print("Step 6: Importing to Supabase...")
     print()
 
+    # From the first upsert onward the previous import record describes a Supabase that
+    # no longer exists. Drop it now, so an interrupted run leaves nothing for the
+    # exporter to corroborate; it is rewritten below only if every pass completes.
+    invalidate_import_provenance(pgp_data_dir)
+    print()
+
     # Pass 1: Documents (no FK dependencies)
     print("Pass 1: Upserting documents...")
     docs_processed = upsert_in_batches(
@@ -1257,7 +1305,8 @@ Prerequisites:
     # describes the Supabase snapshot rather than whatever CSVs happen to sit on this
     # machine. Without this the exporter can label a database with a commit that was
     # downloaded but never imported -- or that another machine imported instead.
-    write_import_provenance(pgp_data_dir, after_counts, verified=not provenance_problems)
+    write_import_provenance(pgp_data_dir, after_counts, verified=not provenance_problems,
+                            supabase_url=supabase_url)
     print()
 
     print("IMPORT COMPLETE")

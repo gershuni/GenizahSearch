@@ -80,9 +80,14 @@ def verify_against_provenance(dest: str, check_derived: bool = True) -> list:
     The three CSVs are replaced one at a time, so an interruption between two renames can
     leave a mixed-vintage set -- which is the exact thing pinning to one upstream commit
     is meant to prevent. The replacement cannot easily be made atomic across three files,
-    so instead it is made DETECTABLE: provenance carries a SHA-256, byte count and row
-    count per file, and the importer refuses to run on a set that does not match. This
-    also catches a hand-edited or partially copied CSV, which no amount of atomicity would.
+    so instead it is made DETECTABLE: provenance carries a SHA-256 and byte count per file
+    (a row count too, recorded for humans and not enforced -- the hash subsumes it), and
+    the importer refuses to run on a set that does not match. This also catches a
+    hand-edited or partially copied CSV, which no amount of atomicity would.
+
+    The manifest must also COVER every file the pipeline consumes. A manifest with entries
+    for two of the three CSVs used to pass vacuously and certify whatever sat at the third
+    name.
     """
     problems = []
     path = os.path.join(dest, PROVENANCE_FILENAME)
@@ -98,6 +103,10 @@ def verify_against_provenance(dest: str, check_derived: bool = True) -> list:
     files = provenance.get("files") or {}
     if not files:
         return ["%s records no files" % PROVENANCE_FILENAME]
+    uncovered = sorted({name for _, name, _ in FILES} - set(files))
+    if uncovered:
+        problems.append("%s does not cover %s -- re-run scripts/fetch_pgp_metadata.py"
+                        % (PROVENANCE_FILENAME, ", ".join(uncovered)))
 
     # transcriptions_linked.csv is DERIVED from these CSVs by
     # scripts/pgp_transcriptions_export.py and is what carries the transcription content
@@ -155,8 +164,15 @@ def _verify_derived(dest: str, expected_commit) -> list:
         except (OSError, ValueError):
             derived = {}
 
+    if not expected_commit:
+        # None == None must not read as "same commit".
+        problems.append("%s records no upstream commit, so transcriptions_linked.csv "
+                        "cannot be bound to one -- re-run scripts/fetch_pgp_metadata.py"
+                        % PROVENANCE_FILENAME)
+        return problems
+
     derived_commit = derived.get("derived_from_commit")
-    if derived_commit != expected_commit:
+    if not derived_commit or derived_commit != expected_commit:
         problems.append(
             "transcriptions_linked.csv was derived from %s but the CSVs are from %s "
             "-- re-run scripts/pgp_transcriptions_export.py"
@@ -183,6 +199,61 @@ def _verify_derived(dest: str, expected_commit) -> list:
     elif hashlib.sha256(raw).hexdigest() != recorded.get("sha256"):
         problems.append("transcriptions_linked.csv: SHA-256 does not match provenance")
 
+    problems.extend(_verify_derivation_inputs(dest, derived.get("inputs")))
+    return problems
+
+
+# The non-upstream inputs of the derivation and where each lives relative to pgp_data/.
+# libraries.csv sits at the project root; the FIST supplement beside the CSVs.
+DERIVATION_INPUTS = {
+    "libraries.csv": ("..", "libraries.csv"),
+    "fist_shelfmarks_supplement.csv": ("fist_shelfmarks_supplement.csv",),
+}
+
+
+def _verify_derivation_inputs(dest: str, inputs) -> list:
+    """Are libraries.csv and the FIST supplement still what the derivation read?
+
+    They decide which GenizahSearch manuscript each transcription is attributed to, and
+    they are not upstream files, so the upstream manifest cannot see them. Editing one
+    line of libraries.csv re-attributed a PGP transcription to the wrong manuscript while
+    every checksum in the chain stayed clean. The derivation records each one's
+    fingerprint -- or 'absent', which is itself a fact worth checking: a supplement that
+    was missing when the file was derived and is present now means the import would link
+    ~2,900 more fragments than the derived file knows about.
+    """
+    problems = []
+    if not isinstance(inputs, dict):
+        return ["transcriptions_linked.csv has no recorded input checksums (libraries.csv, "
+                "FIST supplement) -- re-run scripts/pgp_transcriptions_export.py"]
+    for label, parts in sorted(DERIVATION_INPUTS.items()):
+        recorded = inputs.get(label)
+        path = os.path.join(dest, *parts)
+        exists = os.path.exists(path)
+        if recorded is None:
+            problems.append("transcriptions_linked.csv records nothing about %s -- re-run "
+                            "scripts/pgp_transcriptions_export.py" % label)
+            continue
+        if recorded == "absent":
+            if exists:
+                problems.append("%s was absent when transcriptions_linked.csv was derived "
+                                "and is present now -- re-run "
+                                "scripts/pgp_transcriptions_export.py" % label)
+            continue
+        if not isinstance(recorded, dict):
+            problems.append("%s: unreadable input record in %s"
+                            % (label, DERIVED_PROVENANCE_FILENAME))
+            continue
+        if not exists:
+            problems.append("%s was present when transcriptions_linked.csv was derived and "
+                            "is missing now" % label)
+            continue
+        with open(path, "rb") as fh:
+            raw = fh.read()
+        if len(raw) != recorded.get("bytes") or \
+                hashlib.sha256(raw).hexdigest() != recorded.get("sha256"):
+            problems.append("%s has changed since transcriptions_linked.csv was derived "
+                            "from it -- re-run scripts/pgp_transcriptions_export.py" % label)
     return problems
 
 

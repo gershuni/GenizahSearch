@@ -15,6 +15,7 @@ Replaces live Supabase queries with a local SQLite sidecar for read-only
 PGP reference data.
 """
 
+import argparse
 import json
 import os
 import sqlite3
@@ -74,8 +75,9 @@ KNOWN_UNEXPORTED = {
 # claim is worse than none, because it invites trust.
 IMPORT_PROVENANCE_FILENAME = "import_provenance.json"
 
-# Kept for the fetch-time file, which is still read only to report a mismatch.
-PROVENANCE_FILENAME = "upstream_provenance.json"
+# The four tables exported from Supabase. Upserts never delete, so none of them can
+# legitimately hold fewer rows than the sidecar built from the previous export.
+CORE_TABLES = ("documents", "document_sources", "document_footnotes", "document_fragments")
 
 
 def serialize_json(value):
@@ -192,6 +194,52 @@ def write_carryover_tables(cursor, carried):
     cursor.connection.commit()
 
 
+def read_previous_counts(existing_db_path):
+    """Row counts of the core tables in the LIVE sidecar, or {} when there is none.
+
+    Read before the build so the new export can be held to them: the importer only ever
+    upserts, so a table that comes back smaller than it was is not a smaller corpus, it is
+    a restricted client (rotated key, RLS change, wrong project) returning part of one.
+    The empty-table guard catches zero rows; this catches 1 of 36,000.
+    """
+    if not os.path.exists(existing_db_path):
+        return {}
+    conn = sqlite3.connect("file:%s?mode=ro" % str(existing_db_path).replace("\\", "/"), uri=True)
+    try:
+        present = {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        return {
+            table: conn.execute('SELECT COUNT(*) FROM "%s"' % table).fetchone()[0]
+            for table in CORE_TABLES if table in present
+        }
+    finally:
+        conn.close()
+
+
+def assert_no_shrink(previous_counts, exported_counts, allow_shrink=False):
+    """Refuse to replace a sidecar with one that holds fewer rows in any core table."""
+    shrunk = [
+        "%s: %s -> %s" % (table, format(previous_counts[table], ","),
+                          format(exported_counts[table], ","))
+        for table in CORE_TABLES
+        if table in previous_counts and exported_counts.get(table, 0) < previous_counts[table]
+    ]
+    if not shrunk:
+        return
+    message = (
+        "the export returned FEWER rows than the live sidecar holds (%s). The importer "
+        "only upserts, so a core table never legitimately shrinks: this is a credentials, "
+        "RLS or wrong-project problem returning part of the corpus, and the row-count "
+        "validation cannot see it because it counts through the same restricted client. "
+        "Refusing to replace the live sidecar." % "; ".join(shrunk)
+    )
+    if allow_shrink:
+        print("\n  WARNING: %s (--allow-shrink: building anyway)" % message)
+        return
+    raise RuntimeError(message)
+
+
 def read_import_provenance(pgp_data_dir):
     """What scripts/import_pgp_full.py last pushed to Supabase, or {} if unknown."""
     path = os.path.join(str(pgp_data_dir), IMPORT_PROVENANCE_FILENAME)
@@ -206,7 +254,7 @@ def read_import_provenance(pgp_data_dir):
         return {}
 
 
-def corroborate_provenance(provenance, exported_counts):
+def corroborate_provenance(provenance, exported_counts, supabase_url=None):
     """Does the import record describe the snapshot we just exported?
 
     Returns (ok, reason). Only an `ok` record earns a commit id in meta. This is what
@@ -215,14 +263,29 @@ def corroborate_provenance(provenance, exported_counts):
     sides are equally wrong when the import never happened here.
 
     Matching counts are corroboration, not proof: an import of a different commit that
-    happened to leave identical counts would pass. It catches the failure modes that
-    actually occur -- fetched but never imported, and refreshed from another machine.
+    happened to leave identical counts would pass (a metadata-correction commit moves no
+    count at all; that gap is recorded in docs/OPEN_ISSUES.md). What IS checked, because
+    it is cheap: the record must say its inputs were verified -- explicitly, since a record
+    without the key is indistinguishable from one written by an older importer -- and it
+    must name the same Supabase project this export is reading from.
     """
     if not provenance:
         return False, ("no %s -- the import step did not run on this machine"
                        % IMPORT_PROVENANCE_FILENAME)
     if not provenance.get("upstream_commit"):
         return False, "%s records no upstream commit" % IMPORT_PROVENANCE_FILENAME
+    if provenance.get("inputs_verified") is not True:
+        return False, ("%s does not state that its inputs were verified (re-run "
+                       "scripts/import_pgp_full.py --execute to write a record that does)"
+                       % IMPORT_PROVENANCE_FILENAME)
+    if supabase_url is not None:
+        recorded_url = provenance.get("supabase_url")
+        if not recorded_url:
+            return False, ("%s names no Supabase project, so it cannot be tied to %s"
+                           % (IMPORT_PROVENANCE_FILENAME, supabase_url))
+        if recorded_url.rstrip("/") != str(supabase_url).rstrip("/"):
+            return False, ("%s describes an import into %s, not %s"
+                           % (IMPORT_PROVENANCE_FILENAME, recorded_url, supabase_url))
 
     recorded = provenance.get("supabase_counts_after") or {}
     if not recorded:
@@ -721,11 +784,20 @@ def main():
         print("ERROR: SUPABASE_URL and SUPABASE_ANON_KEY must be set in .env or as defaults")
         sys.exit(1)
 
+    parser = argparse.ArgumentParser(description="Export the PGP tables from Supabase to "
+                                                 "pgp_data/pgp.db")
+    parser.add_argument("--allow-shrink", action="store_true",
+                        help="replace the live sidecar even if a core table came back with "
+                             "fewer rows than it holds (only after rows were deliberately "
+                             "deleted in Supabase)")
+    args = parser.parse_args()
+
     target_dir = Path(__file__).parent.parent / "pgp_data"
-    return build_sidecar(create_client(supabase_url, supabase_key), target_dir, supabase_url)
+    return build_sidecar(create_client(supabase_url, supabase_key), target_dir, supabase_url,
+                         allow_shrink=args.allow_shrink)
 
 
-def build_sidecar(client, target_dir, supabase_url):
+def build_sidecar(client, target_dir, supabase_url, allow_shrink=False):
     """Build pgp.db from `client` into `target_dir`, swapping it in only once valid.
 
     Separate from main() so a test can drive the real orchestration -- every guard, the
@@ -750,6 +822,7 @@ def build_sidecar(client, target_dir, supabase_url):
     # Read the sidecar-only tables out of the LIVE file before anything touches it.
     print("Checking the existing sidecar for locally-generated tables...")
     carried = read_carryover_tables(str(target_path))
+    previous_counts = read_previous_counts(str(target_path))
     provenance = read_import_provenance(target_dir)
     if provenance.get("upstream_commit"):
         print("  last import: %s @ %s (%s)"
@@ -787,7 +860,11 @@ def build_sidecar(client, target_dir, supabase_url):
             "document_footnotes": footnote_count,
             "document_fragments": frag_count,
         }
-        corroborated, reason = corroborate_provenance(provenance, exported_counts)
+        # Fewer rows than the live sidecar is a restricted client, not a smaller corpus.
+        assert_no_shrink(previous_counts, exported_counts, allow_shrink=allow_shrink)
+
+        corroborated, reason = corroborate_provenance(provenance, exported_counts,
+                                                      supabase_url=supabase_url)
         if corroborated:
             print("\n  provenance: %s" % reason)
         else:

@@ -200,30 +200,113 @@ def test_build_app_bat_checks_the_built_output_too():
     assert bundled[0] > build, "the bundled check only means anything after the build"
 
 
+DEPLOY_PS1 = REPO_ROOT / "scripts" / "deploy_pgp_sidecar.ps1"
+REFRESH_PS1 = REPO_ROOT / "scripts" / "refresh_pgp_data.ps1"
+
+
 def test_the_web_deploy_is_guarded_too():
     """The web reads pgp_translations through TranslationService, so an unconditional
-    scp can republish the withheld corpus that build_app.bat blocks for desktop. The
-    check must be CHAINED to the upload, not merely printed above it."""
+    scp can republish the withheld corpus that build_app.bat blocks for desktop.
+
+    Round 3 pinned a bash `&&` chain here. An independent audit then fed that chain to the
+    PowerShell 5.1 parser this project deploys from: "The token '&&' is not a valid
+    statement separator" -- the whole statement is rejected, the operator retypes it as
+    two lines, and the scp runs whether or not the guard passed. So the guide now hands
+    the upload to scripts/deploy_pgp_sidecar.ps1, and any scp of the sidecar that the
+    guide still shows must be either inside that script or explicitly `&&`-chained."""
     guide = (REPO_ROOT / "docs" / "guides" / "DEPLOYMENT_TECHNICAL.md").read_text(
         encoding="utf-8", errors="replace"
     )
-    lines = guide.splitlines()
-    uploads = [i for i, ln in enumerate(lines) if "scp pgp_data/pgp.db" in ln]
-    assert uploads, "the guide should still document how to deploy the sidecar"
+    assert "deploy_pgp_sidecar.ps1" in guide, "the guide must point at the guarded deploy"
 
-    for i in uploads:
-        # The chain can span lines (`... && \` then the scp), so look at the upload line
-        # and the two above it rather than the upload line alone.
+    lines = guide.splitlines()
+    for i, ln in enumerate(lines):
+        if "scp pgp_data/pgp.db" not in ln:
+            continue
         window = "\n".join(lines[max(0, i - 2):i + 1])
-        assert "check_shipping_sidecar" in window, (
-            "an unguarded `scp pgp_data/pgp.db` can republish the withheld corpus "
-            "(line %d): %r" % (i + 1, lines[i].strip())
+        assert "check_shipping_sidecar" in window and "&&" in window, (
+            "a bare `scp pgp_data/pgp.db` in the guide can republish the withheld corpus "
+            "(line %d): %r -- use scripts/deploy_pgp_sidecar.ps1" % (i + 1, ln.strip())
         )
-        chained = "&&" in window
-        assert chained, (
-            "the check must be CHAINED to the upload with &&, not merely printed above "
-            "it (line %d)" % (i + 1)
-        )
+
+
+def _ps1_lines(path):
+    return [ln.strip() for ln in path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_the_deploy_script_uploads_only_after_the_guard_passes():
+    """Order AND consumption of the exit code: guard, then a `$LASTEXITCODE -ne 0` check,
+    then scp, then another check, then the restart. build_app.bat has the same shape."""
+    lines = _ps1_lines(DEPLOY_PS1)
+    guard = next(i for i, ln in enumerate(lines)
+                 if ln.startswith("python scripts/check_shipping_sidecar.py"))
+    upload = next(i for i, ln in enumerate(lines) if ln.startswith("scp "))
+    restart = next(i for i, ln in enumerate(lines) if ln.startswith("ssh "))
+    assert guard < upload < restart
+
+    def checked(after, before):
+        between = lines[after + 1:before]
+        return any("$LASTEXITCODE -ne 0" in ln and ("Fail" in ln or "exit" in ln)
+                   for ln in between)
+
+    assert checked(guard, upload), "the guard's exit code must gate the upload"
+    assert checked(upload, restart), "a failed upload must not be followed by a restart"
+    code = [ln for ln in lines if not ln.startswith("#")]
+    assert not any("&&" in ln for ln in code), "PowerShell 5.1: `&&` is a parse error"
+
+
+def test_the_deploy_script_really_stops_when_the_guard_refuses(tmp_path):
+    """Behaviour, not text: run the script (dry run, so no scp) against a sidecar carrying
+    the withheld table and read what it did."""
+    import shutil
+    import subprocess
+
+    powershell = shutil.which("powershell")
+    if not powershell:
+        pytest.skip("PowerShell not available")
+    dirty = _sidecar(tmp_path / "dirty.db", with_translations=True)
+    proc = subprocess.run(
+        [powershell, "-NoProfile", "-File", str(DEPLOY_PS1), "-DryRun", "-Sidecar", dirty],
+        capture_output=True, text=True, cwd=str(REPO_ROOT),
+    )
+    assert proc.returncode == 1
+    assert "DEPLOY ABORTED" in proc.stderr
+    assert "Would now run" not in proc.stdout, "the upload step must not be reached"
+
+    clean = _sidecar(tmp_path / "clean.db")
+    proc = subprocess.run(
+        [powershell, "-NoProfile", "-File", str(DEPLOY_PS1), "-DryRun", "-Sidecar", clean],
+        capture_output=True, text=True, cwd=str(REPO_ROOT),
+    )
+    assert proc.returncode == 0
+    assert "Would now run" in proc.stdout
+
+
+def test_the_refresh_runner_runs_the_documented_steps_in_order_and_stops_on_failure():
+    """The guide's block was eight unchained lines; step 5 ran after step 4 exited 1."""
+    text = REFRESH_PS1.read_text(encoding="utf-8")
+    lines = _ps1_lines(REFRESH_PS1)
+    steps = [ln for ln in lines if ln.startswith("Step ")]
+    numbers = [int(ln.split()[1]) for ln in steps]
+    assert numbers == list(range(9)), numbers
+    for expected, ln in zip((
+        "fist_shelfmarks_export.py", "fetch_pgp_metadata.py", "pgp_transcriptions_export.py",
+        "import_pgp_full.py", "import_pgp_full.py', '--execute", "update_doc_relation.py",
+        "import_pgp_sections.py", "export_pgp_sidecar.py", "check_shipping_sidecar.py",
+    ), steps):
+        assert expected in ln, (expected, ln)
+
+    body = text[text.index("function Step"):text.index("\n}\n") + 3]
+    body_lines = [ln.strip() for ln in body.splitlines()]
+    assert any("$LASTEXITCODE -ne 0" in ln for ln in body_lines)
+    # A STATEMENT that exits -- not the word "exit" inside the error message, which is
+    # what a first version of this pin matched while `return` replaced the real exit.
+    assert any(ln.startswith("exit ") for ln in body_lines), (
+        "a failing step must END the run, not be printed and passed over"
+    )
+    # The write steps sit behind the -Execute gate, after the dry run.
+    assert text.index("-not $Execute") < text.index("Step 4")
+    assert not any("&&" in ln for ln in lines if not ln.startswith("#"))
 
 
 def test_the_withholding_decision_is_recorded_where_it_is_enforced(guard):
@@ -253,3 +336,37 @@ def test_bundled_passes_only_when_every_layout_is_clean(guard, tmp_path, monkeyp
     _sidecar(b)
     monkeypatch.setattr(guard, "BUNDLED_SIDECARS", (str(a), str(b)))
     assert guard.main(["--bundled"]) == 0
+
+
+def test_sidecar_and_bundled_are_both_checked(guard, tmp_path, monkeypatch, capsys):
+    """`--sidecar X --bundled` used to check only the bundled copies and silently drop X."""
+    dirty = _sidecar(tmp_path / "source.db", with_translations=True)
+    clean_bundled = _sidecar(tmp_path / "bundled.db")
+    monkeypatch.setattr(guard, "BUNDLED_SIDECARS", (clean_bundled,))
+
+    assert guard.main(["--sidecar", dirty, "--bundled"]) == 1
+    err = capsys.readouterr().err
+    assert "source.db" in err and "pgp_translations" in err
+
+
+def test_a_view_or_a_leftover_staging_copy_of_the_withheld_table_is_caught(guard, tmp_path):
+    """Name-based matching on `type='table'` let two things through: a VIEW called
+    pgp_translations, which TranslationService reads exactly as it reads the table, and
+    pgp_translations_restore_tmp, which restore_pgp_translations.py stages into and a
+    Ctrl-C (a BaseException its `except Exception` does not see) leaves behind."""
+    path = _sidecar(tmp_path / "view.db")
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE VIEW pgp_translations AS SELECT pgpid, description AS description_he "
+                 "FROM documents")
+    conn.commit()
+    conn.close()
+    problems = guard.check_sidecar(path)
+    assert any("'pgp_translations'" in p for p in problems), problems
+
+    path = _sidecar(tmp_path / "tmp.db")
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE pgp_translations_restore_tmp (pgpid INTEGER)")
+    conn.commit()
+    conn.close()
+    problems = guard.check_sidecar(path)
+    assert any("pgp_translations_restore_tmp" in p for p in problems), problems

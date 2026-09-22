@@ -87,16 +87,26 @@ def check_sidecar(path: str, allow_withheld: bool = False,
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
+        # Views too: a view named pgp_translations serves TranslationService exactly as
+        # the table would. And by prefix: restore_pgp_translations.py stages into
+        # pgp_translations_restore_tmp, and an interrupted restore leaves that behind.
+        relations = {
+            row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"
+            )
+        }
 
         for table in REQUIRED_TABLES:
             if table not in tables:
                 problems.append("missing required table %r" % table)
 
         for table, reason in sorted(WITHHELD_TABLES.items()):
-            if table in tables:
-                count = conn.execute('SELECT COUNT(*) FROM "%s"' % table).fetchone()[0]
+            for name in sorted(relations):
+                if name != table and not name.startswith(table + "_"):
+                    continue
+                count = conn.execute('SELECT COUNT(*) FROM "%s"' % name).fetchone()[0]
                 message = ("contains %r (%s rows) -- %s"
-                           % (table, format(count, ","), reason))
+                           % (name, format(count, ","), reason))
                 if allow_withheld:
                     print("WARNING: sidecar %s (--allow-translations)" % message)
                 else:
@@ -127,8 +137,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--sidecar", default=DEFAULT_SIDECAR,
-                        help="the pgp.db about to be bundled (default: %(default)s)")
+    parser.add_argument("--sidecar", default=None,
+                        help="the pgp.db about to be bundled (default: %s)" % DEFAULT_SIDECAR)
     parser.add_argument("--allow-translations", action="store_true",
                         help="build anyway with the withheld tables present (one-off)")
     parser.add_argument("--allow-stale-schema", action="store_true",
@@ -143,16 +153,20 @@ def parse_args(argv=None) -> argparse.Namespace:
 def main(argv=None) -> int:
     args = parse_args(argv)
 
-    targets = [args.sidecar]
+    # `--sidecar X --bundled` checks BOTH. It used to check only the bundled copies,
+    # silently dropping the sidecar the operator had explicitly named.
+    targets = [args.sidecar] if args.sidecar else []
     if args.bundled:
-        targets = [p for p in BUNDLED_SIDECARS if os.path.exists(p)]
-        if not targets:
+        targets.extend(p for p in BUNDLED_SIDECARS if os.path.exists(p))
+        if not any(p in BUNDLED_SIDECARS for p in targets):
             print("No built sidecar found under dist/. Looked in:", file=sys.stderr)
             for path in BUNDLED_SIDECARS:
                 print("  %s" % path, file=sys.stderr)
             print("\nBuild first (build_app.bat), or drop the stale dist/ directory.",
                   file=sys.stderr)
             return 1
+    if not targets:
+        targets = [DEFAULT_SIDECAR]
 
     # EVERY candidate, not just the first. CompileScriptGenizah.iss packages the whole
     # dist tree recursively, so if both supported layouts are present a clean _internal
