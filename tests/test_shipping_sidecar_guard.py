@@ -250,18 +250,11 @@ def _sidecar_readers():
 SIDECAR_PRODUCER = "scripts/export_pgp_sidecar.py"
 
 
-def _consumes_the_sidecar(path):
-    """(opens, imports_service, names_column) for one module, judged from the parse tree.
-
-    Comments and docstrings do not count: `shared/transcription_credits.py` discusses pgp.db
-    in prose and opens nothing. Imports are found by walking, not by reading the header, because
-    several consumers import `shared.document_service` lazily inside a function."""
+def _code_strings(tree):
+    """Every string literal that is not a docstring. `shared/transcription_credits.py`
+    discusses pgp.db in prose and opens nothing, so prose must not count."""
     import ast
 
-    try:
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
-    except SyntaxError:
-        return (False, False, False)
     docstrings = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -269,25 +262,51 @@ def _consumes_the_sidecar(path):
             if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
                     and isinstance(body[0].value.value, str):
                 docstrings.add(id(body[0].value))
-    strings = [n.value for n in ast.walk(tree)
-               if isinstance(n, ast.Constant) and isinstance(n.value, str)
-               and id(n) not in docstrings]
-    imports_service = False
+    return [n.value for n in ast.walk(tree)
+            if isinstance(n, ast.Constant) and isinstance(n.value, str)
+            and id(n) not in docstrings]
+
+
+def _imported_modules(tree):
+    """Dotted names this module imports, found by WALKING -- several consumers import the
+    sidecar services lazily inside a function, where a header-only scan never looks."""
+    import ast
+
+    names = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("document_service"):
-            imports_service = True
-        elif isinstance(node, ast.Import) and any(
-                a.name.endswith("document_service") for a in node.names):
-            imports_service = True
-    return (any("pgp.db" in s for s in strings),
-            imports_service,
-            any(s == "doc_relation" for s in strings))
+        if isinstance(node, ast.ImportFrom) and node.module:
+            names.add(node.module)
+        elif isinstance(node, ast.Import):
+            names.update(a.name for a in node.names)
+    return names
 
 
 def _derived_sidecar_readers():
-    out = set()
+    """The consumer set, from three signals. Signal 2 is derived from signal 1 rather than
+    naming a module: hardcoding `document_service` there is exactly what hid
+    `web/pages/parallels.py`, which reaches the sidecar through TranslationService."""
+    import ast
+
+    trees = {}
     for p in list((REPO_ROOT / "shared").glob("*.py")) + list((REPO_ROOT / "web").rglob("*.py")):
-        if any(_consumes_the_sidecar(p)):
+        try:
+            trees[p] = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+
+    # 1. the modules that open pgp.db themselves
+    openers = {p for p, t in trees.items() if any("pgp.db" in s for s in _code_strings(t))}
+    assert openers, "no module was found opening pgp.db -- the detector has stopped working"
+    opener_modules = {p.stem for p in openers}
+
+    out = set()
+    for p, tree in trees.items():
+        opens = p in openers
+        # 2. imports one of THOSE modules, at any depth
+        imports_opener = any(m.split(".")[-1] in opener_modules for m in _imported_modules(tree))
+        # 3. names the column, however it came by the dict
+        names_column = any(s == "doc_relation" for s in _code_strings(tree))
+        if opens or imports_opener or names_column:
             out.add(str(p.relative_to(REPO_ROOT)).replace("\\", "/"))
     return out
 
@@ -300,10 +319,12 @@ def test_the_contract_covers_every_sidecar_consumer_exactly():
     sidecar and is not in the contract lets an incompatible sidecar through, and a module listed
     that no longer consumes it anchors the contract to an unrelated commit.
 
-    Three signals, union: opens pgp.db, imports shared.document_service (at any depth), or names
-    the doc_relation column. `browse_enrichment.py`, the module that actually raised on
-    2026-09-22, is caught by the second and third and by neither the first nor any grep of its
-    imports -- it takes the dict from its caller."""
+    Three signals, union: opens pgp.db, imports one of the modules that DO (derived, not named --
+    hardcoding `document_service` there is what hid `web/pages/parallels.py`, which reaches the
+    sidecar through TranslationService), or names the doc_relation column. `browse_enrichment.py`,
+    the module that actually raised on 2026-09-22, is caught by the second and third and by
+    neither the first nor any header-only import scan -- it takes the dict from its caller and
+    imports inside a function."""
     listed = set(_sidecar_readers())
     derived = _derived_sidecar_readers()
     assert derived, "the detector found no sidecar consumers at all -- it has stopped working"

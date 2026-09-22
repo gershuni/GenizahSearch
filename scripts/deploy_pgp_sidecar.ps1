@@ -39,7 +39,9 @@ param(
 # so the set is now computed from three signals and pinned by an EXACT match in
 # tests/test_shipping_sidecar_guard.py, which prints the corrected block when it fails:
 #   1. opens pgp.db itself (a non-docstring "pgp.db" literal)
-#   2. imports shared.document_service, at module level or inside a function
+#   2. imports one of the modules that DO, at module level or inside a function -- derived
+#      from 1, not named, because hardcoding document_service there hid web/pages/parallels.py,
+#      which reaches the sidecar through TranslationService
 #   3. names the 'doc_relation' column, however it came by the dict
 # Plus the exporter, which is not a reader: when IT changes the schema changes, so a server
 # that does not have it has no business receiving what it produced.
@@ -53,11 +55,13 @@ $SidecarReaders = @(
     'shared/search_serializer.py',
     'shared/transcription_service.py',
     'shared/translation_service.py',
+    'web/components/catalog_dialog.py',
     'web/components/joins_panel.py',
     'web/document_service.py',
     'web/pages/browse.py',
     'web/pages/browse_enrichment.py',
     'web/pages/catalog_browse.py',
+    'web/pages/parallels.py',
     'web/pages/search.py',
     'web/pages/search_results.py',
     'web/stats_service.py'
