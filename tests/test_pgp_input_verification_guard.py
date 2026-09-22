@@ -300,3 +300,28 @@ def test_two_missing_commits_are_not_a_match(tmp_path):
 
     problems = _verifier().verify_against_provenance(str(pgp_data), check_derived=True)
     assert any("records no upstream commit" in p for p in problems), problems
+
+
+def test_an_input_edited_while_the_derivation_ran_cannot_verify_clean(exporter, tmp_path,
+                                                                     monkeypatch):
+    """gpt-6-astra, round 5: the fingerprints were taken AFTER the derivation read the
+    files. Editing libraries.csv between the read and the stamp produced output from the
+    old mapping stamped with the new file's hash -- and it verified clean. Fingerprinted
+    before the read, the same edit leaves the file on disk disagreeing with the stamp."""
+    monkeypatch.delenv("PGP_ALLOW_UNVERIFIED_INPUTS", raising=False)
+    pgp_data = fx.build_tree(tmp_path, derived=False)
+    real_loader = exporter.load_genizahsearch_shelfmarks
+
+    def load_then_edit(libraries_path, supplement_path=None):
+        lookup = real_loader(libraries_path, supplement_path)
+        fx.tamper(tmp_path / "libraries.csv")  # the race, made deterministic
+        return lookup
+
+    monkeypatch.setattr(exporter, "load_genizahsearch_shelfmarks", load_then_edit)
+    assert _run_main(exporter, tmp_path)[0] == 0
+
+    problems = _verifier().verify_against_provenance(str(pgp_data), check_derived=True)
+    assert any("libraries.csv has changed" in p for p in problems), (
+        "the stamp must describe the file the derivation CONSUMED, not the one on disk "
+        "afterwards: %r" % problems
+    )

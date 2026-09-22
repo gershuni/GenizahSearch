@@ -885,7 +885,7 @@ is a script, and each step is followed by an exit-code check:
 
 ```powershell
 # Steps 0-3 (FIST supplement, pinned fetch, derive transcriptions_linked.csv, import DRY RUN).
-# Stops at the first failure. Then read pgp_data/full_import_report.txt.
+# Stops at the first failure. Then read pgp_data/full_import_dry_run_report.txt.
 powershell -File scripts/refresh_pgp_data.ps1
 
 # Steps 4-8: import --execute, classify doc_relation (verified by read-back), sections,
@@ -905,7 +905,7 @@ the exact command it ran, and `-StartAt N` resumes there):
 | 0 | `python scripts/fist_shelfmarks_export.py` | ~35,600 shelfmarks `libraries.csv` lacks. Without it the fragment match rate falls 94.5% -> 87.5% (~2,900 fragments lose their IIIF images). Steps 2 and 4 refuse to run without it. |
 | 1 | `python scripts/fetch_pgp_metadata.py` | The three upstream CSVs, all at ONE commit, with a per-file SHA-256 manifest (`upstream_provenance.json`). `--dry-run` prints row deltas against the current `pgp.db`. |
 | 2 | `python scripts/pgp_transcriptions_export.py` | Derives `transcriptions_linked.csv` (NOT an upstream file) from documents + footnotes + `libraries.csv` + the supplement. Refuses CSVs that fail the manifest; refuses to overwrite with an empty result; stamps `derived_provenance.json` with the commit, the output's hash, and the hashes of `libraries.csv` and the supplement. |
-| 3 | `python scripts/import_pgp_full.py` | Dry run: validates and writes `full_import_report.txt`. Read it. |
+| 3 | `python scripts/import_pgp_full.py` | Dry run: validates and writes `full_import_dry_run_report.txt`. Read THAT file -- `full_import_report.txt` is the previous `--execute`'s report. |
 | 4 | `python scripts/import_pgp_full.py --execute` | Refuses inputs that fail their checksums (`--no-provenance-check` imports anyway but records no commit). Removes the previous `import_provenance.json` before the first push and writes a new one only on completion -- so an interrupted import cannot be stamped. |
 | 5 | `python scripts/update_doc_relation.py --execute` | Same provenance check as step 4 on the same derived file. Fatal if any row is unusable, if nothing was classified, if any pgpid matched no row, if any update raised -- and every classification is READ BACK and compared before it reports success. |
 | 6 | `python scripts/import_pgp_sections.py --execute` | Per-canvas sections from the `pgp-text` repo (clones/pulls it first). |

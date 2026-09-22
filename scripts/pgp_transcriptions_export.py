@@ -233,10 +233,14 @@ def _record_derived_provenance(pgp_data_dir, verified: bool = False, inputs=()) 
     leaving the stamp alone passed verification, because nothing read the content.
 
     `inputs` are the NON-upstream files the derivation read -- libraries.csv and the FIST
-    supplement -- as (label, path) pairs. They decide which manuscript a transcription is
-    attributed to, and they were covered by no checksum: editing one line of libraries.csv
-    re-attributed a transcription to the wrong manuscript while every check stayed clean.
-    Their fingerprints are recorded here and compared by fetch_pgp_metadata._verify_derived.
+    supplement -- as (label, fingerprint) pairs, where the fingerprint was taken BEFORE the
+    file was read (see export_transcriptions). They decide which manuscript a transcription
+    is attributed to, and they were covered by no checksum: editing one line of
+    libraries.csv re-attributed a transcription to the wrong manuscript while every check
+    stayed clean. Fingerprinting them here, after the derivation, was not enough either: a
+    change between the read and the stamp produced output from the old file stamped with
+    the new file's hash, which then verified clean. Taken before the read, any later change
+    leaves the file on disk disagreeing with the stamp, and the import refuses.
 
     `verified` defaults to False on purpose: forgetting to pass it must produce no stamp,
     never a certified one.
@@ -288,7 +292,7 @@ def _record_derived_provenance(pgp_data_dir, verified: bool = False, inputs=()) 
                     'sha256': hashlib.sha256(raw).hexdigest(),
                 },
             },
-            'inputs': {label: _fingerprint(path) for label, path in inputs},
+            'inputs': dict(inputs),
         }, fh, indent=2, sort_keys=True)
         fh.write('\n')
     print("  Recorded derived provenance (upstream %s, sha %s)"
@@ -494,6 +498,15 @@ def export_transcriptions(
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
 
+    # Fingerprint the mapping inputs BEFORE anything reads them. The stamp must describe
+    # the files the derivation actually consumed; taken afterwards, an edit made while the
+    # derivation ran was stamped as if it had been used. Taken here, such an edit leaves the
+    # on-disk file disagreeing with the stamp, and the import refuses -- the safe direction.
+    input_fingerprints = (
+        ('libraries.csv', _fingerprint(libraries_path)),
+        ('fist_shelfmarks_supplement.csv', _fingerprint(fist_supplement_path)),
+    )
+
     # Load data
     print("Loading GenizahSearch shelfmarks...")
     gs_lookup = load_genizahsearch_shelfmarks(libraries_path, fist_supplement_path)
@@ -649,10 +662,7 @@ def export_transcriptions(
     _record_derived_provenance(
         output_dir,
         verified=_INPUTS_VERIFIED,
-        inputs=(
-            ('libraries.csv', libraries_path),
-            ('fist_shelfmarks_supplement.csv', fist_supplement_path),
-        ),
+        inputs=input_fingerprints,
     )
 
     print("Export complete!")

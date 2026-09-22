@@ -900,28 +900,42 @@ def capture_table_counts(client) -> Dict[str, int]:
     return counts
 
 
+DRY_RUN_REPORT_FILENAME = 'full_import_dry_run_report.txt'
+
+
 def write_verification_report(
     before: Dict[str, int],
     after: Dict[str, int],
     stats: Dict,
     all_issues: List[Dict],
-    report_path: str
+    report_path: str,
+    dry_run: bool = False,
 ):
-    """Write comprehensive before/after verification report."""
+    """Write comprehensive before/after verification report.
+
+    A dry run writes one too (to DRY_RUN_REPORT_FILENAME, not the execute report): the
+    procedure says "read the report, then --execute", and until this existed the file it
+    pointed at was the PREVIOUS execute's report.
+    """
     with open(report_path, 'w', encoding='utf-8') as f:
         f.write("=" * 60 + "\n")
-        f.write("Full PGP Import Verification Report\n")
+        f.write("Full PGP Import Verification Report%s\n" % (" -- DRY RUN" if dry_run else ""))
         f.write("=" * 60 + "\n")
         f.write(f"Generated: {datetime.now().isoformat()}\n\n")
 
-        f.write("Table Row Counts (Before -> After):\n")
-        f.write("-" * 50 + "\n")
-        for table in ['documents', 'document_fragments', 'document_sources', 'document_footnotes']:
-            b = before.get(table, 0)
-            a = after.get(table, 0)
-            delta = a - b
-            f.write(f"  {table:25s}: {b:>8,} -> {a:>8,} (delta: {delta:+,d})\n")
-        f.write("\n")
+        if dry_run:
+            f.write("DRY RUN: nothing was written to Supabase and no row counts were "
+                    "captured.\nThe figures below describe what --execute WOULD push.\n\n")
+        else:
+            f.write("Table Row Counts (Before -> After):\n")
+            f.write("-" * 50 + "\n")
+            for table in ['documents', 'document_fragments', 'document_sources',
+                          'document_footnotes']:
+                b = before.get(table, 0)
+                a = after.get(table, 0)
+                delta = a - b
+                f.write(f"  {table:25s}: {b:>8,} -> {a:>8,} (delta: {delta:+,d})\n")
+            f.write("\n")
 
         f.write("Records Prepared Per Pass:\n")
         f.write("-" * 50 + "\n")
@@ -963,7 +977,8 @@ def write_verification_report(
         )
         f.write(f"Success Rate:\n")
         f.write(f"  Total records attempted: {total_attempted:,}\n")
-        f.write(f"  Total new/updated rows:  {total_delta:,}\n")
+        if not dry_run:
+            f.write(f"  Total new/updated rows:  {total_delta:,}\n")
 
 
 # ============================================
@@ -1221,7 +1236,23 @@ Prerequisites:
     # ============================================
     # STEP 6: EXECUTE OR DRY-RUN EXIT
     # ============================================
+    stats = {
+        'doc_count': len(doc_records),
+        'source_count': len(source_records),
+        'footnote_count': len(footnote_records),
+        'fragment_count': len(frag_records),
+        'digital_editions': source_stats['digital_editions'],
+        'digital_translations': source_stats['digital_translations'],
+        'translation_hebrew': source_stats['translation_hebrew'],
+        'translation_english': source_stats['translation_english'],
+    }
+
     if dry_run:
+        # The procedure says "read the report, then --execute". Write one for THIS run --
+        # the execute report on disk describes the previous import, not these inputs.
+        dry_run_report_path = project_dir / 'pgp_data' / DRY_RUN_REPORT_FILENAME
+        write_verification_report({}, {}, stats, all_issues, str(dry_run_report_path),
+                                  dry_run=True)
         print("DRY RUN COMPLETE")
         print()
         print(f"Would import {len(doc_records):,} documents")
@@ -1229,6 +1260,7 @@ Prerequisites:
         print(f"Would import {len(footnote_records):,} footnotes")
         print(f"Would create {len(frag_records):,} fragment links")
         print()
+        print(f"Report: {dry_run_report_path}")
         print("To execute import, run with --execute flag")
         return 0
 
@@ -1287,17 +1319,6 @@ Prerequisites:
     print()
 
     # Write verification report
-    stats = {
-        'doc_count': len(doc_records),
-        'source_count': len(source_records),
-        'footnote_count': len(footnote_records),
-        'fragment_count': len(frag_records),
-        'digital_editions': source_stats['digital_editions'],
-        'digital_translations': source_stats['digital_translations'],
-        'translation_hebrew': source_stats['translation_hebrew'],
-        'translation_english': source_stats['translation_english'],
-    }
-
     print(f"Writing verification report to {report_path}...")
     write_verification_report(before_counts, after_counts, stats, all_issues, str(report_path))
 

@@ -82,8 +82,10 @@ def check_sidecar(path: str, allow_withheld: bool = False,
 
     conn = _ro(path)
     try:
+        # SQLite identifiers are case-insensitive: `CREATE TABLE PGP_TRANSLATIONS` is read
+        # by `SELECT ... FROM pgp_translations`, so every comparison here is lower-cased.
         tables = {
-            row[0] for row in conn.execute(
+            row[0].lower() for row in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
@@ -91,18 +93,19 @@ def check_sidecar(path: str, allow_withheld: bool = False,
         # the table would. And by prefix: restore_pgp_translations.py stages into
         # pgp_translations_restore_tmp, and an interrupted restore leaves that behind.
         relations = {
-            row[0] for row in conn.execute(
+            row[0]: row[0].lower() for row in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"
             )
         }
 
         for table in REQUIRED_TABLES:
-            if table not in tables:
+            if table.lower() not in tables:
                 problems.append("missing required table %r" % table)
 
         for table, reason in sorted(WITHHELD_TABLES.items()):
-            for name in sorted(relations):
-                if name != table and not name.startswith(table + "_"):
+            wanted = table.lower()
+            for name, lowered in sorted(relations.items()):
+                if lowered != wanted and not lowered.startswith(wanted + "_"):
                     continue
                 count = conn.execute('SELECT COUNT(*) FROM "%s"' % name).fetchone()[0]
                 message = ("contains %r (%s rows) -- %s"

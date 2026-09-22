@@ -47,12 +47,13 @@ Step 0 'FIST shelfmark supplement'               @('scripts/fist_shelfmarks_expo
 Step 1 'fetch upstream CSVs (pinned)'            @('scripts/fetch_pgp_metadata.py')
 # 2. transcriptions_linked.csv -- derived locally; verified against the fetch; stamped.
 Step 2 'derive transcriptions_linked.csv'        @('scripts/pgp_transcriptions_export.py')
-# 3. Validate the import without writing. Read pgp_data/full_import_report.txt.
+# 3. Validate the import without writing. Writes pgp_data/full_import_dry_run_report.txt
+#    (full_import_report.txt is the PREVIOUS --execute's report, not this run's).
 Step 3 'import: DRY RUN'                         @('scripts/import_pgp_full.py')
 
 if (-not $Execute) {
     Write-Host ""
-    Write-Host "Dry run complete. Read pgp_data/full_import_report.txt, then:"
+    Write-Host "Dry run complete. Read pgp_data/full_import_dry_run_report.txt, then:"
     Write-Host "  powershell -File scripts/refresh_pgp_data.ps1 -Execute -StartAt 4"
     exit 0
 }

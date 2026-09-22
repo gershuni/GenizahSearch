@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import importlib.util
 import pathlib
+import re
 import sqlite3
 
 import pytest
@@ -244,13 +245,25 @@ def test_the_deploy_script_uploads_only_after_the_guard_passes():
     restart = next(i for i, ln in enumerate(lines) if ln.startswith("ssh "))
     assert guard < upload < restart
 
+    # STRICT form. gpt-6-astra (round 5) disabled the check with `-and $false` while
+    # keeping the text a looser pin matched, and the suite stayed green.
+    check = re.compile(r"^if \(\$LASTEXITCODE -ne 0\) \{ Fail ")
+
     def checked(after, before):
-        between = lines[after + 1:before]
-        return any("$LASTEXITCODE -ne 0" in ln and ("Fail" in ln or "exit" in ln)
-                   for ln in between)
+        return any(check.match(ln) for ln in lines[after + 1:before])
 
     assert checked(guard, upload), "the guard's exit code must gate the upload"
     assert checked(upload, restart), "a failed upload must not be followed by a restart"
+    assert any(check.match(ln) for ln in lines[restart + 1:]), (
+        "a failed restart must be reported, not swallowed"
+    )
+    # One check per external command, and nothing else that looks like one.
+    commands = [i for i, ln in enumerate(lines)
+                if ln.startswith(("python ", "scp ", "ssh "))]
+    assert len(commands) == 3
+    for i in commands:
+        following = next(ln for ln in lines[i + 1:] if ln)
+        assert check.match(following), "the line after %r must be its exit-code check" % lines[i]
     code = [ln for ln in lines if not ln.startswith("#")]
     assert not any("&&" in ln for ln in code), "PowerShell 5.1: `&&` is a parse error"
 
@@ -298,7 +311,8 @@ def test_the_refresh_runner_runs_the_documented_steps_in_order_and_stops_on_fail
 
     body = text[text.index("function Step"):text.index("\n}\n") + 3]
     body_lines = [ln.strip() for ln in body.splitlines()]
-    assert any("$LASTEXITCODE -ne 0" in ln for ln in body_lines)
+    # Strict form: `-and $false` inside the condition kept a looser pin green.
+    assert any(ln == "if ($LASTEXITCODE -ne 0) {" for ln in body_lines), body_lines
     # A STATEMENT that exits -- not the word "exit" inside the error message, which is
     # what a first version of this pin matched while `return` replaced the real exit.
     assert any(ln.startswith("exit ") for ln in body_lines), (
@@ -370,3 +384,18 @@ def test_a_view_or_a_leftover_staging_copy_of_the_withheld_table_is_caught(guard
     conn.close()
     problems = guard.check_sidecar(path)
     assert any("pgp_translations_restore_tmp" in p for p in problems), problems
+
+
+def test_the_withheld_table_is_caught_whatever_its_case(guard, tmp_path):
+    """SQLite identifiers are case-insensitive: `CREATE TABLE PGP_TRANSLATIONS` is read by
+    `SELECT ... FROM pgp_translations`. gpt-6-astra shipped one through the guard."""
+    path = _sidecar(tmp_path / "caps.db")
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE PGP_TRANSLATIONS (pgpid INTEGER PRIMARY KEY, description_he TEXT)")
+    conn.execute("INSERT INTO PGP_TRANSLATIONS VALUES (1, 'x')")
+    conn.commit()
+    # ...and the lower-case query really does read it.
+    assert conn.execute("SELECT COUNT(*) FROM pgp_translations").fetchone()[0] == 1
+    conn.close()
+    problems = guard.check_sidecar(path)
+    assert any("PGP_TRANSLATIONS" in p for p in problems), problems

@@ -105,6 +105,20 @@ def test_a_dry_run_pushes_nothing_and_records_nothing(importer, tmp_path, monkey
     assert _record(tmp_path) is None
 
 
+def test_a_dry_run_writes_its_own_report_and_leaves_the_execute_report_alone(
+        importer, tmp_path, monkeypatch):
+    """The procedure says 'read the report, then --execute'. The dry run wrote none, so the
+    file it pointed at was the PREVIOUS execute's report (Codex review 7, astra round 5)."""
+    execute_report = tmp_path / "pgp_data" / "full_import_report.txt"
+    execute_report.write_text("STALE REPORT FROM LAST WEEK", encoding="utf-8")
+
+    assert _run(importer, monkeypatch)[0] == 0
+    dry = (tmp_path / "pgp_data" / importer.DRY_RUN_REPORT_FILENAME).read_text(encoding="utf-8")
+    assert "DRY RUN" in dry
+    assert "Pass 1 - Documents:                 2" in dry
+    assert execute_report.read_text(encoding="utf-8") == "STALE REPORT FROM LAST WEEK"
+
+
 def test_a_completed_import_records_commit_verification_and_project(importer, tmp_path,
                                                                      monkeypatch):
     rc, _out, _ = _run(importer, monkeypatch, "--execute")
