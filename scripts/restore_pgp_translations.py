@@ -181,7 +181,16 @@ def main(argv=None) -> int:
             conn.execute(
                 "ALTER TABLE pgp_translations_restore_tmp RENAME TO pgp_translations"
             )
-        n_new, hash_new = fingerprint(conn)
+            # Fingerprint INSIDE the transaction: a mismatch here (for instance because
+            # the source changed between the fingerprint read and the row read) then
+            # rolls the rename back and leaves the previous table in place, instead of
+            # committing the new one and only afterwards discovering it is wrong.
+            n_new, hash_new = fingerprint(conn)
+            if (n_new, hash_new) != (n_src, hash_src):
+                raise sqlite3.IntegrityError(
+                    "restored table does not match the source (%d/%s vs %d/%s)"
+                    % (n_new, hash_new[:16], n_src, hash_src[:16])
+                )
     except Exception:
         try:
             conn.execute("DROP TABLE IF EXISTS pgp_translations_restore_tmp")

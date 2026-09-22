@@ -32,6 +32,13 @@ REM flag the old command used is rejected or ignored when building from one.
 python -m PyInstaller --noconfirm --clean GenizahSearchPro.spec
 if errorlevel 1 exit /b 1
 
+REM Check what was actually BUILT, not just the source sidecar. The installer script is
+REM often compiled by hand and packages dist\GenizahSearchPro recursively, so the bundled
+REM copy is the thing that ends up in front of users.
+echo Checking the bundled sidecar...
+python scripts\check_shipping_sidecar.py --bundled
+if errorlevel 1 exit /b 1
+
 echo.
 echo Build complete! Output in dist\GenizahSearchPro
 echo.

@@ -804,7 +804,12 @@ All sidecar databases are **NOT in git** (listed in `.gitignore`). They must be 
 # From local machine:
 scp fist_data/fjms_enrichment.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/fist_data/
 scp nli_data/nli_crossref.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/nli_data/
-scp pgp_data/pgp.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/pgp_data/
+
+# pgp.db is CHAINED behind the shipping check: the web reads pgp_translations through
+# TranslationService, so an unconditional upload can publish a withheld corpus.
+python scripts/check_shipping_sidecar.py --sidecar pgp_data/pgp.db && \
+  scp pgp_data/pgp.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/pgp_data/
+
 scp libraries_translations.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/
 
 # On server, create directories if needed:
@@ -909,8 +914,12 @@ python -c "import sqlite3; c=sqlite3.connect('file:pgp_data/pgp.db?mode=ro',uri=
 print(dict(c.execute('SELECT key,value FROM meta')))"
 
 # 8. Deploy: sidecar first, then restart. (Web is not continuous-deploy.)
-scp pgp_data/pgp.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/pgp_data/
-ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "sudo systemctl restart genizah-web"
+#    The check is CHAINED, not merely run first: the web reads pgp_translations through
+#    TranslationService, so an unconditional scp can republish the withheld corpus that
+#    build_app.bat blocks for desktop.
+python scripts/check_shipping_sidecar.py --sidecar pgp_data/pgp.db && \
+  scp pgp_data/pgp.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/pgp_data/ && \
+  ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "sudo systemctl restart genizah-web"
 ```
 
 **What the desktop needs.** `GenizahSearchPro.spec` bundles `pgp_data/pgp.db` into the

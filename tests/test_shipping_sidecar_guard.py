@@ -155,6 +155,77 @@ def test_the_guards_failure_stops_the_build():
     )
 
 
+def test_the_installer_script_checks_the_bundled_database():
+    """The route I got wrong, and said so publicly.
+
+    `CompileScriptGenizah.iss` is routinely compiled by hand (`ISCC ...`), which never
+    runs `build_app.bat` and never evaluates `GenizahSearchPro.spec`. Its `[Files]`
+    entries package `dist\\GenizahSearchPro` recursively, so a stale `dist` from an earlier
+    build ships whatever it contains. Putting the check in the spec closed only the
+    direct-PyInstaller route; the guard must also run from here, against the BUILT copy.
+    """
+    iss = (REPO_ROOT / "CompileScriptGenizah.iss").read_text(
+        encoding="utf-8", errors="replace"
+    )
+    lines = [
+        ln.strip() for ln in iss.splitlines()
+        if ln.strip() and not ln.strip().startswith(";")
+    ]
+    # Only lines that actually INVOKE it count. An earlier version of this test matched
+    # "--bundled" anywhere on a line mentioning the script, which the `#error` message
+    # text satisfies -- so dropping the flag from the real Exec() left the test green.
+    invocations = [
+        i for i, ln in enumerate(lines)
+        if "check_shipping_sidecar.py" in ln and "Exec(" in ln
+    ]
+    assert invocations, "CompileScriptGenizah.iss must INVOKE the shipping guard"
+    assert all("--bundled" in lines[i] for i in invocations), (
+        "the installer must check the BUILT sidecar under dist/, not the source one"
+    )
+    checks = invocations
+    assert any("#error" in ln for ln in lines[checks[0]:checks[0] + 4]), (
+        "a failed check must abort compilation, not just print"
+    )
+
+    files = next(i for i, ln in enumerate(lines) if ln.startswith("[Files]"))
+    assert checks[0] < files, "the guard must run before anything is packaged"
+
+
+def test_build_app_bat_checks_the_built_output_too():
+    """Checking only the source sidecar leaves the artifact unverified."""
+    lines = _live_bat_lines()
+    bundled = [i for i, ln in enumerate(lines) if "--bundled" in ln]
+    assert bundled, "build_app.bat must also check the BUILT sidecar"
+    build = next(i for i, ln in enumerate(lines) if "PyInstaller" in ln)
+    assert bundled[0] > build, "the bundled check only means anything after the build"
+
+
+def test_the_web_deploy_is_guarded_too():
+    """The web reads pgp_translations through TranslationService, so an unconditional
+    scp can republish the withheld corpus that build_app.bat blocks for desktop. The
+    check must be CHAINED to the upload, not merely printed above it."""
+    guide = (REPO_ROOT / "docs" / "guides" / "DEPLOYMENT_TECHNICAL.md").read_text(
+        encoding="utf-8", errors="replace"
+    )
+    lines = guide.splitlines()
+    uploads = [i for i, ln in enumerate(lines) if "scp pgp_data/pgp.db" in ln]
+    assert uploads, "the guide should still document how to deploy the sidecar"
+
+    for i in uploads:
+        # The chain can span lines (`... && \` then the scp), so look at the upload line
+        # and the two above it rather than the upload line alone.
+        window = "\n".join(lines[max(0, i - 2):i + 1])
+        assert "check_shipping_sidecar" in window, (
+            "an unguarded `scp pgp_data/pgp.db` can republish the withheld corpus "
+            "(line %d): %r" % (i + 1, lines[i].strip())
+        )
+        chained = "&&" in window
+        assert chained, (
+            "the check must be CHAINED to the upload with &&, not merely printed above "
+            "it (line %d)" % (i + 1)
+        )
+
+
 def test_the_withholding_decision_is_recorded_where_it_is_enforced(guard):
     """Reversing the decision should be a one-line edit in an obvious place, with the
     reason attached -- not a silent change of behaviour somewhere else."""

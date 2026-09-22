@@ -40,6 +40,14 @@ import sys
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_SIDECAR = os.path.join(PROJECT_ROOT, "pgp_data", "pgp.db")
 
+# Where PyInstaller leaves the bundled copy. Checking the SOURCE sidecar is not enough:
+# CompileScriptGenizah.iss packages dist\GenizahSearchPro recursively and never evaluates
+# the spec, so an installer compiled by hand against a stale dist ships whatever is there.
+BUNDLED_SIDECARS = (
+    os.path.join(PROJECT_ROOT, "dist", "GenizahSearchPro", "_internal", "pgp_data", "pgp.db"),
+    os.path.join(PROJECT_ROOT, "dist", "GenizahSearchPro", "pgp_data", "pgp.db"),
+)
+
 # Tables that exist locally but must NOT reach a user. One line to reverse, in the one
 # place a reader would look. See docs/plans/PGP_TRANSLATION_QUALITY.md.
 WITHHELD_TABLES = {
@@ -126,11 +134,26 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--allow-stale-schema", action="store_true",
                         help="build anyway from a pre-1.1.0 sidecar (one-off; it will "
                              "ship translation-flagged documents as transcriptions)")
+    parser.add_argument("--bundled", action="store_true",
+                        help="check the BUILT copy under dist/ instead of the source "
+                             "sidecar (use before compiling the installer)")
     return parser.parse_args(argv)
 
 
 def main(argv=None) -> int:
     args = parse_args(argv)
+
+    targets = [args.sidecar]
+    if args.bundled:
+        targets = [p for p in BUNDLED_SIDECARS if os.path.exists(p)]
+        if not targets:
+            print("No built sidecar found under dist/. Looked in:", file=sys.stderr)
+            for path in BUNDLED_SIDECARS:
+                print("  %s" % path, file=sys.stderr)
+            print("\nBuild first (build_app.bat), or drop the stale dist/ directory.",
+                  file=sys.stderr)
+            return 1
+        args.sidecar = targets[0]
 
     problems = check_sidecar(
         args.sidecar,

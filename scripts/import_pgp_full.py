@@ -740,7 +740,8 @@ def upsert_in_batches(
     return processed
 
 
-def write_import_provenance(pgp_data_dir: str, after_counts: Dict[str, int]) -> None:
+def write_import_provenance(pgp_data_dir: str, after_counts: Dict[str, int],
+                            verified: bool = True) -> None:
     """Write what this import pushed, and the row counts it left behind.
 
     The sidecar export reads THIS file, not the fetch-time one, and only stamps the
@@ -751,7 +752,11 @@ def write_import_provenance(pgp_data_dir: str, after_counts: Dict[str, int]) -> 
 
     upstream = {}
     upstream_path = os.path.join(pgp_data_dir, PROVENANCE_FILENAME)
-    if os.path.exists(upstream_path):
+    # A manifest that FAILED verification must not lend its commit id to the import
+    # record: --no-provenance-check means "import these anyway", not "and vouch for
+    # them". Row-count corroboration downstream cannot detect altered files with
+    # unchanged counts, so the sidecar would carry a commit whose checksums did not match.
+    if verified and os.path.exists(upstream_path):
         try:
             with open(upstream_path, 'r', encoding='utf-8') as fh:
                 upstream = json.load(fh) or {}
@@ -763,6 +768,10 @@ def write_import_provenance(pgp_data_dir: str, after_counts: Dict[str, int]) -> 
         'imported_by': 'scripts/import_pgp_full.py',
         'supabase_counts_after': dict(after_counts),
     }
+    if not verified:
+        record['inputs_verified'] = False
+        record['note'] = ('imported with --no-provenance-check; no upstream commit is '
+                          'recorded because the CSVs did not match their manifest')
     for key in ('upstream_repo', 'upstream_commit', 'upstream_committed'):
         if upstream.get(key):
             record[key] = upstream[key]
@@ -962,6 +971,7 @@ Prerequisites:
     # meant to prevent. Verify the checksums the fetch recorded before importing anything.
     pgp_data_dir = str(project_dir / 'pgp_data')
     problems = verify_against_provenance(pgp_data_dir)
+    provenance_problems = list(problems)
     if problems:
         if args.no_provenance_check:
             print("WARNING: importing CSVs that do not match %s (--no-provenance-check):"
@@ -1028,6 +1038,17 @@ Prerequisites:
 
     # Build lookup: pgpid -> first Digital Edition content
     transcription_lookup = {}
+    for rec in transcription_records:
+        pgpid = rec['pgpid']
+        if rec['doc_relation'] == 'Digital Edition':
+            # Exact match always wins. Widening to any 'Edition' relation rescued pgpid
+            # 38267 (whose only edition is the bare relation 'Edition') but regressed
+            # 20107, where an earlier bare-'Edition' row displaced the explicit Digital
+            # Edition and changed the attribution. Two passes keep both right.
+            transcription_lookup[pgpid] = {
+                'content': rec['content'],
+                'source_scholar': rec['source_scholar'],
+            }
     for rec in transcription_records:
         pgpid = rec['pgpid']
         if pgpid not in transcription_lookup and is_edition_relation(rec['doc_relation']):
@@ -1192,7 +1213,7 @@ Prerequisites:
     # describes the Supabase snapshot rather than whatever CSVs happen to sit on this
     # machine. Without this the exporter can label a database with a commit that was
     # downloaded but never imported -- or that another machine imported instead.
-    write_import_provenance(pgp_data_dir, after_counts)
+    write_import_provenance(pgp_data_dir, after_counts, verified=not provenance_problems)
     print()
 
     print("IMPORT COMPLETE")

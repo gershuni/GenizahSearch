@@ -136,8 +136,49 @@ def normalize_shelfmark(shelf: str) -> str:
 
 
 
+def _require_verified_inputs(pgp_data_dir) -> None:
+    """Refuse to derive from CSVs that do not match what the fetch recorded.
+
+    Otherwise the stamp certifies inputs it never checked: swap footnotes.csv for an
+    altered copy, run this, restore the original, and the derived file is wrong while
+    verification reports clean. Hashing only the OUTPUT would faithfully hash the wrong
+    derivation, so the inputs have to be verified before generation, not after.
+    """
+    import sys as _sys
+
+    _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    try:
+        from fetch_pgp_metadata import verify_against_provenance
+    except ImportError:
+        return
+
+    problems = verify_against_provenance(str(pgp_data_dir), check_derived=False)
+    if not problems:
+        return
+    if os.environ.get('PGP_ALLOW_UNVERIFIED_INPUTS') == '1':
+        print("WARNING: deriving from unverified CSVs "
+              "(PGP_ALLOW_UNVERIFIED_INPUTS=1):")
+        for problem in problems:
+            print("  %s" % problem)
+        return
+    print("ERROR: the CSVs in pgp_data/ do not match upstream_provenance.json:",
+          file=__import__("sys").stderr)
+    for problem in problems:
+        print("  %s" % problem, file=__import__("sys").stderr)
+    print("", file=__import__("sys").stderr)
+    print("Re-run:  python scripts/fetch_pgp_metadata.py", file=__import__("sys").stderr)
+    print("Set PGP_ALLOW_UNVERIFIED_INPUTS=1 to derive from them anyway.",
+          file=__import__("sys").stderr)
+    raise SystemExit(1)
+
+
 def _record_derived_provenance(pgp_data_dir) -> None:
-    """Stamp transcriptions_linked.csv with the upstream commit it was derived from."""
+    """Stamp transcriptions_linked.csv with its upstream commit AND its own checksum.
+
+    The commit alone was not enough: replacing the file with two lines of CSV while
+    leaving the stamp alone passed verification, because nothing read the content.
+    """
+    import hashlib
     import json
 
     upstream_path = os.path.join(str(pgp_data_dir), 'upstream_provenance.json')
@@ -153,15 +194,31 @@ def _record_derived_provenance(pgp_data_dir) -> None:
     if not commit:
         return
 
+    linked = os.path.join(str(pgp_data_dir), 'transcriptions_linked.csv')
+    if not os.path.exists(linked):
+        return
+    with open(linked, 'rb') as fh:
+        raw = fh.read()
+
     out = os.path.join(str(pgp_data_dir), 'derived_provenance.json')
+    # Invalidate the old stamp before writing the new one, so an interrupted write
+    # cannot leave a stamp vouching for a file it no longer describes.
+    if os.path.exists(out):
+        os.remove(out)
     with open(out, 'w', encoding='utf-8') as fh:
         json.dump({
             'derived_from_commit': commit,
             'derived_by': 'scripts/pgp_transcriptions_export.py',
-            'files': ['transcriptions_linked.csv'],
+            'files': {
+                'transcriptions_linked.csv': {
+                    'bytes': len(raw),
+                    'sha256': hashlib.sha256(raw).hexdigest(),
+                },
+            },
         }, fh, indent=2, sort_keys=True)
         fh.write('\n')
-    print("  Recorded derived provenance (upstream %s)" % commit[:12])
+    print("  Recorded derived provenance (upstream %s, sha %s)"
+          % (commit[:12], hashlib.sha256(raw).hexdigest()[:12]))
 
 
 def require_fist_supplement(path, allow_missing: bool) -> None:
@@ -522,6 +579,7 @@ def main():
         str(fist_supplement_path),
         os.environ.get('PGP_ALLOW_MISSING_FIST_SUPPLEMENT') == '1',
     )
+    _require_verified_inputs(project_dir / 'pgp_data')
     documents_path = project_dir / 'pgp_data' / 'documents.csv'
     footnotes_path = project_dir / 'pgp_data' / 'footnotes.csv'
     output_dir = project_dir / 'pgp_data'

@@ -71,9 +71,10 @@ USER_AGENT = "genizahsearch-pgp-refresh"
 
 
 PROVENANCE_FILENAME = "upstream_provenance.json"
+DERIVED_PROVENANCE_FILENAME = "derived_provenance.json"
 
 
-def verify_against_provenance(dest: str) -> list:
+def verify_against_provenance(dest: str, check_derived: bool = True) -> list:
     """Do the CSVs on disk still match what the fetch recorded? Returns a list of problems.
 
     The three CSVs are replaced one at a time, so an interruption between two renames can
@@ -102,24 +103,6 @@ def verify_against_provenance(dest: str) -> list:
     # scripts/pgp_transcriptions_export.py and is what carries the transcription content
     # the importer consumes. It is not in this manifest, so fetching a new commit and
     # keeping the old derived file used to verify clean while importing the old text.
-    derived_path = os.path.join(dest, "derived_provenance.json")
-    linked = os.path.join(dest, "transcriptions_linked.csv")
-    if os.path.exists(linked):
-        derived_commit = None
-        if os.path.exists(derived_path):
-            try:
-                with open(derived_path, "r", encoding="utf-8") as fh:
-                    derived_commit = (json.load(fh) or {}).get("derived_from_commit")
-            except (OSError, ValueError):
-                derived_commit = None
-        expected = provenance.get("upstream_commit")
-        if derived_commit != expected:
-            problems.append(
-                "transcriptions_linked.csv was derived from %s but the CSVs are from %s "
-                "-- re-run scripts/pgp_transcriptions_export.py"
-                % (derived_commit or "an unrecorded commit", (expected or "?")[:12])
-            )
-
     for filename, expected in sorted(files.items()):
         target = os.path.join(dest, filename)
         if not os.path.exists(target):
@@ -139,6 +122,66 @@ def verify_against_provenance(dest: str) -> list:
             continue
         if hashlib.sha256(raw).hexdigest() != expected.get("sha256"):
             problems.append("%s: SHA-256 does not match provenance" % filename)
+
+    # check_derived=False for the FETCH's own self-check: at that moment the derived file
+    # is legitimately from the previous commit and regeneration is the very next step.
+    # Reporting it as a failure there broke fetch -> derive -> import (my own regression,
+    # introduced in 22f94a28 and never exercised because I did not re-run fetch after
+    # adding the check). The IMPORT still requires it.
+    if check_derived:
+        problems.extend(_verify_derived(dest, provenance.get("upstream_commit")))
+
+    return problems
+
+
+def _verify_derived(dest: str, expected_commit) -> list:
+    """Is transcriptions_linked.csv both from the right commit AND unaltered?
+
+    It is generated from the downloaded CSVs and is what actually carries transcription
+    content, so it needs the same treatment as them: recording only the commit let a
+    truncated or hand-edited file verify clean.
+    """
+    problems = []
+    linked = os.path.join(dest, "transcriptions_linked.csv")
+    if not os.path.exists(linked):
+        return problems
+
+    derived = {}
+    derived_path = os.path.join(dest, DERIVED_PROVENANCE_FILENAME)
+    if os.path.exists(derived_path):
+        try:
+            with open(derived_path, "r", encoding="utf-8") as fh:
+                derived = json.load(fh) or {}
+        except (OSError, ValueError):
+            derived = {}
+
+    derived_commit = derived.get("derived_from_commit")
+    if derived_commit != expected_commit:
+        problems.append(
+            "transcriptions_linked.csv was derived from %s but the CSVs are from %s "
+            "-- re-run scripts/pgp_transcriptions_export.py"
+            % (derived_commit or "an unrecorded commit", (expected_commit or "?")[:12])
+        )
+        return problems
+
+    # An older derived_provenance.json recorded `files` as a bare list of names. Treat
+    # that as "no checksum", not as a crash.
+    files = derived.get("files")
+    recorded = files.get("transcriptions_linked.csv") if isinstance(files, dict) else None
+    if not isinstance(recorded, dict):
+        problems.append(
+            "transcriptions_linked.csv has no recorded checksum -- re-run "
+            "scripts/pgp_transcriptions_export.py"
+        )
+        return problems
+
+    with open(linked, "rb") as fh:
+        raw = fh.read()
+    if len(raw) != recorded.get("bytes"):
+        problems.append("transcriptions_linked.csv: %d bytes on disk, provenance says %s"
+                        % (len(raw), recorded.get("bytes")))
+    elif hashlib.sha256(raw).hexdigest() != recorded.get("sha256"):
+        problems.append("transcriptions_linked.csv: SHA-256 does not match provenance")
 
     return problems
 
@@ -315,7 +358,9 @@ def main(argv=None) -> int:
         fh.write("\n")
     print("  wrote %s" % provenance_path)
 
-    problems = verify_against_provenance(args.dest)
+    # check_derived=False: the derived file is legitimately stale here; regenerating it
+    # is the next step this very script tells you to run.
+    problems = verify_against_provenance(args.dest, check_derived=False)
     if problems:
         print("\nERROR: the set on disk does not match what was just written:",
               file=sys.stderr)

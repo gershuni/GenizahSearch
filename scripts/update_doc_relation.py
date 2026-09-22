@@ -244,10 +244,24 @@ def main():
     print(f"  FAILED (exceptions): {failed}")
 
     if not_found > 0:
+        # The old note here claimed multi-fragment documents explained this. That was
+        # FALSE: load_doc_relations() collapses the CSV to one mapping per pgpid, so
+        # duplicate fragment rows cannot produce an unmatched update -- and
+        # import_pgp_full.py upserts every document from the same source file immediately
+        # before this runs. Measured on the staged corpus: zero classification ids are
+        # missing from the loaded documents. So a no-match means the classification was
+        # simply not applied, and the next export would ship a stale or NULL doc_relation.
         print()
-        print(f"Note: {not_found} pgpids in the CSV matched no row.")
-        print("This is expected for multi-fragment documents, where several CSV rows")
-        print("map to a single pgpid.")
+        print(f"ERROR: {not_found} pgpid(s) matched no row in documents.", file=sys.stderr)
+        print("Every pgpid classified here should already exist -- import_pgp_full.py",
+              file=sys.stderr)
+        print("upserts them from the same file. An unmatched update means the",
+              file=sys.stderr)
+        print("classification was NOT applied; exporting now would ship a stale or NULL",
+              file=sys.stderr)
+        print("doc_relation. Re-run scripts/import_pgp_full.py --execute first.",
+              file=sys.stderr)
+        return 1
 
     if failed:
         print()
