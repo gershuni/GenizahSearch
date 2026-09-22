@@ -855,7 +855,24 @@ sudo systemctl restart genizah-web
 
 ### PGP Data Maintenance
 
-PGP data is updated regularly on GitHub at [princeton-geniza-project](https://github.com/Princeton-CDH/geniza). When updated:
+PGP data is exported by Princeton to
+**[princetongenizalab/pgp-metadata](https://github.com/princetongenizalab/pgp-metadata)** --
+`data/documents.csv`, `fragments.csv`, `footnotes.csv` and friends, committed automatically
+several times a day. Per-canvas transcription HTML comes from a second repo,
+[princetongenizalab/pgp-text](https://github.com/princetongenizalab/pgp-text) (cloned into
+`pgp_data/pgp-text/`, and last changed upstream in October 2025).
+
+> **This link used to point at [Princeton-CDH/geniza](https://github.com/Princeton-CDH/geniza),
+> which is Princeton's Django *application* source and carries no data exports.** Anyone following
+> step 1 literally could not complete it. Corrected 2026-09-22.
+
+> **Steps 2-3 below are contradictory and have not been executed since 2026-04-22.**
+> `scripts/import_pgp_full.py`'s own docstring says it *replaces* `import_pgp_documents.py` and
+> `import_document_sources.py`, yet both are still listed here and both still exist in `scripts/`.
+> No record says which set the April refresh actually ran. Resolve this before the next refresh
+> rather than during it.
+
+When updated:
 
 ```bash
 cd /home/ubuntu/GenizahSearch

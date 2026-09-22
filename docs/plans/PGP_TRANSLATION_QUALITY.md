@@ -1,7 +1,11 @@
 # PGP Hebrew translations — quality finding and remediation plan
 
-**Status: DEFERRED (2026-09-21).** The corpus is restored and live-equivalent; nothing here
-blocks shipping it. Resuming needs one answer from the owner (see [Open question](#open-question)).
+**Status: WITHHELD (2026-09-21, owner decision).** The corpus is **not shipped on either
+surface.** It was never deployed to the website, and it has been lifted out of
+`pgp_data/pgp.db` so the desktop installer stops carrying it -- see
+[What was decided](#what-was-decided). Both surfaces now show the English description, which is
+what production was already doing. Resuming needs one answer from the owner (see
+[Open question](#open-question)).
 
 **Last updated:** 2026-09-21
 
@@ -96,6 +100,37 @@ material, and has no way to be taught a house glossary.
 which is accurate about the wire and misleading about the product; and the help page
 ([web/pages/help.py](../../web/pages/help.py)) tells the public the translations are "powered by
 machine translation via Dicta Translation", which on this evidence is not accurate.
+
+## What was decided
+
+The owner ruled on 2026-09-21: **do not ship these translations.** Better no Hebrew than Hebrew
+that names the wrong person or reverses a date.
+
+Withholding had two halves, and only the first is obvious. The website never received the restored
+sidecar, so nothing had to be undone there. But `GenizahSearchPro.spec` bundles `pgp_data\pgp.db`
+into every desktop installer, so the next `build_app.bat` would have shipped the same rows to
+desktop users even though the site never saw them. The table was therefore lifted out of the
+sidecar entirely:
+
+| | |
+|---|---|
+| Withheld to | `pgp_data/pgp_translations_withheld_2026-09-21.db` (18.0 MB, gitignored) |
+| Verified | 35,111 rows, SHA-256 over every column identical to the source before the drop |
+| Effect on the sidecar | 174.8 MB -> 155.8 MB, so the installer shrinks with it |
+| Restore | `python scripts/restore_pgp_translations.py` (`--dry-run` first; refuses to overwrite a different corpus without `--force`) |
+
+Nothing was deleted. The 15.1-hour run is kept because it is the baseline any remediation has to
+beat: option 2 and option 3 below are only measurable against it.
+
+Behaviour after the withdrawal, verified rather than assumed: `TranslationService` reports
+`_pgp_has_translations = False`, `get_pgp_description_he()` and `get_pgp_document_type_he()` return
+`None`, and no exception is raised. `is_available()` still returns `True` -- it is satisfied by the
+unrelated FJMS sidecar -- so the translations toggle stays visible, correctly, for the surfaces that
+do have translations.
+
+One consequence to keep in view: `scripts/export_pgp_sidecar.py` drops `pgp_translations` on every
+rebuild, which currently works *in favour* of this decision. That is an accident, not a safeguard,
+and it stops helping the moment the quality question is answered.
 
 ## Options
 
