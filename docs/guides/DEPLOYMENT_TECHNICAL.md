@@ -871,6 +871,13 @@ That is why a refresh is not finished until the sidecar is rebuilt and deployed.
 CSVs and build a 156 MB sidecar. Only step 8 touches the server.
 
 ```bash
+# 0. Regenerate the FIST shelfmark supplement (needs fist_data/FIST.db).
+#    It contributes ~35,600 shelfmarks libraries.csv does not carry. Skip it and the
+#    fragment match rate falls 94.5% -> 87.5%: ~2,900 fragments stop linking and lose
+#    their IIIF image URLs, which is most of what a refresh is for. Steps 1-3 now
+#    refuse to run without it.
+python scripts/fist_shelfmarks_export.py
+
 # 1. Download the upstream CSVs, all pinned to one commit.
 #    (--dry-run first: it prints the row deltas against the current pgp.db.)
 python scripts/fetch_pgp_metadata.py --dry-run
@@ -928,6 +935,13 @@ one of its five numbers (`scholarly_transcriptions`) is derived from
 | `pgp_translations` | destroyed by every rebuild (the 2026-04-22 refresh took 34,954 rows with it, unnoticed for five months) | carried forward across rebuilds |
 | A failed export | deleted `pgp.db` before building, so a failure left no sidecar at all | builds beside the live file, swaps after validation |
 | Stale `pgp-text` checkout | a failed `git pull` warned and imported the old checkout as if fresh | now aborts; `--skip-clone` is the deliberate opt-out |
+| Missing FIST supplement | fragment match rate drops 94.5% -> 87.5% with no warning, so ~2,900 fragments never link and their IIIF images never appear | step 0; both consumers now refuse to run without it |
+| `fist_shelfmarks_export.py` | pointed at `FIST_DB_BACKUP/FIST.db`, a directory that no longer exists, so the supplement could not be regenerated at all | now finds `fist_data/FIST.db` |
+
+**Upserts never delete.** `import_pgp_full.py` upserts on natural keys, so documents
+Princeton has *withdrawn* stay in Supabase and in the sidecar (344 such pgpids as of
+2026-09-22). Removing them is a separate, deliberate decision -- not something a refresh
+should do silently.
 
 **PGP data files** (in `pgp_data/`): not in git. `fetch_pgp_metadata.py` downloads them and
 writes `pgp_data/upstream_provenance.json`, which the exporter folds into `pgp.db`'s `meta`

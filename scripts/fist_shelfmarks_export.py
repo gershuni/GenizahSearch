@@ -35,7 +35,24 @@ def export_fist_shelfmarks():
     script_dir = Path(__file__).parent
     project_dir = script_dir.parent
 
-    fist_db = project_dir / 'FIST_DB_BACKUP' / 'FIST.db'
+    # FIST.db moved to fist_data/ when the sidecars were consolidated; the old
+    # FIST_DB_BACKUP/ path was left behind here and silently stopped resolving, so the
+    # supplement could no longer be regenerated. Without it the PGP fragment match rate
+    # falls from ~94.5% to 87.5% -- 2,700 fragments that stop linking, and with them the
+    # IIIF image URLs a refresh exists to deliver. Search the known locations and say
+    # which one was used rather than failing with a path nobody recognises.
+    fist_candidates = [
+        project_dir / 'fist_data' / 'FIST.db',
+        project_dir / 'FIST_DB_BACKUP' / 'FIST.db',
+    ]
+    fist_db = next((p for p in fist_candidates if p.exists()), None)
+    if fist_db is None:
+        raise SystemExit(
+            "FIST.db not found. Looked in:\n" +
+            "\n".join("  %s" % p for p in fist_candidates)
+        )
+    print(f"FIST database: {fist_db}")
+
     libraries_csv = project_dir / 'libraries.csv'
     output_file = project_dir / 'pgp_data' / 'fist_shelfmarks_supplement.csv'
 

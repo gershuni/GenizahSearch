@@ -71,6 +71,38 @@ from pgp_transcriptions_export import normalize_shelfmark, load_genizahsearch_sh
 BATCH_SIZE = 500  # Proven in v1 imports
 
 
+def require_fist_supplement(path, allow_missing: bool) -> None:
+    """Refuse to run without the FIST shelfmark supplement.
+
+    It contributes ~35,600 shelfmarks that libraries.csv does not carry. Without it the
+    PGP fragment match rate drops from 94.5% to 87.5% -- roughly 2,900 fragments that
+    quietly fail to link, taking their IIIF image URLs with them. The old behaviour was
+    to shrug and continue, so the loss showed up only as a slightly worse number in a
+    report nobody diffed.
+    """
+    import os as _os
+    if _os.path.exists(path):
+        return
+    if allow_missing:
+        print("WARNING: proceeding WITHOUT the FIST supplement (--no-fist-supplement).")
+        print("         Expect a materially lower fragment match rate.")
+        print()
+        return
+    print("ERROR: FIST shelfmark supplement not found:", file=__import__("sys").stderr)
+    print("         %s" % path, file=__import__("sys").stderr)
+    print("", file=__import__("sys").stderr)
+    print("Regenerate it with:  python scripts/fist_shelfmarks_export.py",
+          file=__import__("sys").stderr)
+    print("(it needs fist_data/FIST.db). Without it the fragment match rate falls from",
+          file=__import__("sys").stderr)
+    print("94.5% to 87.5%, so thousands of fragments lose their IIIF image links.",
+          file=__import__("sys").stderr)
+    print("Pass --no-fist-supplement if you really mean to run without it.",
+          file=__import__("sys").stderr)
+    raise SystemExit(1)
+
+
+
 # ============================================
 # DATA LOADING FUNCTIONS
 # ============================================
@@ -755,6 +787,10 @@ Prerequisites:
         '--execute', action='store_true',
         help='Actually import data to Supabase'
     )
+    parser.add_argument(
+        '--no-fist-supplement', action='store_true',
+        help='Run without pgp_data/fist_shelfmarks_supplement.csv (much worse matching)'
+    )
 
     args = parser.parse_args()
     dry_run = not args.execute
@@ -821,6 +857,8 @@ Prerequisites:
     # ============================================
     print("Step 1: Loading data sources...")
     print()
+
+    require_fist_supplement(str(fist_supplement_path), args.no_fist_supplement)
 
     print("  Loading GenizahSearch shelfmarks from libraries.csv...")
     gs_lookup = load_genizahsearch_shelfmarks(
