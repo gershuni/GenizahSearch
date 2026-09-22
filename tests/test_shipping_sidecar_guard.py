@@ -238,6 +238,60 @@ def _ps1_lines(path):
     return [ln.strip() for ln in path.read_text(encoding="utf-8").splitlines()]
 
 
+def _sidecar_readers():
+    text = DEPLOY_PS1.read_text(encoding="utf-8")
+    block = re.search(r"\$SidecarReaders = @\((.*?)\)", text, re.S)
+    assert block, "deploy_pgp_sidecar.ps1 must declare $SidecarReaders"
+    return re.findall(r"'([^']+)'", block.group(1))
+
+
+def _opens_the_sidecar(path):
+    """True when the module names pgp.db in CODE -- a docstring or comment mention does not
+    count. Parsed rather than grepped, because `shared/export_dossier.py` and
+    `shared/transcription_credits.py` both discuss the file in prose and open nothing."""
+    import ast
+
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    except SyntaxError:
+        return False
+    docstrings = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            body = getattr(node, "body", None)
+            if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
+                    and isinstance(body[0].value.value, str):
+                docstrings.add(id(body[0].value))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) \
+                and id(node) not in docstrings and "pgp.db" in node.value:
+            return True
+    return False
+
+
+def test_every_module_that_opens_the_sidecar_is_in_the_contract():
+    """gpt-5-codex on PR #358 (P2): `shared/translation_service.py` finds and opens pgp.db
+    itself, and queried `pgp_translations` -- a schema change it alone had to absorb would
+    leave the contract commit old and let the upload through. Derive the OPENERS from the
+    source so the list cannot quietly fall behind again.
+
+    This is a lower bound, deliberately. It cannot find the modules that read FIELDS off what
+    those services return -- `browse_enrichment.py`, which is what actually raised on
+    2026-09-22, never names the file. Those stay hand-listed."""
+    listed = set(_sidecar_readers())
+    openers = sorted(
+        str(p.relative_to(REPO_ROOT)).replace("\\", "/")
+        for p in list((REPO_ROOT / "shared").glob("*.py")) + list((REPO_ROOT / "web").rglob("*.py"))
+        if _opens_the_sidecar(p)
+    )
+    assert openers, "the detector found no sidecar openers at all -- it has stopped working"
+    missing = [o for o in openers if o not in listed]
+    assert not missing, (
+        "these modules open pgp.db but are not in $SidecarReaders, so a schema change only "
+        "they absorb would not hold back the upload: %s" % missing
+    )
+
+
 def test_the_sidecar_reader_list_names_files_that_exist():
     """`$SidecarReaders` decides which commit the server must already have. A renamed or
     deleted module left in that list is invisible: `git log -1 -- <paths>` still returns a
@@ -264,13 +318,16 @@ def test_the_deploy_script_uploads_only_after_the_guard_passes():
     lines = _ps1_lines(DEPLOY_PS1)
     guard = next(i for i, ln in enumerate(lines)
                  if ln.startswith("python scripts/check_shipping_sidecar.py"))
+    dirty = next(i for i, ln in enumerate(lines) if ln.startswith("git diff --quiet HEAD"))
     contract = next(i for i, ln in enumerate(lines) if ln.startswith("$Contract = (git "))
     ancestor = next(i for i, ln in enumerate(lines)
                     if ln.startswith("ssh ") and "--is-ancestor" in ln)
     upload = next(i for i, ln in enumerate(lines) if ln.startswith("scp "))
     restart = next(i for i, ln in enumerate(lines)
                    if ln.startswith("ssh ") and "systemctl restart" in ln)
-    assert guard < contract < ancestor < upload < restart
+    # The working-tree check must come BEFORE the commit is derived: `git log` answers with
+    # the last COMMITTED reader, so an uncommitted edit would be invisible to it.
+    assert guard < dirty < contract < ancestor < upload < restart
 
     # STRICT form. gpt-6-astra (round 5) disabled the check with `-and $false` while
     # keeping the text a looser pin matched, and the suite stayed green.
@@ -279,7 +336,10 @@ def test_the_deploy_script_uploads_only_after_the_guard_passes():
     def checked(after, before):
         return any(check.match(ln) for ln in lines[after + 1:before])
 
-    assert checked(guard, contract), "the guard's exit code must gate everything after it"
+    assert checked(guard, dirty), "the guard's exit code must gate everything after it"
+    assert checked(dirty, contract), (
+        "an uncommitted reader change must stop the deploy, not be derived around"
+    )
     assert checked(ancestor, upload), (
         "the server-has-the-code check must gate the upload -- a sidecar whose schema the "
         "deployed code cannot read took the live site's browse enrichment down on 2026-09-22"
@@ -290,8 +350,8 @@ def test_the_deploy_script_uploads_only_after_the_guard_passes():
     )
     # One check per external command, and nothing else that looks like one.
     commands = [i for i, ln in enumerate(lines)
-                if ln.startswith(("python ", "scp ", "ssh ", "$Contract = (git "))]
-    assert len(commands) == 5
+                if ln.startswith(("python ", "scp ", "ssh ", "git ", "$Contract = (git "))]
+    assert len(commands) == 6
     for i in commands:
         following = next(ln for ln in lines[i + 1:] if ln)
         assert check.match(following), "the line after %r must be its exit-code check" % lines[i]
@@ -494,6 +554,21 @@ def _log_lines(log):
 TEST_HOST = "stub-host"
 TEST_REPO = "/srv/stub-repo"
 RESTART_ARGS = "%s sudo systemctl restart genizah-web" % TEST_HOST
+FAKE_SHA = "0123456789abcdef0123456789abcdef01234567"
+
+
+def _git_stub(tmp_path, dirty=False):
+    """`git diff` reports the working tree, `git log` prints a fixed sha. Real git would tie
+    these tests to whatever happens to be uncommitted in the checkout, so editing one of the
+    reader modules would redden the DEPLOY tests for no reason."""
+    (tmp_path / "stubs" / "git.cmd").write_text(
+        "@echo off\r\n"
+        "echo git %* >> \"%STUB_LOG%\"\r\n"
+        "if \"%1\"==\"diff\" exit /b " + ("1" if dirty else "0") + "\r\n"
+        "if \"%1\"==\"log\" echo " + FAKE_SHA + "\r\n"
+        "exit /b 0\r\n",
+        encoding="ascii",
+    )
 
 
 def _deploy_args(sidecar):
@@ -508,39 +583,59 @@ def test_deploy_refuses_when_the_server_lacks_the_sidecar_reading_code(tmp_path)
     upload, not warn about it."""
     clean = _sidecar(tmp_path / "clean.db")
     env, log = _stubs(tmp_path, scp=0, ssh=1)
+    _git_stub(tmp_path)
     rc, _out, err = _run_ps1(DEPLOY_PS1, _deploy_args(clean), env)
     assert rc == 1
     assert "the server does not have commit" in err
     assert "deploy.sh master-main" in err, "the message must name the way out"
-    assert _log_lines(log) == ["ssh"], "nothing may be uploaded after that refusal"
+    assert _log_lines(log) == ["git", "git", "ssh"], "nothing may be uploaded after that refusal"
+
+
+def test_deploy_refuses_while_a_reader_is_still_uncommitted(tmp_path):
+    """gpt-5-codex on PR #358 (P1): `git log` answers with the last COMMITTED reader. Deploy
+    a sidecar built from a working tree that also holds the matching code change and the
+    server passes this check on the OLD commit, exactly the state the gate exists to stop.
+    Nothing may run after the refusal -- not even the commit derivation."""
+    clean = _sidecar(tmp_path / "clean.db")
+    env, log = _stubs(tmp_path, scp=0, ssh=0)
+    _git_stub(tmp_path, dirty=True)
+    rc, _out, err = _run_ps1(DEPLOY_PS1, _deploy_args(clean), env)
+    assert rc == 1
+    assert "differs from HEAD" in err
+    assert "Commit and push the reader change first" in err
+    assert _log_lines(log) == ["git"], "the deploy must stop at the working-tree check"
 
 
 def test_deploy_really_stops_when_scp_fails(tmp_path):
     clean = _sidecar(tmp_path / "clean.db")
     env, log = _stubs(tmp_path, scp=1, ssh=0)
+    _git_stub(tmp_path)
     rc, _out, err = _run_ps1(DEPLOY_PS1, _deploy_args(clean), env)
     assert rc == 1
     assert "DEPLOY ABORTED: scp failed" in err
-    assert _log_lines(log) == ["ssh", "scp"], "no restart after a failed upload"
+    assert _log_lines(log) == ["git", "git", "ssh", "scp"], "no restart after a failed upload"
 
 
 def test_deploy_really_reports_a_failed_restart(tmp_path):
     clean = _sidecar(tmp_path / "clean.db")
     env, log = _stubs(tmp_path, scp=0, ssh=0, fail_on=RESTART_ARGS)
+    _git_stub(tmp_path)
     rc, out, err = _run_ps1(DEPLOY_PS1, _deploy_args(clean), env)
     assert rc == 1
     assert "DEPLOY ABORTED: restart failed" in err
     assert "Deployed" not in out
-    assert _log_lines(log) == ["ssh", "scp", "ssh"]
+    assert _log_lines(log) == ["git", "git", "ssh", "scp", "ssh"]
 
 
 def test_deploy_succeeds_end_to_end_when_every_step_does(tmp_path):
     clean = _sidecar(tmp_path / "clean.db")
     env, log = _stubs(tmp_path, scp=0, ssh=0)
+    _git_stub(tmp_path)
     rc, out, _err = _run_ps1(DEPLOY_PS1, _deploy_args(clean), env)
     assert rc == 0
     assert "Deployed" in out
-    assert _log_lines(log) == ["ssh", "scp", "ssh"]
+    assert FAKE_SHA in out, "the contract commit the server was checked against must be shown"
+    assert _log_lines(log) == ["git", "git", "ssh", "scp", "ssh"]
 
 
 def test_refresh_really_stops_at_the_first_failing_step(tmp_path):

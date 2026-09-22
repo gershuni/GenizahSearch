@@ -33,11 +33,17 @@ param(
 
 # The modules that READ the sidecar. If the newest commit touching any of them is not yet
 # on the server, the server cannot be trusted to read what we are about to upload.
+# Two kinds of entry: the modules that OPEN pgp.db (document_service and translation_service
+# each find and connect to it independently), and the modules that read FIELDS off what those
+# return, which is where a new column actually raised on 2026-09-22.
+# tests/test_shipping_sidecar_guard.py derives the openers from the source and fails if one
+# is missing here; the field-readers are hand-listed and cannot be derived.
 $SidecarReaders = @(
     'web/pages/browse_enrichment.py',
     'web/pages/search_results.py',
     'shared/browse_service.py',
     'shared/document_service.py',
+    'shared/translation_service.py',
     'scripts/export_pgp_sidecar.py'
 )
 
@@ -64,6 +70,12 @@ if ($DryRun) {
 }
 
 Write-Host "== 2/4 the server must already run the code that reads this sidecar"
+# Uncommitted reader changes first: `git log` answers with the last COMMITTED version, so a
+# server holding that commit would pass while the sidecar you just built needs the edit still
+# sitting in the working tree. The refresh builds a gitignored pgp.db from that tree, so this
+# is the ordinary case, not a corner one.
+git diff --quiet HEAD -- $SidecarReaders
+if ($LASTEXITCODE -ne 0) { Fail "one of $($SidecarReaders -join ', ') differs from HEAD. The commit this check derives is the last COMMITTED one, so an uncommitted reader change would be invisible to it and the sidecar would ship ahead of its code. Commit and push the reader change first. Nothing was uploaded" }
 $Contract = (git log -1 --format=%H -- $SidecarReaders | Select-Object -First 1)
 if ($LASTEXITCODE -ne 0) { Fail "could not read the local git history for the sidecar readers (exit $LASTEXITCODE); nothing was uploaded" }
 if (-not $Contract) { Fail "no commit found for any of: $($SidecarReaders -join ', ') -- run this from the repository, not a copy" }
