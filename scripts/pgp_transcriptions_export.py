@@ -24,6 +24,7 @@ import re
 import sys
 import hashlib
 import io
+import json
 import os
 from collections import defaultdict
 from datetime import datetime
@@ -244,7 +245,8 @@ def _fingerprint(path):
     return _fingerprint_bytes(_read_bytes(path))
 
 
-def _record_derived_provenance(pgp_data_dir, verified: bool = False, inputs=()) -> None:
+def _record_derived_provenance(pgp_data_dir, verified: bool = False, inputs=(),
+                               commit=None) -> None:
     """Stamp transcriptions_linked.csv with its upstream commit AND its own checksum.
 
     The commit alone was not enough: replacing the file with two lines of CSV while
@@ -261,27 +263,17 @@ def _record_derived_provenance(pgp_data_dir, verified: bool = False, inputs=()) 
     leaves the file on disk disagreeing with the stamp, and the import refuses.
 
     `verified` defaults to False on purpose: forgetting to pass it must produce no stamp,
-    never a certified one.
+    never a certified one. `commit` is the upstream commit read from the SAME manifest
+    bytes that verified the inputs -- this function opens nothing: re-reading the manifest
+    here let a fetch that landed mid-derivation relabel commit-A output as commit B.
     """
-    import hashlib
-    import json
-
     # Invalidate FIRST, before any early return. A stale derived_provenance.json left
     # behind by a previous run would otherwise vouch for output this run produced from
     # unverified -- or unknown -- inputs.
     _invalidate_derived_stamp(pgp_data_dir)
 
-    upstream_path = os.path.join(str(pgp_data_dir), 'upstream_provenance.json')
-    if not os.path.exists(upstream_path):
-        return
-    try:
-        with open(upstream_path, 'r', encoding='utf-8') as fh:
-            upstream = json.load(fh) or {}
-    except (OSError, ValueError):
-        return
-
-    commit = upstream.get('upstream_commit')
     if not commit:
+        print("  No derived provenance recorded (no verified upstream commit).")
         return
     if not verified:
         # Derived from CSVs that failed their manifest; the stamp was already removed
@@ -570,15 +562,21 @@ def export_transcriptions(
     for path, raw in ((documents_path, documents_raw), (footnotes_path, footnotes_raw)):
         if raw is None:
             raise FileNotFoundError(path)
+    manifest_raw = _read_bytes(os.path.join(output_dir, 'upstream_provenance.json'))
 
     # Verify the upstream CSVs -- THESE bytes, not the files on disk. Verifying by path and
     # then letting the loaders re-open the files left the same swap-and-restore window
     # the mapping inputs had: swapped content in the output, the original commit in the
-    # stamp, and a clean verification afterwards.
-    _require_verified_inputs(output_dir, contents={
+    # stamp, and a clean verification afterwards. The manifest is bound the same way: the
+    # commit stamped below comes from these manifest bytes, never from a second open().
+    verified = _require_verified_inputs(output_dir, contents={
         'documents.csv': documents_raw,
         'footnotes.csv': footnotes_raw,
+        'upstream_provenance.json': manifest_raw,
     })
+    verified_commit = None
+    if verified and manifest_raw is not None:
+        verified_commit = (json.loads(manifest_raw.decode('utf-8')) or {}).get('upstream_commit')
 
     input_fingerprints = (
         ('libraries.csv', _fingerprint_bytes(libraries_raw)),
@@ -741,6 +739,7 @@ def export_transcriptions(
         output_dir,
         verified=_INPUTS_VERIFIED,
         inputs=input_fingerprints,
+        commit=verified_commit,
     )
 
     print("Export complete!")

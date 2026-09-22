@@ -112,14 +112,19 @@ def verify_against_provenance(dest: str, check_derived: bool = True, contents=No
     """
     problems = []
     path = os.path.join(dest, PROVENANCE_FILENAME)
-    if not os.path.exists(path):
+    # The manifest too may be handed over as bytes, so that the commit a consumer later
+    # stamps is read from the same bytes that verified its inputs. A fetch landing between
+    # the check and a second open() used to label commit-A data as commit B.
+    raw_manifest = _bytes_for(PROVENANCE_FILENAME, path, contents)
+    if raw_manifest is None:
         return ["%s is missing -- the CSVs were not fetched by scripts/fetch_pgp_metadata.py"
                 % PROVENANCE_FILENAME]
     try:
-        with open(path, "r", encoding="utf-8") as fh:
-            provenance = json.load(fh)
-    except (OSError, ValueError) as exc:
+        provenance = json.loads(raw_manifest.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as exc:
         return ["%s is unreadable: %s" % (PROVENANCE_FILENAME, exc)]
+    if not isinstance(provenance, dict):
+        return ["%s is not a JSON object" % PROVENANCE_FILENAME]
 
     files = provenance.get("files") or {}
     if not files:

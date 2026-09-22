@@ -42,6 +42,7 @@ Prerequisites:
 import argparse
 import csv
 import io
+import json
 import os
 import sys
 from collections import defaultdict
@@ -884,28 +885,27 @@ def invalidate_import_provenance(pgp_data_dir: str) -> None:
 
 
 def write_import_provenance(pgp_data_dir: str, after_counts: Dict[str, int],
-                            verified: bool = True, supabase_url: Optional[str] = None) -> None:
+                            verified: bool = True, supabase_url: Optional[str] = None,
+                            upstream: Optional[Dict] = None) -> None:
     """Write what this import pushed, and the row counts it left behind.
 
     The sidecar export reads THIS file, not the fetch-time one, and only stamps the
     upstream commit into pgp.db's meta if the counts it exports corroborate these -- and
     if it is exporting from the same project this record names.
+
+    `upstream` is the manifest PARSED FROM THE BYTES THAT VERIFIED THE IMPORT. This
+    function opens nothing: re-reading upstream_provenance.json here let a fetch that
+    landed during the (long) push record the new commit against rows prepared from the
+    old one -- and the after-counts still corroborated, so the sidecar published A's data
+    as B.
     """
-    import json
     from datetime import timezone
 
-    upstream = {}
-    upstream_path = os.path.join(pgp_data_dir, PROVENANCE_FILENAME)
     # A manifest that FAILED verification must not lend its commit id to the import
     # record: --no-provenance-check means "import these anyway", not "and vouch for
     # them". Row-count corroboration downstream cannot detect altered files with
     # unchanged counts, so the sidecar would carry a commit whose checksums did not match.
-    if verified and os.path.exists(upstream_path):
-        try:
-            with open(upstream_path, 'r', encoding='utf-8') as fh:
-                upstream = json.load(fh) or {}
-        except (OSError, ValueError):
-            upstream = {}
+    upstream = dict(upstream or {}) if verified else {}
 
     record = {
         'imported_at': datetime.now(timezone.utc).isoformat(),
@@ -1153,7 +1153,16 @@ Prerequisites:
             fist_supplement_path.read_bytes() if fist_supplement_path.exists() else None
         ),
     }
+    # The manifest too: the commit recorded at the end comes from THESE bytes.
+    manifest_path = project_dir / 'pgp_data' / PROVENANCE_FILENAME
+    raw[PROVENANCE_FILENAME] = manifest_path.read_bytes() if manifest_path.exists() else None
     problems = verify_against_provenance(pgp_data_dir, contents=raw)
+    verified_upstream = {}
+    if raw[PROVENANCE_FILENAME] is not None:
+        try:
+            verified_upstream = json.loads(raw[PROVENANCE_FILENAME].decode('utf-8')) or {}
+        except (ValueError, UnicodeDecodeError):
+            verified_upstream = {}
     provenance_problems = list(problems)
     if problems:
         if args.no_provenance_check:
@@ -1389,7 +1398,7 @@ Prerequisites:
     # machine. Without this the exporter can label a database with a commit that was
     # downloaded but never imported -- or that another machine imported instead.
     write_import_provenance(pgp_data_dir, after_counts, verified=not provenance_problems,
-                            supabase_url=supabase_url)
+                            supabase_url=supabase_url, upstream=verified_upstream)
     print()
 
     print("IMPORT COMPLETE")

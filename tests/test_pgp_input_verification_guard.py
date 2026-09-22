@@ -101,7 +101,8 @@ def test_a_verified_run_does_record_the_commit(exporter, tmp_path, monkeypatch):
     (staged / "transcriptions_linked.csv").write_bytes(b"pgpid\n1\n")
 
     exporter._require_verified_inputs(staged)
-    exporter._record_derived_provenance(staged, verified=exporter._INPUTS_VERIFIED)
+    exporter._record_derived_provenance(staged, verified=exporter._INPUTS_VERIFIED,
+                                        commit="a94528cc")
 
     recorded = json.loads((staged / "derived_provenance.json").read_text(encoding="utf-8"))
     assert recorded["derived_from_commit"] == "a94528cc"
@@ -480,3 +481,50 @@ def test_bytes_swapped_under_the_read_are_what_gets_verified(exporter, tmp_path,
     assert rc == 1, "the swapped bytes must fail verification"
     assert "footnotes.csv: SHA-256 does not match" in err
     assert not (pgp_data / "transcriptions_linked.csv").exists()
+
+
+def test_the_stamp_carries_the_commit_of_the_manifest_that_verified_the_inputs(
+        exporter, tmp_path, monkeypatch):
+    """Codex review 10: the stamp writer re-opened upstream_provenance.json. A fetch that
+    landed mid-derivation (here: the manifest is rewritten with commit B after the inputs
+    verified as A) relabelled A-derived output as B, and B's checksums then verified the
+    B inputs clean. The commit must come from the manifest bytes that did the verifying."""
+    monkeypatch.delenv("PGP_ALLOW_UNVERIFIED_INPUTS", raising=False)
+    pgp_data = fx.build_tree(tmp_path, derived=False)
+    real = exporter.extract_transcriptions_from_bytes
+
+    def parse_then_new_fetch_lands(raw):
+        result = real(raw)
+        fx.write_upstream_manifest(pgp_data, commit="b" * 40)  # a new fetch, same files
+        return result
+
+    monkeypatch.setattr(exporter, "extract_transcriptions_from_bytes", parse_then_new_fetch_lands)
+    assert _run_main(exporter, tmp_path)[0] == 0
+    stamp = json.loads((pgp_data / "derived_provenance.json").read_text(encoding="utf-8"))
+    assert stamp["derived_from_commit"] == fx.COMMIT, (
+        "the output was derived from commit A's verified bytes; the stamp must say A"
+    )
+    # ...and with the manifest on disk now saying B, verification must NOT be clean.
+    problems = _verifier().verify_against_provenance(str(pgp_data), check_derived=True)
+    assert any("derived from" in p for p in problems), problems
+
+
+def test_a_stamp_writer_given_no_verified_commit_writes_nothing(exporter, tmp_path):
+    staged = _staged(tmp_path)
+    (staged / "transcriptions_linked.csv").write_bytes(b"pgpid\n1\n")
+    exporter._record_derived_provenance(staged, verified=True)  # no commit handed over
+    assert not (staged / "derived_provenance.json").exists()
+
+
+def test_the_verifier_checks_the_manifest_bytes_it_is_handed(tmp_path):
+    pgp_data = fx.build_tree(tmp_path)
+    verifier = _verifier()
+    manifest_raw = (pgp_data / "upstream_provenance.json").read_bytes()
+    fx.write_upstream_manifest(pgp_data, commit="b" * 40)  # disk now says B
+    # Handed A's manifest bytes: files match, and the derived file (stamped A) agrees.
+    assert verifier.verify_against_provenance(
+        str(pgp_data), check_derived=True, contents={"upstream_provenance.json": manifest_raw}
+    ) == []
+    # Read from disk (B): the derived file's A no longer matches.
+    assert any("derived from" in p
+               for p in verifier.verify_against_provenance(str(pgp_data), check_derived=True))

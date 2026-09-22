@@ -232,3 +232,22 @@ def test_the_importer_parses_exactly_the_bytes_it_verified(importer, tmp_path, m
     assert _run(importer, monkeypatch, "--execute")[0] == 0
     assert hashlib.sha256(seen["documents.csv"]).hexdigest() == \
         manifest["files"]["documents.csv"]["sha256"]
+
+
+def test_the_record_carries_the_commit_of_the_manifest_that_verified_the_import(
+        importer, tmp_path, monkeypatch):
+    """Codex review 10: write_import_provenance() re-opened upstream_provenance.json after
+    the (long) push. A fetch landing meanwhile recorded the new commit against rows
+    prepared from the old one, and the after-counts still corroborated."""
+    real_upsert = importer.upsert_in_batches
+
+    def push_then_new_fetch_lands(*args, **kwargs):
+        result = real_upsert(*args, **kwargs)
+        fx.write_upstream_manifest(tmp_path / "pgp_data", commit="b" * 40)
+        return result
+
+    monkeypatch.setattr(importer, "upsert_in_batches", push_then_new_fetch_lands)
+    assert _run(importer, monkeypatch, "--execute")[0] == 0
+    assert _record(tmp_path)["upstream_commit"] == fx.COMMIT, (
+        "the rows came from commit A's verified bytes; the record must say A"
+    )
