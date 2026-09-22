@@ -16,8 +16,16 @@
 # present-but-NULL column returned None and `'Edition' in None` raised. That killed the whole
 # browse-enrichment pass (images, folios, Cambridge, pagination, attribution), 16 times in
 # 8 minutes of live traffic, until the sidecar was rolled back. So step 2 below refuses to
-# upload until the server's checkout already contains the last commit that touched the
-# modules which READ this file.
+# upload until the server's checkout already contains the commit this sidecar was built from.
+#
+# WHY THAT COMMIT AND NOT A NARROWER ONE. This check first tried to name the modules that read
+# the sidecar and require only THEIR last commit. Four review rounds found four consumers that
+# enumeration had missed -- one reached the file through a second service, one through a lazy
+# in-function import, one through an import spelling the detector could not parse. Every miss
+# fails OPEN: the upload proceeds. So the enumeration is gone. The sidecar is built from this
+# working tree, so the rule is simply that the server must be running this tree's code. It
+# costs an occasional code deploy for unrelated commits; it cannot be defeated by a consumer
+# nobody remembered.
 #
 # Every step here is followed by an exit-code check. Nothing after a failed step runs.
 #
@@ -29,42 +37,6 @@ param(
     [string]$RemoteRepo = "/home/ubuntu/GenizahSearch",
     [string]$Sidecar = "pgp_data/pgp.db",
     [switch]$DryRun
-)
-
-# The modules that READ the sidecar. If the newest commit touching any of them is not yet on
-# the server, the server cannot be trusted to read what we are about to upload.
-#
-# DERIVED, NOT HAND-LISTED. Two rounds of review each found a module missing from a list I
-# had written out by hand -- first shared/translation_service.py, then web/pages/browse.py --
-# so the set is now computed from three signals and pinned by an EXACT match in
-# tests/test_shipping_sidecar_guard.py, which prints the corrected block when it fails:
-#   1. opens pgp.db itself (a non-docstring "pgp.db" literal)
-#   2. imports one of the modules that DO, at module level or inside a function -- derived
-#      from 1, not named, because hardcoding document_service there hid web/pages/parallels.py,
-#      which reaches the sidecar through TranslationService
-#   3. names the 'doc_relation' column, however it came by the dict
-# Plus the exporter, which is not a reader: when IT changes the schema changes, so a server
-# that does not have it has no business receiving what it produced.
-$SidecarReaders = @(
-    'scripts/export_pgp_sidecar.py',
-    'shared/browse_service.py',
-    'shared/document_service.py',
-    'shared/export_dossier.py',
-    'shared/fgp_service.py',
-    'shared/manuscript_details.py',
-    'shared/search_serializer.py',
-    'shared/transcription_service.py',
-    'shared/translation_service.py',
-    'web/components/catalog_dialog.py',
-    'web/components/joins_panel.py',
-    'web/document_service.py',
-    'web/pages/browse.py',
-    'web/pages/browse_enrichment.py',
-    'web/pages/catalog_browse.py',
-    'web/pages/parallels.py',
-    'web/pages/search.py',
-    'web/pages/search_results.py',
-    'web/stats_service.py'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -83,30 +55,30 @@ if ($LASTEXITCODE -ne 0) { Fail "the shipping guard refused $Sidecar (exit $LAST
 if ($DryRun) {
     Write-Host ""
     Write-Host "Dry run. Would now run:"
-    Write-Host "  ssh $RemoteHost (confirm the server already has the sidecar-reading code)"
+    Write-Host "  ssh $RemoteHost (confirm the server is running this tree's code)"
     Write-Host "  scp $Sidecar ${RemoteHost}:$RemotePath"
     Write-Host "  ssh $RemoteHost `"sudo systemctl restart genizah-web`""
     exit 0
 }
 
-Write-Host "== 2/4 the server must already run the code that reads this sidecar"
-# Uncommitted reader changes first: `git log` answers with the last COMMITTED version, so a
-# server holding that commit would pass while the sidecar you just built needs the edit still
-# sitting in the working tree. The refresh builds a gitignored pgp.db from that tree, so this
+Write-Host "== 2/4 the server must already run this tree's code"
+# Uncommitted changes first: HEAD is what the server can be checked against, so if the tree
+# differs from it the sidecar may have been built from code that is in no commit at all and
+# there is nothing to compare. The refresh builds a gitignored pgp.db from this tree, so this
 # is the ordinary case, not a corner one.
-git diff --quiet HEAD -- $SidecarReaders
-if ($LASTEXITCODE -ne 0) { Fail "one of $($SidecarReaders -join ', ') differs from HEAD. The commit this check derives is the last COMMITTED one, so an uncommitted reader change would be invisible to it and the sidecar would ship ahead of its code. Commit and push the reader change first. Nothing was uploaded" }
+git diff --quiet HEAD
+if ($LASTEXITCODE -ne 0) { Fail "the working tree has uncommitted changes to tracked files, so the code this sidecar was built from is not in any commit and the server cannot be checked against it. Commit and push first. Nothing was uploaded" }
 # @(...) and NOT `| Select-Object -First 1`: Select-Object stops the pipeline as soon as it
 # has its one item, which can terminate the native git process mid-write and leave
 # $LASTEXITCODE at -1 -- a deploy that aborts claiming it could not read the git history,
-# on a repository where nothing is wrong. Caught when the reader list grew to 17 paths.
-$ContractLines = @(git log -1 --format=%H -- $SidecarReaders)
-if ($LASTEXITCODE -ne 0) { Fail "could not read the local git history for the sidecar readers (exit $LASTEXITCODE); nothing was uploaded" }
+# on a repository where nothing is wrong.
+$ContractLines = @(git rev-parse HEAD)
+if ($LASTEXITCODE -ne 0) { Fail "could not read HEAD (exit $LASTEXITCODE) -- run this from the repository, not a copy; nothing was uploaded" }
 $Contract = $ContractLines[0]
-if (-not $Contract) { Fail "no commit found for any of: $($SidecarReaders -join ', ') -- run this from the repository, not a copy" }
-Write-Host "   the readers were last changed in $Contract"
+if (-not $Contract) { Fail "git rev-parse HEAD printed nothing -- run this from the repository, not a copy" }
+Write-Host "   this sidecar was built from $Contract"
 ssh $RemoteHost "set -e; cd $RemoteRepo; git fetch -q origin; git merge-base --is-ancestor $Contract HEAD"
-if ($LASTEXITCODE -ne 0) { Fail "the server does not have commit $Contract, which last changed $($SidecarReaders -join ', '). A sidecar whose schema those modules do not yet understand can break the live site -- see the CODE BEFORE DATA note at the top of this script. Deploy the code first (ssh $RemoteHost 'cd $RemoteRepo; ./deploy.sh master-main'), then re-run this. Nothing was uploaded" }
+if ($LASTEXITCODE -ne 0) { Fail "the server's checkout does not contain $Contract, the commit this sidecar was built from, so it may not be able to read what is about to be uploaded -- see the CODE BEFORE DATA note at the top of this script. Deploy the code first (ssh $RemoteHost 'cd $RemoteRepo; ./deploy.sh master-main'), then re-run this. Nothing was uploaded" }
 
 Write-Host "== 3/4 upload: $Sidecar -> ${RemoteHost}:$RemotePath"
 scp $Sidecar "${RemoteHost}:$RemotePath"

@@ -238,161 +238,6 @@ def _ps1_lines(path):
     return [ln.strip() for ln in path.read_text(encoding="utf-8").splitlines()]
 
 
-def _sidecar_readers():
-    text = DEPLOY_PS1.read_text(encoding="utf-8")
-    block = re.search(r"\$SidecarReaders = @\((.*?)\)", text, re.S)
-    assert block, "deploy_pgp_sidecar.ps1 must declare $SidecarReaders"
-    return re.findall(r"'([^']+)'", block.group(1))
-
-
-# The exporter is not a reader: it PRODUCES the sidecar, so when it changes the schema
-# changes, and a server that lacks that commit has no business receiving the result.
-SIDECAR_PRODUCER = "scripts/export_pgp_sidecar.py"
-
-
-def _code_strings(tree):
-    """Every string literal that is not a docstring. `shared/transcription_credits.py`
-    discusses pgp.db in prose and opens nothing, so prose must not count."""
-    import ast
-
-    docstrings = set()
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
-            body = getattr(node, "body", None)
-            if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
-                    and isinstance(body[0].value.value, str):
-                docstrings.add(id(body[0].value))
-    return [n.value for n in ast.walk(tree)
-            if isinstance(n, ast.Constant) and isinstance(n.value, str)
-            and id(n) not in docstrings]
-
-
-def _imported_modules(tree):
-    """Every name this module imports, found by WALKING -- several consumers import the sidecar
-    services lazily inside a function, where a header-only scan never looks.
-
-    `ImportFrom` contributes its module AND each imported alias, because
-    `from shared import translation_service` and `from . import translation_service` put the
-    module name in the alias, not in `node.module` -- the second recording nothing at all.
-    Reading only `node.module` would have let a consumer written that way through."""
-    import ast
-
-    names = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            if node.module:
-                names.add(node.module)
-            names.update(a.name for a in node.names)
-        elif isinstance(node, ast.Import):
-            names.update(a.name for a in node.names)
-    return names
-
-
-def _derived_sidecar_readers():
-    """The consumer set, from three signals. Signal 2 is derived from signal 1 rather than
-    naming a module: hardcoding `document_service` there is exactly what hid
-    `web/pages/parallels.py`, which reaches the sidecar through TranslationService."""
-    import ast
-
-    trees = {}
-    for p in list((REPO_ROOT / "shared").glob("*.py")) + list((REPO_ROOT / "web").rglob("*.py")):
-        try:
-            trees[p] = ast.parse(p.read_text(encoding="utf-8", errors="replace"))
-        except SyntaxError:
-            continue
-
-    # 1. the modules that open pgp.db themselves
-    openers = {p for p, t in trees.items() if any("pgp.db" in s for s in _code_strings(t))}
-    assert openers, "no module was found opening pgp.db -- the detector has stopped working"
-    opener_modules = {p.stem for p in openers}
-
-    out = set()
-    for p, tree in trees.items():
-        opens = p in openers
-        # 2. imports one of THOSE modules, at any depth
-        imports_opener = any(m.split(".")[-1] in opener_modules for m in _imported_modules(tree))
-        # 3. names the column, however it came by the dict
-        names_column = any(s == "doc_relation" for s in _code_strings(tree))
-        if opens or imports_opener or names_column:
-            out.add(str(p.relative_to(REPO_ROOT)).replace("\\", "/"))
-    return out
-
-
-def test_the_import_detector_sees_every_form_of_importing_an_opener():
-    """gpt-5-codex on PR #358 (P2): the detector read only `ImportFrom.module`, so
-    `from shared import translation_service` recorded `shared` and the relative form recorded
-    nothing -- a consumer written either way would have been missed while the exact-match test
-    stayed green. All four forms must resolve to the opener's module name."""
-    import ast
-
-    forms = {
-        "plain module": "import shared.translation_service",
-        "from module import symbol": "from shared.translation_service import TranslationService",
-        "from package import module": "from shared import translation_service",
-        "relative from package": "from . import translation_service",
-    }
-    for label, source in forms.items():
-        names = _imported_modules(ast.parse(source))
-        assert any(n.split(".")[-1] == "translation_service" for n in names), (
-            "%s (%r) does not resolve to the opener module: %s" % (label, source, sorted(names))
-        )
-
-    # ...and a lazy import inside a function, which is how several real consumers do it.
-    lazy = "def f():\n    from shared import translation_service\n    return translation_service\n"
-    names = _imported_modules(ast.parse(lazy))
-    assert any(n.split(".")[-1] == "translation_service" for n in names)
-
-
-def test_the_contract_covers_every_sidecar_consumer_exactly():
-    """gpt-5-codex on PR #358, twice. First `shared/translation_service.py` was missing from a
-    list I wrote by hand; then, after I added it by hand, `web/pages/browse.py` -- which calls
-    the service and branches on `doc_relation` -- was missing too. A list maintained by hand
-    keeps losing entries, so it is DERIVED here and matched EXACTLY: a module that consumes the
-    sidecar and is not in the contract lets an incompatible sidecar through, and a module listed
-    that no longer consumes it anchors the contract to an unrelated commit.
-
-    Three signals, union: opens pgp.db, imports one of the modules that DO (derived, not named --
-    hardcoding `document_service` there is what hid `web/pages/parallels.py`, which reaches the
-    sidecar through TranslationService), or names the doc_relation column. `browse_enrichment.py`,
-    the module that actually raised on 2026-09-22, is caught by the second and third and by
-    neither the first nor any header-only import scan -- it takes the dict from its caller and
-    imports inside a function."""
-    listed = set(_sidecar_readers())
-    derived = _derived_sidecar_readers()
-    assert derived, "the detector found no sidecar consumers at all -- it has stopped working"
-    expected = derived | {SIDECAR_PRODUCER}
-
-    missing = sorted(expected - listed)
-    stale = sorted(listed - expected)
-    assert not (missing or stale), (
-        "$SidecarReaders in scripts/deploy_pgp_sidecar.ps1 is out of date.\n"
-        "  missing (consume the sidecar, would not hold back an upload): %s\n"
-        "  stale   (no longer consume it, anchor the contract to unrelated commits): %s\n"
-        "Replace the block with:\n%s"
-        % (missing, stale,
-           "\n".join("    '%s'," % e for e in sorted(expected)).rstrip(","))
-    )
-
-
-def test_the_sidecar_reader_list_names_files_that_exist():
-    """`$SidecarReaders` decides which commit the server must already have. A renamed or
-    deleted module left in that list is invisible: `git log -1 -- <paths>` still returns a
-    commit from the SURVIVING entries, so the gate keeps passing while silently checking
-    less than it claims to. Every entry must be a real tracked file."""
-    text = DEPLOY_PS1.read_text(encoding="utf-8")
-    block = re.search(r"\$SidecarReaders = @\((.*?)\)", text, re.S)
-    assert block, "deploy_pgp_sidecar.ps1 must declare $SidecarReaders"
-    entries = re.findall(r"'([^']+)'", block.group(1))
-    assert entries, "the reader list must not be empty"
-    missing = [e for e in entries if not (REPO_ROOT / e).exists()]
-    assert not missing, (
-        "$SidecarReaders names files that no longer exist: %s. Update it in the same commit "
-        "as the rename, or the code-before-data gate checks the wrong history." % missing
-    )
-    # The module that actually raised on 2026-09-22 must stay covered.
-    assert "web/pages/browse_enrichment.py" in entries
-
-
 def test_the_deploy_script_uploads_only_after_the_guard_passes():
     """Order AND consumption of the exit code: guard, then a `$LASTEXITCODE -ne 0` check,
     then the code-before-data check, then scp, then another check, then the restart.
@@ -400,8 +245,9 @@ def test_the_deploy_script_uploads_only_after_the_guard_passes():
     lines = _ps1_lines(DEPLOY_PS1)
     guard = next(i for i, ln in enumerate(lines)
                  if ln.startswith("python scripts/check_shipping_sidecar.py"))
-    dirty = next(i for i, ln in enumerate(lines) if ln.startswith("git diff --quiet HEAD"))
-    contract = next(i for i, ln in enumerate(lines) if ln.startswith("$ContractLines = @(git "))
+    dirty = next(i for i, ln in enumerate(lines) if ln.strip() == "git diff --quiet HEAD")
+    contract = next(i for i, ln in enumerate(lines)
+                    if ln.startswith("$ContractLines = @(git rev-parse HEAD)"))
     ancestor = next(i for i, ln in enumerate(lines)
                     if ln.startswith("ssh ") and "--is-ancestor" in ln)
     upload = next(i for i, ln in enumerate(lines) if ln.startswith("scp "))
@@ -436,8 +282,19 @@ def test_the_deploy_script_uploads_only_after_the_guard_passes():
     assert len(commands) == 6
     # Select-Object would stop the pipeline early and can kill the native process mid-write,
     # leaving $LASTEXITCODE at -1 on a perfectly healthy repository.
-    assert not any("git log" in ln and "Select-Object" in ln for ln in lines), (
+    assert not any("git rev-parse" in ln and "Select-Object" in ln for ln in lines), (
         "capture git's output with @(...), never through Select-Object -First"
+    )
+    # The check compares the SERVER against this tree's HEAD. Four review rounds defeated the
+    # earlier version, which named the modules that read the sidecar: every enumeration miss
+    # failed open. Nothing here may narrow the comparison to a subset of the tree again.
+    text = DEPLOY_PS1.read_text(encoding="utf-8")
+    assert "$SidecarReaders" not in text, (
+        "the deploy must compare the server against HEAD, not against an enumerated subset "
+        "of sidecar-reading modules -- see the CODE BEFORE DATA note in the script"
+    )
+    assert "git diff --quiet HEAD\n" in text.replace("\r\n", "\n"), (
+        "the working-tree check must cover the whole tree, not a path list"
     )
     for i in commands:
         following = next(ln for ln in lines[i + 1:] if ln)
@@ -645,14 +502,14 @@ FAKE_SHA = "0123456789abcdef0123456789abcdef01234567"
 
 
 def _git_stub(tmp_path, dirty=False):
-    """`git diff` reports the working tree, `git log` prints a fixed sha. Real git would tie
-    these tests to whatever happens to be uncommitted in the checkout, so editing one of the
-    reader modules would redden the DEPLOY tests for no reason."""
+    """`git diff` reports the working tree, `git rev-parse` prints a fixed sha. Real git would
+    tie these tests to whatever happens to be uncommitted in the checkout, so any edit in
+    progress would redden the DEPLOY tests for no reason."""
     (tmp_path / "stubs" / "git.cmd").write_text(
         "@echo off\r\n"
         "echo git %* >> \"%STUB_LOG%\"\r\n"
         "if \"%1\"==\"diff\" exit /b " + ("1" if dirty else "0") + "\r\n"
-        "if \"%1\"==\"log\" echo " + FAKE_SHA + "\r\n"
+        "if \"%1\"==\"rev-parse\" echo " + FAKE_SHA + "\r\n"
         "exit /b 0\r\n",
         encoding="ascii",
     )
@@ -662,34 +519,34 @@ def _deploy_args(sidecar):
     return ["-Sidecar", sidecar, "-RemoteHost", TEST_HOST, "-RemoteRepo", TEST_REPO]
 
 
-def test_deploy_refuses_when_the_server_lacks_the_sidecar_reading_code(tmp_path):
+def test_deploy_refuses_when_the_server_is_behind_this_tree(tmp_path):
     """2026-09-22, live: the refreshed pgp.db added `documents.doc_relation` (NULL for 80%
     of rows) and was uploaded to a server whose code read it with `.get(k, '')`. Browse
     enrichment raised TypeError 16 times in 8 minutes until the sidecar was rolled back.
-    The FIRST ssh asks whether the server already has that commit; a 'no' must stop the
-    upload, not warn about it."""
+    The FIRST ssh asks whether the server's checkout contains this tree's HEAD; a 'no' must
+    stop the upload, not warn about it."""
     clean = _sidecar(tmp_path / "clean.db")
     env, log = _stubs(tmp_path, scp=0, ssh=1)
     _git_stub(tmp_path)
     rc, _out, err = _run_ps1(DEPLOY_PS1, _deploy_args(clean), env)
     assert rc == 1
-    assert "the server does not have commit" in err
+    assert "does not contain" in err and FAKE_SHA in err
     assert "deploy.sh master-main" in err, "the message must name the way out"
     assert _log_lines(log) == ["git", "git", "ssh"], "nothing may be uploaded after that refusal"
 
 
-def test_deploy_refuses_while_a_reader_is_still_uncommitted(tmp_path):
-    """gpt-5-codex on PR #358 (P1): `git log` answers with the last COMMITTED reader. Deploy
-    a sidecar built from a working tree that also holds the matching code change and the
-    server passes this check on the OLD commit, exactly the state the gate exists to stop.
-    Nothing may run after the refusal -- not even the commit derivation."""
+def test_deploy_refuses_while_the_tree_is_still_uncommitted(tmp_path):
+    """gpt-5-codex on PR #358 (P1). The server can only be checked against a COMMIT, so a tree
+    that differs from HEAD means the sidecar may have been built from code that is in no commit
+    at all and there is nothing to compare. Nothing may run after the refusal -- not even the
+    commit derivation."""
     clean = _sidecar(tmp_path / "clean.db")
     env, log = _stubs(tmp_path, scp=0, ssh=0)
     _git_stub(tmp_path, dirty=True)
     rc, _out, err = _run_ps1(DEPLOY_PS1, _deploy_args(clean), env)
     assert rc == 1
-    assert "differs from HEAD" in err
-    assert "Commit and push the reader change first" in err
+    assert "uncommitted changes to tracked files" in err
+    assert "Commit and push first" in err
     assert _log_lines(log) == ["git"], "the deploy must stop at the working-tree check"
 
 

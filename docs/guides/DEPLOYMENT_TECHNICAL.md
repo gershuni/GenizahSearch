@@ -901,8 +901,9 @@ powershell -File scripts/refresh_pgp_data.ps1 -Execute -StartAt 4
 #   ssh ubuntu@<server> 'cd /home/ubuntu/GenizahSearch && ./deploy.sh master-main'
 #
 # Then: guard, code check, scp, restart -- each gated on the previous exit code. Step 2
-# refuses to upload until the server already has the last commit that touched the modules
-# which read the sidecar, so the order above is enforced rather than merely documented.
+# refuses to upload until the server's checkout contains the commit this sidecar was built
+# from, so the order above is enforced rather than merely documented. It also refuses while
+# the working tree is dirty, since then the sidecar came from code that is in no commit.
 powershell -File scripts/deploy_pgp_sidecar.ps1
 ```
 
