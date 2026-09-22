@@ -153,22 +153,28 @@ def main(argv=None) -> int:
             print("\nBuild first (build_app.bat), or drop the stale dist/ directory.",
                   file=sys.stderr)
             return 1
-        args.sidecar = targets[0]
 
-    problems = check_sidecar(
-        args.sidecar,
-        allow_withheld=args.allow_translations,
-        allow_stale_schema=args.allow_stale_schema,
-    )
-    if not problems:
-        print("Sidecar fit to ship: %s" % args.sidecar)
+    # EVERY candidate, not just the first. CompileScriptGenizah.iss packages the whole
+    # dist tree recursively, so if both supported layouts are present a clean _internal
+    # copy could pass the guard while a second, stale pgp_data/pgp.db still ships.
+    found = []
+    for target in targets:
+        problems = check_sidecar(
+            target,
+            allow_withheld=args.allow_translations,
+            allow_stale_schema=args.allow_stale_schema,
+        )
+        found.extend((target, problem) for problem in problems)
+
+    if not found:
+        for target in targets:
+            print("Sidecar fit to ship: %s" % target)
         return 0
 
     print("", file=sys.stderr)
-    print("REFUSING TO BUILD -- %s must not be shipped as it stands:" % args.sidecar,
-          file=sys.stderr)
-    for problem in problems:
-        print("  - %s" % problem, file=sys.stderr)
+    print("REFUSING TO BUILD -- these must not be shipped as they stand:", file=sys.stderr)
+    for target, problem in found:
+        print("  - %s: %s" % (target, problem), file=sys.stderr)
     print("", file=sys.stderr)
     print("To withhold the translations again:", file=sys.stderr)
     print("    python scripts/export_pgp_sidecar.py    (rebuilds without them only if",

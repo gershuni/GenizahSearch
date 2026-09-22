@@ -355,6 +355,44 @@ def detect_translation_language(content: str) -> str:
     return "Hebrew" if hebrew_count > 10 else "English"
 
 
+def build_transcription_lookup(transcription_records: List[Dict]) -> Dict[int, Dict]:
+    """pgpid -> the edition whose text becomes ``documents.transcription``.
+
+    Two passes, and the order of both matters:
+
+    1. The FIRST row whose relation is exactly ``Digital Edition``.
+    2. Only if there is none, the first row of any other ``Edition`` relation -- which
+       rescues documents like pgpid 38267 whose sole edition carries the bare relation
+       ``Edition``.
+
+    Both passes keep the FIRST match. That guard was briefly dropped from pass 1, so the
+    LAST exact edition won instead: 657 documents silently received a different scholar's
+    text and a different attribution (Gil where it should have been Goitein, Friedman
+    where it should have been Olszowy-Schlanger). Attribution is not cosmetic here -- it
+    is what the citation machinery prints -- so this lives in a function that can be
+    tested rather than inline in main().
+    """
+    lookup: Dict[int, Dict] = {}
+
+    for rec in transcription_records:
+        pgpid = rec['pgpid']
+        if pgpid not in lookup and rec['doc_relation'] == 'Digital Edition':
+            lookup[pgpid] = {
+                'content': rec['content'],
+                'source_scholar': rec['source_scholar'],
+            }
+
+    for rec in transcription_records:
+        pgpid = rec['pgpid']
+        if pgpid not in lookup and is_edition_relation(rec['doc_relation']):
+            lookup[pgpid] = {
+                'content': rec['content'],
+                'source_scholar': rec['source_scholar'],
+            }
+
+    return lookup
+
+
 def prepare_document_records(
     documents: Dict[int, Dict],
     transcription_lookup: Dict[int, Dict]
@@ -1036,26 +1074,7 @@ Prerequisites:
     # ============================================
     print("Step 3: Building transcription lookup...")
 
-    # Build lookup: pgpid -> first Digital Edition content
-    transcription_lookup = {}
-    for rec in transcription_records:
-        pgpid = rec['pgpid']
-        if rec['doc_relation'] == 'Digital Edition':
-            # Exact match always wins. Widening to any 'Edition' relation rescued pgpid
-            # 38267 (whose only edition is the bare relation 'Edition') but regressed
-            # 20107, where an earlier bare-'Edition' row displaced the explicit Digital
-            # Edition and changed the attribution. Two passes keep both right.
-            transcription_lookup[pgpid] = {
-                'content': rec['content'],
-                'source_scholar': rec['source_scholar'],
-            }
-    for rec in transcription_records:
-        pgpid = rec['pgpid']
-        if pgpid not in transcription_lookup and is_edition_relation(rec['doc_relation']):
-            transcription_lookup[pgpid] = {
-                'content': rec['content'],
-                'source_scholar': rec['source_scholar'],
-            }
+    transcription_lookup = build_transcription_lookup(transcription_records)
 
     print(f"    Documents with Digital Edition content: {len(transcription_lookup):,}")
     print()

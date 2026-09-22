@@ -112,10 +112,19 @@ def test_a_deliberate_omission_can_be_declared(exporter, monkeypatch):
     exporter.assert_no_dropped_columns("documents", rows, cursor)
 
 
-def test_no_rows_is_not_an_error(exporter):
-    """An empty table tells us nothing about columns; it must not be read as 'all fine'
-    OR as a failure."""
-    exporter.assert_no_dropped_columns("documents", [], _cursor_with(["pgpid"]))
+def test_no_rows_is_now_fatal(exporter):
+    """This test used to assert the opposite, and the reversal was deliberate.
+
+    An empty table genuinely tells us nothing about its columns, so the original reading
+    was "cannot check, carry on". But a core PGP table is never legitimately empty, and
+    ``validate_export()`` counts through the SAME client that returned nothing -- so a
+    rotated key, an RLS change or the wrong project yields zero on both sides, the build
+    "validates", and it replaces the live sidecar. Silent whole-table loss beats an
+    unusable column check, so this is now an error.
+    """
+    with pytest.raises(RuntimeError) as excinfo:
+        exporter.assert_no_dropped_columns("documents", [], _cursor_with(["pgpid"]))
+    assert "no rows" in str(excinfo.value)
 
 
 # ── carrying the locally-generated tables across a rebuild ────────────────────

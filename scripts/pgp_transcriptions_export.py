@@ -136,7 +136,12 @@ def normalize_shelfmark(shelf: str) -> str:
 
 
 
-def _require_verified_inputs(pgp_data_dir) -> None:
+# Set by _require_verified_inputs(), read by _record_derived_provenance(). They run in
+# different functions, and the stamp must never certify inputs that failed their manifest.
+_INPUTS_VERIFIED = True
+
+
+def _require_verified_inputs(pgp_data_dir) -> bool:
     """Refuse to derive from CSVs that do not match what the fetch recorded.
 
     Otherwise the stamp certifies inputs it never checked: swap footnotes.csv for an
@@ -152,15 +157,24 @@ def _require_verified_inputs(pgp_data_dir) -> None:
     except ImportError:
         return
 
+    global _INPUTS_VERIFIED
     problems = verify_against_provenance(str(pgp_data_dir), check_derived=False)
     if not problems:
-        return
+        _INPUTS_VERIFIED = True
+        return True
     if os.environ.get('PGP_ALLOW_UNVERIFIED_INPUTS') == '1':
         print("WARNING: deriving from unverified CSVs "
               "(PGP_ALLOW_UNVERIFIED_INPUTS=1):")
         for problem in problems:
             print("  %s" % problem)
-        return
+        print("  No upstream commit will be recorded for the derived file.")
+        _INPUTS_VERIFIED = False
+        # The override means "derive from these anyway", not "and vouch for them".
+        # Without this the stamp copies the rejected manifest's commit, and once the
+        # original CSVs are restored everything verifies clean while the derived output
+        # came from different inputs.
+        return False
+    return True
     print("ERROR: the CSVs in pgp_data/ do not match upstream_provenance.json:",
           file=__import__("sys").stderr)
     for problem in problems:
@@ -172,7 +186,7 @@ def _require_verified_inputs(pgp_data_dir) -> None:
     raise SystemExit(1)
 
 
-def _record_derived_provenance(pgp_data_dir) -> None:
+def _record_derived_provenance(pgp_data_dir, verified: bool = True) -> None:
     """Stamp transcriptions_linked.csv with its upstream commit AND its own checksum.
 
     The commit alone was not enough: replacing the file with two lines of CSV while
@@ -192,6 +206,14 @@ def _record_derived_provenance(pgp_data_dir) -> None:
 
     commit = upstream.get('upstream_commit')
     if not commit:
+        return
+    if not verified:
+        # Derived from CSVs that failed their manifest. Removing any previous stamp is
+        # the point: leaving a stale one behind would let the import trust this output.
+        stale = os.path.join(str(pgp_data_dir), 'derived_provenance.json')
+        if os.path.exists(stale):
+            os.remove(stale)
+        print("  No derived provenance recorded (inputs were not verified).")
         return
 
     linked = os.path.join(str(pgp_data_dir), 'transcriptions_linked.csv')
@@ -553,7 +575,7 @@ def export_transcriptions(
     # from them and is what actually carries transcription content -- so fetching a new
     # commit and keeping an old derived file passed verification while the importer
     # consumed the old text.
-    _record_derived_provenance(output_dir)
+    _record_derived_provenance(output_dir, verified=_INPUTS_VERIFIED)
 
     print("Export complete!")
     print(f"  Linked: {linked_path}")

@@ -231,3 +231,25 @@ def test_the_withholding_decision_is_recorded_where_it_is_enforced(guard):
     reason attached -- not a silent change of behaviour somewhere else."""
     assert "pgp_translations" in guard.WITHHELD_TABLES
     assert "PGP_TRANSLATION_QUALITY.md" in guard.WITHHELD_TABLES["pgp_translations"]
+
+
+def test_every_bundled_layout_is_checked_not_just_the_first(guard, tmp_path, monkeypatch):
+    """CompileScriptGenizah.iss packages the whole dist tree recursively, so checking
+    only the first candidate layout lets a clean `_internal` copy vouch for a stale
+    `pgp_data/pgp.db` sitting beside it that still carries the withheld table."""
+    clean = tmp_path / "internal.db"
+    stale = tmp_path / "stale.db"
+    _sidecar(clean)
+    _sidecar(stale, with_translations=True)
+
+    monkeypatch.setattr(guard, "BUNDLED_SIDECARS", (str(clean), str(stale)))
+    code = guard.main(["--bundled"])
+    assert code == 1, "the stale second layout must still fail the guard"
+
+
+def test_bundled_passes_only_when_every_layout_is_clean(guard, tmp_path, monkeypatch):
+    a, b = tmp_path / "a.db", tmp_path / "b.db"
+    _sidecar(a)
+    _sidecar(b)
+    monkeypatch.setattr(guard, "BUNDLED_SIDECARS", (str(a), str(b)))
+    assert guard.main(["--bundled"]) == 0

@@ -280,3 +280,18 @@ def test_a_stale_import_record_is_not_stamped(exporter, tmp_path):
     finally:
         conn.close()
     assert "upstream_commit" not in meta
+
+
+@pytest.mark.parametrize("table", ["documents", "document_sources", "document_fragments"])
+def test_an_empty_core_table_aborts_the_export(exporter, tmp_path, table):
+    """A core PGP table is never legitimately empty. If one comes back with no rows --
+    a rotated key, an RLS change, the wrong project -- the exporter would build an empty
+    table, and validate_export() counts through the SAME restricted client, so both sides
+    read zero and the 'validated' build replaces the live sidecar. Silent whole-table loss."""
+    fake = FakeSupabase()
+    fake.tables[table] = []
+
+    with pytest.raises(RuntimeError) as excinfo:
+        exporter.build_sidecar(fake, tmp_path, "https://fake")
+    assert table in str(excinfo.value)
+    assert not (tmp_path / "pgp.db").exists()

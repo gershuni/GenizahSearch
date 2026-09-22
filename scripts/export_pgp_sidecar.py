@@ -98,13 +98,17 @@ def assert_no_dropped_columns(table_name, supabase_rows, cursor):
     warning, and five months of translations rendered as transcriptions. Fail instead.
     """
     if not supabase_rows:
-        # An empty table tells us nothing about its columns, so this check cannot run --
-        # which also means a column added to an empty (or entirely RLS-hidden) table is
-        # invisible to it. Say so rather than passing silently; a PGP table with no rows
-        # is itself a reason to stop and look.
-        print("  WARNING: %s returned no rows, so its columns could not be checked"
-              % table_name)
-        return
+        # A core PGP table is never legitimately empty. If one comes back with no rows --
+        # an RLS policy change, a rotated or downgraded key, the wrong project -- the
+        # exporter would build an empty table, and validate_export() counts through the
+        # SAME restricted client, so both sides read zero and the "validated" build
+        # replaces the live sidecar. That is silent whole-table data loss, so it is fatal
+        # rather than a warning.
+        raise RuntimeError(
+            "%s returned no rows. A core PGP table is never empty, so this is a "
+            "credentials, RLS or wrong-project problem -- not an empty corpus. Refusing "
+            "to build a sidecar that would wipe it." % table_name
+        )
     supabase_cols = set(supabase_rows[0])
     local_cols = {r[1] for r in cursor.execute("PRAGMA table_info(%s)" % table_name)}
     dropped = sorted(
