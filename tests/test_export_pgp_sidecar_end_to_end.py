@@ -189,6 +189,39 @@ def test_a_new_supabase_column_actually_stops_the_export(exporter, tmp_path):
     assert not (tmp_path / "pgp.db").exists(), "a refused build must leave nothing behind"
 
 
+@pytest.mark.parametrize(
+    "table", ["document_sources", "document_footnotes", "document_fragments"]
+)
+def test_every_table_is_guarded_not_just_documents(exporter, tmp_path, table):
+    """Round 2 of the same review: removing only the source/footnote/fragment guard calls
+    still passed all 24 tests, because only `documents` was exercised. Four call sites
+    need four tests."""
+    fake = FakeSupabase()
+    fake.tables[table] = [
+        dict(row, newly_added_by_princeton="surprise") for row in fake.tables[table]
+    ]
+
+    with pytest.raises(RuntimeError) as excinfo:
+        exporter.build_sidecar(fake, tmp_path, "https://fake")
+    assert "newly_added_by_princeton" in str(excinfo.value)
+    assert table in str(excinfo.value)
+
+
+def test_fragment_page_info_survives_the_export(exporter, tmp_path):
+    """Also round 2: forcing exported page_info to None passed every test. It decides
+    WHICH document a two-sided fragment resolves to (shared/document_service.py) and
+    which page's text renders (shared/browse_service.py), so losing it is not cosmetic."""
+    assert exporter.build_sidecar(FakeSupabase(), tmp_path, "https://fake") == 0
+
+    conn = sqlite3.connect(str(tmp_path / "pgp.db"))
+    try:
+        assert conn.execute(
+            "SELECT page_info FROM document_fragments WHERE document_id = 1"
+        ).fetchone()[0] == "recto"
+    finally:
+        conn.close()
+
+
 def test_a_failed_export_leaves_the_previous_sidecar_intact(exporter, tmp_path):
     """The reason the build happens beside the live file rather than on top of it."""
     rows = [(1, "תרגום", None, "2026-09-21T00:00:00Z", "dictalm2.0")]

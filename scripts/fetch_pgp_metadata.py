@@ -98,6 +98,28 @@ def verify_against_provenance(dest: str) -> list:
     if not files:
         return ["%s records no files" % PROVENANCE_FILENAME]
 
+    # transcriptions_linked.csv is DERIVED from these CSVs by
+    # scripts/pgp_transcriptions_export.py and is what carries the transcription content
+    # the importer consumes. It is not in this manifest, so fetching a new commit and
+    # keeping the old derived file used to verify clean while importing the old text.
+    derived_path = os.path.join(dest, "derived_provenance.json")
+    linked = os.path.join(dest, "transcriptions_linked.csv")
+    if os.path.exists(linked):
+        derived_commit = None
+        if os.path.exists(derived_path):
+            try:
+                with open(derived_path, "r", encoding="utf-8") as fh:
+                    derived_commit = (json.load(fh) or {}).get("derived_from_commit")
+            except (OSError, ValueError):
+                derived_commit = None
+        expected = provenance.get("upstream_commit")
+        if derived_commit != expected:
+            problems.append(
+                "transcriptions_linked.csv was derived from %s but the CSVs are from %s "
+                "-- re-run scripts/pgp_transcriptions_export.py"
+                % (derived_commit or "an unrecorded commit", (expected or "?")[:12])
+            )
+
     for filename, expected in sorted(files.items()):
         target = os.path.join(dest, filename)
         if not os.path.exists(target):

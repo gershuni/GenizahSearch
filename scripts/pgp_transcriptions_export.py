@@ -136,6 +136,34 @@ def normalize_shelfmark(shelf: str) -> str:
 
 
 
+def _record_derived_provenance(pgp_data_dir) -> None:
+    """Stamp transcriptions_linked.csv with the upstream commit it was derived from."""
+    import json
+
+    upstream_path = os.path.join(str(pgp_data_dir), 'upstream_provenance.json')
+    if not os.path.exists(upstream_path):
+        return
+    try:
+        with open(upstream_path, 'r', encoding='utf-8') as fh:
+            upstream = json.load(fh) or {}
+    except (OSError, ValueError):
+        return
+
+    commit = upstream.get('upstream_commit')
+    if not commit:
+        return
+
+    out = os.path.join(str(pgp_data_dir), 'derived_provenance.json')
+    with open(out, 'w', encoding='utf-8') as fh:
+        json.dump({
+            'derived_from_commit': commit,
+            'derived_by': 'scripts/pgp_transcriptions_export.py',
+            'files': ['transcriptions_linked.csv'],
+        }, fh, indent=2, sort_keys=True)
+        fh.write('\n')
+    print("  Recorded derived provenance (upstream %s)" % commit[:12])
+
+
 def require_fist_supplement(path, allow_missing: bool) -> None:
     """Refuse to run without the FIST shelfmark supplement.
 
@@ -463,6 +491,13 @@ def export_transcriptions(
                     break
 
     print()
+    # Record which upstream commit this DERIVED file was built from. The fetch step
+    # checksums the three downloaded CSVs, but transcriptions_linked.csv is generated
+    # from them and is what actually carries transcription content -- so fetching a new
+    # commit and keeping an old derived file passed verification while the importer
+    # consumed the old text.
+    _record_derived_provenance(output_dir)
+
     print("Export complete!")
     print(f"  Linked: {linked_path}")
     print(f"  Unmatched: {unmatched_path}")

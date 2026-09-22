@@ -77,6 +77,19 @@ IMPORT_PROVENANCE_FILENAME = 'import_provenance.json'
 BATCH_SIZE = 500  # Proven in v1 imports
 
 
+def is_edition_relation(doc_relation: str) -> bool:
+    '''Does this doc_relation denote an edition (i.e. transcribed source text)?
+
+    ONE predicate, used by both the transcription selection here and the classification
+    in scripts/update_doc_relation.py. They used to disagree: the classifier accepted any
+    relation containing 'Edition' while this required exactly 'Digital Edition', so a
+    compound 'Edition ; Translation' row -- or the bare 'Edition' that pgpid 38267 carries
+    -- was classified as an edition while no row was selected for the transcription,
+    leaving whatever was there before. The app then labels stale text with a fresh claim.
+    '''
+    return 'Edition' in (doc_relation or '')
+
+
 def require_fist_supplement(path, allow_missing: bool) -> None:
     """Refuse to run without the FIST shelfmark supplement.
 
@@ -593,7 +606,11 @@ def build_page_info_lookup(documents: Dict[int, Dict]) -> Dict[Tuple[int, str], 
                 continue
             normalized = normalize_shelfmark(part)
             if normalized:
-                lookup[(pgpid, normalized)] = sides[index]
+                # setdefault, not assignment: a combined shelfmark can repeat a fragment
+                # ("T-S 12.1 + T-S 12.1", side "recto ; verso"). document_fragments is
+                # unique on (document_id, sys_id) so only one row can exist for the pair
+                # anyway -- keep the FIRST side rather than silently keeping the last.
+                lookup.setdefault((pgpid, normalized), sides[index])
 
     return lookup
 
@@ -1013,7 +1030,7 @@ Prerequisites:
     transcription_lookup = {}
     for rec in transcription_records:
         pgpid = rec['pgpid']
-        if pgpid not in transcription_lookup and rec['doc_relation'] == 'Digital Edition':
+        if pgpid not in transcription_lookup and is_edition_relation(rec['doc_relation']):
             transcription_lookup[pgpid] = {
                 'content': rec['content'],
                 'source_scholar': rec['source_scholar'],

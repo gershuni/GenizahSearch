@@ -96,6 +96,8 @@ def load_doc_relations(csv_path: Path) -> dict:
             if not doc_relation:
                 continue
 
+            # Same predicate the importer uses to pick the transcription
+            # (import_pgp_full.py::is_edition_relation); they must not diverge.
             existing = relations.get(pgpid)
             if existing and 'Edition' in existing and 'Edition' not in doc_relation:
                 # Already classified by an edition; a later translation must not demote it.
