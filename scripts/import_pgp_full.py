@@ -66,6 +66,12 @@ except ImportError:
 # Import normalize_shelfmark from existing export script
 sys.path.insert(0, str(Path(__file__).parent))
 from pgp_transcriptions_export import normalize_shelfmark, load_genizahsearch_shelfmarks
+from fetch_pgp_metadata import (
+    PROVENANCE_FILENAME,
+    verify_against_provenance,
+)
+
+IMPORT_PROVENANCE_FILENAME = 'import_provenance.json'
 
 # Constants
 BATCH_SIZE = 500  # Proven in v1 imports
@@ -559,10 +565,44 @@ def prepare_footnote_records(
     return valid_records, issues
 
 
+def build_page_info_lookup(documents: Dict[int, Dict]) -> Dict[Tuple[int, str], str]:
+    """(pgpid, normalized fragment shelfmark) -> side, e.g. 'recto' / 'verso'.
+
+    documents.csv carries a combined shelfmark ("A + B") and a parallel side string
+    ("recto ; verso"); zipping them is how the superseded v1 importer populated
+    document_fragments.page_info. import_pgp_full.py loaded `side` and never used it, so
+    the column has gone unmaintained since February.
+
+    It decides which document a two-sided fragment resolves to
+    (shared/document_service.py) and which page's text is shown
+    (shared/browse_service.py), so losing it shows the wrong side's transcription.
+    """
+    lookup: Dict[Tuple[int, str], str] = {}
+
+    for pgpid, doc in documents.items():
+        shelfmark = doc.get('_shelfmark_raw') or ''
+        side = doc.get('_side') or ''
+        if not shelfmark or not side.strip():
+            continue
+
+        parts = [p.strip() for p in shelfmark.split(' + ')]
+        sides = [x.strip() for x in side.split(' ; ')]
+
+        for index, part in enumerate(parts):
+            if index >= len(sides) or not sides[index]:
+                continue
+            normalized = normalize_shelfmark(part)
+            if normalized:
+                lookup[(pgpid, normalized)] = sides[index]
+
+    return lookup
+
+
 def prepare_fragment_records_from_csv(
     fragment_metadata: Dict[str, Dict],
     gs_lookup: Dict[str, str],
-    valid_pgpids: Optional[set] = None
+    valid_pgpids: Optional[set] = None,
+    page_info_lookup: Optional[Dict[Tuple[int, str], str]] = None
 ) -> Tuple[List[Dict], List[Dict]]:
     """
     Build document_fragments records from fragments.csv.
@@ -621,6 +661,7 @@ def prepare_fragment_records_from_csv(
             pgpid_fragments[pgpid].append({
                 'sys_id': sys_id,
                 'shelfmark': shelfmark,
+                'page_info': (page_info_lookup or {}).get((pgpid, normalized)),
                 'collection': meta.get('collection'),
                 'library': meta.get('library'),
                 'library_abbrev': meta.get('library_abbrev'),
@@ -644,6 +685,7 @@ def prepare_fragment_records_from_csv(
                 'library_abbrev': frag['library_abbrev'],
                 'fragment_url': frag['fragment_url'],
                 'iiif_url': frag['iiif_url'],
+                'page_info': frag['page_info'],
             })
 
     return valid_records, issues
@@ -679,6 +721,40 @@ def upsert_in_batches(
         processed += len(batch)
 
     return processed
+
+
+def write_import_provenance(pgp_data_dir: str, after_counts: Dict[str, int]) -> None:
+    """Write what this import pushed, and the row counts it left behind.
+
+    The sidecar export reads THIS file, not the fetch-time one, and only stamps the
+    upstream commit into pgp.db's meta if the counts it exports corroborate these.
+    """
+    import json
+    from datetime import timezone
+
+    upstream = {}
+    upstream_path = os.path.join(pgp_data_dir, PROVENANCE_FILENAME)
+    if os.path.exists(upstream_path):
+        try:
+            with open(upstream_path, 'r', encoding='utf-8') as fh:
+                upstream = json.load(fh) or {}
+        except (OSError, ValueError):
+            upstream = {}
+
+    record = {
+        'imported_at': datetime.now(timezone.utc).isoformat(),
+        'imported_by': 'scripts/import_pgp_full.py',
+        'supabase_counts_after': dict(after_counts),
+    }
+    for key in ('upstream_repo', 'upstream_commit', 'upstream_committed'):
+        if upstream.get(key):
+            record[key] = upstream[key]
+
+    path = os.path.join(pgp_data_dir, IMPORT_PROVENANCE_FILENAME)
+    with open(path, 'w', encoding='utf-8') as fh:
+        json.dump(record, fh, indent=2, sort_keys=True)
+        fh.write('\n')
+    print(f"Wrote {path}")
 
 
 def capture_table_counts(client) -> Dict[str, int]:
@@ -791,6 +867,10 @@ Prerequisites:
         '--no-fist-supplement', action='store_true',
         help='Run without pgp_data/fist_shelfmarks_supplement.csv (much worse matching)'
     )
+    parser.add_argument(
+        '--no-provenance-check', action='store_true',
+        help='Import CSVs that were not fetched by scripts/fetch_pgp_metadata.py'
+    )
 
     args = parser.parse_args()
     dry_run = not args.execute
@@ -859,6 +939,31 @@ Prerequisites:
     print()
 
     require_fist_supplement(str(fist_supplement_path), args.no_fist_supplement)
+
+    # The three CSVs are replaced one at a time by the fetch step, so an interrupted run
+    # can leave a mixed-vintage set -- exactly what pinning to one upstream commit is
+    # meant to prevent. Verify the checksums the fetch recorded before importing anything.
+    pgp_data_dir = str(project_dir / 'pgp_data')
+    problems = verify_against_provenance(pgp_data_dir)
+    if problems:
+        if args.no_provenance_check:
+            print("WARNING: importing CSVs that do not match %s (--no-provenance-check):"
+                  % PROVENANCE_FILENAME)
+            for problem in problems:
+                print("  %s" % problem)
+            print()
+        else:
+            print("ERROR: the CSVs in pgp_data/ do not match %s:" % PROVENANCE_FILENAME,
+                  file=sys.stderr)
+            for problem in problems:
+                print("  %s" % problem, file=sys.stderr)
+            print("", file=sys.stderr)
+            print("Re-run:  python scripts/fetch_pgp_metadata.py", file=sys.stderr)
+            print("Or pass --no-provenance-check to import them anyway.", file=sys.stderr)
+            return 1
+    else:
+        print("  CSV set verified against %s" % PROVENANCE_FILENAME)
+    print()
 
     print("  Loading GenizahSearch shelfmarks from libraries.csv...")
     gs_lookup = load_genizahsearch_shelfmarks(
@@ -951,7 +1056,13 @@ Prerequisites:
     print()
 
     print("  Preparing fragment records...")
-    frag_records, frag_issues = prepare_fragment_records_from_csv(fragment_metadata, gs_lookup, valid_pgpids)
+    page_info_lookup = build_page_info_lookup(documents)
+    print(f"    Fragment sides known (recto/verso): {len(page_info_lookup):,}")
+    frag_records, frag_issues = prepare_fragment_records_from_csv(
+        fragment_metadata, gs_lookup, valid_pgpids, page_info_lookup
+    )
+    with_page_info = sum(1 for r in frag_records if r.get('page_info'))
+    print(f"    Fragment links carrying page_info: {with_page_info:,}")
     print(f"    Valid fragment links: {len(frag_records):,}")
     print(f"    Unmatched fragments: {len(frag_issues):,}")
     if fragment_metadata:
@@ -1059,6 +1170,12 @@ Prerequisites:
 
     print(f"Writing verification report to {report_path}...")
     write_verification_report(before_counts, after_counts, stats, all_issues, str(report_path))
+
+    # Record what was actually PUSHED, so the sidecar export can stamp provenance that
+    # describes the Supabase snapshot rather than whatever CSVs happen to sit on this
+    # machine. Without this the exporter can label a database with a commit that was
+    # downloaded but never imported -- or that another machine imported instead.
+    write_import_provenance(pgp_data_dir, after_counts)
     print()
 
     print("IMPORT COMPLETE")

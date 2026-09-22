@@ -227,15 +227,76 @@ def test_a_missing_carried_table_is_caught(exporter, tmp_path):
 
 
 def test_provenance_is_optional_and_never_raises(exporter, tmp_path):
-    """`meta.created` dates the BUILD; provenance dates the DATA. Fetching the CSVs by
-    hand is allowed -- it just means the sidecar records no upstream commit."""
-    assert exporter.read_provenance(tmp_path) == {}
+    """`meta.created` dates the BUILD; provenance dates the DATA. Importing by hand is
+    allowed -- it just means the sidecar records no upstream commit."""
+    assert exporter.read_import_provenance(tmp_path) == {}
 
-    (tmp_path / exporter.PROVENANCE_FILENAME).write_text(
+    (tmp_path / exporter.IMPORT_PROVENANCE_FILENAME).write_text(
         '{"upstream_commit": "abc123", "upstream_repo": "princetongenizalab/pgp-metadata"}',
         encoding="utf-8",
     )
-    assert exporter.read_provenance(tmp_path)["upstream_commit"] == "abc123"
+    assert exporter.read_import_provenance(tmp_path)["upstream_commit"] == "abc123"
 
-    (tmp_path / exporter.PROVENANCE_FILENAME).write_text("{ not json", encoding="utf-8")
-    assert exporter.read_provenance(tmp_path) == {}
+    (tmp_path / exporter.IMPORT_PROVENANCE_FILENAME).write_text("{ not json", encoding="utf-8")
+    assert exporter.read_import_provenance(tmp_path) == {}
+
+
+def test_provenance_is_read_from_the_import_not_the_download(exporter):
+    """The sidecar is built from Supabase, so a commit id that only describes what this
+    workstation DOWNLOADED could label the database with a vintage it does not hold --
+    fetched but never imported, or Supabase refreshed from another machine. A false
+    provenance claim is worse than none, because it invites trust."""
+    assert exporter.IMPORT_PROVENANCE_FILENAME == "import_provenance.json"
+    assert exporter.IMPORT_PROVENANCE_FILENAME != exporter.PROVENANCE_FILENAME
+
+
+COUNTS = {
+    "documents": 36298,
+    "document_sources": 10037,
+    "document_footnotes": 23634,
+    "document_fragments": 36870,
+}
+
+
+def _record(**overrides):
+    record = {
+        "upstream_commit": "a94528cccfdb732374f3964b9879f8b30444fb23",
+        "upstream_repo": "princetongenizalab/pgp-metadata",
+        "supabase_counts_after": dict(COUNTS),
+    }
+    record.update(overrides)
+    return record
+
+
+def test_matching_counts_corroborate_the_commit(exporter):
+    ok, reason = exporter.corroborate_provenance(_record(), COUNTS)
+    assert ok, reason
+
+
+def test_supabase_moving_under_us_withholds_the_commit(exporter):
+    """Somebody else refreshed Supabase between that import and this export."""
+    moved = dict(COUNTS, documents=36500)
+    ok, reason = exporter.corroborate_provenance(_record(), moved)
+    assert not ok
+    assert "documents" in reason
+
+
+def test_no_import_record_means_no_commit_stamp(exporter):
+    """Fetched but never imported on this machine -- the case the old code got wrong."""
+    ok, reason = exporter.corroborate_provenance({}, COUNTS)
+    assert not ok
+    assert "import_provenance.json" in reason
+
+
+def test_an_import_record_without_counts_is_not_corroboration(exporter):
+    ok, reason = exporter.corroborate_provenance(
+        _record(supabase_counts_after={}), COUNTS
+    )
+    assert not ok
+
+
+def test_an_import_record_without_a_commit_is_not_corroboration(exporter):
+    record = _record()
+    del record["upstream_commit"]
+    ok, _reason = exporter.corroborate_provenance(record, COUNTS)
+    assert not ok

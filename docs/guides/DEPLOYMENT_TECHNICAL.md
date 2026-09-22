@@ -874,7 +874,7 @@ CSVs and build a 156 MB sidecar. Only step 8 touches the server.
 # 0. Regenerate the FIST shelfmark supplement (needs fist_data/FIST.db).
 #    It contributes ~35,600 shelfmarks libraries.csv does not carry. Skip it and the
 #    fragment match rate falls 94.5% -> 87.5%: ~2,900 fragments stop linking and lose
-#    their IIIF image URLs, which is most of what a refresh is for. Steps 1-3 now
+#    their IIIF image URLs, which is most of what a refresh is for. Steps 2 and 3
 #    refuse to run without it.
 python scripts/fist_shelfmarks_export.py
 
@@ -931,7 +931,7 @@ one of its five numbers (`scholarly_transcriptions`) is derived from
 | `import_pgp_documents.py` / `import_document_sources.py` | superseded by `import_pgp_full.py`; running them first means it overwrites their partial work | they now refuse to run without `--run-superseded` |
 | Missing `--execute` | both importers default to `--dry-run`, so the whole procedure silently writes nothing | spelled out above |
 | `transcriptions_linked.csv` | generated locally, not downloaded; step 3 aborts without it | step 2 |
-| `documents.doc_relation` | dropped by the sidecar exporter before v1.1.0, so 891 translation-flagged documents rendered as "PGP Transcription" | carried now, and a fail-closed check refuses to build a sidecar missing any Supabase column |
+| `documents.doc_relation` | dropped by the sidecar exporter before v1.1.0, so 891 translation-flagged documents rendered as "PGP Transcription" | carried now, and a fail-closed check refuses to build a sidecar missing any column Supabase returns (it cannot see columns on a table that comes back empty, and says so) |
 | `pgp_translations` | destroyed by every rebuild (the 2026-04-22 refresh took 34,954 rows with it, unnoticed for five months) | carried forward across rebuilds |
 | A failed export | deleted `pgp.db` before building, so a failure left no sidecar at all | builds beside the live file, swaps after validation |
 | Stale `pgp-text` checkout | a failed `git pull` warned and imported the old checkout as if fresh | now aborts; `--skip-clone` is the deliberate opt-out |

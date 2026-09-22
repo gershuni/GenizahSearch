@@ -10,6 +10,17 @@ python scripts\checkpoint_sidecars.py
 if errorlevel 1 exit /b 1
 echo Done.
 
+REM Refuse to bundle a pgp.db that must not ship. pgp_data\*.db is gitignored, so the
+REM 2026-09-21 removal of the known-bad pgp_translations table is LOCAL FILE STATE, not a
+REM property of the repo -- a build host that kept the old sidecar, or anyone who ran
+REM scripts\restore_pgp_translations.py to measure against it, would otherwise quietly
+REM ship the owner's withheld data. Also rejects a pre-1.1.0 sidecar, which lacks
+REM documents.doc_relation and would present 891 translations as transcriptions.
+REM Runs AFTER the checkpoint above so it sees committed rows, not a WAL journal.
+echo Checking the sidecar is fit to ship...
+python scripts\check_shipping_sidecar.py
+if errorlevel 1 exit /b 1
+
 REM Build from the CHECKED-IN spec, never from command-line flags.
 REM Command-line PyInstaller regenerates GenizahSearchPro.spec on every run and
 REM strips the maintained collect_all() calls for pymupdf / zstandard / lxml plus

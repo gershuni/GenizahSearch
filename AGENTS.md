@@ -97,11 +97,12 @@ python scripts/import_nli_crossref.py
 python scripts/import_manchester_luna.py
 python scripts/import_jts_dpul.py
 python scripts/import_jts_dpul_v2.py
+python scripts/fist_shelfmarks_export.py
+python scripts/fetch_pgp_metadata.py
 python scripts/pgp_transcriptions_export.py
-python scripts/import_pgp_documents.py
 python scripts/import_pgp_full.py --execute
-python scripts/import_document_sources.py
-python scripts/import_pgp_sections.py
+python scripts/update_doc_relation.py --execute
+python scripts/import_pgp_sections.py --execute
 python scripts/export_pgp_sidecar.py
 python scripts/fix_nli_oxford_mislabel.py --dry-run
 python scripts/fix_nli_oxford_mislabel.py --apply

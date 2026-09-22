@@ -596,6 +596,9 @@ def _refuse_unless_forced(argv):
         return
     print("This script is SUPERSEDED by %s, which does the same work in one pass."
           % SUPERSEDED_BY, file=sys.stderr)
+    print("(That equivalence was not quite true until 2026-09-22: the full importer did",
+          file=sys.stderr)
+    print(" not populate document_fragments.page_info. It does now.)", file=sys.stderr)
     print("", file=sys.stderr)
     print("The current refresh procedure is in docs/guides/DEPLOYMENT_TECHNICAL.md,",
           file=sys.stderr)

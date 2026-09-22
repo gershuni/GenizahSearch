@@ -150,20 +150,51 @@ def main(argv=None) -> int:
         print("\nDry run: would write %d rows. Nothing changed." % n_src)
         return 0
 
+    # Stage into a side table and swap at the end. The previous version dropped the
+    # existing table FIRST and then inserted, so an interrupted or failing insert left
+    # the old corpus destroyed -- in the one script whose entire job is to make that
+    # corpus recoverable. DDL in SQLite is transactional, so the swap is all-or-nothing.
     conn = sqlite3.connect(args.pgp_db)
     try:
-        if existing is not None:
-            conn.execute("DROP TABLE pgp_translations")
-        conn.execute(SCHEMA)
+        conn.execute("DROP TABLE IF EXISTS pgp_translations_restore_tmp")
+        conn.execute(SCHEMA.replace("pgp_translations", "pgp_translations_restore_tmp"))
         conn.executemany(
-            "INSERT INTO pgp_translations (%s) VALUES (%s)"
+            "INSERT INTO pgp_translations_restore_tmp (%s) VALUES (%s)"
             % (", ".join(COLUMNS), ", ".join("?" * len(COLUMNS))),
             rows,
         )
-        conn.commit()
+
+        staged = conn.execute(
+            "SELECT COUNT(*) FROM pgp_translations_restore_tmp"
+        ).fetchone()[0]
+        if staged != n_src:
+            conn.rollback()
+            conn.execute("DROP TABLE IF EXISTS pgp_translations_restore_tmp")
+            conn.commit()
+            print("ERROR: staged %d of %d rows; target left untouched"
+                  % (staged, n_src), file=sys.stderr)
+            return 1
+
+        with conn:
+            if existing is not None:
+                conn.execute("DROP TABLE pgp_translations")
+            conn.execute(
+                "ALTER TABLE pgp_translations_restore_tmp RENAME TO pgp_translations"
+            )
         n_new, hash_new = fingerprint(conn)
-    finally:
+    except Exception:
+        try:
+            conn.execute("DROP TABLE IF EXISTS pgp_translations_restore_tmp")
+            conn.commit()
+        except sqlite3.Error:
+            pass
         conn.close()
+        raise
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
     if (n_new, hash_new) != (n_src, hash_src):
         print(

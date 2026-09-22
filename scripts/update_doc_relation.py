@@ -65,6 +65,14 @@ def load_doc_relations(csv_path: Path) -> dict:
     """
     Load pgpid -> doc_relation mapping from transcriptions_linked.csv
 
+    An Edition ALWAYS wins over a Translation for the same pgpid. That is not a
+    preference, it is the only value consistent with the text actually stored:
+    import_pgp_full.py sets documents.transcription from the FIRST 'Digital Edition' row,
+    while this used to take the LAST row of any kind. A document with an edition followed
+    by a translation therefore held edition text but was labelled a translation -- and
+    once doc_relation reaches the sidecar, Browse and Advanced View suppress that text as
+    a translation. Measured on the 2026-09-22 corpus: 1,045 documents.
+
     Returns: Dict mapping pgpid (int) to doc_relation (str)
     """
     relations = {}
@@ -85,8 +93,14 @@ def load_doc_relations(csv_path: Path) -> dict:
                 continue
 
             doc_relation = row.get('doc_relation', '').strip()
-            if doc_relation:
-                relations[pgpid] = doc_relation
+            if not doc_relation:
+                continue
+
+            existing = relations.get(pgpid)
+            if existing and 'Edition' in existing and 'Edition' not in doc_relation:
+                # Already classified by an edition; a later translation must not demote it.
+                continue
+            relations[pgpid] = doc_relation
 
     return relations
 
@@ -108,10 +122,17 @@ def batch_update_doc_relations(client: Client, relations: dict) -> tuple:
     """
     Update doc_relation column in batches.
 
-    Returns: (success_count, error_count)
+    Returns: (success_count, not_found_count, failed_count)
+
+    `not found` and `failed` used to be one counter, and the epilogue asserted the benign
+    reading of it -- so a Supabase outage that failed thousands of updates printed "this
+    is expected for multi-fragment documents" and exited 0. They are different events and
+    only one of them is normal, so they are counted separately and only one of them is
+    fatal.
     """
     success_count = 0
-    error_count = 0
+    not_found_count = 0
+    failed_count = 0
 
     # Convert to list of (pgpid, doc_relation) for batching
     items = list(relations.items())
@@ -128,14 +149,15 @@ def batch_update_doc_relations(client: Client, relations: dict) -> tuple:
                 if response.data:
                     success_count += 1
                 else:
-                    # Document might not exist in database
-                    error_count += 1
+                    # No row matched this pgpid. Normal: the CSV carries one row per
+                    # fragment, so a multi-fragment document appears several times.
+                    not_found_count += 1
 
             except Exception as e:
-                print(f"  Error updating pgpid {pgpid}: {e}")
-                error_count += 1
+                print(f"  ERROR updating pgpid {pgpid}: {e}")
+                failed_count += 1
 
-    return success_count, error_count
+    return success_count, not_found_count, failed_count
 
 
 def main():
@@ -201,7 +223,7 @@ def main():
         print()
         print("To update the database, run:")
         print("  python scripts/update_doc_relation.py --execute")
-        return
+        return 0
 
     # Execute updates
     print("EXECUTE mode - updating database...")
@@ -209,21 +231,35 @@ def main():
 
     client = get_supabase_client()
 
-    success, errors = batch_update_doc_relations(client, relations)
+    success, not_found, failed = batch_update_doc_relations(client, relations)
 
     print()
     print("=" * 60)
     print("Update complete")
     print("=" * 60)
     print(f"  Successful updates: {success}")
-    print(f"  Errors/not found: {errors}")
+    print(f"  Not found in database: {not_found}")
+    print(f"  FAILED (exceptions): {failed}")
 
-    if errors > 0:
+    if not_found > 0:
         print()
-        print(f"Note: {errors} documents in CSV not found in database.")
-        print("This is expected for multi-fragment documents where we have")
-        print("multiple CSV rows mapping to a single pgpid.")
+        print(f"Note: {not_found} pgpids in the CSV matched no row.")
+        print("This is expected for multi-fragment documents, where several CSV rows")
+        print("map to a single pgpid.")
+
+    if failed:
+        print()
+        print(f"ERROR: {failed} update(s) raised. documents.doc_relation is now PARTIALLY",
+              file=sys.stderr)
+        print("updated, which is the worst of the three states: the next sidecar export",
+              file=sys.stderr)
+        print("will pass its own row-count and schema checks and ship a mix of fresh and",
+              file=sys.stderr)
+        print("stale classifications. Re-run this script before exporting.", file=sys.stderr)
+        return 1
+
+    return 0
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

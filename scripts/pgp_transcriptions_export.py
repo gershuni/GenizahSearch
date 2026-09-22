@@ -149,7 +149,8 @@ def require_fist_supplement(path, allow_missing: bool) -> None:
     if _os.path.exists(path):
         return
     if allow_missing:
-        print("WARNING: proceeding WITHOUT the FIST supplement (--no-fist-supplement).")
+        print("WARNING: proceeding WITHOUT the FIST supplement "
+              "(PGP_ALLOW_MISSING_FIST_SUPPLEMENT=1).")
         print("         Expect a materially lower fragment match rate.")
         print()
         return
@@ -162,7 +163,7 @@ def require_fist_supplement(path, allow_missing: bool) -> None:
           file=__import__("sys").stderr)
     print("94.5% to 87.5%, so thousands of fragments lose their IIIF image links.",
           file=__import__("sys").stderr)
-    print("Pass --no-fist-supplement if you really mean to run without it.",
+    print("Set PGP_ALLOW_MISSING_FIST_SUPPLEMENT=1 if you really mean to run without it.",
           file=__import__("sys").stderr)
     raise SystemExit(1)
 

@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import io
 import json
 import os
@@ -67,6 +68,57 @@ FILES = (
 # A download smaller than this is a redirect, an error page or a truncation, not data.
 MIN_BYTES = 100_000
 USER_AGENT = "genizahsearch-pgp-refresh"
+
+
+PROVENANCE_FILENAME = "upstream_provenance.json"
+
+
+def verify_against_provenance(dest: str) -> list:
+    """Do the CSVs on disk still match what the fetch recorded? Returns a list of problems.
+
+    The three CSVs are replaced one at a time, so an interruption between two renames can
+    leave a mixed-vintage set -- which is the exact thing pinning to one upstream commit
+    is meant to prevent. The replacement cannot easily be made atomic across three files,
+    so instead it is made DETECTABLE: provenance carries a SHA-256, byte count and row
+    count per file, and the importer refuses to run on a set that does not match. This
+    also catches a hand-edited or partially copied CSV, which no amount of atomicity would.
+    """
+    problems = []
+    path = os.path.join(dest, PROVENANCE_FILENAME)
+    if not os.path.exists(path):
+        return ["%s is missing -- the CSVs were not fetched by scripts/fetch_pgp_metadata.py"
+                % PROVENANCE_FILENAME]
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            provenance = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return ["%s is unreadable: %s" % (PROVENANCE_FILENAME, exc)]
+
+    files = provenance.get("files") or {}
+    if not files:
+        return ["%s records no files" % PROVENANCE_FILENAME]
+
+    for filename, expected in sorted(files.items()):
+        target = os.path.join(dest, filename)
+        if not os.path.exists(target):
+            problems.append("%s is missing" % filename)
+            continue
+        # Older provenance recorded a bare row count; treat that as unverifiable rather
+        # than as a failure, so an existing checkout is not bricked by the new format.
+        if not isinstance(expected, dict):
+            problems.append("%s: provenance predates checksums; re-run "
+                            "scripts/fetch_pgp_metadata.py" % filename)
+            continue
+        with open(target, "rb") as fh:
+            raw = fh.read()
+        if len(raw) != expected.get("bytes"):
+            problems.append("%s: %d bytes on disk, provenance says %s"
+                            % (filename, len(raw), expected.get("bytes")))
+            continue
+        if hashlib.sha256(raw).hexdigest() != expected.get("sha256"):
+            problems.append("%s: SHA-256 does not match provenance" % filename)
+
+    return problems
 
 
 def _get(url: str, timeout: int = 300) -> bytes:
@@ -201,6 +253,13 @@ def main(argv=None) -> int:
         print("Dry run: nothing written. Re-run without --dry-run to download.")
         return 0
 
+    # Drop the old provenance BEFORE touching any CSV. If the run dies halfway through
+    # the renames below, there is then no provenance vouching for a set that no longer
+    # exists -- and the importer refuses to run without one.
+    stale_provenance = os.path.join(args.dest, PROVENANCE_FILENAME)
+    if os.path.exists(stale_provenance):
+        os.remove(stale_provenance)
+
     # Write via a temp file per CSV, then swap, so an interrupted write cannot leave a
     # half-file that the importer would happily read as a short corpus.
     for filename, raw, _rows in staged:
@@ -216,13 +275,32 @@ def main(argv=None) -> int:
         "upstream_commit": commit["sha"],
         "upstream_committed": commit["committed"],
         "upstream_fetched": datetime.now(timezone.utc).isoformat(),
-        "files": {name: rows for name, _raw, rows in staged},
+        # Per-file checksums so a partially-replaced or hand-edited set is DETECTABLE at
+        # import time. The three renames above are not atomic as a group and cannot
+        # cheaply be made so; this makes the failure loud instead of silent.
+        "files": {
+            name: {
+                "rows": rows,
+                "bytes": len(raw),
+                "sha256": hashlib.sha256(raw).hexdigest(),
+            }
+            for name, raw, rows in staged
+        },
     }
-    provenance_path = os.path.join(args.dest, "upstream_provenance.json")
+    provenance_path = os.path.join(args.dest, PROVENANCE_FILENAME)
     with open(provenance_path, "w", encoding="utf-8") as fh:
         json.dump(provenance, fh, indent=2, sort_keys=True)
         fh.write("\n")
     print("  wrote %s" % provenance_path)
+
+    problems = verify_against_provenance(args.dest)
+    if problems:
+        print("\nERROR: the set on disk does not match what was just written:",
+              file=sys.stderr)
+        for problem in problems:
+            print("  %s" % problem, file=sys.stderr)
+        return 1
+    print("  verified: all %d files match their recorded checksums" % len(staged))
 
     print()
     print("Next: python scripts/pgp_transcriptions_export.py")

@@ -63,8 +63,18 @@ KNOWN_UNEXPORTED = {
     # "table.column": "why",
 }
 
-# Written by scripts/fetch_pgp_metadata.py. Absent when the CSVs were fetched by hand,
-# in which case the sidecar simply carries no upstream provenance.
+# Written by scripts/import_pgp_full.py on a successful --execute. It records the
+# upstream commit that was actually PUSHED to Supabase, plus the row counts the import
+# left behind.
+#
+# Deliberately NOT upstream_provenance.json, which only says what this workstation last
+# DOWNLOADED. The sidecar is built from Supabase, so stamping a download-time commit could
+# label the database with a vintage it does not contain -- if the CSVs were fetched but
+# never imported, or if Supabase was refreshed from another machine. A false provenance
+# claim is worse than none, because it invites trust.
+IMPORT_PROVENANCE_FILENAME = "import_provenance.json"
+
+# Kept for the fetch-time file, which is still read only to report a mismatch.
 PROVENANCE_FILENAME = "upstream_provenance.json"
 
 
@@ -88,6 +98,12 @@ def assert_no_dropped_columns(table_name, supabase_rows, cursor):
     warning, and five months of translations rendered as transcriptions. Fail instead.
     """
     if not supabase_rows:
+        # An empty table tells us nothing about its columns, so this check cannot run --
+        # which also means a column added to an empty (or entirely RLS-hidden) table is
+        # invisible to it. Say so rather than passing silently; a PGP table with no rows
+        # is itself a reason to stop and look.
+        print("  WARNING: %s returned no rows, so its columns could not be checked"
+              % table_name)
         return
     supabase_cols = set(supabase_rows[0])
     local_cols = {r[1] for r in cursor.execute("PRAGMA table_info(%s)" % table_name)}
@@ -172,9 +188,9 @@ def write_carryover_tables(cursor, carried):
     cursor.connection.commit()
 
 
-def read_provenance(pgp_data_dir):
-    """Upstream commit info written by scripts/fetch_pgp_metadata.py, or {} if absent."""
-    path = os.path.join(str(pgp_data_dir), PROVENANCE_FILENAME)
+def read_import_provenance(pgp_data_dir):
+    """What scripts/import_pgp_full.py last pushed to Supabase, or {} if unknown."""
+    path = os.path.join(str(pgp_data_dir), IMPORT_PROVENANCE_FILENAME)
     if not os.path.exists(path):
         return {}
     try:
@@ -182,8 +198,41 @@ def read_provenance(pgp_data_dir):
             data = json.load(fh)
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError) as exc:
-        print("  WARNING: could not read %s: %s" % (PROVENANCE_FILENAME, exc))
+        print("  WARNING: could not read %s: %s" % (IMPORT_PROVENANCE_FILENAME, exc))
         return {}
+
+
+def corroborate_provenance(provenance, exported_counts):
+    """Does the import record describe the snapshot we just exported?
+
+    Returns (ok, reason). Only an `ok` record earns a commit id in meta. This is what
+    stops the sidecar claiming a vintage it does not hold -- the row-count validation
+    elsewhere compares the sidecar against Supabase and is blind to it, because both
+    sides are equally wrong when the import never happened here.
+
+    Matching counts are corroboration, not proof: an import of a different commit that
+    happened to leave identical counts would pass. It catches the failure modes that
+    actually occur -- fetched but never imported, and refreshed from another machine.
+    """
+    if not provenance:
+        return False, ("no %s -- the import step did not run on this machine"
+                       % IMPORT_PROVENANCE_FILENAME)
+    if not provenance.get("upstream_commit"):
+        return False, "%s records no upstream commit" % IMPORT_PROVENANCE_FILENAME
+
+    recorded = provenance.get("supabase_counts_after") or {}
+    if not recorded:
+        return False, "%s records no row counts to check against" % IMPORT_PROVENANCE_FILENAME
+
+    mismatches = [
+        "%s: exported %s, import recorded %s" % (table, format(count, ","), recorded.get(table))
+        for table, count in sorted(exported_counts.items())
+        if recorded.get(table) != count
+    ]
+    if mismatches:
+        return False, ("Supabase has changed since that import (%s)"
+                       % "; ".join(mismatches))
+    return True, "row counts match the recorded import"
 
 
 def fetch_all_rows(client, table_name, order_by="id"):
@@ -546,7 +595,7 @@ def create_meta(cursor, doc_count, source_count, footnote_count, frag_count, sup
 
     # Which upstream commit the CSVs came from. `created` already dates the BUILD; this
     # dates the DATA, which is the thing that was actually five months stale.
-    for key in ("upstream_repo", "upstream_commit", "upstream_committed", "upstream_fetched"):
+    for key in ("upstream_repo", "upstream_commit", "upstream_committed", "imported_at"):
         value = (provenance or {}).get(key)
         if value:
             entries.append((key, str(value)))
@@ -668,10 +717,19 @@ def main():
         print("ERROR: SUPABASE_URL and SUPABASE_ANON_KEY must be set in .env or as defaults")
         sys.exit(1)
 
-    # Paths
-    script_dir = Path(__file__).parent
-    project_dir = script_dir.parent
-    target_dir = project_dir / "pgp_data"
+    target_dir = Path(__file__).parent.parent / "pgp_data"
+    return build_sidecar(create_client(supabase_url, supabase_key), target_dir, supabase_url)
+
+
+def build_sidecar(client, target_dir, supabase_url):
+    """Build pgp.db from `client` into `target_dir`, swapping it in only once valid.
+
+    Separate from main() so a test can drive the real orchestration -- every guard, the
+    carry-forward, the validation and the swap -- against a fake Supabase. Testing only
+    the helpers left the CALL SITES unguarded: they could all be deleted with the suite
+    still green.
+    """
+    target_dir = Path(target_dir)
     target_path = target_dir / "pgp.db"
     # Built beside the live sidecar and swapped in only once validation passes. The old
     # code deleted pgp.db first, so an export that failed -- or was interrupted -- left
@@ -688,18 +746,17 @@ def main():
     # Read the sidecar-only tables out of the LIVE file before anything touches it.
     print("Checking the existing sidecar for locally-generated tables...")
     carried = read_carryover_tables(str(target_path))
-    provenance = read_provenance(target_dir)
+    provenance = read_import_provenance(target_dir)
     if provenance.get("upstream_commit"):
-        print("  upstream: %s @ %s" % (provenance.get("upstream_repo", "?"),
-                                       str(provenance["upstream_commit"])[:12]))
+        print("  last import: %s @ %s (%s)"
+              % (provenance.get("upstream_repo", "?"),
+                 str(provenance["upstream_commit"])[:12],
+                 provenance.get("imported_at", "?")))
     print()
 
     # A stale build file from an interrupted run must not be reused.
     if build_path.exists():
         os.remove(build_path)
-
-    # Create Supabase client
-    client = create_client(supabase_url, supabase_key)
 
     # Create target database
     conn = sqlite3.connect(str(build_path))
@@ -717,6 +774,24 @@ def main():
         # Re-create the locally-generated tables BEFORE validation, so their row
         # counts are part of what gets checked rather than an afterthought.
         write_carryover_tables(cursor, carried)
+
+        # Stamp the upstream commit ONLY if the counts we just exported corroborate the
+        # recorded import. Otherwise carry no provenance at all, and say why.
+        exported_counts = {
+            "documents": doc_count,
+            "document_sources": source_count,
+            "document_footnotes": footnote_count,
+            "document_fragments": frag_count,
+        }
+        corroborated, reason = corroborate_provenance(provenance, exported_counts)
+        if corroborated:
+            print("\n  provenance: %s" % reason)
+        else:
+            print("\n  provenance: NOT recorded -- %s" % reason)
+            print("  The sidecar is still correct; it just cannot honestly say which")
+            print("  upstream commit it came from. Run scripts/import_pgp_full.py")
+            print("  --execute on this machine to establish that.")
+            provenance = {}
 
         # Create meta table
         create_meta(cursor, doc_count, source_count, footnote_count, frag_count,
@@ -766,6 +841,7 @@ def main():
         for table in carried:
             print(f"  {table['name'] + ':':<19} {len(table['rows']):>10,} rows (carried forward)")
         print(f"  File size: {file_size_mb:.1f} MB")
+        return 0
 
     except Exception:
         try:
@@ -784,4 +860,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
