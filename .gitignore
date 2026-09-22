@@ -384,3 +384,7 @@ scripts/nightly_verify_review_artifact.cmd
 !/reports/leading_zero_collisions.csv
 !/reports/synthetic_parent_shelfmarks.csv
 !/reports/cudl_full_normalization_collisions.csv
+
+# Written by deploy.sh on the server AFTER a successful restart: the revision the
+# running genizah-web actually loaded. Per-machine runtime state, never committed.
+/.deployed_revision

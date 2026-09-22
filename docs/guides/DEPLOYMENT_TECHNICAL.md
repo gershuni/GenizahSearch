@@ -892,8 +892,20 @@ powershell -File scripts/refresh_pgp_data.ps1
 # export the sidecar, run the shipping guard on it.
 powershell -File scripts/refresh_pgp_data.ps1 -Execute -StartAt 4
 
-# Deploy: guard, scp, restart -- each gated on the previous exit code. (Web is not
-# continuous-deploy; push the code after the sidecar is up.)
+# CODE FIRST, then this sidecar. The usual "DBs before code" rule assumes the schema is
+# unchanged; a refresh that ADDS a column inverts it. On 2026-09-22 the refreshed pgp.db
+# went up ahead of its code and added `documents.doc_relation`, NULL for 29,226 of 36,642
+# rows; the deployed browse code read it with `.get(k, '')`, a default that fires only on a
+# MISSING key, so browse enrichment raised TypeError -- images, folios and pagination gone
+# on ~80% of PGP pages -- until the sidecar was rolled back.
+#   ssh ubuntu@<server> 'cd /home/ubuntu/GenizahSearch && ./deploy.sh master-main'
+#
+# Then: guard, code check, scp, restart -- each gated on the previous exit code. Step 2 reads
+# meta.source_revision, which export_pgp_sidecar.py stamps into the DATABASE at build time,
+# and refuses unless the RUNNING genizah-web already has that commit (deploy.sh records it in
+# .deployed_revision after a successful restart; a checkout alone proves nothing about the
+# process in memory). It also refuses a sidecar built from a dirty tree, since that code is in
+# no commit at all. So the order above is enforced, not merely documented.
 powershell -File scripts/deploy_pgp_sidecar.ps1
 ```
 
