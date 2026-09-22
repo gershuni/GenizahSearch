@@ -238,15 +238,39 @@ def _ps1_lines(path):
     return [ln.strip() for ln in path.read_text(encoding="utf-8").splitlines()]
 
 
+def test_the_sidecar_reader_list_names_files_that_exist():
+    """`$SidecarReaders` decides which commit the server must already have. A renamed or
+    deleted module left in that list is invisible: `git log -1 -- <paths>` still returns a
+    commit from the SURVIVING entries, so the gate keeps passing while silently checking
+    less than it claims to. Every entry must be a real tracked file."""
+    text = DEPLOY_PS1.read_text(encoding="utf-8")
+    block = re.search(r"\$SidecarReaders = @\((.*?)\)", text, re.S)
+    assert block, "deploy_pgp_sidecar.ps1 must declare $SidecarReaders"
+    entries = re.findall(r"'([^']+)'", block.group(1))
+    assert entries, "the reader list must not be empty"
+    missing = [e for e in entries if not (REPO_ROOT / e).exists()]
+    assert not missing, (
+        "$SidecarReaders names files that no longer exist: %s. Update it in the same commit "
+        "as the rename, or the code-before-data gate checks the wrong history." % missing
+    )
+    # The module that actually raised on 2026-09-22 must stay covered.
+    assert "web/pages/browse_enrichment.py" in entries
+
+
 def test_the_deploy_script_uploads_only_after_the_guard_passes():
     """Order AND consumption of the exit code: guard, then a `$LASTEXITCODE -ne 0` check,
-    then scp, then another check, then the restart. build_app.bat has the same shape."""
+    then the code-before-data check, then scp, then another check, then the restart.
+    build_app.bat has the same shape."""
     lines = _ps1_lines(DEPLOY_PS1)
     guard = next(i for i, ln in enumerate(lines)
                  if ln.startswith("python scripts/check_shipping_sidecar.py"))
+    contract = next(i for i, ln in enumerate(lines) if ln.startswith("$Contract = (git "))
+    ancestor = next(i for i, ln in enumerate(lines)
+                    if ln.startswith("ssh ") and "--is-ancestor" in ln)
     upload = next(i for i, ln in enumerate(lines) if ln.startswith("scp "))
-    restart = next(i for i, ln in enumerate(lines) if ln.startswith("ssh "))
-    assert guard < upload < restart
+    restart = next(i for i, ln in enumerate(lines)
+                   if ln.startswith("ssh ") and "systemctl restart" in ln)
+    assert guard < contract < ancestor < upload < restart
 
     # STRICT form. gpt-6-astra (round 5) disabled the check with `-and $false` while
     # keeping the text a looser pin matched, and the suite stayed green.
@@ -255,15 +279,19 @@ def test_the_deploy_script_uploads_only_after_the_guard_passes():
     def checked(after, before):
         return any(check.match(ln) for ln in lines[after + 1:before])
 
-    assert checked(guard, upload), "the guard's exit code must gate the upload"
+    assert checked(guard, contract), "the guard's exit code must gate everything after it"
+    assert checked(ancestor, upload), (
+        "the server-has-the-code check must gate the upload -- a sidecar whose schema the "
+        "deployed code cannot read took the live site's browse enrichment down on 2026-09-22"
+    )
     assert checked(upload, restart), "a failed upload must not be followed by a restart"
     assert any(check.match(ln) for ln in lines[restart + 1:]), (
         "a failed restart must be reported, not swallowed"
     )
     # One check per external command, and nothing else that looks like one.
     commands = [i for i, ln in enumerate(lines)
-                if ln.startswith(("python ", "scp ", "ssh "))]
-    assert len(commands) == 3
+                if ln.startswith(("python ", "scp ", "ssh ", "$Contract = (git "))]
+    assert len(commands) == 5
     for i in commands:
         following = next(ln for ln in lines[i + 1:] if ln)
         assert check.match(following), "the line after %r must be its exit-code check" % lines[i]
@@ -461,32 +489,58 @@ def _log_lines(log):
             if ln.strip()] if log.exists() else []
 
 
+# A throwaway host/repo so the restart invocation can be named exactly in `fail_on`,
+# independently of whatever the script's defaults happen to be.
+TEST_HOST = "stub-host"
+TEST_REPO = "/srv/stub-repo"
+RESTART_ARGS = "%s sudo systemctl restart genizah-web" % TEST_HOST
+
+
+def _deploy_args(sidecar):
+    return ["-Sidecar", sidecar, "-RemoteHost", TEST_HOST, "-RemoteRepo", TEST_REPO]
+
+
+def test_deploy_refuses_when_the_server_lacks_the_sidecar_reading_code(tmp_path):
+    """2026-09-22, live: the refreshed pgp.db added `documents.doc_relation` (NULL for 80%
+    of rows) and was uploaded to a server whose code read it with `.get(k, '')`. Browse
+    enrichment raised TypeError 16 times in 8 minutes until the sidecar was rolled back.
+    The FIRST ssh asks whether the server already has that commit; a 'no' must stop the
+    upload, not warn about it."""
+    clean = _sidecar(tmp_path / "clean.db")
+    env, log = _stubs(tmp_path, scp=0, ssh=1)
+    rc, _out, err = _run_ps1(DEPLOY_PS1, _deploy_args(clean), env)
+    assert rc == 1
+    assert "the server does not have commit" in err
+    assert "deploy.sh master-main" in err, "the message must name the way out"
+    assert _log_lines(log) == ["ssh"], "nothing may be uploaded after that refusal"
+
+
 def test_deploy_really_stops_when_scp_fails(tmp_path):
     clean = _sidecar(tmp_path / "clean.db")
     env, log = _stubs(tmp_path, scp=1, ssh=0)
-    rc, _out, err = _run_ps1(DEPLOY_PS1, ["-Sidecar", clean], env)
+    rc, _out, err = _run_ps1(DEPLOY_PS1, _deploy_args(clean), env)
     assert rc == 1
     assert "DEPLOY ABORTED: scp failed" in err
-    assert _log_lines(log) == ["scp"], "ssh must not run after a failed upload"
+    assert _log_lines(log) == ["ssh", "scp"], "no restart after a failed upload"
 
 
 def test_deploy_really_reports_a_failed_restart(tmp_path):
     clean = _sidecar(tmp_path / "clean.db")
-    env, log = _stubs(tmp_path, scp=0, ssh=1)
-    rc, out, err = _run_ps1(DEPLOY_PS1, ["-Sidecar", clean], env)
+    env, log = _stubs(tmp_path, scp=0, ssh=0, fail_on=RESTART_ARGS)
+    rc, out, err = _run_ps1(DEPLOY_PS1, _deploy_args(clean), env)
     assert rc == 1
     assert "DEPLOY ABORTED: restart failed" in err
     assert "Deployed" not in out
-    assert _log_lines(log) == ["scp", "ssh"]
+    assert _log_lines(log) == ["ssh", "scp", "ssh"]
 
 
 def test_deploy_succeeds_end_to_end_when_every_step_does(tmp_path):
     clean = _sidecar(tmp_path / "clean.db")
     env, log = _stubs(tmp_path, scp=0, ssh=0)
-    rc, out, _err = _run_ps1(DEPLOY_PS1, ["-Sidecar", clean], env)
+    rc, out, _err = _run_ps1(DEPLOY_PS1, _deploy_args(clean), env)
     assert rc == 0
     assert "Deployed" in out
-    assert _log_lines(log) == ["scp", "ssh"]
+    assert _log_lines(log) == ["ssh", "scp", "ssh"]
 
 
 def test_refresh_really_stops_at_the_first_failing_step(tmp_path):
