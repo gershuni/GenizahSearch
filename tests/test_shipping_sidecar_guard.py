@@ -268,14 +268,21 @@ def _code_strings(tree):
 
 
 def _imported_modules(tree):
-    """Dotted names this module imports, found by WALKING -- several consumers import the
-    sidecar services lazily inside a function, where a header-only scan never looks."""
+    """Every name this module imports, found by WALKING -- several consumers import the sidecar
+    services lazily inside a function, where a header-only scan never looks.
+
+    `ImportFrom` contributes its module AND each imported alias, because
+    `from shared import translation_service` and `from . import translation_service` put the
+    module name in the alias, not in `node.module` -- the second recording nothing at all.
+    Reading only `node.module` would have let a consumer written that way through."""
     import ast
 
     names = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module:
-            names.add(node.module)
+        if isinstance(node, ast.ImportFrom):
+            if node.module:
+                names.add(node.module)
+            names.update(a.name for a in node.names)
         elif isinstance(node, ast.Import):
             names.update(a.name for a in node.names)
     return names
@@ -309,6 +316,31 @@ def _derived_sidecar_readers():
         if opens or imports_opener or names_column:
             out.add(str(p.relative_to(REPO_ROOT)).replace("\\", "/"))
     return out
+
+
+def test_the_import_detector_sees_every_form_of_importing_an_opener():
+    """gpt-5-codex on PR #358 (P2): the detector read only `ImportFrom.module`, so
+    `from shared import translation_service` recorded `shared` and the relative form recorded
+    nothing -- a consumer written either way would have been missed while the exact-match test
+    stayed green. All four forms must resolve to the opener's module name."""
+    import ast
+
+    forms = {
+        "plain module": "import shared.translation_service",
+        "from module import symbol": "from shared.translation_service import TranslationService",
+        "from package import module": "from shared import translation_service",
+        "relative from package": "from . import translation_service",
+    }
+    for label, source in forms.items():
+        names = _imported_modules(ast.parse(source))
+        assert any(n.split(".")[-1] == "translation_service" for n in names), (
+            "%s (%r) does not resolve to the opener module: %s" % (label, source, sorted(names))
+        )
+
+    # ...and a lazy import inside a function, which is how several real consumers do it.
+    lazy = "def f():\n    from shared import translation_service\n    return translation_service\n"
+    names = _imported_modules(ast.parse(lazy))
+    assert any(n.split(".")[-1] == "translation_service" for n in names)
 
 
 def test_the_contract_covers_every_sidecar_consumer_exactly():
