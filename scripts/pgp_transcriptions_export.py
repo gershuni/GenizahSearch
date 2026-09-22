@@ -22,6 +22,8 @@ Usage:
 import csv
 import re
 import sys
+import hashlib
+import io
 import os
 from collections import defaultdict
 from datetime import datetime
@@ -215,15 +217,30 @@ def _invalidate_derived_stamp(pgp_data_dir) -> None:
         os.remove(stale)
 
 
+def _read_bytes(path):
+    """The file's bytes, or None when there is no such file (or no path was given)."""
+    if not path or not os.path.exists(path):
+        return None
+    with open(path, 'rb') as fh:
+        return fh.read()
+
+
+def _fingerprint_bytes(raw):
+    """{bytes, sha256} of bytes already in hand, or 'absent' for None.
+
+    The derivation fingerprints the very bytes it parses. Fingerprinting the FILE -- even
+    before reading it -- left a window: fingerprint A, swap in B, let the loader read B,
+    restore A, and the output came from B while the stamp described A and verified clean.
+    With one read there is no second read for a swap to land between.
+    """
+    if raw is None:
+        return 'absent'
+    return {'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}
+
+
 def _fingerprint(path):
     """{bytes, sha256} of a file, or the string 'absent' when there is no such file."""
-    import hashlib
-
-    if not path or not os.path.exists(path):
-        return 'absent'
-    with open(path, 'rb') as fh:
-        raw = fh.read()
-    return {'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}
+    return _fingerprint_bytes(_read_bytes(path))
 
 
 def _record_derived_provenance(pgp_data_dir, verified: bool = False, inputs=()) -> None:
@@ -331,51 +348,68 @@ def require_fist_supplement(path, allow_missing: bool) -> None:
     raise SystemExit(1)
 
 
+def load_genizahsearch_shelfmarks_from_bytes(libraries_raw: bytes,
+                                             supplement_raw: bytes = None) -> dict:
+    """Build the shelfmark -> sys_id mapping from bytes already read.
+
+    The derivation reads libraries.csv and the FIST supplement exactly once, fingerprints
+    those bytes for derived_provenance.json, and parses the SAME bytes here -- so the stamp
+    can only ever describe what was actually consumed.
+
+    Returns dict: normalized_shelfmark -> system_number
+    """
+    gs_lookup = {}
+
+    # Main libraries.csv
+    reader = csv.reader(io.StringIO(libraries_raw.decode('utf-8')))
+    next(reader, None)  # Skip header
+
+    for row in reader:
+        if len(row) < 3:
+            continue
+
+        sys_id = row[0]
+        call_numbers = row[2]
+
+        # Split pipe-separated variants and index all
+        for variant in call_numbers.split('|'):
+            normalized = normalize_shelfmark(variant)
+            if normalized:
+                # Keep first match (most specific)
+                if normalized not in gs_lookup:
+                    gs_lookup[normalized] = sys_id
+
+    # FIST supplement, if it was there
+    if supplement_raw is not None:
+        reader = csv.DictReader(io.StringIO(supplement_raw.decode('utf-8-sig')))
+        fist_count = 0
+        for row in reader:
+            shelfmark = row.get('shelfmark', '')
+            alma_id = row.get('alma_id', '')
+            if shelfmark and alma_id:
+                normalized = normalize_shelfmark(shelfmark)
+                if normalized and normalized not in gs_lookup:
+                    gs_lookup[normalized] = alma_id
+                    fist_count += 1
+        print(f"  Added {fist_count} shelfmarks from FIST supplement")
+
+    return gs_lookup
+
+
 def load_genizahsearch_shelfmarks(libraries_path: str, fist_supplement_path: str = None) -> dict:
     """
     Load GenizahSearch libraries.csv and create shelfmark → sys_id mapping.
     Optionally supplement with FIST shelfmarks for better coverage.
 
+    Path-based convenience for callers that do not stamp provenance (import_pgp_full.py).
+    The derivation itself must NOT use this: see export_transcriptions.
+
     Returns dict: normalized_shelfmark → system_number
     """
-    gs_lookup = {}
-
-    # Load main libraries.csv
-    with open(libraries_path, 'r', encoding='utf-8') as f:
-        reader = csv.reader(f)
-        header = next(reader)  # Skip header
-
-        for row in reader:
-            if len(row) < 3:
-                continue
-
-            sys_id = row[0]
-            call_numbers = row[2]
-
-            # Split pipe-separated variants and index all
-            for variant in call_numbers.split('|'):
-                normalized = normalize_shelfmark(variant)
-                if normalized:
-                    # Keep first match (most specific)
-                    if normalized not in gs_lookup:
-                        gs_lookup[normalized] = sys_id
-
-    # Load FIST supplement if available
-    if fist_supplement_path and os.path.exists(fist_supplement_path):
-        with open(fist_supplement_path, 'r', encoding='utf-8-sig') as f:
-            reader = csv.DictReader(f)
-            fist_count = 0
-            for row in reader:
-                shelfmark = row.get('shelfmark', '')
-                alma_id = row.get('alma_id', '')
-                if shelfmark and alma_id:
-                    normalized = normalize_shelfmark(shelfmark)
-                    if normalized and normalized not in gs_lookup:
-                        gs_lookup[normalized] = alma_id
-                        fist_count += 1
-        print(f"  Added {fist_count} shelfmarks from FIST supplement")
-
-    return gs_lookup
+    with open(libraries_path, 'rb') as fh:
+        libraries_raw = fh.read()
+    supplement_raw = _read_bytes(fist_supplement_path)
+    return load_genizahsearch_shelfmarks_from_bytes(libraries_raw, supplement_raw)
 
 
 def load_pgp_documents(documents_path: str) -> dict:
@@ -498,18 +532,23 @@ def export_transcriptions(
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
 
-    # Fingerprint the mapping inputs BEFORE anything reads them. The stamp must describe
-    # the files the derivation actually consumed; taken afterwards, an edit made while the
-    # derivation ran was stamped as if it had been used. Taken here, such an edit leaves the
-    # on-disk file disagreeing with the stamp, and the import refuses -- the safe direction.
+    # Read the mapping inputs ONCE. The stamp fingerprints these bytes and the loader
+    # parses these bytes, so the stamp can only describe what was consumed. Fingerprinting
+    # the FILE was not enough in either order: after the read, an edit during the run was
+    # stamped as consumed; before the read, a swap-and-restore between the fingerprint and
+    # the loader's own open() produced output from one file stamped as the other.
+    libraries_raw = _read_bytes(libraries_path)
+    if libraries_raw is None:
+        raise FileNotFoundError(libraries_path)
+    supplement_raw = _read_bytes(fist_supplement_path)
     input_fingerprints = (
-        ('libraries.csv', _fingerprint(libraries_path)),
-        ('fist_shelfmarks_supplement.csv', _fingerprint(fist_supplement_path)),
+        ('libraries.csv', _fingerprint_bytes(libraries_raw)),
+        ('fist_shelfmarks_supplement.csv', _fingerprint_bytes(supplement_raw)),
     )
 
     # Load data
     print("Loading GenizahSearch shelfmarks...")
-    gs_lookup = load_genizahsearch_shelfmarks(libraries_path, fist_supplement_path)
+    gs_lookup = load_genizahsearch_shelfmarks_from_bytes(libraries_raw, supplement_raw)
     print(f"  Loaded {len(gs_lookup):,} normalized shelfmarks")
 
     print("Loading PGP documents...")

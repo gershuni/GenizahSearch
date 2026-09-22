@@ -17,9 +17,12 @@ These tests pin the enforcement, and that ``build_app.bat`` actually invokes it.
 from __future__ import annotations
 
 import importlib.util
+import os
 import pathlib
 import re
+import shutil
 import sqlite3
+import subprocess
 
 import pytest
 
@@ -399,3 +402,101 @@ def test_the_withheld_table_is_caught_whatever_its_case(guard, tmp_path):
     conn.close()
     problems = guard.check_sidecar(path)
     assert any("PGP_TRANSLATIONS" in p for p in problems), problems
+
+
+# ── the .ps1 files, run for real with stubbed remote commands ─────────────────
+#
+# gpt-6-astra (round 6) kept every text pin green while (a) appending `; $LASTEXITCODE = 0`
+# to the ssh line, (b) inserting `$LASTEXITCODE = 0` after `& python @Command` in the
+# refresh runner, and (c) adding `if ($message -like "scp failed*") { return }` inside Fail.
+# Each made the script report success after a failure. Text cannot pin behaviour; running
+# the script can. `scp`, `ssh` and `python` are shadowed by .cmd stubs first on PATH that
+# log their invocation and exit with a chosen code.
+
+
+def _powershell():
+    exe = shutil.which("powershell")
+    if not exe or os.name != "nt":
+        pytest.skip("Windows PowerShell not available")
+    return exe
+
+
+def _stubs(tmp_path, **exit_codes):
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    for name, code in exit_codes.items():
+        (stubs / (name + ".cmd")).write_text(
+            "@echo off\r\necho %s %%* >> \"%%STUB_LOG%%\"\r\nexit /b %d\r\n" % (name, code),
+            encoding="ascii",
+        )
+    log = tmp_path / "stub.log"
+    env = dict(os.environ, PATH=str(stubs) + os.pathsep + os.environ.get("PATH", ""),
+               STUB_LOG=str(log))
+    return env, log
+
+
+def _run_ps1(script, args, env):
+    proc = subprocess.run(
+        [_powershell(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), *args],
+        capture_output=True, text=True, cwd=str(REPO_ROOT), env=env, timeout=120,
+    )
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def _log_lines(log):
+    return [ln.split()[0] for ln in log.read_text(encoding="ascii", errors="replace").splitlines()
+            if ln.strip()] if log.exists() else []
+
+
+def test_deploy_really_stops_when_scp_fails(tmp_path):
+    clean = _sidecar(tmp_path / "clean.db")
+    env, log = _stubs(tmp_path, scp=1, ssh=0)
+    rc, _out, err = _run_ps1(DEPLOY_PS1, ["-Sidecar", clean], env)
+    assert rc == 1
+    assert "DEPLOY ABORTED: scp failed" in err
+    assert _log_lines(log) == ["scp"], "ssh must not run after a failed upload"
+
+
+def test_deploy_really_reports_a_failed_restart(tmp_path):
+    clean = _sidecar(tmp_path / "clean.db")
+    env, log = _stubs(tmp_path, scp=0, ssh=1)
+    rc, out, err = _run_ps1(DEPLOY_PS1, ["-Sidecar", clean], env)
+    assert rc == 1
+    assert "DEPLOY ABORTED: restart failed" in err
+    assert "Deployed" not in out
+    assert _log_lines(log) == ["scp", "ssh"]
+
+
+def test_deploy_succeeds_end_to_end_when_every_step_does(tmp_path):
+    clean = _sidecar(tmp_path / "clean.db")
+    env, log = _stubs(tmp_path, scp=0, ssh=0)
+    rc, out, _err = _run_ps1(DEPLOY_PS1, ["-Sidecar", clean], env)
+    assert rc == 0
+    assert "Deployed" in out
+    assert _log_lines(log) == ["scp", "ssh"]
+
+
+def test_refresh_really_stops_at_the_first_failing_step(tmp_path):
+    """python is stubbed to fail; the runner must exit with ITS code and run nothing more."""
+    env, log = _stubs(tmp_path, python=7)
+    rc, _out, err = _run_ps1(REFRESH_PS1, [], env)
+    assert rc == 7
+    assert "REFRESH STOPPED at step 0" in err
+    assert _log_lines(log) == ["python"], "step 1 must not run after step 0 failed"
+
+
+def test_refresh_runs_every_dry_run_step_when_they_pass(tmp_path):
+    env, log = _stubs(tmp_path, python=0)
+    rc, out, _err = _run_ps1(REFRESH_PS1, [], env)
+    assert rc == 0
+    assert "Dry run complete" in out
+    assert _log_lines(log) == ["python"] * 4, "steps 0-3, then stop before -Execute"
+
+
+def test_no_script_resets_the_exit_code_it_is_about_to_check():
+    """Belt to the braces above: an assignment to $LASTEXITCODE anywhere in either script
+    is how a check gets blinded, and there is no legitimate reason to write one."""
+    for script in (DEPLOY_PS1, REFRESH_PS1):
+        code = [ln for ln in script.read_text(encoding="utf-8").splitlines()
+                if not ln.strip().startswith("#")]
+        assert not any(re.search(r"\$LASTEXITCODE\s*=[^=]", ln) for ln in code), script.name

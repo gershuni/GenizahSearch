@@ -15,6 +15,7 @@ the guard does, not on what it returns to the shell.
 """
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import io
 import json
@@ -310,14 +311,14 @@ def test_an_input_edited_while_the_derivation_ran_cannot_verify_clean(exporter, 
     before the read, the same edit leaves the file on disk disagreeing with the stamp."""
     monkeypatch.delenv("PGP_ALLOW_UNVERIFIED_INPUTS", raising=False)
     pgp_data = fx.build_tree(tmp_path, derived=False)
-    real_loader = exporter.load_genizahsearch_shelfmarks
+    real_loader = exporter.load_genizahsearch_shelfmarks_from_bytes
 
-    def load_then_edit(libraries_path, supplement_path=None):
-        lookup = real_loader(libraries_path, supplement_path)
+    def load_then_edit(libraries_raw, supplement_raw=None):
+        lookup = real_loader(libraries_raw, supplement_raw)
         fx.tamper(tmp_path / "libraries.csv")  # the race, made deterministic
         return lookup
 
-    monkeypatch.setattr(exporter, "load_genizahsearch_shelfmarks", load_then_edit)
+    monkeypatch.setattr(exporter, "load_genizahsearch_shelfmarks_from_bytes", load_then_edit)
     assert _run_main(exporter, tmp_path)[0] == 0
 
     problems = _verifier().verify_against_provenance(str(pgp_data), check_derived=True)
@@ -325,3 +326,55 @@ def test_an_input_edited_while_the_derivation_ran_cannot_verify_clean(exporter, 
         "the stamp must describe the file the derivation CONSUMED, not the one on disk "
         "afterwards: %r" % problems
     )
+
+
+def test_the_stamp_describes_exactly_the_bytes_the_derivation_parsed(exporter, tmp_path,
+                                                                    monkeypatch):
+    """gpt-6-astra, round 6: fingerprinting BEFORE the read still left a window --
+    fingerprint A, swap in B, let the loader open() B, restore A: output from B, stamp for
+    A, verification clean. The only closure is one read: the bytes that are hashed are the
+    bytes that are parsed. This test captures what the parser received and compares it to
+    the stamp; and it makes the path-based loader tamper the file on its way in, so any
+    route that re-opens the file shows up as a mismatch."""
+    monkeypatch.delenv("PGP_ALLOW_UNVERIFIED_INPUTS", raising=False)
+    pgp_data = fx.build_tree(tmp_path, derived=False)
+    seen = {}
+    real_bytes_loader = exporter.load_genizahsearch_shelfmarks_from_bytes
+
+    def capture(libraries_raw, supplement_raw=None):
+        seen["libraries.csv"] = libraries_raw
+        seen["fist_shelfmarks_supplement.csv"] = supplement_raw
+        return real_bytes_loader(libraries_raw, supplement_raw)
+
+    real_path_loader = exporter.load_genizahsearch_shelfmarks
+
+    def tamper_then_load(libraries_path, supplement_path=None):
+        fx.tamper(tmp_path / "libraries.csv")  # a second open() would see this
+        return real_path_loader(libraries_path, supplement_path)
+
+    monkeypatch.setattr(exporter, "load_genizahsearch_shelfmarks_from_bytes", capture)
+    monkeypatch.setattr(exporter, "load_genizahsearch_shelfmarks", tamper_then_load)
+
+    assert _run_main(exporter, tmp_path)[0] == 0
+    stamp = json.loads((pgp_data / "derived_provenance.json").read_text(encoding="utf-8"))
+    for label in ("libraries.csv", "fist_shelfmarks_supplement.csv"):
+        assert hashlib.sha256(seen[label]).hexdigest() == stamp["inputs"][label]["sha256"], (
+            "%s: the stamp must describe the bytes the parser consumed" % label
+        )
+    # ...and the derived content really came from those bytes (sys_id from the original).
+    linked = (pgp_data / "transcriptions_linked.csv").read_text(encoding="utf-8-sig")
+    assert "9900000001" in linked
+
+
+def test_the_bytes_loader_and_the_path_loader_agree(exporter, tmp_path):
+    """import_pgp_full.py still uses the path form; the two must build the same mapping."""
+    fx.build_tree(tmp_path, derived=False)
+    lib = tmp_path / "libraries.csv"
+    sup = tmp_path / "pgp_data" / "fist_shelfmarks_supplement.csv"
+    by_path = exporter.load_genizahsearch_shelfmarks(str(lib), str(sup))
+    by_bytes = exporter.load_genizahsearch_shelfmarks_from_bytes(lib.read_bytes(), sup.read_bytes())
+    assert by_path == by_bytes
+    assert by_path["t-s 12.123"] == "9900000001"
+    assert by_path["moss. ix 1.1"] == "9900000002"
+    assert exporter.load_genizahsearch_shelfmarks(str(lib), None) == \
+        exporter.load_genizahsearch_shelfmarks_from_bytes(lib.read_bytes(), None)
