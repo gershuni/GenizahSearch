@@ -17,7 +17,9 @@ _EXPECTED = {
     "manuscripts": 255_723,
     "catalog_entries": 731_354,
     "images": 1_019_886,
-    "scholarly_transcriptions": 27_424,
+    # 27,424 -> 27,593 on the 2026-09-22 PGP refresh: document_sources gained
+    # 866 rows, of which these are the Edition-relation ones.
+    "scholarly_transcriptions": 27_593,
     "automatic_transcriptions": 232_450,
 }
 
