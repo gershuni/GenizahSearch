@@ -391,3 +391,92 @@ def test_the_bytes_loader_keeps_the_old_loaders_newline_tolerance(exporter):
     assert exporter.load_genizahsearch_shelfmarks_from_bytes(b"id,x,call\n", supplement) == {
         "moss. ix 1.1": "9900000002"
     }
+
+
+def test_the_derived_file_comes_from_the_verified_upstream_bytes(exporter, tmp_path,
+                                                                 monkeypatch):
+    """Codex review 9: _require_verified_inputs() hashed documents.csv / footnotes.csv by
+    path and the loaders re-opened them -- the same swap-and-restore window as the mapping
+    inputs. Now the bytes the verifier checks ARE the bytes the parsers receive. The
+    path-based loaders are rigged to tamper the file on the way in, so any route that
+    re-opens a file shows up as a mismatch against the manifest."""
+    monkeypatch.delenv("PGP_ALLOW_UNVERIFIED_INPUTS", raising=False)
+    pgp_data = fx.build_tree(tmp_path, derived=False)
+    manifest = json.loads((pgp_data / "upstream_provenance.json").read_text(encoding="utf-8"))
+    seen = {}
+
+    for name, label, path in (("load_pgp_documents", "documents.csv", pgp_data / "documents.csv"),
+                              ("extract_transcriptions", "footnotes.csv", pgp_data / "footnotes.csv")):
+        real_bytes = getattr(exporter, name + "_from_bytes")
+        real_path = getattr(exporter, name)
+
+        def capture(raw, _label=label, _real=real_bytes):
+            seen[_label] = raw
+            return _real(raw)
+
+        def tamper_then_load(p, _path=path, _real=real_path):
+            fx.tamper(_path)
+            return _real(p)
+
+        monkeypatch.setattr(exporter, name + "_from_bytes", capture)
+        monkeypatch.setattr(exporter, name, tamper_then_load)
+
+    assert _run_main(exporter, tmp_path)[0] == 0
+    for label in ("documents.csv", "footnotes.csv"):
+        assert hashlib.sha256(seen[label]).hexdigest() == manifest["files"][label]["sha256"], (
+            "%s: the parser must receive the bytes the manifest verified" % label
+        )
+
+
+def test_the_verifier_checks_the_bytes_it_is_handed_not_the_disk(tmp_path):
+    """`contents=` is what binds verification to parsing."""
+    pgp_data = fx.build_tree(tmp_path)
+    verifier = _verifier()
+    clean = (pgp_data / "footnotes.csv").read_bytes()
+    tampered = bytearray(clean)
+    tampered[-2] ^= 0x20
+
+    # Disk clean, handed bytes tampered -> the handed bytes are what fail.
+    problems = verifier.verify_against_provenance(
+        str(pgp_data), check_derived=False, contents={"footnotes.csv": bytes(tampered)}
+    )
+    assert any("footnotes.csv: SHA-256" in p for p in problems), problems
+
+    # Disk tampered, handed bytes clean -> clean (the disk is not what will be parsed).
+    fx.tamper(pgp_data / "footnotes.csv")
+    assert verifier.verify_against_provenance(
+        str(pgp_data), check_derived=False, contents={"footnotes.csv": clean}
+    ) == []
+    # ...and the same binding for the derived file and its inputs.
+    linked = (pgp_data / "transcriptions_linked.csv").read_bytes()
+    fx.tamper(pgp_data / "transcriptions_linked.csv")
+    fx.write_upstream_manifest(pgp_data)  # footnotes edit above becomes legitimate
+    assert verifier.verify_against_provenance(
+        str(pgp_data), check_derived=True, contents={"transcriptions_linked.csv": linked}
+    ) == []
+    assert any("transcriptions_linked.csv" in p
+               for p in verifier.verify_against_provenance(str(pgp_data), check_derived=True))
+
+
+def test_bytes_swapped_under_the_read_are_what_gets_verified(exporter, tmp_path, monkeypatch):
+    """The race Codex named, from the other side: the file is swapped when the derivation
+    READS it and restored before anything looks at the disk again. The verifier must be
+    handed the bytes that were read -- a verifier that re-reads the (restored) disk passes,
+    and the swapped content is derived under a clean stamp."""
+    monkeypatch.delenv("PGP_ALLOW_UNVERIFIED_INPUTS", raising=False)
+    pgp_data = fx.build_tree(tmp_path, derived=False)
+    real_read = exporter._read_bytes
+
+    def read_swapped(path):
+        raw = real_read(path)
+        if raw is not None and str(path).endswith("footnotes.csv"):
+            swapped = bytearray(raw)
+            swapped[-2] ^= 0x20  # same length, different content
+            return bytes(swapped)
+        return raw
+
+    monkeypatch.setattr(exporter, "_read_bytes", read_swapped)
+    rc, _out, err = _run_main(exporter, tmp_path)
+    assert rc == 1, "the swapped bytes must fail verification"
+    assert "footnotes.csv: SHA-256 does not match" in err
+    assert not (pgp_data / "transcriptions_linked.csv").exists()

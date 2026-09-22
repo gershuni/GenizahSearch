@@ -12,6 +12,7 @@ Nothing tested ``main()``; the helpers were fine. These tests run it.
 """
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import io
 import json
@@ -204,3 +205,30 @@ def test_a_derived_file_with_an_unusable_row_is_refused(importer, tmp_path, monk
     fx.write_derived_stamp(tmp_path)
     with pytest.raises(SystemExit, match="no usable pgpid"):
         _run(importer, monkeypatch)
+
+
+def test_the_importer_parses_exactly_the_bytes_it_verified(importer, tmp_path, monkeypatch):
+    """Codex review 9: verify-then-reopen in import_pgp_full.py had the same
+    swap-and-restore window. Every path-based loader is rigged to fail if main() touches
+    it, and the bytes handed to one parser are compared to the manifest."""
+    manifest = json.loads(
+        (tmp_path / "pgp_data" / "upstream_provenance.json").read_text(encoding="utf-8")
+    )
+    for name in ("load_documents_full", "load_fragment_metadata", "load_footnotes",
+                 "load_transcriptions", "load_genizahsearch_shelfmarks"):
+        def by_path(*_a, _name=name, **_k):
+            raise AssertionError("%s re-opened a file main() had already verified" % _name)
+        monkeypatch.setattr(importer, name, by_path)
+
+    seen = {}
+    real = importer.load_documents_full_from_bytes
+
+    def capture(raw):
+        seen["documents.csv"] = raw
+        return real(raw)
+
+    monkeypatch.setattr(importer, "load_documents_full_from_bytes", capture)
+
+    assert _run(importer, monkeypatch, "--execute")[0] == 0
+    assert hashlib.sha256(seen["documents.csv"]).hexdigest() == \
+        manifest["files"]["documents.csv"]["sha256"]

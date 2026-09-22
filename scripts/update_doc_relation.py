@@ -20,6 +20,7 @@ Prerequisites:
 
 import argparse
 import csv
+import io
 import os
 import sys
 from collections import defaultdict
@@ -70,6 +71,13 @@ SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://ylcpglwxompwjcufdemz.supa
 
 
 def load_doc_relations(csv_path: Path) -> tuple:
+    """Path form of load_doc_relations_from_bytes(). main() must not use it: it verifies
+    the file's bytes and parses the SAME bytes, so nothing can be swapped in between."""
+    with open(csv_path, 'rb') as fh:
+        return load_doc_relations_from_bytes(fh.read())
+
+
+def load_doc_relations_from_bytes(raw: bytes) -> tuple:
     """
     Load pgpid -> doc_relation mapping from transcriptions_linked.csv.
 
@@ -93,7 +101,7 @@ def load_doc_relations(csv_path: Path) -> tuple:
     relations = {}
     skipped = {'blank_pgpid': 0, 'non_integer_pgpid': 0, 'blank_doc_relation': 0}
 
-    with open(csv_path, 'r', encoding='utf-8-sig') as f:
+    with io.StringIO(raw.decode('utf-8-sig'), newline=None) as f:
         reader = csv.DictReader(f)
 
         for row in reader:
@@ -126,7 +134,7 @@ def load_doc_relations(csv_path: Path) -> tuple:
     return relations, skipped
 
 
-def require_verified_inputs(pgp_data_dir: Path, allow_unverified: bool) -> None:
+def require_verified_inputs(pgp_data_dir: Path, allow_unverified: bool, contents=None) -> None:
     """Refuse to classify from a derived file that does not match its provenance.
 
     import_pgp_full.py runs this same check before reading transcriptions_linked.csv. This
@@ -135,7 +143,8 @@ def require_verified_inputs(pgp_data_dir: Path, allow_unverified: bool) -> None:
     doc_relation values pushed to Supabase at exit 0, which is precisely the user-visible
     misclassification the refresh procedure exists to fix.
     """
-    problems = verify_against_provenance(str(pgp_data_dir), check_derived=True)
+    problems = verify_against_provenance(str(pgp_data_dir), check_derived=True,
+                                         contents=contents)
     if not problems:
         print("  transcriptions_linked.csv verified against %s" % PROVENANCE_FILENAME)
         return
@@ -269,9 +278,12 @@ def main():
         print(f"ERROR: CSV file not found: {TRANSCRIPTIONS_CSV}")
         sys.exit(1)
 
-    require_verified_inputs(PGP_DATA_DIR, args.no_provenance_check)
+    # Read once; verify these bytes; parse these bytes.
+    linked_raw = TRANSCRIPTIONS_CSV.read_bytes()
+    require_verified_inputs(PGP_DATA_DIR, args.no_provenance_check,
+                            contents={'transcriptions_linked.csv': linked_raw})
 
-    relations, skipped = load_doc_relations(TRANSCRIPTIONS_CSV)
+    relations, skipped = load_doc_relations_from_bytes(linked_raw)
     print(f"  Loaded {len(relations)} pgpid -> doc_relation mappings")
     print()
 

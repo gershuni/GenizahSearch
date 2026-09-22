@@ -149,7 +149,7 @@ def normalize_shelfmark(shelf: str) -> str:
 _INPUTS_VERIFIED = False
 
 
-def _require_verified_inputs(pgp_data_dir) -> bool:
+def _require_verified_inputs(pgp_data_dir, contents=None) -> bool:
     """Refuse to derive from CSVs that do not match what the fetch recorded.
 
     Otherwise the stamp certifies inputs it never checked: swap footnotes.csv for an
@@ -171,7 +171,8 @@ def _require_verified_inputs(pgp_data_dir) -> bool:
         _INPUTS_VERIFIED = False
         return False
 
-    problems = verify_against_provenance(str(pgp_data_dir), check_derived=False)
+    problems = verify_against_provenance(str(pgp_data_dir), check_derived=False,
+                                         contents=contents)
     if not problems:
         _INPUTS_VERIFIED = True
         return True
@@ -414,6 +415,17 @@ def load_genizahsearch_shelfmarks(libraries_path: str, fist_supplement_path: str
 
 
 def load_pgp_documents(documents_path: str) -> dict:
+    """Path form of load_pgp_documents_from_bytes(), for callers that stamp no provenance.
+
+    The pipeline's main() must NOT use this: it verifies a file's bytes and then parses
+    the SAME bytes, so nothing can be swapped between the two. Re-opening by path here is
+    exactly the window that closes.
+    """
+    with open(documents_path, 'rb') as fh:
+        return load_pgp_documents_from_bytes(fh.read())
+
+
+def load_pgp_documents_from_bytes(raw: bytes) -> dict:
     """
     Load PGP documents.csv and create pgpid → document info mapping.
 
@@ -421,7 +433,7 @@ def load_pgp_documents(documents_path: str) -> dict:
     """
     pgp_docs = {}
 
-    with open(documents_path, 'r', encoding='utf-8') as f:
+    with io.StringIO(raw.decode('utf-8'), newline=None) as f:
         reader = csv.DictReader(f)
 
         for row in reader:
@@ -441,6 +453,17 @@ def load_pgp_documents(documents_path: str) -> dict:
 
 
 def extract_transcriptions(footnotes_path: str) -> list:
+    """Path form of extract_transcriptions_from_bytes(), for callers that stamp no provenance.
+
+    The pipeline's main() must NOT use this: it verifies a file's bytes and then parses
+    the SAME bytes, so nothing can be swapped between the two. Re-opening by path here is
+    exactly the window that closes.
+    """
+    with open(footnotes_path, 'rb') as fh:
+        return extract_transcriptions_from_bytes(fh.read())
+
+
+def extract_transcriptions_from_bytes(raw: bytes) -> list:
     """
     Extract transcriptions from PGP footnotes.csv.
 
@@ -452,7 +475,7 @@ def extract_transcriptions(footnotes_path: str) -> list:
     """
     transcriptions = []
 
-    with open(footnotes_path, 'r', encoding='utf-8') as f:
+    with io.StringIO(raw.decode('utf-8'), newline=None) as f:
         reader = csv.DictReader(f)
 
         for row in reader:
@@ -542,22 +565,37 @@ def export_transcriptions(
     if libraries_raw is None:
         raise FileNotFoundError(libraries_path)
     supplement_raw = _read_bytes(fist_supplement_path)
+    documents_raw = _read_bytes(documents_path)
+    footnotes_raw = _read_bytes(footnotes_path)
+    for path, raw in ((documents_path, documents_raw), (footnotes_path, footnotes_raw)):
+        if raw is None:
+            raise FileNotFoundError(path)
+
+    # Verify the upstream CSVs -- THESE bytes, not the files on disk. Verifying by path and
+    # then letting the loaders re-open the files left the same swap-and-restore window
+    # the mapping inputs had: swapped content in the output, the original commit in the
+    # stamp, and a clean verification afterwards.
+    _require_verified_inputs(output_dir, contents={
+        'documents.csv': documents_raw,
+        'footnotes.csv': footnotes_raw,
+    })
+
     input_fingerprints = (
         ('libraries.csv', _fingerprint_bytes(libraries_raw)),
         ('fist_shelfmarks_supplement.csv', _fingerprint_bytes(supplement_raw)),
     )
 
-    # Load data
+    # Load data -- every loader parses the bytes read above.
     print("Loading GenizahSearch shelfmarks...")
     gs_lookup = load_genizahsearch_shelfmarks_from_bytes(libraries_raw, supplement_raw)
     print(f"  Loaded {len(gs_lookup):,} normalized shelfmarks")
 
     print("Loading PGP documents...")
-    pgp_docs = load_pgp_documents(documents_path)
+    pgp_docs = load_pgp_documents_from_bytes(documents_raw)
     print(f"  Loaded {len(pgp_docs):,} documents")
 
     print("Extracting transcriptions from footnotes...")
-    transcriptions = extract_transcriptions(footnotes_path)
+    transcriptions = extract_transcriptions_from_bytes(footnotes_raw)
     print(f"  Found {len(transcriptions):,} transcription records")
     print()
 
@@ -731,9 +769,9 @@ def main():
     )
     # ONE directory for the verification, the reads and the writes. They already
     # agreed, but deriving them separately is how a check ends up validating a different
-    # directory than the one actually consumed.
+    # directory than the one actually consumed. The verification itself happens inside
+    # export_transcriptions(), against the bytes it parses.
     pgp_data_dir = project_dir / 'pgp_data'
-    _require_verified_inputs(pgp_data_dir)
     documents_path = pgp_data_dir / 'documents.csv'
     footnotes_path = project_dir / 'pgp_data' / 'footnotes.csv'
     output_dir = pgp_data_dir

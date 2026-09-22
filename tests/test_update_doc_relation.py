@@ -16,8 +16,10 @@ fails here rather than in production.
 """
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import io
+import json
 import pathlib
 import sys
 from contextlib import redirect_stderr, redirect_stdout
@@ -233,3 +235,29 @@ def test_an_unmatched_document_is_still_fatal(updater, tmp_path, monkeypatch):
     rc, _out, err = _run(updater, monkeypatch, "--execute")
     assert rc == 1
     assert "matched no row" in err
+
+
+def test_the_classifier_parses_exactly_the_bytes_it_verified(updater, tmp_path, monkeypatch):
+    """Codex review 9: the same verify-then-reopen window, in the classifier."""
+    fx.build_tree(tmp_path)
+    stamp = json.loads(
+        (tmp_path / "pgp_data" / "derived_provenance.json").read_text(encoding="utf-8")
+    )
+    def by_path(*_a, **_k):
+        raise AssertionError("load_doc_relations re-opened the file main() had already verified")
+
+    monkeypatch.setattr(updater, "load_doc_relations", by_path)
+    seen = {}
+    real = updater.load_doc_relations_from_bytes
+
+    def capture(raw):
+        seen["linked"] = raw
+        return real(raw)
+
+    monkeypatch.setattr(updater, "load_doc_relations_from_bytes", capture)
+    _point_at(updater, monkeypatch, tmp_path)  # dry run: no client may be created
+
+    rc, _out, _err = _run(updater, monkeypatch, "--dry-run")
+    assert rc == 0
+    assert hashlib.sha256(seen["linked"]).hexdigest() == \
+        stamp["files"]["transcriptions_linked.csv"]["sha256"]

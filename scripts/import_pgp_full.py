@@ -41,6 +41,7 @@ Prerequisites:
 
 import argparse
 import csv
+import io
 import os
 import sys
 from collections import defaultdict
@@ -65,7 +66,11 @@ except ImportError:
 
 # Import normalize_shelfmark from existing export script
 sys.path.insert(0, str(Path(__file__).parent))
-from pgp_transcriptions_export import normalize_shelfmark, load_genizahsearch_shelfmarks
+from pgp_transcriptions_export import (
+    normalize_shelfmark,
+    load_genizahsearch_shelfmarks,  # noqa: F401 -- kept importable for older callers
+    load_genizahsearch_shelfmarks_from_bytes,
+)
 from fetch_pgp_metadata import (
     PROVENANCE_FILENAME,
     verify_against_provenance,
@@ -138,6 +143,17 @@ def parse_tags(tags_str: str) -> List[str]:
 
 
 def load_documents_full(documents_path: str) -> Dict[int, Dict]:
+    """Path form of load_documents_full_from_bytes(), for callers that stamp no provenance.
+
+    The pipeline's main() must NOT use this: it verifies a file's bytes and then parses
+    the SAME bytes, so nothing can be swapped between the two. Re-opening by path here is
+    exactly the window that closes.
+    """
+    with open(documents_path, 'rb') as fh:
+        return load_documents_full_from_bytes(fh.read())
+
+
+def load_documents_full_from_bytes(raw: bytes) -> Dict[int, Dict]:
     """
     Load ALL columns from documents.csv.
 
@@ -145,7 +161,7 @@ def load_documents_full(documents_path: str) -> Dict[int, Dict]:
     """
     documents = {}
 
-    with open(documents_path, 'r', encoding='utf-8-sig') as f:
+    with io.StringIO(raw.decode('utf-8-sig'), newline=None) as f:
         reader = csv.DictReader(f)
 
         for row in reader:
@@ -190,6 +206,17 @@ def load_documents_full(documents_path: str) -> Dict[int, Dict]:
 
 
 def load_fragment_metadata(fragments_path: str) -> Dict[str, Dict]:
+    """Path form of load_fragment_metadata_from_bytes(), for callers that stamp no provenance.
+
+    The pipeline's main() must NOT use this: it verifies a file's bytes and then parses
+    the SAME bytes, so nothing can be swapped between the two. Re-opening by path here is
+    exactly the window that closes.
+    """
+    with open(fragments_path, 'rb') as fh:
+        return load_fragment_metadata_from_bytes(fh.read())
+
+
+def load_fragment_metadata_from_bytes(raw: bytes) -> Dict[str, Dict]:
     """
     Load fragments.csv into shelfmark -> metadata lookup.
 
@@ -200,7 +227,7 @@ def load_fragment_metadata(fragments_path: str) -> Dict[str, Dict]:
     """
     fragments = {}
 
-    with open(fragments_path, 'r', encoding='utf-8-sig') as f:
+    with io.StringIO(raw.decode('utf-8-sig'), newline=None) as f:
         reader = csv.DictReader(f)
 
         for row in reader:
@@ -223,6 +250,17 @@ def load_fragment_metadata(fragments_path: str) -> Dict[str, Dict]:
 
 
 def load_footnotes(footnotes_path: str) -> List[Dict]:
+    """Path form of load_footnotes_from_bytes(), for callers that stamp no provenance.
+
+    The pipeline's main() must NOT use this: it verifies a file's bytes and then parses
+    the SAME bytes, so nothing can be swapped between the two. Re-opening by path here is
+    exactly the window that closes.
+    """
+    with open(footnotes_path, 'rb') as fh:
+        return load_footnotes_from_bytes(fh.read())
+
+
+def load_footnotes_from_bytes(raw: bytes) -> List[Dict]:
     """
     Load footnotes.csv into list of footnote records.
 
@@ -233,7 +271,7 @@ def load_footnotes(footnotes_path: str) -> List[Dict]:
     """
     footnotes = []
 
-    with open(footnotes_path, 'r', encoding='utf-8-sig') as f:
+    with io.StringIO(raw.decode('utf-8-sig'), newline=None) as f:
         reader = csv.DictReader(f)
 
         for row in reader:
@@ -286,6 +324,17 @@ def load_footnotes(footnotes_path: str) -> List[Dict]:
 
 
 def load_transcriptions(transcriptions_path: str) -> List[Dict]:
+    """Path form of load_transcriptions_from_bytes(), for callers that stamp no provenance.
+
+    The pipeline's main() must NOT use this: it verifies a file's bytes and then parses
+    the SAME bytes, so nothing can be swapped between the two. Re-opening by path here is
+    exactly the window that closes.
+    """
+    with open(transcriptions_path, 'rb') as fh:
+        return load_transcriptions_from_bytes(fh.read())
+
+
+def load_transcriptions_from_bytes(raw: bytes) -> List[Dict]:
     """
     Load ALL records from transcriptions_linked.csv.
 
@@ -297,7 +346,7 @@ def load_transcriptions(transcriptions_path: str) -> List[Dict]:
     records = []
     skipped = {'blank_pgpid': 0, 'non_integer_pgpid': 0}
 
-    with open(transcriptions_path, 'r', encoding='utf-8-sig') as f:
+    with io.StringIO(raw.decode('utf-8-sig'), newline=None) as f:
         reader = csv.DictReader(f)
 
         for row in reader:
@@ -1090,7 +1139,21 @@ Prerequisites:
     # can leave a mixed-vintage set -- exactly what pinning to one upstream commit is
     # meant to prevent. Verify the checksums the fetch recorded before importing anything.
     pgp_data_dir = str(project_dir / 'pgp_data')
-    problems = verify_against_provenance(pgp_data_dir)
+
+    # Read every input ONCE. The verifier checks THESE bytes and the loaders below parse
+    # THESE bytes; verifying by path and then re-opening the files left a window in which
+    # a swapped-and-restored CSV was imported under a clean manifest.
+    raw = {
+        'documents.csv': documents_path.read_bytes(),
+        'fragments.csv': fragments_path.read_bytes(),
+        'footnotes.csv': footnotes_path.read_bytes(),
+        'transcriptions_linked.csv': transcriptions_path.read_bytes(),
+        'libraries.csv': libraries_path.read_bytes(),
+        'fist_shelfmarks_supplement.csv': (
+            fist_supplement_path.read_bytes() if fist_supplement_path.exists() else None
+        ),
+    }
+    problems = verify_against_provenance(pgp_data_dir, contents=raw)
     provenance_problems = list(problems)
     if problems:
         if args.no_provenance_check:
@@ -1113,30 +1176,29 @@ Prerequisites:
     print()
 
     print("  Loading GenizahSearch shelfmarks from libraries.csv...")
-    gs_lookup = load_genizahsearch_shelfmarks(
-        str(libraries_path),
-        str(fist_supplement_path) if fist_supplement_path.exists() else None
+    gs_lookup = load_genizahsearch_shelfmarks_from_bytes(
+        raw['libraries.csv'], raw['fist_shelfmarks_supplement.csv']
     )
     print(f"    Loaded {len(gs_lookup):,} normalized shelfmarks")
     print()
 
     print("  Loading documents from documents.csv...")
-    documents = load_documents_full(str(documents_path))
+    documents = load_documents_full_from_bytes(raw['documents.csv'])
     print(f"    Loaded {len(documents):,} document records")
     print()
 
     print("  Loading fragment metadata from fragments.csv...")
-    fragment_metadata = load_fragment_metadata(str(fragments_path))
+    fragment_metadata = load_fragment_metadata_from_bytes(raw['fragments.csv'])
     print(f"    Loaded {len(fragment_metadata):,} fragment records")
     print()
 
     print("  Loading footnotes from footnotes.csv...")
-    footnotes = load_footnotes(str(footnotes_path))
+    footnotes = load_footnotes_from_bytes(raw['footnotes.csv'])
     print(f"    Loaded {len(footnotes):,} footnote records")
     print()
 
     print("  Loading transcriptions from transcriptions_linked.csv...")
-    transcription_records = load_transcriptions(str(transcriptions_path))
+    transcription_records = load_transcriptions_from_bytes(raw['transcriptions_linked.csv'])
     print(f"    Loaded {len(transcription_records):,} transcription/source records")
     print()
 

@@ -74,7 +74,23 @@ PROVENANCE_FILENAME = "upstream_provenance.json"
 DERIVED_PROVENANCE_FILENAME = "derived_provenance.json"
 
 
-def verify_against_provenance(dest: str, check_derived: bool = True) -> list:
+def _bytes_for(name: str, path: str, contents) -> bytes | None:
+    """The bytes to verify for `name`.
+
+    When the caller hands over the bytes it is about to parse (`contents[name]`), THOSE are
+    verified -- so the bytes verified and the bytes parsed are one object and nothing can be
+    swapped between the two steps. Otherwise the file on disk is read. None when there is
+    nothing at all (the caller may record an input as absent by passing None explicitly).
+    """
+    if contents is not None and name in contents:
+        return contents[name]
+    if not os.path.exists(path):
+        return None
+    with open(path, "rb") as fh:
+        return fh.read()
+
+
+def verify_against_provenance(dest: str, check_derived: bool = True, contents=None) -> list:
     """Do the CSVs on disk still match what the fetch recorded? Returns a list of problems.
 
     The three CSVs are replaced one at a time, so an interruption between two renames can
@@ -88,6 +104,11 @@ def verify_against_provenance(dest: str, check_derived: bool = True) -> list:
     The manifest must also COVER every file the pipeline consumes. A manifest with entries
     for two of the three CSVs used to pass vacuously and certify whatever sat at the third
     name.
+
+    `contents` ({filename: bytes}) lets a caller verify the exact bytes it is about to parse
+    instead of whatever is on disk at the moment of the check. Verify-then-reopen left a
+    window in every consumer: swap the file after the hash, restore it after the load, and
+    the output came from the swapped file under a clean stamp.
     """
     problems = []
     path = os.path.join(dest, PROVENANCE_FILENAME)
@@ -114,7 +135,8 @@ def verify_against_provenance(dest: str, check_derived: bool = True) -> list:
     # keeping the old derived file used to verify clean while importing the old text.
     for filename, expected in sorted(files.items()):
         target = os.path.join(dest, filename)
-        if not os.path.exists(target):
+        raw = _bytes_for(filename, target, contents)
+        if raw is None:
             problems.append("%s is missing" % filename)
             continue
         # Older provenance recorded a bare row count; treat that as unverifiable rather
@@ -123,8 +145,6 @@ def verify_against_provenance(dest: str, check_derived: bool = True) -> list:
             problems.append("%s: provenance predates checksums; re-run "
                             "scripts/fetch_pgp_metadata.py" % filename)
             continue
-        with open(target, "rb") as fh:
-            raw = fh.read()
         if len(raw) != expected.get("bytes"):
             problems.append("%s: %d bytes on disk, provenance says %s"
                             % (filename, len(raw), expected.get("bytes")))
@@ -138,12 +158,12 @@ def verify_against_provenance(dest: str, check_derived: bool = True) -> list:
     # introduced in 22f94a28 and never exercised because I did not re-run fetch after
     # adding the check). The IMPORT still requires it.
     if check_derived:
-        problems.extend(_verify_derived(dest, provenance.get("upstream_commit")))
+        problems.extend(_verify_derived(dest, provenance.get("upstream_commit"), contents))
 
     return problems
 
 
-def _verify_derived(dest: str, expected_commit) -> list:
+def _verify_derived(dest: str, expected_commit, contents=None) -> list:
     """Is transcriptions_linked.csv both from the right commit AND unaltered?
 
     It is generated from the downloaded CSVs and is what actually carries transcription
@@ -152,7 +172,8 @@ def _verify_derived(dest: str, expected_commit) -> list:
     """
     problems = []
     linked = os.path.join(dest, "transcriptions_linked.csv")
-    if not os.path.exists(linked):
+    raw = _bytes_for("transcriptions_linked.csv", linked, contents)
+    if raw is None:
         return problems
 
     derived = {}
@@ -191,15 +212,13 @@ def _verify_derived(dest: str, expected_commit) -> list:
         )
         return problems
 
-    with open(linked, "rb") as fh:
-        raw = fh.read()
     if len(raw) != recorded.get("bytes"):
         problems.append("transcriptions_linked.csv: %d bytes on disk, provenance says %s"
                         % (len(raw), recorded.get("bytes")))
     elif hashlib.sha256(raw).hexdigest() != recorded.get("sha256"):
         problems.append("transcriptions_linked.csv: SHA-256 does not match provenance")
 
-    problems.extend(_verify_derivation_inputs(dest, derived.get("inputs")))
+    problems.extend(_verify_derivation_inputs(dest, derived.get("inputs"), contents))
     return problems
 
 
@@ -211,7 +230,7 @@ DERIVATION_INPUTS = {
 }
 
 
-def _verify_derivation_inputs(dest: str, inputs) -> list:
+def _verify_derivation_inputs(dest: str, inputs, contents=None) -> list:
     """Are libraries.csv and the FIST supplement still what the derivation read?
 
     They decide which GenizahSearch manuscript each transcription is attributed to, and
@@ -229,7 +248,8 @@ def _verify_derivation_inputs(dest: str, inputs) -> list:
     for label, parts in sorted(DERIVATION_INPUTS.items()):
         recorded = inputs.get(label)
         path = os.path.join(dest, *parts)
-        exists = os.path.exists(path)
+        raw = _bytes_for(label, path, contents)
+        exists = raw is not None
         if recorded is None:
             problems.append("transcriptions_linked.csv records nothing about %s -- re-run "
                             "scripts/pgp_transcriptions_export.py" % label)
@@ -248,8 +268,6 @@ def _verify_derivation_inputs(dest: str, inputs) -> list:
             problems.append("%s was present when transcriptions_linked.csv was derived and "
                             "is missing now" % label)
             continue
-        with open(path, "rb") as fh:
-            raw = fh.read()
         if len(raw) != recorded.get("bytes") or \
                 hashlib.sha256(raw).hexdigest() != recorded.get("sha256"):
             problems.append("%s has changed since transcriptions_linked.csv was derived "
