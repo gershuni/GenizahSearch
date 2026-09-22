@@ -1,5 +1,25 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
+import subprocess
+import sys
+
 from PyInstaller.utils.hooks import collect_all
+
+# Refuse to bundle a pgp.db that must not ship, HERE rather than only in build_app.bat.
+# Two routes bypass the .bat: invoking PyInstaller directly with this spec, and compiling
+# CompileScriptGenizah.iss against a stale dist\ (its [Files] section recursively packages
+# whatever that directory holds). Checking inside the spec closes both, since the ISS can
+# only package what PyInstaller produced. See scripts/check_shipping_sidecar.py.
+if os.environ.get("GENIZAH_SKIP_SIDECAR_CHECK") != "1":
+    _check = subprocess.run(
+        [sys.executable, os.path.join("scripts", "check_shipping_sidecar.py")],
+        cwd=os.path.abspath(os.getcwd()),
+    )
+    if _check.returncode != 0:
+        raise SystemExit(
+            "GenizahSearchPro.spec: refusing to build -- see the sidecar check above. "
+            "Set GENIZAH_SKIP_SIDECAR_CHECK=1 only if you know what will ship."
+        )
 
 # WR-05: hebrew_sample.pdf (6.3 MB) was shipped in every production installer
 # even though it is only used by tests/test_local_pyinstaller_smoke.py

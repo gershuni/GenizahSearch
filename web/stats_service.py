@@ -35,7 +35,7 @@ CORPUS_STATS: Dict[str, int] = {
     "manuscripts": 255_723,
     "catalog_entries": 731_354,
     "images": 1_019_886,
-    "scholarly_transcriptions": 27_424,
+    "scholarly_transcriptions": 27_593,
     "automatic_transcriptions": 232_450,
 }
 

@@ -97,12 +97,11 @@ python scripts/import_nli_crossref.py
 python scripts/import_manchester_luna.py
 python scripts/import_jts_dpul.py
 python scripts/import_jts_dpul_v2.py
-python scripts/pgp_transcriptions_export.py
-python scripts/import_pgp_documents.py
-python scripts/import_pgp_full.py --execute
-python scripts/import_document_sources.py
-python scripts/import_pgp_sections.py
-python scripts/export_pgp_sidecar.py
+# PGP refresh: ONE sequence that stops at the first failing step (never paste the steps
+# as separate lines -- exit codes are not consumed that way). Deploy is a separate script.
+powershell -File scripts/refresh_pgp_data.ps1                     # steps 0-3, through the import dry run
+powershell -File scripts/refresh_pgp_data.ps1 -Execute -StartAt 4 # steps 4-8, writing to Supabase
+powershell -File scripts/deploy_pgp_sidecar.ps1                   # guard -> scp -> restart, each gated
 python scripts/fix_nli_oxford_mislabel.py --dry-run
 python scripts/fix_nli_oxford_mislabel.py --apply
 python scripts/soak_search_api.py --url https://genizahsearch.com/api/search

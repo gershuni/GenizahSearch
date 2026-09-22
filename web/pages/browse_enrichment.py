@@ -604,7 +604,10 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
         }
 
         pgpid = pgp_doc.get('pgpid')
-        doc_relation = pgp_doc.get('doc_relation', '')
+        # `or ''` NOT `.get(..., '')`: the default only fires when the KEY is absent,
+        # and doc_relation is now a real column that is SQL NULL for ~80% of documents.
+        # `'Edition' in None` raises TypeError. search_results.py already had this right.
+        doc_relation = pgp_doc.get('doc_relation') or ''
         is_edition = 'Edition' in doc_relation or not doc_relation
         page_content = get_section_for_page(pgp_doc['transcription'], page.p_num, fragment_page_info=pgp_doc.get('_fragment_page_info')) if pgp_doc.get('transcription') else None
 

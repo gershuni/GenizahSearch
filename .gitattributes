@@ -21,3 +21,8 @@ tests/fixtures/mishneh_torah_container_probe_children.json text eol=lf
 
 # The API documentation contract checks CRLF on every platform.
 docs/SEARCH_API.md text eol=crlf
+
+# Batch files are read by cmd.exe, which mis-parses LF-only files that carry a
+# non-ASCII byte (observed 2026-09-22 on build_app.bat: REM fragments executed as
+# commands). Repo blob LF, working tree CRLF.
+*.bat text eol=crlf

@@ -41,6 +41,8 @@ Prerequisites:
 
 import argparse
 import csv
+import io
+import json
 import os
 import sys
 from collections import defaultdict
@@ -65,10 +67,65 @@ except ImportError:
 
 # Import normalize_shelfmark from existing export script
 sys.path.insert(0, str(Path(__file__).parent))
-from pgp_transcriptions_export import normalize_shelfmark, load_genizahsearch_shelfmarks
+from pgp_transcriptions_export import (
+    normalize_shelfmark,
+    load_genizahsearch_shelfmarks,  # noqa: F401 -- kept importable for older callers
+    load_genizahsearch_shelfmarks_from_bytes,
+)
+from fetch_pgp_metadata import (
+    PROVENANCE_FILENAME,
+    verify_against_provenance,
+)
+
+IMPORT_PROVENANCE_FILENAME = 'import_provenance.json'
 
 # Constants
 BATCH_SIZE = 500  # Proven in v1 imports
+
+
+def is_edition_relation(doc_relation: str) -> bool:
+    '''Does this doc_relation denote an edition (i.e. transcribed source text)?
+
+    ONE predicate, used by both the transcription selection here and the classification
+    in scripts/update_doc_relation.py. They used to disagree: the classifier accepted any
+    relation containing 'Edition' while this required exactly 'Digital Edition', so a
+    compound 'Edition ; Translation' row -- or the bare 'Edition' that pgpid 38267 carries
+    -- was classified as an edition while no row was selected for the transcription,
+    leaving whatever was there before. The app then labels stale text with a fresh claim.
+    '''
+    return 'Edition' in (doc_relation or '')
+
+
+def require_fist_supplement(path, allow_missing: bool) -> None:
+    """Refuse to run without the FIST shelfmark supplement.
+
+    It contributes ~35,600 shelfmarks that libraries.csv does not carry. Without it the
+    PGP fragment match rate drops from 94.5% to 87.5% -- roughly 2,900 fragments that
+    quietly fail to link, taking their IIIF image URLs with them. The old behaviour was
+    to shrug and continue, so the loss showed up only as a slightly worse number in a
+    report nobody diffed.
+    """
+    import os as _os
+    if _os.path.exists(path):
+        return
+    if allow_missing:
+        print("WARNING: proceeding WITHOUT the FIST supplement (--no-fist-supplement).")
+        print("         Expect a materially lower fragment match rate.")
+        print()
+        return
+    print("ERROR: FIST shelfmark supplement not found:", file=__import__("sys").stderr)
+    print("         %s" % path, file=__import__("sys").stderr)
+    print("", file=__import__("sys").stderr)
+    print("Regenerate it with:  python scripts/fist_shelfmarks_export.py",
+          file=__import__("sys").stderr)
+    print("(it needs fist_data/FIST.db). Without it the fragment match rate falls from",
+          file=__import__("sys").stderr)
+    print("94.5% to 87.5%, so thousands of fragments lose their IIIF image links.",
+          file=__import__("sys").stderr)
+    print("Pass --no-fist-supplement if you really mean to run without it.",
+          file=__import__("sys").stderr)
+    raise SystemExit(1)
+
 
 
 # ============================================
@@ -87,6 +144,17 @@ def parse_tags(tags_str: str) -> List[str]:
 
 
 def load_documents_full(documents_path: str) -> Dict[int, Dict]:
+    """Path form of load_documents_full_from_bytes(), for callers that stamp no provenance.
+
+    The pipeline's main() must NOT use this: it verifies a file's bytes and then parses
+    the SAME bytes, so nothing can be swapped between the two. Re-opening by path here is
+    exactly the window that closes.
+    """
+    with open(documents_path, 'rb') as fh:
+        return load_documents_full_from_bytes(fh.read())
+
+
+def load_documents_full_from_bytes(raw: bytes) -> Dict[int, Dict]:
     """
     Load ALL columns from documents.csv.
 
@@ -94,7 +162,7 @@ def load_documents_full(documents_path: str) -> Dict[int, Dict]:
     """
     documents = {}
 
-    with open(documents_path, 'r', encoding='utf-8-sig') as f:
+    with io.StringIO(raw.decode('utf-8-sig'), newline=None) as f:
         reader = csv.DictReader(f)
 
         for row in reader:
@@ -139,6 +207,17 @@ def load_documents_full(documents_path: str) -> Dict[int, Dict]:
 
 
 def load_fragment_metadata(fragments_path: str) -> Dict[str, Dict]:
+    """Path form of load_fragment_metadata_from_bytes(), for callers that stamp no provenance.
+
+    The pipeline's main() must NOT use this: it verifies a file's bytes and then parses
+    the SAME bytes, so nothing can be swapped between the two. Re-opening by path here is
+    exactly the window that closes.
+    """
+    with open(fragments_path, 'rb') as fh:
+        return load_fragment_metadata_from_bytes(fh.read())
+
+
+def load_fragment_metadata_from_bytes(raw: bytes) -> Dict[str, Dict]:
     """
     Load fragments.csv into shelfmark -> metadata lookup.
 
@@ -149,7 +228,7 @@ def load_fragment_metadata(fragments_path: str) -> Dict[str, Dict]:
     """
     fragments = {}
 
-    with open(fragments_path, 'r', encoding='utf-8-sig') as f:
+    with io.StringIO(raw.decode('utf-8-sig'), newline=None) as f:
         reader = csv.DictReader(f)
 
         for row in reader:
@@ -172,6 +251,17 @@ def load_fragment_metadata(fragments_path: str) -> Dict[str, Dict]:
 
 
 def load_footnotes(footnotes_path: str) -> List[Dict]:
+    """Path form of load_footnotes_from_bytes(), for callers that stamp no provenance.
+
+    The pipeline's main() must NOT use this: it verifies a file's bytes and then parses
+    the SAME bytes, so nothing can be swapped between the two. Re-opening by path here is
+    exactly the window that closes.
+    """
+    with open(footnotes_path, 'rb') as fh:
+        return load_footnotes_from_bytes(fh.read())
+
+
+def load_footnotes_from_bytes(raw: bytes) -> List[Dict]:
     """
     Load footnotes.csv into list of footnote records.
 
@@ -182,7 +272,7 @@ def load_footnotes(footnotes_path: str) -> List[Dict]:
     """
     footnotes = []
 
-    with open(footnotes_path, 'r', encoding='utf-8-sig') as f:
+    with io.StringIO(raw.decode('utf-8-sig'), newline=None) as f:
         reader = csv.DictReader(f)
 
         for row in reader:
@@ -235,6 +325,17 @@ def load_footnotes(footnotes_path: str) -> List[Dict]:
 
 
 def load_transcriptions(transcriptions_path: str) -> List[Dict]:
+    """Path form of load_transcriptions_from_bytes(), for callers that stamp no provenance.
+
+    The pipeline's main() must NOT use this: it verifies a file's bytes and then parses
+    the SAME bytes, so nothing can be swapped between the two. Re-opening by path here is
+    exactly the window that closes.
+    """
+    with open(transcriptions_path, 'rb') as fh:
+        return load_transcriptions_from_bytes(fh.read())
+
+
+def load_transcriptions_from_bytes(raw: bytes) -> List[Dict]:
     """
     Load ALL records from transcriptions_linked.csv.
 
@@ -244,8 +345,9 @@ def load_transcriptions(transcriptions_path: str) -> List[Dict]:
     Returns: List of all source records
     """
     records = []
+    skipped = {'blank_pgpid': 0, 'non_integer_pgpid': 0}
 
-    with open(transcriptions_path, 'r', encoding='utf-8-sig') as f:
+    with io.StringIO(raw.decode('utf-8-sig'), newline=None) as f:
         reader = csv.DictReader(f)
 
         for row in reader:
@@ -263,11 +365,13 @@ def load_transcriptions(transcriptions_path: str) -> List[Dict]:
                 pgpid_str = row['\ufeffpgpid']
 
             if not pgpid_str:
+                skipped['blank_pgpid'] += 1
                 continue
 
             try:
                 pgpid = int(pgpid_str)
             except ValueError:
+                skipped['non_integer_pgpid'] += 1
                 continue
 
             records.append({
@@ -278,6 +382,17 @@ def load_transcriptions(transcriptions_path: str) -> List[Dict]:
                 'content': row.get('content', ''),
                 'content_length': row.get('content_length', ''),
             })
+
+    # Every row scripts/pgp_transcriptions_export.py writes carries an integer pgpid
+    # (measured 2026-09-22: 10,037 rows, 0 skipped). A row this loop cannot use is a
+    # format change under this importer, and a bare `continue` used to hide it.
+    if any(skipped.values()):
+        raise SystemExit(
+            "ERROR: %d row(s) in transcriptions_linked.csv have no usable pgpid (%s). "
+            "Regenerate it with scripts/pgp_transcriptions_export.py."
+            % (sum(skipped.values()),
+               ", ".join("%s=%d" % kv for kv in sorted(skipped.items()) if kv[1]))
+        )
 
     return records
 
@@ -302,6 +417,44 @@ def detect_translation_language(content: str) -> str:
         if 0x0590 <= ord(c) <= 0x05FF
     )
     return "Hebrew" if hebrew_count > 10 else "English"
+
+
+def build_transcription_lookup(transcription_records: List[Dict]) -> Dict[int, Dict]:
+    """pgpid -> the edition whose text becomes ``documents.transcription``.
+
+    Two passes, and the order of both matters:
+
+    1. The FIRST row whose relation is exactly ``Digital Edition``.
+    2. Only if there is none, the first row of any other ``Edition`` relation -- which
+       rescues documents like pgpid 38267 whose sole edition carries the bare relation
+       ``Edition``.
+
+    Both passes keep the FIRST match. That guard was briefly dropped from pass 1, so the
+    LAST exact edition won instead: 657 documents silently received a different scholar's
+    text and a different attribution (Gil where it should have been Goitein, Friedman
+    where it should have been Olszowy-Schlanger). Attribution is not cosmetic here -- it
+    is what the citation machinery prints -- so this lives in a function that can be
+    tested rather than inline in main().
+    """
+    lookup: Dict[int, Dict] = {}
+
+    for rec in transcription_records:
+        pgpid = rec['pgpid']
+        if pgpid not in lookup and rec['doc_relation'] == 'Digital Edition':
+            lookup[pgpid] = {
+                'content': rec['content'],
+                'source_scholar': rec['source_scholar'],
+            }
+
+    for rec in transcription_records:
+        pgpid = rec['pgpid']
+        if pgpid not in lookup and is_edition_relation(rec['doc_relation']):
+            lookup[pgpid] = {
+                'content': rec['content'],
+                'source_scholar': rec['source_scholar'],
+            }
+
+    return lookup
 
 
 def prepare_document_records(
@@ -527,10 +680,48 @@ def prepare_footnote_records(
     return valid_records, issues
 
 
+def build_page_info_lookup(documents: Dict[int, Dict]) -> Dict[Tuple[int, str], str]:
+    """(pgpid, normalized fragment shelfmark) -> side, e.g. 'recto' / 'verso'.
+
+    documents.csv carries a combined shelfmark ("A + B") and a parallel side string
+    ("recto ; verso"); zipping them is how the superseded v1 importer populated
+    document_fragments.page_info. import_pgp_full.py loaded `side` and never used it, so
+    the column has gone unmaintained since February.
+
+    It decides which document a two-sided fragment resolves to
+    (shared/document_service.py) and which page's text is shown
+    (shared/browse_service.py), so losing it shows the wrong side's transcription.
+    """
+    lookup: Dict[Tuple[int, str], str] = {}
+
+    for pgpid, doc in documents.items():
+        shelfmark = doc.get('_shelfmark_raw') or ''
+        side = doc.get('_side') or ''
+        if not shelfmark or not side.strip():
+            continue
+
+        parts = [p.strip() for p in shelfmark.split(' + ')]
+        sides = [x.strip() for x in side.split(' ; ')]
+
+        for index, part in enumerate(parts):
+            if index >= len(sides) or not sides[index]:
+                continue
+            normalized = normalize_shelfmark(part)
+            if normalized:
+                # setdefault, not assignment: a combined shelfmark can repeat a fragment
+                # ("T-S 12.1 + T-S 12.1", side "recto ; verso"). document_fragments is
+                # unique on (document_id, sys_id) so only one row can exist for the pair
+                # anyway -- keep the FIRST side rather than silently keeping the last.
+                lookup.setdefault((pgpid, normalized), sides[index])
+
+    return lookup
+
+
 def prepare_fragment_records_from_csv(
     fragment_metadata: Dict[str, Dict],
     gs_lookup: Dict[str, str],
-    valid_pgpids: Optional[set] = None
+    valid_pgpids: Optional[set] = None,
+    page_info_lookup: Optional[Dict[Tuple[int, str], str]] = None
 ) -> Tuple[List[Dict], List[Dict]]:
     """
     Build document_fragments records from fragments.csv.
@@ -589,6 +780,7 @@ def prepare_fragment_records_from_csv(
             pgpid_fragments[pgpid].append({
                 'sys_id': sys_id,
                 'shelfmark': shelfmark,
+                'page_info': (page_info_lookup or {}).get((pgpid, normalized)),
                 'collection': meta.get('collection'),
                 'library': meta.get('library'),
                 'library_abbrev': meta.get('library_abbrev'),
@@ -612,6 +804,7 @@ def prepare_fragment_records_from_csv(
                 'library_abbrev': frag['library_abbrev'],
                 'fragment_url': frag['fragment_url'],
                 'iiif_url': frag['iiif_url'],
+                'page_info': frag['page_info'],
             })
 
     return valid_records, issues
@@ -629,36 +822,148 @@ def upsert_in_batches(
     dry_run: bool = True
 ) -> int:
     """
-    Upsert records in batches with progress bar.
+    Upsert records in batches, grouped by COLUMN SET, with a progress bar.
+
+    The grouping is load-bearing, not tidiness. prepare_document_records() deliberately
+    omits `transcription` / `transcription_source` for documents that have no edition
+    content, so the upsert leaves whatever is already stored alone. PostgREST sends one
+    request per batch whose column list is the UNION of the payload's keys, and a record
+    that omitted a key is then written as NULL because another record in the same batch
+    carried it. That silently erased both fields on 8 documents in the 2026-09-22 refresh
+    (897, 4093, 7336, 11073, 11265, 11266, 26420, 38240), and re-running does not repair
+    them -- omitting the key now preserves the NULL.
+
+    Batching each distinct column set separately restores the omission semantics.
 
     Returns: Number of records processed
     """
     if not records:
         return 0
 
+    groups: Dict[frozenset, List[Dict]] = defaultdict(list)
+    for record in records:
+        groups[frozenset(record.keys())].append(record)
+
+    if len(groups) > 1:
+        sizes = ", ".join(str(len(g)) for g in sorted(groups.values(), key=len, reverse=True))
+        print(f"    {len(groups)} distinct column sets ({sizes}); batched separately "
+              f"so omitted columns are preserved")
+
     processed = 0
+    total = len(records)
+    with tqdm(total=total, desc=f"Importing {table_name}") as progress:
+        for group in groups.values():
+            for i in range(0, len(group), BATCH_SIZE):
+                batch = group[i:i + BATCH_SIZE]
 
-    for i in tqdm(range(0, len(records), BATCH_SIZE), desc=f"Importing {table_name}"):
-        batch = records[i:i + BATCH_SIZE]
+                if not dry_run:
+                    client.table(table_name).upsert(
+                        batch, on_conflict=on_conflict
+                    ).execute()
 
-        if not dry_run:
-            client.table(table_name).upsert(batch, on_conflict=on_conflict).execute()
-
-        processed += len(batch)
+                processed += len(batch)
+                progress.update(len(batch))
 
     return processed
 
 
+def read_optional_bytes(path) -> Optional[bytes]:
+    """The file's bytes; None when it is missing OR cannot be read (reported). For the
+    manifest: an unreadable manifest is a verification problem the override may waive,
+    not a crash."""
+    try:
+        with open(path, 'rb') as fh:
+            return fh.read()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        print(f"WARNING: could not read {path}: {exc}")
+        return None
+
+
+def invalidate_import_provenance(pgp_data_dir: str) -> None:
+    """Remove the previous import record BEFORE the first row is pushed.
+
+    The record is written last, after all four passes. Until then the old record still
+    describes the previous import -- with the same row counts, because upserts change
+    content, not counts -- so a run that dies between the first push and the final write
+    (Ctrl-C, a PostgREST error, a locked report file) left a record the exporter would
+    corroborate and stamp onto half-applied data. With no record on disk, an interrupted
+    import simply cannot be stamped until it is re-run to completion.
+    """
+    path = os.path.join(pgp_data_dir, IMPORT_PROVENANCE_FILENAME)
+    if os.path.exists(path):
+        os.remove(path)
+        print(f"Removed the previous {IMPORT_PROVENANCE_FILENAME}; a new one is written only "
+              "if this import completes.")
+
+
+def write_import_provenance(pgp_data_dir: str, after_counts: Dict[str, int],
+                            verified: bool = True, supabase_url: Optional[str] = None,
+                            upstream: Optional[Dict] = None) -> None:
+    """Write what this import pushed, and the row counts it left behind.
+
+    The sidecar export reads THIS file, not the fetch-time one, and only stamps the
+    upstream commit into pgp.db's meta if the counts it exports corroborate these -- and
+    if it is exporting from the same project this record names.
+
+    `upstream` is the manifest PARSED FROM THE BYTES THAT VERIFIED THE IMPORT. This
+    function opens nothing: re-reading upstream_provenance.json here let a fetch that
+    landed during the (long) push record the new commit against rows prepared from the
+    old one -- and the after-counts still corroborated, so the sidecar published A's data
+    as B.
+    """
+    from datetime import timezone
+
+    # A manifest that FAILED verification must not lend its commit id to the import
+    # record: --no-provenance-check means "import these anyway", not "and vouch for
+    # them". Row-count corroboration downstream cannot detect altered files with
+    # unchanged counts, so the sidecar would carry a commit whose checksums did not match.
+    upstream = dict(upstream or {}) if verified else {}
+
+    record = {
+        'imported_at': datetime.now(timezone.utc).isoformat(),
+        'imported_by': 'scripts/import_pgp_full.py',
+        'supabase_counts_after': dict(after_counts),
+        # Explicit either way. A record without the key used to be indistinguishable
+        # from one written by an older importer that did not know about verification.
+        'inputs_verified': bool(verified),
+    }
+    if supabase_url:
+        record['supabase_url'] = supabase_url
+    if not verified:
+        record['note'] = ('imported with --no-provenance-check; no upstream commit is '
+                          'recorded because the CSVs did not match their manifest')
+    for key in ('upstream_repo', 'upstream_commit', 'upstream_committed'):
+        if upstream.get(key):
+            record[key] = upstream[key]
+
+    path = os.path.join(pgp_data_dir, IMPORT_PROVENANCE_FILENAME)
+    with open(path, 'w', encoding='utf-8') as fh:
+        json.dump(record, fh, indent=2, sort_keys=True)
+        fh.write('\n')
+    print(f"Wrote {path}")
+
+
 def capture_table_counts(client) -> Dict[str, int]:
-    """Capture current row counts for all PGP tables."""
+    """Capture current row counts for all PGP tables.
+
+    A failed count query used to be recorded as 0. These numbers go into
+    import_provenance.json, which is the sidecar exporter's only corroboration, so a
+    transient error here silently turned a good import into one the exporter must reject
+    (or, before the push, into a before-count of 0 and a report full of false deltas).
+    Let it raise: no record is better than a wrong one.
+    """
     counts = {}
     for table in ['documents', 'document_fragments', 'document_sources', 'document_footnotes']:
-        try:
-            response = client.table(table).select('*', count='exact', head=True).execute()
-            counts[table] = response.count or 0
-        except Exception:
-            counts[table] = 0
+        response = client.table(table).select('*', count='exact', head=True).execute()
+        if response.count is None:
+            raise RuntimeError(f"Supabase returned no row count for {table}")
+        counts[table] = response.count
     return counts
+
+
+DRY_RUN_REPORT_FILENAME = 'full_import_dry_run_report.txt'
 
 
 def write_verification_report(
@@ -666,23 +971,34 @@ def write_verification_report(
     after: Dict[str, int],
     stats: Dict,
     all_issues: List[Dict],
-    report_path: str
+    report_path: str,
+    dry_run: bool = False,
 ):
-    """Write comprehensive before/after verification report."""
+    """Write comprehensive before/after verification report.
+
+    A dry run writes one too (to DRY_RUN_REPORT_FILENAME, not the execute report): the
+    procedure says "read the report, then --execute", and until this existed the file it
+    pointed at was the PREVIOUS execute's report.
+    """
     with open(report_path, 'w', encoding='utf-8') as f:
         f.write("=" * 60 + "\n")
-        f.write("Full PGP Import Verification Report\n")
+        f.write("Full PGP Import Verification Report%s\n" % (" -- DRY RUN" if dry_run else ""))
         f.write("=" * 60 + "\n")
         f.write(f"Generated: {datetime.now().isoformat()}\n\n")
 
-        f.write("Table Row Counts (Before -> After):\n")
-        f.write("-" * 50 + "\n")
-        for table in ['documents', 'document_fragments', 'document_sources', 'document_footnotes']:
-            b = before.get(table, 0)
-            a = after.get(table, 0)
-            delta = a - b
-            f.write(f"  {table:25s}: {b:>8,} -> {a:>8,} (delta: {delta:+,d})\n")
-        f.write("\n")
+        if dry_run:
+            f.write("DRY RUN: nothing was written to Supabase and no row counts were "
+                    "captured.\nThe figures below describe what --execute WOULD push.\n\n")
+        else:
+            f.write("Table Row Counts (Before -> After):\n")
+            f.write("-" * 50 + "\n")
+            for table in ['documents', 'document_fragments', 'document_sources',
+                          'document_footnotes']:
+                b = before.get(table, 0)
+                a = after.get(table, 0)
+                delta = a - b
+                f.write(f"  {table:25s}: {b:>8,} -> {a:>8,} (delta: {delta:+,d})\n")
+            f.write("\n")
 
         f.write("Records Prepared Per Pass:\n")
         f.write("-" * 50 + "\n")
@@ -724,7 +1040,8 @@ def write_verification_report(
         )
         f.write(f"Success Rate:\n")
         f.write(f"  Total records attempted: {total_attempted:,}\n")
-        f.write(f"  Total new/updated rows:  {total_delta:,}\n")
+        if not dry_run:
+            f.write(f"  Total new/updated rows:  {total_delta:,}\n")
 
 
 # ============================================
@@ -754,6 +1071,14 @@ Prerequisites:
     group.add_argument(
         '--execute', action='store_true',
         help='Actually import data to Supabase'
+    )
+    parser.add_argument(
+        '--no-fist-supplement', action='store_true',
+        help='Run without pgp_data/fist_shelfmarks_supplement.csv (much worse matching)'
+    )
+    parser.add_argument(
+        '--no-provenance-check', action='store_true',
+        help='Import CSVs that were not fetched by scripts/fetch_pgp_metadata.py'
     )
 
     args = parser.parse_args()
@@ -822,31 +1147,81 @@ Prerequisites:
     print("Step 1: Loading data sources...")
     print()
 
+    require_fist_supplement(str(fist_supplement_path), args.no_fist_supplement)
+
+    # The three CSVs are replaced one at a time by the fetch step, so an interrupted run
+    # can leave a mixed-vintage set -- exactly what pinning to one upstream commit is
+    # meant to prevent. Verify the checksums the fetch recorded before importing anything.
+    pgp_data_dir = str(project_dir / 'pgp_data')
+
+    # Read every input ONCE. The verifier checks THESE bytes and the loaders below parse
+    # THESE bytes; verifying by path and then re-opening the files left a window in which
+    # a swapped-and-restored CSV was imported under a clean manifest.
+    raw = {
+        'documents.csv': documents_path.read_bytes(),
+        'fragments.csv': fragments_path.read_bytes(),
+        'footnotes.csv': footnotes_path.read_bytes(),
+        'transcriptions_linked.csv': transcriptions_path.read_bytes(),
+        'libraries.csv': libraries_path.read_bytes(),
+        'fist_shelfmarks_supplement.csv': (
+            fist_supplement_path.read_bytes() if fist_supplement_path.exists() else None
+        ),
+    }
+    # The manifest too: the commit recorded at the end comes from THESE bytes.
+    manifest_path = project_dir / 'pgp_data' / PROVENANCE_FILENAME
+    raw[PROVENANCE_FILENAME] = read_optional_bytes(manifest_path)
+    problems = verify_against_provenance(pgp_data_dir, contents=raw)
+    verified_upstream = {}
+    if raw[PROVENANCE_FILENAME] is not None:
+        try:
+            verified_upstream = json.loads(raw[PROVENANCE_FILENAME].decode('utf-8')) or {}
+        except (ValueError, UnicodeDecodeError):
+            verified_upstream = {}
+    provenance_problems = list(problems)
+    if problems:
+        if args.no_provenance_check:
+            print("WARNING: importing CSVs that do not match %s (--no-provenance-check):"
+                  % PROVENANCE_FILENAME)
+            for problem in problems:
+                print("  %s" % problem)
+            print()
+        else:
+            print("ERROR: the CSVs in pgp_data/ do not match %s:" % PROVENANCE_FILENAME,
+                  file=sys.stderr)
+            for problem in problems:
+                print("  %s" % problem, file=sys.stderr)
+            print("", file=sys.stderr)
+            print("Re-run:  python scripts/fetch_pgp_metadata.py", file=sys.stderr)
+            print("Or pass --no-provenance-check to import them anyway.", file=sys.stderr)
+            return 1
+    else:
+        print("  CSV set verified against %s" % PROVENANCE_FILENAME)
+    print()
+
     print("  Loading GenizahSearch shelfmarks from libraries.csv...")
-    gs_lookup = load_genizahsearch_shelfmarks(
-        str(libraries_path),
-        str(fist_supplement_path) if fist_supplement_path.exists() else None
+    gs_lookup = load_genizahsearch_shelfmarks_from_bytes(
+        raw['libraries.csv'], raw['fist_shelfmarks_supplement.csv']
     )
     print(f"    Loaded {len(gs_lookup):,} normalized shelfmarks")
     print()
 
     print("  Loading documents from documents.csv...")
-    documents = load_documents_full(str(documents_path))
+    documents = load_documents_full_from_bytes(raw['documents.csv'])
     print(f"    Loaded {len(documents):,} document records")
     print()
 
     print("  Loading fragment metadata from fragments.csv...")
-    fragment_metadata = load_fragment_metadata(str(fragments_path))
+    fragment_metadata = load_fragment_metadata_from_bytes(raw['fragments.csv'])
     print(f"    Loaded {len(fragment_metadata):,} fragment records")
     print()
 
     print("  Loading footnotes from footnotes.csv...")
-    footnotes = load_footnotes(str(footnotes_path))
+    footnotes = load_footnotes_from_bytes(raw['footnotes.csv'])
     print(f"    Loaded {len(footnotes):,} footnote records")
     print()
 
     print("  Loading transcriptions from transcriptions_linked.csv...")
-    transcription_records = load_transcriptions(str(transcriptions_path))
+    transcription_records = load_transcriptions_from_bytes(raw['transcriptions_linked.csv'])
     print(f"    Loaded {len(transcription_records):,} transcription/source records")
     print()
 
@@ -866,15 +1241,7 @@ Prerequisites:
     # ============================================
     print("Step 3: Building transcription lookup...")
 
-    # Build lookup: pgpid -> first Digital Edition content
-    transcription_lookup = {}
-    for rec in transcription_records:
-        pgpid = rec['pgpid']
-        if pgpid not in transcription_lookup and rec['doc_relation'] == 'Digital Edition':
-            transcription_lookup[pgpid] = {
-                'content': rec['content'],
-                'source_scholar': rec['source_scholar'],
-            }
+    transcription_lookup = build_transcription_lookup(transcription_records)
 
     print(f"    Documents with Digital Edition content: {len(transcription_lookup):,}")
     print()
@@ -913,7 +1280,13 @@ Prerequisites:
     print()
 
     print("  Preparing fragment records...")
-    frag_records, frag_issues = prepare_fragment_records_from_csv(fragment_metadata, gs_lookup, valid_pgpids)
+    page_info_lookup = build_page_info_lookup(documents)
+    print(f"    Fragment sides known (recto/verso): {len(page_info_lookup):,}")
+    frag_records, frag_issues = prepare_fragment_records_from_csv(
+        fragment_metadata, gs_lookup, valid_pgpids, page_info_lookup
+    )
+    with_page_info = sum(1 for r in frag_records if r.get('page_info'))
+    print(f"    Fragment links carrying page_info: {with_page_info:,}")
     print(f"    Valid fragment links: {len(frag_records):,}")
     print(f"    Unmatched fragments: {len(frag_issues):,}")
     if fragment_metadata:
@@ -948,7 +1321,23 @@ Prerequisites:
     # ============================================
     # STEP 6: EXECUTE OR DRY-RUN EXIT
     # ============================================
+    stats = {
+        'doc_count': len(doc_records),
+        'source_count': len(source_records),
+        'footnote_count': len(footnote_records),
+        'fragment_count': len(frag_records),
+        'digital_editions': source_stats['digital_editions'],
+        'digital_translations': source_stats['digital_translations'],
+        'translation_hebrew': source_stats['translation_hebrew'],
+        'translation_english': source_stats['translation_english'],
+    }
+
     if dry_run:
+        # The procedure says "read the report, then --execute". Write one for THIS run --
+        # the execute report on disk describes the previous import, not these inputs.
+        dry_run_report_path = project_dir / 'pgp_data' / DRY_RUN_REPORT_FILENAME
+        write_verification_report({}, {}, stats, all_issues, str(dry_run_report_path),
+                                  dry_run=True)
         print("DRY RUN COMPLETE")
         print()
         print(f"Would import {len(doc_records):,} documents")
@@ -956,11 +1345,18 @@ Prerequisites:
         print(f"Would import {len(footnote_records):,} footnotes")
         print(f"Would create {len(frag_records):,} fragment links")
         print()
+        print(f"Report: {dry_run_report_path}")
         print("To execute import, run with --execute flag")
         return 0
 
     # Execute mode
     print("Step 6: Importing to Supabase...")
+    print()
+
+    # From the first upsert onward the previous import record describes a Supabase that
+    # no longer exists. Drop it now, so an interrupted run leaves nothing for the
+    # exporter to corroborate; it is rewritten below only if every pass completes.
+    invalidate_import_provenance(pgp_data_dir)
     print()
 
     # Pass 1: Documents (no FK dependencies)
@@ -1008,19 +1404,15 @@ Prerequisites:
     print()
 
     # Write verification report
-    stats = {
-        'doc_count': len(doc_records),
-        'source_count': len(source_records),
-        'footnote_count': len(footnote_records),
-        'fragment_count': len(frag_records),
-        'digital_editions': source_stats['digital_editions'],
-        'digital_translations': source_stats['digital_translations'],
-        'translation_hebrew': source_stats['translation_hebrew'],
-        'translation_english': source_stats['translation_english'],
-    }
-
     print(f"Writing verification report to {report_path}...")
     write_verification_report(before_counts, after_counts, stats, all_issues, str(report_path))
+
+    # Record what was actually PUSHED, so the sidecar export can stamp provenance that
+    # describes the Supabase snapshot rather than whatever CSVs happen to sit on this
+    # machine. Without this the exporter can label a database with a commit that was
+    # downloaded but never imported -- or that another machine imported instead.
+    write_import_provenance(pgp_data_dir, after_counts, verified=not provenance_problems,
+                            supabase_url=supabase_url, upstream=verified_upstream)
     print()
 
     print("IMPORT COMPLETE")

@@ -128,9 +128,12 @@ Behaviour after the withdrawal, verified rather than assumed: `TranslationServic
 unrelated FJMS sidecar -- so the translations toggle stays visible, correctly, for the surfaces that
 do have translations.
 
-One consequence to keep in view: `scripts/export_pgp_sidecar.py` drops `pgp_translations` on every
-rebuild, which currently works *in favour* of this decision. That is an accident, not a safeguard,
-and it stops helping the moment the quality question is answered.
+One consequence to keep in view: `scripts/export_pgp_sidecar.py` USED TO drop
+`pgp_translations` on every rebuild, which happened to work *in favour* of this decision. That was
+an accident, not a safeguard. It was fixed on 2026-09-22 -- the table is now carried across a
+rebuild -- so the withholding no longer rides on a bug, and is enforced deliberately instead:
+`scripts/check_shipping_sidecar.py` refuses to let `build_app.bat` package a sidecar that still
+contains the table.
 
 ## Options
 

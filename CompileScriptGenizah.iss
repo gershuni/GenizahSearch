@@ -61,6 +61,15 @@ hebrew.VisitWebsite=לאתר הגניזה של דיקטה
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
+; Refuse to package a sidecar that must not ship. This file is often compiled BY HAND
+; (ISCC CompileScriptGenizah.iss), which never runs build_app.bat or GenizahSearchPro.spec
+; -- and [Files] below packages dist\GenizahSearchPro recursively, so a stale dist from an
+; earlier build would ship whatever it contains. The check therefore has to live here too,
+; against the BUILT database. See scripts/check_shipping_sidecar.py.
+#if Exec("cmd.exe", "/c python scripts\check_shipping_sidecar.py --bundled", "C:\GenizahSearch") != 0
+  #error The bundled pgp.db must not ship. Run: python scripts\check_shipping_sidecar.py --bundled
+#endif
+
 [Files]
 Source: "C:\GenizahSearch\dist\GenizahSearchPro\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "C:\GenizahSearch\dist\GenizahSearchPro\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs

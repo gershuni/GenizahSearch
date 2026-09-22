@@ -21,6 +21,10 @@ Usage:
 
 import csv
 import re
+import sys
+import hashlib
+import io
+import json
 import os
 from collections import defaultdict
 from datetime import datetime
@@ -135,54 +139,297 @@ def normalize_shelfmark(shelf: str) -> str:
     return shelf.lower()
 
 
-def load_genizahsearch_shelfmarks(libraries_path: str, fist_supplement_path: str = None) -> dict:
-    """
-    Load GenizahSearch libraries.csv and create shelfmark → sys_id mapping.
-    Optionally supplement with FIST shelfmarks for better coverage.
 
-    Returns dict: normalized_shelfmark → system_number
+# Set by _require_verified_inputs(), read by _record_derived_provenance(). They run in
+# different functions, and the stamp must never certify inputs that failed their manifest.
+#
+# False until the guard has actually run and passed. It used to start True, which meant
+# any path that skipped the guard -- or a single dropped `verified=` kwarg at the call
+# site -- produced a fully certified stamp for inputs nobody had checked. The unsafe
+# state must be unreachable by omission.
+_INPUTS_VERIFIED = False
+
+
+def _require_verified_inputs(pgp_data_dir, contents=None) -> bool:
+    """Refuse to derive from CSVs that do not match what the fetch recorded.
+
+    Otherwise the stamp certifies inputs it never checked: swap footnotes.csv for an
+    altered copy, run this, restore the original, and the derived file is wrong while
+    verification reports clean. Hashing only the OUTPUT would faithfully hash the wrong
+    derivation, so the inputs have to be verified before generation, not after.
+    """
+    import sys as _sys
+
+    _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    global _INPUTS_VERIFIED
+    try:
+        from fetch_pgp_metadata import verify_against_provenance
+    except ImportError:
+        # Cannot verify => must not certify. Returning None here read as "carry on"
+        # while being falsy downstream, which is the worst of both.
+        print("WARNING: could not import the provenance verifier; the derived file "
+              "will carry no upstream commit.")
+        _INPUTS_VERIFIED = False
+        return False
+
+    problems = verify_against_provenance(str(pgp_data_dir), check_derived=False,
+                                         contents=contents)
+    if not problems:
+        _INPUTS_VERIFIED = True
+        return True
+    if os.environ.get('PGP_ALLOW_UNVERIFIED_INPUTS') == '1':
+        print("WARNING: deriving from unverified CSVs "
+              "(PGP_ALLOW_UNVERIFIED_INPUTS=1):")
+        for problem in problems:
+            print("  %s" % problem)
+        print("  No upstream commit will be recorded for the derived file.")
+        _INPUTS_VERIFIED = False
+        # The override means "derive from these anyway", not "and vouch for them".
+        # Without this the stamp copies the rejected manifest's commit, and once the
+        # original CSVs are restored everything verifies clean while the derived output
+        # came from different inputs.
+        return False
+
+    # No override, and the inputs do not match their manifest: this is fatal. A stray
+    # `return True` used to sit here and made everything below unreachable, so a
+    # mismatch silently reported success and the derived file was stamped with the
+    # rejected commit.
+    _INPUTS_VERIFIED = False
+    print("ERROR: the CSVs in pgp_data/ do not match upstream_provenance.json:",
+          file=__import__("sys").stderr)
+    for problem in problems:
+        print("  %s" % problem, file=__import__("sys").stderr)
+    print("", file=__import__("sys").stderr)
+    print("Re-run:  python scripts/fetch_pgp_metadata.py", file=__import__("sys").stderr)
+    print("Set PGP_ALLOW_UNVERIFIED_INPUTS=1 to derive from them anyway.",
+          file=__import__("sys").stderr)
+    raise SystemExit(1)
+
+
+def _invalidate_derived_stamp(pgp_data_dir) -> None:
+    """Remove derived_provenance.json. Called BEFORE the derived file is touched.
+
+    The stamp describes a specific transcriptions_linked.csv. From the moment this run
+    starts rewriting that file, the old stamp describes nothing that exists -- and if the
+    run dies between the write and the re-stamp (an empty footnotes.csv used to do that,
+    via ZeroDivisionError in the report), a stale stamp would vouch for a header-only file.
+    """
+    stale = os.path.join(str(pgp_data_dir), 'derived_provenance.json')
+    if os.path.exists(stale):
+        os.remove(stale)
+
+
+def _read_bytes(path):
+    """The file's bytes, or None when there is no such file (or no path was given)."""
+    if not path or not os.path.exists(path):
+        return None
+    with open(path, 'rb') as fh:
+        return fh.read()
+
+
+def _read_optional_bytes(path):
+    """Like _read_bytes, but a file that exists and cannot be read is reported and treated
+    as absent. Used for the manifest only: its absence or unreadability is a verification
+    PROBLEM (fatal without the override, stamp-less with it), never a crash before the
+    derivation has said anything."""
+    try:
+        return _read_bytes(path)
+    except OSError as exc:
+        print("WARNING: could not read %s: %s" % (path, exc))
+        return None
+
+
+def _fingerprint_bytes(raw):
+    """{bytes, sha256} of bytes already in hand, or 'absent' for None.
+
+    The derivation fingerprints the very bytes it parses. Fingerprinting the FILE -- even
+    before reading it -- left a window: fingerprint A, swap in B, let the loader read B,
+    restore A, and the output came from B while the stamp described A and verified clean.
+    With one read there is no second read for a swap to land between.
+    """
+    if raw is None:
+        return 'absent'
+    return {'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}
+
+
+def _fingerprint(path):
+    """{bytes, sha256} of a file, or the string 'absent' when there is no such file."""
+    return _fingerprint_bytes(_read_bytes(path))
+
+
+def _record_derived_provenance(pgp_data_dir, verified: bool = False, inputs=(),
+                               commit=None) -> None:
+    """Stamp transcriptions_linked.csv with its upstream commit AND its own checksum.
+
+    The commit alone was not enough: replacing the file with two lines of CSV while
+    leaving the stamp alone passed verification, because nothing read the content.
+
+    `inputs` are the NON-upstream files the derivation read -- libraries.csv and the FIST
+    supplement -- as (label, fingerprint) pairs, where the fingerprint was taken BEFORE the
+    file was read (see export_transcriptions). They decide which manuscript a transcription
+    is attributed to, and they were covered by no checksum: editing one line of
+    libraries.csv re-attributed a transcription to the wrong manuscript while every check
+    stayed clean. Fingerprinting them here, after the derivation, was not enough either: a
+    change between the read and the stamp produced output from the old file stamped with
+    the new file's hash, which then verified clean. Taken before the read, any later change
+    leaves the file on disk disagreeing with the stamp, and the import refuses.
+
+    `verified` defaults to False on purpose: forgetting to pass it must produce no stamp,
+    never a certified one. `commit` is the upstream commit read from the SAME manifest
+    bytes that verified the inputs -- this function opens nothing: re-reading the manifest
+    here let a fetch that landed mid-derivation relabel commit-A output as commit B.
+    """
+    # Invalidate FIRST, before any early return. A stale derived_provenance.json left
+    # behind by a previous run would otherwise vouch for output this run produced from
+    # unverified -- or unknown -- inputs.
+    _invalidate_derived_stamp(pgp_data_dir)
+
+    if not commit:
+        print("  No derived provenance recorded (no verified upstream commit).")
+        return
+    if not verified:
+        # Derived from CSVs that failed their manifest; the stamp was already removed
+        # above, so there is simply nothing for the import to trust.
+        print("  No derived provenance recorded (inputs were not verified).")
+        return
+
+    linked = os.path.join(str(pgp_data_dir), 'transcriptions_linked.csv')
+    if not os.path.exists(linked):
+        return
+    with open(linked, 'rb') as fh:
+        raw = fh.read()
+
+    out = os.path.join(str(pgp_data_dir), 'derived_provenance.json')
+    # Invalidate the old stamp before writing the new one, so an interrupted write
+    # cannot leave a stamp vouching for a file it no longer describes.
+    if os.path.exists(out):
+        os.remove(out)
+    with open(out, 'w', encoding='utf-8') as fh:
+        json.dump({
+            'derived_from_commit': commit,
+            'derived_by': 'scripts/pgp_transcriptions_export.py',
+            'files': {
+                'transcriptions_linked.csv': {
+                    'bytes': len(raw),
+                    'sha256': hashlib.sha256(raw).hexdigest(),
+                },
+            },
+            'inputs': dict(inputs),
+        }, fh, indent=2, sort_keys=True)
+        fh.write('\n')
+    print("  Recorded derived provenance (upstream %s, sha %s)"
+          % (commit[:12], hashlib.sha256(raw).hexdigest()[:12]))
+
+
+def require_fist_supplement(path, allow_missing: bool) -> None:
+    """Refuse to run without the FIST shelfmark supplement.
+
+    It contributes ~35,600 shelfmarks that libraries.csv does not carry. Without it the
+    PGP fragment match rate drops from 94.5% to 87.5% -- roughly 2,900 fragments that
+    quietly fail to link, taking their IIIF image URLs with them. The old behaviour was
+    to shrug and continue, so the loss showed up only as a slightly worse number in a
+    report nobody diffed.
+    """
+    import os as _os
+    if _os.path.exists(path):
+        return
+    if allow_missing:
+        print("WARNING: proceeding WITHOUT the FIST supplement "
+              "(PGP_ALLOW_MISSING_FIST_SUPPLEMENT=1).")
+        print("         Expect a materially lower fragment match rate.")
+        print()
+        return
+    print("ERROR: FIST shelfmark supplement not found:", file=__import__("sys").stderr)
+    print("         %s" % path, file=__import__("sys").stderr)
+    print("", file=__import__("sys").stderr)
+    print("Regenerate it with:  python scripts/fist_shelfmarks_export.py",
+          file=__import__("sys").stderr)
+    print("(it needs fist_data/FIST.db). Without it the fragment match rate falls from",
+          file=__import__("sys").stderr)
+    print("94.5% to 87.5%, so thousands of fragments lose their IIIF image links.",
+          file=__import__("sys").stderr)
+    print("Set PGP_ALLOW_MISSING_FIST_SUPPLEMENT=1 if you really mean to run without it.",
+          file=__import__("sys").stderr)
+    raise SystemExit(1)
+
+
+def load_genizahsearch_shelfmarks_from_bytes(libraries_raw: bytes,
+                                             supplement_raw: bytes = None) -> dict:
+    """Build the shelfmark -> sys_id mapping from bytes already read.
+
+    The derivation reads libraries.csv and the FIST supplement exactly once, fingerprints
+    those bytes for derived_provenance.json, and parses the SAME bytes here -- so the stamp
+    can only ever describe what was actually consumed.
+
+    Returns dict: normalized_shelfmark -> system_number
     """
     gs_lookup = {}
 
-    # Load main libraries.csv
-    with open(libraries_path, 'r', encoding='utf-8') as f:
-        reader = csv.reader(f)
-        header = next(reader)  # Skip header
+    # Main libraries.csv. newline=None: the text-mode open() this replaced translated
+    # bare CR and CRLF to LF before the csv module saw them; StringIO does not unless told.
+    reader = csv.reader(io.StringIO(libraries_raw.decode('utf-8'), newline=None))
+    next(reader, None)  # Skip header
 
+    for row in reader:
+        if len(row) < 3:
+            continue
+
+        sys_id = row[0]
+        call_numbers = row[2]
+
+        # Split pipe-separated variants and index all
+        for variant in call_numbers.split('|'):
+            normalized = normalize_shelfmark(variant)
+            if normalized:
+                # Keep first match (most specific)
+                if normalized not in gs_lookup:
+                    gs_lookup[normalized] = sys_id
+
+    # FIST supplement, if it was there
+    if supplement_raw is not None:
+        reader = csv.DictReader(io.StringIO(supplement_raw.decode('utf-8-sig'), newline=None))
+        fist_count = 0
         for row in reader:
-            if len(row) < 3:
-                continue
-
-            sys_id = row[0]
-            call_numbers = row[2]
-
-            # Split pipe-separated variants and index all
-            for variant in call_numbers.split('|'):
-                normalized = normalize_shelfmark(variant)
-                if normalized:
-                    # Keep first match (most specific)
-                    if normalized not in gs_lookup:
-                        gs_lookup[normalized] = sys_id
-
-    # Load FIST supplement if available
-    if fist_supplement_path and os.path.exists(fist_supplement_path):
-        with open(fist_supplement_path, 'r', encoding='utf-8-sig') as f:
-            reader = csv.DictReader(f)
-            fist_count = 0
-            for row in reader:
-                shelfmark = row.get('shelfmark', '')
-                alma_id = row.get('alma_id', '')
-                if shelfmark and alma_id:
-                    normalized = normalize_shelfmark(shelfmark)
-                    if normalized and normalized not in gs_lookup:
-                        gs_lookup[normalized] = alma_id
-                        fist_count += 1
+            shelfmark = row.get('shelfmark', '')
+            alma_id = row.get('alma_id', '')
+            if shelfmark and alma_id:
+                normalized = normalize_shelfmark(shelfmark)
+                if normalized and normalized not in gs_lookup:
+                    gs_lookup[normalized] = alma_id
+                    fist_count += 1
         print(f"  Added {fist_count} shelfmarks from FIST supplement")
 
     return gs_lookup
 
 
+def load_genizahsearch_shelfmarks(libraries_path: str, fist_supplement_path: str = None) -> dict:
+    """
+    Load GenizahSearch libraries.csv and create shelfmark → sys_id mapping.
+    Optionally supplement with FIST shelfmarks for better coverage.
+
+    Path-based convenience for callers that do not stamp provenance (import_pgp_full.py).
+    The derivation itself must NOT use this: see export_transcriptions.
+
+    Returns dict: normalized_shelfmark → system_number
+    """
+    with open(libraries_path, 'rb') as fh:
+        libraries_raw = fh.read()
+    supplement_raw = _read_bytes(fist_supplement_path)
+    return load_genizahsearch_shelfmarks_from_bytes(libraries_raw, supplement_raw)
+
+
 def load_pgp_documents(documents_path: str) -> dict:
+    """Path form of load_pgp_documents_from_bytes(), for callers that stamp no provenance.
+
+    The pipeline's main() must NOT use this: it verifies a file's bytes and then parses
+    the SAME bytes, so nothing can be swapped between the two. Re-opening by path here is
+    exactly the window that closes.
+    """
+    with open(documents_path, 'rb') as fh:
+        return load_pgp_documents_from_bytes(fh.read())
+
+
+def load_pgp_documents_from_bytes(raw: bytes) -> dict:
     """
     Load PGP documents.csv and create pgpid → document info mapping.
 
@@ -190,7 +437,7 @@ def load_pgp_documents(documents_path: str) -> dict:
     """
     pgp_docs = {}
 
-    with open(documents_path, 'r', encoding='utf-8') as f:
+    with io.StringIO(raw.decode('utf-8'), newline=None) as f:
         reader = csv.DictReader(f)
 
         for row in reader:
@@ -210,6 +457,17 @@ def load_pgp_documents(documents_path: str) -> dict:
 
 
 def extract_transcriptions(footnotes_path: str) -> list:
+    """Path form of extract_transcriptions_from_bytes(), for callers that stamp no provenance.
+
+    The pipeline's main() must NOT use this: it verifies a file's bytes and then parses
+    the SAME bytes, so nothing can be swapped between the two. Re-opening by path here is
+    exactly the window that closes.
+    """
+    with open(footnotes_path, 'rb') as fh:
+        return extract_transcriptions_from_bytes(fh.read())
+
+
+def extract_transcriptions_from_bytes(raw: bytes) -> list:
     """
     Extract transcriptions from PGP footnotes.csv.
 
@@ -221,7 +479,7 @@ def extract_transcriptions(footnotes_path: str) -> list:
     """
     transcriptions = []
 
-    with open(footnotes_path, 'r', encoding='utf-8') as f:
+    with io.StringIO(raw.decode('utf-8'), newline=None) as f:
         reader = csv.DictReader(f)
 
         for row in reader:
@@ -302,17 +560,52 @@ def export_transcriptions(
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
 
-    # Load data
+    # Read the mapping inputs ONCE. The stamp fingerprints these bytes and the loader
+    # parses these bytes, so the stamp can only describe what was consumed. Fingerprinting
+    # the FILE was not enough in either order: after the read, an edit during the run was
+    # stamped as consumed; before the read, a swap-and-restore between the fingerprint and
+    # the loader's own open() produced output from one file stamped as the other.
+    libraries_raw = _read_bytes(libraries_path)
+    if libraries_raw is None:
+        raise FileNotFoundError(libraries_path)
+    supplement_raw = _read_bytes(fist_supplement_path)
+    documents_raw = _read_bytes(documents_path)
+    footnotes_raw = _read_bytes(footnotes_path)
+    for path, raw in ((documents_path, documents_raw), (footnotes_path, footnotes_raw)):
+        if raw is None:
+            raise FileNotFoundError(path)
+    manifest_raw = _read_optional_bytes(os.path.join(output_dir, 'upstream_provenance.json'))
+
+    # Verify the upstream CSVs -- THESE bytes, not the files on disk. Verifying by path and
+    # then letting the loaders re-open the files left the same swap-and-restore window
+    # the mapping inputs had: swapped content in the output, the original commit in the
+    # stamp, and a clean verification afterwards. The manifest is bound the same way: the
+    # commit stamped below comes from these manifest bytes, never from a second open().
+    verified = _require_verified_inputs(output_dir, contents={
+        'documents.csv': documents_raw,
+        'footnotes.csv': footnotes_raw,
+        'upstream_provenance.json': manifest_raw,
+    })
+    verified_commit = None
+    if verified and manifest_raw is not None:
+        verified_commit = (json.loads(manifest_raw.decode('utf-8')) or {}).get('upstream_commit')
+
+    input_fingerprints = (
+        ('libraries.csv', _fingerprint_bytes(libraries_raw)),
+        ('fist_shelfmarks_supplement.csv', _fingerprint_bytes(supplement_raw)),
+    )
+
+    # Load data -- every loader parses the bytes read above.
     print("Loading GenizahSearch shelfmarks...")
-    gs_lookup = load_genizahsearch_shelfmarks(libraries_path, fist_supplement_path)
+    gs_lookup = load_genizahsearch_shelfmarks_from_bytes(libraries_raw, supplement_raw)
     print(f"  Loaded {len(gs_lookup):,} normalized shelfmarks")
 
     print("Loading PGP documents...")
-    pgp_docs = load_pgp_documents(documents_path)
+    pgp_docs = load_pgp_documents_from_bytes(documents_raw)
     print(f"  Loaded {len(pgp_docs):,} documents")
 
     print("Extracting transcriptions from footnotes...")
-    transcriptions = extract_transcriptions(footnotes_path)
+    transcriptions = extract_transcriptions_from_bytes(footnotes_raw)
     print(f"  Found {len(transcriptions):,} transcription records")
     print()
 
@@ -363,6 +656,25 @@ def export_transcriptions(
     print(f"  Unique unmatched documents: {len(unmatched_pgpids):,}")
     print()
 
+    # A derivation that links nothing is not a result, it is a broken input: an upstream
+    # column rename or a truncated footnotes.csv used to replace a 10,000-row file with a
+    # header and then crash in the report (ZeroDivisionError), leaving the old stamp
+    # behind. Refuse before touching the output.
+    if not transcriptions or not linked:
+        print("ERROR: the derivation produced %d transcription records and %d linked rows; "
+              "refusing to overwrite transcriptions_linked.csv with an empty result."
+              % (len(transcriptions), len(linked)), file=sys.stderr)
+        print("  footnotes.csv: %s" % footnotes_path, file=sys.stderr)
+        print("  libraries.csv: %s" % libraries_path, file=sys.stderr)
+        raise SystemExit(1)
+
+    # From here on the previous transcriptions_linked.csv is being replaced, so the stamp
+    # that described it must go NOW -- before the write, not after it, where a crash in
+    # between (the report's ZeroDivisionError on an empty footnotes.csv) left a stale
+    # stamp vouching for a header-only file. Not earlier either: a derivation refused
+    # above leaves the old file intact, and its stamp still describes it.
+    _invalidate_derived_stamp(output_dir)
+
     # Write linked transcriptions
     linked_path = os.path.join(output_dir, 'transcriptions_linked.csv')
     print(f"Writing {linked_path}...")
@@ -406,7 +718,7 @@ def export_transcriptions(
         f.write("Matching Results:\n")
         f.write(f"  Linked records: {stats['linked']:,}\n")
         f.write(f"  Unmatched records: {stats['unmatched']:,}\n")
-        f.write(f"  Match rate: {stats['linked']/len(transcriptions)*100:.1f}%\n\n")
+        f.write(f"  Match rate: {stats['linked']/max(len(transcriptions), 1)*100:.1f}%\n\n")
 
         f.write("Unique Documents:\n")
         f.write(f"  Linked: {len(linked_pgpids):,}\n")
@@ -430,6 +742,18 @@ def export_transcriptions(
                     break
 
     print()
+    # Record which upstream commit this DERIVED file was built from. The fetch step
+    # checksums the three downloaded CSVs, but transcriptions_linked.csv is generated
+    # from them and is what actually carries transcription content -- so fetching a new
+    # commit and keeping an old derived file passed verification while the importer
+    # consumed the old text.
+    _record_derived_provenance(
+        output_dir,
+        verified=_INPUTS_VERIFIED,
+        inputs=input_fingerprints,
+        commit=verified_commit,
+    )
+
     print("Export complete!")
     print(f"  Linked: {linked_path}")
     print(f"  Unmatched: {unmatched_path}")
@@ -450,9 +774,18 @@ def main():
 
     libraries_path = project_dir / 'libraries.csv'
     fist_supplement_path = project_dir / 'pgp_data' / 'fist_shelfmarks_supplement.csv'
-    documents_path = project_dir / 'pgp_data' / 'documents.csv'
+    require_fist_supplement(
+        str(fist_supplement_path),
+        os.environ.get('PGP_ALLOW_MISSING_FIST_SUPPLEMENT') == '1',
+    )
+    # ONE directory for the verification, the reads and the writes. They already
+    # agreed, but deriving them separately is how a check ends up validating a different
+    # directory than the one actually consumed. The verification itself happens inside
+    # export_transcriptions(), against the bytes it parses.
+    pgp_data_dir = project_dir / 'pgp_data'
+    documents_path = pgp_data_dir / 'documents.csv'
     footnotes_path = project_dir / 'pgp_data' / 'footnotes.csv'
-    output_dir = project_dir / 'pgp_data'
+    output_dir = pgp_data_dir
 
     # Verify input files exist
     for path in [libraries_path, documents_path, footnotes_path]:
