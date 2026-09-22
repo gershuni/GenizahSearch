@@ -362,5 +362,44 @@ Prerequisites:
     return 0
 
 
+# ============================================
+# SUPERSEDED
+# ============================================
+# scripts/import_pgp_full.py replaces this script (see its docstring) and is what the
+# 2026-04-22 refresh actually ran -- pgp_data/full_import_report.txt is written only by
+# import_pgp_full.py, while this script's own pgp_data/import_report.csv is dated
+# February, one refresh earlier.
+#
+# docs/guides/DEPLOYMENT_TECHNICAL.md nonetheless listed this script and import_pgp_full.py
+# as consecutive steps until 2026-09-22. Running both means this one writes a partial
+# picture that the other then overwrites -- wasted time at best, and a confusing
+# half-updated Supabase if the second step fails. So it refuses to run by default rather
+# than looking like a working step.
+#
+# Kept, not deleted: it is the only record of how the pre-April imports worked.
+SUPERSEDED_BY = "scripts/import_pgp_full.py"
+
+
+def _refuse_unless_forced(argv):
+    """Exit unless the caller explicitly acknowledges the supersession."""
+    flag = "--run-superseded"
+    if flag in argv:
+        argv.remove(flag)
+        print("WARNING: running %s, which is superseded by %s."
+              % (__file__, SUPERSEDED_BY))
+        print()
+        return
+    print("This script is SUPERSEDED by %s, which does the same work in one pass."
+          % SUPERSEDED_BY, file=sys.stderr)
+    print("", file=sys.stderr)
+    print("The current refresh procedure is in docs/guides/DEPLOYMENT_TECHNICAL.md,",
+          file=sys.stderr)
+    print('"PGP Data Maintenance". If you genuinely need this older path, re-run with',
+          file=sys.stderr)
+    print("    %s" % flag, file=sys.stderr)
+    sys.exit(2)
+
+
 if __name__ == '__main__':
+    _refuse_unless_forced(sys.argv)
     sys.exit(main())

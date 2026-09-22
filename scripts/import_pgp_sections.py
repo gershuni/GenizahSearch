@@ -89,10 +89,17 @@ def clone_or_update_pgp_text(target_dir: str) -> bool:
             capture_output=True, text=True
         )
         if result.returncode != 0:
-            print(f"  WARNING: git pull failed: {result.stderr}")
-            print("  Continuing with existing repo state...")
-        else:
-            print(f"  {result.stdout.strip()}")
+            # Used to warn and carry on. That turned "the refresh could not reach
+            # upstream" into a run that reports success while importing whatever the
+            # checkout already held -- silently stale section data, indistinguishable
+            # from a real refresh. Fail instead; --skip-clone is the deliberate way to
+            # work from an existing checkout on purpose.
+            print(f"  ERROR: git pull failed: {result.stderr}")
+            print("  The checkout may be stale, so importing from it would silently")
+            print("  produce an old result. Fix the pull, or pass --skip-clone if you")
+            print("  really do mean to import the checkout as it stands.")
+            return False
+        print(f"  {result.stdout.strip()}")
         return True
     else:
         print(f"  Cloning pgp-text repo to {target_dir}...")
