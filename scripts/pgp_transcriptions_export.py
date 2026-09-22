@@ -195,6 +195,13 @@ def _record_derived_provenance(pgp_data_dir, verified: bool = True) -> None:
     import hashlib
     import json
 
+    # Invalidate FIRST, before any early return. A stale derived_provenance.json left
+    # behind by a previous run would otherwise vouch for output this run produced from
+    # unverified -- or unknown -- inputs.
+    stale = os.path.join(str(pgp_data_dir), 'derived_provenance.json')
+    if os.path.exists(stale):
+        os.remove(stale)
+
     upstream_path = os.path.join(str(pgp_data_dir), 'upstream_provenance.json')
     if not os.path.exists(upstream_path):
         return
@@ -208,11 +215,8 @@ def _record_derived_provenance(pgp_data_dir, verified: bool = True) -> None:
     if not commit:
         return
     if not verified:
-        # Derived from CSVs that failed their manifest. Removing any previous stamp is
-        # the point: leaving a stale one behind would let the import trust this output.
-        stale = os.path.join(str(pgp_data_dir), 'derived_provenance.json')
-        if os.path.exists(stale):
-            os.remove(stale)
+        # Derived from CSVs that failed their manifest; the stamp was already removed
+        # above, so there is simply nothing for the import to trust.
         print("  No derived provenance recorded (inputs were not verified).")
         return
 
@@ -601,10 +605,14 @@ def main():
         str(fist_supplement_path),
         os.environ.get('PGP_ALLOW_MISSING_FIST_SUPPLEMENT') == '1',
     )
-    _require_verified_inputs(project_dir / 'pgp_data')
-    documents_path = project_dir / 'pgp_data' / 'documents.csv'
+    # ONE directory for the verification, the reads and the writes. They already
+    # agreed, but deriving them separately is how a check ends up validating a different
+    # directory than the one actually consumed.
+    pgp_data_dir = project_dir / 'pgp_data'
+    _require_verified_inputs(pgp_data_dir)
+    documents_path = pgp_data_dir / 'documents.csv'
     footnotes_path = project_dir / 'pgp_data' / 'footnotes.csv'
-    output_dir = project_dir / 'pgp_data'
+    output_dir = pgp_data_dir
 
     # Verify input files exist
     for path in [libraries_path, documents_path, footnotes_path]:

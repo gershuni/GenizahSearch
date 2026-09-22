@@ -758,22 +758,47 @@ def upsert_in_batches(
     dry_run: bool = True
 ) -> int:
     """
-    Upsert records in batches with progress bar.
+    Upsert records in batches, grouped by COLUMN SET, with a progress bar.
+
+    The grouping is load-bearing, not tidiness. prepare_document_records() deliberately
+    omits `transcription` / `transcription_source` for documents that have no edition
+    content, so the upsert leaves whatever is already stored alone. PostgREST sends one
+    request per batch whose column list is the UNION of the payload's keys, and a record
+    that omitted a key is then written as NULL because another record in the same batch
+    carried it. That silently erased both fields on 8 documents in the 2026-09-22 refresh
+    (897, 4093, 7336, 11073, 11265, 11266, 26420, 38240), and re-running does not repair
+    them -- omitting the key now preserves the NULL.
+
+    Batching each distinct column set separately restores the omission semantics.
 
     Returns: Number of records processed
     """
     if not records:
         return 0
 
+    groups: Dict[frozenset, List[Dict]] = defaultdict(list)
+    for record in records:
+        groups[frozenset(record.keys())].append(record)
+
+    if len(groups) > 1:
+        sizes = ", ".join(str(len(g)) for g in sorted(groups.values(), key=len, reverse=True))
+        print(f"    {len(groups)} distinct column sets ({sizes}); batched separately "
+              f"so omitted columns are preserved")
+
     processed = 0
+    total = len(records)
+    with tqdm(total=total, desc=f"Importing {table_name}") as progress:
+        for group in groups.values():
+            for i in range(0, len(group), BATCH_SIZE):
+                batch = group[i:i + BATCH_SIZE]
 
-    for i in tqdm(range(0, len(records), BATCH_SIZE), desc=f"Importing {table_name}"):
-        batch = records[i:i + BATCH_SIZE]
+                if not dry_run:
+                    client.table(table_name).upsert(
+                        batch, on_conflict=on_conflict
+                    ).execute()
 
-        if not dry_run:
-            client.table(table_name).upsert(batch, on_conflict=on_conflict).execute()
-
-        processed += len(batch)
+                processed += len(batch)
+                progress.update(len(batch))
 
     return processed
 

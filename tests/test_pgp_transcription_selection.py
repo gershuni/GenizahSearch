@@ -108,3 +108,81 @@ def test_is_edition_relation_is_the_one_predicate(importer):
     assert not importer.is_edition_relation("Digital Translation")
     assert not importer.is_edition_relation("")
     assert not importer.is_edition_relation(None)
+
+
+class _RecordingTable:
+    """Captures what would actually be sent to PostgREST."""
+
+    def __init__(self, sink):
+        self._sink = sink
+
+    def upsert(self, batch, on_conflict=None):
+        self._sink.append(batch)
+        return self
+
+    def execute(self):
+        return self
+
+
+class _RecordingClient:
+    def __init__(self):
+        self.batches = []
+
+    def table(self, _name):
+        return _RecordingTable(self.batches)
+
+
+def test_records_with_different_columns_are_never_batched_together(importer):
+    """The 2026-09-22 data loss, in one test.
+
+    prepare_document_records() omits `transcription` / `transcription_source` for
+    documents with no edition content, so the upsert leaves the stored value alone.
+    PostgREST sends one request per batch whose column list is the UNION of the payload's
+    keys -- so the moment a record that omitted the key shares a batch with one that
+    carries it, the omission becomes an explicit NULL. Eight documents lost both fields
+    that way, and re-running the import could not repair them, because omitting the key
+    then faithfully preserved the NULL.
+    """
+    records = [
+        {"pgpid": 1, "description": "has edition", "transcription": "text",
+         "transcription_source": "Goitein"},
+        {"pgpid": 2, "description": "no edition"},          # deliberately omits both
+        {"pgpid": 3, "description": "has edition", "transcription": "more",
+         "transcription_source": "Gil"},
+    ]
+    client = _RecordingClient()
+    processed = importer.upsert_in_batches(
+        client, "documents", records, on_conflict="pgpid", dry_run=False
+    )
+
+    assert processed == 3
+    for batch in client.batches:
+        column_sets = {frozenset(record) for record in batch}
+        assert len(column_sets) == 1, (
+            "a batch mixing column sets makes PostgREST NULL the omitted columns: %r"
+            % column_sets
+        )
+
+    # ...and the record that omitted the keys must never appear beside them.
+    for batch in client.batches:
+        if any(r["pgpid"] == 2 for r in batch):
+            assert all("transcription" not in r for r in batch)
+
+
+def test_grouping_does_not_drop_or_duplicate_records(importer):
+    records = [{"pgpid": i, **({"transcription": "t"} if i % 3 else {})} for i in range(50)]
+    client = _RecordingClient()
+    processed = importer.upsert_in_batches(
+        client, "documents", records, on_conflict="pgpid", dry_run=False
+    )
+    sent = [r for batch in client.batches for r in batch]
+    assert processed == 50
+    assert sorted(r["pgpid"] for r in sent) == list(range(50))
+
+
+def test_a_dry_run_sends_nothing(importer):
+    client = _RecordingClient()
+    assert importer.upsert_in_batches(
+        client, "documents", [{"pgpid": 1}], on_conflict="pgpid", dry_run=True
+    ) == 1
+    assert client.batches == []
