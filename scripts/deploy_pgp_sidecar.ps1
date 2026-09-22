@@ -61,24 +61,26 @@ if ($DryRun) {
     exit 0
 }
 
-Write-Host "== 2/4 the server must already run this tree's code"
-# Uncommitted changes first: HEAD is what the server can be checked against, so if the tree
-# differs from it the sidecar may have been built from code that is in no commit at all and
-# there is nothing to compare. The refresh builds a gitignored pgp.db from this tree, so this
-# is the ordinary case, not a corner one.
-git diff --quiet HEAD
-if ($LASTEXITCODE -ne 0) { Fail "the working tree has uncommitted changes to tracked files, so the code this sidecar was built from is not in any commit and the server cannot be checked against it. Commit and push first. Nothing was uploaded" }
+Write-Host "== 2/4 the RUNNING server must already have the code this sidecar was built from"
+# The revision comes out of the SIDECAR, not out of the current checkout. pgp_data/*.db is
+# gitignored, so a database built at commit A survives a later checkout or commit of B; using
+# HEAD here would label it B and clear it against B's code. export_pgp_sidecar.py stamps
+# meta.source_revision (and meta.source_dirty) at build time, and this reads that back.
 # @(...) and NOT `| Select-Object -First 1`: Select-Object stops the pipeline as soon as it
-# has its one item, which can terminate the native git process mid-write and leave
-# $LASTEXITCODE at -1 -- a deploy that aborts claiming it could not read the git history,
-# on a repository where nothing is wrong.
-$ContractLines = @(git rev-parse HEAD)
-if ($LASTEXITCODE -ne 0) { Fail "could not read HEAD (exit $LASTEXITCODE) -- run this from the repository, not a copy; nothing was uploaded" }
+# has its one item, which can terminate the native process mid-write and leave $LASTEXITCODE
+# at -1 -- a deploy that aborts on a repository where nothing is wrong.
+$ContractLines = @(python scripts/check_shipping_sidecar.py --sidecar $Sidecar --print-source-revision)
+if ($LASTEXITCODE -ne 0) { Fail "could not bind $Sidecar to a repository revision (exit $LASTEXITCODE; the reason is printed above). Nothing was uploaded" }
 $Contract = $ContractLines[0]
-if (-not $Contract) { Fail "git rev-parse HEAD printed nothing -- run this from the repository, not a copy" }
+if (-not $Contract) { Fail "the source-revision check printed nothing; nothing was uploaded" }
 Write-Host "   this sidecar was built from $Contract"
-ssh $RemoteHost "set -e; cd $RemoteRepo; git fetch -q origin; git merge-base --is-ancestor $Contract HEAD"
-if ($LASTEXITCODE -ne 0) { Fail "the server's checkout does not contain $Contract, the commit this sidecar was built from, so it may not be able to read what is about to be uploaded -- see the CODE BEFORE DATA note at the top of this script. Deploy the code first (ssh $RemoteHost 'cd $RemoteRepo; ./deploy.sh master-main'), then re-run this. Nothing was uploaded" }
+# And the server must report what it is RUNNING, not what is checked out. `git reset --hard`
+# can land new code while the old process keeps serving -- a checkout that contains the
+# revision proves nothing about the reader in memory, and if the restart at step 4 then fails
+# the stale reader meets the new sidecar indefinitely. deploy.sh writes .deployed_revision
+# after a successful restart, so that file is the only honest answer.
+ssh $RemoteHost "set -e; cd $RemoteRepo; test -s .deployed_revision; git fetch -q origin; git merge-base --is-ancestor $Contract `$(cat .deployed_revision)"
+if ($LASTEXITCODE -ne 0) { Fail "the running genizah-web does not have $Contract, the commit this sidecar was built from -- or $RemoteRepo/.deployed_revision is missing, which means the service has not completed a ./deploy.sh run since this check was introduced. A checkout alone is not enough: the process in memory is what reads the sidecar. Deploy the code first (ssh $RemoteHost 'cd $RemoteRepo; ./deploy.sh master-main'), then re-run this. Nothing was uploaded" }
 
 Write-Host "== 3/4 upload: $Sidecar -> ${RemoteHost}:$RemotePath"
 scp $Sidecar "${RemoteHost}:$RemotePath"

@@ -900,10 +900,12 @@ powershell -File scripts/refresh_pgp_data.ps1 -Execute -StartAt 4
 # on ~80% of PGP pages -- until the sidecar was rolled back.
 #   ssh ubuntu@<server> 'cd /home/ubuntu/GenizahSearch && ./deploy.sh master-main'
 #
-# Then: guard, code check, scp, restart -- each gated on the previous exit code. Step 2
-# refuses to upload until the server's checkout contains the commit this sidecar was built
-# from, so the order above is enforced rather than merely documented. It also refuses while
-# the working tree is dirty, since then the sidecar came from code that is in no commit.
+# Then: guard, code check, scp, restart -- each gated on the previous exit code. Step 2 reads
+# meta.source_revision, which export_pgp_sidecar.py stamps into the DATABASE at build time,
+# and refuses unless the RUNNING genizah-web already has that commit (deploy.sh records it in
+# .deployed_revision after a successful restart; a checkout alone proves nothing about the
+# process in memory). It also refuses a sidecar built from a dirty tree, since that code is in
+# no commit at all. So the order above is enforced, not merely documented.
 powershell -File scripts/deploy_pgp_sidecar.ps1
 ```
 

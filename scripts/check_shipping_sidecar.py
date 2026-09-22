@@ -150,11 +150,51 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--bundled", action="store_true",
                         help="check the BUILT copy under dist/ instead of the source "
                              "sidecar (use before compiling the installer)")
+    parser.add_argument("--print-source-revision", action="store_true",
+                        help="print meta.source_revision (the repository revision this "
+                             "sidecar was BUILT from) and exit; non-zero if it is absent "
+                             "or the build was from a dirty tree. Used by "
+                             "scripts/deploy_pgp_sidecar.ps1 to bind data to code.")
     return parser.parse_args(argv)
+
+
+def read_source_revision(path: str):
+    """(revision, problem). The revision is read from the SIDECAR, never derived from the
+    current checkout: pgp_data/*.db is gitignored, so a database built at commit A survives
+    a later checkout of B and would otherwise be labelled B and deployed against B's code."""
+    if not os.path.exists(path):
+        return (None, "%s does not exist" % path)
+    conn = _ro(path)
+    try:
+        rows = dict(conn.execute("SELECT key, value FROM meta"))
+    except sqlite3.Error as exc:
+        return (None, "%s has no readable meta table: %s" % (path, exc))
+    finally:
+        conn.close()
+    revision = (rows.get("source_revision") or "").strip()
+    if not revision or revision == "unknown":
+        return (None,
+                "%s records no meta.source_revision, so the code it was built from is "
+                "unknown and it cannot be bound to a deployment. Rebuild it with "
+                "scripts/export_pgp_sidecar.py." % path)
+    if rows.get("source_dirty") == "1":
+        return (None,
+                "%s was built from a working tree with uncommitted changes (%s), so the "
+                "code that produced it exists in no commit and no server can be checked "
+                "against it. Commit, rebuild, push." % (path, revision[:8]))
+    return (revision, None)
 
 
 def main(argv=None) -> int:
     args = parse_args(argv)
+
+    if args.print_source_revision:
+        revision, problem = read_source_revision(args.sidecar or DEFAULT_SIDECAR)
+        if problem:
+            print(problem, file=sys.stderr)
+            return 1
+        print(revision)
+        return 0
 
     # `--sidecar X --bundled` checks BOTH. It used to check only the bundled copies,
     # silently dropping the sidecar the operator had explicitly named.

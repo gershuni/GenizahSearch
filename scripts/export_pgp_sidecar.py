@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 import sqlite3
+import subprocess
 import sys
 import time
 from datetime import datetime, timezone
@@ -632,6 +633,30 @@ def export_fragments(client, cursor):
     return count
 
 
+def source_revision():
+    """(revision, dirty) for the repository that is building this sidecar.
+
+    `dirty` is True when tracked files differ from HEAD, which means the sidecar was built
+    from code that exists in no commit and therefore cannot be pinned to one. Both are
+    recorded rather than enforced here: the BUILD is allowed to be exploratory, the DEPLOY
+    is what must refuse. Returns (None, True) if git cannot answer -- unknown provenance is
+    treated as unpinnable, never as clean.
+    """
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    try:
+        rev = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo_root,
+                             capture_output=True, text=True, timeout=30)
+        if rev.returncode != 0:
+            return (None, True)
+        diff = subprocess.run(["git", "diff", "--quiet", "HEAD"], cwd=repo_root,
+                              capture_output=True, text=True, timeout=60)
+        if diff.returncode not in (0, 1):
+            return (None, True)
+        return (rev.stdout.strip() or None, diff.returncode != 0)
+    except (OSError, subprocess.SubprocessError):
+        return (None, True)
+
+
 def create_meta(cursor, doc_count, source_count, footnote_count, frag_count, supabase_url,
                 carried=(), provenance=None):
     """Create meta table with version, build metadata and upstream provenance."""
@@ -666,6 +691,14 @@ def create_meta(cursor, doc_count, source_count, footnote_count, frag_count, sup
         value = (provenance or {}).get(key)
         if value:
             entries.append((key, str(value)))
+
+    # Which revision of THIS repository produced the file, so the deploy can bind the
+    # sidecar to the code that must read it. Deriving that at deploy time from the current
+    # HEAD is wrong: the database is gitignored, so it survives a later checkout or commit
+    # and would be labelled with a revision it was never built from.
+    revision, dirty = source_revision()
+    entries.append(("source_revision", revision or "unknown"))
+    entries.append(("source_dirty", "1" if dirty else "0"))
 
     cursor.executemany("INSERT INTO meta (key, value) VALUES (?, ?)", entries)
     cursor.connection.commit()

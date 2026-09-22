@@ -173,9 +173,10 @@ Details, one row per artifact, in [DATA_LIFECYCLE.md](DATA_LIFECYCLE.md). The sh
   adds or removes a column goes code-first**, because the deployed code then meets a value it has
   never seen: on 2026-09-22 a refreshed `pgp_data/pgp.db` added `documents.doc_relation`, NULL for
   80% of rows, and the browse enrichment pass raised `TypeError` on every affected page until the
-  sidecar was rolled back. `scripts/deploy_pgp_sidecar.ps1` now refuses to upload until the server's
-  checkout contains the commit the sidecar was built from, so for `pgp.db` the order is enforced;
-  for the others it is still a rule you have to follow. The passage index is a separate
+  sidecar was rolled back. `scripts/deploy_pgp_sidecar.ps1` now refuses to upload unless the RUNNING
+  `genizah-web` already has the commit the sidecar was built from -- the build stamps it into the
+  database's `meta`, and `deploy.sh` records the running revision after a successful restart -- so
+  for `pgp.db` the order is enforced; for the others it is still a rule you have to follow. The passage index is a separate
   exception -- code first, then `scripts/build_passage_index.py` builds it **on the server**
   against the corpus already served there, never uploaded. `deploy.sh` itself has no data step
   ([docs/guides/DEPLOYMENT_TECHNICAL.md](../guides/DEPLOYMENT_TECHNICAL.md)).
