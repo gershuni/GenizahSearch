@@ -528,3 +528,61 @@ def test_the_verifier_checks_the_manifest_bytes_it_is_handed(tmp_path):
     # Read from disk (B): the derived file's A no longer matches.
     assert any("derived from" in p
                for p in verifier.verify_against_provenance(str(pgp_data), check_derived=True))
+
+
+def _deny_manifest(monkeypatch, exporter):
+    """Inject PermissionError on the manifest only."""
+    real = exporter._read_bytes
+
+    def denied(path):
+        if str(path).endswith("upstream_provenance.json"):
+            raise PermissionError(13, "Permission denied", str(path))
+        return real(path)
+
+    monkeypatch.setattr(exporter, "_read_bytes", denied)
+
+
+def test_an_unreadable_manifest_is_a_problem_not_a_crash(exporter, tmp_path, monkeypatch):
+    """gpt-6-astra, pass 9 (P3): round 13 moved the manifest read out from under the
+    verifier's try/except, so a PermissionError propagated before the derivation said
+    anything. Without the override it must fail with a reason; with it, complete stamp-less."""
+    pgp_data = fx.build_tree(tmp_path, derived=False)
+    _deny_manifest(monkeypatch, exporter)
+
+    monkeypatch.delenv("PGP_ALLOW_UNVERIFIED_INPUTS", raising=False)
+    rc, _out, err = _run_main(exporter, tmp_path)
+    assert rc == 1
+    assert "upstream_provenance.json is missing" in err or "unreadable" in err
+    assert not (pgp_data / "transcriptions_linked.csv").exists()
+
+    monkeypatch.setenv("PGP_ALLOW_UNVERIFIED_INPUTS", "1")
+    rc, out, _err = _run_main(exporter, tmp_path)
+    assert rc == 0
+    assert "Wrote 2 records" in out
+    assert not (pgp_data / "derived_provenance.json").exists()
+
+
+def test_the_verifier_reports_an_unreadable_file_instead_of_raising(tmp_path, monkeypatch):
+    pgp_data = fx.build_tree(tmp_path)
+    verifier = _verifier()
+    real = verifier._bytes_for
+
+    def denied(name, path, contents):
+        handed_over = contents is not None and name in contents
+        if not handed_over and name in ("upstream_provenance.json", "footnotes.csv",
+                                        "libraries.csv"):
+            raise PermissionError(13, "Permission denied", name)
+        return real(name, path, contents)
+
+    monkeypatch.setattr(verifier, "_bytes_for", denied)
+    problems = verifier.verify_against_provenance(str(pgp_data), check_derived=True)
+    assert problems == ["upstream_provenance.json is unreadable: [Errno 13] Permission denied: "
+                        "'upstream_provenance.json'"]
+
+    # Manifest readable, one CSV and one derivation input not.
+    manifest = (pgp_data / "upstream_provenance.json").read_bytes()
+    problems = verifier.verify_against_provenance(
+        str(pgp_data), check_derived=True, contents={"upstream_provenance.json": manifest}
+    )
+    assert any(p.startswith("footnotes.csv is unreadable") for p in problems), problems
+    assert any(p.startswith("libraries.csv is unreadable") for p in problems), problems

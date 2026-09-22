@@ -227,6 +227,18 @@ def _read_bytes(path):
         return fh.read()
 
 
+def _read_optional_bytes(path):
+    """Like _read_bytes, but a file that exists and cannot be read is reported and treated
+    as absent. Used for the manifest only: its absence or unreadability is a verification
+    PROBLEM (fatal without the override, stamp-less with it), never a crash before the
+    derivation has said anything."""
+    try:
+        return _read_bytes(path)
+    except OSError as exc:
+        print("WARNING: could not read %s: %s" % (path, exc))
+        return None
+
+
 def _fingerprint_bytes(raw):
     """{bytes, sha256} of bytes already in hand, or 'absent' for None.
 
@@ -562,7 +574,7 @@ def export_transcriptions(
     for path, raw in ((documents_path, documents_raw), (footnotes_path, footnotes_raw)):
         if raw is None:
             raise FileNotFoundError(path)
-    manifest_raw = _read_bytes(os.path.join(output_dir, 'upstream_provenance.json'))
+    manifest_raw = _read_optional_bytes(os.path.join(output_dir, 'upstream_provenance.json'))
 
     # Verify the upstream CSVs -- THESE bytes, not the files on disk. Verifying by path and
     # then letting the loaders re-open the files left the same swap-and-restore window

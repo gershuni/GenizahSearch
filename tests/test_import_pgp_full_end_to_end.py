@@ -251,3 +251,25 @@ def test_the_record_carries_the_commit_of_the_manifest_that_verified_the_import(
     assert _record(tmp_path)["upstream_commit"] == fx.COMMIT, (
         "the rows came from commit A's verified bytes; the record must say A"
     )
+
+
+def test_an_unreadable_manifest_is_waivable_by_the_override(importer, tmp_path, monkeypatch):
+    """gpt-6-astra, pass 9 (P3): the same regression on the importer's own manifest read."""
+    import builtins
+    real_open = builtins.open
+
+    def denied(path, *args, **kwargs):
+        if str(path).endswith("upstream_provenance.json"):
+            raise PermissionError(13, "Permission denied", str(path))
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", denied)
+
+    rc, _out, err = _run(importer, monkeypatch, "--execute")
+    assert rc == 1 and "upstream_provenance.json is missing" in err
+    assert importer.fake_client.upserts == 0
+
+    rc, _out, _err = _run(importer, monkeypatch, "--execute", "--no-provenance-check")
+    assert rc == 0
+    record = _record(tmp_path)
+    assert record["inputs_verified"] is False and "upstream_commit" not in record

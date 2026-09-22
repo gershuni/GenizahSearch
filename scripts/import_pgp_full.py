@@ -867,6 +867,20 @@ def upsert_in_batches(
     return processed
 
 
+def read_optional_bytes(path) -> Optional[bytes]:
+    """The file's bytes; None when it is missing OR cannot be read (reported). For the
+    manifest: an unreadable manifest is a verification problem the override may waive,
+    not a crash."""
+    try:
+        with open(path, 'rb') as fh:
+            return fh.read()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        print(f"WARNING: could not read {path}: {exc}")
+        return None
+
+
 def invalidate_import_provenance(pgp_data_dir: str) -> None:
     """Remove the previous import record BEFORE the first row is pushed.
 
@@ -1155,7 +1169,7 @@ Prerequisites:
     }
     # The manifest too: the commit recorded at the end comes from THESE bytes.
     manifest_path = project_dir / 'pgp_data' / PROVENANCE_FILENAME
-    raw[PROVENANCE_FILENAME] = manifest_path.read_bytes() if manifest_path.exists() else None
+    raw[PROVENANCE_FILENAME] = read_optional_bytes(manifest_path)
     problems = verify_against_provenance(pgp_data_dir, contents=raw)
     verified_upstream = {}
     if raw[PROVENANCE_FILENAME] is not None:

@@ -115,7 +115,12 @@ def verify_against_provenance(dest: str, check_derived: bool = True, contents=No
     # The manifest too may be handed over as bytes, so that the commit a consumer later
     # stamps is read from the same bytes that verified its inputs. A fetch landing between
     # the check and a second open() used to label commit-A data as commit B.
-    raw_manifest = _bytes_for(PROVENANCE_FILENAME, path, contents)
+    try:
+        raw_manifest = _bytes_for(PROVENANCE_FILENAME, path, contents)
+    except OSError as exc:
+        # A read error is a verification problem, not an exception: the override path
+        # must still complete (stamp-less), and the normal path must still say why.
+        return ["%s is unreadable: %s" % (PROVENANCE_FILENAME, exc)]
     if raw_manifest is None:
         return ["%s is missing -- the CSVs were not fetched by scripts/fetch_pgp_metadata.py"
                 % PROVENANCE_FILENAME]
@@ -140,7 +145,11 @@ def verify_against_provenance(dest: str, check_derived: bool = True, contents=No
     # keeping the old derived file used to verify clean while importing the old text.
     for filename, expected in sorted(files.items()):
         target = os.path.join(dest, filename)
-        raw = _bytes_for(filename, target, contents)
+        try:
+            raw = _bytes_for(filename, target, contents)
+        except OSError as exc:
+            problems.append("%s is unreadable: %s" % (filename, exc))
+            continue
         if raw is None:
             problems.append("%s is missing" % filename)
             continue
@@ -177,7 +186,10 @@ def _verify_derived(dest: str, expected_commit, contents=None) -> list:
     """
     problems = []
     linked = os.path.join(dest, "transcriptions_linked.csv")
-    raw = _bytes_for("transcriptions_linked.csv", linked, contents)
+    try:
+        raw = _bytes_for("transcriptions_linked.csv", linked, contents)
+    except OSError as exc:
+        return ["transcriptions_linked.csv is unreadable: %s" % exc]
     if raw is None:
         return problems
 
@@ -253,7 +265,11 @@ def _verify_derivation_inputs(dest: str, inputs, contents=None) -> list:
     for label, parts in sorted(DERIVATION_INPUTS.items()):
         recorded = inputs.get(label)
         path = os.path.join(dest, *parts)
-        raw = _bytes_for(label, path, contents)
+        try:
+            raw = _bytes_for(label, path, contents)
+        except OSError as exc:
+            problems.append("%s is unreadable: %s" % (label, exc))
+            continue
         exists = raw is not None
         if recorded is None:
             problems.append("transcriptions_linked.csv records nothing about %s -- re-run "
