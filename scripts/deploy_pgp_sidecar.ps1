@@ -31,20 +31,36 @@ param(
     [switch]$DryRun
 )
 
-# The modules that READ the sidecar. If the newest commit touching any of them is not yet
-# on the server, the server cannot be trusted to read what we are about to upload.
-# Two kinds of entry: the modules that OPEN pgp.db (document_service and translation_service
-# each find and connect to it independently), and the modules that read FIELDS off what those
-# return, which is where a new column actually raised on 2026-09-22.
-# tests/test_shipping_sidecar_guard.py derives the openers from the source and fails if one
-# is missing here; the field-readers are hand-listed and cannot be derived.
+# The modules that READ the sidecar. If the newest commit touching any of them is not yet on
+# the server, the server cannot be trusted to read what we are about to upload.
+#
+# DERIVED, NOT HAND-LISTED. Two rounds of review each found a module missing from a list I
+# had written out by hand -- first shared/translation_service.py, then web/pages/browse.py --
+# so the set is now computed from three signals and pinned by an EXACT match in
+# tests/test_shipping_sidecar_guard.py, which prints the corrected block when it fails:
+#   1. opens pgp.db itself (a non-docstring "pgp.db" literal)
+#   2. imports shared.document_service, at module level or inside a function
+#   3. names the 'doc_relation' column, however it came by the dict
+# Plus the exporter, which is not a reader: when IT changes the schema changes, so a server
+# that does not have it has no business receiving what it produced.
 $SidecarReaders = @(
-    'web/pages/browse_enrichment.py',
-    'web/pages/search_results.py',
+    'scripts/export_pgp_sidecar.py',
     'shared/browse_service.py',
     'shared/document_service.py',
+    'shared/export_dossier.py',
+    'shared/fgp_service.py',
+    'shared/manuscript_details.py',
+    'shared/search_serializer.py',
+    'shared/transcription_service.py',
     'shared/translation_service.py',
-    'scripts/export_pgp_sidecar.py'
+    'web/components/joins_panel.py',
+    'web/document_service.py',
+    'web/pages/browse.py',
+    'web/pages/browse_enrichment.py',
+    'web/pages/catalog_browse.py',
+    'web/pages/search.py',
+    'web/pages/search_results.py',
+    'web/stats_service.py'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -76,8 +92,13 @@ Write-Host "== 2/4 the server must already run the code that reads this sidecar"
 # is the ordinary case, not a corner one.
 git diff --quiet HEAD -- $SidecarReaders
 if ($LASTEXITCODE -ne 0) { Fail "one of $($SidecarReaders -join ', ') differs from HEAD. The commit this check derives is the last COMMITTED one, so an uncommitted reader change would be invisible to it and the sidecar would ship ahead of its code. Commit and push the reader change first. Nothing was uploaded" }
-$Contract = (git log -1 --format=%H -- $SidecarReaders | Select-Object -First 1)
+# @(...) and NOT `| Select-Object -First 1`: Select-Object stops the pipeline as soon as it
+# has its one item, which can terminate the native git process mid-write and leave
+# $LASTEXITCODE at -1 -- a deploy that aborts claiming it could not read the git history,
+# on a repository where nothing is wrong. Caught when the reader list grew to 17 paths.
+$ContractLines = @(git log -1 --format=%H -- $SidecarReaders)
 if ($LASTEXITCODE -ne 0) { Fail "could not read the local git history for the sidecar readers (exit $LASTEXITCODE); nothing was uploaded" }
+$Contract = $ContractLines[0]
 if (-not $Contract) { Fail "no commit found for any of: $($SidecarReaders -join ', ') -- run this from the repository, not a copy" }
 Write-Host "   the readers were last changed in $Contract"
 ssh $RemoteHost "set -e; cd $RemoteRepo; git fetch -q origin; git merge-base --is-ancestor $Contract HEAD"

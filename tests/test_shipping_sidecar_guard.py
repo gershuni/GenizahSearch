@@ -245,16 +245,23 @@ def _sidecar_readers():
     return re.findall(r"'([^']+)'", block.group(1))
 
 
-def _opens_the_sidecar(path):
-    """True when the module names pgp.db in CODE -- a docstring or comment mention does not
-    count. Parsed rather than grepped, because `shared/export_dossier.py` and
-    `shared/transcription_credits.py` both discuss the file in prose and open nothing."""
+# The exporter is not a reader: it PRODUCES the sidecar, so when it changes the schema
+# changes, and a server that lacks that commit has no business receiving the result.
+SIDECAR_PRODUCER = "scripts/export_pgp_sidecar.py"
+
+
+def _consumes_the_sidecar(path):
+    """(opens, imports_service, names_column) for one module, judged from the parse tree.
+
+    Comments and docstrings do not count: `shared/transcription_credits.py` discusses pgp.db
+    in prose and opens nothing. Imports are found by walking, not by reading the header, because
+    several consumers import `shared.document_service` lazily inside a function."""
     import ast
 
     try:
         tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
     except SyntaxError:
-        return False
+        return (False, False, False)
     docstrings = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -262,33 +269,55 @@ def _opens_the_sidecar(path):
             if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
                     and isinstance(body[0].value.value, str):
                 docstrings.add(id(body[0].value))
+    strings = [n.value for n in ast.walk(tree)
+               if isinstance(n, ast.Constant) and isinstance(n.value, str)
+               and id(n) not in docstrings]
+    imports_service = False
     for node in ast.walk(tree):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str) \
-                and id(node) not in docstrings and "pgp.db" in node.value:
-            return True
-    return False
+        if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("document_service"):
+            imports_service = True
+        elif isinstance(node, ast.Import) and any(
+                a.name.endswith("document_service") for a in node.names):
+            imports_service = True
+    return (any("pgp.db" in s for s in strings),
+            imports_service,
+            any(s == "doc_relation" for s in strings))
 
 
-def test_every_module_that_opens_the_sidecar_is_in_the_contract():
-    """gpt-5-codex on PR #358 (P2): `shared/translation_service.py` finds and opens pgp.db
-    itself, and queried `pgp_translations` -- a schema change it alone had to absorb would
-    leave the contract commit old and let the upload through. Derive the OPENERS from the
-    source so the list cannot quietly fall behind again.
+def _derived_sidecar_readers():
+    out = set()
+    for p in list((REPO_ROOT / "shared").glob("*.py")) + list((REPO_ROOT / "web").rglob("*.py")):
+        if any(_consumes_the_sidecar(p)):
+            out.add(str(p.relative_to(REPO_ROOT)).replace("\\", "/"))
+    return out
 
-    This is a lower bound, deliberately. It cannot find the modules that read FIELDS off what
-    those services return -- `browse_enrichment.py`, which is what actually raised on
-    2026-09-22, never names the file. Those stay hand-listed."""
+
+def test_the_contract_covers_every_sidecar_consumer_exactly():
+    """gpt-5-codex on PR #358, twice. First `shared/translation_service.py` was missing from a
+    list I wrote by hand; then, after I added it by hand, `web/pages/browse.py` -- which calls
+    the service and branches on `doc_relation` -- was missing too. A list maintained by hand
+    keeps losing entries, so it is DERIVED here and matched EXACTLY: a module that consumes the
+    sidecar and is not in the contract lets an incompatible sidecar through, and a module listed
+    that no longer consumes it anchors the contract to an unrelated commit.
+
+    Three signals, union: opens pgp.db, imports shared.document_service (at any depth), or names
+    the doc_relation column. `browse_enrichment.py`, the module that actually raised on
+    2026-09-22, is caught by the second and third and by neither the first nor any grep of its
+    imports -- it takes the dict from its caller."""
     listed = set(_sidecar_readers())
-    openers = sorted(
-        str(p.relative_to(REPO_ROOT)).replace("\\", "/")
-        for p in list((REPO_ROOT / "shared").glob("*.py")) + list((REPO_ROOT / "web").rglob("*.py"))
-        if _opens_the_sidecar(p)
-    )
-    assert openers, "the detector found no sidecar openers at all -- it has stopped working"
-    missing = [o for o in openers if o not in listed]
-    assert not missing, (
-        "these modules open pgp.db but are not in $SidecarReaders, so a schema change only "
-        "they absorb would not hold back the upload: %s" % missing
+    derived = _derived_sidecar_readers()
+    assert derived, "the detector found no sidecar consumers at all -- it has stopped working"
+    expected = derived | {SIDECAR_PRODUCER}
+
+    missing = sorted(expected - listed)
+    stale = sorted(listed - expected)
+    assert not (missing or stale), (
+        "$SidecarReaders in scripts/deploy_pgp_sidecar.ps1 is out of date.\n"
+        "  missing (consume the sidecar, would not hold back an upload): %s\n"
+        "  stale   (no longer consume it, anchor the contract to unrelated commits): %s\n"
+        "Replace the block with:\n%s"
+        % (missing, stale,
+           "\n".join("    '%s'," % e for e in sorted(expected)).rstrip(","))
     )
 
 
@@ -319,7 +348,7 @@ def test_the_deploy_script_uploads_only_after_the_guard_passes():
     guard = next(i for i, ln in enumerate(lines)
                  if ln.startswith("python scripts/check_shipping_sidecar.py"))
     dirty = next(i for i, ln in enumerate(lines) if ln.startswith("git diff --quiet HEAD"))
-    contract = next(i for i, ln in enumerate(lines) if ln.startswith("$Contract = (git "))
+    contract = next(i for i, ln in enumerate(lines) if ln.startswith("$ContractLines = @(git "))
     ancestor = next(i for i, ln in enumerate(lines)
                     if ln.startswith("ssh ") and "--is-ancestor" in ln)
     upload = next(i for i, ln in enumerate(lines) if ln.startswith("scp "))
@@ -350,8 +379,13 @@ def test_the_deploy_script_uploads_only_after_the_guard_passes():
     )
     # One check per external command, and nothing else that looks like one.
     commands = [i for i, ln in enumerate(lines)
-                if ln.startswith(("python ", "scp ", "ssh ", "git ", "$Contract = (git "))]
+                if ln.startswith(("python ", "scp ", "ssh ", "git ", "$ContractLines = @(git "))]
     assert len(commands) == 6
+    # Select-Object would stop the pipeline early and can kill the native process mid-write,
+    # leaving $LASTEXITCODE at -1 on a perfectly healthy repository.
+    assert not any("git log" in ln and "Select-Object" in ln for ln in lines), (
+        "capture git's output with @(...), never through Select-Object -First"
+    )
     for i in commands:
         following = next(ln for ln in lines[i + 1:] if ln)
         assert check.match(following), "the line after %r must be its exit-code check" % lines[i]
