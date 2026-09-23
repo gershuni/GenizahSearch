@@ -12,8 +12,11 @@ filtered. Both surfaces now ask this module the same question about the same dat
 The contract (owner decision, 2026-09-23 -- "split by filter type"):
 
 * MANUSCRIPT-level filters keep or drop a manuscript together with all its pages:
-  library, shelfmark, title and printed-column text; the 3-state printed filter;
-  LOCAL only/hidden and LOCAL file opt-outs; domain exclusions.
+  library, title and printed-column text; the 3-state printed filter; LOCAL
+  only/hidden and LOCAL file opt-outs; domain exclusions.
+* SHELFMARK matches the visible Shelfmark cell ("T-S 1 (Image 3)"): the
+  manuscript's cell keeps all its pages; failing that, the page rows whose own
+  cell ("Image 4 [2v]") matches are kept.
 * PAGE-level filters keep only the pages whose own text matches: source context and
   manuscript context.
 * A manuscript is shown iff it passes the manuscript-level rules AND at least one of
@@ -100,7 +103,9 @@ class FilterHost:
     is_local(ms_item)   -> bool
     is_opted_out(ms_item) -> bool (LOCAL file the user opted out of)
     domains(sys_id)     -> list of domain names ([] = uncategorized)
-    page_texts(page)    -> {'context', 'ms_context'} text, as the tree previews them
+    page_texts(page, ms_item) -> {'context', 'ms_context', 'shelfmark'}: the page's
+                           preview text, and its own Shelfmark cell (None when the
+                           page has no row of its own)
     """
     ms_fields: Callable[[dict], dict]
     sys_id: Callable[[dict], str]
@@ -108,12 +113,14 @@ class FilterHost:
     is_local: Callable[[dict], bool]
     is_opted_out: Callable[[dict], bool]
     domains: Callable[[str], list]
-    page_texts: Callable[[dict], dict]
+    page_texts: Callable[[dict, dict], dict]
 
 
 def manuscript_passes(ms_item: dict, state: FilterState, host: FilterHost) -> bool:
     """The manuscript-level half of the contract."""
-    ms_rules = {k: r for k, r in state.column_rules.items() if k in MS_LEVEL_COLUMNS}
+    # Shelfmark is judged in eligible_pages: its cell exists on page rows too.
+    ms_rules = {k: r for k, r in state.column_rules.items()
+                if k in MS_LEVEL_COLUMNS and k != "shelfmark"}
     if ms_rules:
         fields = host.ms_fields(ms_item) or {}
         for key, rule in ms_rules.items():
@@ -157,12 +164,27 @@ def eligible_pages(ms_item: dict, state: FilterState, host: FilterHost) -> list:
         return pages
     if not manuscript_passes(ms_item, state, host):
         return []
+    shelf_rule = state.column_rules.get("shelfmark")
+    if shelf_rule is not None:
+        fields = host.ms_fields(ms_item) or {}
+        if not text_matches(fields.get("shelfmark", ""), shelf_rule):
+            # The Shelfmark cell of the manuscript row does not match; its PAGE rows
+            # carry their own visible cells ("Image 4 [2v]"), and the tree has
+            # always kept a manuscript whose page row matched. Only pages that have
+            # a row of their own (page_texts shelfmark not None) can match this way.
+            pages = [
+                p for p in pages
+                if (host.page_texts(p, ms_item) or {}).get("shelfmark") is not None
+                and text_matches((host.page_texts(p, ms_item) or {}).get("shelfmark"), shelf_rule)
+            ]
+            if not pages:
+                return []
     page_rules = {k: r for k, r in state.column_rules.items() if k in PAGE_LEVEL_COLUMNS}
     if not page_rules:
         return pages
     kept = []
     for page in pages:
-        texts = host.page_texts(page) or {}
+        texts = host.page_texts(page, ms_item) or {}
         if all(text_matches(texts.get(k, ""), r) for k, r in page_rules.items()):
             kept.append(page)
     return kept

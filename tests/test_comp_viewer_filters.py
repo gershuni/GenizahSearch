@@ -32,7 +32,8 @@ def _host(fields=None, printed=(), local=(), opted_out=(), domains=None):
         is_local=lambda it: it["sys_id"] in local,
         is_opted_out=lambda it: it["sys_id"] in opted_out,
         domains=lambda sid: domains.get(sid, []),
-        page_texts=lambda p: {"context": p.get("source_ctx", ""), "ms_context": p.get("text", "")},
+        page_texts=lambda p, ms: {"context": p.get("source_ctx", ""), "ms_context": p.get("text", ""),
+                                  "shelfmark": p.get("_cell")},
     )
 
 
@@ -167,7 +168,8 @@ def _gui_stub(qt):
     for name in ("_apply_comp_tree_filters", "_comp_filter_state", "_comp_filter_population",
                  "_comp_ms_sys_id", "_comp_viewer_entry", "on_comp_item_double_clicked",
                  "_comp_filter_summary", "_apply_comp_domain_exclusions",
-                 "on_comp_tree_item_expanded"):
+                 "on_comp_tree_item_expanded", "_comp_shelf_cells",
+                 "_comp_shelf_cells_uncached"):
         setattr(s, name, MethodType(getattr(GenizahGUI, name), s))
     s._comp_item_is_local = GenizahGUI._comp_item_is_local
     s._comp_preview_source_text = GenizahGUI._comp_preview_source_text
@@ -397,5 +399,70 @@ def test_uncategorized_lists_show_nothing_new(qt):
     mixed = _ctx_stub(qt, [{"category": {"id": "main", "label": "Main"}}, {"uid": "y"}],
                       idx=1, summary="S")
     mixed._update_results_context()
-    assert mixed.lbl_res_category.text() == ""
+    assert mixed.results_context_bar.isHidden(), (
+        "an appended non-composition result kept the composition filter strip")
+    assert mixed.lbl_res_filters.text() == ""
+    mixed.current_result_idx = 0                    # back on a composition entry
+    mixed._update_results_context()
+    assert not mixed.results_context_bar.isHidden()
     assert mixed.lbl_res_filters.text() == "S"
+
+
+# ------------------------------------------------------------------ Codex #360 --------
+
+def test_shelfmark_matches_the_visible_cell_then_page_rows():
+    """The Shelfmark cell shows "(Image 3)" / "(2 matches)" / "[2v]": a filter on that
+    visible text must not lose the row."""
+    ms = _ms("a", "x", "y")
+    ms["pages"][0]["_cell"] = "Image 1 [1r]"
+    ms["pages"][1]["_cell"] = "Image 2 [2v]"
+    host = _host(fields={"a": {"shelfmark": "T-S 1 (2 matches)"}})
+    both = cvf.FilterState(column_rules={"shelfmark": {"text": "2 matches"}})
+    assert len(cvf.eligible_pages(ms, both, host)) == 2
+    one = cvf.FilterState(column_rules={"shelfmark": {"text": "2v"}})
+    assert [p["uid"] for p in cvf.eligible_pages(ms, one, host)] == ["a-1"]
+    none = cvf.FilterState(column_rules={"shelfmark": {"text": "ENA"}})
+    assert cvf.eligible_pages(ms, none, host) == []
+
+
+def test_single_page_row_is_judged_only_by_its_manuscript_cell():
+    """A single-page manuscript has no page row, so an exclude rule must not be
+    satisfied by a page cell that does not exist."""
+    ms = _ms("a", "x")                      # page has no "_cell" -> None
+    host = _host(fields={"a": {"shelfmark": "T-S 1 (Image 3)"}})
+    st = cvf.FilterState(column_rules={"shelfmark": {"text": "Image 3", "exclude": True}})
+    assert cvf.eligible_pages(ms, st, host) == []
+
+
+@pytest.mark.gui
+def test_shelf_cells_match_what_the_builders_draw(qt, monkeypatch):
+    """The formatter IS what the builders draw: pin its output shapes."""
+    import genizah_core
+    monkeypatch.setattr(genizah_core, "CURRENT_LANG", "en")   # labels go through tr()
+    s = _gui_stub(qt)
+    one = {"type": "manuscript", "sys_id": "a", "pages": [{"uid": "u", "raw_header": "a_P3"}]}
+    many = {"type": "manuscript", "sys_id": "a",
+            "pages": [{"uid": "u1", "raw_header": "a_P3"}, {"uid": "u2", "raw_header": "a_P4"}]}
+    assert s._comp_shelf_cells(one, "T-S 1")[0] == "T-S 1 (Image 3)"
+    cell, pages = s._comp_shelf_cells(many, "T-S 1")
+    assert cell == "T-S 1 (Image 3...)"
+    assert pages[("u2", "a_P4")] == "Image 4"
+
+
+@pytest.mark.gui
+def test_tree_shelfmark_filter_uses_the_visible_cell(qt, monkeypatch):
+    """Call site: GenizahGUI's host feeds the formatted cell to the rule."""
+    import genizah_core
+    monkeypatch.setattr(genizah_core, "CURRENT_LANG", "en")
+    s = _gui_stub(qt)
+    one = _item("a", "x", _shelf="T-S 1")        # single page -> "T-S 1 (Image 0)"
+    many = _item("b", "x", "y", _shelf="T-S 2")  # pages b_P0, b_P1 -> "Image 1" row
+    _tree_with_groups(s, [cvf.ViewGroup(cvf.CATEGORY_MAIN, (one, many))])
+    s.comp_filters = {s.comp_col_shelfmark: {"text": "Image 0"}}
+    s._apply_comp_tree_filters()
+    assert not _find(s, "a").isHidden(), "filter on the visible '(Image 0)' lost the row"
+    s.comp_filters = {s.comp_col_shelfmark: {"text": "Image 1"}}
+    s._apply_comp_tree_filters()
+    assert _find(s, "a").isHidden()
+    b = _find(s, "b")
+    assert not b.isHidden() and b.child(0).isHidden() and not b.child(1).isHidden()

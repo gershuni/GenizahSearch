@@ -22075,6 +22075,58 @@ class GenizahGUI(QMainWindow):
                 'title': _resolve_display_title(sid, title, compact=True),
                 'is_local': self._comp_item_is_local(ms_item)}
 
+    def _comp_shelf_cells(self, ms_item, shelf):
+        """The Shelfmark cell text of a manuscript/part row and of each of its page
+        rows, exactly as the row builders draw them -- e.g. "T-S 1 (Image 3)",
+        "📖 Part (2 matches, 3 folios)", "Image 4 [2v]". One formatter for the
+        builders and the filter, so a Shelfmark filter matches the visible text.
+
+        Returns (manuscript_cell, {page_key: page_cell}).
+        """
+        # The builders ask once per row of a manuscript; remember the last answer.
+        # The cache holds the item itself, so identity is checked with `is` (a
+        # held reference cannot be recycled, unlike an id()).
+        last = getattr(self, '_comp_shelf_cells_last', None)
+        if last is not None and last[0] is ms_item and last[1] == shelf:
+            return last[2]
+        result = self._comp_shelf_cells_uncached(ms_item, shelf)
+        self._comp_shelf_cells_last = (ms_item, shelf, result)
+        return result
+
+    def _comp_shelf_cells_uncached(self, ms_item, shelf):
+        item_type = ms_item.get('type', '')
+        pages = ms_item.get('pages', []) or []
+        page_cells = {}
+        if item_type == 'part':
+            base = shelf
+            cells = []
+            for p in pages:
+                _, p_num, p_shelf, _ = self._get_meta_for_header(p.get('raw_header', ''))
+                folio_info = f" [{p_shelf}]" if p_shelf else ""
+                cells.append((p, p_num, folio_info))
+                page_cells[_cvf.page_key(p)] = f"{tr('Image')} {p_num}{folio_info}"
+            if len(pages) == 1:
+                _, p_num, folio_info = cells[0]
+                return f"{base} ({tr('Image')} {p_num}{folio_info})", page_cells
+            if pages:
+                folios = ms_item.get('folios', []) or []
+                folio_count = f", {len(folios)} folios" if len(folios) > 1 else ""
+                return f"{base} ({len(pages)} matches{folio_count})", page_cells
+            return base, page_cells
+        if item_type == 'manuscript':
+            base = shelf or tr('Unknown Shelfmark')
+            nums = []
+            for p in pages:
+                _, p_num, _, _ = self._get_meta_for_header(p.get('raw_header', ''))
+                nums.append(p_num)
+                page_cells[_cvf.page_key(p)] = f"{tr('Image')} {p_num}"
+            if len(pages) == 1:
+                return f"{base} ({tr('Image')} {nums[0]})", page_cells
+            if pages:
+                return f"{base} ({tr('Image')} {nums[0]}...)", page_cells
+            return base, page_cells
+        return shelf, page_cells
+
     def _comp_ms_sys_id(self, ms_item):
         sid = ms_item.get('sys_id') if isinstance(ms_item, dict) else None
         if not sid and isinstance(ms_item, dict):
@@ -22140,7 +22192,7 @@ class GenizahGUI(QMainWindow):
         domain_map = getattr(self, '_comp_result_domain_map', {}) or {}
         display_cache = {}
 
-        def ms_fields(ms_item):
+        def display(ms_item):
             # Keyed by the row's IDENTITY, never id(): the tree hands back a fresh
             # copy of the stored dict on every data() call, and a freed copy's id()
             # is reused -- one manuscript would get another's library/title.
@@ -22150,10 +22202,15 @@ class GenizahGUI(QMainWindow):
             if d is None:
                 d = self._comp_ms_display(ms_item)
                 display_cache[key] = d
+            return d
+
+        def ms_fields(ms_item):
+            d = display(ms_item)
             sid = d.get('sys_id') or ''
             return {
                 'library': d.get('library_code') or '',
-                'shelfmark': d.get('shelf') or tr("Unknown Shelfmark"),
+                # The visible Shelfmark cell, e.g. "T-S 1 (Image 3)" (Codex, #360).
+                'shelfmark': self._comp_shelf_cells(ms_item, d.get('shelf'))[0] or '',
                 'title': d.get('title') or '',
                 'printed': printed_tag if sid and sid in printed_ids else '',
             }
@@ -22164,11 +22221,17 @@ class GenizahGUI(QMainWindow):
             row = {'display': {'source': 'LOCAL', 'id': self._comp_ms_sys_id(ms_item)}}
             return not self._apply_local_optout_filter([row])
 
-        def page_texts(page):
+        def page_texts(page, ms_item):
+            d = display(ms_item)
+            cells = self._comp_shelf_cells(ms_item, d.get('shelf'))[1]
             return {
                 'context': self._comp_preview_source_text(
                     page.get('source_ctx', ''), page.get('highlight_pattern')) or '',
                 'ms_context': page.get('text', '') or '',
+                # A page has a Shelfmark cell of its own only when it has a row:
+                # a multi-page manuscript or part (the builders draw page rows then).
+                'shelfmark': (cells.get(_cvf.page_key(page))
+                              if len(ms_item.get('pages') or []) > 1 else None),
             }
 
         host = _cvf.FilterHost(
@@ -27333,14 +27396,14 @@ class GenizahGUI(QMainWindow):
                     p_item = pages[0]
                     p_sid, p_num, p_shelf, _ = self._get_meta_for_header(p_item['raw_header'])
                     folio_info = f" [{p_shelf}]" if p_shelf else ""
-                    self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, f"{shelf} ({tr('Image')} {p_num}{folio_info})")
+                    self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, self._comp_shelf_cells(ms_item, shelf)[0])
                     self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=True)
                 else:
                     if pages:
                         p0 = pages[0]
                         _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
                         folio_count = f", {len(folios)} folios" if len(folios) > 1 else ""
-                        self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, f"{shelf} ({len(pages)} matches{folio_count})")
+                        self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, self._comp_shelf_cells(ms_item, shelf)[0])
                         self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'), defer_widgets=True)
 
                     for p_item in pages:
@@ -27349,7 +27412,7 @@ class GenizahGUI(QMainWindow):
                         page_node = QTreeWidgetItem(ms_node)
                         self._set_comp_tree_text(page_node, 0, self._format_score_with_boundary(p_item))
                         set_boundary_tooltip(page_node, p_item)
-                        self._set_comp_tree_text(page_node, self.comp_col_shelfmark, f"{tr('Image')} {p_num}{folio_info}")
+                        self._set_comp_tree_text(page_node, self.comp_col_shelfmark, self._comp_shelf_cells(ms_item, shelf)[1].get(_cvf.page_key(p_item), f"{tr('Image')} {p_num}{folio_info}"))
                         self._set_comp_tree_text(page_node, self.comp_col_library, "")
                         self._set_comp_tree_text(page_node, self.comp_col_title, "")
                         self._set_comp_tree_text(page_node, self.comp_col_sysid, p_sid or "")
@@ -27390,13 +27453,13 @@ class GenizahGUI(QMainWindow):
                 if len(pages) == 1:
                     p_item = pages[0]
                     _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
-                    self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p_num})")
+                    self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, self._comp_shelf_cells(ms_item, shelf)[0])
                     self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=True)
                 else:
                     if pages:
                         p0 = pages[0]
                         _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
-                        self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p0_num}...)")
+                        self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, self._comp_shelf_cells(ms_item, shelf)[0])
                         self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'), defer_widgets=True)
 
                     for p_item in pages:
@@ -27404,7 +27467,7 @@ class GenizahGUI(QMainWindow):
                         page_node = QTreeWidgetItem(ms_node)
                         self._set_comp_tree_text(page_node, 0, self._format_score_with_boundary(p_item))
                         set_boundary_tooltip(page_node, p_item)
-                        self._set_comp_tree_text(page_node, self.comp_col_shelfmark, f"{tr('Image')} {p_num}")
+                        self._set_comp_tree_text(page_node, self.comp_col_shelfmark, self._comp_shelf_cells(ms_item, shelf)[1].get(_cvf.page_key(p_item), f"{tr('Image')} {p_num}"))
                         self._set_comp_tree_text(page_node, self.comp_col_library, "")
                         self._set_comp_tree_text(page_node, self.comp_col_title, "")
                         self._set_comp_tree_text(page_node, self.comp_col_sysid, "")
@@ -27666,14 +27729,14 @@ class GenizahGUI(QMainWindow):
                 p_item = pages[0]
                 p_sid, p_num, p_shelf, _ = self._get_meta_for_header(p_item['raw_header'])
                 folio_info = f" [{p_shelf}]" if p_shelf else ""
-                self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, f"{shelf} ({tr('Image')} {p_num}{folio_info})")
+                self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, self._comp_shelf_cells(ms_item, shelf)[0])
                 self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=defer_widgets)
             else:
                 if pages:
                     p0 = pages[0]
                     _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
                     folio_count = f", {len(folios)} folios" if len(folios) > 1 else ""
-                    self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, f"{shelf} ({len(pages)} matches{folio_count})")
+                    self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, self._comp_shelf_cells(ms_item, shelf)[0])
                     self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'), defer_widgets=defer_widgets)
 
                 for p_item in pages:
@@ -27681,7 +27744,7 @@ class GenizahGUI(QMainWindow):
                     folio_info = f" [{p_shelf}]" if p_shelf else ""
                     page_node = QTreeWidgetItem(ms_node)
                     self._set_comp_tree_text(page_node, 0, str(int(p_item.get('score', 0))))
-                    self._set_comp_tree_text(page_node, self.comp_col_shelfmark, f"{tr('Image')} {p_num}{folio_info}")
+                    self._set_comp_tree_text(page_node, self.comp_col_shelfmark, self._comp_shelf_cells(ms_item, shelf)[1].get(_cvf.page_key(p_item), f"{tr('Image')} {p_num}{folio_info}"))
                     self._set_comp_tree_text(page_node, self.comp_col_library, "")
                     self._set_comp_tree_text(page_node, self.comp_col_title, "")
                     self._set_comp_tree_text(page_node, self.comp_col_sysid, p_sid or "")
@@ -27718,20 +27781,20 @@ class GenizahGUI(QMainWindow):
             if len(pages) == 1:
                 p_item = pages[0]
                 _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
-                self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p_num})")
+                self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, self._comp_shelf_cells(ms_item, shelf)[0])
                 self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=defer_widgets)
             else:
                 if pages:
                     p0 = pages[0]
                     _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
-                    self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p0_num}...)")
+                    self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, self._comp_shelf_cells(ms_item, shelf)[0])
                     self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'), defer_widgets=defer_widgets)
 
                 for p_item in pages:
                     _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
                     page_node = QTreeWidgetItem(ms_node)
                     self._set_comp_tree_text(page_node, 0, str(int(p_item.get('score', 0))))
-                    self._set_comp_tree_text(page_node, self.comp_col_shelfmark, f"{tr('Image')} {p_num}")
+                    self._set_comp_tree_text(page_node, self.comp_col_shelfmark, self._comp_shelf_cells(ms_item, shelf)[1].get(_cvf.page_key(p_item), f"{tr('Image')} {p_num}"))
                     self._set_comp_tree_text(page_node, self.comp_col_library, "")
                     self._set_comp_tree_text(page_node, self.comp_col_title, "")
                     self._set_comp_tree_text(page_node, self.comp_col_sysid, "")

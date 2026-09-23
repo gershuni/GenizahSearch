@@ -56,7 +56,8 @@ class _CompositionFilterHarness:
 
         for name in ("_apply_comp_tree_filters", "_comp_filter_state",
                      "_comp_filter_population", "_comp_ms_sys_id",
-                     "_text_matches_filter"):
+                     "_text_matches_filter", "_comp_shelf_cells",
+                     "_comp_shelf_cells_uncached"):
             setattr(self, name, MethodType(getattr(GenizahGUI, name), self))
         self._comp_item_is_local = GenizahGUI._comp_item_is_local
         self._comp_preview_source_text = GenizahGUI._comp_preview_source_text
@@ -68,6 +69,9 @@ class _CompositionFilterHarness:
             "library_code": ms_item.get("_library", ""),
             "title": ms_item.get("_title", ""),
         }
+
+    def _get_meta_for_header(self, raw_header):
+        return ("", raw_header, "", "")
 
     def _apply_local_filter(self, results, state):
         return results

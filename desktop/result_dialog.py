@@ -775,9 +775,12 @@ class ResultDialog(QDialog):
             cat = None
         summary = getattr(self, '_results_filter_summary', '')
         if not isinstance(cat, dict):
+            # Not a composition result -- e.g. a joined fragment load_by_shelfmark
+            # appended. The filters did not select it, so neither the strip nor
+            # "Back to results" describes it (Codex, #360).
             self.lbl_res_category.setText('')
-            self.lbl_res_filters.setText(summary)
-            bar.setVisible(bool(summary))
+            self.lbl_res_filters.setText('')
+            bar.setVisible(False)
             return
         label = cat.get('label') or ''
         sub = cat.get('subgroup')

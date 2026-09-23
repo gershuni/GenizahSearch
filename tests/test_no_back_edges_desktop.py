@@ -63,6 +63,8 @@ DESKTOP_MODULES = [
     "desktop/gui_threads.py",
     "desktop/list_filter_dialog.py",
     "desktop/supabase_corrections_client.py",
+    # 2026-09-23 (user letter A4/A5): the Composition tree/viewer filter rule.
+    "desktop/comp_view_filter.py",
 ]
 
 # Compound statement types whose bodies run at import time
