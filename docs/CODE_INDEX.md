@@ -2011,6 +2011,14 @@ Five rules, each of which was a bug on the web first: `witness_sys_id` (the one 
 
 Moved out of `web/pages/parallels.py` when the desktop needed the same rules; the page re-exports them, so its own callers are unchanged.
 
+## desktop/comp_view_filter.py
+
+ONE eligibility rule for the Composition result tree and the Manuscript Viewer (user letter, Tishrei 5787). Qt-free: the host passes a `FilterHost` of lookups, so the rule is tested directly.
+
+`eligible_pages(ms_item, state, host)` is the contract: manuscript-level filters (library, shelfmark, title, printed column, the 3-state printed filter, LOCAL only/hidden and opt-outs, domain exclusions) keep or drop a manuscript with all its pages; the Context / MS Context filters keep only the matching pages. `viewer_pages(groups, state, host)` walks the ordered `ViewGroup`s that `GenizahGUI.display_comp_results` records as `_comp_view_groups` -- data, not widgets, so collapsed groups, unexpanded lazy groups and rows a batched load has not drawn are all included. `filter_reason_ids` gives stable reason ids (raw `filter_reason` values kept, e.g. `duplicate_photography`).
+
+Host side in `genizah_app.py`: `_comp_ms_display` (the single display resolver both row builders use), `_comp_filter_state` (freezes the filters and settles the LOCAL no-op rule and chip), `_apply_comp_tree_filters` (the one pass; `_apply_comp_domain_exclusions` delegates to it), `on_comp_item_double_clicked` (builds the viewer list and its category tags), `_comp_filter_summary` (the viewer's frozen filter strip). `ResultDialog.set_results_filter_summary` / `_update_results_context` show category + strip only for entries that carry a `category`.
+
 ## desktop/passage_witnesses.py
 
 The desktop's multi-witness state machine -- identity, duplication, staleness, capacity, fusion and persistence. Qt-free by construction, so every rule is reachable from a test without a QApplication.

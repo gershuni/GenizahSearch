@@ -158,6 +158,30 @@ class ResultDialog(QDialog):
         self.btn_res_next_ms.clicked.connect(lambda: self.navigate_manuscript_results(1))
         top_bar.addWidget(self.btn_res_prev_ms); top_bar.addWidget(self.btn_res_prev); top_bar.addWidget(self.lbl_res_count, 1); top_bar.addWidget(self.btn_compact_toggle); top_bar.addWidget(self.btn_res_next); top_bar.addWidget(self.btn_res_next_ms)
         main_layout.addLayout(top_bar)
+
+        # --- Composition result context (hidden for every other caller) ---
+        # A category label for the current result (Main / Appendix / Filtered /
+        # Excluded), and a strip naming the result-list filters that shaped this
+        # list. The list is a snapshot taken when the viewer opened, so the strip
+        # is frozen too; "Back to results" returns to the list to change them.
+        self.results_context_bar = QWidget()
+        _ctx = QHBoxLayout(self.results_context_bar)
+        _ctx.setContentsMargins(4, 0, 4, 0)
+        _ctx.setSpacing(8)
+        self.lbl_res_category = QLabel()
+        self.lbl_res_category.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        self.lbl_res_filters = QLabel()
+        self.lbl_res_filters.setStyleSheet("color: #8e44ad;")
+        self.lbl_res_filters.setWordWrap(True)
+        self.btn_back_to_results = QPushButton(tr("Back to results"))
+        self.btn_back_to_results.setToolTip(tr("Show the results list, where the filters can be changed"))
+        self.btn_back_to_results.setAutoDefault(False)
+        self.btn_back_to_results.clicked.connect(self._back_to_results)
+        _ctx.addWidget(self.lbl_res_category)
+        _ctx.addWidget(self.lbl_res_filters, 1)
+        _ctx.addWidget(self.btn_back_to_results)
+        self.results_context_bar.setVisible(False)
+        main_layout.addWidget(self.results_context_bar)
         main_layout.addWidget(QSplitter(Qt.Orientation.Horizontal))
 
         # --- Compact Bar (initially hidden, shown in compact mode) ---
@@ -731,6 +755,50 @@ class ResultDialog(QDialog):
             self.btn_compact_ext_info.setChecked(self.btn_ext_info.isChecked())
             self.btn_compact_ext_info.blockSignals(False)
             self.btn_compact_ext_info.setText(self.btn_ext_info.text())
+
+    def set_results_filter_summary(self, summary):
+        """Composition caller: the frozen one-line summary of the result-list filters
+        that shaped this list ('' when unfiltered)."""
+        self._results_filter_summary = summary or ''
+        self._update_results_context()
+
+    def _update_results_context(self):
+        """Show the current result's category and the filter strip -- only for
+        entries that carry a composition category. Any other list (every other
+        caller, or a row load_by_shelfmark appended) shows nothing new."""
+        bar = getattr(self, 'results_context_bar', None)
+        if bar is None:
+            return
+        try:
+            cat = (self.all_results[self.current_result_idx] or {}).get('category')
+        except (IndexError, TypeError, AttributeError):
+            cat = None
+        summary = getattr(self, '_results_filter_summary', '')
+        if not isinstance(cat, dict):
+            self.lbl_res_category.setText('')
+            self.lbl_res_filters.setText(summary)
+            bar.setVisible(bool(summary))
+            return
+        label = cat.get('label') or ''
+        sub = cat.get('subgroup')
+        if sub:
+            label = f"{label} — {sub}"
+        self.lbl_res_category.setText(label)
+        self.lbl_res_filters.setText(summary)
+        bar.setVisible(True)
+
+    def _back_to_results(self):
+        """Bring the main window forward, on the results list."""
+        host = self._app
+        if host is None:
+            return
+        try:
+            if host.isMinimized():
+                host.showNormal()
+            host.raise_()
+            host.activateWindow()
+        except RuntimeError:
+            pass
 
     def navigate_results(self, direction):
         new_idx = self.current_result_idx + direction
@@ -2459,6 +2527,7 @@ class ResultDialog(QDialog):
 
         # Nav UI Updates
         self.lbl_res_count.setText(tr("Result {} of {}").format(idx + 1, len(self.all_results)))
+        self._update_results_context()
         self.btn_res_prev.setEnabled(idx > 0)
         self.btn_res_next.setEnabled(idx < len(self.all_results) - 1)
         self._update_manuscript_nav()

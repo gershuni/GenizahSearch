@@ -29,6 +29,24 @@ def _function_contains_call(func_node, name: str) -> bool:
     return False
 
 
+#: A joinpoint may reach the LOCAL helpers through ONE named delegate. The composition
+#: tree and the Manuscript Viewer share one filter rule (desktop/comp_view_filter.py);
+#: its state -- including LOCAL -- is built in _comp_filter_state, which both call.
+_DELEGATES = {'_apply_comp_tree_filters': '_comp_filter_state'}
+
+
+def _reaches_call(func_node, name: str, funcs_by_name: dict) -> bool:
+    """True if func_node calls `name` directly, or calls its registered delegate and
+    THAT function calls `name` directly (one hop, never an open-ended search)."""
+    if _function_contains_call(func_node, name):
+        return True
+    delegate = _DELEGATES.get(func_node.name)
+    if delegate and _function_contains_call(func_node, delegate):
+        target = funcs_by_name.get(delegate)
+        return target is not None and _function_contains_call(target, name)
+    return False
+
+
 def _iter_function_defs(tree):
     """Yield every FunctionDef + AsyncFunctionDef in the tree, including nested."""
     for node in ast.walk(tree):
@@ -45,6 +63,7 @@ def test_local_filter_applied_within_results_cascade():
     """
     source = GENIZAH_APP_PY.read_text(encoding='utf-8')
     tree = ast.parse(source)
+    all_funcs = {f.name: f for f in _iter_function_defs(tree)}
 
     target_functions = {'_apply_results_table_filters', '_apply_comp_tree_filters'}
     found = {}
@@ -60,7 +79,7 @@ def test_local_filter_applied_within_results_cascade():
 
     offenders = []
     for fname, func in found.items():
-        if not _function_contains_call(func, '_apply_local_filter'):
+        if not _reaches_call(func, '_apply_local_filter', all_funcs):
             offenders.append((fname, func.lineno))
 
     assert not offenders, (
@@ -211,13 +230,14 @@ def test_optout_filter_applied_within_both_cascades():
     import pytest
     source = GENIZAH_APP_PY.read_text(encoding='utf-8')
     tree = ast.parse(source)
+    all_funcs = {f.name: f for f in _iter_function_defs(tree)}
     target_functions = {'_apply_results_table_filters', '_apply_comp_tree_filters'}
     found = {f.name: f for f in _iter_function_defs(tree) if f.name in target_functions}
     if set(found.keys()) != target_functions:
         pytest.skip("cascade joinpoint functions missing (Phase 95 regression?)")
     offenders = []
     for fname, func in found.items():
-        if not _function_contains_call(func, '_apply_local_optout_filter'):
+        if not _reaches_call(func, '_apply_local_optout_filter', all_funcs):
             offenders.append((fname, func.lineno))
     if offenders:
         pytest.skip(
