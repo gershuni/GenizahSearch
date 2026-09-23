@@ -104,7 +104,7 @@ class _Sig:
     def connect(self, _slot):
         self._log.append(self._name + ":connect")
 
-    def disconnect(self, _slot):
+    def disconnect(self, _slot=None):
         self._log.append(self._name + ":disconnect")
 
 
@@ -159,3 +159,52 @@ def test_search_start_retires_the_old_cross_worker():
     src = inspect.getsource(JoinCandidatePane)
     start = src.index("self._cross_worker = _CrossSideWorker(")
     assert "self._retire_cross_worker()" in src[max(0, start - 300):start]
+
+
+# --- Codex P1 on #359: a superseded worker must never overwrite a newer search -------
+# Retiring only when the NEXT search also started a cross-side worker left a hole: clear
+# or disable the other side, search again, and the old worker's late result replaced the
+# new search's candidates.
+
+def test_stale_cross_result_is_dropped():
+    from desktop.join_workbench import JoinCandidatePane
+    from shared.joins_lab import MergeResult
+
+    class _Stub:
+        _search_gen = 5
+        _text_cands = ["new"]
+        assembled = 0
+
+        def _maybe_assemble(self):
+            self.assembled += 1
+
+    s = _Stub()
+    JoinCandidatePane._on_cross_done(s, MergeResult(candidates=("old",), note=""), 4)
+    assert s._text_cands == ["new"] and s.assembled == 0
+    JoinCandidatePane._on_cross_done(s, MergeResult(candidates=("cur",), note=""), 5)
+    assert s._text_cands == ["cur"] and s.assembled == 1
+
+
+@pytest.mark.parametrize("method", ["do_search", "_stop_search"])
+def test_every_generation_bump_retires_the_cross_worker(method):
+    """Each place that supersedes a search (new search; Stop that kills the thread) must
+    retire the cross-side worker unconditionally, not only when a new one is started."""
+    import ast
+    import inspect
+    import textwrap
+    from desktop.join_workbench import JoinCandidatePane
+
+    fn = ast.parse(textwrap.dedent(inspect.getsource(getattr(JoinCandidatePane, method))))
+    calls = {
+        n.func.attr for n in ast.walk(fn)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+    }
+    assert "_retire_cross_worker" in calls, method
+
+
+def test_worker_result_is_connected_with_its_generation():
+    import inspect
+    from desktop.join_workbench import JoinCandidatePane
+
+    src = inspect.getsource(JoinCandidatePane._on_results)
+    assert "self._on_cross_done(res, g)" in src

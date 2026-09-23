@@ -2871,6 +2871,7 @@ if _QT_AVAILABLE:
                 # tiny race window before terminate() are dropped by _on_results' guard
                 # (Codex nit) — they'd otherwise overwrite "Search stopped." untagged.
                 self._search_gen += 1
+                self._retire_cross_worker()
                 # No results will be delivered — reset button + status here (the
                 # graceful path is handled by the queued _on_results instead).
                 self._is_searching = False
@@ -2962,6 +2963,10 @@ if _QT_AVAILABLE:
             self._search_thread = None
             self._search_gen += 1
             _gen = self._search_gen
+            # A cross-side worker from the previous search is superseded too, even when
+            # this search will not start one (other side cleared or disabled) -- else its
+            # late result would overwrite this search's candidates.
+            self._retire_cross_worker()
 
             # R-01: page_position forwarded as text_position; genizah scope only.
             # SEED-024: core_mode is the mode-aware string (was hardcoded "exact").
@@ -3034,13 +3039,20 @@ if _QT_AVAILABLE:
                         combine,
                         a_pattern,
                     )
-                    self._cross_worker.done.connect(self._on_cross_done)
+                    self._cross_worker.done.connect(
+                        lambda res, g=self._search_gen: self._on_cross_done(res, g)
+                    )
                     self._cross_worker.start()
                     return
             self._maybe_assemble()
 
-        def _on_cross_done(self, merge_result):
-            """Handle cross-side worker result (MergeResult — .candidates is correct here)."""
+        def _on_cross_done(self, merge_result, gen=None):
+            """Handle cross-side worker result (MergeResult — .candidates is correct here).
+
+            Latest-wins: a result from a worker started under an older search generation
+            is dropped, the same guard _on_results applies to SearchThread results."""
+            if gen is not None and gen != self._search_gen:
+                return
             self._text_cands = list(merge_result.candidates)  # MergeResult.candidates
             self._maybe_assemble()
 
@@ -3061,7 +3073,7 @@ if _QT_AVAILABLE:
             except Exception:
                 pass
             try:
-                old.done.disconnect(self._on_cross_done)
+                old.done.disconnect()  # its only slot: the generation-tagged _on_cross_done
             except (TypeError, RuntimeError):
                 pass
             try:
