@@ -14,9 +14,8 @@ The contract (owner decision, 2026-09-23 -- "split by filter type"):
 * MANUSCRIPT-level filters keep or drop a manuscript together with all its pages:
   library, title and printed-column text; the 3-state printed filter; LOCAL
   only/hidden and LOCAL file opt-outs; domain exclusions.
-* SHELFMARK matches the visible Shelfmark cell ("T-S 1 (Image 3)"): the
-  manuscript's cell keeps all its pages; failing that, the page rows whose own
-  cell ("Image 4 [2v]") matches are kept.
+* SHELFMARK is judged on the visible Shelfmark cells -- the manuscript row's
+  ("T-S 1 (Image 3)") and each page row's ("Image 4 [2v]"); see _shelfmark_pages.
 * PAGE-level filters keep only the pages whose own text matches: source context and
   manuscript context.
 * A manuscript is shown iff it passes the manuscript-level rules AND at least one of
@@ -154,6 +153,32 @@ def manuscript_passes(ms_item: dict, state: FilterState, host: FilterHost) -> bo
     return True
 
 
+def _shelfmark_pages(ms_item: dict, pages: list, rule: dict, host: FilterHost) -> list:
+    """The pages a Shelfmark rule keeps, judged on the VISIBLE cells.
+
+    A manuscript row shows one Shelfmark cell ("T-S 1 (Image 1...)"); a multi-page
+    manuscript also shows one per page row ("Image 4 [2v]"). A single-page row has
+    no page cell (page_texts gives None) and is judged by its own cell only.
+
+    * "contains X": the manuscript cell matching keeps every page; otherwise the
+      page rows whose own cell contains X are kept.
+    * "does not contain X": X in the manuscript cell drops the manuscript; otherwise
+      each page row whose own cell contains X is dropped (Codex, #360).
+    """
+    ms_cell = (host.ms_fields(ms_item) or {}).get("shelfmark", "")
+
+    def page_cell(p):
+        return (host.page_texts(p, ms_item) or {}).get("shelfmark")
+
+    if rule.get("exclude"):
+        if not text_matches(ms_cell, rule):
+            return []
+        return [p for p in pages if page_cell(p) is None or text_matches(page_cell(p), rule)]
+    if text_matches(ms_cell, rule):
+        return pages
+    return [p for p in pages if page_cell(p) is not None and text_matches(page_cell(p), rule)]
+
+
 def eligible_pages(ms_item: dict, state: FilterState, host: FilterHost) -> list:
     """The pages of ``ms_item`` that the current filters keep, in their own order.
 
@@ -166,19 +191,9 @@ def eligible_pages(ms_item: dict, state: FilterState, host: FilterHost) -> list:
         return []
     shelf_rule = state.column_rules.get("shelfmark")
     if shelf_rule is not None:
-        fields = host.ms_fields(ms_item) or {}
-        if not text_matches(fields.get("shelfmark", ""), shelf_rule):
-            # The Shelfmark cell of the manuscript row does not match; its PAGE rows
-            # carry their own visible cells ("Image 4 [2v]"), and the tree has
-            # always kept a manuscript whose page row matched. Only pages that have
-            # a row of their own (page_texts shelfmark not None) can match this way.
-            pages = [
-                p for p in pages
-                if (host.page_texts(p, ms_item) or {}).get("shelfmark") is not None
-                and text_matches((host.page_texts(p, ms_item) or {}).get("shelfmark"), shelf_rule)
-            ]
-            if not pages:
-                return []
+        pages = _shelfmark_pages(ms_item, pages, shelf_rule, host)
+        if not pages:
+            return []
     page_rules = {k: r for k, r in state.column_rules.items() if k in PAGE_LEVEL_COLUMNS}
     if not page_rules:
         return pages

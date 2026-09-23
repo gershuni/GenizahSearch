@@ -497,3 +497,16 @@ def test_back_to_results_switches_to_the_composition_tab(qt):
     ResultDialog._back_to_results(d)
     assert calls[0] == ("tab", _Host.composition_tab), "did not return to the Composition tab"
     assert "raise" in calls and "activate" in calls
+
+
+def test_shelfmark_exclusion_drops_matching_page_rows_and_manuscripts():
+    """Codex #360 round 3: "does not contain Image 4" must hide the Image 4 row even
+    when the manuscript's own cell ("T-S 1 (Image 1...)") passes."""
+    ms = _ms("a", "x", "y")
+    ms["pages"][0]["_cell"] = "Image 1"
+    ms["pages"][1]["_cell"] = "Image 4"
+    host = _host(fields={"a": {"shelfmark": "T-S 1 (Image 1...)"}})
+    st = cvf.FilterState(column_rules={"shelfmark": {"text": "Image 4", "exclude": True}})
+    assert [p["uid"] for p in cvf.eligible_pages(ms, st, host)] == ["a-0"]
+    st_ms = cvf.FilterState(column_rules={"shelfmark": {"text": "T-S 1", "exclude": True}})
+    assert cvf.eligible_pages(ms, st_ms, host) == [], "excluded shelfmark kept via its pages"
