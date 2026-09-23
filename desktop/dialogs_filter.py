@@ -1034,7 +1034,9 @@ class PreSearchFilterDialog(QDialog):
         mat_layout_inner = QHBoxLayout(mat_widget)
         mat_layout_inner.setContentsMargins(0, 0, 0, 0)
         for mat in MEASUREMENT_MATERIALS:
-            cb = QCheckBox(mat)
+            # Display the translated name; the English value stays the dict key and
+            # the saved measurement_material filter value.
+            cb = QCheckBox(tr(mat))
             cb.stateChanged.connect(self._on_filter_changed)
             mat_layout_inner.addWidget(cb)
             self._meas_material_checks[mat] = cb

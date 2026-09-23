@@ -1851,26 +1851,35 @@ if _QT_AVAILABLE:
         def run(self):
             from shared.joins_lab import apply_cross_side, compose, MergeResult
             try:
-                b_str, _b_ro_ignored, _b_pos = compose(self.b_query)
+                b_str, _b_ro_ignored, b_pos = compose(self.b_query)
             except ValueError:
                 self.done.emit(MergeResult(candidates=tuple(self.base), note=""))
                 return
             if not b_str:
                 self.done.emit(MergeResult(candidates=tuple(self.base), note=""))
                 return
+            if self._cancel:
+                return
             try:
+                # Pass the COMPOSED query string, never the SideQuery: execute_search
+                # runs strip_search_diacritics() on it, and a SideQuery raised a
+                # TypeError that the executor adapter swallowed into [] -- Narrow
+                # returned nothing and Widen added nothing on desktop.
                 # Pass the MERGED b_ro as b_responsa_options — do NOT re-compose here.
                 result = apply_cross_side(
                     self.executor,
                     self.base,
-                    self.b_query,
+                    b_str,
                     self.b_ro,
                     self.combine,
                     self.a_pattern,
+                    text_position=b_pos,
                 )
             except Exception as exc:
                 logger.warning("_CrossSideWorker error: %s", exc)
                 result = MergeResult(candidates=tuple(self.base), note="")
+            if self._cancel:
+                return  # superseded by a newer search: never clobber its candidates
             self.done.emit(result)
 
     class _EnrichWorker(QThread):
@@ -3015,12 +3024,8 @@ if _QT_AVAILABLE:
                         self._text_cands[0].highlight_pattern
                         if self._text_cands else None
                     )
-                    # Cancel old cross-side worker
-                    if self._cross_worker is not None:
-                        try:
-                            self._cross_worker.cancel()
-                        except Exception:
-                            pass
+                    # Cancel old cross-side worker (crash-safe teardown).
+                    self._retire_cross_worker()
                     self._cross_worker = _CrossSideWorker(
                         self.executor,
                         self._text_cands,
@@ -3038,6 +3043,43 @@ if _QT_AVAILABLE:
             """Handle cross-side worker result (MergeResult — .candidates is correct here)."""
             self._text_cands = list(merge_result.candidates)  # MergeResult.candidates
             self._maybe_assemble()
+
+        def _retire_cross_worker(self):
+            """Crash-safely tear down the current _CrossSideWorker before a new one starts.
+
+            Same hazard and remedy as _retire_enrich_worker: dropping the only reference to
+            a still-running QThread destroys it mid-run (Windows 0xC0000409). Until the
+            SideQuery/str fix the worker failed within microseconds, so this never bit; now
+            it runs a real engine search. Cancel, disconnect the stale result, and retain a
+            running worker in _retired_workers until finished()."""
+            old = self._cross_worker
+            self._cross_worker = None
+            if old is None:
+                return
+            try:
+                old.cancel()
+            except Exception:
+                pass
+            try:
+                old.done.disconnect(self._on_cross_done)
+            except (TypeError, RuntimeError):
+                pass
+            try:
+                running = old.isRunning()
+            except RuntimeError:
+                running = False
+            if not running:
+                return
+            self._retired_workers.append(old)
+            try:
+                old.finished.connect(lambda w=old: self._reap_enrich_worker(w))
+            except (TypeError, RuntimeError):
+                pass
+            try:
+                if not old.isRunning():
+                    self._reap_enrich_worker(old)
+            except RuntimeError:
+                self._reap_enrich_worker(old)
 
         # ------------------------------------------------------------------ #
         # Phase 109 G-04 — VS toggle helpers (replaces 3-radio model)      #
