@@ -129,6 +129,7 @@ def _pane_stub(worker):
 
     s = _Stub()
     s._cross_worker = worker
+    s._cross_gen = 0
     s._retired_workers = []
     s._on_cross_done = lambda r: None
     return s
@@ -171,7 +172,7 @@ def test_stale_cross_result_is_dropped():
     from shared.joins_lab import MergeResult
 
     class _Stub:
-        _search_gen = 5
+        _cross_gen = 5
         _text_cands = ["new"]
         assembled = 0
 
@@ -208,3 +209,50 @@ def test_worker_result_is_connected_with_its_generation():
 
     src = inspect.getsource(JoinCandidatePane._on_results)
     assert "self._on_cross_done(res, g)" in src
+
+
+# --- Codex round 2 on #359 -------------------------------------------------------------
+
+def test_retire_advances_the_generation_so_a_queued_result_is_dropped():
+    """A result already queued when the worker is retired must not land (a disconnect
+    does not recall an event Qt has already posted)."""
+    from desktop.join_workbench import JoinCandidatePane
+    from shared.joins_lab import MergeResult
+
+    stub = _pane_stub(_FakeCrossWorker([], running=False))
+    stub._text_cands = ["new"]
+    stub._maybe_assemble = lambda: None
+    started_under = stub._cross_gen
+    JoinCandidatePane._retire_cross_worker(stub)
+    JoinCandidatePane._on_cross_done(
+        stub, MergeResult(candidates=("old",), note=""), started_under)
+    assert stub._text_cands == ["new"]
+
+
+def test_reanchoring_retires_the_cross_worker():
+    """P1: a re-anchor must invalidate an other-side search computed for the old anchor."""
+    import ast
+    import inspect
+    import textwrap
+    from desktop import join_workbench
+
+    win = next(v for k, v in vars(join_workbench).items()
+               if isinstance(v, type) and hasattr(v, "set_anchor")
+               and hasattr(v, "_start_anchor_load"))
+    fn = ast.parse(textwrap.dedent(inspect.getsource(win.set_anchor)))
+    calls = {n.func.attr for n in ast.walk(fn)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
+    assert "_retire_cross_worker" in calls
+
+
+def test_cancel_stops_the_underlying_engine_scan():
+    """P2: the engine only stops when its progress_callback raises InterruptedError."""
+    ex = _StrictExec([_res(4)])
+    w = _worker(ex, "AND")
+    _run(w)
+    cb = ex.calls[0][1].get("progress_callback")
+    assert callable(cb), "no progress_callback reached the engine"
+    cb(1, 10)                      # not cancelled: harmless
+    w.cancel()
+    with pytest.raises(InterruptedError):
+        cb(2, 10)

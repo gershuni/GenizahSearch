@@ -1848,6 +1848,14 @@ if _QT_AVAILABLE:
         def cancel(self):
             self._cancel = True
 
+        def _check_cancel(self, *_args):
+            # The engine's cancellation contract: a progress_callback that raises
+            # InterruptedError stops the scan (execute_search catches it and returns).
+            # Without it a retired worker kept scanning to completion, so repeated
+            # searches piled up concurrent full scans.
+            if self._cancel:
+                raise InterruptedError("cross-side search superseded")
+
         def run(self):
             from shared.joins_lab import apply_cross_side, compose, MergeResult
             try:
@@ -1873,6 +1881,7 @@ if _QT_AVAILABLE:
                     self.b_ro,
                     self.combine,
                     self.a_pattern,
+                    progress_callback=self._check_cancel,
                     text_position=b_pos,
                 )
             except Exception as exc:
@@ -2504,6 +2513,7 @@ if _QT_AVAILABLE:
             self.view_mode = "grid"   # 'grid' | 'table'
             self._resolver = None     # ThumbResolver (current page)
             self._cross_worker = None
+            self._cross_gen = 0               # bumped by _retire_cross_worker (latest-wins)
             self._enrich_worker = None
             self._retired_workers = []  # crash-safety: running _EnrichWorkers awaiting finished() (0xC0000409)
             self._search_thread = None
@@ -3040,7 +3050,7 @@ if _QT_AVAILABLE:
                         a_pattern,
                     )
                     self._cross_worker.done.connect(
-                        lambda res, g=self._search_gen: self._on_cross_done(res, g)
+                        lambda res, g=self._cross_gen: self._on_cross_done(res, g)
                     )
                     self._cross_worker.start()
                     return
@@ -3049,9 +3059,10 @@ if _QT_AVAILABLE:
         def _on_cross_done(self, merge_result, gen=None):
             """Handle cross-side worker result (MergeResult — .candidates is correct here).
 
-            Latest-wins: a result from a worker started under an older search generation
-            is dropped, the same guard _on_results applies to SearchThread results."""
-            if gen is not None and gen != self._search_gen:
+            Latest-wins: every _retire_cross_worker() advances _cross_gen, so a result
+            from a retired worker -- superseded by a new search, a Stop or a re-anchor --
+            is dropped even if its queued signal is delivered after the disconnect."""
+            if gen is not None and gen != self._cross_gen:
                 return
             self._text_cands = list(merge_result.candidates)  # MergeResult.candidates
             self._maybe_assemble()
@@ -3064,6 +3075,7 @@ if _QT_AVAILABLE:
             SideQuery/str fix the worker failed within microseconds, so this never bit; now
             it runs a real engine search. Cancel, disconnect the stale result, and retain a
             running worker in _retired_workers until finished()."""
+            self._cross_gen += 1   # invalidate any result the old worker already queued
             old = self._cross_worker
             self._cross_worker = None
             if old is None:
@@ -5453,6 +5465,8 @@ if _QT_AVAILABLE:
             # cards (incl. any "Select as partner" pick buttons in the Plan-06 pick flow) linger.
             pane = getattr(self, "_candidate_pane", None)
             if pane is not None:
+                # An other-side search still running was computed for the OLD anchor.
+                pane._retire_cross_worker()
                 pane._text_cands = None
                 pane._vs_cands = None
                 pane._vs_loaded_sid = None     # force _ensure_vs_loaded_for_anchor to reload for the new sid
