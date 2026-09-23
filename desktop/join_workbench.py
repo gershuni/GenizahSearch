@@ -608,6 +608,67 @@ except ImportError:
 # Carries a generation token (must-fix #7) to allow latest-wins semantics.
 # ---------------------------------------------------------------------------
 
+# Workers that were still running when their owning pane was torn down. Held here, not
+# on the pane, so Python never frees a running QThread (Windows 0xC0000409); each one
+# removes itself on finished().
+_ORPHANED_WORKERS: list = []
+
+
+_ORPHAN_JOIN_HOOKED = False
+
+
+def _join_orphaned_workers(timeout_ms: int = 10000) -> None:
+    """At application quit, never let interpreter teardown free a running QThread.
+
+    A module-level list only postpones destruction to module finalisation, and the
+    queued finished() release may never run once the event loop has stopped. So on
+    aboutToQuit: wait (bounded) for each orphan, and terminate() a thread that is
+    still running -- a forced stop at exit is recoverable; destroying a running
+    QThread aborts the process (0xC0000409)."""
+    for w in list(_ORPHANED_WORKERS):
+        try:
+            if w.isRunning() and not w.wait(timeout_ms):
+                w.terminate()
+                w.wait()
+        except RuntimeError:
+            pass
+    _ORPHANED_WORKERS.clear()
+
+
+def _hook_orphan_join() -> None:
+    global _ORPHAN_JOIN_HOOKED
+    if _ORPHAN_JOIN_HOOKED:
+        return
+    try:
+        from PyQt6.QtCore import QCoreApplication
+        app = QCoreApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(_join_orphaned_workers)
+            _ORPHAN_JOIN_HOOKED = True
+    except Exception:
+        pass
+
+
+def _keep_until_finished(worker) -> None:
+    if worker in _ORPHANED_WORKERS:
+        return
+    _ORPHANED_WORKERS.append(worker)
+    _hook_orphan_join()
+
+    def _release(w=worker):
+        try:
+            _ORPHANED_WORKERS.remove(w)
+        except ValueError:
+            pass
+
+    try:
+        worker.finished.connect(_release)
+        if not worker.isRunning():
+            _release()
+    except (TypeError, RuntimeError):
+        _release()
+
+
 if _QT_AVAILABLE:
     class _AnchorLoadWorker(QThread):
         """Load anchor image list (enrich_metadata route) + folio text.
@@ -1848,29 +1909,47 @@ if _QT_AVAILABLE:
         def cancel(self):
             self._cancel = True
 
+        def _check_cancel(self, *_args):
+            # The engine's cancellation contract: a progress_callback that raises
+            # InterruptedError stops the scan (execute_search catches it and returns).
+            # Without it a retired worker kept scanning to completion, so repeated
+            # searches piled up concurrent full scans.
+            if self._cancel:
+                raise InterruptedError("cross-side search superseded")
+
         def run(self):
             from shared.joins_lab import apply_cross_side, compose, MergeResult
             try:
-                b_str, _b_ro_ignored, _b_pos = compose(self.b_query)
+                b_str, _b_ro_ignored, b_pos = compose(self.b_query)
             except ValueError:
                 self.done.emit(MergeResult(candidates=tuple(self.base), note=""))
                 return
             if not b_str:
                 self.done.emit(MergeResult(candidates=tuple(self.base), note=""))
                 return
+            if self._cancel:
+                return
             try:
+                # Pass the COMPOSED query string, never the SideQuery: execute_search
+                # runs strip_search_diacritics() on it, and a SideQuery raised a
+                # TypeError that the executor adapter swallowed into [] -- Narrow
+                # returned nothing and Widen added nothing on desktop.
                 # Pass the MERGED b_ro as b_responsa_options — do NOT re-compose here.
                 result = apply_cross_side(
                     self.executor,
                     self.base,
-                    self.b_query,
+                    b_str,
                     self.b_ro,
                     self.combine,
                     self.a_pattern,
+                    progress_callback=self._check_cancel,
+                    text_position=b_pos,
                 )
             except Exception as exc:
                 logger.warning("_CrossSideWorker error: %s", exc)
                 result = MergeResult(candidates=tuple(self.base), note="")
+            if self._cancel:
+                return  # superseded by a newer search: never clobber its candidates
             self.done.emit(result)
 
     class _EnrichWorker(QThread):
@@ -2495,6 +2574,7 @@ if _QT_AVAILABLE:
             self.view_mode = "grid"   # 'grid' | 'table'
             self._resolver = None     # ThumbResolver (current page)
             self._cross_worker = None
+            self._cross_gen = 0               # bumped by _retire_cross_worker (latest-wins)
             self._enrich_worker = None
             self._retired_workers = []  # crash-safety: running _EnrichWorkers awaiting finished() (0xC0000409)
             self._search_thread = None
@@ -2862,6 +2942,7 @@ if _QT_AVAILABLE:
                 # tiny race window before terminate() are dropped by _on_results' guard
                 # (Codex nit) — they'd otherwise overwrite "Search stopped." untagged.
                 self._search_gen += 1
+                self._retire_cross_worker()
                 # No results will be delivered — reset button + status here (the
                 # graceful path is handled by the queued _on_results instead).
                 self._is_searching = False
@@ -2953,6 +3034,10 @@ if _QT_AVAILABLE:
             self._search_thread = None
             self._search_gen += 1
             _gen = self._search_gen
+            # A cross-side worker from the previous search is superseded too, even when
+            # this search will not start one (other side cleared or disabled) -- else its
+            # late result would overwrite this search's candidates.
+            self._retire_cross_worker()
 
             # R-01: page_position forwarded as text_position; genizah scope only.
             # SEED-024: core_mode is the mode-aware string (was hardcoded "exact").
@@ -3015,12 +3100,8 @@ if _QT_AVAILABLE:
                         self._text_cands[0].highlight_pattern
                         if self._text_cands else None
                     )
-                    # Cancel old cross-side worker
-                    if self._cross_worker is not None:
-                        try:
-                            self._cross_worker.cancel()
-                        except Exception:
-                            pass
+                    # Cancel old cross-side worker (crash-safe teardown).
+                    self._retire_cross_worker()
                     self._cross_worker = _CrossSideWorker(
                         self.executor,
                         self._text_cands,
@@ -3029,15 +3110,82 @@ if _QT_AVAILABLE:
                         combine,
                         a_pattern,
                     )
-                    self._cross_worker.done.connect(self._on_cross_done)
+                    self._cross_worker.done.connect(
+                        lambda res, g=self._cross_gen: self._on_cross_done(res, g)
+                    )
                     self._cross_worker.start()
                     return
             self._maybe_assemble()
 
-        def _on_cross_done(self, merge_result):
-            """Handle cross-side worker result (MergeResult — .candidates is correct here)."""
+        def _on_cross_done(self, merge_result, gen=None):
+            """Handle cross-side worker result (MergeResult — .candidates is correct here).
+
+            Latest-wins: every _retire_cross_worker() advances _cross_gen, so a result
+            from a retired worker -- superseded by a new search, a Stop or a re-anchor --
+            is dropped even if its queued signal is delivered after the disconnect."""
+            if gen is not None and gen != self._cross_gen:
+                return
             self._text_cands = list(merge_result.candidates)  # MergeResult.candidates
             self._maybe_assemble()
+
+        def shutdown_background_workers(self, timeout_ms: int = 3000):
+            """Stop the other-side scan before the workbench is torn down.
+
+            Called from JoinWorkbenchWindow.closeEvent. Retiring cancels the scan (its
+            progress_callback raises InterruptedError inside the engine) and keeps the
+            QThread referenced; the bounded wait lets it actually finish, so closing the
+            lab neither leaves an invisible full scan running nor lets app shutdown
+            destroy a running QThread (0xC0000409)."""
+            self._retire_cross_worker()
+            for w in list(self._retired_workers):
+                try:
+                    finished = (not w.isRunning()) or w.wait(timeout_ms)
+                except RuntimeError:
+                    continue
+                if not finished:
+                    # The engine runs its Tantivy query before the first cancellation
+                    # callback, so a cancelled scan can outlive the wait. The worker has
+                    # no Qt parent; hand the last reference to a module-level keeper that
+                    # outlives this pane, so teardown never destroys a running QThread.
+                    _keep_until_finished(w)
+
+        def _retire_cross_worker(self):
+            """Crash-safely tear down the current _CrossSideWorker before a new one starts.
+
+            Same hazard and remedy as _retire_enrich_worker: dropping the only reference to
+            a still-running QThread destroys it mid-run (Windows 0xC0000409). Until the
+            SideQuery/str fix the worker failed within microseconds, so this never bit; now
+            it runs a real engine search. Cancel, disconnect the stale result, and retain a
+            running worker in _retired_workers until finished()."""
+            self._cross_gen += 1   # invalidate any result the old worker already queued
+            old = self._cross_worker
+            self._cross_worker = None
+            if old is None:
+                return
+            try:
+                old.cancel()
+            except Exception:
+                pass
+            try:
+                old.done.disconnect()  # its only slot: the generation-tagged _on_cross_done
+            except (TypeError, RuntimeError):
+                pass
+            try:
+                running = old.isRunning()
+            except RuntimeError:
+                running = False
+            if not running:
+                return
+            self._retired_workers.append(old)
+            try:
+                old.finished.connect(lambda w=old: self._reap_enrich_worker(w))
+            except (TypeError, RuntimeError):
+                pass
+            try:
+                if not old.isRunning():
+                    self._reap_enrich_worker(old)
+            except RuntimeError:
+                self._reap_enrich_worker(old)
 
         # ------------------------------------------------------------------ #
         # Phase 109 G-04 — VS toggle helpers (replaces 3-radio model)      #
@@ -5399,6 +5547,8 @@ if _QT_AVAILABLE:
             # cards (incl. any "Select as partner" pick buttons in the Plan-06 pick flow) linger.
             pane = getattr(self, "_candidate_pane", None)
             if pane is not None:
+                # An other-side search still running was computed for the OLD anchor.
+                pane._retire_cross_worker()
                 pane._text_cands = None
                 pane._vs_cands = None
                 pane._vs_loaded_sid = None     # force _ensure_vs_loaded_for_anchor to reload for the new sid
@@ -5679,6 +5829,12 @@ if _QT_AVAILABLE:
             self._gen += 1  # must-fix #7: invalidate any in-flight workers
             self._cancel_workers()
             self._cancel_images()
+            pane = getattr(self, "_candidate_pane", None)
+            if pane is not None:
+                try:
+                    pane.shutdown_background_workers()
+                except (RuntimeError, AttributeError):
+                    pass
             super().closeEvent(event)
 
         # ------------------------------------------------------------------

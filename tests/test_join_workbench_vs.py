@@ -337,6 +337,7 @@ def test_set_anchor_invalidates_candidate_state():
     from desktop.join_workbench import JoinWorkbenchWindow
 
     render_calls = []
+    retire_calls = []
 
     class _FakePaneStub:
         _text_cands = ["old_text_cand"]
@@ -346,6 +347,9 @@ def test_set_anchor_invalidates_candidate_state():
 
         def render_results(self):
             render_calls.append(1)
+
+        def _retire_cross_worker(self):
+            retire_calls.append(1)   # an other-side search for the OLD anchor must die
 
     class _MockLabel:
         def setText(self, *a):
@@ -400,6 +404,8 @@ def test_set_anchor_invalidates_candidate_state():
         f"set_anchor must call pane.render_results() exactly once to clear stale card widgets, "
         f"got {len(render_calls)} calls"
     )
+    # Codex P1 on #359: an other-side search still running belongs to the OLD anchor.
+    assert retire_calls == [1], "set_anchor must retire the pane's cross-side worker"
 
 
 # ---------------------------------------------------------------------------

@@ -451,7 +451,16 @@ def apply_cross_side(
     out = list(base)
     seen = {c.key for c in base}
     added = 0
-    for (sid, q) in b_set:
+    for i, (sid, q) in enumerate(b_set):
+        # Cooperative cancel in the synthesis phase too: each page costs browse and
+        # metadata lookups, so a superseded Widen over a large B set would otherwise
+        # keep working long after the engine scan honoured the same callback.
+        if progress_callback is not None:
+            try:
+                progress_callback(i, len(b_set))
+            except InterruptedError:
+                note = f"B matched {len(b_set)} pages · +{added} via other side (stopped)"
+                return MergeResult(candidates=tuple(out), note=note)
         t = _page_total(sid)
         for n in (q - 1, q + 1):
             if n < 1:
