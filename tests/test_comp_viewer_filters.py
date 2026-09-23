@@ -466,3 +466,34 @@ def test_tree_shelfmark_filter_uses_the_visible_cell(qt, monkeypatch):
     assert _find(s, "a").isHidden()
     b = _find(s, "b")
     assert not b.isHidden() and b.child(0).isHidden() and not b.child(1).isHidden()
+
+
+@pytest.mark.gui
+def test_back_to_results_switches_to_the_composition_tab(qt):
+    from desktop.result_dialog import ResultDialog
+
+    calls = []
+
+    class _Host:
+        composition_tab = object()
+
+        def _set_active_tab(self, tab):
+            calls.append(("tab", tab))
+
+        def isMinimized(self):
+            return False
+
+        def raise_(self):
+            calls.append("raise")
+
+        def activateWindow(self):
+            calls.append("activate")
+
+    class _D:
+        pass
+
+    d = _D()
+    d._app = _Host()
+    ResultDialog._back_to_results(d)
+    assert calls[0] == ("tab", _Host.composition_tab), "did not return to the Composition tab"
+    assert "raise" in calls and "activate" in calls

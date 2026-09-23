@@ -795,6 +795,15 @@ class ResultDialog(QDialog):
         host = self._app
         if host is None:
             return
+        # The user may have changed tabs while this non-modal viewer stayed open;
+        # the strip's filters belong to the Composition results, so go there.
+        # _set_active_tab is the programmatic switch (no tab-activation telemetry).
+        tab = getattr(host, 'composition_tab', None)
+        if tab is not None and hasattr(host, '_set_active_tab'):
+            try:
+                host._set_active_tab(tab)
+            except RuntimeError:
+                pass
         try:
             if host.isMinimized():
                 host.showNormal()
