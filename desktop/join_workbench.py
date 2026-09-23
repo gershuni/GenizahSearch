@@ -3067,6 +3067,22 @@ if _QT_AVAILABLE:
             self._text_cands = list(merge_result.candidates)  # MergeResult.candidates
             self._maybe_assemble()
 
+        def shutdown_background_workers(self, timeout_ms: int = 3000):
+            """Stop the other-side scan before the workbench is torn down.
+
+            Called from JoinWorkbenchWindow.closeEvent. Retiring cancels the scan (its
+            progress_callback raises InterruptedError inside the engine) and keeps the
+            QThread referenced; the bounded wait lets it actually finish, so closing the
+            lab neither leaves an invisible full scan running nor lets app shutdown
+            destroy a running QThread (0xC0000409)."""
+            self._retire_cross_worker()
+            for w in list(self._retired_workers):
+                try:
+                    if w.isRunning():
+                        w.wait(timeout_ms)
+                except RuntimeError:
+                    pass
+
         def _retire_cross_worker(self):
             """Crash-safely tear down the current _CrossSideWorker before a new one starts.
 
@@ -5747,6 +5763,12 @@ if _QT_AVAILABLE:
             self._gen += 1  # must-fix #7: invalidate any in-flight workers
             self._cancel_workers()
             self._cancel_images()
+            pane = getattr(self, "_candidate_pane", None)
+            if pane is not None:
+                try:
+                    pane.shutdown_background_workers()
+                except (RuntimeError, AttributeError):
+                    pass
             super().closeEvent(event)
 
         # ------------------------------------------------------------------

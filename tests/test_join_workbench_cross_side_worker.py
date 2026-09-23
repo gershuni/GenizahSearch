@@ -256,3 +256,37 @@ def test_cancel_stops_the_underlying_engine_scan():
     w.cancel()
     with pytest.raises(InterruptedError):
         cb(2, 10)
+
+
+# --- Codex round 3 on #359: closing the lab must stop the scan ------------------------
+
+def test_shutdown_retires_and_waits_for_a_running_cross_worker():
+    from desktop.join_workbench import JoinCandidatePane
+
+    log = []
+
+    class _Waitable(_FakeCrossWorker):
+        def wait(self, ms):
+            log.append(f"wait:{ms}")
+            self._running = False
+            return True
+
+    worker = _Waitable(log, running=True)
+    stub = _pane_stub(worker)
+    stub._retire_cross_worker = lambda: JoinCandidatePane._retire_cross_worker(stub)
+    JoinCandidatePane.shutdown_background_workers(stub, timeout_ms=1234)
+    assert "cancel" in log, "the scan was not cancelled"
+    assert "wait:1234" in log, "close did not wait for the running QThread"
+    assert stub._cross_worker is None
+
+
+def test_workbench_close_shuts_down_the_candidate_pane():
+    import ast
+    import inspect
+    import textwrap
+    from desktop.join_workbench import JoinWorkbenchWindow
+
+    fn = ast.parse(textwrap.dedent(inspect.getsource(JoinWorkbenchWindow.closeEvent)))
+    calls = {n.func.attr for n in ast.walk(fn)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
+    assert "shutdown_background_workers" in calls
