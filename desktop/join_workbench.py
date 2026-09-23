@@ -608,6 +608,31 @@ except ImportError:
 # Carries a generation token (must-fix #7) to allow latest-wins semantics.
 # ---------------------------------------------------------------------------
 
+# Workers that were still running when their owning pane was torn down. Held here, not
+# on the pane, so Python never frees a running QThread (Windows 0xC0000409); each one
+# removes itself on finished().
+_ORPHANED_WORKERS: list = []
+
+
+def _keep_until_finished(worker) -> None:
+    if worker in _ORPHANED_WORKERS:
+        return
+    _ORPHANED_WORKERS.append(worker)
+
+    def _release(w=worker):
+        try:
+            _ORPHANED_WORKERS.remove(w)
+        except ValueError:
+            pass
+
+    try:
+        worker.finished.connect(_release)
+        if not worker.isRunning():
+            _release()
+    except (TypeError, RuntimeError):
+        _release()
+
+
 if _QT_AVAILABLE:
     class _AnchorLoadWorker(QThread):
         """Load anchor image list (enrich_metadata route) + folio text.
@@ -3078,10 +3103,15 @@ if _QT_AVAILABLE:
             self._retire_cross_worker()
             for w in list(self._retired_workers):
                 try:
-                    if w.isRunning():
-                        w.wait(timeout_ms)
+                    finished = (not w.isRunning()) or w.wait(timeout_ms)
                 except RuntimeError:
-                    pass
+                    continue
+                if not finished:
+                    # The engine runs its Tantivy query before the first cancellation
+                    # callback, so a cancelled scan can outlive the wait. The worker has
+                    # no Qt parent; hand the last reference to a module-level keeper that
+                    # outlives this pane, so teardown never destroys a running QThread.
+                    _keep_until_finished(w)
 
         def _retire_cross_worker(self):
             """Crash-safely tear down the current _CrossSideWorker before a new one starts.

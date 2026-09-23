@@ -290,3 +290,43 @@ def test_workbench_close_shuts_down_the_candidate_pane():
     calls = {n.func.attr for n in ast.walk(fn)
              if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
     assert "shutdown_background_workers" in calls
+
+
+def test_worker_that_outlives_the_shutdown_wait_is_kept_alive():
+    """Codex round 4: a timed-out wait must not drop the last reference to a running
+    QThread -- it moves to a module-level keeper until finished()."""
+    import desktop.join_workbench as jw
+    from desktop.join_workbench import JoinCandidatePane
+
+    log = []
+    slots = []
+
+    class _Sig2(_Sig):
+        def connect(self, slot):
+            slots.append(slot)
+            super().connect(slot)
+
+    class _Stuck(_FakeCrossWorker):
+        def __init__(self, log):
+            super().__init__(log, running=True)
+            self.finished = _Sig2("finished", log)
+
+        def wait(self, ms):
+            return False                  # still running after the bounded wait
+
+    worker = _Stuck(log)
+    stub = _pane_stub(worker)
+    stub._retire_cross_worker = lambda: JoinCandidatePane._retire_cross_worker(stub)
+    try:
+        JoinCandidatePane.shutdown_background_workers(stub, timeout_ms=1)
+        assert worker in jw._ORPHANED_WORKERS
+        worker._running = False
+        for slot in list(slots):          # simulate finished()
+            try:
+                slot()
+            except TypeError:
+                pass
+        assert worker not in jw._ORPHANED_WORKERS
+    finally:
+        if worker in jw._ORPHANED_WORKERS:
+            jw._ORPHANED_WORKERS.remove(worker)
