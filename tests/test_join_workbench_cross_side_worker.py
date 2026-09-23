@@ -330,3 +330,73 @@ def test_worker_that_outlives_the_shutdown_wait_is_kept_alive():
     finally:
         if worker in jw._ORPHANED_WORKERS:
             jw._ORPHANED_WORKERS.remove(worker)
+
+
+# --- Codex round 5 on #359 --------------------------------------------------------------
+
+def test_widen_synthesis_stops_when_cancelled():
+    """The OR loop honours the same callback the engine scan does."""
+    from shared.joins_lab import apply_cross_side
+
+    b_hits = [_res(p) for p in (2, 5, 8, 11)]
+
+    class _Counting(_StrictExec):
+        browse = 0
+
+        def get_browse_page(self, sys_id, p_num=None, **kwargs):
+            _Counting.browse += 1
+            return super().get_browse_page(sys_id, p_num, **kwargs)
+
+        def get_meta_for_id(self, sid):
+            return ("T-S 1", "")
+
+        def get_library_for_id(self, sid):
+            return "CUL"
+
+    state = {"calls": 0}
+
+    def cb(i, total=None):
+        state["calls"] += 1
+        if state["calls"] > 1:       # let the engine scan run, stop in synthesis
+            raise InterruptedError("superseded")
+
+    ex = _Counting(b_hits)
+    base = [normalize_candidate(_res(20))]
+    res = apply_cross_side(ex, base, "אבגד", {}, "OR", None, progress_callback=cb)
+    assert "(stopped)" in res.note
+    assert len(res.candidates) < 1 + 2 * len(b_hits)
+
+
+def test_orphans_are_joined_or_terminated_at_quit():
+    import desktop.join_workbench as jw
+
+    log = []
+
+    class _Stubborn:
+        def isRunning(self):
+            return True
+
+        def wait(self, ms=None):
+            log.append(("wait", ms))
+            return ms is None          # bounded wait times out; the post-terminate one returns
+
+        def terminate(self):
+            log.append("terminate")
+
+    w = _Stubborn()
+    jw._ORPHANED_WORKERS.append(w)
+    try:
+        jw._join_orphaned_workers(timeout_ms=5)
+        assert ("wait", 5) in log and "terminate" in log
+        assert jw._ORPHANED_WORKERS == []
+    finally:
+        if w in jw._ORPHANED_WORKERS:
+            jw._ORPHANED_WORKERS.remove(w)
+
+
+def test_keeping_an_orphan_hooks_the_quit_join():
+    import inspect
+    import desktop.join_workbench as jw
+
+    assert "_hook_orphan_join()" in inspect.getsource(jw._keep_until_finished)
+    assert "aboutToQuit.connect(_join_orphaned_workers)" in inspect.getsource(jw._hook_orphan_join)

@@ -614,10 +614,46 @@ except ImportError:
 _ORPHANED_WORKERS: list = []
 
 
+_ORPHAN_JOIN_HOOKED = False
+
+
+def _join_orphaned_workers(timeout_ms: int = 10000) -> None:
+    """At application quit, never let interpreter teardown free a running QThread.
+
+    A module-level list only postpones destruction to module finalisation, and the
+    queued finished() release may never run once the event loop has stopped. So on
+    aboutToQuit: wait (bounded) for each orphan, and terminate() a thread that is
+    still running -- a forced stop at exit is recoverable; destroying a running
+    QThread aborts the process (0xC0000409)."""
+    for w in list(_ORPHANED_WORKERS):
+        try:
+            if w.isRunning() and not w.wait(timeout_ms):
+                w.terminate()
+                w.wait()
+        except RuntimeError:
+            pass
+    _ORPHANED_WORKERS.clear()
+
+
+def _hook_orphan_join() -> None:
+    global _ORPHAN_JOIN_HOOKED
+    if _ORPHAN_JOIN_HOOKED:
+        return
+    try:
+        from PyQt6.QtCore import QCoreApplication
+        app = QCoreApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(_join_orphaned_workers)
+            _ORPHAN_JOIN_HOOKED = True
+    except Exception:
+        pass
+
+
 def _keep_until_finished(worker) -> None:
     if worker in _ORPHANED_WORKERS:
         return
     _ORPHANED_WORKERS.append(worker)
+    _hook_orphan_join()
 
     def _release(w=worker):
         try:
