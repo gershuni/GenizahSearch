@@ -3042,7 +3042,27 @@ class ResultDialog(QDialog):
         """The genizahsearch.com address of the page on screen, or None."""
         from shared.web_links import web_browse_url
         return web_browse_url(self.current_sys_id, self.current_p_num,
-                              self.current_volume_ie)
+                              self.current_volume_ie or self._rd_page_volume())
+
+    def _rd_page_volume(self):
+        """The volume (IE) of the page on screen, for a multi-volume manuscript.
+
+        ``current_volume_ie`` is reset to None when page navigation crosses into
+        another manuscript or opens one by shelfmark, while the page number is
+        still counted within ONE volume -- so a link without the volume would
+        open the same number in the website's default volume (Codex, #362). The
+        page's own header names its volume; the Browse tab re-reads it the
+        same way on every page (``browse_render_page``).
+        """
+        try:
+            ie = (self.meta_mgr.parse_full_id_components(
+                getattr(self, 'current_full_header', '') or '') or {}).get('ie_id')
+            if not ie or not self.current_sys_id:
+                return None
+            from genizah_core import get_volumes_for_sys_id
+            return ie if len(get_volumes_for_sys_id(self.current_sys_id)) > 1 else None
+        except Exception:  # noqa: BLE001 - a link without the volume, as before
+            return None
 
     def _rd_open_on_web(self):
         url = self._rd_web_url()

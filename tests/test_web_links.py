@@ -112,3 +112,20 @@ def test_browse_buttons_follow_the_page_and_the_document(monkeypatch):
     host.current_browse_sid = SYNTH                  # no citation, but a page on the site
     host._sync_browse_cite_button()
     assert host.btn_b_open_web.isEnabled() and not host.btn_b_cite.isEnabled()
+
+
+@pytest.mark.gui
+def test_viewer_link_keeps_the_volume_after_crossing_into_another_manuscript(viewer, monkeypatch):
+    """Codex, #362: navigating into another manuscript resets current_volume_ie,
+    but the page number still counts within one volume -- the link must name the
+    page's own volume, read from its header, when the manuscript has several."""
+    import genizah_core
+    viewer.current_sys_id, viewer.current_p_num, viewer.current_volume_ie = SID, 7, None
+    viewer.current_full_header = "hdr"
+    viewer.meta_mgr.parse_full_id_components.return_value = {"sys_id": SID, "ie_id": "IE222"}
+    monkeypatch.setattr(genizah_core, "get_volumes_for_sys_id", lambda sid: ["IE111", "IE222"])
+    assert viewer._rd_web_url().endswith(f"sys_id={SID}&page=7&volume_ie=IE222")
+    monkeypatch.setattr(genizah_core, "get_volumes_for_sys_id", lambda sid: ["IE222"])
+    assert viewer._rd_web_url().endswith(f"sys_id={SID}&page=7")      # one volume: no IE
+    viewer.current_volume_ie = "IE111"                                  # an explicit choice wins
+    assert viewer._rd_web_url().endswith("&volume_ie=IE111")
