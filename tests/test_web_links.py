@@ -169,3 +169,10 @@ def test_compact_mode_keeps_both_website_actions(viewer):
     assert viewer._opened == [f"{GENIZAHSEARCH_URL}/browse?sys_id={SID}&page=3"]
     viewer.btn_compact_copy_web.click()
     assert QApplication.clipboard().text().endswith(f"sys_id={SID}&page=3")
+
+
+def test_main_window_floor_on_a_tiny_screen_is_the_screen():
+    from PyQt6.QtCore import QRect
+    import genizah_app
+    tiny = SimpleNamespace(availableGeometry=lambda: QRect(0, 0, 300, 200))
+    assert genizah_app.GenizahGUI._main_window_floor(tiny) == (300, 200)

@@ -15380,8 +15380,10 @@ class GenizahGUI(QMainWindow):
         if scr is None:
             return floor
         g = scr.availableGeometry()
-        return (max(min(floor[0], g.width() - margin), 320),
-                max(min(floor[1], g.height() - margin), 240))
+        # 320x240 is the smallest floor worth having, but never more than the
+        # screen itself (a tiny VM display; Codex, #362).
+        return (min(max(min(floor[0], g.width() - margin), 320), g.width()),
+                min(max(min(floor[1], g.height() - margin), 240), g.height()))
 
     def showEvent(self, event):  # noqa: N802 - Qt API
         super().showEvent(event)
