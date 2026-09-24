@@ -6,7 +6,7 @@ import threading
 from PyQt6.QtWidgets import (
     QApplication, QComboBox, QDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
     QMenu, QMessageBox, QPushButton, QSpinBox, QSplitter, QStyle,
-    QTextBrowser, QToolButton, QVBoxLayout, QWidget,
+    QTextBrowser, QToolButton, QToolTip, QVBoxLayout, QWidget,
 )
 from PyQt6.QtCore import QMargins, QPoint, QRect, QSize, Qt, QTimer, QUrl, pyqtSignal
 from PyQt6 import sip
@@ -38,6 +38,10 @@ from desktop.title_helpers import (
     _resolve_display_title, _set_label_with_tooltip,
 )
 from desktop.image_loader import ImageLoaderThread
+from desktop.widgets.flow_layout import FlowWidget
+from desktop.widgets.overflow_row import (
+    PINNED, OverflowRow, explicitly_hidden,
+)
 from shared.synthetic_sys_id import is_synthetic_sys_id
 
 logger = get_logger(__name__)
@@ -47,6 +51,26 @@ logger = get_logger(__name__)
 # title bar and thin borders. Only an estimate -- fit_on_screen() runs again once
 # the window is up and uses the real frame.
 _FRAME_ESTIMATE = QMargins(8, 32, 8, 8)
+
+# Manuscript / source text size in the viewer (A- / A+), in points.
+VIEWER_TEXT_PT_KEY = 'viewer_text_pt'
+TEXT_PT_DEFAULT, TEXT_PT_MIN, TEXT_PT_MAX, TEXT_PT_STEP = 16, 9, 40, 2
+
+
+def _saved_text_pt():
+    try:
+        pt = int(load_app_config().get(VIEWER_TEXT_PT_KEY, TEXT_PT_DEFAULT))
+    except Exception:  # noqa: BLE001 - unreadable config: the default
+        return TEXT_PT_DEFAULT
+    return max(TEXT_PT_MIN, min(TEXT_PT_MAX, pt))
+
+
+# Kept free between a fitted viewer and the screen edge (logical px).
+SCREEN_MARGIN = 12
+
+# Below this usable screen area (logical px) the viewer opens in its compact
+# arrangement. 1366x768 at 125% leaves about 1092x580.
+COMPACT_SCREEN = QSize(1200, 720)
 
 
 def fit_window_geometry(available: QRect, want: QSize, minimum: QSize,
@@ -167,8 +191,22 @@ class ResultDialog(QDialog):
             frame = _FRAME_ESTIMATE
         if center is None:
             center = self.frameGeometry().center()
+        avail = screen.availableGeometry()
+        if not self.isVisible() and (avail.width() < COMPACT_SCREEN.width()
+                                     or avail.height() < COMPACT_SCREEN.height()):
+            # A small screen: start with the image-adjustment sliders folded away
+            # (one click on the image pane's gear brings them back).
+            viewer = getattr(self, 'ms_viewer', None)
+            if viewer is not None and hasattr(viewer, 'set_adjustments_visible'):
+                viewer.set_adjustments_visible(False)
+        # A margin inside the screen edge: Windows' real frame (DWM shadow and
+        # resize borders) is a few pixels wider than the one Qt reports, so a
+        # window fitted flush to the edge ended about 15 px past it -- the start
+        # of every row cut off in the Hebrew UI (owner screenshot, 2026-09-24).
+        m = SCREEN_MARGIN
+        inner = avail.adjusted(m, m, -m, -m) if avail.width() > 4 * m and avail.height() > 4 * m else avail
         top_left, size = fit_window_geometry(
-            screen.availableGeometry(), self.size(), self.minimumSizeHint(), center, frame)
+            inner, self.size(), self.minimumSizeHint(), center, frame)
         if size != self.size():
             self.resize(size)
         self.move(top_left)
@@ -180,7 +218,6 @@ class ResultDialog(QDialog):
         main_layout = QVBoxLayout()
         
         # --- Top Bar (Result Nav) ---
-        top_bar = QHBoxLayout()
         self.btn_res_prev = QPushButton(tr("◀ Prev Result")); self.btn_res_prev.clicked.connect(lambda: self.navigate_results(-1))
         # Phase 96 bug #3 fix: prevent btn_res_prev from capturing Enter keypress.
         # QPushButton in a QDialog defaults to autoDefault=True, which means pressing
@@ -213,33 +250,48 @@ class ResultDialog(QDialog):
         self.btn_res_next_ms.setAutoDefault(False)
         self.btn_res_next_ms.setVisible(False)
         self.btn_res_next_ms.clicked.connect(lambda: self.navigate_manuscript_results(1))
-        top_bar.addWidget(self.btn_res_prev_ms); top_bar.addWidget(self.btn_res_prev); top_bar.addWidget(self.lbl_res_count, 1); top_bar.addWidget(self.btn_compact_toggle); top_bar.addWidget(self.btn_res_next); top_bar.addWidget(self.btn_res_next_ms)
-        main_layout.addLayout(top_bar)
-
         # --- Composition result context (hidden for every other caller) ---
-        # A category label for the current result (Main / Appendix / Filtered /
-        # Excluded), and a strip naming the result-list filters that shaped this
-        # list. The list is a snapshot taken when the viewer opened, so the strip
-        # is frozen too; "Back to results" returns to the list to change them.
-        self.results_context_bar = QWidget()
-        _ctx = QHBoxLayout(self.results_context_bar)
-        _ctx.setContentsMargins(4, 0, 4, 0)
-        _ctx.setSpacing(8)
+        # The current result's category (Main / Appendix / Filtered / Excluded),
+        # the result-list filters that shaped this list (a snapshot taken when
+        # the viewer opened, so frozen too) and the way back to change them.
+        # They share the navigation row rather than a row of their own: on a
+        # short screen every row is reading height (owner screenshots at 300%,
+        # 2026-09-24).
         self.lbl_res_category = QLabel()
-        self.lbl_res_category.setStyleSheet("font-weight: bold; color: #2c3e50;")
-        self.lbl_res_filters = QLabel()
-        self.lbl_res_filters.setStyleSheet("color: #8e44ad;")
-        self.lbl_res_filters.setWordWrap(True)
+        self.lbl_res_category.setStyleSheet("font-weight: bold; color: palette(highlight);")
+        self.lbl_res_category.setVisible(False)
+        self.btn_res_filters = QToolButton()
+        self.btn_res_filters.setText(tr("Filters"))
+        self.btn_res_filters.setVisible(False)
+        self.btn_res_filters.clicked.connect(self._show_results_filters)
         self.btn_back_to_results = QPushButton(tr("Back to results"))
         self.btn_back_to_results.setToolTip(tr("Show the results list, where the filters can be changed"))
         self.btn_back_to_results.setAutoDefault(False)
+        self.btn_back_to_results.setVisible(False)
         self.btn_back_to_results.clicked.connect(self._back_to_results)
-        _ctx.addWidget(self.lbl_res_category)
-        _ctx.addWidget(self.lbl_res_filters, 1)
-        _ctx.addWidget(self.btn_back_to_results)
-        self.results_context_bar.setVisible(False)
-        main_layout.addWidget(self.results_context_bar)
-        main_layout.addWidget(QSplitter(Qt.Orientation.Horizontal))
+        # Closing: the window's own X and Esc. This small button replaced a
+        # full-width footer bar, which cost a whole row of reading height.
+        self.btn_close = QPushButton(tr("Close"))
+        self.btn_close.setAutoDefault(False)
+        self.btn_close.clicked.connect(self.close)
+
+        # One row that never forces the window wider than the screen: what does
+        # not fit moves into "More" (desktop/widgets/overflow_row.py). Result
+        # Prev/Next and the counter always stay.
+        self.nav_bar = OverflowRow(tr("More"))
+        self.nav_bar.add(self.btn_res_prev_ms, 3)
+        self.nav_bar.add(self.btn_res_prev, PINNED, short_text="◀")
+        # The category may leave the row when there is no room; the counter's
+        # tooltip carries it too (_update_results_context).
+        self.nav_bar.add(self.lbl_res_category, 5)
+        self.nav_bar.add(self.lbl_res_count, PINNED, stretch=True)
+        self.nav_bar.add(self.btn_res_filters, 2)
+        self.nav_bar.add(self.btn_back_to_results, 2)
+        self.nav_bar.add(self.btn_compact_toggle, 1)
+        self.nav_bar.add(self.btn_res_next, PINNED, short_text="▶")
+        self.nav_bar.add(self.btn_res_next_ms, 3)
+        self.nav_bar.add(self.btn_close, 6)
+        main_layout.addWidget(self.nav_bar)
 
         # --- Compact Bar (initially hidden, shown in compact mode) ---
         self.compact_bar = QWidget()
@@ -277,11 +329,14 @@ class ResultDialog(QDialog):
 
         compact_layout.addWidget(QLabel(" | "))
 
+        # The compact twins share one overflow row, like the full action row.
+        self.compact_actions = OverflowRow(tr("More"))
+
         # Add to List (compact)
         self.btn_compact_add_list = QPushButton(_format_add_to_list_label(False))
         self.btn_compact_add_list.setToolTip(tr("Add to List"))
         self.btn_compact_add_list.clicked.connect(self.add_current_to_list)
-        compact_layout.addWidget(self.btn_compact_add_list)
+        self.compact_actions.add(self.btn_compact_add_list, 0)
 
         # Extended Info (compact)
         self.btn_compact_ext_info = QPushButton(f"ℹ️ {tr('Info')}")
@@ -289,23 +344,23 @@ class ResultDialog(QDialog):
         self.btn_compact_ext_info.setCheckable(True)
         self.btn_compact_ext_info.setVisible(False)  # shown when extended info available
         self.btn_compact_ext_info.toggled.connect(self.toggle_extended_info)
-        compact_layout.addWidget(self.btn_compact_ext_info)
+        self.compact_actions.add(self.btn_compact_ext_info, 1)
 
         # Bib buttons (compact)
         self.btn_compact_bib_fjms = QPushButton()
         self.btn_compact_bib_fjms.setVisible(False)
         self.btn_compact_bib_fjms.clicked.connect(self._show_rd_fjms_bib)
-        compact_layout.addWidget(self.btn_compact_bib_fjms)
+        self.compact_actions.add(self.btn_compact_bib_fjms, 2)
         self.btn_compact_bib_nli = QPushButton()
         self.btn_compact_bib_nli.setVisible(False)
         self.btn_compact_bib_nli.clicked.connect(self._show_rd_nli_bib)
-        compact_layout.addWidget(self.btn_compact_bib_nli)
+        self.compact_actions.add(self.btn_compact_bib_nli, 2)
 
         # Catalog Records (compact)
         self.btn_compact_catalog = QPushButton()
         self.btn_compact_catalog.setVisible(False)
         self.btn_compact_catalog.clicked.connect(self._show_rd_catalog)
-        compact_layout.addWidget(self.btn_compact_catalog)
+        self.compact_actions.add(self.btn_compact_catalog, 2)
 
         # PGP (compact) -- twin of btn_rd_pgp; every conditional button in
         # this dialog has a compact counterpart, and both are driven by the
@@ -314,32 +369,32 @@ class ResultDialog(QDialog):
         self.btn_compact_pgp.setToolTip(tr("Open on the Princeton Geniza Project website"))
         self.btn_compact_pgp.setVisible(False)
         self.btn_compact_pgp.clicked.connect(self.open_pgp_link)
-        compact_layout.addWidget(self.btn_compact_pgp)
+        self.compact_actions.add(self.btn_compact_pgp, 2)
 
         # Measurements (compact)
         self.btn_compact_measurements = QPushButton()
         self.btn_compact_measurements.setVisible(False)
         self.btn_compact_measurements.clicked.connect(self._show_rd_measurements)
-        compact_layout.addWidget(self.btn_compact_measurements)
+        self.compact_actions.add(self.btn_compact_measurements, 2)
 
         # Joins (compact) - chain icon like normal mode
         self.btn_compact_joins = QToolButton()
         self.btn_compact_joins.setText("🔗")
         self.btn_compact_joins.setToolTip(tr("View joined fragments"))
-        self.btn_compact_joins.setFixedSize(40, 32)
+        self.btn_compact_joins.setMinimumWidth(32)  # no fixed 40x32: it stood taller than its row at 300%
         self.btn_compact_joins.setStyleSheet("background-color: #95a5a6; color: white; border-radius: 4px;")
         self.btn_compact_joins.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self.btn_compact_joins.clicked.connect(self._rd_view_joins)
-        compact_layout.addWidget(self.btn_compact_joins)
+        self.compact_actions.add(self.btn_compact_joins, 1)
 
         # Cite (compact) - twin of btn_cite; menu attached once rd_cite_menu exists
         self.btn_compact_cite = QToolButton()
         self.btn_compact_cite.setText("\u201c\u201d")
         self.btn_compact_cite.setToolTip(tr("Cite this page"))
-        self.btn_compact_cite.setFixedSize(40, 32)
+        self.btn_compact_cite.setMinimumWidth(32)  # no fixed 40x32: it stood taller than its row at 300%
         self.btn_compact_cite.setStyleSheet("background-color: #6b7280; color: white; border-radius: 4px;")
         self.btn_compact_cite.clicked.connect(self._rd_copy_page_citation)
-        compact_layout.addWidget(self.btn_compact_cite)
+        self.compact_actions.add(self.btn_compact_cite, 0)
 
         # Translation toggle (compact)
         self.btn_compact_translations = QPushButton()
@@ -352,9 +407,9 @@ class ResultDialog(QDialog):
             "QPushButton:checked { background-color: #059669; }"
         )
         self.btn_compact_translations.toggled.connect(self._rd_toggle_translations)
-        compact_layout.addWidget(self.btn_compact_translations)
+        self.compact_actions.add(self.btn_compact_translations, 1)
 
-        compact_layout.addStretch()
+        compact_layout.addWidget(self.compact_actions, 1)
 
         main_layout.addWidget(self.compact_bar)
 
@@ -367,9 +422,12 @@ class ResultDialog(QDialog):
         
         self.lbl_shelf = QLabel(); self.lbl_shelf.setFont(QFont("Arial", 16, QFont.Weight.Bold)); self.lbl_shelf.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.lbl_title = QLabel(); self.lbl_title.setFont(QFont("Arial", 14)); self.lbl_title.setAlignment(Qt.AlignmentFlag.AlignLeft); self.lbl_title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        # Wrap rather than widen: an unwrapped label's minimum width is its whole
+        # text, and a long library name + shelfmark then sets the window's width.
+        self.lbl_shelf.setWordWrap(True)
+        self.lbl_title.setWordWrap(True)
 
         # Controls Row
-        info_row = QHBoxLayout()
         self.btn_img = QPushButton(tr("Go to Ktiv")); self.btn_img.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogHelpButton)); self.btn_img.clicked.connect(self.open_catalog); self.btn_img.setFixedWidth(100)
         self.btn_external_link = QPushButton(tr("External Website"))
         self.btn_external_link.setVisible(False)
@@ -386,17 +444,39 @@ class ResultDialog(QDialog):
         self.lbl_info = QLabel(); self.lbl_info.setStyleSheet("font-size: 11px; color: palette(text);"); self.lbl_info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.lbl_meta_loading = QLabel(tr("Loading...")); self.lbl_meta_loading.setStyleSheet("color: orange; font-size: 11px;"); self.lbl_meta_loading.setVisible(False)
 
-        # Domain info (inlined on info_row)
+        # Domain info (in info_flow)
         self.lbl_rd_domains = QLabel("")
         self.lbl_rd_domains.setStyleSheet("color: #8e44ad; font-size: 11px;")
         self.lbl_rd_domains.setVisible(False)
 
-        # Printed material badge (inlined on info_row)
+        # Printed material badge (in info_flow)
         self.lbl_rd_printed = QLabel("")
         self.lbl_rd_printed.setStyleSheet("color: #dc2626; font-weight: bold; font-size: 11px;")
         self.lbl_rd_printed.setVisible(False)
 
-        info_row.addWidget(self.btn_img); info_row.addWidget(self.btn_external_link); info_row.addWidget(self.btn_rd_pgp); info_row.addWidget(self.lbl_info); info_row.addWidget(self.lbl_rd_domains); info_row.addWidget(self.lbl_rd_printed); info_row.addWidget(self.lbl_meta_loading); info_row.addStretch()
+        # The page on genizahsearch.com (owner, 2026-09-24): open it, or copy its
+        # address. shared/web_links.py builds the website's own locator for the
+        # page on screen; a My Library document has none, so both hide for it.
+        # "Open" sits beside Go to Ktiv, with the app's own icon (it IS
+        # genizahsearch.com; the globe already means Ktiv and translations).
+        # "Copy link" is an icon beside Cite, like Cite itself (owner, 2026-09-24).
+        self.btn_rd_open_web = QPushButton(tr("Open on the website"))
+        self.btn_rd_open_web.setIcon(QApplication.windowIcon())
+        self.btn_rd_open_web.setToolTip(tr("Open this page on genizahsearch.com"))
+        self.btn_rd_open_web.clicked.connect(self._rd_open_on_web)
+        self.btn_rd_copy_web = QToolButton()
+        self.btn_rd_copy_web.setText("\U0001f4cb")
+        self.btn_rd_copy_web.setToolTip(tr("Copy a link to this page on genizahsearch.com"))
+        self.btn_rd_copy_web.setAccessibleName(tr("Copy link"))
+        self.btn_rd_copy_web.setMinimumWidth(32)
+        self.btn_rd_copy_web.setStyleSheet("background-color: #6b7280; color: white; border-radius: 4px;")
+        self.btn_rd_copy_web.clicked.connect(self._rd_copy_web_link)
+
+        # Wraps onto a second line instead of widening the window.
+        self.info_flow = FlowWidget(margin=0)
+        for _w in (self.btn_img, self.btn_rd_open_web, self.btn_external_link, self.btn_rd_pgp, self.lbl_info,
+                   self.lbl_rd_domains, self.lbl_rd_printed, self.lbl_meta_loading):
+            self.info_flow.add_widget(_w)
 
         # Nav Row (Inside Header)
         nav_row = QHBoxLayout()
@@ -422,7 +502,6 @@ class ResultDialog(QDialog):
         nav_row.addWidget(QLabel(tr("Image:"))); nav_row.addWidget(self.btn_pg_prev); nav_row.addWidget(self.spin_page);
         nav_row.addWidget(self.lbl_total); nav_row.addWidget(self.btn_pg_next); nav_row.addWidget(self.lbl_img_label); nav_row.addStretch()
 
-        action_row = QHBoxLayout()
         self.btn_view_transcription = QPushButton(f"📖 {tr('Browse')}")
         self.btn_view_transcription.setToolTip(tr("Browse manuscript"))
         self.btn_view_transcription.clicked.connect(self.open_full_transcription)
@@ -454,13 +533,31 @@ class ResultDialog(QDialog):
 
         # Toggle Image Button
         self.btn_toggle_image = QPushButton("🖼️")
+        self.btn_toggle_image.setToolTip(tr("Show the image"))
+        self.btn_toggle_image.setAccessibleName(tr("Show the image"))
         self.btn_toggle_image.setCheckable(True)
+        self.btn_toggle_image.setMaximumWidth(44)  # an icon; it drew as a wide empty bar
         self.btn_toggle_image.setChecked(True) # Default open
         self.btn_toggle_image.clicked.connect(self.toggle_external_viewer)
         self.btn_toggle_image.setVisible(False) # Hidden until images avail
 
         # Deprecated: btn_external_view replaced/merged logic
         self.btn_external_view = self.btn_toggle_image
+
+        # Text toggle, the twin of the image toggle beside it (owner,
+        # 2026-09-24): pressed = the text pane is shown; released, the image has
+        # the whole window -- on a short or narrow screen side-by-side leaves a
+        # few lines of text and a thumbnail. Offered only while the image pane
+        # is shown, and the text comes back whenever the image goes away, so the
+        # window is never left empty.
+        self.btn_toggle_text = QPushButton("\U0001f4c4")
+        self.btn_toggle_text.setToolTip(tr("Show the text"))
+        self.btn_toggle_text.setAccessibleName(tr("Show the text"))
+        self.btn_toggle_text.setCheckable(True)
+        self.btn_toggle_text.setChecked(True)
+        self.btn_toggle_text.setMaximumWidth(44)
+        self.btn_toggle_text.setVisible(False)
+        self.btn_toggle_text.toggled.connect(self._set_text_shown)
 
         self.btn_rd_bib_fjms = QPushButton()
         self.btn_rd_bib_fjms.setVisible(False)
@@ -496,18 +593,6 @@ class ResultDialog(QDialog):
         )
         self.btn_rd_translations.toggled.connect(self._rd_toggle_translations)
 
-        action_row.addWidget(self.btn_view_transcription)
-        action_row.addWidget(self.btn_search_parallels)
-        action_row.addWidget(self.btn_add_to_list)
-        action_row.addWidget(self.btn_add_to_puzzle)
-        action_row.addWidget(self.btn_rd_find_joins)
-        action_row.addWidget(self.btn_ext_info)
-        action_row.addWidget(self.btn_rd_bib_fjms)
-        action_row.addWidget(self.btn_rd_bib_nli)
-        action_row.addWidget(self.btn_rd_catalog)
-        action_row.addWidget(self.btn_rd_measurements)
-        action_row.addWidget(self.btn_toggle_image)
-        action_row.addWidget(self.btn_rd_translations)
 
         # Phase 95 smoke-fix (E): "Open file" button for LOCAL hits.
         # Visible only when current result is a LOCAL file. Calls os.startfile().
@@ -519,7 +604,6 @@ class ResultDialog(QDialog):
         self.btn_rd_open_file.setVisible(False)  # Hidden until a LOCAL result is shown
         self.btn_rd_open_file.clicked.connect(self._rd_open_local_file)
         self._rd_local_filepath = None  # filepath for the current LOCAL result
-        action_row.addWidget(self.btn_rd_open_file)
 
         # v7.16: "Open file location" — reveal the file in the OS file manager.
         self.btn_rd_open_file_location = QPushButton(tr("Open file location"))
@@ -529,87 +613,88 @@ class ResultDialog(QDialog):
         )
         self.btn_rd_open_file_location.setVisible(False)  # Hidden until a LOCAL result is shown
         self.btn_rd_open_file_location.clicked.connect(self._rd_open_file_location)
-        action_row.addWidget(self.btn_rd_open_file_location)
-
-        action_row.addStretch()
 
         # --- Second row: Community features (Edit, Version, Comment) ---
-        community_row = QHBoxLayout()
+        self.community_row = community_row = OverflowRow(tr("More"))
 
         # Version selector
-        community_row.addWidget(QLabel(tr("Version:")))
+        community_row.add(QLabel(tr("Version:")), PINNED)
         self.rd_version_combo = QComboBox()
         self.rd_version_combo.addItem("V0.8", {"source": "original"})
-        self.rd_version_combo.setFixedWidth(240)  # Wider for PGP scholar names
+        # Up to 240 px for PGP scholar names, but allowed to give way on a
+        # narrow screen (it was a fixed 240).
+        self.rd_version_combo.setMinimumWidth(110)
+        self.rd_version_combo.setMaximumWidth(240)
+        self.rd_version_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.rd_version_combo.setMinimumContentsLength(8)
         self.rd_version_combo.setEnabled(False)
         self.rd_version_combo.currentIndexChanged.connect(self._rd_change_version)
-        community_row.addWidget(self.rd_version_combo)
+        community_row.add(self.rd_version_combo, PINNED)
         self._rd_versions_cache = {}
 
-        community_row.addWidget(QLabel(" | "))
 
         # Edit button
         self.btn_rd_edit = QPushButton(tr("✏️ Edit"))
         self.btn_rd_edit.setToolTip(tr("Enable edit mode to make corrections"))
         self.btn_rd_edit.clicked.connect(self._rd_toggle_edit_mode)
-        community_row.addWidget(self.btn_rd_edit)
+        community_row.add(self.btn_rd_edit, 0)
 
         # Edit action buttons (hidden by default, shown in edit mode)
         self.btn_rd_save_draft = QPushButton(f"💾 {tr('Save')}")
         self.btn_rd_save_draft.clicked.connect(lambda: self._rd_save_correction(submit=False))
         self.btn_rd_save_draft.setEnabled(False)
         self.btn_rd_save_draft.setVisible(False)
-        community_row.addWidget(self.btn_rd_save_draft)
+        community_row.add(self.btn_rd_save_draft, 0)
 
         self.btn_rd_submit = QPushButton(f"📤 {tr('Submit')}")
         self.btn_rd_submit.clicked.connect(lambda: self._rd_save_correction(submit=True))
         self.btn_rd_submit.setEnabled(False)
         self.btn_rd_submit.setVisible(False)
-        community_row.addWidget(self.btn_rd_submit)
+        community_row.add(self.btn_rd_submit, 0)
 
         self.btn_rd_cancel_edit = QPushButton(tr("Cancel"))
         self.btn_rd_cancel_edit.clicked.connect(self._rd_cancel_edit)
         self.btn_rd_cancel_edit.setVisible(False)
-        community_row.addWidget(self.btn_rd_cancel_edit)
+        community_row.add(self.btn_rd_cancel_edit, 0)
 
         # Edit status label (hidden by default)
         self.rd_edit_status = QLabel("")
         self.rd_edit_status.setVisible(False)
-        community_row.addWidget(self.rd_edit_status)
+        community_row.add(self.rd_edit_status, PINNED)
 
-        community_row.addWidget(QLabel(" | "))
 
         # Comment button
         self.btn_comment = QPushButton(tr("💬 Comment"))
         self.btn_comment.clicked.connect(self.add_comment)
-        community_row.addWidget(self.btn_comment)
+        community_row.add(self.btn_comment, 2)
 
         # View Corrections button
         self.btn_view_corrections = QPushButton(f"📝 {tr('Corrections')}")
         self.btn_view_corrections.setToolTip(tr("View Corrections"))
         self.btn_view_corrections.clicked.connect(self.view_corrections)
-        community_row.addWidget(self.btn_view_corrections)
+        community_row.add(self.btn_view_corrections, 2)
 
         # View Comments button (icon, visible when comments exist)
         self.btn_view_comments = QPushButton("💬")
         self.btn_view_comments.setToolTip(tr("View Comments"))
-        self.btn_view_comments.setFixedSize(32, 32)
+        self.btn_view_comments.setMinimumWidth(32)
         self.btn_view_comments.setVisible(False)
         self.btn_view_comments.clicked.connect(self.view_comments)
-        community_row.addWidget(self.btn_view_comments)
+        community_row.add(self.btn_view_comments, 2)
 
         # Joins button with dropdown
         self.btn_joins = QToolButton()
         self.btn_joins.setText("🔗")
         self.btn_joins.setToolTip(tr("View joined fragments"))
-        self.btn_joins.setFixedSize(40, 32)
+        self.btn_joins.setMinimumWidth(32)  # no fixed 40x32: it stood taller than its row at 300%
         self.btn_joins.setStyleSheet("background-color: #95a5a6; color: white; border-radius: 4px;")
         self.btn_joins.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self.btn_joins.clicked.connect(self._rd_view_joins)
         self.rd_joins_menu = QMenu(self)
         self.rd_joins_menu.aboutToShow.connect(self._rd_on_joins_menu_show)
         self.btn_joins.setMenu(self.rd_joins_menu)
-        community_row.addWidget(self.btn_joins)
+        community_row.add(self.btn_joins, 1)
 
         # ONE button, "Cite this page", matching the Browse tab's `btn_b_cite`
         # (owner, 2026-09-06). It replaced a two-entry menu that also offered
@@ -623,12 +708,35 @@ class ResultDialog(QDialog):
         self.btn_cite = QToolButton()
         self.btn_cite.setText("\u201c\u201d")
         self.btn_cite.setToolTip(tr("Cite this page"))
-        self.btn_cite.setFixedSize(40, 32)
+        self.btn_cite.setMinimumWidth(32)  # no fixed 40x32: it stood taller than its row at 300%
         self.btn_cite.setStyleSheet("background-color: #6b7280; color: white; border-radius: 4px;")
         self.btn_cite.clicked.connect(self._rd_copy_page_citation)
-        community_row.addWidget(self.btn_cite)
 
-        community_row.addStretch()
+
+        # The action row, built now that the Cite button exists. What does not fit
+        # shrinks to its icon, then moves into a menu, lowest priority first
+        # (owner, 2026-09-24: Browse, List and Cite stay; Parallels is rare
+        # enough to leave first). Info is its own button. The bibliographies,
+        # Catalog and Measurements are separate buttons while there is room and
+        # fold into one "Sources" menu -- with their counts -- only when there is
+        # not; each still shows and hides itself as metadata arrives.
+        self.actions_row = OverflowRow(tr("More"))
+        self.actions_row.add(self.btn_view_transcription, 0)
+        self.actions_row.add(self.btn_add_to_list, 0)
+        self.actions_row.add(self.btn_cite, 0)
+        self.actions_row.add(self.btn_rd_copy_web, 0)
+        self.actions_row.add(self.btn_ext_info, 1)
+        for _src in (self.btn_rd_bib_fjms, self.btn_rd_bib_nli,
+                     self.btn_rd_catalog, self.btn_rd_measurements):
+            self.actions_row.add(_src, 2, group=tr("Sources"))
+        self.actions_row.add(self.btn_rd_translations, 1)
+        self.actions_row.add(self.btn_toggle_image, 1)
+        self.actions_row.add(self.btn_toggle_text, 1)
+        self.actions_row.add(self.btn_rd_open_file, 0)
+        self.actions_row.add(self.btn_rd_open_file_location, 1)
+        self.actions_row.add(self.btn_search_parallels, 3)
+        self.actions_row.add(self.btn_add_to_puzzle, 3)
+        self.actions_row.add(self.btn_rd_find_joins, 3)
 
         self.txt_extended_info = QTextBrowser()
         self.txt_extended_info.setVisible(False)
@@ -638,7 +746,7 @@ class ResultDialog(QDialog):
         self.txt_extended_info.setOpenLinks(False)
         self.txt_extended_info.anchorClicked.connect(self._on_rd_ext_link_clicked)
 
-        meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(nav_row); meta_col.addLayout(action_row); meta_col.addLayout(community_row)
+        meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_title); meta_col.addWidget(self.info_flow); meta_col.addLayout(nav_row); meta_col.addWidget(self.actions_row); meta_col.addWidget(community_row)
 
         # Thumbnail (kept as hidden dummy for compatibility with existing methods)
         self.lbl_thumb = QLabel()
@@ -679,6 +787,22 @@ class ResultDialog(QDialog):
         self.find_ms_input.textChanged.connect(lambda text: apply_find_highlight(self.text_ms, text.strip()))
         ms_find_row.addWidget(self.find_ms_input)
 
+        # Text size, for the manuscript and the source-context panes together
+        # (owner, 2026-09-24). Saved, so the next viewer opens at the same size.
+        self.btn_text_smaller = QToolButton()
+        # Left-to-right marks: in the Hebrew UI a bare "A-" displays as "-A".
+        self.btn_text_smaller.setText("‎A−‎")
+        self.btn_text_smaller.setToolTip(tr("Smaller text"))
+        self.btn_text_smaller.setAccessibleName(tr("Smaller text"))
+        self.btn_text_smaller.clicked.connect(lambda: self._change_text_size(-TEXT_PT_STEP))
+        self.btn_text_larger = QToolButton()
+        self.btn_text_larger.setText("‎A+‎")
+        self.btn_text_larger.setToolTip(tr("Larger text"))
+        self.btn_text_larger.setAccessibleName(tr("Larger text"))
+        self.btn_text_larger.clicked.connect(lambda: self._change_text_size(TEXT_PT_STEP))
+        for _b in (self.btn_text_smaller, self.btn_text_larger):
+            ms_find_row.addWidget(_b)
+
         # Phase 999.4 — Line-number gutter toggle (shared config key with Browse tab)
         self.btn_rd_line_numbers = QPushButton(tr("# Lines"))
         self.btn_rd_line_numbers.setCheckable(True)
@@ -703,7 +827,8 @@ class ResultDialog(QDialog):
             ms_find_row.addWidget(self.btn_rd_line_numbers)
 
         ms_text_layout.addLayout(ms_find_row)
-        self.text_ms = QTextBrowser(); self.text_ms.setFont(QFont("SBL Hebrew", 16)); self.text_ms.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self._text_pt = _saved_text_pt()
+        self.text_ms = QTextBrowser(); self.text_ms.setFont(QFont("SBL Hebrew", self._text_pt)); self.text_ms.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         ms_text_layout.addWidget(self.text_ms)
         # Phase 999.4: attach line-number gutter as sibling widget (D-04 selection-safe).
         # First real render at _rd_display_text / browse_render_page will populate.
@@ -714,7 +839,7 @@ class ResultDialog(QDialog):
         src_layout = QVBoxLayout(self.src_widget); src_layout.setContentsMargins(0,0,0,0)
         src_layout.addWidget(QLabel("<b>" + tr("Match Context (Source)") + "</b>"))
         self.text_src = QTextBrowser()
-        self.text_src.setFont(QFont("SBL Hebrew", 16))
+        self.text_src.setFont(QFont("SBL Hebrew", self._text_pt))
         self.text_src.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         line_height = self.text_src.fontMetrics().lineSpacing()
         self.text_src.setMinimumHeight(line_height * 3 + 12)
@@ -729,6 +854,7 @@ class ResultDialog(QDialog):
         ms_layout.addWidget(self.ms_text_splitter)
 
         self.main_splitter.addWidget(ms_widget)
+        self.ms_widget = ms_widget
 
         # 3. External Viewer Pane (Initially Hidden)
         self.external_pane = QWidget()
@@ -758,14 +884,14 @@ class ResultDialog(QDialog):
         ext_layout.addWidget(self.ms_viewer, 1)
 
         self.main_splitter.addWidget(self.external_pane)
+        # The text toggle follows the image pane, whichever of the many code paths
+        # shows or hides it (metadata arrival, the toggle, navigation).
+        self.external_pane.installEventFilter(self)
         self.main_splitter.setStretchFactor(0, 1)
         self.main_splitter.setStretchFactor(1, 1)
         self.main_splitter.setSizes([650, 650])
 
         main_layout.addWidget(self.main_splitter, 1)
-
-        # Footer
-        btn_close = QPushButton("Close"); btn_close.clicked.connect(self.close); main_layout.addWidget(btn_close)
 
         # Item 3 (Codex): fully suppress all dialog-default button behavior.
         # setAutoDefault(False) prevents Qt from auto-promoting any button to
@@ -807,11 +933,63 @@ class ResultDialog(QDialog):
             self.lbl_compact_page.setText(f"{page_num} {total_text}")
 
             # Sync extended info button state
-            self.btn_compact_ext_info.setVisible(self.btn_ext_info.isVisible())
+            # Whether its own code shows it (not isVisible(): it may be parked
+            # in the overflow row, or the header may be hidden).
+            self.btn_compact_ext_info.setVisible(not explicitly_hidden(self.btn_ext_info))
             self.btn_compact_ext_info.blockSignals(True)
             self.btn_compact_ext_info.setChecked(self.btn_ext_info.isChecked())
             self.btn_compact_ext_info.blockSignals(False)
             self.btn_compact_ext_info.setText(self.btn_ext_info.text())
+
+    def _change_text_size(self, delta):
+        """Enlarge or shrink the manuscript and source text; remember the size."""
+        pt = max(TEXT_PT_MIN, min(TEXT_PT_MAX, self._text_pt + delta))
+        if pt == self._text_pt:
+            return
+        self._text_pt = pt
+        for pane in (self.text_ms, self.text_src):
+            f = pane.font()
+            f.setPointSize(pt)
+            pane.setFont(f)
+        self.btn_text_smaller.setEnabled(pt > TEXT_PT_MIN)
+        self.btn_text_larger.setEnabled(pt < TEXT_PT_MAX)
+        try:
+            save_app_config({VIEWER_TEXT_PT_KEY: pt})
+        except Exception:  # noqa: BLE001 - a preference, never worth an error
+            pass
+
+    def eventFilter(self, obj, event):  # noqa: N802 - Qt API
+        from PyQt6.QtCore import QEvent
+        if obj is getattr(self, 'external_pane', None) and event.type() in (
+                QEvent.Type.Show, QEvent.Type.Hide,
+                QEvent.Type.ShowToParent, QEvent.Type.HideToParent):
+            self._sync_text_toggle()
+        return super().eventFilter(obj, event)
+
+    def _sync_text_toggle(self):
+        """Offer the text toggle only while the image pane is shown; bring the
+        text back when the image goes away, so the dialog is never left empty."""
+        btn = getattr(self, 'btn_toggle_text', None)
+        if btn is None:
+            return
+        image_shown = not explicitly_hidden(self.external_pane)
+        if btn.isHidden() == image_shown:
+            btn.setVisible(image_shown)
+        if not image_shown and not btn.isChecked():
+            btn.setChecked(True)
+
+    def _set_text_shown(self, shown):
+        pane = getattr(self, 'ms_widget', None)
+        if pane is not None:
+            pane.setVisible(bool(shown))
+
+    def _show_results_filters(self):
+        """Show the full result-list filter summary next to its button."""
+        text = self.btn_res_filters.toolTip()
+        if text:
+            QToolTip.showText(
+                self.btn_res_filters.mapToGlobal(self.btn_res_filters.rect().bottomLeft()),
+                text, self.btn_res_filters)
 
     def set_results_filter_summary(self, summary):
         """Composition caller: the frozen one-line summary of the result-list filters
@@ -820,11 +998,11 @@ class ResultDialog(QDialog):
         self._update_results_context()
 
     def _update_results_context(self):
-        """Show the current result's category and the filter strip -- only for
-        entries that carry a composition category. Any other list (every other
-        caller, or a row load_by_shelfmark appended) shows nothing new."""
-        bar = getattr(self, 'results_context_bar', None)
-        if bar is None:
+        """Show the current result's category, the Filters button and "Back to
+        results" -- only for entries that carry a composition category. Any other
+        list (every other caller, or a row load_by_shelfmark appended) shows
+        nothing new."""
+        if getattr(self, 'lbl_res_category', None) is None:
             return
         try:
             cat = (self.all_results[self.current_result_idx] or {}).get('category')
@@ -833,19 +1011,27 @@ class ResultDialog(QDialog):
         summary = getattr(self, '_results_filter_summary', '')
         if not isinstance(cat, dict):
             # Not a composition result -- e.g. a joined fragment load_by_shelfmark
-            # appended. The filters did not select it, so neither the strip nor
+            # appended. The filters did not select it, so neither the filters nor
             # "Back to results" describes it (Codex, #360).
             self.lbl_res_category.setText('')
-            self.lbl_res_filters.setText('')
-            bar.setVisible(False)
+            self.lbl_res_category.setVisible(False)
+            self.lbl_res_count.setToolTip('')
+            self.btn_res_filters.setToolTip('')
+            self.btn_res_filters.setVisible(False)
+            self.btn_back_to_results.setVisible(False)
             return
         label = cat.get('label') or ''
         sub = cat.get('subgroup')
         if sub:
             label = f"{label} — {sub}"
         self.lbl_res_category.setText(label)
-        self.lbl_res_filters.setText(summary)
-        bar.setVisible(True)
+        self.lbl_res_category.setVisible(bool(label))
+        self.lbl_res_count.setToolTip(label)
+        # The summary is often a long sentence; the button keeps it one click away
+        # instead of spending a row on it.
+        self.btn_res_filters.setToolTip(summary)
+        self.btn_res_filters.setVisible(bool(summary))
+        self.btn_back_to_results.setVisible(True)
 
     def _back_to_results(self):
         """Bring the main window forward, on the results list."""
@@ -1797,7 +1983,7 @@ class ResultDialog(QDialog):
         if pgp_doc:
             if getattr(self, '_rd_enriched_data_loaded', False):
                 self._rd_update_extended_info_with_pgp()
-            elif not self.btn_ext_info.isVisible():
+            elif explicitly_hidden(self.btn_ext_info):
                 parent_win = self._app
                 if parent_win and hasattr(parent_win, '_build_pgp_extended_info_html'):
                     pal = self.txt_extended_info.palette()
@@ -2499,6 +2685,10 @@ class ResultDialog(QDialog):
             from shared.local_sys_id import is_local_sys_id as _is_local
             _src_id = (data.get('display', {}) or {}).get('id', '')
             _is_local_hit = bool(_src_id and _is_local(_src_id) and self._app)
+            # Not on the website: the reader's own file.
+            _on_web = not (_src_id and _is_local(_src_id))
+            self.btn_rd_open_web.setVisible(_on_web)
+            self.btn_rd_copy_web.setVisible(_on_web)
             if _is_local_hit:
                 # Look up filepath from the indexer via parent app helper
                 _fp = None
@@ -2847,6 +3037,31 @@ class ResultDialog(QDialog):
         QApplication.clipboard().setText(text)
         QMessageBox.information(self, tr("Copied"),
                                 tr("Citation copied to clipboard!"))
+
+    def _rd_web_url(self):
+        """The genizahsearch.com address of the page on screen, or None."""
+        from shared.web_links import web_browse_url
+        return web_browse_url(self.current_sys_id, self.current_p_num,
+                              self.current_volume_ie)
+
+    def _rd_open_on_web(self):
+        url = self._rd_web_url()
+        if not url:
+            QMessageBox.information(self, tr("Open on the website"),
+                                    tr("This page is not on genizahsearch.com."))
+            return
+        QDesktopServices.openUrl(QUrl(url))
+
+    def _rd_copy_web_link(self):
+        url = self._rd_web_url()
+        if not url:
+            QMessageBox.information(self, tr("Copy link"),
+                                    tr("This page is not on genizahsearch.com."))
+            return
+        QApplication.clipboard().setText(url)
+        QToolTip.showText(
+            self.btn_rd_copy_web.mapToGlobal(self.btn_rd_copy_web.rect().bottomLeft()),
+            tr("Link copied") + "\n" + url, self.btn_rd_copy_web)
 
     def _rd_copy_page_citation(self):
         """Cite the folio this dialog is showing.

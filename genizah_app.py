@@ -59,6 +59,9 @@ from desktop.widgets import (
     _get_initial_image_index,
     ShelfmarkCompleter,
 )
+from desktop.column_chooser import ColumnChooser, ColumnFitter
+from desktop.widgets.flow_layout import FlowWidget
+from desktop.widgets.overflow_row import OverflowRow
 from desktop.widgets.line_number_text_edit import (
     apply_line_numbered_text,
     is_line_numbers_enabled,
@@ -1372,8 +1375,13 @@ class GenizahGUI(QMainWindow):
         # untouched. Hidden unless a rank-fused run produced the rows.
         self.comp_col_witnesses = 9
         self.setWindowTitle(tr(f"Dicta Genizah Search Pro V{APP_VERSION}"))
-        # Initial size - will be overridden by showMaximized() at startup
-        self.setMinimumSize(1200, 700)
+        # Initial size - will be overridden by showMaximized() at startup.
+        # A floor, not a size: it was 1200x700, larger than a 1366x768 laptop at
+        # 125% (about 1092x580 usable) and than any screen at 300% zoom, so the
+        # window could not fit at all. The toolbars now wrap and overflow into
+        # menus (2026-09-24); Qt still keeps the window at least as large as
+        # its layouts need.
+        self.setMinimumSize(800, 520)
         log_tls_relaxation_notice()
 
         self.meta_mgr = None
@@ -2029,22 +2037,34 @@ class GenizahGUI(QMainWindow):
         # Settings Dialog (persistent, created once)
         self.settings_dialog = SettingsDialog(self)
 
-        # Corner widget — order: Login | v6.x | Language | Website | Settings(⚙)
-        corner_widget = QWidget()
-        corner_layout = QHBoxLayout(corner_widget)
-        corner_layout.setContentsMargins(5, 0, 5, 0)
-        corner_layout.setSpacing(3)  # tightened (Feature 6)
+        # Corner widget — order: All sections | Login | v6.x | Language | Website |
+        # Puzzle | Joins | Settings(⚙). An overflow row: on a narrow window the
+        # extras move into "More" instead of taking half the tab row (owner
+        # screenshots at 300%, 2026-09-24). The language switch, Settings and the
+        # sections menu always stay; the version leaves first (Settings and About
+        # both show it and offer the update check).
+        corner_widget = self.corner_row = OverflowRow(tr("More"), spacing=4)
+        corner_widget.setContentsMargins(5, 0, 5, 0)
 
-        def _corner_sep():
-            s = QLabel("|"); s.setStyleSheet("color: gray;"); return s
+        # All sections: every tab in one menu, for when the tab bar is too
+        # narrow to show them all and scrolls.
+        self.corner_sections_btn = QToolButton()
+        self.corner_sections_btn.setText("\u2630")
+        self.corner_sections_btn.setToolTip(tr("All sections"))
+        self.corner_sections_btn.setAccessibleName(tr("All sections"))
+        self.corner_sections_btn.setAutoRaise(True)
+        self.corner_sections_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._corner_sections_menu = QMenu(self.corner_sections_btn)
+        self._corner_sections_menu.aboutToShow.connect(self._fill_sections_menu)
+        self.corner_sections_btn.setMenu(self._corner_sections_menu)
+        corner_widget.add(self.corner_sections_btn, -1)
 
         # Login/Logout
         self.corner_login_btn = QPushButton(tr("Login"))
         self.corner_login_btn.setFlat(True)
         self.corner_login_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.corner_login_btn.clicked.connect(self._corner_login_clicked)
-        corner_layout.addWidget(self.corner_login_btn)
-        corner_layout.addWidget(_corner_sep())
+        corner_widget.add(self.corner_login_btn, 2)
 
         # Version
         self.corner_version_btn = QPushButton(f"v{APP_VERSION}")
@@ -2053,16 +2073,14 @@ class GenizahGUI(QMainWindow):
         self.corner_version_btn.setToolTip(tr("Check for updates"))
         self.corner_version_btn.clicked.connect(self.check_updates_manual)
         self.corner_version_btn.setStyleSheet("color: #7f8c8d; font-size: 11px;")
-        corner_layout.addWidget(self.corner_version_btn)
-        corner_layout.addWidget(_corner_sep())
+        corner_widget.add(self.corner_version_btn, 5)
 
         # Language toggle
         self.lang_btn = QPushButton("English" if CURRENT_LANG == 'he' else "עברית")
         self.lang_btn.setFlat(True)
         self.lang_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.lang_btn.clicked.connect(lambda: self.toggle_language())
-        corner_layout.addWidget(self.lang_btn)
-        corner_layout.addWidget(_corner_sep())
+        corner_widget.add(self.lang_btn, -1)
 
         # Website
         self.corner_website_btn = QPushButton("\U0001F310 GenizahSearch.com")
@@ -2077,8 +2095,7 @@ class GenizahGUI(QMainWindow):
             }
             QPushButton:hover { background-color: #1a73e8; color: white; }
         """)
-        corner_layout.addWidget(self.corner_website_btn)
-        corner_layout.addWidget(_corner_sep())
+        corner_widget.add(self.corner_website_btn, 4)
 
         # Puzzle canvas button
         self.corner_puzzle_btn = QPushButton("\U0001F9E9")  # puzzle piece emoji
@@ -2088,8 +2105,7 @@ class GenizahGUI(QMainWindow):
         self.corner_puzzle_btn.setStyleSheet("font-size: 16px; padding: 1px 2px;")
         self.corner_puzzle_btn.setFixedWidth(30)
         self.corner_puzzle_btn.clicked.connect(self._open_puzzle_window)
-        corner_layout.addWidget(self.corner_puzzle_btn)
-        corner_layout.addWidget(_corner_sep())
+        corner_widget.add(self.corner_puzzle_btn, 3)
 
         # Joins Lab button (Feature 6)
         self.corner_joins_btn = QPushButton("\U0001F517")  # 🔗 link emoji
@@ -2099,8 +2115,7 @@ class GenizahGUI(QMainWindow):
         self.corner_joins_btn.setStyleSheet("font-size: 16px; padding: 1px 2px;")
         self.corner_joins_btn.setFixedWidth(30)
         self.corner_joins_btn.clicked.connect(self.open_join_workbench)
-        corner_layout.addWidget(self.corner_joins_btn)
-        corner_layout.addWidget(_corner_sep())
+        corner_widget.add(self.corner_joins_btn, 3)
 
         # Settings gear
         self.corner_settings_btn = QPushButton("\u2699")
@@ -2110,13 +2125,16 @@ class GenizahGUI(QMainWindow):
         self.corner_settings_btn.setStyleSheet("font-size: 16px; padding: 1px 2px;")
         self.corner_settings_btn.setFixedWidth(30)
         self.corner_settings_btn.clicked.connect(self._open_settings_dialog)
-        corner_layout.addWidget(self.corner_settings_btn)
+        corner_widget.add(self.corner_settings_btn, -1)
 
         # Expand tab bar so corner widget is pushed to the far edge.
         # Qt mirrors corner positions in RTL, so TopRightCorner works for both:
         #   English LTR: physically right → Search far-left, gear far-right
         #   Hebrew  RTL: mirrored to left → Search far-right, gear far-left
         self.tabs.tabBar().setExpanding(True)
+        # Shorten tab names with "..." rather than cutting them mid-word when
+        # the window is narrow; the full name stays in the All sections menu.
+        self.tabs.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
         self.tabs.setCornerWidget(corner_widget, Qt.Corner.TopRightCorner)
         self._update_corner_login_state()
 
@@ -4970,7 +4988,12 @@ class GenizahGUI(QMainWindow):
         row1.addWidget(self.btn_reset_search)
 
         # Row 2: Search Parameters & Lab Mode
-        row2 = QHBoxLayout()
+        # Wraps onto a second line when the window is narrow instead of clipping
+        # its labels ("ab Mode", "Anywh") or forcing the window wider -- the
+        # v8.6.0 fix squeezed it into 1440 px; at 300% zoom there are ~670
+        # (owner screenshots, 2026-09-24). Each block keeps its natural width.
+        self.search_row2 = FlowWidget(margin=0)
+        row2 = self.search_row2.flow
 
         # Tooltips
         self.mode_combo.setItemData(0, tr("Exact match"))
@@ -5154,6 +5177,7 @@ class GenizahGUI(QMainWindow):
         self.chk_lab_deep = QCheckBox(tr("Deep Scan"))
         self.chk_lab_deep.setToolTip(tr("Slower but checks deeper. Use for common phrases/quotes"))
         self.chk_lab_deep.setEnabled(False) # Enabled only in Lab Mode
+        self.chk_lab_deep.setVisible(False)  # ...and shown only then (update_lab_ui_state)
         self.chk_lab_deep.toggled.connect(self.on_deep_scan_toggled_search)
 
         # No text labels here any more: they cost 152 px of a row that was already
@@ -5270,7 +5294,6 @@ class GenizahGUI(QMainWindow):
         row2.addWidget(self.local_filter_inactive_lbl_search)
         self._update_local_filter_btn_search()
 
-        row2.addStretch()
         row2.addWidget(btn_help)
 
         # --- Responsa Sub-Options Row (visible only when Responsa mode is selected) ---
@@ -5318,7 +5341,7 @@ class GenizahGUI(QMainWindow):
         self._pgp_tags_worker.start()
 
         top_layout.addWidget(self.search_row1_container)
-        top_layout.addLayout(row2)
+        top_layout.addWidget(self.search_row2)
         top_layout.addWidget(self.responsa_sub_row)
 
         # Pre-search filter chip bar (Phase 45-03)
@@ -5408,6 +5431,22 @@ class GenizahGUI(QMainWindow):
         # Ensure column 0 is not sortable to avoid confusion with check action
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_CHECKBOX, QHeaderView.ResizeMode.Fixed)
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_ACTIONS, QHeaderView.ResizeMode.Fixed)
+
+        # Right-click the header to choose columns (desktop/column_chooser.py).
+        # Src is left out: the app shows it only when results mix sources.
+        # Every column shows until the user hides one (owner, 2026-09-24).
+        self.results_columns = ColumnChooser(
+            self.results_table, self.results_table.horizontalHeader(),
+            [self.COL_SYS_ID, self.COL_LIBRARY, self.COL_SHELF, self.COL_IMG, self.COL_TITLE,
+             self.COL_PGP, self.COL_DOMAIN, self.COL_PRINTED, self.COL_TRANSCRIPTION],
+            'hidden_result_columns',
+            lambda c: (self.results_table.horizontalHeaderItem(c).text()
+                       if self.results_table.horizontalHeaderItem(c) else str(c)))
+        # And every shown column inside the table's width: the snippet takes
+        # what the others leave (owner, 2026-09-24: no sideways scrolling to
+        # reach the last columns).
+        self.results_columns.fitter = ColumnFitter(
+            self.results_table, self.results_table.horizontalHeader(), [self.COL_SNIPPET])
 
         self.results_table.setMouseTracking(True)
         self.results_table.cellEntered.connect(self.on_table_cell_entered)
@@ -5529,11 +5568,13 @@ class GenizahGUI(QMainWindow):
 
         # Append export controls to the right
         bot.addWidget(QLabel("|"))
-        bot.addWidget(self.lbl_search_export)
-        bot.addWidget(self.btn_exp_xlsx)
-        bot.addWidget(self.btn_exp_csv)
-        bot.addWidget(self.btn_exp_txt)
-        bot.addWidget(self.btn_exp_docx)
+        # One overflow row: on a narrow window the label goes first, then the
+        # formats fold into an "Export" menu (2026-09-24).
+        self.search_export_row = OverflowRow(tr("Export"))
+        self.search_export_row.add(self.lbl_search_export, 1)
+        for _b in self.export_buttons:
+            self.search_export_row.add(_b, 0)
+        bot.addWidget(self.search_export_row)
         
         layout.addLayout(bot)
         panel.setLayout(layout)
@@ -5612,19 +5653,25 @@ class GenizahGUI(QMainWindow):
         self.btn_comp_pre_search_filters.setStyleSheet("padding: 2px 8px;")
         self.btn_comp_pre_search_filters.clicked.connect(self._open_pre_search_filter_dialog)
 
-        top_row.addWidget(self.btn_comp_pre_search_filters)
-        top_row.addWidget(btn_exclude); top_row.addWidget(btn_filter_text)
-        top_row.addWidget(self.btn_comp_domain_filter)
-        top_row.addWidget(self.lbl_comp_domain_filter)
-        top_row.addWidget(self.lbl_exclude_status)
-        top_row.addWidget(self.lbl_comp_status)
+        # The buttons after the title wrap as a group (the title field keeps
+        # stretching): on a small screen they used to push "Found N results"
+        # and the help button off the edge.
+        self.comp_title_actions = FlowWidget(margin=0)
+        _title_flow = self.comp_title_actions.flow
+        _title_flow.addWidget(self.btn_comp_pre_search_filters)
+        _title_flow.addWidget(btn_exclude); _title_flow.addWidget(btn_filter_text)
+        _title_flow.addWidget(self.btn_comp_domain_filter)
+        _title_flow.addWidget(self.lbl_comp_domain_filter)
+        _title_flow.addWidget(self.lbl_exclude_status)
+        _title_flow.addWidget(self.lbl_comp_status)
 
         # Help Button
         btn_help = QPushButton("?")
         btn_help.setFixedWidth(30)
         btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
         btn_help.clicked.connect(lambda: self.open_help_center(anchor="composition"))
-        top_row.addWidget(btn_help)
+        _title_flow.addWidget(btn_help)
+        top_row.addWidget(self.comp_title_actions)
 
         in_l.addLayout(top_row)
 
@@ -5644,7 +5691,9 @@ class GenizahGUI(QMainWindow):
         in_l.addWidget(self.comp_text_area)
 
         # Single Row for Controls
-        cr = QHBoxLayout()
+        # Wraps like the Search tab's row 2 (see search_row2).
+        self.comp_options_row = FlowWidget(margin=0)
+        cr = self.comp_options_row.flow
 
         # 2. Parameters
         self.spin_chunk = QSpinBox(); self.spin_chunk.setValue(5); self.spin_chunk.setPrefix(tr("Chunk: "))
@@ -5804,7 +5853,10 @@ class GenizahGUI(QMainWindow):
         # Phase 146: the three policy axes, ported from the web surface with
         # the same keys, order, defaults and tooltip wording. Shown only in
         # letter-level mode -- they say nothing about a chunk search.
-        passage_row = QHBoxLayout()
+        # Wraps like the options row (see search_row2); a hidden control takes
+        # no space, so in chunk mode the row collapses to nothing.
+        self.comp_passage_row = FlowWidget(margin=0)
+        passage_row = self.comp_passage_row.flow
         self.comp_passage_width_combo = QComboBox()
         for _val, _lbl in (('standard-40', tr("Narrow (near-exact)")),
                            ('wide-40', tr("Medium width")),
@@ -5873,8 +5925,7 @@ class GenizahGUI(QMainWindow):
         # this search will run", and letter-level controls split across two
         # places read as two features (owner, 2026-08-27).
         self._build_witness_button(passage_row)
-        passage_row.addStretch()
-        in_l.addLayout(passage_row)
+        in_l.addWidget(self.comp_passage_row)
         in_l.addWidget(self.lbl_comp_passage_reason)
         in_l.addWidget(self.lbl_comp_passage_dropped_warning)
 
@@ -5908,6 +5959,7 @@ class GenizahGUI(QMainWindow):
         self.chk_lab_deep_comp = QCheckBox(tr("Deep Scan"))
         self.chk_lab_deep_comp.setToolTip(tr("Slower but checks deeper. Use for common phrases/quotes"))
         self.chk_lab_deep_comp.setEnabled(False)
+        self.chk_lab_deep_comp.setVisible(False)  # shown with Lab Mode (update_lab_ui_state)
         self.chk_lab_deep_comp.toggled.connect(self.on_deep_scan_toggled_comp)
 
         # Shortened Text
@@ -5968,7 +6020,7 @@ class GenizahGUI(QMainWindow):
         cr.addWidget(self.btn_comp_recursive)
         cr.addWidget(self.btn_reset_comp)
 
-        in_l.addLayout(cr)
+        in_l.addWidget(self.comp_options_row)
 
         self.lab_panel_comp = LabPanel(self, 'comp')
         in_l.addWidget(self.lab_panel_comp)
@@ -6031,6 +6083,18 @@ class GenizahGUI(QMainWindow):
         self.comp_tree.setHeader(self.chk_comp_header)
         self._update_comp_filter_indicators()
         self._configure_comp_tree_header()
+        # After setHeader (it would wipe the hidden state). Src and Witnesses are
+        # left out: the app decides those from the results.
+        self.comp_columns = ColumnChooser(
+            self.comp_tree, self.chk_comp_header,
+            [self.comp_col_library, self.comp_col_shelfmark, self.comp_col_title,
+             self.comp_col_sysid, self.comp_col_context, self.comp_col_ms_context,
+             self.comp_col_printed],
+            'hidden_comp_columns',
+            lambda c: self.comp_tree.headerItem().text(c))
+        self.comp_columns.fitter = ColumnFitter(
+            self.comp_tree, self.chk_comp_header,
+            [self.comp_col_context, self.comp_col_ms_context])
 
         rl.addWidget(self.comp_tree)
         
@@ -6055,7 +6119,6 @@ class GenizahGUI(QMainWindow):
 
         exp_layout.addStretch()
         self.lbl_comp_export = QLabel(tr("Save Report"))
-        exp_layout.addWidget(self.lbl_comp_export)
         
         self.btn_comp_xlsx = QPushButton("XLSX")
         self.btn_comp_xlsx.clicked.connect(lambda: self.export_comp_report('xlsx'))
@@ -6073,10 +6136,12 @@ class GenizahGUI(QMainWindow):
         for b in self.comp_export_buttons:
             b.setEnabled(False) 
             
-        exp_layout.addWidget(self.btn_comp_xlsx)
-        exp_layout.addWidget(self.btn_comp_csv)
-        exp_layout.addWidget(self.btn_comp_txt)
-        exp_layout.addWidget(self.btn_comp_docx)
+        # Same folding as the Search tab's export row.
+        self.comp_export_row = OverflowRow(tr("Export"))
+        self.comp_export_row.add(self.lbl_comp_export, 1)
+        for _b in self.comp_export_buttons:
+            self.comp_export_row.add(_b, 0)
+        exp_layout.addWidget(self.comp_export_row)
         
         rl.addLayout(exp_layout)
         
@@ -6159,6 +6224,23 @@ class GenizahGUI(QMainWindow):
         self.btn_b_cite.setToolTip(tr("Copy a citation for the folio on screen"))
         self.btn_b_cite.clicked.connect(self.copy_page_citation)
         self.btn_b_cite.setEnabled(False)
+
+        # The page on genizahsearch.com (owner, 2026-09-24); enabled with Cite
+        # by _sync_browse_cite_button -- except that a synthetic record, which
+        # has no citation, does have a page on the website.
+        # Beside View on Ktiv, with the app's own icon (the globe is Ktiv's);
+        # Copy link is an icon beside Cite (owner, 2026-09-24).
+        self.btn_b_open_web = QPushButton(tr("Open on the website"))
+        self.btn_b_open_web.setIcon(QApplication.windowIcon())
+        self.btn_b_open_web.setToolTip(tr("Open this page on genizahsearch.com"))
+        self.btn_b_open_web.clicked.connect(self._browse_open_on_web)
+        self.btn_b_open_web.setEnabled(False)
+        self.btn_b_copy_web = QToolButton()
+        self.btn_b_copy_web.setText("\U0001f4cb")
+        self.btn_b_copy_web.setAccessibleName(tr("Copy link"))
+        self.btn_b_copy_web.setToolTip(tr("Copy a link to this page on genizahsearch.com"))
+        self.btn_b_copy_web.clicked.connect(self._browse_copy_web_link)
+        self.btn_b_copy_web.setEnabled(False)
 
         self.btn_b_all = QPushButton(tr("View All"))
         self.btn_b_all.setCheckable(True)
@@ -6287,6 +6369,7 @@ class GenizahGUI(QMainWindow):
         ext_info_row.addWidget(self.btn_b_catalog_records)
         ext_info_row.addWidget(self.btn_b_measurements)
         ext_info_row.addWidget(self.btn_b_catalog)
+        ext_info_row.addWidget(self.btn_b_open_web)
         ext_info_row.addWidget(self.btn_b_pgp)
         ext_info_row.addWidget(self.btn_b_external_link)
         ext_info_row.addStretch()
@@ -6344,7 +6427,10 @@ class GenizahGUI(QMainWindow):
         text_widget = QWidget(); text_layout = QVBoxLayout(text_widget); text_layout.setContentsMargins(0,0,0,0)
 
         # Navigation Bar (Above Text)
-        nav_bar = QHBoxLayout()
+        # An overflow row, not a sideways-scrolling strip (2026-09-24): labelled
+        # buttons shrink to their icons first, then the least used move into
+        # "More". Page navigation always stays.
+        nav_bar = self.browse_nav_row = OverflowRow(tr("More"))
         self.btn_b_prev = QPushButton(tr("< Prev")); self.btn_b_prev.clicked.connect(lambda: self._browse_prev_next(-1))
         self.btn_b_next = QPushButton(tr("Next >")); self.btn_b_next.clicked.connect(lambda: self._browse_prev_next(1))
         self.btn_b_prev.setEnabled(False); self.btn_b_next.setEnabled(False)
@@ -6385,16 +6471,17 @@ class GenizahGUI(QMainWindow):
         self.btn_b_toggle_img.setEnabled(False)
 
         # Layout: [< Prev] [Folio Label] [Page Combo] [of N pages] [Next >] [Volume] [View All] [Save] [Image Toggle]
-        nav_bar.addWidget(self.btn_b_prev)
-        nav_bar.addWidget(self.lbl_browse_folio)
-        nav_bar.addWidget(self.combo_browse_page)
-        nav_bar.addWidget(self.lbl_browse_page_count)
-        nav_bar.addWidget(self.btn_b_next)
-        nav_bar.addWidget(self.combo_browse_volume)
-        nav_bar.addWidget(self.btn_b_all)
-        nav_bar.addWidget(self.btn_b_save)
-        nav_bar.addWidget(self.btn_b_cite)
-        nav_bar.addWidget(self.btn_b_toggle_img)
+        nav_bar.add(self.btn_b_prev, -1)
+        nav_bar.add(self.lbl_browse_folio, -1)
+        nav_bar.add(self.combo_browse_page, -1)
+        nav_bar.add(self.lbl_browse_page_count, -1)
+        nav_bar.add(self.btn_b_next, -1)
+        nav_bar.add(self.combo_browse_volume, -1)
+        nav_bar.add(self.btn_b_all, 1)
+        nav_bar.add(self.btn_b_save, 2)
+        nav_bar.add(self.btn_b_cite, 1)
+        nav_bar.add(self.btn_b_copy_web, 1)
+        nav_bar.add(self.btn_b_toggle_img, 1)
 
         # Phase 95 D-28 — "Open file" button for LOCAL browse hits.
         self.browse_open_file_btn = QPushButton(tr("Open file"))
@@ -6402,22 +6489,21 @@ class GenizahGUI(QMainWindow):
         self.browse_open_file_btn.clicked.connect(self._on_browse_open_file_clicked)
         self.browse_open_file_btn.setVisible(False)  # shown only when a LOCAL hit is browsed
         self._current_local_filepath: str | None = None
-        nav_bar.addWidget(self.browse_open_file_btn)
+        nav_bar.add(self.browse_open_file_btn, 0)
 
         # v7.16 — "Open file location" button for LOCAL browse hits.
         self.browse_open_file_location_btn = QPushButton(tr("Open file location"))
         self.browse_open_file_location_btn.setToolTip(tr("Open the containing folder and select this file (LOCAL documents only)"))
         self.browse_open_file_location_btn.clicked.connect(self._on_browse_open_file_location_clicked)
         self.browse_open_file_location_btn.setVisible(False)  # shown only when a LOCAL hit is browsed
-        nav_bar.addWidget(self.browse_open_file_location_btn)
+        nav_bar.add(self.browse_open_file_location_btn, 1)
 
         # Phase 96 polish (Item 2): btn_local_browse_prev/next/view_toggle and
         # lbl_local_browse_page removed. btn_b_prev/btn_b_next/btn_b_all now
         # dispatch to LOCAL nav when a LOCAL sys_id is loaded (via _browse_prev_next
         # and toggle_browse_view_all). lbl_browse_page_count shows LOCAL page info.
 
-        nav_bar.addStretch()
-        text_layout.addWidget(_make_scrollable_row(nav_bar))
+        text_layout.addWidget(self.browse_nav_row)
 
         # Second row: Community buttons and version selector
         community_bar = QHBoxLayout()
@@ -15279,6 +15365,27 @@ class GenizahGUI(QMainWindow):
         # (SC#4 / Pitfall 3).
         dialog.exec()
 
+    def _fill_sections_menu(self):
+        """The All sections menu: one entry per tab, the current one checked."""
+        menu = self._corner_sections_menu
+        menu.clear()
+        for i in range(self.tabs.count()):
+            act = menu.addAction(self.tabs.tabText(i))
+            act.setCheckable(True)
+            act.setChecked(i == self.tabs.currentIndex())
+            act.triggered.connect(lambda _c=False, idx=i: self.tabs.setCurrentIndex(idx))
+
+    # The corner cluster may ask for at most this share of the window's width;
+    # the rest is the tab bar's. A QTabWidget gives its corner widget exactly the
+    # width it asks for, so without a cap the cluster would never overflow.
+    _CORNER_WIDTH_SHARE = 0.42
+
+    def resizeEvent(self, event):  # noqa: N802 - Qt API
+        super().resizeEvent(event)
+        row = getattr(self, 'corner_row', None)
+        if row is not None:
+            row.set_width_cap(int(self.width() * self._CORNER_WIDTH_SHARE))
+
     def _open_settings_dialog(self):
         """Open the settings dialog.
 
@@ -15542,10 +15649,13 @@ class GenizahGUI(QMainWindow):
         tab is in front -- which happens on the ordinary path of opening a
         result and switching to Browse.
         """
+        sid = getattr(self, 'current_browse_sid', None)
+        for _web in (getattr(self, 'btn_b_open_web', None), getattr(self, 'btn_b_copy_web', None)):
+            if _web is not None:
+                _web.setEnabled(self._browse_web_url() is not None)
         btn = getattr(self, 'btn_b_cite', None)
         if btn is None:
             return
-        sid = getattr(self, 'current_browse_sid', None)
         try:
             from shared.local_sys_id import is_local_sys_id as _is_local
             from shared.synthetic_sys_id import is_synthetic_sys_id as _is_syn
@@ -15553,6 +15663,25 @@ class GenizahGUI(QMainWindow):
         except Exception:                                        # noqa: BLE001
             citable = bool(sid)
         btn.setEnabled(citable)
+
+    def _browse_web_url(self):
+        """The genizahsearch.com address of the Browse page on screen, or None."""
+        from shared.web_links import web_browse_url
+        return web_browse_url(getattr(self, 'current_browse_sid', None),
+                              getattr(self, 'current_browse_p', None),
+                              getattr(self, 'current_browse_volume_ie', None))
+
+    def _browse_open_on_web(self):
+        url = self._browse_web_url()
+        if url:
+            QDesktopServices.openUrl(QUrl(url))
+
+    def _browse_copy_web_link(self):
+        url = self._browse_web_url()
+        if not url:
+            return
+        QApplication.clipboard().setText(url)
+        self.statusBar().showMessage(tr("Link copied") + ": " + url, 5000)
 
     def _software_clause(self):
         """"Dicta Genizah Search Pro V<version>" -- what this app IS.
@@ -18749,6 +18878,16 @@ class GenizahGUI(QMainWindow):
                 w.setEnabled(not lab_on)
             else:
                 w.setEnabled(True)
+            # Hidden, not just greyed, in letter-level mode: disabled they still
+            # took about half the options row and pushed Lab Mode, "Sort by
+            # shelfmark only" and Analyze off a small screen (owner screenshots
+            # at 300%, 2026-09-24). The values above are still forced and
+            # restored. The paragraph-mode combo lives in the paragraph row,
+            # which is shown and hidden as a whole below.
+            if name != 'boundary_mode_combo':
+                set_visible = getattr(w, 'setVisible', None)
+                if set_visible is not None:
+                    set_visible(not on)
 
         # The whole paragraph row goes away in letter-level mode rather than
         # greying out: these controls describe paragraph boundaries, which
@@ -18889,12 +19028,18 @@ class GenizahGUI(QMainWindow):
         # Search Tab
         if hasattr(self, 'mode_combo'): self.mode_combo.setEnabled(not checked)
         if hasattr(self, 'gap_input'): self.gap_input.setEnabled(not checked)
-        if hasattr(self, 'chk_lab_deep'): self.chk_lab_deep.setEnabled(checked)
+        # Deep Scan means something only in Lab Mode: shown with it, not greyed
+        # out without it (space on small screens, 2026-09-24).
+        if hasattr(self, 'chk_lab_deep'):
+            self.chk_lab_deep.setEnabled(checked)
+            self.chk_lab_deep.setVisible(checked)
 
         # Composition Tab
         if hasattr(self, 'comp_mode_combo'): self.comp_mode_combo.setEnabled(not checked)
         if hasattr(self, 'spin_freq'): self.spin_freq.setEnabled(not checked)
-        if hasattr(self, 'chk_lab_deep_comp'): self.chk_lab_deep_comp.setEnabled(checked)
+        if hasattr(self, 'chk_lab_deep_comp'):
+            self.chk_lab_deep_comp.setEnabled(checked)
+            self.chk_lab_deep_comp.setVisible(checked)
 
         # Phase 146 -- Lab WINS: one precedence rule, applied in both
         # directions. Turning Lab on demotes the method to chunk (and
@@ -26720,13 +26865,25 @@ class GenizahGUI(QMainWindow):
         self.comp_progress.setVisible(True)
         self.comp_progress.setRange(0, 1)
         self.comp_progress.setValue(1)
+        # Pages, not "Results": this counts matching PAGES before they are grouped
+        # into manuscripts, while the status label beside the title counts
+        # manuscripts -- two numbers under one word read as a contradiction
+        # ("Found 2 results" next to "3 Results"; Codex, 2026-09-24). And a
+        # letter-level run has no chunks, so it does not report "0 chunks".
+        pages_part = tr("{} matching pages").format(result_count)
+        if getattr(self, '_comp_last_result_method', 'chunk') == 'passage':
+            chunks_part = ""
+        elif is_partial:
+            chunks_part = f"{chunks_processed}/{chunks_total} {tr('chunks')}, "
+        else:
+            chunks_part = f"{chunks_total} {tr('chunks')}, "
         if is_partial:
             self.comp_summary_text = (
-                f"{tr('Partial results')} \u2014 {elapsed_str} \u2014 {chunks_processed}/{chunks_total} {tr('chunks')}, {result_count} {tr('Results')}"
+                f"{tr('Partial results')} \u2014 {elapsed_str} \u2014 {chunks_part}{pages_part}"
             )
         else:
             self.comp_summary_text = (
-                f"{tr('Completed in')} {elapsed_str} \u2014 {chunks_total} {tr('chunks')}, {result_count} {tr('Results')}"
+                f"{tr('Completed in')} {elapsed_str} \u2014 {chunks_part}{pages_part}"
             )
         self.comp_progress.setFormat(self.comp_summary_text)
 
@@ -27304,7 +27461,7 @@ class GenizahGUI(QMainWindow):
         full_main_count = len(clean_main)
         visible_main = clean_main
 
-        msg_color = "black"
+        msg_color = "palette(text)"  # was black: unreadable on the dark theme
         if len(visible_main) < full_main_count:
             status_msg = tr("Showing top {} of {} results. (Export for full list)").format(len(visible_main), full_main_count)
             msg_color = "#e67e22" # Orange

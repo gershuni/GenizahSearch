@@ -152,8 +152,29 @@ class CheckBoxHeader(QHeaderView):
 
             self.style().drawControl(QStyle.ControlElement.CE_CheckBox, option, painter)
 
+    def _on_resize_grip(self, pos):
+        """True when ``pos`` is on a section boundary, where a drag resizes.
+
+        The checks below return early for the checkbox and for non-sortable
+        columns, and they used to swallow a press on those columns' own resize
+        grip too, so the Actions and Img columns could not be resized from
+        their edge in either direction (measured 2026-09-24).
+        """
+        idx = self.logicalIndexAt(pos)
+        if idx < 0:
+            return False
+        grip = max(self.style().pixelMetric(QStyle.PixelMetric.PM_HeaderGripMargin), 2)
+        start = self.sectionViewportPosition(idx)
+        end = start + self.sectionSize(idx)
+        x = pos.x()
+        return abs(x - start) <= grip or abs(x - end) <= grip
+
     def mousePressEvent(self, event):
         idx = self.logicalIndexAt(event.pos())
+
+        if self.sectionResizeMode(idx) != QHeaderView.ResizeMode.Fixed and self._on_resize_grip(event.pos()):
+            super().mousePressEvent(event)
+            return
 
         # Handle Filter/Star clicks
         if (idx in self.filter_columns and self.filter_callback) or (idx in self.star_columns and self.star_callback):

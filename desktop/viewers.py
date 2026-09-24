@@ -670,13 +670,18 @@ class ManuscriptViewerWidget(QWidget):
         self._thumbnail_ready.connect(self._on_thumbnail_ready)
         self.init_ui()
 
+    def set_adjustments_visible(self, visible):
+        """Show or hide the image-adjustment row (the sliders keep their values)."""
+        visible = bool(visible)
+        self.adj_row.setVisible(visible)
+        if self.btn_adjust.isChecked() != visible:
+            self.btn_adjust.setChecked(visible)
+
     def init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         # Top Bar (Source + Zoom)
-        top_bar = QHBoxLayout()
-        top_bar.setContentsMargins(5, 5, 5, 5)
 
         self.combo_source = QComboBox()
         self.combo_source.addItem("NLI")
@@ -728,27 +733,48 @@ class ManuscriptViewerWidget(QWidget):
         self.btn_ktiv.clicked.connect(self._open_ktiv_viewer)
         self._ktiv_sys_id = None
 
-        top_bar.addWidget(self.combo_source)
-        top_bar.addStretch()
-        top_bar.addWidget(self.btn_ktiv)
-        top_bar.addWidget(self.btn_external)
-        top_bar.addWidget(btn_rot_left)
-        top_bar.addWidget(self.slider_rotation)
-        top_bar.addWidget(btn_rot_right)
-        top_bar.addWidget(btn_rot_reset)
-        top_bar.addSpacing(10)
-        top_bar.addWidget(btn_zoom_out)
-        top_bar.addWidget(btn_zoom_in)
+        # One overflow row instead of a sideways-scrolling strip (owner,
+        # 2026-09-24): when the pane is narrow the labelled buttons shrink to
+        # their icons first, then the least used move into "More" (the
+        # rotation slider, which a menu cannot hold, simply leaves the row;
+        # the 90-degree buttons stay). Zoom, fullscreen and the adjustments
+        # toggle always stay.
+        from desktop.widgets.overflow_row import PINNED, OverflowRow
+        self.image_toolbar = OverflowRow(tr("More"), spacing=4)
+        self.image_toolbar.setContentsMargins(5, 5, 5, 5)
+        self.image_toolbar.add(self.combo_source, PINNED)
+        _spacer = QWidget()
+        self.image_toolbar.add(_spacer, PINNED, stretch=True)
+        self.image_toolbar.add(self.btn_ktiv, 2)
+        self.image_toolbar.add(self.btn_external, 2)
+        self.image_toolbar.add(btn_rot_left, 1)
+        self.image_toolbar.add(self.slider_rotation, 3)
+        self.image_toolbar.add(btn_rot_right, 1)
+        self.image_toolbar.add(btn_rot_reset, 1)
+        self.image_toolbar.add(btn_zoom_out, PINNED)
+        self.image_toolbar.add(btn_zoom_in, PINNED)
 
         # Fullscreen button
         btn_fullscreen = QPushButton("\u26f6")
         btn_fullscreen.setToolTip(tr("Fullscreen"))
         btn_fullscreen.setFixedWidth(30)
         btn_fullscreen.clicked.connect(self._open_fullscreen)
-        top_bar.addWidget(btn_fullscreen)
+        self.image_toolbar.add(btn_fullscreen, PINNED)
+
+        # Shows or hides the brightness / contrast / gamma row below. On a short
+        # screen that row costs image height the reader needs more
+        # (set_adjustments_visible; owner screenshots at 300%, 2026-09-24).
+        self.btn_adjust = QPushButton("⚙")
+        self.btn_adjust.setToolTip(tr("Image adjustments"))
+        self.btn_adjust.setAccessibleName(tr("Image adjustments"))
+        self.btn_adjust.setCheckable(True)
+        self.btn_adjust.setChecked(True)
+        self.btn_adjust.setFixedWidth(30)
+        self.btn_adjust.toggled.connect(self.set_adjustments_visible)
+        self.image_toolbar.add(self.btn_adjust, PINNED)
         self._fullscreen_window = None
 
-        layout.addWidget(_make_scrollable_row(top_bar))
+        layout.addWidget(self.image_toolbar)
 
         # 260902 (debug/oxford-fgp-image-mismatch.md sub-issue A): visible
         # notice shown when the viewer auto-falls-back from a dead external
@@ -835,7 +861,8 @@ class ManuscriptViewerWidget(QWidget):
 
         btn_reset_adj.clicked.connect(_reset_adjustments)
 
-        layout.addWidget(_make_scrollable_row(adj_bar))
+        self.adj_row = _make_scrollable_row(adj_bar)
+        layout.addWidget(self.adj_row)
 
         # Attribution
         self.lbl_attribution = QLabel("")

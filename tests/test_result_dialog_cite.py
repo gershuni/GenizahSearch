@@ -173,8 +173,8 @@ def test_the_cite_button_is_a_single_cite_this_page_action():
     """
     code = _code_only(RD)
     assert 'self.btn_cite = QToolButton()' in code
-    assert 'community_row.addWidget(self.btn_cite)' in code, (
-        'the cite button is not on the dialog toolbar')
+    assert 'self.actions_row.add(self.btn_cite, 0)' in code, (
+        'the cite button is not on the dialog toolbar (a direct, priority-0 action)')
     assert 'self.btn_cite.clicked.connect(self._rd_copy_page_citation)' in code, (
         'the button does not cite THIS PAGE')
     assert 'rd_cite_menu' not in code, (
@@ -210,7 +210,7 @@ def test_it_survives_compact_mode():
         'still needed rather than deleting this test')
     assert 'self.btn_compact_cite = QToolButton()' in rd, (
         'no compact twin: the cite button disappears in compact mode')
-    assert 'compact_layout.addWidget(self.btn_compact_cite)' in rd
+    assert 'self.compact_actions.add(self.btn_compact_cite, 0)' in rd
     assert 'self.btn_compact_cite.clicked.connect(self._rd_copy_page_citation)' in rd, (
         'the compact twin is not wired to the same single action as its full-'
         'header counterpart, so the two can drift')
