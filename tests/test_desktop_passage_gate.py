@@ -11,6 +11,7 @@ lane is for tests that genuinely need a window; these do not.
 from __future__ import annotations
 
 import ast
+import textwrap
 import io
 import os
 import re
@@ -3125,3 +3126,44 @@ def test_the_single_owner_controls_are_unaffected_by_lab_mode():
     assert w.spin_chunk.enabled is True
     assert w.spin_min_chunks.enabled is True
     assert w.boundary_mode_combo.enabled is True
+
+
+def test_a_save_before_the_index_loads_keeps_the_letter_level_choice(monkeypatch):
+    """Owner, 2026-09-24: letter-level chosen, app closed, reopened -> chunk.
+    During startup the combo is parked on chunk while the restored choice
+    waits in `_comp_method_deferred`; a save in that window (an autosave, or
+    closing before the index finished loading) wrote chunk as CHOSEN, and the
+    next launch honoured it forever."""
+    monkeypatch.setattr(genizah_app.passage_witnesses, "snapshot", lambda _s: [])
+    w = _window(scope='genizah')
+    w.comp_method_combo = _Combo([('chunk', ''), ('passage', '')], index=0)
+    w._comp_method_user_choice_seen = True
+    w._comp_method_deferred = 'passage'
+    w._comp_passage_axis = lambda _axis: None
+    w._comp_witness_state = lambda: None
+
+    fields = APP._comp_passage_preference_fields(w)
+    assert fields['comp_method'] == 'passage'
+    assert fields['comp_method_chosen'] is True
+
+    # Once nothing is pending, the combo is the truth again.
+    w._comp_method_deferred = None
+    assert APP._comp_passage_preference_fields(w)['comp_method'] == 'chunk'
+
+
+def test_the_restore_honours_a_parked_letter_level_choice():
+    """Owner, 2026-09-24 (reproduced in the real app): the index loads at
+    ~3.0 s, BEFORE the session restore (~3.2 s), so the restore's parked
+    letter-level choice was never applied -- `_on_passage_loaded` had already
+    run. The restore's own `finally` must honour it, and before the default,
+    which would otherwise see chunk and a recorded choice and do nothing."""
+    seg = _function_source('_restore_session')
+    tree = ast.parse(textwrap.dedent(seg))
+    fin = [n for n in ast.walk(tree) if isinstance(n, ast.Try) and n.finalbody]
+    assert fin, '_restore_session lost its finally block'
+    body = ast.unparse(ast.Module(body=fin[-1].finalbody, type_ignores=[]))
+    assert '_honour_deferred_comp_method()' in body, (
+        'the restore never applies a stored letter-level choice when the '
+        'index loaded first')
+    assert (body.index('_honour_deferred_comp_method()')
+            < body.index('_apply_default_comp_method()'))

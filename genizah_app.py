@@ -16533,8 +16533,18 @@ class GenizahGUI(QMainWindow):
     def _comp_passage_preference_fields(self):
         """The method and its three policy axes, as the session stores them.
         Only ever called once the composition tab exists."""
+        # A letter-level choice still waiting for the index is the user's
+        # method, not the chunk the combo is parked on meanwhile. Until the
+        # index loads the combo reads `chunk`, and a save in that window -- an
+        # autosave during startup, or closing the app before the load
+        # finished -- wrote `chunk` as CHOSEN, so the next launch honoured a
+        # chunk nobody picked and letter-level never came back (owner,
+        # 2026-09-24).
+        method = self._comp_method()
+        if getattr(self, '_comp_method_deferred', None) == 'passage':
+            method = 'passage'
         return {
-            'comp_method': self._comp_method(),
+            'comp_method': method,
             # Only a method the user PICKED is a decision. This dict is
             # written on every autosave, so `comp_method` alone says nothing
             # about intent -- every session since v9.1.0 carried a `chunk`
@@ -31110,6 +31120,17 @@ class GenizahGUI(QMainWindow):
             # letter-level default becomes safe to apply: the stored method
             # is known, and the chunk knobs hold the values a cache may keep.
             # A no-op unless there was no stored choice and an index exists.
+            # A stored letter-level choice is parked in `_comp_method_deferred`
+            # for `_on_passage_loaded` -- but the index usually loads FIRST
+            # (measured: loaded at 3.0 s, restore at 3.2 s), and then nothing
+            # ever applied it: the combo sat on chunk, the next save wrote
+            # chunk as chosen, and every launch after that opened on chunk
+            # (owner, 2026-09-24). Honour it here too; with the index still
+            # loading it stays parked for `_on_passage_loaded`.
+            try:
+                self._honour_deferred_comp_method()
+            except Exception:                                # noqa: BLE001
+                logger.exception('could not apply the stored search method')
             try:
                 self._apply_default_comp_method()
             except Exception:                                # noqa: BLE001
