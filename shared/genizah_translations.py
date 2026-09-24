@@ -5217,21 +5217,21 @@ TRANSLATIONS.update({
 })
 
 
-# v9.2.1 desktop What's New bar and dialog (2026-09-17). Hebrew: the owner's
-# own for the bar and the Oxford bullet; the rest drafted for the release.
+# v9.3.0 desktop What's New bar and dialog (2026-09-24). Hebrew: the owner's
+# own for the bar; the dialog bullets drafted for the release and approved.
 TRANSLATIONS.update({
-    "New: the search results viewer is now an independent window that can be minimized, plus further improvements and fixes":
-        "חדש: חלונית הצפייה בתוצאות החיפוש היא כעת חלון עצמאי שניתן למזעור, ושיפורים ותיקונים נוספים",
-    "The search results viewer is now a window of its own: minimize it, switch back to the main window, and keep searching while it stays open.":
-        "חלונית הצפייה בתוצאות החיפוש היא כעת חלון עצמאי: אפשר למזער אותה, לחזור לחלון הראשי ולהמשיך לחפש בזמן שהיא פתוחה.",
-    "Searched \"Local\" by accident and found nothing? A notice now says so and offers the same search in the Genizah corpus with one click.":
-        "חיפשתם ב\"מקומי\" בטעות ולא מצאתם דבר? הודעה מציינת זאת ומציעה את אותו חיפוש במאגר הגניזה בלחיצה אחת.",
-    "Composition Search: the search-type and frequency controls work again after switching from Letter-level back to Chunk search.":
-        "חיפוש חיבורים: אפשרויות סוג החיפוש והתדירות חוזרות לפעול לאחר מעבר מחיפוש ברמת האות בחזרה לחיפוש מקטעים.",
-    "Oxford images: when the images are not available for display, a link to the Bodleian site is shown.":
-        "תמונות אוקספורד: כאשר התמונות אינן זמינות לתצוגה, מוצג קישור לאתר הבודליאנה",
-    "Composition Search now opens on Letter-level search whenever its index is built; without an index it stays on Chunk search. A method you pick yourself is kept.":
-        "חיפוש חיבורים נפתח כעת בחיפוש ברמת האות בכל פעם שהאינדקס שלו בנוי; בלי אינדקס הוא נשאר בחיפוש מקטעים. שיטה שבחרתם בעצמכם נשמרת.",
+    "New: updated PGP data, a layout for small screens, interface improvements and bug fixes":
+        "חדש: נתוני PGP מעודכנים, תצוגה מותאמת לצגים קטנים, שיפורי ממשק ותיקוני באגים",
+    "Princeton Geniza Project data updated: 36,642 documents, and most fragments now link to their images.":
+        "נתוני פרויקט הגניזה של פרינסטון עודכנו: 36,642 מסמכים, ולרוב הקטעים יש כעת קישור לתמונות.",
+    "Small screens and high zoom: buttons shrink to icons and then move to a \"More\" menu, results fit the window without scrolling sideways, and the viewer always opens on screen.":
+        "מסכים קטנים והגדלה: הכפתורים מתכווצים לסמלים ואחר כך עוברים לתפריט „עוד\", התוצאות נכנסות לרוחב החלון בלי גלילה הצידה, והמציג נפתח תמיד בתוך המסך.",
+    "In the viewer and the Browse tab: open or copy a link to the page on genizahsearch.com, enlarge or shrink the text (A−/A+), and show or hide the transcription.":
+        "במציג ובלשונית העיון: פתיחת הדף באתר genizahsearch.com או העתקת קישור אליו, הגדלה והקטנה של הטקסט (A−/A+), והצגה או הסתרה של התעתיק.",
+    "Composition Search: the viewer follows the result filters and shows each result's category.":
+        "חיפוש חיבורים: המציג מכבד את סינוני התוצאות ומראה את הקטגוריה של כל תוצאה.",
+    "Fixes: the Library and Shelfmark columns in the Excel export, filtered markers in the flat view, the other-side search in the Joins Lab, and Hebrew material names in Focus Search.":
+        "תיקונים: עמודות הספרייה ומספר המדף בייצוא ל־Excel, סימון תוצאות מסוננות בתצוגה השטוחה, החיפוש בצד השני של הדף במעבדת הצירופים, ושמות החומרים בעברית ב„מקד חיפוש\".",
 })
 
 # Web What's New banner, v9.2.1 (2026-09-18): the GPT pilot went live.

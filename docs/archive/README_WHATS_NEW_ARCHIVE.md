@@ -7,6 +7,37 @@ The authoritative release history is [CHANGELOG.md](../../CHANGELOG.md).
 
 ---
 
+## What's New in Version 9.2.1? (the README's own text, 2026-09-18 to 2026-09-24)
+
+**On the web** (deployed 2026-09-17):
+
+- **Ask the Genizah in ChatGPT.** The GenizahSearch GPT searches the corpus, reads pages, finds
+  letter-level parallels across several witnesses and returns manuscript details with FJMS
+  bibliography, catalog records and source credits, through a bounded API facade with
+  background jobs and paginated results. Start from the new **AI tools** page,
+  [genizahsearch.com/ai](https://genizahsearch.com/ai), which also links the research skill for
+  other AI assistants (with a portable installation guide and a `details` command) and the API guide.
+- **Long research searches** run in isolated, resource-limited workers: interactive searches and
+  background API jobs (submit, poll, fetch, cancel) no longer hit a time cutoff; the synchronous
+  API keeps its deadlines.
+- **Faster, steadier search**: one heavy query can no longer stall the whole site (bounded regex
+  work, a clear error instead of a hang, API `504 core_timeout`); pattern compilation is about
+  7x faster; matching in supervised workers is accelerated.
+- Responsa tabular search: **Within Document** now matches its components anywhere in the transcription.
+
+**On the desktop** (installer 9.2.1):
+
+- **Manuscript Viewer**: a window of its own, with its own taskbar button; minimize it, keep the
+  search panel in view, and it closes with the app
+- **Local-scope search with no results**: one-click "Search the Genizah corpus instead"
+- **Composition Search** opens on Letter-level search when its index is built (v9.1.0 promised
+  this; a stored default was being read as a choice, so it never happened)
+- **Composition Search**: search type and frequency work again after Letter-level -> Chunk
+- **Oxford images**: translated notice, a Bodleian link in every failure state, and the
+  placeholder icon is no longer shown as a manuscript
+
+---
+
 ## What's New in Version 9.2.1?
 
 **The viewer is its own window, a hint for stray Local searches, honest Oxford images.**

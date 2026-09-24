@@ -156,8 +156,9 @@ class WhatsNewBar(QFrame):
         # v9.2.1: the owner's own sentence (2026-09-17). The window change is the
         # one users notice on day one; everything else is "further improvements
         # and fixes", which is what the dialog is for.
+        # v9.3.0: the owner's own sentence (2026-09-24).
         self.lbl_msg.setText(tr(
-            "New: the search results viewer is now an independent window that can be minimized, plus further improvements and fixes"))
+            "New: updated PGP data, a layout for small screens, interface improvements and bug fixes"))
         self.show()
 
     def on_learn_more(self):
@@ -290,15 +291,15 @@ class WhatsNewDialog(QDialog):
         layout.addWidget(title)
 
         is_heb = CURRENT_LANG == 'he'
-        # v9.2.1 (2026-09-17). Five bullets: the viewer window, the LOCAL-scope
-        # hint, the chunk controls, the Oxford failure state (the owner's own
-        # Hebrew), and the letter-level default that now really applies.
+        # v9.3.0 (2026-09-24). Five bullets: PGP data, small screens, the viewer/Browse
+        # buttons, the Composition viewer filters, and the fixes. The letter-level
+        # restart fix is in the CHANGELOG and README only (owner).
         items = [
-            tr("The search results viewer is now a window of its own: minimize it, switch back to the main window, and keep searching while it stays open."),
-            tr("Searched \"Local\" by accident and found nothing? A notice now says so and offers the same search in the Genizah corpus with one click."),
-            tr("Composition Search: the search-type and frequency controls work again after switching from Letter-level back to Chunk search."),
-            tr("Oxford images: when the images are not available for display, a link to the Bodleian site is shown."),
-            tr("Composition Search now opens on Letter-level search whenever its index is built; without an index it stays on Chunk search. A method you pick yourself is kept."),
+            tr("Princeton Geniza Project data updated: 36,642 documents, and most fragments now link to their images."),
+            tr("Small screens and high zoom: buttons shrink to icons and then move to a \"More\" menu, results fit the window without scrolling sideways, and the viewer always opens on screen."),
+            tr("In the viewer and the Browse tab: open or copy a link to the page on genizahsearch.com, enlarge or shrink the text (A−/A+), and show or hide the transcription."),
+            tr("Composition Search: the viewer follows the result filters and shows each result's category."),
+            tr("Fixes: the Library and Shelfmark columns in the Excel export, filtered markers in the flat view, the other-side search in the Joins Lab, and Hebrew material names in Focus Search."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)

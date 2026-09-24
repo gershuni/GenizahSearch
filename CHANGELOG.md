@@ -6,6 +6,75 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ## [Unreleased]
 
+## [9.3.0] - 2026-09-24 — Fresh PGP data, small screens, and urgent fixes
+
+**Desktop release.** The web side of this work (the PGP sidecar and the homepage count) went
+live on 2026-09-22; everything below reaches the desktop with this installer.
+
+**Fresh Princeton Geniza Project data.** The bundled PGP data had been frozen since April
+2026. It is rebuilt from upstream `princetongenizalab/pgp-metadata` (36,642 documents), and
+the share of PGP fragments with a linked IIIF image rose from 57.5% to 87.0%. The refresh pipeline behind it (#355–#358) now runs
+as one script that stops at the first failure, verifies every input by hash, and refuses to
+ship a sidecar that still carries the withheld Hebrew translations.
+
+**The desktop fits small screens and high display scaling.** At 300% Windows scaling, or on
+a low-resolution screen, toolbars used to clip or push the window off the screen. Now:
+
+- Toolbars compact in stages: buttons first shrink to their icons, and only then do the
+  least-used controls move into a **More** menu (Previous/Next, the language and settings
+  buttons always stay). Text rows wrap onto a second line instead of widening the window.
+- The main window's minimum size follows the screen it is on, so it can always be dragged
+  and resized fully.
+- The Manuscript Viewer opens inside the visible screen area, title bar included, and
+  switches to its compact header when even the full header cannot fit.
+- The image toolbar compacts before it scrolls; the image adjustment sliders fold behind a ⚙
+  button on small screens.
+- Search and Composition results fit their columns to the window, with no horizontal scroll;
+  a **Columns** menu hides and restores columns and re-fits them. Dragging a column border
+  now resizes the column you grabbed (the header's checkbox used to swallow the press).
+
+**New in the Manuscript Viewer and the Browse tab.**
+
+- **Open on the website** and **Copy link** (📋) open or copy the same page on
+  genizahsearch.com, including its volume for multi-volume manuscripts. Hidden for My
+  Library documents, which are not on the website.
+- **A− / A+** change the transcription text size, remembered between sessions.
+- A **text toggle** (📄) next to the image toggle shows or hides the transcription, replacing
+  "Image only".
+- The results strip (category, position, filters, Back to results) moved into the
+  navigation row, saving a line of height.
+
+**The Manuscript Viewer follows your Composition result filters (#360).** Opened from a
+filtered result list, the viewer now steps only through results the list shows, shows each
+result's category (main, filtered, appendix) and the active filters, and "Back to results"
+returns to the Composition tab.
+
+### Bug Fixes
+
+- **Composition xlsx export:** under "Library" the Report View printed the shelfmark and
+  under "Shelfmark" the library; the manuscript headings show the shelfmark again (#361).
+- **Flat view showed no filtered results as filtered:** the category was visible only in the
+  grouped view. Flat rows now carry a "{n} filtered" / "{n} excluded" marker (#361).
+- **Manuscript Viewer opened with its title bar above the screen** (reported on 9.2.1), so it
+  could not be moved; only Maximize helped (#361).
+- **Joins Lab "other side of the leaf" search never returned anything:** the worker handed
+  the search engine the query object instead of its text, and the error was swallowed.
+  Narrow now narrows and Widen widens; a newer search is no longer overwritten by an older
+  one, and closing the Lab stops a running scan (#359).
+- **Focus Search material names** (paper, vellum, papyrus, mixed, wood) were English in the
+  Hebrew interface (#359).
+- **Composition shelfmark exclusions** judged only part of the visible rows (#360).
+- **Composition Search forgot a letter-level choice on every restart:** the index finished
+  loading before the session was restored, so the stored choice was never applied and the
+  next save recorded chunk as the user's choice. It is now applied either way (#363).
+  Sessions already saved with that chunk stay on chunk until letter-level is picked once.
+
+### Internal
+
+- Repo structure Rounds 1 and 2 (#344–#354): the root alias stubs are gone; `desktop/` and
+  `shared/` hold every moved module. Their notes follow, as part of this release.
+
+
 ### Internal -- repo structure Round 1, stage 2: the cross-app modules and the dev-server CLI (2026-09-20; no behaviour change)
 
 - **Four modules moved into `shared/`** behind alias stubs, consumers rewritten: `sefaria_utils.py`,

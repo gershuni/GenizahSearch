@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 9.2.1
+# Dicta Genizah Search Pro 9.3.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,37 +8,26 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 9.2.1?
+## What's New in Version 9.3.0?
 
-**On the web** (deployed 2026-09-17):
+**On the desktop** (installer 9.3.0):
 
-- **Ask the Genizah in ChatGPT.** The GenizahSearch GPT searches the corpus, reads pages, finds
-  letter-level parallels across several witnesses and returns manuscript details with FJMS
-  bibliography, catalog records and source credits, through a bounded API facade with
-  background jobs and paginated results. Start from the new **AI tools** page,
-  [genizahsearch.com/ai](https://genizahsearch.com/ai), which also links the research skill for
-  other AI assistants (with a portable installation guide and a `details` command) and the API guide.
-- **Long research searches** run in isolated, resource-limited workers: interactive searches and
-  background API jobs (submit, poll, fetch, cancel) no longer hit a time cutoff; the synchronous
-  API keeps its deadlines.
-- **Faster, steadier search**: one heavy query can no longer stall the whole site (bounded regex
-  work, a clear error instead of a hang, API `504 core_timeout`); pattern compilation is about
-  7x faster; matching in supervised workers is accelerated.
-- Responsa tabular search: **Within Document** now matches its components anywhere in the transcription.
+- **Fresh Princeton Geniza Project data**: 36,642 documents, with linked images for 87% of
+  PGP fragments (was 57.5%)
+- **Fits small screens and 300% display scaling**: toolbars shrink to icons, then fold into a
+  "More" menu; results fit the window with no horizontal scroll; the viewer always opens on
+  screen
+- **Manuscript Viewer and Browse**: open or copy the page on genizahsearch.com, change the
+  text size (A−/A+), and show or hide the transcription
+- **The viewer follows your Composition filters** and shows each result's category
+- **Fixes**: Composition xlsx library/shelfmark columns, filtered markers in flat view, the
+  Joins Lab other-side search, Hebrew material names in Focus Search, and Composition Search
+  now remembers letter-level search after a restart
 
-**On the desktop** (installer 9.2.1):
-
-- **Manuscript Viewer**: a window of its own, with its own taskbar button; minimize it, keep the
-  search panel in view, and it closes with the app
-- **Local-scope search with no results**: one-click "Search the Genizah corpus instead"
-- **Composition Search** opens on Letter-level search when its index is built (v9.1.0 promised
-  this; a stored default was being read as a choice, so it never happened)
-- **Composition Search**: search type and frequency work again after Letter-level -> Chunk
-- **Oxford images**: translated notice, a Bodleian link in every failure state, and the
-  placeholder icon is no longer shown as a manuscript
+**On the web**: the refreshed PGP data has been live since 2026-09-22.
 
 Earlier releases: [CHANGELOG.md](CHANGELOG.md). The README's previous What's New sections
-(8.1.0 to 9.2.0) are kept in [docs/archive/README_WHATS_NEW_ARCHIVE.md](docs/archive/README_WHATS_NEW_ARCHIVE.md).
+(8.1.0 to 9.2.1) are kept in [docs/archive/README_WHATS_NEW_ARCHIVE.md](docs/archive/README_WHATS_NEW_ARCHIVE.md).
 
 ---
 
@@ -112,7 +101,7 @@ Open the **GenizahSearch GPT** in ChatGPT from [genizahsearch.com/ai](https://ge
 
 ### Desktop Installation
 
-1. **Download:** the installer (`GenizahSearchPro_V9.2.1_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest)
+1. **Download:** the installer (`GenizahSearchPro_V9.3.0_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest)
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 
