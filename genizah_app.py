@@ -24866,7 +24866,7 @@ class GenizahGUI(QMainWindow):
 
                                 if ms_item_rows:
                                     ms_start = report_row
-                                    report_row = _write_report_header(ws_report, report_row, f"{ms_item_rows[0][3]} | {ms_item_rows[0][5]}")
+                                    report_row = _write_report_header(ws_report, report_row, f"{ms_item_rows[0][4]} | {ms_item_rows[0][5]}")
                                     for row_data in ms_item_rows:
                                         report_row = _write_report_row(ws_report, report_row, row_data)
                                     ms_end = report_row - 1

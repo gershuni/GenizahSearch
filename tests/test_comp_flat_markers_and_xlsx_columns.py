@@ -295,3 +295,9 @@ def test_xlsx_every_sheet_puts_each_value_under_its_own_header(tmp_path, monkeyp
                 checked += 1
     # Two manuscripts on both the Raw Data and the Report View sheet.
     assert checked >= 4, checked
+
+    # Report View heads each manuscript's rows with "<shelfmark> | <title>" (Codex, #361).
+    report = next(ws for ws in wb.worksheets if ws.title == "Report View")
+    first_cells = {str(r[0].value) for r in report.iter_rows() if r[0].value}
+    assert "T-S 12.34 | Title one" in first_cells, sorted(first_cells)
+    assert "ENA 555.6 | Title two" in first_cells, sorted(first_cells)
