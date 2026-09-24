@@ -231,3 +231,22 @@ def test_a_fitted_viewer_keeps_a_margin_from_the_screen_edge(viewer):
     assert viewer.pos().x() >= SHORT.left() + m
     assert viewer.pos().y() >= SHORT.top() + m
     assert viewer.pos().x() + viewer.width() + FRAME.left() + FRAME.right() <= SHORT.right() + 1 - m
+
+
+
+def test_text_size_buttons_start_disabled_at_a_saved_limit(monkeypatch):
+    monkeypatch.setattr(rd, "_saved_text_pt", lambda: rd.TEXT_PT_MAX)
+    monkeypatch.setattr(rd.ResultDialog, "load_result_by_index", lambda self, i: None)
+    dlg = rd.ResultDialog(MagicMock(), [{}], 0, MagicMock(), MagicMock())
+    assert not dlg.btn_text_larger.isEnabled() and dlg.btn_text_smaller.isEnabled()
+    dlg.deleteLater()
+
+
+def test_a_confirmation_from_an_overflowed_button_anchors_to_its_row(viewer):
+    _populated(viewer)
+    btn = viewer.btn_rd_copy_web
+    row = btn.parentWidget()
+    assert viewer._visible_anchor(btn) is btn            # on screen: itself
+    btn.move(-10000 - btn.width(), -10000)               # parked, as OverflowLayout does
+    assert viewer._visible_anchor(btn) is row
+    assert viewer._visible_anchor(viewer.btn_view_transcription) is viewer.btn_view_transcription

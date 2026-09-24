@@ -840,6 +840,9 @@ class ResultDialog(QDialog):
         src_layout.addWidget(QLabel("<b>" + tr("Match Context (Source)") + "</b>"))
         self.text_src = QTextBrowser()
         self.text_src.setFont(QFont("SBL Hebrew", self._text_pt))
+        # A viewer reopened at a saved limit shows which way is left (Codex, #362).
+        self.btn_text_smaller.setEnabled(self._text_pt > TEXT_PT_MIN)
+        self.btn_text_larger.setEnabled(self._text_pt < TEXT_PT_MAX)
         self.text_src.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         line_height = self.text_src.fontMetrics().lineSpacing()
         self.text_src.setMinimumHeight(line_height * 3 + 12)
@@ -983,13 +986,26 @@ class ResultDialog(QDialog):
         if pane is not None:
             pane.setVisible(bool(shown))
 
+    @staticmethod
+    def _visible_anchor(widget):
+        """``widget`` if it is on screen, else the row that holds it.
+
+        A button that moved into a row's More menu is parked outside the row
+        (desktop/widgets/overflow_row.py), so a tooltip mapped from it would
+        open off-screen -- "Link copied" chosen from More showed nothing
+        (Codex, #362).
+        """
+        row = widget.parentWidget()
+        if row is not None and not row.rect().intersects(widget.geometry()):
+            return row
+        return widget
+
     def _show_results_filters(self):
         """Show the full result-list filter summary next to its button."""
         text = self.btn_res_filters.toolTip()
         if text:
-            QToolTip.showText(
-                self.btn_res_filters.mapToGlobal(self.btn_res_filters.rect().bottomLeft()),
-                text, self.btn_res_filters)
+            anchor = self._visible_anchor(self.btn_res_filters)
+            QToolTip.showText(anchor.mapToGlobal(anchor.rect().bottomLeft()), text, anchor)
 
     def set_results_filter_summary(self, summary):
         """Composition caller: the frozen one-line summary of the result-list filters
@@ -3079,9 +3095,9 @@ class ResultDialog(QDialog):
                                     tr("This page is not on genizahsearch.com."))
             return
         QApplication.clipboard().setText(url)
-        QToolTip.showText(
-            self.btn_rd_copy_web.mapToGlobal(self.btn_rd_copy_web.rect().bottomLeft()),
-            tr("Link copied") + "\n" + url, self.btn_rd_copy_web)
+        anchor = self._visible_anchor(self.btn_rd_copy_web)
+        QToolTip.showText(anchor.mapToGlobal(anchor.rect().bottomLeft()),
+                          tr("Link copied") + "\n" + url, anchor)
 
     def _rd_copy_page_citation(self):
         """Cite the folio this dialog is showing.
