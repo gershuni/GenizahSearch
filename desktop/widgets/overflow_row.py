@@ -465,18 +465,26 @@ def populate_menu_from_buttons(menu: QMenu, widgets) -> int:
             # Symbol-only tool buttons ("“”", "🔗"): the tooltip is the name.
             text = f"{w.text()}  {w.toolTip()}".strip()
         sub = w.menu() if isinstance(w, QToolButton) else None
-        if sub is not None and not sub.isEmpty():
-            act = menu.addMenu(sub)
-            act.setText(text)
-        else:
+        # A split button (MenuButtonPopup: its own action plus a dropdown) keeps
+        # both. The menu is attached even when it is empty now: many are filled
+        # by their aboutToShow handler (the viewer's Joins menu), which runs
+        # when the submenu opens (Codex, #362).
+        split = (sub is not None and w.popupMode()
+                 == QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        if sub is None or split:
             act = menu.addAction(w.icon(), text)
             act.setToolTip(w.toolTip())
             if w.isCheckable():
                 act.setCheckable(True)
                 act.setChecked(w.isChecked())
             act.triggered.connect(lambda _checked=False, b=w: b.click())
-        act.setEnabled(w.isEnabled())
-        n += 1
+            act.setEnabled(w.isEnabled())
+            n += 1
+        if sub is not None:
+            sub_act = menu.addMenu(sub)
+            sub_act.setText(f"{text} \u25b8" if split else text)
+            sub_act.setEnabled(w.isEnabled())
+            n += 1
     return n
 
 

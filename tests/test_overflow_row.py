@@ -276,3 +276,26 @@ def test_a_group_folds_into_its_own_menu_only_when_needed():
     assert in_group and all(m in members for m in in_group)     # ...then sources, into Sources
     assert other in row.row.overflowed_in(None) and other not in in_group
     assert row.rect().intersects(grp.geometry())
+
+
+
+def test_a_lazily_filled_tool_button_menu_stays_a_submenu():
+    """Codex, #362: the viewer's Joins menu is empty until its aboutToShow fills
+    it; in More it must stay a submenu (with the button's own action too, for a
+    split button) instead of becoming a plain click."""
+    from PyQt6.QtWidgets import QMenu
+    holder = QWidget()
+    joins = QToolButton(holder)
+    joins.setText("\U0001f517")
+    joins.setToolTip("View joined fragments")
+    joins.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+    lazy = QMenu(joins)
+    lazy.aboutToShow.connect(lambda: lazy.addAction("fragment A") if lazy.isEmpty() else None)
+    joins.setMenu(lazy)
+    m = QMenu()
+    assert populate_menu_from_buttons(m, [joins]) == 2
+    acts = m.actions()
+    assert acts[0].menu() is None                  # the button's own action
+    assert acts[1].menu() is lazy                  # the lazy submenu, still attached
+    lazy.aboutToShow.emit()
+    assert [a.text() for a in lazy.actions()] == ["fragment A"]

@@ -100,8 +100,11 @@ def test_all_columns_fit_without_sideways_scrolling(rtl):
 def test_a_narrow_view_shrinks_the_other_columns_before_hiding_anything():
     t, f = _fit_table(450)
     assert _used(t) <= t.viewport().width()
-    assert t.columnWidth(3) == f.min_flex or t.columnWidth(3) >= f.min_flex
-    assert all(t.columnWidth(c) >= f.min_other or t.columnWidth(c) == 30 for c in (0, 1, 2, 4, 5))
+    # Fitting inside the view wins over the soft floors (Codex, #362); Qt's own
+    # minimum section size is the hard one.
+    floor = t.horizontalHeader().minimumSectionSize()
+    assert all(t.columnWidth(c) >= floor for c in range(6))
+    assert t.columnWidth(3) >= max(t.columnWidth(c) for c in (1, 2, 4, 5))   # the snippet still leads
 
 
 def test_widening_another_column_takes_from_the_snippet_and_is_kept():
@@ -173,3 +176,21 @@ def test_dragging_a_column_in_the_real_header_moves_the_edge_the_reader_drags(rt
     assert t.columnWidth(2) == 180
     assert t.columnWidth(3) == snippet - 30
     assert _used(t) <= t.viewport().width()
+
+
+
+def test_even_the_floors_never_push_past_the_view():
+    """Codex, #362: 13 Search columns in an 800 px window -- the fixed columns,
+    the 48 px floors and the 160 px snippet floor alone exceed the viewport, and
+    the fitter used to hand out that width anyway, bringing the scrollbar back."""
+    t = QTableWidget(5, 13)
+    for c in range(13):
+        t.setColumnWidth(c, 120)
+    t.setColumnWidth(7, 600)                        # the snippet
+    t.resize(560, 300)
+    t.show()
+    QApplication.processEvents()
+    f = cc.ColumnFitter(t, t.horizontalHeader(), [7])
+    f.fit()
+    assert _used(t) <= t.viewport().width()
+    assert all(t.columnWidth(c) >= t.horizontalHeader().minimumSectionSize() for c in range(13))

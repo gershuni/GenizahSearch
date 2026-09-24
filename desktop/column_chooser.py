@@ -142,6 +142,32 @@ class ColumnFitter(QObject):
         if self.auto:
             self._timer.start()
 
+    def _bound_to(self, limit, want, widths):
+        h = self.header
+        cols = {**want, **widths}
+        over = sum(cols.values()) - limit
+        if over <= 0:
+            return
+        floor = max(h.minimumSectionSize(), 1)
+        give = {c: max(w - floor, 0) for c, w in cols.items()
+                if h.sectionResizeMode(c) != QHeaderView.ResizeMode.Fixed}
+        total = sum(give.values())
+        if not total:
+            return                        # only fixed columns left: nothing to give
+        cut = {c: min(g, over * g // total) for c, g in give.items()}
+        left = over - sum(cut.values())
+        for c, g in give.items():
+            if left <= 0:
+                break
+            more = min(g - cut[c], left)
+            cut[c] += more
+            left -= more
+        for c, n in cut.items():
+            if c in want:
+                want[c] -= n
+            else:
+                widths[c] -= n
+
     def refit(self):
         self.auto = True
         self.fit()
@@ -187,6 +213,11 @@ class ColumnFitter(QObject):
             widths[c] = max(self.min_flex, avail * weights[c] // total_w)
             used += widths[c]
         widths[flex[-1]] = max(self.min_flex, avail - used)
+        # Still wider than the view (the floors alone do not fit, e.g. 13 Search
+        # columns in an 800 px window): scale every resizable column down toward
+        # Qt's own minimum section size, so the total never exceeds the view --
+        # a floor must not hand out width that is not there (Codex, #362).
+        self._bound_to(vw - 1, want, widths)
         self._busy = True
         try:
             for c, w in want.items():
