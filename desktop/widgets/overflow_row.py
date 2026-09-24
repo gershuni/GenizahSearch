@@ -221,6 +221,10 @@ class OverflowLayout(QLayout):
         """The menu buttons ``dropped`` entries need: one per group they belong
         to, plus More for the ungrouped ones."""
         out, seen = [], set()
+        # Only an entry a menu can hold (a button) calls for a menu button: a
+        # dropped label leaves the row with no entry, and an empty "Export"
+        # menu in its place would take room from real actions (Codex, #362).
+        dropped = [e for e in dropped if isinstance(e.item.widget(), QAbstractButton)]
         for e in dropped:
             g = e.group
             if g is not None and g in self._groups and g not in seen:

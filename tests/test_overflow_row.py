@@ -299,3 +299,19 @@ def test_a_lazily_filled_tool_button_menu_stays_a_submenu():
     assert acts[1].menu() is lazy                  # the lazy submenu, still attached
     lazy.aboutToShow.emit()
     assert [a.text() for a in lazy.actions()] == ["fragment A"]
+
+
+def test_a_dropped_label_alone_does_not_bring_an_empty_menu():
+    """Codex, #362: dropping only the "Export Results:" label showed an empty
+    Export menu, taking room from the format buttons."""
+    host, row = _row(1000)
+    lbl = QLabel("Export Results:")
+    lbl.setFixedSize(120, 30)
+    row.add(lbl, priority=1)
+    for t in ("XLSX", "CSV"):
+        row.add(_btn(t, w=60), priority=0)
+    _settle(host)
+    host.resize(60 + 6 + 60 + 20, 40)            # the two buttons fit; the label does not
+    _settle(host)
+    assert row.overflowed() == [lbl]
+    assert not row.rect().intersects(row.more_button.geometry())   # no empty More
