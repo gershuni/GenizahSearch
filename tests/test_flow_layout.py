@@ -195,3 +195,19 @@ def test_flow_widget_height_for_width_in_vbox_layout():
 
     assert narrow_height > wide_height
     host.close()
+
+
+def test_an_exactly_full_row_does_not_wrap_its_last_item():
+    """Codex, #362: QRect.right() is inclusive, so the old comparison wrapped the
+    last item of a row that fit exactly, and heightForWidth(sizeHint().width())
+    reported two rows for a one-row layout."""
+    from desktop.widgets.flow_layout import FlowLayout
+    host = QWidget()
+    lay = FlowLayout(host, margin=0, h_spacing=6, v_spacing=6)
+    for _ in range(3):
+        b = QPushButton("x")
+        b.setFixedSize(100, 30)
+        lay.addWidget(b)
+    one_row = lay.sizeHint().width()
+    assert lay.heightForWidth(one_row) == 30
+    assert lay.heightForWidth(one_row - 1) > 30

@@ -15383,6 +15383,18 @@ class GenizahGUI(QMainWindow):
         return (max(min(floor[0], g.width() - margin), 320),
                 max(min(floor[1], g.height() - margin), 240))
 
+    def showEvent(self, event):  # noqa: N802 - Qt API
+        super().showEvent(event)
+        # The floor follows the window's CURRENT screen: moved to a 300%-scaled
+        # second monitor, a floor derived from a large primary one would keep
+        # it from fitting (Codex, #362).
+        handle = self.windowHandle()
+        if handle is not None and not getattr(self, '_floor_follows_screen', False):
+            self._floor_follows_screen = True
+            handle.screenChanged.connect(
+                lambda scr: self.setMinimumSize(*self._main_window_floor(scr)))
+            self.setMinimumSize(*self._main_window_floor(handle.screen()))
+
     def _fill_sections_menu(self):
         """The All sections menu: one entry per tab, the current one checked."""
         menu = self._corner_sections_menu

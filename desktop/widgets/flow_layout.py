@@ -204,7 +204,9 @@ class FlowLayout(QLayout):
             item_size = item.sizeHint().expandedTo(item.minimumSize())
             next_x = x + item_size.width() + h_space
 
-            if next_x - h_space > effective_rect.right() and line_height > 0:
+            # The item's right edge is next_x - h_space - 1 (QRect.right() is
+            # inclusive): an exactly-full row must not wrap its last item (Codex, #362).
+            if next_x - h_space - 1 > effective_rect.right() and line_height > 0:
                 flush_row(y, line_height)
                 row_items = []
                 x = effective_rect.x()
