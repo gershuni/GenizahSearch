@@ -1210,7 +1210,7 @@ def test_the_method_row_leads_the_panel():
     seg = _function_source('create_composition_tab')
     method = seg.index('in_l.addLayout(method_row)')
     boundary = seg.index('in_l.addLayout(boundary_row)')
-    passage = seg.index('in_l.addLayout(passage_row)')
+    passage = seg.index('in_l.addWidget(self.comp_passage_row)')  # wraps since 2026-09-24
     assert method < boundary, (
         'the paragraph controls come before the method that selects them')
     assert method < passage < boundary, (

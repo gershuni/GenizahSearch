@@ -489,7 +489,7 @@ def test_cite_this_page_is_on_the_browse_toolbar():
     assert 'self.btn_b_cite = QPushButton(' in code, (
         'the Browse toolbar has no cite button, so the page citation removed '
         'from the bar has nowhere to live')
-    assert 'nav_bar.addWidget(self.btn_b_cite)' in code, (
+    assert 'nav_bar.add(self.btn_b_cite, 1)' in code, (  # an overflow row since 2026-09-24
         'the cite button is not on the Browse toolbar')
     assert 'self.btn_b_cite.clicked.connect(self.copy_page_citation)' in code
     assert 'self.btn_b_cite.setEnabled(False)' in code, (

@@ -363,16 +363,21 @@ def test_flat_view_entries_are_category_all(qt):
 # ------------------------------------------------------------------ ResultDialog -----
 
 def _ctx_stub(qt, results, idx=0, summary=""):
-    from PyQt6.QtWidgets import QLabel, QWidget
+    from PyQt6.QtWidgets import QLabel, QPushButton, QToolButton, QWidget
     from desktop.result_dialog import ResultDialog
 
     class _D:
         pass
 
+    # Since the high-zoom layout (2026-09-24) the category, a Filters button that
+    # holds the summary, and "Back to results" sit in the navigation row instead
+    # of a strip of their own. Parented so that isHidden() means "hidden by code".
     d = _D()
-    d.results_context_bar = QWidget()
-    d.lbl_res_category = QLabel()
-    d.lbl_res_filters = QLabel()
+    d._host = QWidget()
+    d.lbl_res_category = QLabel(d._host)
+    d.lbl_res_count = QLabel(d._host)
+    d.btn_res_filters = QToolButton(d._host)
+    d.btn_back_to_results = QPushButton(d._host)
     d.all_results = results
     d.current_result_idx = idx
     d._results_filter_summary = summary
@@ -386,8 +391,11 @@ def test_viewer_shows_category_and_frozen_filter_strip(qt):
     d = _ctx_stub(qt, [{"category": cat}], summary="Filters from the results list: X")
     d._update_results_context()
     assert d.lbl_res_category.text() == "Filtered — Dup"
-    assert "X" in d.lbl_res_filters.text()
-    assert not d.results_context_bar.isHidden()
+    assert not d.lbl_res_category.isHidden()
+    assert d.lbl_res_count.toolTip() == "Filtered — Dup"   # survives the label leaving a narrow row
+    assert "X" in d.btn_res_filters.toolTip()
+    assert not d.btn_res_filters.isHidden()
+    assert not d.btn_back_to_results.isHidden()
 
 
 @pytest.mark.gui
@@ -395,17 +403,18 @@ def test_uncategorized_lists_show_nothing_new(qt):
     """Every other ResultDialog caller, and a row load_by_shelfmark appends."""
     d = _ctx_stub(qt, [{"uid": "x"}])
     d._update_results_context()
-    assert d.results_context_bar.isHidden()
+    assert d.lbl_res_category.isHidden() and d.btn_back_to_results.isHidden()
+    assert d.btn_res_filters.isHidden()
     mixed = _ctx_stub(qt, [{"category": {"id": "main", "label": "Main"}}, {"uid": "y"}],
                       idx=1, summary="S")
     mixed._update_results_context()
-    assert mixed.results_context_bar.isHidden(), (
-        "an appended non-composition result kept the composition filter strip")
-    assert mixed.lbl_res_filters.text() == ""
+    assert mixed.btn_back_to_results.isHidden() and mixed.btn_res_filters.isHidden(), (
+        "an appended non-composition result kept the composition filter controls")
+    assert mixed.btn_res_filters.toolTip() == ""
     mixed.current_result_idx = 0                    # back on a composition entry
     mixed._update_results_context()
-    assert not mixed.results_context_bar.isHidden()
-    assert mixed.lbl_res_filters.text() == "S"
+    assert not mixed.btn_back_to_results.isHidden()
+    assert mixed.btn_res_filters.toolTip() == "S"
 
 
 # ------------------------------------------------------------------ Codex #360 --------

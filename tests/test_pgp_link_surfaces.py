@@ -549,13 +549,15 @@ def test_results_table_wires_the_click_and_double_click_handlers():
 
 def test_browse_pgp_button_is_added_to_the_toolbar_row():
     src = _read("genizah_app.py")
-    assert "ext_info_row.addWidget(self.btn_b_pgp)" in src
+    assert "ext_info_row.add(self.btn_b_pgp, 2)" in src  # an overflow row since #362
 
 
 def test_result_dialog_adds_both_pgp_buttons_to_their_rows():
     src = _read("desktop/result_dialog.py")
-    assert "info_row.addWidget(self.btn_rd_pgp)" in src
-    assert "compact_layout.addWidget(self.btn_compact_pgp)" in src
+    # The info row wraps (FlowWidget) and the compact twins share an overflow row
+    # since the high-zoom layout work (2026-09-24).
+    assert "self.btn_rd_pgp, self.lbl_info" in src and "self.info_flow.add_widget(_w)" in src
+    assert "self.compact_actions.add(self.btn_compact_pgp" in src
 
 
 def test_the_new_tooltip_string_is_translated():

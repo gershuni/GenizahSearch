@@ -153,7 +153,7 @@ def test_folio_label_in_browse_nav(genizah_app_source):
         "Browse nav should have lbl_browse_folio label"
 
     # Check it's added to nav_bar layout
-    assert 'nav_bar.addWidget(self.lbl_browse_folio)' in genizah_app_source, \
+    assert 'nav_bar.add(self.lbl_browse_folio, -1)' in genizah_app_source, \
         "lbl_browse_folio should be added to nav_bar"
 
     # Check that page count label exists

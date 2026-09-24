@@ -5268,3 +5268,26 @@ TRANSLATIONS.update({
     "Filtered result: {}": "תוצאה מסוננת: {}",
     "Excluded from the results by you": "הוחרגה על ידך מן התוצאות",
 })
+
+# Desktop layout for low-resolution / high-zoom screens (2026-09-24): overflow
+# menus, the Manuscript Viewer's reading views and image controls.
+TRANSLATIONS.update({
+    "More": "עוד",
+    "Sources": "מקורות",
+    "Show the image": "הצגת התמונה",
+    "Show the text": "הצגת הטקסט",
+    "Image adjustments": "כוונון תמונה",
+    "{} matching pages": "{} עמודים תואמים",
+    "All sections": "כל הלשוניות",
+    "Columns": "עמודות",
+    "Show all columns": "הצגת כל העמודות",
+    "Fit columns to window": "התאמת העמודות לחלון",
+    "Open on the website": "פתיחה באתר",
+    "Copy link": "העתקת קישור",
+    "Link copied": "הקישור הועתק",
+    "Open this page on genizahsearch.com": "פתיחת עמוד זה באתר genizahsearch.com",
+    "Copy a link to this page on genizahsearch.com": "העתקת קישור לעמוד זה באתר genizahsearch.com",
+    "This page is not on genizahsearch.com.": "עמוד זה אינו נמצא באתר genizahsearch.com.",
+    "Smaller text": "הקטנת הטקסט",
+    "Larger text": "הגדלת הטקסט",
+})
