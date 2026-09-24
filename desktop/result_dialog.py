@@ -396,6 +396,25 @@ class ResultDialog(QDialog):
         self.btn_compact_cite.clicked.connect(self._rd_copy_page_citation)
         self.compact_actions.add(self.btn_compact_cite, 0)
 
+        # Website twins (Codex, #362): compact mode hides the header, which holds
+        # "Open on the website" and "Copy link"; like Cite and PGP they need a
+        # compact counterpart, driven by the same handlers and hidden together
+        # for a My Library document.
+        self.btn_compact_open_web = QToolButton()
+        self.btn_compact_open_web.setIcon(QApplication.windowIcon())
+        if QApplication.windowIcon().isNull():
+            self.btn_compact_open_web.setText("\u2197")
+        self.btn_compact_open_web.setToolTip(tr("Open this page on genizahsearch.com"))
+        self.btn_compact_open_web.setAccessibleName(tr("Open on the website"))
+        self.btn_compact_open_web.clicked.connect(self._rd_open_on_web)
+        self.compact_actions.add(self.btn_compact_open_web, 1)
+        self.btn_compact_copy_web = QToolButton()
+        self.btn_compact_copy_web.setText("\U0001f4cb")
+        self.btn_compact_copy_web.setToolTip(tr("Copy a link to this page on genizahsearch.com"))
+        self.btn_compact_copy_web.setAccessibleName(tr("Copy link"))
+        self.btn_compact_copy_web.clicked.connect(self._rd_copy_web_link)
+        self.compact_actions.add(self.btn_compact_copy_web, 0)
+
         # Translation toggle (compact)
         self.btn_compact_translations = QPushButton()
         self.btn_compact_translations.setCheckable(True)
@@ -2703,8 +2722,9 @@ class ResultDialog(QDialog):
             _is_local_hit = bool(_src_id and _is_local(_src_id) and self._app)
             # Not on the website: the reader's own file.
             _on_web = not (_src_id and _is_local(_src_id))
-            self.btn_rd_open_web.setVisible(_on_web)
-            self.btn_rd_copy_web.setVisible(_on_web)
+            for _b in (self.btn_rd_open_web, self.btn_rd_copy_web,
+                       self.btn_compact_open_web, self.btn_compact_copy_web):
+                _b.setVisible(_on_web)
             if _is_local_hit:
                 # Look up filepath from the indexer via parent app helper
                 _fp = None

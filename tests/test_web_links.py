@@ -155,3 +155,17 @@ def test_main_window_floor_never_exceeds_the_screen():
     assert w <= 640 and h <= 330
     big = SimpleNamespace(availableGeometry=lambda: QRect(0, 0, 1920, 1040))
     assert genizah_app.GenizahGUI._main_window_floor(big) == (800, 520)
+
+
+
+@pytest.mark.gui
+def test_compact_mode_keeps_both_website_actions(viewer):
+    """Codex, #362: compact mode hides the header, which holds both buttons."""
+    from PyQt6.QtWidgets import QApplication
+    viewer.current_sys_id, viewer.current_p_num, viewer.current_volume_ie = SID, 3, None
+    viewer._toggle_compact_mode(True)
+    assert viewer.compact_bar.isVisibleTo(viewer) and not viewer.header_widget.isVisibleTo(viewer)
+    viewer.btn_compact_open_web.click()
+    assert viewer._opened == [f"{GENIZAHSEARCH_URL}/browse?sys_id={SID}&page=3"]
+    viewer.btn_compact_copy_web.click()
+    assert QApplication.clipboard().text().endswith(f"sys_id={SID}&page=3")
