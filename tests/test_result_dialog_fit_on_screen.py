@@ -250,3 +250,16 @@ def test_a_confirmation_from_an_overflowed_button_anchors_to_its_row(viewer):
     btn.move(-10000 - btn.width(), -10000)               # parked, as OverflowLayout does
     assert viewer._visible_anchor(btn) is row
     assert viewer._visible_anchor(viewer.btn_view_transcription) is viewer.btn_view_transcription
+
+
+
+def test_a_screen_too_short_for_the_full_header_opens_compact(viewer):
+    """Codex, #362: 1920x1080 at 300% is ~640x360 logical px; the full header does
+    not fit, so the viewer switches to its compact header rather than running off
+    the bottom. A screen the full header fits keeps it."""
+    _populated(viewer)
+    viewer.fit_on_screen(QPoint(960, 520), _Screen(QRect(0, 0, 1920, 1040)))
+    assert not viewer.btn_compact_toggle.isChecked()
+    viewer.fit_on_screen(QPoint(320, 180), _Screen(QRect(0, 0, 640, 330)))
+    assert viewer.btn_compact_toggle.isChecked()
+    assert viewer.header_widget.isHidden()

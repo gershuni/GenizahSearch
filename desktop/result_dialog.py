@@ -205,6 +205,16 @@ class ResultDialog(QDialog):
         # of every row cut off in the Hebrew UI (owner screenshot, 2026-09-24).
         m = SCREEN_MARGIN
         inner = avail.adjusted(m, m, -m, -m) if avail.width() > 4 * m and avail.height() > 4 * m else avail
+        # Too short even for the full header (1920x1080 at 300% leaves ~360 px):
+        # switch to the compact header, which the reader can expand again with the
+        # toggle, instead of letting the window run off the bottom (Codex, #362).
+        # Measured on the laid-out window only -- before show() Qt reports an
+        # understated minimum -- so a screen the full header fits keeps it.
+        if (self.isVisible() and not self.btn_compact_toggle.isChecked()
+                and self.minimumSizeHint().height() + frame.top() + frame.bottom()
+                > inner.height()):
+            self._toggle_compact_mode(True)
+            self.layout().activate()
         top_left, size = fit_window_geometry(
             inner, self.size(), self.minimumSizeHint(), center, frame)
         if size != self.size():
