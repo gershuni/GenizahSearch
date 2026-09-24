@@ -144,3 +144,14 @@ def test_every_change_of_the_browse_document_resyncs_its_buttons():
     missing = [i + 1 for i in sites[1:]            # [0] is the __init__ default
                if "_sync_browse_cite_button()" not in src[i + 1]]
     assert not missing, f"genizah_app.py lines {missing} change the Browse document without re-syncing"
+
+
+def test_main_window_floor_never_exceeds_the_screen():
+    """Codex, #362: 1920x1080 at 300% is about 640x360 logical px."""
+    from PyQt6.QtCore import QRect
+    import genizah_app
+    scr = SimpleNamespace(availableGeometry=lambda: QRect(0, 0, 640, 330))
+    w, h = genizah_app.GenizahGUI._main_window_floor(scr)
+    assert w <= 640 and h <= 330
+    big = SimpleNamespace(availableGeometry=lambda: QRect(0, 0, 1920, 1040))
+    assert genizah_app.GenizahGUI._main_window_floor(big) == (800, 520)

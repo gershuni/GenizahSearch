@@ -1381,7 +1381,7 @@ class GenizahGUI(QMainWindow):
         # window could not fit at all. The toolbars now wrap and overflow into
         # menus (2026-09-24); Qt still keeps the window at least as large as
         # its layouts need.
-        self.setMinimumSize(800, 520)
+        self.setMinimumSize(*self._main_window_floor())
         log_tls_relaxation_notice()
 
         self.meta_mgr = None
@@ -15369,6 +15369,19 @@ class GenizahGUI(QMainWindow):
         # exec() blocks; the workbench caller calls _reload_known_joins() after this returns
         # (SC#4 / Pitfall 3).
         dialog.exec()
+
+    @staticmethod
+    def _main_window_floor(screen=None, floor=(800, 520), margin=16):
+        """The main window's minimum size: 800x520, but never more than the
+        screen offers. At 300% a 1920x1080 display is about 640x360 logical px,
+        and a fixed floor above that kept controls off the screen (Codex, #362).
+        """
+        scr = screen or QApplication.primaryScreen()
+        if scr is None:
+            return floor
+        g = scr.availableGeometry()
+        return (max(min(floor[0], g.width() - margin), 320),
+                max(min(floor[1], g.height() - margin), 240))
 
     def _fill_sections_menu(self):
         """The All sections menu: one entry per tab, the current one checked."""
