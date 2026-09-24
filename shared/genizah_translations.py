@@ -5239,3 +5239,22 @@ TRANSLATIONS.update({
     "New: ask the Genizah in ChatGPT - the GenizahSearch GPT, a research skill for other AI assistants, and the public API, from the AI tools page.":
         "חדש: שאלו את הגניזה ב־ ChatGPT – ה־GPT של GenizahSearch, סקיל מחקר לעוזרי AI אחרים וה־API הציבורי, הכול מעמוד כלי ה־AI.",
 })
+
+# Composition Manuscript Viewer: result category, the frozen result-list filter strip,
+# and the way back to the list (user letter, Tishrei 5787 -- A4/A5).
+TRANSLATIONS.update({
+    "Main results group": "תוצאות ראשיות",
+    "Appendix group": "נספח",
+    "Filtered group": "מסוננים",
+    "Excluded group": "מוחרגים",
+    "All results group": "כל התוצאות",
+    "Back to results": "חזרה לתוצאות",
+    "Show the results list, where the filters can be changed": "הצגת רשימת התוצאות, שבה אפשר לשנות את הסינונים",
+    "This result is hidden by the current filters": "תוצאה זו מוסתרת על ידי הסינונים הנוכחיים",
+    "Filters from the results list: {}": "סינונים מרשימת התוצאות: {}",
+    '{} contains "{}"': '{} מכיל "{}"',
+    '{} does not contain "{}"': '{} אינו מכיל "{}"',
+    "My Library only": "הספרייה שלי בלבד",
+    "My Library hidden": "הספרייה שלי מוסתרת",
+    "{} domains excluded": "{} תחומים הוחרגו",
+})

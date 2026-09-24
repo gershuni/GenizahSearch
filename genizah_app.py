@@ -71,6 +71,7 @@ from desktop.title_helpers import (
 )
 from desktop.image_loader import ImageLoaderThread
 from desktop.result_dialog import ResultDialog
+from desktop import comp_view_filter as _cvf
 from desktop.dialogs_scholarly import FjmsBibliographyDialog, FjmsCatalogDialog, FjmsMeasurementsDialog, NliBibliographyDialog  # noqa: F401
 from desktop.dialogs_filter import ExcludeDialog, DomainFilterDialog, PreSearchFilterDialog, LibraryFilterDialog, library_apply_selection  # noqa: F401
 from desktop.viewers import ZoomableScrollArea, FullscreenImageWindow, ManuscriptViewerWidget, _make_scrollable_row, _generate_oxford_dynamic_url  # noqa: F401
@@ -1402,6 +1403,7 @@ class GenizahGUI(QMainWindow):
         self.comp_filtered_summary = {}
         self.comp_raw_items = []
         self.comp_raw_filtered = []
+        self._comp_view_groups = []  # ordered result groups as the tree shows them
         self.comp_grouped_main = []
         self.comp_grouped_appendix = {}
         self.comp_grouped_summary = {}
@@ -15011,7 +15013,7 @@ class GenizahGUI(QMainWindow):
         self._puzzle_window.raise_()
         self._puzzle_window.activateWindow()
 
-    def _show_result_dialog(self, results, index):
+    def _show_result_dialog(self, results, index, filter_summary=None):
         """Open the Manuscript Viewer (ResultDialog) as an independent,
         non-modal window, and keep the one reference that owns it.
 
@@ -15047,6 +15049,10 @@ class GenizahGUI(QMainWindow):
                 and not sip.isdeleted(previous)):
             previous.close()
         dlg = ResultDialog(self, results, index, self.meta_mgr, self.searcher)
+        if filter_summary is not None:
+            # Composition: the frozen summary of the result-list filters that shaped
+            # this list (the viewer keeps its snapshot; reopen for a new one).
+            dlg.set_results_filter_summary(filter_summary)
         if not nested:
             self._result_dialog = dlg
         dlg.finished.connect(
@@ -19560,35 +19566,14 @@ class GenizahGUI(QMainWindow):
             self.lbl_comp_domain_filter.setStyleSheet("color: #9b59b6; font-size: 11px;")
 
     def _apply_comp_domain_exclusions(self):
-        """Apply domain exclusions by hiding/showing composition tree items."""
-        if not self._comp_domain_exclusions:
-            # Show all items
-            root = self.comp_tree.invisibleRootItem()
-            for i in range(root.childCount()):
-                section = root.child(i)
-                for j in range(section.childCount()):
-                    section.child(j).setHidden(False)
-            return
+        """Apply domain exclusions by hiding/showing composition tree items.
 
-        hide_uncategorized = "Uncategorized" in self._comp_domain_exclusions
-        root = self.comp_tree.invisibleRootItem()
-        for i in range(root.childCount()):
-            section = root.child(i)
-            for j in range(section.childCount()):
-                node = section.child(j)
-                item_data = node.data(0, Qt.ItemDataRole.UserRole)
-                if not item_data or not isinstance(item_data, dict):
-                    continue
-                sid = item_data.get('sys_id')
-                if not sid:
-                    sid, _ = self.meta_mgr.parse_header_smart(item_data.get('raw_header', ''))
-                result_domains = self._comp_result_domain_map.get(sid, []) if sid else []
-                if not result_domains:
-                    node.setHidden(hide_uncategorized)
-                elif all(d in self._comp_domain_exclusions for d in result_domains):
-                    node.setHidden(True)
-                else:
-                    node.setHidden(False)
+        Domain exclusions are one of the filters in the shared composition rule
+        (desktop/comp_view_filter.py), so this re-runs the whole cascade. The old
+        separate pass saw only the immediate children of each section -- it missed
+        grouped Appendix/Filtered rows -- and clearing domains unhid rows a column
+        filter still excluded (and vice versa)."""
+        self._apply_comp_tree_filters()
 
     def _open_query_builder(self):
         """Open the tabular query builder dialog."""
@@ -22043,32 +22028,236 @@ class GenizahGUI(QMainWindow):
             else:
                 self.chk_comp_header.set_filter_active(column, column in self.comp_filters)
 
-    def _apply_comp_tree_filters(self):
-        root = self.comp_tree.invisibleRootItem()
+    # ------------------------------------------------------------------------------
+    # Composition result filtering: ONE rule for the tree and the Manuscript Viewer
+    # (desktop/comp_view_filter.py). Manuscript-level filters keep or drop a whole
+    # manuscript; the Context / MS Context text filters keep only matching pages.
+    # ------------------------------------------------------------------------------
 
-        # Phase 95 REQ-6 — LOCAL filter cascade joinpoint (composition + parallels surface).
+    def _comp_ms_display(self, ms_item):
+        """Display fields of a composition manuscript/part row: shelfmark, library
+        and title. The single source for BOTH row builders and the filter rule, so a
+        filter judges what the tree shows even for rows not drawn yet."""
+        def lib(sid):
+            code = self.meta_mgr.get_library_for_id(sid) if sid else ''
+            return code, (get_library_display(code, short=False) if code else '')
+
+        item_type = ms_item.get('type', '')
+        if item_type == 'part':
+            sid = ms_item.get('sys_id', '')
+            part_display = ms_item.get('part_display', '')
+            code, full = lib(sid)
+            return {
+                'sys_id': sid,
+                'shelf': f"📖 {part_display}" if part_display else sid,
+                'library_code': code, 'library_full': full,
+                'title': _resolve_display_title(sid, ms_item.get('oxford_title', '') or "", compact=True),
+                'is_local': False,
+            }
+        if item_type == 'manuscript':
+            sid = ms_item['sys_id']
+            if self._comp_item_is_local(ms_item):
+                shelf, local_library = self._comp_local_display_fields(
+                    sid, ms_item.get('shelfmark', ''))
+                return {'sys_id': sid, 'shelf': shelf, 'library_code': local_library,
+                        'library_full': local_library, 'title': '', 'is_local': True}
+            shelf, t = self.meta_mgr.get_meta_for_id(sid)
+            if not shelf or shelf == "Unknown":
+                header_shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
+                if header_shelf:
+                    shelf = header_shelf
+            code, full = lib(sid)
+            return {'sys_id': sid, 'shelf': shelf, 'library_code': code, 'library_full': full,
+                    'title': _resolve_display_title(sid, t or "", compact=True), 'is_local': False}
+        sid, _, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
+        code, full = lib(sid)
+        return {'sys_id': sid, 'shelf': shelf, 'library_code': code, 'library_full': full,
+                'title': _resolve_display_title(sid, title, compact=True),
+                'is_local': self._comp_item_is_local(ms_item)}
+
+    def _comp_shelf_cells(self, ms_item, shelf):
+        """The Shelfmark cell text of a manuscript/part row and of each of its page
+        rows, exactly as the row builders draw them -- e.g. "T-S 1 (Image 3)",
+        "📖 Part (2 matches, 3 folios)", "Image 4 [2v]". One formatter for the
+        builders and the filter, so a Shelfmark filter matches the visible text.
+
+        Returns (manuscript_cell, {page_key: page_cell}).
+        """
+        # The builders ask once per row of a manuscript; remember the last answer.
+        # The cache holds the item itself, so identity is checked with `is` (a
+        # held reference cannot be recycled, unlike an id()).
+        last = getattr(self, '_comp_shelf_cells_last', None)
+        if last is not None and last[0] is ms_item and last[1] == shelf:
+            return last[2]
+        result = self._comp_shelf_cells_uncached(ms_item, shelf)
+        self._comp_shelf_cells_last = (ms_item, shelf, result)
+        return result
+
+    def _comp_shelf_cells_uncached(self, ms_item, shelf):
+        item_type = ms_item.get('type', '')
+        pages = ms_item.get('pages', []) or []
+        page_cells = {}
+        if item_type == 'part':
+            base = shelf
+            cells = []
+            for p in pages:
+                _, p_num, p_shelf, _ = self._get_meta_for_header(p.get('raw_header', ''))
+                folio_info = f" [{p_shelf}]" if p_shelf else ""
+                cells.append((p, p_num, folio_info))
+                page_cells[_cvf.page_key(p)] = f"{tr('Image')} {p_num}{folio_info}"
+            if len(pages) == 1:
+                _, p_num, folio_info = cells[0]
+                return f"{base} ({tr('Image')} {p_num}{folio_info})", page_cells
+            if pages:
+                folios = ms_item.get('folios', []) or []
+                folio_count = f", {len(folios)} folios" if len(folios) > 1 else ""
+                return f"{base} ({len(pages)} matches{folio_count})", page_cells
+            return base, page_cells
+        if item_type == 'manuscript':
+            base = shelf or tr('Unknown Shelfmark')
+            nums = []
+            for p in pages:
+                _, p_num, _, _ = self._get_meta_for_header(p.get('raw_header', ''))
+                nums.append(p_num)
+                page_cells[_cvf.page_key(p)] = f"{tr('Image')} {p_num}"
+            if len(pages) == 1:
+                return f"{base} ({tr('Image')} {nums[0]})", page_cells
+            if pages:
+                return f"{base} ({tr('Image')} {nums[0]}...)", page_cells
+            return base, page_cells
+        return shelf, page_cells
+
+    def _comp_ms_sys_id(self, ms_item):
+        sid = ms_item.get('sys_id') if isinstance(ms_item, dict) else None
+        if not sid and isinstance(ms_item, dict):
+            sid, _ = self.meta_mgr.parse_header_smart(ms_item.get('raw_header', ''))
+        return sid or ''
+
+    def _comp_filter_population(self):
+        """Every composition item the tree can show, drawn or not."""
+        groups = getattr(self, '_comp_view_groups', None)
+        if groups:
+            return [it for g in groups for it in g.items]
+        return list(getattr(self, 'comp_raw_items', []) or [])
+
+    def _comp_filter_state(self):
+        """The current tree filters, frozen, plus the host lookups the rule needs.
+
+        Also settles the LOCAL filter's no-op rule and chip exactly as before: LOCAL
+        only/hidden is a no-op (with the inline chip) when no LOCAL hit exists.
+        """
         _from_parallels = getattr(self, '_comp_results_from_parallels', False)
         if _from_parallels:
-            _local_state_comp = getattr(self, '_local_filter_state_parallels', 'all')
-            _local_chip_surface = 'parallels'
+            local_state = getattr(self, '_local_filter_state_parallels', 'all')
+            chip_surface = 'parallels'
         else:
-            _local_state_comp = getattr(self, '_local_filter_state_composition', 'all')
-            _local_chip_surface = 'composition'
-        # Gather all comp_raw_items to determine LOCAL presence for no-op check (D-10 P1).
-        _comp_raw = getattr(self, 'comp_raw_items', []) or []
-        _local_filtered_comp = self._apply_local_filter(_comp_raw, _local_state_comp)
-        # Phase 96 D-F1: drop user-opted-out LOCAL files from the cascade.
-        _local_filtered_comp = self._apply_local_optout_filter(_local_filtered_comp)
-        _local_filter_comp_active = _local_state_comp != 'all'
-        # Phase 96 D-F1: visible-set must also be computed if opt-outs may have hidden hits.
-        _optout_active_comp = bool(getattr(self, '_local_file_optouts', set()))
-        _local_visible_sys_ids_comp = {
-            (r.get('display', {}) or {}).get('id') or r.get('sys_id', '')
-            for r in _local_filtered_comp
-        } if (_local_filter_comp_active or _optout_active_comp) and not self._local_filter_inactive_chip_visible else None
-        self._show_local_filter_chip(_local_chip_surface, self._local_filter_inactive_chip_visible)
+            local_state = getattr(self, '_local_filter_state_composition', 'all')
+            chip_surface = 'composition'
 
-        if not self.comp_filters and self._comp_printed_filter_state == 'all' and not _local_filter_comp_active and not _optout_active_comp:
+        population = self._comp_filter_population()
+        # The LOCAL helpers speak the regular-search shape; present each composition
+        # item that way, using the COMPOSITION-aware LOCAL test (grouped manuscripts
+        # carry `source`, not `display.source`).
+        as_rows = [
+            {'display': {'source': 'LOCAL' if self._comp_item_is_local(it) else '',
+                         'id': self._comp_ms_sys_id(it)}}
+            for it in population
+        ]
+        self._apply_local_filter(as_rows, local_state)   # sets the no-op chip flag
+        chip = self._local_filter_inactive_chip_visible
+        self._show_local_filter_chip(chip_surface, chip)
+        effective_local = 'all' if (local_state == 'all' or chip) else local_state
+
+        optouts_active = bool(getattr(self, '_local_file_optouts', set()))
+
+        col_keys = {
+            self.comp_col_library: 'library',
+            self.comp_col_shelfmark: 'shelfmark',
+            self.comp_col_title: 'title',
+            self.comp_col_context: 'context',
+            self.comp_col_ms_context: 'ms_context',
+            self.comp_col_printed: 'printed',
+        }
+        rules = {col_keys[c]: r for c, r in (self.comp_filters or {}).items() if c in col_keys}
+        state = _cvf.FilterState(
+            column_rules=rules,
+            printed_state=getattr(self, '_comp_printed_filter_state', 'all'),
+            local_state=effective_local,
+            optouts_active=optouts_active,
+            domain_exclusions=frozenset(getattr(self, '_comp_domain_exclusions', None) or ()),
+        )
+
+        printed_ids = getattr(self, '_comp_printed_sys_ids', set()) or set()
+        printed_tag = 'דפוס' if CURRENT_LANG == 'he' else 'Printed'
+        domain_map = getattr(self, '_comp_result_domain_map', {}) or {}
+        display_cache = {}
+
+        def display(ms_item):
+            # Keyed by the row's IDENTITY, never id(): the tree hands back a fresh
+            # copy of the stored dict on every data() call, and a freed copy's id()
+            # is reused -- one manuscript would get another's library/title.
+            key = (ms_item.get('type'), ms_item.get('sys_id'), ms_item.get('part_id'),
+                   ms_item.get('raw_header'))
+            d = display_cache.get(key)
+            if d is None:
+                d = self._comp_ms_display(ms_item)
+                display_cache[key] = d
+            return d
+
+        def ms_fields(ms_item):
+            d = display(ms_item)
+            sid = d.get('sys_id') or ''
+            return {
+                'library': d.get('library_code') or '',
+                # The visible Shelfmark cell, e.g. "T-S 1 (Image 3)" (Codex, #360).
+                'shelfmark': self._comp_shelf_cells(ms_item, d.get('shelf'))[0] or '',
+                'title': d.get('title') or '',
+                'printed': printed_tag if sid and sid in printed_ids else '',
+            }
+
+        def is_opted_out(ms_item):
+            if not self._comp_item_is_local(ms_item):
+                return False
+            row = {'display': {'source': 'LOCAL', 'id': self._comp_ms_sys_id(ms_item)}}
+            return not self._apply_local_optout_filter([row])
+
+        def page_texts(page, ms_item):
+            d = display(ms_item)
+            cells = self._comp_shelf_cells(ms_item, d.get('shelf'))[1]
+            return {
+                'context': self._comp_preview_source_text(
+                    page.get('source_ctx', ''), page.get('highlight_pattern')) or '',
+                'ms_context': page.get('text', '') or '',
+                # A page has a Shelfmark cell of its own only when it has a row:
+                # a multi-page manuscript or part (the builders draw page rows then).
+                'shelfmark': (cells.get(_cvf.page_key(page))
+                              if len(ms_item.get('pages') or []) > 1 else None),
+            }
+
+        host = _cvf.FilterHost(
+            ms_fields=ms_fields,
+            sys_id=self._comp_ms_sys_id,
+            is_printed=lambda sid: sid in printed_ids,
+            is_local=self._comp_item_is_local,
+            is_opted_out=is_opted_out,
+            domains=lambda sid: domain_map.get(sid, []),
+            page_texts=page_texts,
+        )
+        return state, host
+
+    def _apply_comp_tree_filters(self):
+        """Hide/show composition tree rows by the shared rule (comp_view_filter).
+
+        Every filter -- column text, printed, LOCAL (via _apply_local_filter /
+        _apply_local_optout_filter inside _comp_filter_state), and domain exclusions
+        -- goes through this one pass, so applying or clearing one filter can never
+        unhide a row another still excludes. An unexpanded lazy group is judged by
+        its stored items, not by its placeholder child.
+        """
+        root = self.comp_tree.invisibleRootItem()
+        state, host = self._comp_filter_state()
+
+        if not state.active():
             def unhide(node):
                 node.setHidden(False)
                 for j in range(node.childCount()):
@@ -22078,46 +22267,74 @@ class GenizahGUI(QMainWindow):
                 unhide(root.child(i))
             return
 
-        def with_inherited_sys_id(node, data):
-            if data.get('sys_id'):
-                return data
-            parent = node.parent()
-            while parent is not None:
-                parent_data = parent.data(0, Qt.ItemDataRole.UserRole)
-                if isinstance(parent_data, dict) and parent_data.get('sys_id'):
-                    inherited = dict(data)
-                    inherited['sys_id'] = parent_data['sys_id']
-                    return inherited
-                parent = parent.parent()
-            return data
+        def record_of(node):
+            data = node.data(0, Qt.ItemDataRole.UserRole)
+            return data if isinstance(data, dict) else None
 
         def visit(node):
+            lazy = node.data(0, Qt.ItemDataRole.UserRole + 200)
+            if lazy:
+                visible = any(_cvf.eligible_pages(it, state, host) for it in lazy)
+                node.setHidden(not visible)
+                return visible
+            data = record_of(node)
+            parent = node.parent()
+            is_manuscript_row = data is not None and (parent is None or record_of(parent) is None)
+            if is_manuscript_row:
+                kept = {_cvf.page_key(p) for p in _cvf.eligible_pages(data, state, host)}
+                visible = bool(kept)
+                for j in range(node.childCount()):
+                    child = node.child(j)
+                    child_data = record_of(child)
+                    child.setHidden(
+                        not visible
+                        or (child_data is not None and _cvf.page_key(child_data) not in kept))
+                node.setHidden(not visible)
+                return visible
             visible_any = False
-            for i in range(node.childCount()):
-                if visit(node.child(i)):
+            for j in range(node.childCount()):
+                if visit(node.child(j)):
                     visible_any = True
-
-            record_data = node.data(0, Qt.ItemDataRole.UserRole)
-            preview_data = node.data(0, Qt.ItemDataRole.UserRole + 1)
-            if record_data or preview_data:
-                filter_data = with_inherited_sys_id(
-                    node, record_data if isinstance(record_data, dict) else {}
-                )
-                matches = self._comp_data_matches_filters(
-                    node,
-                    filter_data,
-                    _local_visible_sys_ids_comp,
-                    preview_data if isinstance(preview_data, dict) else {},
-                )
-                node_visible = matches or visible_any
-            else:
-                node_visible = visible_any
-
-            node.setHidden(not node_visible)
-            return node_visible
+            node.setHidden(not visible_any)
+            return visible_any
 
         for i in range(root.childCount()):
             visit(root.child(i))
+
+    def _comp_filter_summary(self):
+        """One line naming the active result-list filters, for the Manuscript Viewer.
+
+        Empty when nothing is filtered. A snapshot: the viewer keeps the list it was
+        opened with, and this says which filters shaped that list.
+        """
+        parts = []
+        state = getattr(self, '_comp_printed_filter_state', 'all')
+        if state == 'hide_printed':
+            parts.append(tr('Hiding printed'))
+        elif state == 'only_printed':
+            parts.append(tr('Only printed'))
+        header = self.comp_tree.headerItem()
+        for col, rule in sorted((self.comp_filters or {}).items()):
+            text = (rule.get('text') or '').strip()
+            if not text:
+                continue
+            label = header.text(col) if header else str(col)
+            fmt = tr('{} does not contain "{}"') if rule.get('exclude') else tr('{} contains "{}"')
+            parts.append(fmt.format(label, text))
+        local_state = ('all' if self._local_filter_inactive_chip_visible else
+                       (getattr(self, '_local_filter_state_parallels', 'all')
+                        if getattr(self, '_comp_results_from_parallels', False)
+                        else getattr(self, '_local_filter_state_composition', 'all')))
+        if local_state == 'only_local':
+            parts.append(tr('My Library only'))
+        elif local_state == 'no_local':
+            parts.append(tr('My Library hidden'))
+        n_domains = len(getattr(self, '_comp_domain_exclusions', None) or ())
+        if n_domains:
+            parts.append(tr('{} domains excluded').format(n_domains))
+        if not parts:
+            return ''
+        return tr('Filters from the results list: {}').format(' · '.join(parts))
 
     def _comp_data_matches_filters(
         self, node, data, local_visible_sys_ids=None, preview_data=None
@@ -25776,6 +25993,7 @@ class GenizahGUI(QMainWindow):
 
         # 5. Clear composition results tree
         self.comp_tree.clear()
+        self._comp_view_groups = []
 
         # 6. Reset composition result state
         self.comp_main = []
@@ -25786,6 +26004,7 @@ class GenizahGUI(QMainWindow):
         self.comp_filtered_summary = {}
         self.comp_raw_items = []
         self.comp_raw_filtered = []
+        self._comp_view_groups = []  # ordered result groups as the tree shows them
         self.comp_grouped_main = []
         self.comp_grouped_appendix = {}
         self.comp_grouped_summary = {}
@@ -25948,6 +26167,7 @@ class GenizahGUI(QMainWindow):
         self.comp_progress.setRange(0, 0)
         self.comp_progress.setValue(0)
         self.comp_tree.clear()
+        self._comp_view_groups = []
         self.comp_progress.setFormat(tr("Scanning chunks..."))
         self._apply_pause_state(self._pause_comp, 'pause')
         
@@ -26923,18 +27143,7 @@ class GenizahGUI(QMainWindow):
         self.comp_tree.setItemWidget(node, self.comp_col_ms_context, QLabel(""))
 
     def _set_comp_node_previews(self, node, source_text, ms_text, highlight_pattern=None, defer_widgets=False):
-        if highlight_pattern and source_text:
-            try:
-                # Apply highlighting to Source Text if pattern exists
-                flags = re.IGNORECASE
-                if '\\n' in highlight_pattern or highlight_pattern.startswith('^') or '^\\' in highlight_pattern:
-                    flags |= re.MULTILINE
-                regex = re.compile(highlight_pattern, flags)
-                # Only apply if not already highlighted (simple check)
-                if '*' not in source_text:
-                    source_text = regex.sub(r'*\g<0>*', source_text)
-            except Exception:
-                pass  # Operation failed; non-fatal, continue with defaults
+        source_text = self._comp_preview_source_text(source_text, highlight_pattern)
 
         match = re.search(r'\*(.*?)\*', source_text or "")
         anchor = match.group(1) if match else None
@@ -26957,6 +27166,25 @@ class GenizahGUI(QMainWindow):
             self.snippet_queue.append(node)
             if len(self.snippet_queue) == 1:
                  QTimer.singleShot(10, self._process_snippet_queue)
+
+    @staticmethod
+    def _comp_preview_source_text(source_text, highlight_pattern=None):
+        """The source-context text exactly as the tree previews it (hits wrapped in
+        *...*). Shared by the preview and the filter rule, so a Context filter judges
+        the text the user sees."""
+        if highlight_pattern and source_text:
+            try:
+                # Apply highlighting to Source Text if pattern exists
+                flags = re.IGNORECASE
+                if '\\n' in highlight_pattern or highlight_pattern.startswith('^') or '^\\' in highlight_pattern:
+                    flags |= re.MULTILINE
+                regex = re.compile(highlight_pattern, flags)
+                # Only apply if not already highlighted (simple check)
+                if '*' not in source_text:
+                    source_text = regex.sub(r'*\g<0>*', source_text)
+            except Exception:
+                pass  # Operation failed; non-fatal, continue with defaults
+        return source_text
 
     def display_comp_results(self, main_res, main_appx, main_summ, filt_res, filt_appx, filt_summ):
         # Set on EVERY render, never once at construction: there is no
@@ -27102,6 +27330,10 @@ class GenizahGUI(QMainWindow):
         self.comp_tree_updating = True
         self.comp_tree.setUpdatesEnabled(False)
         self.comp_tree.clear()
+        # The result groups in the order the tree shows them -- the data the
+        # Manuscript Viewer and the filter rule read (desktop/comp_view_filter.py),
+        # independent of which rows are drawn, collapsed, lazy or still batching.
+        self._comp_view_groups = []
 
         def make_checkable(node):
             node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
@@ -27134,12 +27366,9 @@ class GenizahGUI(QMainWindow):
 
             if item_type == 'part':
                 # Part node - show Part display name with 📖 icon
-                part_display = ms_item.get('part_display', '')
-                oxford_title = ms_item.get('oxford_title', '')
-                sid = ms_item.get('sys_id', '')
-                shelf = f"📖 {part_display}" if part_display else sid
-                t = oxford_title or ""
-                library_code, library_full = get_library_info(sid)
+                _d = self._comp_ms_display(ms_item)
+                sid, shelf = _d['sys_id'], _d['shelf']
+                library_code, library_full = _d['library_code'], _d['library_full']
 
                 ms_node = QTreeWidgetItem(parent)
                 self._set_comp_tree_text(ms_node, 0, self._format_score_with_boundary(ms_item))
@@ -27148,7 +27377,7 @@ class GenizahGUI(QMainWindow):
                 self._set_comp_tree_text(ms_node, self.comp_col_library, library_code)
                 if library_full:
                     ms_node.setToolTip(self.comp_col_library, library_full)
-                self._set_comp_tree_text(ms_node, self.comp_col_title, _resolve_display_title(sid, t, compact=True))
+                self._set_comp_tree_text(ms_node, self.comp_col_title, _d['title'])
                 self._set_comp_tree_text(ms_node, self.comp_col_sysid, ms_item.get('part_id', ''))
                 make_checkable(ms_node)
                 ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
@@ -27167,14 +27396,14 @@ class GenizahGUI(QMainWindow):
                     p_item = pages[0]
                     p_sid, p_num, p_shelf, _ = self._get_meta_for_header(p_item['raw_header'])
                     folio_info = f" [{p_shelf}]" if p_shelf else ""
-                    self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, f"{shelf} ({tr('Image')} {p_num}{folio_info})")
+                    self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, self._comp_shelf_cells(ms_item, shelf)[0])
                     self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=True)
                 else:
                     if pages:
                         p0 = pages[0]
                         _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
                         folio_count = f", {len(folios)} folios" if len(folios) > 1 else ""
-                        self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, f"{shelf} ({len(pages)} matches{folio_count})")
+                        self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, self._comp_shelf_cells(ms_item, shelf)[0])
                         self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'), defer_widgets=True)
 
                     for p_item in pages:
@@ -27183,7 +27412,7 @@ class GenizahGUI(QMainWindow):
                         page_node = QTreeWidgetItem(ms_node)
                         self._set_comp_tree_text(page_node, 0, self._format_score_with_boundary(p_item))
                         set_boundary_tooltip(page_node, p_item)
-                        self._set_comp_tree_text(page_node, self.comp_col_shelfmark, f"{tr('Image')} {p_num}{folio_info}")
+                        self._set_comp_tree_text(page_node, self.comp_col_shelfmark, self._comp_shelf_cells(ms_item, shelf)[1].get(_cvf.page_key(p_item), f"{tr('Image')} {p_num}{folio_info}"))
                         self._set_comp_tree_text(page_node, self.comp_col_library, "")
                         self._set_comp_tree_text(page_node, self.comp_col_title, "")
                         self._set_comp_tree_text(page_node, self.comp_col_sysid, p_sid or "")
@@ -27195,20 +27424,10 @@ class GenizahGUI(QMainWindow):
                 # Phase 110 UAT (Issue 1): LOCAL comp manuscript rows mirror
                 # regular search — shelfmark = filename, Library = parent/folder
                 # (do NOT route through the Genizah meta path → "unknown").
-                _ms_is_local = self._comp_item_is_local(ms_item)
-                if _ms_is_local:
-                    shelf, _local_library_display = self._comp_local_display_fields(
-                        sid, ms_item.get('shelfmark', '')
-                    )
-                    t = ""
-                    library_code = _local_library_display
-                    library_full = _local_library_display
-                else:
-                    shelf, t = self.meta_mgr.get_meta_for_id(sid)
-                    if not shelf or shelf == "Unknown":
-                        header_shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
-                        if header_shelf: shelf = header_shelf
-                    library_code, library_full = get_library_info(sid)
+                _d = self._comp_ms_display(ms_item)
+                _ms_is_local = _d['is_local']
+                shelf = _d['shelf']
+                library_code, library_full = _d['library_code'], _d['library_full']
 
                 ms_node = QTreeWidgetItem(parent)
                 self._set_comp_tree_text(ms_node, 0, self._format_score_with_boundary(ms_item))
@@ -27217,7 +27436,7 @@ class GenizahGUI(QMainWindow):
                 self._set_comp_tree_text(ms_node, self.comp_col_library, library_code)
                 if library_full:
                     ms_node.setToolTip(self.comp_col_library, library_full)
-                self._set_comp_tree_text(ms_node, self.comp_col_title, _resolve_display_title(sid, t or "", compact=True) if not _ms_is_local else "")
+                self._set_comp_tree_text(ms_node, self.comp_col_title, _d['title'])
                 self._set_comp_tree_text(ms_node, self.comp_col_sysid, sid)
                 make_checkable(ms_node)
                 ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
@@ -27234,13 +27453,13 @@ class GenizahGUI(QMainWindow):
                 if len(pages) == 1:
                     p_item = pages[0]
                     _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
-                    self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p_num})")
+                    self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, self._comp_shelf_cells(ms_item, shelf)[0])
                     self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=True)
                 else:
                     if pages:
                         p0 = pages[0]
                         _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
-                        self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p0_num}...)")
+                        self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, self._comp_shelf_cells(ms_item, shelf)[0])
                         self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'), defer_widgets=True)
 
                     for p_item in pages:
@@ -27248,7 +27467,7 @@ class GenizahGUI(QMainWindow):
                         page_node = QTreeWidgetItem(ms_node)
                         self._set_comp_tree_text(page_node, 0, self._format_score_with_boundary(p_item))
                         set_boundary_tooltip(page_node, p_item)
-                        self._set_comp_tree_text(page_node, self.comp_col_shelfmark, f"{tr('Image')} {p_num}")
+                        self._set_comp_tree_text(page_node, self.comp_col_shelfmark, self._comp_shelf_cells(ms_item, shelf)[1].get(_cvf.page_key(p_item), f"{tr('Image')} {p_num}"))
                         self._set_comp_tree_text(page_node, self.comp_col_library, "")
                         self._set_comp_tree_text(page_node, self.comp_col_title, "")
                         self._set_comp_tree_text(page_node, self.comp_col_sysid, "")
@@ -27257,8 +27476,9 @@ class GenizahGUI(QMainWindow):
                         self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=True)
             else:
                 # Fallback
-                sid, _, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
-                library_code, library_full = get_library_info(sid)
+                _d = self._comp_ms_display(ms_item)
+                sid, shelf = _d['sys_id'], _d['shelf']
+                library_code, library_full = _d['library_code'], _d['library_full']
                 node = QTreeWidgetItem(parent)
                 self._set_comp_tree_text(node, 0, self._format_score_with_boundary(ms_item))
                 set_boundary_tooltip(node, ms_item)
@@ -27266,7 +27486,7 @@ class GenizahGUI(QMainWindow):
                 self._set_comp_tree_text(node, self.comp_col_library, library_code)
                 if library_full:
                     node.setToolTip(self.comp_col_library, library_full)
-                self._set_comp_tree_text(node, self.comp_col_title, _resolve_display_title(sid, title, compact=True))
+                self._set_comp_tree_text(node, self.comp_col_title, _d['title'])
                 self._set_comp_tree_text(node, self.comp_col_sysid, sid)
                 make_checkable(node)
                 node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
@@ -27290,6 +27510,7 @@ class GenizahGUI(QMainWindow):
             )
             sorted_flat = self._sort_comp_items(all_flat)
             visible_flat = sorted_flat
+            self._comp_view_groups = [_cvf.ViewGroup(_cvf.CATEGORY_ALL, tuple(visible_flat))]
 
             root = QTreeWidgetItem(self.comp_tree, [tr("All Results ({})").format(len(visible_flat))])
             root.setExpanded(True)
@@ -27309,6 +27530,9 @@ class GenizahGUI(QMainWindow):
             sorted_main = self._sort_comp_items(clean_main)
             visible_sorted_main = sorted_main
             root_main = None
+            if visible_sorted_main:
+                self._comp_view_groups.append(
+                    _cvf.ViewGroup(_cvf.CATEGORY_MAIN, tuple(visible_sorted_main)))
 
             if visible_sorted_main:
                 root_main = QTreeWidgetItem(self.comp_tree, [tr("Main Results ({})").format(len(visible_sorted_main))])
@@ -27328,6 +27552,8 @@ class GenizahGUI(QMainWindow):
 
                 sorted_groups = sorted(clean_appx.items(), key=lambda x: len(x[1]), reverse=True)
                 for sig, items in sorted_groups:
+                    self._comp_view_groups.append(_cvf.ViewGroup(
+                        _cvf.CATEGORY_APPENDIX, tuple(self._sort_comp_items(items)), subgroup=sig))
                     group_node = QTreeWidgetItem(root_appx, ["", "", f"{sig} ({len(items)})", ""])
                     make_checkable(group_node)
                     # Virtual children: store items data, add placeholder
@@ -27374,6 +27600,8 @@ class GenizahGUI(QMainWindow):
                     reason_groups[reason].append(item)
 
                 for reason, r_items in reason_groups.items():
+                    self._comp_view_groups.append(_cvf.ViewGroup(
+                        _cvf.CATEGORY_FILTERED, tuple(self._sort_comp_items(r_items)), subgroup=reason))
                     reason_node = QTreeWidgetItem(root_filt, [f"{reason} ({len(r_items)})", "", "", ""])
                     reason_node.setData(0, Qt.ItemDataRole.UserRole + 100, "ROOT_FILT_REASON")
                     reason_node.setForeground(0, QColor('#f39c12'))  # Amber
@@ -27386,6 +27614,8 @@ class GenizahGUI(QMainWindow):
 
                 # Filtered Appendix - Using Virtual Children for performance
                 for sig, items in sorted(clean_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
+                    self._comp_view_groups.append(_cvf.ViewGroup(
+                        _cvf.CATEGORY_FILTERED, tuple(self._sort_comp_items(items)), subgroup=sig))
                     g_node = QTreeWidgetItem(root_filt, ["", "", f"{sig} ({len(items)})", ""])
                     make_checkable(g_node)
                     # Virtual children: store items data, add placeholder
@@ -27401,7 +27631,10 @@ class GenizahGUI(QMainWindow):
                 root_known.setExpanded(False)  # Collapsed by default
                 make_checkable(root_known)
 
-                for item in self._sort_comp_items(self.comp_known):
+                _sorted_known = self._sort_comp_items(self.comp_known)
+                self._comp_view_groups.append(
+                    _cvf.ViewGroup(_cvf.CATEGORY_EXCLUDED, tuple(_sorted_known)))
+                for item in _sorted_known:
                     add_manuscript_node(root_known, item)
 
             # Start batched loading for Main Results (deferred to prevent freeze)
@@ -27474,12 +27707,9 @@ class GenizahGUI(QMainWindow):
 
         item_type = ms_item.get('type', '')
         if item_type == 'part':
-            part_display = ms_item.get('part_display', '')
-            oxford_title = ms_item.get('oxford_title', '')
-            sid = ms_item.get('sys_id', '')
-            shelf = f"📖 {part_display}" if part_display else sid
-            t = oxford_title or ""
-            library_code, library_full = get_library_info(sid)
+            _d = self._comp_ms_display(ms_item)
+            sid, shelf = _d['sys_id'], _d['shelf']
+            library_code, library_full = _d['library_code'], _d['library_full']
 
             ms_node = QTreeWidgetItem(parent)
             self._set_comp_tree_text(ms_node, 0, str(int(ms_item.get('score', 0))))
@@ -27487,7 +27717,7 @@ class GenizahGUI(QMainWindow):
             self._set_comp_tree_text(ms_node, self.comp_col_library, library_code)
             if library_full:
                 ms_node.setToolTip(self.comp_col_library, library_full)
-            self._set_comp_tree_text(ms_node, self.comp_col_title, _resolve_display_title(sid, t, compact=True))
+            self._set_comp_tree_text(ms_node, self.comp_col_title, _d['title'])
             self._set_comp_tree_text(ms_node, self.comp_col_sysid, ms_item.get('part_id', ''))
             self._make_node_checkable(ms_node)
             ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
@@ -27499,14 +27729,14 @@ class GenizahGUI(QMainWindow):
                 p_item = pages[0]
                 p_sid, p_num, p_shelf, _ = self._get_meta_for_header(p_item['raw_header'])
                 folio_info = f" [{p_shelf}]" if p_shelf else ""
-                self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, f"{shelf} ({tr('Image')} {p_num}{folio_info})")
+                self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, self._comp_shelf_cells(ms_item, shelf)[0])
                 self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=defer_widgets)
             else:
                 if pages:
                     p0 = pages[0]
                     _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
                     folio_count = f", {len(folios)} folios" if len(folios) > 1 else ""
-                    self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, f"{shelf} ({len(pages)} matches{folio_count})")
+                    self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, self._comp_shelf_cells(ms_item, shelf)[0])
                     self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'), defer_widgets=defer_widgets)
 
                 for p_item in pages:
@@ -27514,7 +27744,7 @@ class GenizahGUI(QMainWindow):
                     folio_info = f" [{p_shelf}]" if p_shelf else ""
                     page_node = QTreeWidgetItem(ms_node)
                     self._set_comp_tree_text(page_node, 0, str(int(p_item.get('score', 0))))
-                    self._set_comp_tree_text(page_node, self.comp_col_shelfmark, f"{tr('Image')} {p_num}{folio_info}")
+                    self._set_comp_tree_text(page_node, self.comp_col_shelfmark, self._comp_shelf_cells(ms_item, shelf)[1].get(_cvf.page_key(p_item), f"{tr('Image')} {p_num}{folio_info}"))
                     self._set_comp_tree_text(page_node, self.comp_col_library, "")
                     self._set_comp_tree_text(page_node, self.comp_col_title, "")
                     self._set_comp_tree_text(page_node, self.comp_col_sysid, p_sid or "")
@@ -27526,20 +27756,10 @@ class GenizahGUI(QMainWindow):
             # Phase 110 UAT (Issue 1): LOCAL comp manuscript rows mirror regular
             # search — shelfmark = filename, Library = parent/folder. Do NOT route
             # through the Genizah meta path (which yields "unknown" for LOCAL).
-            _ms_is_local = self._comp_item_is_local(ms_item)
-            if _ms_is_local:
-                shelf, _local_library_display = self._comp_local_display_fields(
-                    sid, ms_item.get('shelfmark', '')
-                )
-                t = ""
-                library_code = _local_library_display
-                library_full = _local_library_display
-            else:
-                shelf, t = self.meta_mgr.get_meta_for_id(sid)
-                if not shelf or shelf == "Unknown":
-                    header_shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
-                    if header_shelf: shelf = header_shelf
-                library_code, library_full = get_library_info(sid)
+            _d = self._comp_ms_display(ms_item)
+            _ms_is_local = _d['is_local']
+            shelf = _d['shelf']
+            library_code, library_full = _d['library_code'], _d['library_full']
 
             ms_node = QTreeWidgetItem(parent)
             self._set_comp_tree_text(ms_node, 0, str(int(ms_item.get('score', 0))))
@@ -27547,7 +27767,7 @@ class GenizahGUI(QMainWindow):
             self._set_comp_tree_text(ms_node, self.comp_col_library, library_code)
             if library_full:
                 ms_node.setToolTip(self.comp_col_library, library_full)
-            self._set_comp_tree_text(ms_node, self.comp_col_title, _resolve_display_title(sid, t or "", compact=True) if not _ms_is_local else "")
+            self._set_comp_tree_text(ms_node, self.comp_col_title, _d['title'])
             self._set_comp_tree_text(ms_node, self.comp_col_sysid, sid)
             self._make_node_checkable(ms_node)
             ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
@@ -27561,20 +27781,20 @@ class GenizahGUI(QMainWindow):
             if len(pages) == 1:
                 p_item = pages[0]
                 _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
-                self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p_num})")
+                self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, self._comp_shelf_cells(ms_item, shelf)[0])
                 self._set_comp_node_previews(ms_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=defer_widgets)
             else:
                 if pages:
                     p0 = pages[0]
                     _, p0_num, _, _ = self._get_meta_for_header(p0['raw_header'])
-                    self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, f"{shelf or tr('Unknown Shelfmark')} ({tr('Image')} {p0_num}...)")
+                    self._set_comp_tree_text(ms_node, self.comp_col_shelfmark, self._comp_shelf_cells(ms_item, shelf)[0])
                     self._set_comp_node_previews(ms_node, p0.get('source_ctx', ''), p0.get('text', ''), p0.get('highlight_pattern'), defer_widgets=defer_widgets)
 
                 for p_item in pages:
                     _, p_num, _, _ = self._get_meta_for_header(p_item['raw_header'])
                     page_node = QTreeWidgetItem(ms_node)
                     self._set_comp_tree_text(page_node, 0, str(int(p_item.get('score', 0))))
-                    self._set_comp_tree_text(page_node, self.comp_col_shelfmark, f"{tr('Image')} {p_num}")
+                    self._set_comp_tree_text(page_node, self.comp_col_shelfmark, self._comp_shelf_cells(ms_item, shelf)[1].get(_cvf.page_key(p_item), f"{tr('Image')} {p_num}"))
                     self._set_comp_tree_text(page_node, self.comp_col_library, "")
                     self._set_comp_tree_text(page_node, self.comp_col_title, "")
                     self._set_comp_tree_text(page_node, self.comp_col_sysid, "")
@@ -27583,15 +27803,16 @@ class GenizahGUI(QMainWindow):
                     self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=defer_widgets)
         else:
             # Fallback
-            sid, _, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
-            library_code, library_full = get_library_info(sid)
+            _d = self._comp_ms_display(ms_item)
+            sid, shelf = _d['sys_id'], _d['shelf']
+            library_code, library_full = _d['library_code'], _d['library_full']
             node = QTreeWidgetItem(parent)
             self._set_comp_tree_text(node, 0, str(int(ms_item.get('score', 0))))
             self._set_comp_tree_text(node, self.comp_col_shelfmark, shelf)
             self._set_comp_tree_text(node, self.comp_col_library, library_code)
             if library_full:
                 node.setToolTip(self.comp_col_library, library_full)
-            self._set_comp_tree_text(node, self.comp_col_title, _resolve_display_title(sid, title, compact=True))
+            self._set_comp_tree_text(node, self.comp_col_title, _d['title'])
             self._set_comp_tree_text(node, self.comp_col_sysid, sid)
             self._make_node_checkable(node)
             node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
@@ -27963,17 +28184,23 @@ class GenizahGUI(QMainWindow):
                 else:
                     break
 
-            # Populate real children - block itemChanged signal
+            # Populate real children - block itemChanged signal. Restore the PREVIOUS
+            # updating flag rather than clearing it: an expansion during a batched
+            # load must not re-enable itemChanged under the batch.
+            _was_updating = self.comp_tree_updating
             self.comp_tree_updating = True
             self.comp_tree.setUpdatesEnabled(False)
             sorted_items = self._sort_comp_items(virtual_items)
             for ms_item in sorted_items:
                 self._add_manuscript_node(item, ms_item)
-            self.comp_tree.setUpdatesEnabled(True)
-            self.comp_tree_updating = False
 
             # Clear virtual data to prevent re-population
             item.setData(0, Qt.ItemDataRole.UserRole + 200, None)
+            # The new children were never filtered: run the shared rule over the
+            # tree so they obey the active filters like every other row.
+            self._apply_comp_tree_filters()
+            self.comp_tree.setUpdatesEnabled(True)
+            self.comp_tree_updating = _was_updating
 
         if item.childCount() > 0:
             self._clear_comp_node_previews(item)
@@ -30977,148 +31204,99 @@ class GenizahGUI(QMainWindow):
 
                 self._set_comp_node_previews(item, ctx, snippet, pattern)
 
+    #: Stable composition category id -> translated label for the Manuscript Viewer.
+    _COMP_CATEGORY_LABELS = {
+        _cvf.CATEGORY_MAIN: "Main results group",
+        _cvf.CATEGORY_APPENDIX: "Appendix group",
+        _cvf.CATEGORY_FILTERED: "Filtered group",
+        _cvf.CATEGORY_EXCLUDED: "Excluded group",
+        _cvf.CATEGORY_ALL: "All results group",
+    }
+
+    def _comp_viewer_entry(self, group, ms_item, page):
+        """One Manuscript Viewer entry for a hit page, tagged with its category."""
+        raw_h = page.get('raw_header', '')
+        sid, p_num, shelf, title = self._get_meta_for_header(raw_h)
+        # Phase 110 UAT (Issue 1): LOCAL entries mirror regular search --
+        # shelfmark = filename, source 'LOCAL' (NOT the Genizah-meta "Unknown").
+        _src_lbl = page.get('src_lbl', 'Genizah Lab')
+        if self._comp_item_is_local(page) or self._comp_item_is_local(ms_item):
+            _local_shelf, _ = self._comp_local_display_fields(
+                sid, page.get('shelfmark', '') or ms_item.get('shelfmark', ''))
+            if _local_shelf:
+                shelf = _local_shelf
+            title = ''
+            _src_lbl = 'LOCAL'
+        subgroup = group.subgroup
+        return {
+            'uid': page.get('uid', sid),
+            'raw_header': raw_h,
+            'text': page.get('text', ''),
+            'full_text': None,
+            'source_ctx': page.get('source_ctx', ''),
+            'highlight_pattern': page.get('highlight_pattern'),
+            'source_highlight_pattern': page.get('source_highlight_pattern'),
+            'display': {'id': sid, 'shelfmark': shelf, 'title': title,
+                        'img': p_num, 'source': _src_lbl},
+            # Stable ids for code; the label is display only.
+            'category': {
+                'id': group.category,
+                'label': tr(self._COMP_CATEGORY_LABELS.get(group.category, group.category)),
+                'subgroup': subgroup,
+                'reasons': (_cvf.filter_reason_ids(ms_item)
+                            if group.category == _cvf.CATEGORY_FILTERED else ()),
+            },
+        }
+
     def on_comp_item_double_clicked(self, item, column):
-        """
-        Smart navigation that restores full context (Next/Prev, Source Text).
-        It rebuilds the full list of results from the tree but jumps to the specific clicked item.
+        """Open the Manuscript Viewer on the clicked result, with the WHOLE result list
+        the tree shows -- as the user filtered it -- for Next/Prev.
+
+        The list is built from the recorded result groups (`_comp_view_groups`), not
+        from widgets, through the same rule the tree uses (desktop/comp_view_filter.py):
+        rows the filters hide are left out; collapsed groups, unexpanded lazy groups
+        and rows a batched load has not drawn yet are all included. The viewer keeps
+        this snapshot; its filter strip says which filters shaped it.
         """
         data = item.data(0, Qt.ItemDataRole.UserRole)
-        if not data: return 
+        if not isinstance(data, dict) or not data:
+            return
+        groups = getattr(self, '_comp_view_groups', None) or []
+        if not groups:
+            return
 
+        state, host = self._comp_filter_state()
         flat_list = []
-        target_index = -1
-        
-        clicked_node = item
-        
-        if data.get('type') in ('manuscript', 'part') and item.childCount() > 0:
-            clicked_node = item.child(0)
+        keys = []
+        for group, ms_item, page in _cvf.viewer_pages(groups, state, host):
+            flat_list.append(self._comp_viewer_entry(group, ms_item, page))
+            keys.append(_cvf.page_key(page))
+        if not flat_list:
+            return
 
-        def collect_node_data(node):
-            node_data = node.data(0, Qt.ItemDataRole.UserRole)
-            if not node_data: return
-
-            if node_data.get('type') in ('manuscript', 'part') and node.childCount() > 0:
-                for i in range(node.childCount()):
-                    collect_node_data(node.child(i))
-                return
-
-            raw_h = node_data.get('raw_header', '')
-            sid, p_num, shelf, title = self._get_meta_for_header(raw_h)
-
-            # Phase 110 UAT (Issue 1): LOCAL comp ResultDialog header mirrors
-            # regular search — shelfmark = filename, source 'LOCAL' (NOT the
-            # Genizah-meta "Unknown"). Detect via src_lbl/source/97-prefix sys_id.
-            _src_lbl = node_data.get('src_lbl', 'Genizah Lab')
-            if self._comp_item_is_local(node_data):
-                _local_shelf, _ = self._comp_local_display_fields(sid, node_data.get('shelfmark', ''))
-                if _local_shelf:
-                    shelf = _local_shelf
-                title = ''
-                _src_lbl = 'LOCAL'
-
-            hl_pattern = node_data.get('highlight_pattern')
-
-            ready_item = {
-                'uid': node_data.get('uid', sid),
-                'raw_header': raw_h,
-                'text': node_data.get('text', ''),
-                'full_text': None,
-                'source_ctx': node_data.get('source_ctx', ''),
-                'highlight_pattern': hl_pattern,
-                'source_highlight_pattern': node_data.get('source_highlight_pattern'),
-                'display': {
-                    'id': sid,
-                    'shelfmark': shelf,
-                    'title': title,
-                    'img': p_num,
-                    'source': _src_lbl
-                }
-            }
-
-            flat_list.append(ready_item)
-            
-            if node is clicked_node:
-                nonlocal target_index
-                target_index = len(flat_list) - 1
-
-        def collect_from_data(item_data):
-            """Extract leaf-level results from a manuscript/part data dict (for lazy nodes)."""
-            pages = item_data.get('pages', [])
-            if pages:
-                for p in pages:
-                    raw_h = p.get('raw_header', '')
-                    sid, p_num, shelf, title = self._get_meta_for_header(raw_h)
-                    # Phase 110 UAT (Issue 1): LOCAL page → filename / 'LOCAL'.
-                    _src_lbl = p.get('src_lbl', 'Genizah Lab')
-                    if self._comp_item_is_local(p):
-                        _local_shelf, _ = self._comp_local_display_fields(sid, p.get('shelfmark', ''))
-                        if _local_shelf:
-                            shelf = _local_shelf
-                        title = ''
-                        _src_lbl = 'LOCAL'
-                    flat_list.append({
-                        'uid': p.get('uid', sid),
-                        'raw_header': raw_h,
-                        'text': p.get('text', ''),
-                        'full_text': None,
-                        'source_ctx': p.get('source_ctx', ''),
-                        'highlight_pattern': p.get('highlight_pattern'),
-                        'source_highlight_pattern': p.get('source_highlight_pattern'),
-                        'display': {'id': sid, 'shelfmark': shelf, 'title': title,
-                                    'img': p_num, 'source': _src_lbl}
-                    })
-            else:
-                # Single-page manuscript without pages array
-                raw_h = item_data.get('raw_header', '')
-                sid, p_num, shelf, title = self._get_meta_for_header(raw_h)
-                # Phase 110 UAT (Issue 1): LOCAL item → filename / 'LOCAL'.
-                _src_lbl = item_data.get('src_lbl', 'Genizah Lab')
-                if self._comp_item_is_local(item_data):
-                    _local_shelf, _ = self._comp_local_display_fields(sid, item_data.get('shelfmark', ''))
-                    if _local_shelf:
-                        shelf = _local_shelf
-                    title = ''
-                    _src_lbl = 'LOCAL'
-                flat_list.append({
-                    'uid': item_data.get('uid', sid),
-                    'raw_header': raw_h,
-                    'text': item_data.get('text', ''),
-                    'full_text': None,
-                    'source_ctx': item_data.get('source_ctx', ''),
-                    'highlight_pattern': item_data.get('highlight_pattern'),
-                    'source_highlight_pattern': item_data.get('source_highlight_pattern'),
-                    'display': {'id': sid, 'shelfmark': shelf, 'title': title,
-                                'img': p_num, 'source': _src_lbl}
-                })
-
-        def traverse_tree(node):
-            """Recursively traverse all tree nodes, collecting data from leaf/manuscript nodes.
-            Also handles lazy-loaded appendix groups (UserRole+200) whose children aren't instantiated."""
-            node_data = node.data(0, Qt.ItemDataRole.UserRole)
-            if node_data:
-                # Node has result data — let collect_node_data handle it
-                collect_node_data(node)
-            else:
-                # Check for lazy-loaded (virtual) children stored in UserRole+200
-                lazy_items = node.data(0, Qt.ItemDataRole.UserRole + 200)
-                if lazy_items:
-                    for lazy_item in self._sort_comp_items(lazy_items):
-                        collect_from_data(lazy_item)
-                else:
-                    # Category/reason node — descend into children
-                    for i in range(node.childCount()):
-                        traverse_tree(node.child(i))
-
-        root = self.comp_tree.invisibleRootItem()
-        for i in range(root.childCount()):
-            traverse_tree(root.child(i))
-
-        if not flat_list: return
-        
-        if target_index == -1: target_index = 0
+        # The clicked target: the clicked page itself, or -- for a manuscript row --
+        # its first page that the filters keep (never a hidden first child).
+        parent = item.parent()
+        parent_data = parent.data(0, Qt.ItemDataRole.UserRole) if parent is not None else None
+        is_page_row = isinstance(parent_data, dict) and bool(parent_data)
+        if is_page_row:
+            wanted = [_cvf.page_key(data)]
+        else:
+            wanted = [_cvf.page_key(p) for p in _cvf.eligible_pages(data, state, host)]
+        target_index = next((keys.index(k) for k in wanted if k in keys), -1)
+        if target_index == -1:
+            # The clicked row is not in the filtered list. Never silently open an
+            # unrelated result instead.
+            try:
+                self.statusBar().showMessage(
+                    tr("This result is hidden by the current filters"), 4000)
+            except Exception:  # noqa: BLE001
+                pass
+            return
 
         try:
-            self._show_result_dialog(flat_list, target_index)
+            self._show_result_dialog(
+                flat_list, target_index, filter_summary=self._comp_filter_summary())
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to open viewer: {e}")
 

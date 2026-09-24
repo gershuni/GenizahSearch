@@ -368,7 +368,10 @@ def test_only_supervised_worker_disables_matching_timeout(monkeypatch):
     with search_regex.isolated_matching(native=True):
         assert search_regex._match_timeout() is None
         with search_regex.search_budget(0.1):
-            assert 0 < search_regex._match_timeout() <= 0.1
+            # (monotonic() + 0.1) - monotonic() can round a hair ABOVE 0.1 --
+            # measured 0.1000000000003638 on Windows CI and locally. The property is
+            # "bounded by the budget", not an exact float comparison.
+            assert 0 < search_regex._match_timeout() <= 0.1 + 1e-9
     assert search_regex._match_timeout() == 0.25
 
 
