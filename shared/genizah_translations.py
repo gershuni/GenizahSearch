@@ -5258,3 +5258,13 @@ TRANSLATIONS.update({
     "My Library hidden": "הספרייה שלי מוסתרת",
     "{} domains excluded": "{} תחומים הוחרגו",
 })
+
+# Composition flat view ("Sort by shelfmark only"): the per-row marker that replaces
+# the Filtered/Excluded groups the flat list does not have (2026-09-24).
+TRANSLATIONS.update({
+    "{} filtered": "{} מסוננות",
+    "{} excluded": "{} מוחרגות",
+    "Filtered result": "תוצאה מסוננת",
+    "Filtered result: {}": "תוצאה מסוננת: {}",
+    "Excluded from the results by you": "הוחרגה על ידך מן התוצאות",
+})

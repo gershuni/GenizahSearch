@@ -149,6 +149,7 @@ class _FakeDialog:
         self.closed = self.deleted = False
         self.execd = False
         self.moved_to = None
+        self.fits = []
         _FakeDialog.made.append(self)
 
     def close(self):
@@ -171,6 +172,9 @@ class _FakeDialog:
     def move(self, pos):
         self.moved_to = (pos.x, pos.y)
 
+    def fit_on_screen(self, center=None, screen=None):
+        self.fits.append((None if center is None else (center.x, center.y), screen))
+
     def deleteLater(self):
         self.deleted = True
 
@@ -183,6 +187,12 @@ class _FakeSip:
     @staticmethod
     def isdeleted(obj):
         return getattr(obj, 'deleted', False)
+
+
+class _FakeQTimer:
+    @staticmethod
+    def singleShot(_ms, fn):
+        fn()   # the deferred re-fit, run at once
 
 
 class _FakeQApp:
@@ -206,6 +216,9 @@ class _Host:
     def frameGeometry(self):
         return _Rect(100, 100, 1000, 800)
 
+    def screen(self):
+        return 'host-screen'
+
 
 @pytest.fixture
 def host(monkeypatch):
@@ -214,6 +227,7 @@ def host(monkeypatch):
     monkeypatch.setattr(genizah_app, 'sip', _FakeSip)
     _FakeQApp.active_modal = None
     monkeypatch.setattr(genizah_app, 'QApplication', _FakeQApp)
+    monkeypatch.setattr(genizah_app, 'QTimer', _FakeQTimer)
     return _Host()
 
 
@@ -223,8 +237,11 @@ def test_helper_shows_the_dialog_and_holds_the_reference(host):
     assert dlg.host is host and dlg.results == ['r1', 'r2'] and dlg.index == 1
     assert dlg.meta_mgr is host.meta_mgr and dlg.searcher is host.searcher
     assert dlg.shown and dlg.raised and dlg.activated
-    # centred over the host: host centre (600, 500) minus dialog centre (650, 425)
-    assert dlg.moved_to == (-50, 75)
+    # Fitted to the host's screen, centred on the host's centre (600, 500), and
+    # fitted again once shown (real frame). A bare move() here put the title bar
+    # above a short screen (user report, 2026-09-24).
+    assert dlg.fits == [((600, 500), 'host-screen'), (None, None)]
+    assert dlg.moved_to is None
 
 
 def test_opening_a_second_result_closes_the_first(host):
@@ -278,7 +295,7 @@ def test_opened_from_inside_a_modal_dialog_the_viewer_runs_modally(host):
     _FakeQApp.active_modal = object()
     dlg = host._show_result_dialog(['a'], 0)
     assert dlg.execd and not dlg.shown
-    assert dlg.moved_to is not None       # still centred over the host
+    assert dlg.fits and dlg.fits[0] == ((600, 500), 'host-screen')  # still centred, and fitted
     # nested viewers never take the free-standing slot
     assert host._result_dialog is None
 
