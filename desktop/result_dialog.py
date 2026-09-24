@@ -8,9 +8,9 @@ from PyQt6.QtWidgets import (
     QMenu, QMessageBox, QPushButton, QSpinBox, QSplitter, QStyle,
     QTextBrowser, QToolButton, QVBoxLayout, QWidget,
 )
-from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal
+from PyQt6.QtCore import QMargins, QPoint, QRect, QSize, Qt, QTimer, QUrl, pyqtSignal
 from PyQt6 import sip
-from PyQt6.QtGui import QColor, QDesktopServices, QFont, QPalette, QPixmap
+from PyQt6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QPalette, QPixmap
 
 from genizah_core import (
     CURRENT_LANG, get_library_display, get_logger,
@@ -41,6 +41,39 @@ from desktop.image_loader import ImageLoaderThread
 from shared.synthetic_sys_id import is_synthetic_sys_id
 
 logger = get_logger(__name__)
+
+
+# The viewer's frame before it is shown, when Windows has not reported it yet: a
+# title bar and thin borders. Only an estimate -- fit_on_screen() runs again once
+# the window is up and uses the real frame.
+_FRAME_ESTIMATE = QMargins(8, 32, 8, 8)
+
+
+def fit_window_geometry(available: QRect, want: QSize, minimum: QSize,
+                        center: QPoint, frame: QMargins):
+    """Where and how big a top-level window may be so it fits on its screen.
+
+    Returns ``(frame_top_left, client_size)``. The client size is ``want`` shrunk to
+    what ``available`` holds once the frame is added, but never below ``minimum``.
+    The frame is centred on ``center`` and then pushed inside ``available``. When
+    the window is still too big, its TOP-LEFT wins, so the title bar -- the only
+    handle for moving it -- is always on screen.
+
+    Before v9.2.1 Qt's own QDialog placement guaranteed this; the explicit move()
+    that centres the unparented viewer turned that placement off, and on a short
+    screen the 850 px viewer opened with its title bar above the top edge
+    (user report, 2026-09-24).
+    """
+    fx, fy = frame.left() + frame.right(), frame.top() + frame.bottom()
+    w = max(min(want.width(), available.width() - fx), minimum.width())
+    h = max(min(want.height(), available.height() - fy), minimum.height())
+    fw, fh = w + fx, h + fy
+    x = center.x() - fw // 2
+    y = center.y() - fh // 2
+    x = max(min(x, available.left() + available.width() - fw), available.left())
+    y = max(min(y, available.top() + available.height() - fh), available.top())
+    return QPoint(x, y), QSize(w, h)
+
 
 class ResultDialog(QDialog):
     """Allow browsing a single search result and its surrounding pages."""
@@ -115,6 +148,30 @@ class ResultDialog(QDialog):
         self.init_ui()
         self.metadata_loaded.connect(self.on_metadata_loaded)
         self.load_result_by_index(self.current_result_idx)
+
+    def fit_on_screen(self, center=None, screen=None):
+        """Size and place the viewer so it fits ``screen`` with its title bar visible.
+
+        Called by the host before the first show (centred over the main window, on
+        the main window's screen, with an estimated frame) and once more right after
+        it, when the real frame is known. Keeps the current size when it fits.
+        """
+        screen = screen or self.screen() or QGuiApplication.primaryScreen()
+        if screen is None:
+            return
+        if self.isVisible():
+            fg, g = self.frameGeometry(), self.geometry()
+            frame = QMargins(g.left() - fg.left(), g.top() - fg.top(),
+                             fg.right() - g.right(), fg.bottom() - g.bottom())
+        else:
+            frame = _FRAME_ESTIMATE
+        if center is None:
+            center = self.frameGeometry().center()
+        top_left, size = fit_window_geometry(
+            screen.availableGeometry(), self.size(), self.minimumSizeHint(), center, frame)
+        if size != self.size():
+            self.resize(size)
+        self.move(top_left)
 
     def init_ui(self):
         self.setWindowTitle(tr("Manuscript Viewer"))

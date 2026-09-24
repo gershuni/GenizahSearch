@@ -15058,9 +15058,13 @@ class GenizahGUI(QMainWindow):
         dlg.finished.connect(
             lambda _code, d=dlg: self._on_result_dialog_finished(d))
         # Centre over this window: an unparented QDialog would otherwise
-        # land wherever the screen puts it.
+        # land wherever the screen puts it. Sized to this window's screen and
+        # kept inside it -- a bare move() here put the title bar above the top
+        # of a short screen, where it could not be moved (user report,
+        # 2026-09-24). Fitted again once shown, when the real frame is known.
         try:
-            dlg.move(self.frameGeometry().center() - dlg.rect().center())
+            dlg.fit_on_screen(self.frameGeometry().center(), self.screen())
+            QTimer.singleShot(0, lambda d=dlg: None if sip.isdeleted(d) else d.fit_on_screen())
         except Exception:  # noqa: BLE001
             pass
         if nested:
@@ -24805,8 +24809,8 @@ class GenizahGUI(QMainWindow):
                                             "",
                                             "",
                                             p_sid or sid or "",
-                                            display_shelf or "",
                                             library_display,
+                                            display_shelf or "",
                                             title or "",
                                             str(p_num or ""),
                                             f"{ms_score} (P:{page.get('score',0)})",
@@ -24832,8 +24836,8 @@ class GenizahGUI(QMainWindow):
                                             "",
                                             "",
                                             sid or "",
-                                            shelf or "",
                                             library_display,
+                                            shelf or "",
                                             title or "",
                                             str(p_num or ""),
                                             f"{ms_score} (P:{page.get('score',0)})",
@@ -24851,8 +24855,8 @@ class GenizahGUI(QMainWindow):
                                         "",
                                         "",
                                         sid or "",
-                                        shelf or "",
                                         library_display,
+                                        shelf or "",
                                         title or "",
                                         str(p_num or ""),
                                         str(ms_item.get('score', 0)),
@@ -24862,7 +24866,7 @@ class GenizahGUI(QMainWindow):
 
                                 if ms_item_rows:
                                     ms_start = report_row
-                                    report_row = _write_report_header(ws_report, report_row, f"{ms_item_rows[0][3]} | {ms_item_rows[0][5]}")
+                                    report_row = _write_report_header(ws_report, report_row, f"{ms_item_rows[0][4]} | {ms_item_rows[0][5]}")
                                     for row_data in ms_item_rows:
                                         report_row = _write_report_row(ws_report, report_row, row_data)
                                     ms_end = report_row - 1
@@ -27334,6 +27338,7 @@ class GenizahGUI(QMainWindow):
         # Manuscript Viewer and the filter rule read (desktop/comp_view_filter.py),
         # independent of which rows are drawn, collapsed, lazy or still batching.
         self._comp_view_groups = []
+        self._comp_flat_markers = {}
 
         def make_checkable(node):
             node.setFlags(node.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
@@ -27511,8 +27516,14 @@ class GenizahGUI(QMainWindow):
             sorted_flat = self._sort_comp_items(all_flat)
             visible_flat = sorted_flat
             self._comp_view_groups = [_cvf.ViewGroup(_cvf.CATEGORY_ALL, tuple(visible_flat))]
+            # The flat view has no Filtered/Excluded groups, so each such row is
+            # marked on its own; without it a working Filter Text looked inert.
+            self._comp_flat_markers = self._comp_flat_marker_map(
+                list(clean_filt) + [it for v in clean_filt_appx.values() for it in v],
+                self.comp_known)
 
-            root = QTreeWidgetItem(self.comp_tree, [tr("All Results ({})").format(len(visible_flat))])
+            root = QTreeWidgetItem(self.comp_tree, [self._comp_flat_root_label(
+                len(visible_flat), self._comp_flat_markers)])
             root.setExpanded(True)
             make_checkable(root)
 
@@ -27699,7 +27710,10 @@ class GenizahGUI(QMainWindow):
             node.setToolTip(self.comp_col_printed, tr("Printed material (not handwritten manuscript)"))
 
     def _add_manuscript_node(self, parent, ms_item, defer_widgets=True):
-        """Add a manuscript/part node to the tree. Used for lazy/batched loading."""
+        """Add a manuscript/part node to the tree. Used for lazy/batched loading.
+
+        Returns the top-level row it created.
+        """
         def get_library_info(sid):
             library_code = self.meta_mgr.get_library_for_id(sid) if sid else ''
             library_full = get_library_display(library_code, short=False) if library_code else ''
@@ -27751,6 +27765,7 @@ class GenizahGUI(QMainWindow):
                     self._make_node_checkable(page_node)
                     page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
                     self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=defer_widgets)
+            return ms_node
         elif item_type == 'manuscript':
             sid = ms_item['sys_id']
             # Phase 110 UAT (Issue 1): LOCAL comp manuscript rows mirror regular
@@ -27801,6 +27816,7 @@ class GenizahGUI(QMainWindow):
                     self._make_node_checkable(page_node)
                     page_node.setData(0, Qt.ItemDataRole.UserRole, p_item)
                     self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=defer_widgets)
+            return ms_node
         else:
             # Fallback
             _d = self._comp_ms_display(ms_item)
@@ -27819,6 +27835,53 @@ class GenizahGUI(QMainWindow):
             self._apply_comp_printed_badge(node, sid)
             self._apply_comp_witness_cell(node, ms_item)
             self._set_comp_node_previews(node, ms_item.get('source_ctx', ''), ms_item.get('text', ''), ms_item.get('highlight_pattern'), defer_widgets=defer_widgets)
+            return node
+
+    def _comp_flat_marker_map(self, filtered_items, excluded_items):
+        """Rows the flat view must mark: {id(item): (item, kind, reason)}.
+
+        The flat view ("Sort by shelfmark only") merges every group into one list,
+        so the Filtered and Excluded groups -- the only thing that told a filtered
+        row apart -- are gone. The item itself is kept in the entry so a lookup is
+        confirmed by identity, never by a recycled id() alone.
+        """
+        markers = {}
+        for item in excluded_items or ():
+            markers[id(item)] = (item, 'excluded', '')
+        for item in filtered_items or ():
+            markers[id(item)] = (item, 'filtered', self._get_filter_reason(item))
+        return markers
+
+    def _comp_flat_root_label(self, total, markers):
+        """'All Results (N)', plus how many of them are filtered or excluded."""
+        label = tr("All Results ({})").format(total)
+        n_filt = sum(1 for e in markers.values() if e[1] == 'filtered')
+        n_excl = sum(1 for e in markers.values() if e[1] == 'excluded')
+        parts = []
+        if n_filt:
+            parts.append(tr("{} filtered").format(n_filt))
+        if n_excl:
+            parts.append(tr("{} excluded").format(n_excl))
+        if parts:
+            label += " — " + ", ".join(parts)
+        return label
+
+    def _apply_comp_flat_marker(self, node, entry):
+        """Mark a flat-view row that belongs to the Filtered or Excluded group."""
+        if not entry:
+            return
+        _item, kind, reason = entry
+        if kind == 'filtered':
+            color = QColor('#f39c12')  # the Filtered group header's amber
+            tip = tr("Filtered result: {}").format(reason) if reason else tr("Filtered result")
+            node.setText(0, "⊘ " + node.text(0))
+        else:
+            color = QColor(Qt.GlobalColor.darkGray)  # the Excluded group header's gray
+            tip = tr("Excluded from the results by you")
+        for col in range(self.comp_tree.columnCount()):
+            node.setForeground(col, color)
+        node.setToolTip(0, tip)
+        node.setToolTip(self.comp_col_shelfmark, tip)
 
     def _add_single_node_to_tree(self, parent, ms_item):
         """Dedicated helper to add one row to the tree."""
@@ -27933,8 +27996,13 @@ class GenizahGUI(QMainWindow):
         self.comp_tree.setUpdatesEnabled(False)
         end_index = min(self._batch_index + self._batch_size, len(self._batch_queue))
 
+        markers = getattr(self, '_comp_flat_markers', None) or {}
         for i in range(self._batch_index, end_index):
-            self._add_manuscript_node(self._batch_parent, self._batch_queue[i])
+            ms_item = self._batch_queue[i]
+            node = self._add_manuscript_node(self._batch_parent, ms_item)
+            entry = markers.get(id(ms_item)) if markers else None
+            if node is not None and entry and entry[0] is ms_item:
+                self._apply_comp_flat_marker(node, entry)
 
         self._batch_index = end_index
         self.comp_tree.setUpdatesEnabled(True)

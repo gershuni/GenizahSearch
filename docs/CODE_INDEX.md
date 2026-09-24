@@ -1158,8 +1158,10 @@ Imported by `web/api.py` handlers `GET /api/export/json` (Line ~1920) and `GET /
 
 ## desktop/result_dialog.py
 
+- **Function** `fit_window_geometry` — Size and position for a top-level window so it fits its screen's usable area; the title bar always stays on screen (2026-09-24).
 - **Class** `ResultDialog` (Line 36) — Allow browsing a single search result and its surrounding pages.
     - Method `__init__` (Line 42)
+    - Method `fit_on_screen` — Shrink and place the viewer inside a screen; the host calls it before the first show and again right after.
     - Method `init_ui` (Line 73)
     - Method `_toggle_compact_mode` (Line 507) — Toggle between compact and full header mode.
     - Method `navigate_results` (Line 529)
