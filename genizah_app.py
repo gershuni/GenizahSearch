@@ -6299,8 +6299,14 @@ class GenizahGUI(QMainWindow):
         self.browse_info_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         top_layout.addWidget(self.browse_info_lbl)
 
-        # Extended Info button + Bibliography buttons (shared row)
-        ext_info_row = QHBoxLayout()
+        # Extended Info button + Bibliography buttons (shared row).
+        # An overflow row like the Manuscript Viewer's actions (2026-09-24,
+        # Codex on #362): as metadata arrives Info, the bibliographies, Catalog,
+        # Measurements, PGP and the external link show themselves, and a plain
+        # row then forced the Browse tab wider than a small window. Labels shrink
+        # to icons first; then the sources fold into "Sources" and the rest
+        # into "More".
+        ext_info_row = self.browse_ext_info_row = OverflowRow(tr("More"))
         self.btn_b_ext_info = QPushButton(f"ℹ️ {tr('Info')}")
         self.btn_b_ext_info.setToolTip(tr("Show Extended Info"))
         self.btn_b_ext_info.setCheckable(True)
@@ -6357,24 +6363,23 @@ class GenizahGUI(QMainWindow):
         self._update_local_filter_btn_parallels()
 
         # ext_info_row layout: Puzzle, Find joins, Parallels, List | Info | Bib FJMS, Bib NLI, Catalog | Ktiv, External Link | stretch | Translations
-        ext_info_row.addWidget(self.btn_b_add_to_puzzle)
-        ext_info_row.addWidget(self.btn_b_find_joins)
-        ext_info_row.addWidget(self.btn_find_parallels)
-        ext_info_row.addWidget(self.local_filter_btn_parallels)
-        ext_info_row.addWidget(self.local_filter_inactive_lbl_parallels)
-        ext_info_row.addWidget(self.btn_browse_add_to_list)
-        ext_info_row.addWidget(self.btn_b_ext_info)
-        ext_info_row.addWidget(self.btn_b_bibliography_fjms)
-        ext_info_row.addWidget(self.btn_b_bibliography_nli)
-        ext_info_row.addWidget(self.btn_b_catalog_records)
-        ext_info_row.addWidget(self.btn_b_measurements)
-        ext_info_row.addWidget(self.btn_b_catalog)
-        ext_info_row.addWidget(self.btn_b_open_web)
-        ext_info_row.addWidget(self.btn_b_pgp)
-        ext_info_row.addWidget(self.btn_b_external_link)
-        ext_info_row.addStretch()
-        ext_info_row.addWidget(self.btn_b_translations)
-        top_layout.addLayout(ext_info_row)
+        ext_info_row.add(self.btn_b_add_to_puzzle, 3)
+        ext_info_row.add(self.btn_b_find_joins, 3)
+        ext_info_row.add(self.btn_find_parallels, 3)
+        ext_info_row.add(self.local_filter_btn_parallels, 1)
+        ext_info_row.add(self.local_filter_inactive_lbl_parallels, -1)
+        ext_info_row.add(self.btn_browse_add_to_list, 0)
+        ext_info_row.add(self.btn_b_ext_info, 1)
+        for _src in (self.btn_b_bibliography_fjms, self.btn_b_bibliography_nli,
+                     self.btn_b_catalog_records, self.btn_b_measurements):
+            ext_info_row.add(_src, 2, group=tr("Sources"))
+        ext_info_row.add(self.btn_b_catalog, 1)
+        ext_info_row.add(self.btn_b_open_web, 1)
+        ext_info_row.add(self.btn_b_pgp, 2)
+        ext_info_row.add(self.btn_b_external_link, 2)
+        ext_info_row.add(QWidget(), -1, stretch=True)   # Translations at the far end
+        ext_info_row.add(self.btn_b_translations, 1)
+        top_layout.addWidget(ext_info_row)
         self._browse_fjms_bib = []
         self._browse_marc_bib = []
         self._browse_catalog_detail = None

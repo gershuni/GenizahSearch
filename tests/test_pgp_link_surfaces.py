@@ -549,7 +549,7 @@ def test_results_table_wires_the_click_and_double_click_handlers():
 
 def test_browse_pgp_button_is_added_to_the_toolbar_row():
     src = _read("genizah_app.py")
-    assert "ext_info_row.addWidget(self.btn_b_pgp)" in src
+    assert "ext_info_row.add(self.btn_b_pgp, 2)" in src  # an overflow row since #362
 
 
 def test_result_dialog_adds_both_pgp_buttons_to_their_rows():
