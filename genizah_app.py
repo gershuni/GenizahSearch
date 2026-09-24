@@ -15678,12 +15678,15 @@ class GenizahGUI(QMainWindow):
 
     def _browse_open_on_web(self):
         url = self._browse_web_url()
-        if url:
-            QDesktopServices.openUrl(QUrl(url))
+        if not url:
+            self.statusBar().showMessage(tr("This page is not on genizahsearch.com."), 5000)
+            return
+        QDesktopServices.openUrl(QUrl(url))
 
     def _browse_copy_web_link(self):
         url = self._browse_web_url()
         if not url:
+            self.statusBar().showMessage(tr("This page is not on genizahsearch.com."), 5000)
             return
         QApplication.clipboard().setText(url)
         self.statusBar().showMessage(tr("Link copied") + ": " + url, 5000)
@@ -23427,6 +23430,7 @@ class GenizahGUI(QMainWindow):
 
         # 3. Populate Browse panel state.
         self.current_browse_sid = sys_id
+        self._sync_browse_cite_button()  # Cite + website buttons follow the document
         self.current_browse_p = None
         self.current_browse_internal_idx = None
         self.current_browse_volume_ie = None
@@ -23812,6 +23816,7 @@ class GenizahGUI(QMainWindow):
         # Populate Browse panel state (filepath + info label + tab switch).
         # WR-01: filepath was resolved once at method top — reuse it; no second lookup.
         self.current_browse_sid = sys_id
+        self._sync_browse_cite_button()  # Cite + website buttons follow the document
         self.current_browse_p = page_data.get('p_num')
         self.current_browse_internal_idx = page_data.get('internal_index')
         self.current_browse_volume_ie = None
@@ -28800,6 +28805,7 @@ class GenizahGUI(QMainWindow):
         # manuscript that fails to resolve.  The real sid is set only after
         # successful resolution below.
         self.current_browse_sid = None
+        self._sync_browse_cite_button()  # Cite + website buttons follow the document
 
         # Reset UI (skip when reading desk is active to preserve stacked view)
         if not self.browse_reading_desk_active:
@@ -28911,6 +28917,7 @@ class GenizahGUI(QMainWindow):
             return
 
         self.current_browse_sid = sid
+        self._sync_browse_cite_button()  # Cite + website buttons follow the document
         self.current_browse_p = page_data['p_num'] if page_data else None
         self.current_browse_internal_idx = None
         self.current_browse_volume_ie = None  # Reset volume on new manuscript
@@ -28981,6 +28988,7 @@ class GenizahGUI(QMainWindow):
         # Load the selected folio
         target_sid = folios[folio_idx]
         self.current_browse_sid = target_sid
+        self._sync_browse_cite_button()  # Cite + website buttons follow the document
         self.current_browse_p = None
         self.current_browse_internal_idx = None
         self.current_browse_volume_ie = None  # Reset volume for Part navigation
@@ -29107,6 +29115,7 @@ class GenizahGUI(QMainWindow):
         if is_new_manuscript:
             self.current_browse_volume_ie = None  # Reset volume on cross-manuscript nav
             self.current_browse_sid = new_sid
+            self._sync_browse_cite_button()  # Cite + website buttons follow the document
             self.browse_sys_input.setText(new_sid)
             shelf, _ = self.meta_mgr.get_meta_for_id(new_sid)
             if shelf and shelf != "Unknown":
@@ -29128,6 +29137,7 @@ class GenizahGUI(QMainWindow):
     def browse_render_page(self, pd):
         if pd.get('sys_id') and pd.get('sys_id') != self.current_browse_sid:
             self.current_browse_sid = pd['sys_id']
+            self._sync_browse_cite_button()  # Cite + website buttons follow the document
 
         self.current_browse_p = pd['p_num']
 
@@ -30938,6 +30948,7 @@ class GenizahGUI(QMainWindow):
                         else:
                             self.current_browse_volume_ie = None  # invalid IE, fall back to primary
                     self.current_browse_sid = sid
+                    self._sync_browse_cite_button()  # Cite + website buttons follow the document
                     self.current_browse_p = None
                     # Start enrichment (images, metadata)
                     self._start_browse_enrichment(sid, is_part=False)
@@ -31544,6 +31555,7 @@ class GenizahGUI(QMainWindow):
                 self.current_browse_part_folio_idx = new_idx
                 new_sid = self.current_browse_part_folios[new_idx]
                 self.current_browse_sid = new_sid
+                self._sync_browse_cite_button()  # Cite + website buttons follow the document
                 self.browse_sys_input.setText(new_sid)
                 shelf, _ = self.meta_mgr.get_meta_for_id(new_sid)
                 if shelf and shelf != "Unknown":

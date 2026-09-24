@@ -129,3 +129,18 @@ def test_viewer_link_keeps_the_volume_after_crossing_into_another_manuscript(vie
     assert viewer._rd_web_url().endswith(f"sys_id={SID}&page=7")      # one volume: no IE
     viewer.current_volume_ie = "IE111"                                  # an explicit choice wins
     assert viewer._rd_web_url().endswith("&volume_ie=IE111")
+
+
+def test_every_change_of_the_browse_document_resyncs_its_buttons():
+    """Codex, #362: opening a My Library document by one of the local paths changed
+    current_browse_sid without re-syncing, so the website buttons (and Cite) stayed
+    enabled for a file that is not on the website. Every assignment after __init__
+    is now followed by the sync."""
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parent.parent / "genizah_app.py").read_text(
+        encoding="utf-8").splitlines()
+    sites = [i for i, line in enumerate(src) if "self.current_browse_sid = " in line]
+    assert len(sites) >= 9
+    missing = [i + 1 for i in sites[1:]            # [0] is the __init__ default
+               if "_sync_browse_cite_button()" not in src[i + 1]]
+    assert not missing, f"genizah_app.py lines {missing} change the Browse document without re-syncing"
