@@ -20622,14 +20622,29 @@ class GenizahGUI(QMainWindow):
         """How many results "Load more results" reaches, or 0 when it must
         offer none: nothing unloaded, a run still landing its results
         (reset_ui recomputes as it ends), a restore running (its last step
-        recomputes), or a table that can scroll (scrolling loads)."""
+        recomputes), the "Only results with all terms" view (see
+        _all_terms_view_active), or a table that can scroll (scrolling
+        loads)."""
         remaining = len(getattr(self, 'last_results', None) or []) - getattr(self, 'results_loaded', 0)
         if (remaining <= 0
                 or getattr(self, 'is_searching', False)
                 or getattr(self, '_restoring_session', False)
+                or self._all_terms_view_active()
                 or self.results_table.verticalScrollBar().maximum() != 0):
             return 0
         return remaining
+
+    def _all_terms_view_active(self):
+        """True while "Only results with all terms" narrows the table.
+
+        _apply_all_terms_filter_and_rerender renders a filtered copy of
+        last_results and then puts the full set back, so results_loaded
+        counts positions in the copy. A batch read from last_results at that
+        position would bring rows matching only some of the terms, and rows
+        already shown. The same condition as that method's filter."""
+        chain = getattr(self, 'refinement_chain', None)
+        return bool(getattr(self, '_all_terms_filter', False) and chain
+                    and compute_all_terms_filter(chain) is not None)
 
     def _update_load_more_button(self, *_):
         """Show "Load more results" exactly when _load_more_remaining says
@@ -21322,7 +21337,8 @@ class GenizahGUI(QMainWindow):
         self.title_items_by_sid = {}
         self.load_next_batch()
         self.last_results = original  # restore full set for future operations
-        # Recount against the full set, which a click on the button reads.
+        # Hides "Load more results" while the view is filtered (a click reads
+        # the full set); offers it again, counted on the full set, when not.
         self._update_load_more_button()
         n_shown = len(filtered)
         n_total = len(original)

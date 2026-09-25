@@ -1508,22 +1508,41 @@ def test_load_more_does_not_outlive_the_results_it_counted(load_more, ending):
     assert _load_more_state(w)[0] is False
 
 
-def test_after_the_all_terms_view_the_count_is_what_a_click_loads_from(load_more, monkeypatch):
-    """The all-terms view swaps last_results for the render and restores the
-    full set; a click reads the full set, so the label must count it."""
+def _table_uids(w):
+    t = w.results_table
+    return [f"{t.item(r, w.COL_SYS_ID).text()}_{t.item(r, w.COL_IMG).text()}"
+            for r in range(t.rowCount())]
+
+
+def test_the_all_terms_view_offers_no_load_more_and_a_click_loads_nothing(load_more, monkeypatch):
+    """The all-terms view renders a filtered copy of last_results and puts
+    the full set back, so results_loaded counts positions in the copy. A
+    click read the full set from there: rows matching only some terms, and
+    rows already shown, and a status line without the view's note."""
     w = load_more
-    w.excluded_sys_ids = {A}
-    _search_in_flight(w, _rows(A, 25) + _rows(B, 25))
-    monkeypatch.setattr(app, "compute_all_terms_filter",
-                        lambda chain: {f"{A}_{p}" for p in range(1, 26)})
+    w.results_table.resize(900, 2000)       # 20 rows fit: nothing scrolls
+    matching = {f"{A}_{p}" for p in range(1, 31)}
+    monkeypatch.setattr(app, "compute_all_terms_filter", lambda chain: matching)
     monkeypatch.setattr(app, "enrich_snippet_with_chain_terms", lambda s, c, q: s)
+    _search_in_flight(w, _rows(B, 10) + _rows(A, 20) + _rows(B, 10, start=11)
+                      + _rows(A, 10, start=21))
     w.refinement_chain = [object(), object()]
     w._all_terms_filter = True
     w._apply_all_terms_filter_and_rerender()
-    assert w.results_table.rowCount() == 20
-    remaining = len(w.last_results) - w.results_loaded
-    assert _load_more_state(w) == (True, _load_more_text(remaining)), (
-        "the label counts the swapped-in view, not what a click will read")
+    suffix = f" ({tr('Only results with all terms')})"
+    assert _table_uids(w) == [f"{A}_{p}" for p in range(1, 21)]
+    assert w.status_label.text() == _showing(20, 50) + suffix
+
+    assert _load_more_state(w)[0] is False, "Load more is offered in the all-terms view"
+    w.btn_load_more_results.click()         # a hidden button's click() still fires
+    rows = _table_uids(w)
+    assert set(rows) <= matching, "a click loaded rows that do not match all terms"
+    assert len(rows) == len(set(rows)), "a click loaded rows already shown"
+    assert w.status_label.text() == _showing(20, 50) + suffix
+
+    w._all_terms_filter = False             # the view off: the full set again
+    w._apply_all_terms_filter_and_rerender()
+    assert _load_more_state(w) == (True, _load_more_text(30))
 
 
 def test_the_load_more_label_has_a_hebrew_translation():
