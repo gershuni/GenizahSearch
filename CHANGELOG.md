@@ -16,8 +16,8 @@ every 5 s. The new secret signs every web user out once.
 - **Lists need an account.** Web lists are now kept only in your account; anonymous lists are
   retired. Stars, Add to List, bulk Add, Add from List, the join picker and `/lists` ask anonymous
   visitors to sign in, and the "Move to account" card is gone. The server's old anonymous store
-  (`lists.pkl`) is no longer read or written, and is left in place (owner decision pending). Star
-  icons show as outline for everyone for now; their filled state had come from that old store.
+  (`lists.pkl`) is no longer read or written; the owner deletes it on the server after this
+  deploy. Star icons show as outline for everyone for now; their filled state had come from that old store.
 - **Hardening:** the web storage secret is read from the environment (`GENIZAH_STORAGE_SECRET`,
   required); session id validation.
 - Removed the unused `/api/visual_similarity_db` download route.
