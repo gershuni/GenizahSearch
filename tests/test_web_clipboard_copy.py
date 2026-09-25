@@ -182,11 +182,14 @@ def test_copy_result_text_no_success_toast_when_browser_refuses(fake_env):
     assert _types(env) == ["negative"]
 
 
-def test_copy_result_text_no_answer_is_a_failure(fake_env):
-    """A JS result of None (undefined) is not a success."""
+@pytest.mark.parametrize("answer", [None, 1, "true", {}, [True]],
+                         ids=["none", "one", "str-true", "empty-dict", "list"])
+def test_copy_result_text_no_answer_is_a_failure(fake_env, answer):
+    """Only the boolean True is a success. A JS result of None (undefined) or
+    any other truthy value is not."""
     from web.pages.search_results import copy_result_text
 
-    env = fake_env(None)
+    env = fake_env(answer)
     _run(copy_result_text, "some text")
     assert _types(env) == ["negative"]
 
@@ -262,6 +265,12 @@ def test_clipboard_write_js_round_trips_exactly(text):
     _value, end = json.JSONDecoder().raw_decode(code, start)
     assert "`" not in code[:start] + code[end:]  # no template literal around it
     assert code.lstrip().startswith("(async")  # one expression, no leading `return`
+    # The code must also survive NiceGUI's websocket encoder (orjson, via
+    # nicegui.json), which refuses a raw lone surrogate that Python's json
+    # module accepts.
+    from nicegui import json as nicegui_json
+
+    nicegui_json.dumps({"code": code})
 
 
 _NODE_HARNESS = r"""
@@ -502,6 +511,37 @@ def test_quick_view_copy_reads_current_version():
         assert "current_display_text" in names, f"line {lam.lineno}"
         keys = {x.value for x in ast.walk(lam) if isinstance(x, ast.Constant)}
         assert "html" not in keys and "value" in keys, f"line {lam.lineno}"
+
+
+def test_quick_view_actions_copy_text_reads_current_version():
+    """The 'Copy Text' button in the Quick View Actions card sits in the same
+    dialog as the version selector. In view mode it must copy the version on
+    screen (current_display_text['value']); in edit mode the editor shows the
+    page text, so it keeps copying that."""
+    tree = ast.parse((ROOT / "web/pages/search_results.py").read_text(encoding="utf-8"))
+    render_content = _find_def(_find_def(tree, "open_advanced_dialog"), "render_content")
+    buttons = []
+    for n in ast.walk(render_content):
+        if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and n.func.attr == "button" and n.args):
+            continue
+        label = n.args[0]
+        if (isinstance(label, ast.Call) and isinstance(label.func, ast.Name)
+                and label.func.id == "tr" and label.args
+                and isinstance(label.args[0], ast.Constant)
+                and label.args[0].value == "Copy Text"):
+            buttons.append(n)
+    assert len(buttons) == 1, f"expected one ui.button(tr('Copy Text'), ...), found {len(buttons)}"
+    on_click = next((k.value for k in buttons[0].keywords if k.arg == "on_click"), None)
+    assert isinstance(on_click, ast.Lambda), "on_click is not a lambda"
+    assert (isinstance(on_click.body, ast.Call) and isinstance(on_click.body.func, ast.Name)
+            and on_click.body.func.id == "copy_result_text")
+    names = {x.id for x in ast.walk(on_click) if isinstance(x, ast.Name)}
+    attrs = {x.attr for x in ast.walk(on_click) if isinstance(x, ast.Attribute)}
+    keys = {x.value for x in ast.walk(on_click) if isinstance(x, ast.Constant)}
+    assert "current_display_text" in names, f"line {on_click.lineno} copies the opening text"
+    assert "value" in keys and "html" not in keys, f"line {on_click.lineno}"
+    assert "edit_mode" in attrs, f"line {on_click.lineno} ignores edit mode"
 
 
 def test_copy_result_text_is_async():

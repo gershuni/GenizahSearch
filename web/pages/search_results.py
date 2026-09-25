@@ -2459,9 +2459,13 @@ def open_advanced_dialog(search_state, refs, index, result):
 
                     text_to_copy = current_text or snippet.replace('*', '')
                     if text_to_copy:
+                        # View mode: copy the version on screen (handle_version_change
+                        # updates current_display_text['value']). Edit mode: the editor
+                        # shows the page text, so copy that.
                         ui.button(
                             tr('Copy Text'), icon='content_copy',
-                            on_click=lambda t=text_to_copy: copy_result_text(t)
+                            on_click=lambda t=text_to_copy, on_screen=not adv_state.edit_mode: copy_result_text(
+                                (current_display_text.get('value') if on_screen else None) or t)
                         ).props('outline')
 
     # Initial load (use current_result_idx which handles standalone mode)
