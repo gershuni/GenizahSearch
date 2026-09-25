@@ -4,7 +4,7 @@ UserListsManager.refresh_data() return-type change (None -> Dict).
 
 3 tests:
 - Test 1: authenticated branch returns fetched data dict
-- Test 2: local_mgr branch returns local_mgr.data
+- Test 2: anonymous refresh ignores a passed-in local_mgr (sweep C2)
 - Test 3: default branch returns default data dict
 
 All 3 assert await mgr.refresh_data() is a dict (NOT None).
@@ -33,19 +33,28 @@ def test_refresh_data_authenticated_returns_dict(monkeypatch):
     assert result is fake_data, "authenticated branch must return _get_cached_data() result"
 
 
-def test_refresh_data_local_mgr_returns_local_data(monkeypatch):
-    """Test 2: local_mgr branch returns local_mgr.data."""
+def test_refresh_data_anonymous_ignores_local_mgr(monkeypatch):
+    """Test 2: anonymous refresh returns the default skeleton, never local data.
+
+    This test used to assert ``result is local_mgr.data``, which pinned the
+    server-wide anonymous store leak (improvement sweep C2). The local mgr is
+    now ignored entirely, even when one is passed in.
+    """
     monkeypatch.setattr('web.auth_state.GlobalAuthState.is_logged_in', staticmethod(lambda: False))
 
     local_mgr_mock = MagicMock()
-    local_mgr_mock.data = {'lists': {}, 'projects': {}, 'items': {}, 'recent': []}
+    local_data = {'lists': {'leak': {'name': 'Leak'}}, 'projects': {}, 'items': {}, 'recent': []}
+    local_mgr_mock.data = local_data
     mgr = UserListsManager(local_mgr=local_mgr_mock)
     monkeypatch.setattr(mgr, 'invalidate_cache', lambda: None)
 
     result = asyncio.run(mgr.refresh_data())
 
     assert isinstance(result, dict), f"expected dict, got {type(result)}"
-    assert result is local_mgr_mock.data, "local_mgr branch must return local_mgr.data"
+    assert result is not local_data, "anonymous refresh returned the shared local store"
+    assert 'leak' not in result.get('lists', {})
+    assert result == mgr._get_default_data()
+    assert local_mgr_mock.mock_calls == [], local_mgr_mock.mock_calls
 
 
 def test_refresh_data_default_branch_returns_dict(monkeypatch):

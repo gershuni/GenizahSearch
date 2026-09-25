@@ -2750,6 +2750,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     def bulk_add_to_list():
         """Add all selected results to a list."""
+        from web.components.add_to_list_dialog import require_login_for_lists
+        if not require_login_for_lists():  # sweep C2: before any lists_mgr read
+            return
         if not search_state.selected_indices:
             ui.notify(tr('No results selected'), type='warning')
             return

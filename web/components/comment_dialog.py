@@ -90,6 +90,11 @@ def create_comment_dialog(
 
                             def load_recent():
                                 recent_container.clear()
+                                if not GlobalAuthState.is_logged_in():
+                                    # Sweep C2: anonymous visitors have no recents.
+                                    with recent_container:
+                                        ui.label(tr('Log in to use saved lists')).classes('text-gray-500 text-sm')
+                                    return
                                 if state.lists_mgr:
                                     # Use get_items_in_list to get proper item dicts
                                     recent_items = state.lists_mgr.get_items_in_list_sync('recent')
@@ -124,6 +129,11 @@ def create_comment_dialog(
 
                             def load_lists():
                                 lists_container.clear()
+                                if not GlobalAuthState.is_logged_in():
+                                    # Sweep C2: anonymous visitors have no lists.
+                                    with lists_container:
+                                        ui.label(tr('Log in to use saved lists')).classes('text-gray-500 text-sm')
+                                    return
                                 if state.lists_mgr:
                                     lists = state.lists_mgr.data.get('lists', {})
                                     if lists:

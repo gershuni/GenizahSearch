@@ -481,16 +481,27 @@ def test_get_items_in_list_sync_honours_explicit_auth_when_context_is_lost(monke
 
 
 def test_get_items_in_list_sync_still_defers_to_ambient_auth_by_default(monkeypatch):
-    """Omitting the overrides must keep the original behaviour exactly."""
+    """Omitting the overrides still defers to the ambient auth decision.
+
+    Anonymous (ambient logged-out) now yields [] WITHOUT reading the shared
+    local store: the old `[{'sys_id': 'LOCAL'}]` expectation pinned the
+    server-wide anonymous store leak (improvement sweep C2).
+    """
     user_lists = pytest.importorskip('web.user_lists')
     monkeypatch.setattr(user_lists.GlobalAuthState, 'is_logged_in', classmethod(lambda cls: False))
 
     class _LocalMgr:
+        def __init__(self):
+            self.used = False
+
         def get_items_in_list(self, list_id):
+            self.used = True
             return [{'sys_id': 'LOCAL'}]
 
-    mgr = user_lists.UserListsManager(local_mgr=_LocalMgr())
-    assert mgr.get_items_in_list_sync('recent') == [{'sys_id': 'LOCAL'}]
+    local = _LocalMgr()
+    mgr = user_lists.UserListsManager(local_mgr=local)
+    assert mgr.get_items_in_list_sync('recent') == []
+    assert not local.used, 'anonymous read fell through to the shared local store'
 
 
 def test_home_passes_the_auth_decision_into_the_worker():

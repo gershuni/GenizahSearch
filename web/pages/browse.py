@@ -2961,6 +2961,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                 def show_add_from_list_dialog():
                     """Show dialog to add manuscripts from personal lists to the reading desk."""
+                    from web.components.add_to_list_dialog import require_login_for_lists
+                    if not require_login_for_lists():  # sweep C2: before any lists read
+                        return
                     from web.state import state as app_state
                     lists_mgr = app_state.lists_mgr
                     if not lists_mgr:

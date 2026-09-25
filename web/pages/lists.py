@@ -10,7 +10,7 @@ Features:
 - Edit notes and tags for items
 - Export lists
 - Per-user storage (syncs across devices when logged in)
-- Per-device storage (for anonymous users)
+- Anonymous visitors see a sign-in prompt and no lists (sweep C2)
 """
 
 import logging
@@ -21,7 +21,7 @@ from web.translations import tr, get_language
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.components.typography import h1, h3
 from web.components.project_tree import create_project_tree
-from web.auth_state import GlobalAuthState
+from web.auth_state import GlobalAuthState, create_login_dialog
 from genizah_core import get_library_display
 from typing import Optional, Dict
 import asyncio
@@ -171,6 +171,22 @@ def create_inline_edit_label(
         input_el.on('blur', save_edit)
 
 
+def _render_anonymous_lists_page():
+    """Sign-in empty state for anonymous visitors. Reads no lists at all."""
+    with ui.column().classes('w-full items-center gap-4'):
+        h1(tr('Personal Lists'), classes='text-3xl font-bold text-green-800')
+        with ui.card().classes('p-6 items-center gap-3').mark('lists-anonymous-gate'):
+            ui.icon('lock', size='lg').style('color: var(--text-muted);')
+            ui.label(tr('Sign in to access your saved research lists.')).style(
+                'color: var(--text-secondary);'
+            )
+            ui.button(
+                tr('Sign in'),
+                icon='login',
+                on_click=lambda: create_login_dialog().open(),
+            ).classes('bg-primary text-white')
+
+
 def create_lists_page():
     """Create the personal lists management page."""
 
@@ -184,6 +200,14 @@ def create_lists_page():
             self.refresh_trigger: int = 0
 
     page_state = ListsPageState()
+
+    # Sweep C2: anonymous visitors have no lists. Return BEFORE any
+    # state.lists_mgr access: the old anonymous store was one server-wide
+    # store shared by every visitor. Login reloads the page, so the full
+    # page appears after sign-in.
+    if not GlobalAuthState.is_logged_in():
+        _render_anonymous_lists_page()
+        return
 
     # Main container references
     lists_sidebar_container = None
@@ -861,37 +885,10 @@ def create_lists_page():
             except Exception as e:
                 ui.notify(f"{tr('Export failed')}: {str(e)}", type='negative')
 
-    # --- Migration Dialog ---
-    async def show_migration_dialog():
-        """Show dialog to migrate local lists to user account."""
-        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-[500px]'):
-            h3(tr('Move browser lists to your account'), classes='text-xl font-bold mb-4')
-            ui.label(tr("Your browser has saved lists that haven't been moved to your account yet.")).classes('mb-2')
-            ui.label(tr('Moving them will make them available on all your devices and apps.')).classes('mb-4').style('color: var(--text-secondary);')
-
-            async def do_migration():
-                if hasattr(state.lists_mgr, 'migrate_local_to_user'):
-                    result = await state.lists_mgr.migrate_local_to_user()
-                    if 'error' not in result:
-                        ui.notify(
-                            f"{tr('Migration complete')}: {result.get('lists_migrated', 0)} {tr('lists')}, "
-                            f"{result.get('items_migrated', 0)} {tr('items')}",
-                            type='positive'
-                        )
-                        dialog.close()
-                        await async_refresh_ui()
-                    else:
-                        ui.notify(f"{tr('Migration failed')}: {result.get('error')}", type='negative')
-                else:
-                    ui.notify(tr('Migration not available'), type='warning')
-
-            with ui.row().classes('w-full justify-end gap-2'):
-                ui.button(tr('Later'), on_click=dialog.close).props('flat')
-                ui.button(tr('Move to account'), on_click=do_migration).classes('bg-primary text-white')
-
-        dialog.open()
-
     # --- Main Layout ---
+    # Signed-in only: anonymous visitors returned early above (sweep C2).
+    # The "Move to account" card and dialog are gone: they copied the whole
+    # server-wide anonymous store into one account and then wiped it.
     with ui.column().classes('w-full h-[calc(100vh-120px)]'):
         # Page Title
         with ui.row().classes('w-full items-center justify-between mb-4'):
@@ -899,20 +896,17 @@ def create_lists_page():
             h1(tr('Personal Lists'), classes='text-3xl font-bold text-green-800')
             with ui.row().classes('items-center gap-2'):
                 # Show sync status
-                if GlobalAuthState.is_logged_in():
-                    ui.icon('cloud_done', size='sm').classes('text-green-600').tooltip(tr('Lists auto-sync between this site and the desktop app'))
+                ui.icon('cloud_done', size='sm').classes('text-green-600').tooltip(tr('Lists auto-sync between this site and the desktop app'))
 
-                    # Phase 92.2 / Reviews Codex-MEDIUM-1: probe lifecycle point 3
-                    async def _refresh_button_click():
-                        _lists_task_probe('refresh_button_click')
-                        await async_refresh_ui()
+                # Phase 92.2 / Reviews Codex-MEDIUM-1: probe lifecycle point 3
+                async def _refresh_button_click():
+                    _lists_task_probe('refresh_button_click')
+                    await async_refresh_ui()
 
-                    ui.button(
-                        icon='refresh',
-                        on_click=_refresh_button_click,
-                    ).props('flat round dense').tooltip(tr('Refresh lists from cloud'))
-                else:
-                    ui.icon('cloud_off', size='sm').classes('text-gray-400').tooltip(tr('Local storage only - log in to sync'))
+                ui.button(
+                    icon='refresh',
+                    on_click=_refresh_button_click,
+                ).props('flat round dense').tooltip(tr('Refresh lists from cloud'))
                 ui.button(
                     tr('Create List'),
                     icon='add',
@@ -925,25 +919,7 @@ def create_lists_page():
                 ).props('flat').classes('text-gray-600')
 
         # Description with sync status
-        if GlobalAuthState.is_logged_in():
-            ui.label(tr('Your lists are synced across all your devices')).classes('mb-4').style('color: var(--text-secondary);')
-        else:
-            with ui.row().classes('items-center gap-2 mb-4'):
-                ui.label(tr('Lists are stored locally.')).style('color: var(--text-secondary);')
-                ui.link(tr('Log in to sync across devices'), '/').classes('text-primary underline')
-
-        # Check for migration opportunity (logged in with local lists)
-        if GlobalAuthState.is_logged_in():
-            local_mgr = state.get_local_lists_mgr()
-            if local_mgr and hasattr(state.lists_mgr, 'has_local_lists'):
-                if state.lists_mgr.has_local_lists():
-                    with ui.card().classes('w-full p-4 mb-4 bg-blue-50 border-l-4 border-blue-500'):
-                        with ui.row().classes('items-center gap-3'):
-                            ui.icon('sync', size='md').classes('text-blue-600')
-                            with ui.column().classes('flex-grow'):
-                                ui.label(tr('Browser lists found')).classes('font-semibold text-blue-800')
-                                ui.label(tr("This browser has lists that haven't been moved to your account. Move them now?")).classes('text-sm text-blue-600')
-                            ui.button(tr('Move to account'), on_click=show_migration_dialog).classes('bg-blue-500 text-white')
+        ui.label(tr('Your lists are synced across all your devices')).classes('mb-4').style('color: var(--text-secondary);')
 
         # Main Content: Sidebar + Content
         with ui.splitter(value=25).classes('w-full flex-grow') as splitter:

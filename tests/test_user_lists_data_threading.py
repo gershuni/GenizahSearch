@@ -8,11 +8,10 @@ UserListsManager.get_list_display_color() and get_lists_by_project().
 - Test 3: get_lists_by_project with data kwarg skips _get_cached_data()
 - Test 4: get_lists_by_project without data kwarg calls _get_cached_data()
 - Test 5: Semantic equivalence (same output threaded vs fetched)
-- Test 6: Local-mgr fallback path preserved when is_authenticated=False
+- Test 6: anonymous callers never read a passed-in local_mgr (sweep C2)
 """
 
 import pytest
-from unittest.mock import MagicMock
 from web.user_lists import UserListsManager
 
 
@@ -102,16 +101,31 @@ def test_semantic_equivalence(monkeypatch):
     assert by_proj_threaded == by_proj_fetched, "by_project must be identical threaded vs fetched"
 
 
-def test_local_mgr_fallback_preserved(monkeypatch):
-    """Test 6: local_mgr fallback path preserved when is_authenticated=False."""
-    local_mgr_mock = MagicMock()
-    local_mgr_mock.data = FAKE_DATA
-    mgr = _make_mgr(monkeypatch, is_authenticated=False, local_mgr=local_mgr_mock)
+def test_anonymous_ignores_local_mgr_data(monkeypatch):
+    """Test 6: anonymous callers get the default skeleton, never local_mgr.data.
 
-    # Without data=, should fall back to local_mgr.data
+    Formerly ``test_local_mgr_fallback_preserved``, which pinned the fallback
+    to the shared local store (improvement sweep C2). The local mgr's .data
+    must now never be read, even when one is passed in.
+    """
+    class _LocalMgr:
+        def __init__(self):
+            self.reads = 0
+
+        @property
+        def data(self):
+            self.reads += 1
+            return FAKE_DATA
+
+    local_mgr = _LocalMgr()
+    mgr = _make_mgr(monkeypatch, is_authenticated=False, local_mgr=local_mgr)
+
     color = mgr.get_list_display_color('11')
-    # List '11' is standalone (no project), should be gold
+    # The default skeleton has no list '11', so it is treated as standalone.
     assert color == '#FFD700', f"standalone list should be gold, got {color}"
 
     by_proj = mgr.get_lists_by_project()
     assert None in by_proj, "standalone lists must appear under None key"
+    assert [lst['id'] for lst in by_proj[None]] == ['default']
+    assert '20' not in by_proj, "anonymous result carries the local store's project"
+    assert local_mgr.reads == 0, "anonymous caller read local_mgr.data"

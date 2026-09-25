@@ -3013,7 +3013,15 @@ def init_api_routes(app_override=None):
 
     @target_app.get('/api/export/list/{list_id}/excel')
     def export_list_excel(list_id: str):
-        """Export a specific list to Excel using unified export service."""
+        """Export a specific list to Excel using unified export service.
+
+        Signed-in only, checked before touching state.lists_mgr (sweep C2).
+        This is a sync route run in anyio's threadpool, which copies
+        contextvars, so the request-scoped session resolves here.
+        """
+        from web.auth_state import GlobalAuthState
+        if not GlobalAuthState.is_logged_in():
+            return Response("Login required", status_code=401)
         if not state.lists_mgr:
             return Response("Lists manager not available", status_code=400)
 

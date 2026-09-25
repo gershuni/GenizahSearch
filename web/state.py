@@ -17,7 +17,9 @@ class AppState:
         self.searcher: Optional[SearchEngine] = None
         self.lab_engine: Optional[LabEngine] = None
         self.indexer: Optional[Indexer] = None
-        # Local lists manager (for per-device storage / anonymous users)
+        # Process-wide ListsManager (the server's lists.pkl), loaded read-only
+        # at startup. It is only a readiness signal now: UserListsManager
+        # never reads or writes it (improvement sweep C2).
         self._local_lists_mgr: Optional[ListsManager] = None
 
         # Per-user export state migrated to web.export_state (Phase 88, 2026-05-13).
@@ -53,19 +55,16 @@ class AppState:
 
     @lists_mgr.setter
     def lists_mgr(self, value):
-        """Set the local lists manager (per-device anonymous store).
+        """Set the process-wide ListsManager (the readiness signal).
 
         The factory property at ``lists_mgr`` wraps ``_local_lists_mgr``
         + ``meta_mgr`` into a fresh ``UserListsManager`` on each access
         (Phase 89 D-01). Setting ``state.lists_mgr = ListsManager(...)``
-        from web/main.py:1505 stores the local manager; the factory then
-        produces the wrapper on demand.
+        from web/main.py's engine bootstrap stores it; the factory then
+        produces the wrapper on demand. The wrapper ignores the stored
+        manager: it is one store shared by every visitor (sweep C2).
         """
         self._local_lists_mgr = value
-
-    def get_local_lists_mgr(self) -> Optional[ListsManager]:
-        """Get the local lists manager directly (for migration)."""
-        return self._local_lists_mgr
 
     def is_ready(self):
         return self.searcher is not None and self.meta_mgr is not None

@@ -978,6 +978,12 @@ def show_add_join_form(
         prefill_shelfmark: Optional shelfmark to pre-select as fragment B
         prefill_sys_id: Optional sys_id for pre-selected fragment B
     """
+    # Sweep C2: the picker reads the visitor's lists and recents, and creating
+    # a join needs an account anyway. Gate here, the chokepoint for every caller.
+    if not GlobalAuthState.is_logged_in():
+        ui.notify(tr('Login to create joins'), type='warning')
+        return None
+
     dialog = ui.dialog()
 
     # State to track selected fragment

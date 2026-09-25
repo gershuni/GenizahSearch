@@ -15,6 +15,7 @@ import logging
 from nicegui import run, ui
 from web.state import state
 from web.supabase_client import get_user_client
+from web.auth_state import GlobalAuthState
 from web.client_guard import client_gone, show_load_error
 from web.translations import tr, is_rtl
 from web.components.typography import h1, h2, h3
@@ -122,6 +123,10 @@ def create_page():
                         return "0"
 
                     def get_list_count():
+                        # Sweep C2: anonymous visitors have no lists. Runs in an
+                        # ensure_future task, so it must only return a number.
+                        if not GlobalAuthState.is_logged_in():
+                            return 0
                         return len(state.lists_mgr.get_all_lists()) if state.lists_mgr else 0
 
                     mini_stat('library_books', get_doc_count, tr('Pages'))
@@ -753,15 +758,18 @@ def create_page():
                 # ZERO rows: an empty "Recently viewed" for a logged-in user.
                 await asyncio.sleep(0.3)
                 try:
+                    if not GlobalAuthState.is_logged_in():
+                        # Sweep C2: no recents for anonymous visitors.
+                        if not client_gone(recent_container):
+                            render_recent([])
+                        return
                     if not state.lists_mgr:
                         return
                     # Resolve the auth decision HERE, on the loop, and pass it in.
                     # Passing only `client` is not enough: the method otherwise
                     # re-derives auth itself via GlobalAuthState -> safe_user_get,
                     # which has no UI context in the worker, reads as logged-OUT,
-                    # and falls through to the local_mgr branch -- so a signed-in
-                    # user would silently get local-or-empty recent activity while
-                    # the authenticated client went unused.
+                    # and returns nothing: empty recents for a signed-in user.
                     lists_mgr = state.lists_mgr
                     is_authed = lists_mgr.is_authenticated
                     reader_user_id = lists_mgr.user_id if is_authed else None
@@ -820,7 +828,8 @@ def create_page():
                 )
                 status_item(
                     tr('Personal Lists'),
-                    lambda: len(state.lists_mgr.get_all_lists()) if state.lists_mgr else 0,
+                    lambda: len(state.lists_mgr.get_all_lists())
+                    if state.lists_mgr and GlobalAuthState.is_logged_in() else 0,
                     'star'
                 )
                 status_item(
