@@ -30,10 +30,10 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QObject, QPoint
+from PyQt6.QtCore import QObject, QPoint, QRect
 from PyQt6.QtWidgets import (QApplication, QComboBox, QLabel, QLineEdit,
                              QMainWindow, QProgressBar, QPushButton,
-                             QTableWidget)
+                             QTableWidget, QVBoxLayout, QWidget)
 
 import genizah_app as app
 import shared.session_persistence as session_persistence
@@ -1175,16 +1175,25 @@ def test_the_collector_returns_exactly_the_visible_rows(window):
 @pytest.fixture
 def load_more(window, monkeypatch):
     """The real button, installed by the method the Search tab's builder
-    calls, over a table shown at a known size, with 20-row batches."""
+    calls, under the table in a container laid out as the builder's, shown
+    at a known size, with 20-row batches."""
     w = window
-    install = getattr(w, "_install_load_more_button", None)
-    if install is not None:
-        install()
+    container = QWidget()
+    layout = QVBoxLayout(container)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.addLayout(w._install_load_more_button())
     monkeypatch.setattr(app, "BATCH_SIZE", 20)
-    w.results_table.resize(900, 400)
-    w.results_table.show()
+    container.resize(900, 400)
+    container.show()
+    QApplication.processEvents()
     yield w
-    w.results_table.hide()
+    container.hide()
+
+
+def _resize_results(w, width, height):
+    """The window around the table changes size (the table is laid out)."""
+    w.results_table.parentWidget().resize(width, height)
+    QApplication.processEvents()
 
 
 def _load_more_state(w):
@@ -1239,7 +1248,7 @@ def test_load_more_is_hidden_while_the_restore_runs(load_more):
 
 def test_load_more_is_hidden_when_the_table_can_scroll(load_more):
     w = load_more
-    w.results_table.resize(900, 200)
+    _resize_results(w, 900, 200)
     _search_in_flight(w, _rows(B, 40))
     assert _load_more_state(w)[0] is False, "the button showed while scrolling works"
     assert w.results_table.verticalScrollBar().maximum() > 0
@@ -1248,12 +1257,12 @@ def test_load_more_is_hidden_when_the_table_can_scroll(load_more):
 def test_load_more_follows_the_scroll_range_when_the_window_changes(load_more):
     """Nothing but the scroll bar's rangeChanged recomputes it on a resize."""
     w = load_more
-    w.results_table.resize(900, 2000)
+    _resize_results(w, 900, 2000)
     _search_in_flight(w, _rows(B, 40))
     assert _load_more_state(w) == (True, _load_more_text(20))
-    w.results_table.resize(900, 200)
+    _resize_results(w, 900, 200)
     assert _load_more_state(w)[0] is False, "stale after the table became scrollable"
-    w.results_table.resize(900, 2000)
+    _resize_results(w, 900, 2000)
     assert _load_more_state(w) == (True, _load_more_text(20))
 
 
@@ -1266,7 +1275,7 @@ def test_load_more_is_hidden_when_nothing_remains(load_more):
 
 def test_a_click_loads_exactly_one_batch_and_updates_the_count(load_more):
     w = load_more
-    w.results_table.resize(900, 2000)       # no batch here ever overflows the view
+    _resize_results(w, 900, 2000)           # no batch here ever overflows the view
     w.excluded_sys_ids = {A}
     _search_in_flight(w, _rows(A, 40) + _rows(B, 30))
     assert _load_more_state(w) == (True, _load_more_text(50))
@@ -1496,25 +1505,58 @@ def test_a_click_is_checked_again_and_loads_nothing_while_a_search_runs(load_mor
         "a click loaded a batch while a search was running")
 
 
-def _assert_bottom_centre(w):
-    btn, viewport = w.btn_load_more_results, w.results_table.viewport()
+def _assert_under_the_rows(w):
+    """Shown whole, centred under the table, and over no visible row: a row
+    it covered could not be read or clicked."""
+    QApplication.processEvents()
+    btn, table = w.btn_load_more_results, w.results_table
+    window = btn.window()
     g = btn.geometry()
-    assert g.width() > 0 and g.left() >= 0 and g.top() >= 0, g
-    assert abs((g.left() + g.width() / 2) - viewport.width() / 2) <= 1, (
-        f"not centred: {g} in a viewport {viewport.width()} wide")
-    assert 0 < viewport.height() - (g.top() + g.height()) <= 16, (
-        f"not at the bottom: {g} in a viewport {viewport.height()} high")
+    assert btn.isVisible() and g.width() > 0 and g.height() > 0, g
+    shown = QRect(btn.mapTo(window, QPoint(0, 0)), g.size())
+    assert window.rect().contains(shown), f"cut off: {shown} in {window.rect()}"
+    viewport = table.viewport()
+    over = QRect(viewport.mapFrom(window, shown.topLeft()), g.size())
+    covered = [r for r in range(table.rowCount()) if not table.isRowHidden(r)
+               and over.intersects(viewport.rect().intersected(       # what shows of it
+                   QRect(0, table.rowViewportPosition(r), viewport.width(),
+                         table.rowHeight(r))))]
+    assert covered == [], f"the button covers rows {covered}: {over} in the viewport"
+    t = QRect(table.mapTo(window, QPoint(0, 0)), table.size())
+    assert abs(shown.center().x() - t.center().x()) <= 1, (
+        f"not centred under the table: {shown} under {t}")
 
 
-def test_load_more_sits_bottom_centre_and_follows_a_resize(load_more):
+def test_load_more_sits_under_the_rows_and_follows_a_resize(load_more):
     w = load_more
     w.excluded_sys_ids = {A}
     _search_in_flight(w, _rows(A, 20) + _rows(B, 30))
     assert _load_more_state(w)[0] is True
-    _assert_bottom_centre(w)
-    w.results_table.resize(1300, 700)       # the scroll range stays 0: only the resize says so
+    _assert_under_the_rows(w)
+    _resize_results(w, 1300, 700)           # the scroll range stays 0
     assert _load_more_state(w)[0] is True
-    _assert_bottom_centre(w)
+    _assert_under_the_rows(w)
+
+
+def test_load_more_covers_no_row_when_the_rows_just_fill_the_table(load_more):
+    """No scroll range is not room under the rows: twelve rows in a viewport
+    3 px taller than they are cannot scroll, and the button floated over the
+    viewport's bottom covered the last one. Under the table it squeezes the
+    rows until they overflow -- which must not hide it again, or show and
+    hide it for ever."""
+    w = load_more
+    table = w.results_table
+    overhead = table.height() - table.viewport().height()   # headers, frame, bars
+    _resize_results(w, 900, 12 * table.verticalHeader().defaultSectionSize() + 3 + overhead)
+    assert table.viewport().height() == 12 * table.verticalHeader().defaultSectionSize() + 3
+    w.excluded_sys_ids = {A}
+    _search_in_flight(w, _rows(B, 12) + _rows(A, 38))       # 12 of the first 20 visible
+    assert _load_more_state(w)[0] is True
+    _assert_under_the_rows(w)
+    assert table.verticalScrollBar().maximum() > 0, "the button's row squeezed no row out"
+    for _ in range(5):                                      # and it stays so
+        assert _load_more_state(w) == (True, _load_more_text(30))
+        _assert_under_the_rows(w)
 
 
 def test_load_more_fits_its_label_when_the_count_grows(load_more):
@@ -1528,11 +1570,10 @@ def test_load_more_fits_its_label_when_the_count_grows(load_more):
     assert _load_more_state(w) == (True, _load_more_text(1000))
     btn = w.btn_load_more_results
     assert btn.width() >= btn.sizeHint().width(), "the label no longer fits the button"
-    _assert_bottom_centre(w)
+    _assert_under_the_rows(w)
 
 
 def test_load_more_stays_centred_when_the_table_scrolls_sideways(load_more):
-    """A horizontal scroll moves every child of the viewport with it."""
     w = load_more
     w.excluded_sys_ids = {A}
     _search_in_flight(w, _rows(A, 20) + _rows(B, 30))
@@ -1542,7 +1583,7 @@ def test_load_more_stays_centred_when_the_table_scrolls_sideways(load_more):
     assert bar.maximum() > 0
     bar.setValue(bar.maximum())
     assert _load_more_state(w)[0] is True
-    _assert_bottom_centre(w)
+    _assert_under_the_rows(w)
 
 
 # --- the Search tab as the app builds it ------------------------------------
@@ -1581,6 +1622,18 @@ def search_tab(window, monkeypatch):
     panel.hide()
 
 
+def _layout_holding(layout, widget):
+    """The layout, `layout` or one nested in it, that holds `widget` itself."""
+    if layout.indexOf(widget) >= 0:
+        return layout
+    for i in range(layout.count()):
+        inner = layout.itemAt(i).layout()
+        found = inner is not None and _layout_holding(inner, widget)
+        if found:
+            return found
+    return None
+
+
 def _footer(w, panel):
     top = panel.layout()
     for i in range(top.count()):
@@ -1590,12 +1643,13 @@ def _footer(w, panel):
     raise AssertionError("no row of the Search tab holds the status label")
 
 
-def test_the_built_search_tab_puts_load_more_over_the_results(search_tab):
+def test_the_built_search_tab_puts_load_more_right_under_the_results(search_tab):
     w, panel = search_tab
     btn = getattr(w, "btn_load_more_results", None)
     assert btn is not None, "the Search tab as built has no 'Load more results' button"
-    assert btn.parentWidget() is w.results_table.viewport(), (
-        "the button is not an overlay on the results viewport")
+    rows = _layout_holding(w.results_table.parentWidget().layout(), w.results_table)
+    assert rows is not None and rows.indexOf(btn) == rows.indexOf(w.results_table) + 1, (
+        "the button is not the row right under the results table")
     assert _footer(w, panel).indexOf(btn) == -1, "the button is in the footer layout"
     assert btn.isHidden(), "the button shows at startup, with nothing to load"
 
@@ -1643,7 +1697,7 @@ def test_the_all_terms_view_offers_no_load_more_and_a_click_loads_nothing(load_m
     click read the full set from there: rows matching only some terms, and
     rows already shown, and a status line without the view's note."""
     w = load_more
-    w.results_table.resize(900, 2000)       # 20 rows fit: nothing scrolls
+    _resize_results(w, 900, 2000)           # 20 rows fit: nothing scrolls
     matching = {f"{A}_{p}" for p in range(1, 31)}
     monkeypatch.setattr(app, "compute_all_terms_filter", lambda chain: matching)
     monkeypatch.setattr(app, "enrich_snippet_with_chain_terms", lambda s, c, q: s)
