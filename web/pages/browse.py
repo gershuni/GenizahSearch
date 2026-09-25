@@ -77,7 +77,7 @@ from web.services import (
     is_oxford_manuscript,
 )
 from shared.synthetic_sys_id import is_synthetic_sys_id
-from web.translations import tr, is_rtl, get_language, set_language
+from web.translations import tr, is_rtl, get_language, using_language
 from web.auth_state import GlobalAuthState
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.supabase_client import create_correction, update_correction, get_corrections
@@ -2769,8 +2769,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         # metadata panel, or update_content may have rebuilt
                         # (and deleted) the slot. The UI language is a process
                         # global that every page render resets, so it is
-                        # captured here and restored just before the deferred
-                        # render (which runs synchronously, with no await).
+                        # captured here; the deferred render (synchronous, no
+                        # await) runs in it and then restores whatever another
+                        # visitor's render had set.
                         _joins_gen = _load_generation['value']
                         _joins_sys_id = page.sys_id
                         _joins_lang = get_language()
@@ -2782,8 +2783,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     and state.current_page.sys_id == _joins_sys_id)
 
                         def _render_joins_deferred(joins_data):
-                            set_language(_joins_lang)
-                            _render_related_fragments(joins_data)
+                            with using_language(_joins_lang):
+                                _render_related_fragments(joins_data)
 
                         background_tasks.create(
                             load_connected_fragments_into(

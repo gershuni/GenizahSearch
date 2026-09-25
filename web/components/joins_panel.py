@@ -625,9 +625,10 @@ def create_joins_button(
     button_ref['btn'] = btn
 
     # Load count in background. Re-enter the captured client context so the
-    # recolor/tooltip mutations AND fetch_connected_fragments' safe_storage reads
-    # run under a valid UI context (otherwise: 'app.storage.user can only be used
-    # within a UI context' noise).
+    # recolor/tooltip mutations after the await run under a valid UI context
+    # (a bare ensure_future task starts with an empty slot stack). The fetch
+    # itself is a public anonymous read (get_public_read_client) in a worker
+    # thread; it reads no per-user storage.
     _btn_client = ui.context.client
 
     def _safe_load_count():

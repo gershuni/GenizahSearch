@@ -285,6 +285,48 @@ def test_joins_dialog_has_no_blocking_supabase_execute_in_async_code():
         "into a sync helper awaited via run.io_bound: %r" % hits)
 
 
+def _community_fetch_uses(source):
+    """(direct calls, io_bound-argument uses) of _fetch_community_puzzle_joins.
+
+    The execute() guard above only proves the reads left the async body; it
+    cannot tell whether the sync helper is then awaited through run.io_bound
+    or called inline on the loop. This pins the call site itself.
+    """
+    tree = ast.parse(source)
+    parents = _parents(tree)
+    direct, offloaded = [], []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and _name(node.func) == '_fetch_community_puzzle_joins':
+            direct.append(node.lineno)
+        elif isinstance(node, (ast.Name, ast.Attribute)) and _name(node) == '_fetch_community_puzzle_joins':
+            parent = parents.get(node)
+            if (isinstance(parent, ast.Call) and _name(parent.func) in IO_BOUND_NAMES
+                    and node in parent.args
+                    and isinstance(parents.get(parent), ast.Await)):
+                offloaded.append(node.lineno)
+    return sorted(direct), sorted(offloaded)
+
+
+def test_joins_dialog_awaits_the_community_reads_through_io_bound():
+    direct, offloaded = _community_fetch_uses(JOINS_PANEL.read_text(encoding='utf-8'))
+    assert direct == [], (
+        "_fetch_community_puzzle_joins is called inline (blocking PostgREST on the "
+        "event loop) at lines %r; await run.io_bound(_fetch_community_puzzle_joins, ...)" % direct)
+    assert offloaded, "the Joins dialog must await _fetch_community_puzzle_joins via run.io_bound"
+
+
+@pytest.mark.parametrize('snippet,direct,offloaded', [
+    ("async def f():\n    rows = _fetch_community_puzzle_joins(d) or []\n", 1, 0),
+    ("async def f():\n    rows = await run.io_bound(_fetch_community_puzzle_joins, d) or []\n", 0, 1),
+    # referenced but not awaited: not counted as offloaded
+    ("async def f():\n    fut = run.io_bound(_fetch_community_puzzle_joins, d)\n", 0, 0),
+])
+def test_community_fetch_detector(snippet, direct, offloaded):
+    """Regression guard, green before and after: proves the call-site pin can fail."""
+    d, o = _community_fetch_uses(snippet)
+    assert (len(d), len(o)) == (direct, offloaded)
+
+
 @pytest.mark.parametrize('snippet,expected', [
     ("async def f():\n    c.table('x').select('*').execute()\n", 1),
     ("def f():\n    c.table('x').select('*').execute()\n", 0),
