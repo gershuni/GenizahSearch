@@ -160,7 +160,11 @@ Never treat a flag alone as proof a feature is live.
 | `WEB_PUZZLE_ENABLED` | `true` | the web Fragment Puzzle page | — |
 | `SEARCH_API_MODE` | `open` | the public API (`open`/`localhost-only`/`disabled`) | — |
 
-Three more you will hit directly while working:
+Four more you will hit directly while working:
+
+- `GENIZAH_STORAGE_SECRET` — **required** to run the web app anywhere (32+ characters, no
+  fallback); `python -m web.main` exits at startup without it. On the server it must be set
+  BEFORE deploying; changing it signs every web user out once.
 
 - `MASKING_SCAN_PATTERNS_FILE` — dev/CI. Unset or empty makes `scripts/check_atlas_masking.py`
   **fail (exit 1) BY DESIGN**, never silently pass. A red masking scan with no file set is the

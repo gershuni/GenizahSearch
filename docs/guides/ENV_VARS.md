@@ -17,6 +17,7 @@
 ```
 SUPABASE_URL=https://xxxxx.supabase.co
 SUPABASE_ANON_KEY=eyJ...
+GENIZAH_STORAGE_SECRET=<random, 32+ characters>   # web-only, REQUIRED everywhere (production and local dev). Signs the NiceGUI session cookie. web/main.py's startup block (web/session_hardening.py::resolve_storage_secret) refuses to start when it is unset, blank or shorter than 32 characters -- there is no fallback, so set it on the server BEFORE deploying code that needs it. Generate: python -c "import secrets; print(secrets.token_urlsafe(32))". Changing it signs every web user out once and orphans the old .nicegui/storage-user-*.json files (the 90-day startup prune removes them). Never logged or printed.
 POSTHOG_API_KEY=phc_xxxxx (optional - enables PostHog analytics)
 WEB_PUZZLE_ENABLED=true (default: true)
 ATLAS_PREVIEW_ENABLED=false   # web-only (Phase 133, ATLAS-01). Default OFF — gates the Visual Atlas Preview beta: the /atlas page, its /atlas-data/* routes, and the nav link. The flag is necessary but NOT sufficient: web/atlas_assets.py::atlas_preview_available() ANDs it with the baked-asset readiness (manifest + plain .bin loaded at startup from repo-root atlas_data/, OUTSIDE web/static/), so a flag-ON/asset-missing window still hides cleanly. Set to 1/true to enable in the beta env.

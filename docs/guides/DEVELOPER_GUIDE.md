@@ -51,6 +51,11 @@ Create a `.env` file in the project root:
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_ANON_KEY=your-anon-key
 
+# Required to run the web app at all (it refuses to start without it);
+# any random 32+ character value works locally:
+#   python -c "import secrets; print(secrets.token_urlsafe(32))"
+GENIZAH_STORAGE_SECRET=
+
 # Optional
 GENIZAH_PORT=8081
 GENIZAH_FJMS_DB_PATH=  # optional absolute fjms_enrichment.db path; useful from git worktrees

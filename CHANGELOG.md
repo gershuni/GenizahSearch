@@ -6,6 +6,31 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ## [Unreleased]
 
+### Web hotfix: lists privacy, hardening and correctness (2026-09-25)
+
+**Deploy order (owner-run).** Put `GENIZAH_STORAGE_SECRET` (32+ characters; generate one with
+`python -c "import secrets; print(secrets.token_urlsafe(32))"`) in the server `.env` **before**
+this code is deployed: the web app now refuses to start without it, and systemd would restart it
+every 5 s. The new secret signs every web user out once.
+
+- **Lists need an account.** Web lists are now kept only in your account; anonymous lists are
+  retired. Stars, Add to List, bulk Add, Add from List, the join picker and `/lists` ask anonymous
+  visitors to sign in, and the "Move to account" card is gone. The server's old anonymous store
+  (`lists.pkl`) is no longer read or written, and is left in place (owner decision pending). Star
+  icons show as outline for everyone for now; their filled state had come from that old store.
+- **Hardening:** the web storage secret is read from the environment (`GENIZAH_STORAGE_SECRET`,
+  required); session id validation.
+- Removed the unused `/api/visual_similarity_db` download route.
+- Corrections page: deleting a draft and editing or deleting your own comment now really take
+  effect, and when nothing changed the page says so instead of reporting success. The same check
+  now covers the admin deletes on `/discoveries`, join deletes and the Joins Lab remove.
+- Browse "Related Fragments" and the `/api/search` / `/api/parallels` filter lookups no longer
+  block the web server's event loop; the public joins read has a 5 s timeout.
+- Quick View and the Browse whole-document view show transcription notation such as
+  `<upside down>` literally, and search highlights no longer break the text or each other.
+- Copy buttons copy the exact text (backslash sequences included) and say "copied" only when the
+  browser confirms it; Quick View copies the version on screen.
+
 ## [9.3.0] - 2026-09-24 — Fresh PGP data, small screens, and urgent fixes
 
 **Desktop release.** The web side of this work (the PGP sidecar and the homepage count) went
