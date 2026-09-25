@@ -12,6 +12,7 @@ with ``ui`` replaced by a MagicMock, and pin the page closures to them
 (test the call sites, not only the helpers).
 """
 
+import ast
 import inspect
 from unittest.mock import MagicMock
 
@@ -106,8 +107,65 @@ def test_zero_rows_and_other_errors_show_different_fixed_messages(fake_ui, monke
     assert 'boom' not in second
 
 
+ROUTED_ACTIONS = ('_delete_correction_action', '_delete_comment_action', '_save_comment_action')
+_FUNC_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+
+
+def _routed_action_calls(page_fn):
+    """Names of the routed actions CALLED from a closure nested inside ``page_fn``.
+
+    Parsed with ast, so a comment or a string that merely names an action does
+    not count, and a call made directly in the page body (not from a click
+    handler) does not count either.
+    """
+    parents = {}
+    for node in ast.walk(page_fn):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+    found = set()
+    for node in ast.walk(page_fn):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in ROUTED_ACTIONS):
+            continue
+        cur = parents.get(node)
+        while cur is not None and not isinstance(cur, _FUNC_TYPES):
+            cur = parents.get(cur)
+        if cur is not None and cur is not page_fn:
+            found.add(node.func.id)
+    return found
+
+
+def _page_fn(source, name='create_corrections_page'):
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            return node
+    raise AssertionError('%s not found' % name)
+
+
 def test_page_closures_route_through_the_actions():
-    src = inspect.getsource(corrections.create_corrections_page)
-    for call in ('_delete_correction_action(', '_delete_comment_action(', '_save_comment_action('):
-        assert call in src, "create_corrections_page does not call %s" % call
-    assert 'get_client()' not in src, "a /corrections page handler still uses the anonymous client"
+    fn = _page_fn(inspect.getsource(corrections))
+    missing = set(ROUTED_ACTIONS) - _routed_action_calls(fn)
+    assert not missing, "create_corrections_page's click handlers do not call %s" % sorted(missing)
+    anon = [n.lineno for n in ast.walk(fn) if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name) and n.func.id == 'get_client']
+    assert anon == [], "a /corrections page handler still uses the anonymous client (lines %r)" % anon
+
+
+@pytest.mark.parametrize('snippet,expected', [
+    ("async def create_corrections_page():\n"
+     "    def on_click():\n"
+     "        _delete_correction_action(1)\n"
+     "        _delete_comment_action(1, d)\n"
+     "        _save_comment_action(1, 't', d)\n", set(ROUTED_ACTIONS)),
+    # comments and strings name the actions but call nothing
+    ("async def create_corrections_page():\n"
+     "    def on_click():\n"
+     "        # _delete_correction_action(1)\n"
+     "        s = '_delete_comment_action(1, d)'\n", set()),
+    # called in the page body, not from a click handler
+    ("async def create_corrections_page():\n"
+     "    _save_comment_action(1, 't', d)\n", set()),
+])
+def test_routed_action_detector(snippet, expected):
+    """Regression guard, green before and after: proves the call-site pin can fail."""
+    assert _routed_action_calls(_page_fn(snippet)) == expected

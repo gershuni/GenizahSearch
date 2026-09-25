@@ -3,10 +3,13 @@
 
 Bans, in ``web/`` and ``shared/``:
   any ``.insert`` / ``.update`` / ``.delete`` / ``.upsert`` / ``.rpc`` call
-  whose receiver chain is rooted at the literal anonymous singleton
-  ``get_client()`` -- either written out (``get_client().table('x').delete()``)
-  or through a name bound to ``get_client()`` in an enclosing function
-  (``c = get_client(); c.table('x').update(...)``).
+  whose receiver chain is rooted at a literal anonymous singleton --
+  ``get_client()``, or ``get_public_read_client()`` (the short-timeout client
+  for public reads) -- either written out
+  (``get_client().table('x').delete()``) or through a name bound, in an
+  enclosing function, to the singleton or to an unexecuted builder derived
+  from it (``c = get_client(); c.table('x').update(...)``,
+  ``t = get_client().table('x'); t.delete()``).
 
 Why: ``get_client()`` carries no user JWT, so ``auth.uid()`` is NULL inside
 Postgres. Every owner- or admin-scoped policy then filters the target rows to
@@ -50,15 +53,41 @@ WRITE_METHODS = {'insert', 'update', 'delete', 'upsert', 'rpc'}
 _FUNC_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
 
 
+# The anonymous singletons: get_client() (default timeout) and
+# get_public_read_client() (short timeout, public reads only). Neither carries
+# a user JWT.
+ANON_ROOTS = {'get_client', 'get_public_read_client'}
+
+
 def _is_get_client_call(node):
     if not isinstance(node, ast.Call):
         return False
     func = node.func
-    if isinstance(func, ast.Name) and func.id == 'get_client':
+    if isinstance(func, ast.Name) and func.id in ANON_ROOTS:
         return True
-    if isinstance(func, ast.Attribute) and func.attr == 'get_client':
+    if isinstance(func, ast.Attribute) and func.attr in ANON_ROOTS:
         return True
     return False
+
+
+def _is_anon_builder(expr):
+    """An anonymous singleton call, or an unexecuted builder derived from one.
+
+    ``get_client().table('x')`` counts. An executed response
+    (``... .execute()``) is data, not a client, so a later
+    ``resp.data[0].update(...)`` is a dict method and is not flagged.
+    """
+    while True:
+        if _is_get_client_call(expr):
+            return True
+        if isinstance(expr, ast.Call):
+            if isinstance(expr.func, ast.Attribute) and expr.func.attr == 'execute':
+                return False
+            expr = expr.func
+        elif isinstance(expr, (ast.Attribute, ast.Subscript)):
+            expr = expr.value
+        else:
+            return False
 
 
 def _build_parent_map(tree):
@@ -95,12 +124,12 @@ def _scope_names(scope):
     for node in _own_nodes(scope):
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
             bound.add(node.id)
-        if isinstance(node, ast.Assign) and _is_get_client_call(node.value):
+        if isinstance(node, ast.Assign) and _is_anon_builder(node.value):
             for target in node.targets:
                 if isinstance(target, ast.Name):
                     aliases.add(target.id)
         elif (isinstance(node, (ast.AnnAssign, ast.NamedExpr))
-              and node.value is not None and _is_get_client_call(node.value)
+              and node.value is not None and _is_anon_builder(node.value)
               and isinstance(node.target, ast.Name)):
             aliases.add(node.target.id)
     return aliases, bound
@@ -197,6 +226,9 @@ SEED_TRAP_SNIPPETS = [
     ('aliased_delete', "def f():\n    client = get_client()\n    client.table('corrections').delete().eq('id', 1).execute()"),
     ('async_aliased', "async def f():\n    c = get_client()\n    c.table('comments').delete().eq('id', 1).execute()"),
     ('closure_alias', "def outer():\n    c = get_client()\n    def inner():\n        c.table('comments').delete().eq('id', 1).execute()\n    return inner"),
+    ('public_read_literal', "get_public_read_client().table('comments').delete().eq('id', 1).execute()"),
+    ('public_read_alias', "def f():\n    c = get_public_read_client()\n    c.table('comments').update({}).eq('id', 1).execute()"),
+    ('derived_table_alias', "def f():\n    t = get_client().table('comments')\n    t.delete().eq('id', 1).execute()"),
 ]
 
 
@@ -227,6 +259,7 @@ NEGATIVE_CONTROLS = [
     ('anon_read_only', "def f():\n    c = get_client()\n    return c.table('profiles').select('*').execute()"),
     ('dict_update', "def f():\n    d = {}\n    d.update({'a': 1})"),
     ('alias_in_sibling_function', "def f():\n    c = get_client()\n    return c\ndef g(c):\n    c.table('comments').delete().eq('id', 1).execute()"),
+    ('executed_response_alias', "def f():\n    r = get_client().table('x').select('*').execute()\n    r.data[0].update({'a': 1})"),
     ('shadowed_in_inner', "def outer():\n    c = get_client()\n    def inner():\n        c = get_user_client()\n        c.table('comments').delete().eq('id', 1).execute()\n    return inner"),
 ]
 

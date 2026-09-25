@@ -815,6 +815,10 @@ def create_feed_item(item: dict, on_refresh=None):
                                                 ui.notify(tr('Comment deleted'), type='positive')
                                                 if on_refresh:
                                                     on_refresh()
+                                            elif result.get('no_rows'):
+                                                # RLS let nothing change; the helper's English string is for the log
+                                                logger.warning("admin comment delete changed nothing: %s", result.get('error'))
+                                                ui.notify(tr('Nothing was changed. You may not have permission.'), type='negative')
                                             else:
                                                 ui.notify(result.get("error", tr('Error')), type='negative')
 
@@ -843,6 +847,10 @@ def create_feed_item(item: dict, on_refresh=None):
                                                 ui.notify(tr('Correction deleted'), type='positive')
                                                 if on_refresh:
                                                     on_refresh()
+                                            elif result.get('no_rows'):
+                                                # RLS let nothing change; the helper's English string is for the log
+                                                logger.warning("admin correction delete changed nothing: %s", result.get('error'))
+                                                ui.notify(tr('Nothing was changed. You may not have permission.'), type='negative')
                                             else:
                                                 ui.notify(result.get("error", tr('Error')), type='negative')
 
@@ -1029,6 +1037,10 @@ def create_feed_item(item: dict, on_refresh=None):
                                                                     ui.notify(tr('Join deleted'), type='positive')
                                                                     if on_refresh:
                                                                         on_refresh()
+                                                                elif result.get('no_rows'):
+                                                                    # RLS let nothing change; the helper's English string is for the log
+                                                                    logger.warning("admin join delete changed nothing: %s", result.get('error'))
+                                                                    ui.notify(tr('Nothing was changed. You may not have permission.'), type='negative')
                                                                 else:
                                                                     ui.notify(result.get("error", tr('Error')), type='negative')
 

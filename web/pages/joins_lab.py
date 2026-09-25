@@ -1832,10 +1832,12 @@ def create_joins_lab_page(
                             )
                         else:
                             err = result.get('error', '')
-                            ui.notify(
-                                tr('Could not remove join. Check your connection.'),
-                                type='negative', timeout=8000,
-                            )
+                            if result.get('no_rows'):
+                                # RLS let nothing change: not a connection problem.
+                                msg = tr('Nothing was changed. You may not have permission.')
+                            else:
+                                msg = tr('Could not remove join. Check your connection.')
+                            ui.notify(msg, type='negative', timeout=8000)
                             logger.warning('delete_fragment_join error: %s', err)
                     except RuntimeError:
                         return  # SEED-008 D-20: client/tab deleted mid-fetch
