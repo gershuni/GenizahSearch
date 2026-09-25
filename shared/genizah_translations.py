@@ -1874,6 +1874,8 @@ TRANSLATIONS = {
     "Delete Comment?": "למחוק את ההערה?",
     "Comment deleted": "ההערה נמחקה",
     "Comment updated": "ההערה עודכנה",
+    "Nothing was changed. You may not have permission.": "לא בוצע שינוי. ייתכן שאין לך הרשאה לכך.",
+    "The change could not be saved. Check your connection and try again.": "לא ניתן היה לשמור את השינוי. בדקו את החיבור ונסו שוב.",
     "Private comment (only visible to me)": "הערה פרטית (גלויה רק לי)",
     "Please login to view your edits": "התחבר כדי לצפות בעריכות שלך",
     "Email": "אימייל",

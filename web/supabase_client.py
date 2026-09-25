@@ -1473,6 +1473,24 @@ def update_correction(correction_id: int, data: Dict) -> Dict:
         return {'error': str(e)}
 
 
+def update_comment(comment_id: int, content: str) -> Dict:
+    """Update a comment's text as the logged-in user.
+
+    Uses ``get_user_client()``, so call it ON the event loop (it reads the
+    user's tokens from storage; in a worker thread it silently degrades to the
+    anonymous client). 0 changed rows -- RLS rejected the edit -- is reported as
+    ``{'error': ..., 'no_rows': True}``, never as success.
+    """
+    try:
+        client = get_user_client()
+        response = client.table('comments').update({'content': content}).eq('id', comment_id).execute()
+        if response.data:
+            return {'success': True, 'comment': response.data[0]}
+        return {'error': 'Update failed', 'no_rows': True}
+    except Exception as e:
+        return {'error': str(e)}
+
+
 # ============================================================================
 # COMMENTS OPERATIONS
 # ============================================================================
@@ -1758,11 +1776,20 @@ def create_fragment_join(user_id: str, fragment_a_sys_id: str, fragment_a_shelfm
 
 
 def delete_fragment_join(join_id: int) -> Dict:
-    """Delete a fragment join."""
+    """Delete a fragment join.
+
+    Returns ``{'success': True}`` only when a row was actually deleted. RLS
+    filters a delete the caller may not make to 0 rows and PostgREST answers
+    200 with ``[]``, so an empty ``response.data`` is reported as
+    ``{'error': ..., 'no_rows': True}``. The error strings are English and for
+    logs; pages show their own translated message.
+    """
     try:
         client = get_user_client()
-        client.table('fragment_joins').delete().eq('id', join_id).execute()
-        return {'success': True}
+        response = client.table('fragment_joins').delete().eq('id', join_id).execute()
+        if response.data:
+            return {'success': True}
+        return {'error': 'Nothing was deleted', 'no_rows': True}
     except Exception as e:
         return {'error': str(e)}
 
@@ -1772,21 +1799,39 @@ def delete_fragment_join(join_id: int) -> Dict:
 # ============================================================================
 
 def delete_comment(comment_id: int) -> Dict:
-    """Delete a comment."""
+    """Delete a comment.
+
+    Returns ``{'success': True}`` only when a row was actually deleted. RLS
+    filters a delete the caller may not make to 0 rows and PostgREST answers
+    200 with ``[]``, so an empty ``response.data`` is reported as
+    ``{'error': ..., 'no_rows': True}``. The error strings are English and for
+    logs; pages show their own translated message.
+    """
     try:
         client = get_user_client()
-        client.table('comments').delete().eq('id', comment_id).execute()
-        return {'success': True}
+        response = client.table('comments').delete().eq('id', comment_id).execute()
+        if response.data:
+            return {'success': True}
+        return {'error': 'Nothing was deleted', 'no_rows': True}
     except Exception as e:
         return {'error': str(e)}
 
 
 def delete_correction(correction_id: int) -> Dict:
-    """Delete a correction."""
+    """Delete a correction.
+
+    Returns ``{'success': True}`` only when a row was actually deleted. RLS
+    filters a delete the caller may not make to 0 rows and PostgREST answers
+    200 with ``[]``, so an empty ``response.data`` is reported as
+    ``{'error': ..., 'no_rows': True}``. The error strings are English and for
+    logs; pages show their own translated message.
+    """
     try:
         client = get_user_client()
-        client.table('corrections').delete().eq('id', correction_id).execute()
-        return {'success': True}
+        response = client.table('corrections').delete().eq('id', correction_id).execute()
+        if response.data:
+            return {'success': True}
+        return {'error': 'Nothing was deleted', 'no_rows': True}
     except Exception as e:
         return {'error': str(e)}
 

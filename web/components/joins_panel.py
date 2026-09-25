@@ -12,7 +12,7 @@ from nicegui import run, ui
 from web.translations import tr, is_rtl
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.auth_state import GlobalAuthState
-from web.supabase_client import get_fragment_joins, create_fragment_join, get_client
+from web.supabase_client import get_fragment_joins, create_fragment_join, delete_fragment_join, get_client
 from web.state import state
 from typing import Optional, Callable, Dict, List
 from urllib.parse import quote
@@ -419,16 +419,19 @@ def delete_join(join_id: int) -> bool:
     """
     Delete a join by ID (admin only).
 
+    Goes through ``delete_fragment_join`` (the logged-in user's client plus a
+    row check). It used to delete through the anonymous ``get_client()``, which
+    RLS filters to 0 rows, and still returned True. Call it ON the event loop:
+    the user client reads the tokens from storage.
+
     Returns:
-        True if successful, False otherwise
+        True only if a row was actually deleted, False otherwise
     """
-    try:
-        client = get_client()
-        client.table('fragment_joins').delete().eq('id', join_id).execute()
+    result = delete_fragment_join(join_id)
+    if result.get('success') is True:
         return True
-    except Exception as e:
-        logger.error("Error deleting join: %s", e)
-        return False
+    logger.error("Error deleting join %s: %s", join_id, result.get('error'))
+    return False
 
 
 def create_joins_button(
