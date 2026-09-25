@@ -30,10 +30,10 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QPoint
+from PyQt6.QtCore import QObject, QPoint
 from PyQt6.QtWidgets import (QApplication, QComboBox, QLabel, QLineEdit,
                              QMainWindow, QProgressBar, QPushButton,
-                             QTableWidget, QWidget)
+                             QTableWidget)
 
 import genizah_app as app
 import shared.session_persistence as session_persistence
@@ -1124,13 +1124,12 @@ def test_the_collector_returns_exactly_the_visible_rows(window):
 
 @pytest.fixture
 def load_more(window, monkeypatch):
-    """The real button, wired by the real builder, beside a table shown at a
-    known size, with 20-row batches."""
+    """The real button, installed by the method the Search tab's builder
+    calls, over a table shown at a known size, with 20-row batches."""
     w = window
-    create = getattr(w, "_create_load_more_button", None)
-    w._test_holder = QWidget()
-    if create is not None:
-        create().setParent(w._test_holder)
+    install = getattr(w, "_install_load_more_button", None)
+    if install is not None:
+        install()
     monkeypatch.setattr(app, "BATCH_SIZE", 20)
     w.results_table.resize(900, 400)
     w.results_table.show()
@@ -1245,14 +1244,8 @@ class _IdleSearchThread:
         return False
 
 
-def test_load_more_is_hidden_while_a_search_runs(load_more, monkeypatch):
-    """start_search empties the table but the previous run's results stay in
-    last_results until the new ones land; a click then would render them
-    into the new run's table."""
-    w = load_more
-    w.excluded_sys_ids = {A}
-    _search_in_flight(w, _rows(A, 20) + _rows(B, 30))
-    assert _load_more_state(w)[0] is True
+def _start_a_search_that_never_lands(w, monkeypatch):
+    """The real start_search, with a worker that delivers nothing."""
     monkeypatch.setattr(app, "SearchThread", _IdleSearchThread)
     w.searcher = SimpleNamespace(parse_query_syntax=lambda q, responsa_mode=False: (None, q))
     w.mode_combo.addItems(["literal"] * 8)
@@ -1263,12 +1256,177 @@ def test_load_more_is_hidden_while_a_search_runs(load_more, monkeypatch):
     w.btn_lab_mode_toggle, w.search_within_btn = QPushButton(), QPushButton()
     w._run_seq = 0
     w._pause_search.reset_for_run = lambda run_id, now: None
-    w.query_input.setText("word")
-    w.start_search()                        # the next search, still running
+    w.query_input.setText("other")
+    w.start_search()
     w._search_elapsed_timer.stop()
     assert w.results_table.rowCount() == 0 and w.is_searching
+
+
+def test_load_more_is_hidden_while_a_search_runs(load_more, monkeypatch):
+    """start_search empties the table; a click on the button then would
+    render the previous run's results into the new run's table."""
+    w = load_more
+    w.excluded_sys_ids = {A}
+    _search_in_flight(w, _rows(A, 20) + _rows(B, 30))
+    assert _load_more_state(w)[0] is True
+    _start_a_search_that_never_lands(w, monkeypatch)   # the next search, still running
     assert _load_more_state(w)[0] is False, (
         "the button offers the previous run's results during a search")
+
+
+@pytest.mark.parametrize("ending", ["an error", "Stop"])
+def test_load_more_offers_nothing_after_a_search_that_delivered_nothing(
+        load_more, monkeypatch, ending):
+    """A run that ends with no results -- a bad pattern, a Stop before any
+    arrive -- ends in reset_ui, which recomputes the button. It counted the
+    previous run's results, and a click rendered 20 of them under the new
+    query ("Showing 20 of 50 results")."""
+    w = load_more
+    w.excluded_sys_ids = {A}
+    _search_in_flight(w, _rows(A, 20) + _rows(B, 30))
+    assert _load_more_state(w)[0] is True
+    _start_a_search_that_never_lands(w, monkeypatch)
+    if ending == "an error":
+        monkeypatch.setattr(app.QMessageBox, "critical", staticmethod(lambda *a, **k: None))
+        w.on_error("bad pattern")                       # the worker's error_signal
+    else:
+        w.stop_search()
+    assert not w.is_searching
+    assert _load_more_state(w)[0] is False, "the button offers the previous run's results"
+    w.btn_load_more_results.click()
+    assert w.results_table.rowCount() == 0, "a click rendered the previous run's rows"
+
+
+def test_the_all_terms_view_shows_nothing_after_a_search_that_failed(load_more, monkeypatch):
+    """The same stale results reached the table through the all-terms
+    checkbox, which re-renders last_results."""
+    w = load_more
+    _search_in_flight(w, _rows(B, 30))
+    _start_a_search_that_never_lands(w, monkeypatch)
+    monkeypatch.setattr(app.QMessageBox, "critical", staticmethod(lambda *a, **k: None))
+    w.on_error("bad pattern")
+    w._toggle_all_terms_filter(True)
+    assert w.results_table.rowCount() == 0, "the all-terms view rendered the previous run's rows"
+
+
+def test_a_click_is_checked_again_and_loads_nothing_while_a_search_runs(load_more):
+    """The button only shows the state; a click re-checks it. With a run
+    landing its results (nothing has recomputed the button yet), a click
+    loads nothing."""
+    w = load_more
+    w.excluded_sys_ids = {A}
+    _search_in_flight(w, _rows(A, 20) + _rows(B, 30))
+    assert _load_more_state(w)[0] is True
+    w.is_searching = True
+    w.btn_load_more_results.click()
+    assert w.results_table.rowCount() == 20 and w.results_loaded == 20, (
+        "a click loaded a batch while a search was running")
+
+
+def _assert_bottom_centre(w):
+    btn, viewport = w.btn_load_more_results, w.results_table.viewport()
+    g = btn.geometry()
+    assert g.width() > 0 and g.left() >= 0 and g.top() >= 0, g
+    assert abs((g.left() + g.width() / 2) - viewport.width() / 2) <= 1, (
+        f"not centred: {g} in a viewport {viewport.width()} wide")
+    assert 0 < viewport.height() - (g.top() + g.height()) <= 16, (
+        f"not at the bottom: {g} in a viewport {viewport.height()} high")
+
+
+def test_load_more_sits_bottom_centre_and_follows_a_resize(load_more):
+    w = load_more
+    w.excluded_sys_ids = {A}
+    _search_in_flight(w, _rows(A, 20) + _rows(B, 30))
+    assert _load_more_state(w)[0] is True
+    _assert_bottom_centre(w)
+    w.results_table.resize(1300, 700)       # the scroll range stays 0: only the resize says so
+    assert _load_more_state(w)[0] is True
+    _assert_bottom_centre(w)
+
+
+def test_load_more_fits_its_label_when_the_count_grows(load_more):
+    """A later search can count many more unloaded results than the last,
+    with no resize in between to place the button again."""
+    w = load_more
+    w.excluded_sys_ids = {A}
+    _search_in_flight(w, _rows(A, 20) + _rows(B, 5))
+    assert _load_more_state(w) == (True, _load_more_text(5))
+    _search_in_flight(w, _rows(A, 20) + _rows(B, 1000))
+    assert _load_more_state(w) == (True, _load_more_text(1000))
+    btn = w.btn_load_more_results
+    assert btn.width() >= btn.sizeHint().width(), "the label no longer fits the button"
+    _assert_bottom_centre(w)
+
+
+def test_load_more_stays_centred_when_the_table_scrolls_sideways(load_more):
+    """A horizontal scroll moves every child of the viewport with it."""
+    w = load_more
+    w.excluded_sys_ids = {A}
+    _search_in_flight(w, _rows(A, 20) + _rows(B, 30))
+    w.results_table.setColumnWidth(w.COL_SNIPPET, 4000)
+    QApplication.processEvents()
+    bar = w.results_table.horizontalScrollBar()
+    assert bar.maximum() > 0
+    bar.setValue(bar.maximum())
+    assert _load_more_state(w)[0] is True
+    _assert_bottom_centre(w)
+
+
+# --- the Search tab as the app builds it ------------------------------------
+
+@pytest.fixture
+def search_tab(window, monkeypatch):
+    """create_search_tab for real, over the window fixture's collaborators,
+    shown at a known size, with 20-row batches."""
+    w = window
+    w._zero_result_refine = False
+    monkeypatch.setattr(app, "BATCH_SIZE", 20)
+    panel = w.create_search_tab()
+    panel.resize(1000, 700)
+    panel.show()
+    QApplication.processEvents()
+    yield w, panel
+    # The builder makes the window an event filter of the tab's widgets. The
+    # tab dies before the window here (never in the app), and its widgets'
+    # last events would reach a filter reading the deleted table.
+    for obj in [panel, *panel.findChildren(QObject)]:
+        obj.removeEventFilter(w)
+    panel.hide()
+
+
+def _footer(w, panel):
+    top = panel.layout()
+    for i in range(top.count()):
+        row = top.itemAt(i).layout()
+        if row is not None and row.indexOf(w.status_label) >= 0:
+            return row
+    raise AssertionError("no row of the Search tab holds the status label")
+
+
+def test_the_built_search_tab_puts_load_more_over_the_results(search_tab):
+    w, panel = search_tab
+    btn = getattr(w, "btn_load_more_results", None)
+    assert btn is not None, "the Search tab as built has no 'Load more results' button"
+    assert btn.parentWidget() is w.results_table.viewport(), (
+        "the button is not an overlay on the results viewport")
+    assert _footer(w, panel).indexOf(btn) == -1, "the button is in the footer layout"
+    assert btn.isHidden(), "the button shows at startup, with nothing to load"
+
+
+def test_load_more_does_not_widen_the_search_footer(search_tab):
+    """In the footer layout the button raised the row's minimum width by
+    its whole label (734 to 1,174 px), and it shows exactly when the table
+    has room to spare -- the window could no longer be as narrow."""
+    w, panel = search_tab
+    w.excluded_sys_ids = {A}
+    _search_in_flight(w, _rows(A, 20) + _rows(B, 30))
+    assert _load_more_state(w) == (True, _load_more_text(30))
+    footer = _footer(w, panel)
+    footer.invalidate()
+    shown = footer.minimumSize().width()
+    w.btn_load_more_results.hide()
+    footer.invalidate()
+    assert footer.minimumSize().width() == shown
 
 
 @pytest.mark.parametrize("ending", ["New", "a zero-result search", "a zero-result tag search"])

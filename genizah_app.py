@@ -5511,6 +5511,7 @@ class GenizahGUI(QMainWindow):
         self.results_table.doubleClicked.connect(self._on_results_double_clicked)
         self.results_table.itemChanged.connect(self.on_search_result_item_changed)
         self.results_table.verticalScrollBar().valueChanged.connect(self.check_scroll_load)
+        self._install_load_more_button()
 
         # Context menu for community features
         self.results_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -5609,7 +5610,6 @@ class GenizahGUI(QMainWindow):
 
         # Add controls to status row
         bot.addWidget(self.status_label, 1)
-        bot.addWidget(self._create_load_more_button())
         bot.addWidget(self._zero_result_back_btn)
 
         # Add to List button
@@ -20088,6 +20088,12 @@ class GenizahGUI(QMainWindow):
         self.title_items_by_sid = {}
 
         self.results_table.setRowCount(0)
+        # The previous run's results go with its rows. Kept, they outlived
+        # the table on the exits that deliver nothing (an error, a stop
+        # before any results), where "Load more results" or the all-terms
+        # view rendered them under the new query.
+        self.last_results = []
+        self.results_loaded = 0
         self._printed_filter_state = 'all'
         self.chk_search_header.set_filter_active(self.COL_PRINTED, False)
         for b in self.export_buttons: b.setEnabled(False)
@@ -20572,43 +20578,78 @@ class GenizahGUI(QMainWindow):
         if bar.maximum() > 0 and value >= bar.maximum() * 0.95:
             self.load_next_batch()
 
-    def _create_load_more_button(self):
-        """The Search tab's "Load more results" button, beside the status.
+    def _install_load_more_button(self):
+        """The Search tab's "Load more results" button.
 
         Scrolling is the only other way to load the next batch, and a table
         whose visible rows fit in the window has nothing to scroll -- no rows
         visible at all (a first batch every row of which is excluded or
         filtered out), or a few short ones. Without the button no further
-        batch could ever load. The table's scroll range drives it, so it is
-        never stale after Qt lays the rows out.
+        batch could ever load.
+
+        It floats bottom-centre over the table's viewport, which has room
+        below the rows exactly when it shows, and never enters the footer
+        layout, whose minimum width its label would raise. The table's
+        scroll range drives it, so it is never stale after Qt lays the rows
+        out.
         """
-        btn = QPushButton()
+        viewport = self.results_table.viewport()
+        btn = QPushButton(viewport)
         btn.setVisible(False)
-        # The same call a scroll makes, reading the same state at click time.
-        btn.clicked.connect(lambda: self.load_next_batch())
+        btn.clicked.connect(self._on_load_more_clicked)
         self.btn_load_more_results = btn
+        # eventFilter places it again on every viewport resize. The builder
+        # already filters this viewport (tooltips); Qt keeps one copy.
+        viewport.installEventFilter(self)
+        # A horizontal scroll moves every child of the viewport with it.
+        self.results_table.horizontalScrollBar().valueChanged.connect(
+            self._position_load_more_button)
         self.results_table.verticalScrollBar().rangeChanged.connect(
             self._update_load_more_button)
-        return btn
 
-    def _update_load_more_button(self, *_):
-        """Show "Load more results" exactly when results remain unloaded and
-        the table cannot scroll. Reads only current state and loads nothing,
-        so it is safe to call from anywhere, any number of times. The
-        visibility pass calls it, which covers every batch load."""
+    def _position_load_more_button(self, *_):
+        """Bottom-centre of the results viewport."""
         btn = getattr(self, 'btn_load_more_results', None)
         if btn is None:
             return
+        viewport = btn.parentWidget()
+        btn.adjustSize()
+        btn.move(max(0, (viewport.width() - btn.width()) // 2),
+                 max(0, viewport.height() - btn.height() - 8))
+        btn.raise_()  # above the rows' cell widgets, also viewport children
+
+    def _load_more_remaining(self):
+        """How many results "Load more results" reaches, or 0 when it must
+        offer none: nothing unloaded, a run still landing its results
+        (reset_ui recomputes as it ends), a restore running (its last step
+        recomputes), or a table that can scroll (scrolling loads)."""
         remaining = len(getattr(self, 'last_results', None) or []) - getattr(self, 'results_loaded', 0)
-        show = (remaining > 0
-                # A running search has emptied the table but still holds the
-                # previous run's results; a restore recomputes this at its end.
-                and not getattr(self, 'is_searching', False)
-                and not getattr(self, '_restoring_session', False)
-                and self.results_table.verticalScrollBar().maximum() == 0)
-        if show:
+        if (remaining <= 0
+                or getattr(self, 'is_searching', False)
+                or getattr(self, '_restoring_session', False)
+                or self.results_table.verticalScrollBar().maximum() != 0):
+            return 0
+        return remaining
+
+    def _update_load_more_button(self, *_):
+        """Show "Load more results" exactly when _load_more_remaining says
+        so. Reads only current state and loads nothing, so it is safe to
+        call from anywhere, any number of times. The visibility pass calls
+        it, which covers every batch load."""
+        btn = getattr(self, 'btn_load_more_results', None)
+        if btn is None:
+            return
+        remaining = self._load_more_remaining()
+        if remaining:
             btn.setText(tr("Load more results ({} not loaded)").format(remaining))
-        btn.setVisible(show)
+            self._position_load_more_button()
+        btn.setVisible(bool(remaining))
+
+    def _on_load_more_clicked(self):
+        # Checked again at click time, then the same call a scroll makes,
+        # reading the same state.
+        if self._load_more_remaining():
+            self.load_next_batch()
 
     def load_next_batch(self, batch_size=None):
         if self.results_loaded >= len(self.last_results):
@@ -23003,6 +23044,11 @@ class GenizahGUI(QMainWindow):
                     bar.triggerAction(QAbstractSlider.SliderAction.SliderPageStepAdd)
                 return True  # consumed — do NOT let Qt toggle the current item
             # action is None (col == COL_CHECKBOX): fall through to super() for checkbox toggle
+        # "Load more results" stays bottom-centre of the results viewport.
+        if event.type() == QEvent.Type.Resize:
+            _load_more = getattr(self, 'btn_load_more_results', None)
+            if _load_more is not None and source is _load_more.parentWidget():
+                self._position_load_more_button()
         # Smart tooltips for truncated cell text in results table
         if hasattr(self, 'results_table') and source == self.results_table.viewport() and event.type() == QEvent.Type.ToolTip:
             pos = event.pos()
