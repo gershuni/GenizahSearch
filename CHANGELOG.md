@@ -6,6 +6,22 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ## [Unreleased]
 
+### Hardening: the database enforces privilege and moderation columns (2026-09-25)
+
+Applied to the production Supabase project on 2026-09-25 and verified there (68 checks, all as
+expected). No app change.
+
+- Triggers on `profiles`, `corrections`, `discoveries` and `fragment_joins`
+  (`migrations/add_privileged_column_guards.sql`) now decide which values a signed-in client may
+  write, instead of the apps alone: roles and reputation are admin-only; a reviewed correction is
+  frozen; pinning, un-hiding, closing and featuring discoveries and confirming joins are
+  admin-only.
+- Corrections can be deleted only as drafts (by their author) or by an admin.
+- `scripts/fix_rls_policies.sql` no longer recreates the any-status delete policy, and
+  `supabase_setup.sql` points to the migration.
+- Verification script: `scripts/verify_privileged_column_guards.sql`; rules and rollback in
+  `docs/guides/SUPABASE_GUIDE.md` ("Column guards").
+
 ### Web hotfix: lists privacy, hardening and correctness (2026-09-25)
 
 **Deploy order (owner-run).** Put `GENIZAH_STORAGE_SECRET` (32+ characters; generate one with

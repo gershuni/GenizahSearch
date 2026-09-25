@@ -387,21 +387,52 @@ WITH CHECK (auth.uid() = author_id);
 
 ### profiles
 - Users can read all profiles (public info)
-- Users can only update their own profile
+- Users can only update their own profile, and never its `role` or `reputation` (a trigger; see
+  "Column guards" below). Admins change those.
 
 ### user_lists, list_items
 - Users can only CRUD their own lists and items
 
 ### corrections
-- Anyone can read approved corrections
-- Users can CRUD their own corrections
-- Reviewers/admins can update any correction status
+- Anyone can read non-draft corrections; authors also see their own drafts
+- Authors create drafts or pending corrections (editors may publish directly), edit their drafts,
+  submit them, and delete only drafts. A reviewed correction (approved/merged/rejected) is frozen
+  for everyone but admins.
+- Admins approve and reject. No policy yet lets reviewers or editors update someone else's
+  correction, so the `/corrections` Review tab works only for admins (tracked in
+  `docs/OPEN_ISSUES.md`).
 
 ### comments
 - Anyone can read public comments
 - Users can only see their own private comments
 - Users can CRUD their own comments
 - `ie_id` (text, nullable): IE identifier for multi-volume manuscripts. NULL = primary IE or pre-volume-awareness
+
+### Column guards (hardening, 2026-09-25)
+
+The policies above check only who owns a row. Which VALUES a client may write is enforced by
+`BEFORE INSERT OR UPDATE` triggers from `migrations/add_privileged_column_guards.sql`, on
+`profiles`, `corrections`, `discoveries` and `fragment_joins`. They reject an actual change
+(SQLSTATE `42501`, "not authorized to set this value"); resending an unchanged column is fine.
+
+| Table | Rule for roles user / reviewer / editor |
+|---|---|
+| `profiles` | `role` and `reputation` never change; an insert is role `user`, reputation 0 |
+| `corrections` | insert as draft or pending (approved only by an editor); a reviewed row is frozen (vote counters excepted); an author only submits a draft; review stamps only with a review of someone else's row |
+| `discoveries` | no pinning; the author may hide their own row (the desktop soft delete) but not un-hide it; status only active <-> answered; inserts start unhidden, unpinned, active |
+| `fragment_joins` | `status`, `confirmed_by`, `confirmed_at` never change; inserts start proposed |
+
+Exempt: admins (their own profile has role `admin`) and any caller whose `current_user` is not
+`anon`/`authenticated` -- the SQL editor, `service_role`, and SECURITY DEFINER functions such as
+`handle_new_user`. **A new SECURITY DEFINER function that writes these tables must check the
+caller's role itself**, because the guards step aside for it.
+
+- **Verify:** `scripts/verify_privileged_column_guards.sql` (paste into the SQL editor; choose "Run
+  without RLS" if warned -- its tables are temporary). It ends in a `VERIFY RESULTS` error by design;
+  a pass is 0 skipped and all 68 checks as expected.
+- **Roll back:** the drop statements at the top of the migration. Keep `guard_profile_privileges`.
+- **Changing a rule:** edit the migration's function, re-run the whole file (it is idempotent and
+  one transaction), then re-run the verification.
 
 ### Detailed Policy SQL Examples
 

@@ -365,6 +365,9 @@ FOR SELECT TO public USING (true);
 
 -- ============================================================================
 -- PART 3: FUNCTIONS AND TRIGGERS
+-- After this file, run migrations/add_privileged_column_guards.sql: its
+-- triggers are what stop a client changing role, reputation and the
+-- moderation columns (the policies here check only row ownership).
 -- ============================================================================
 
 -- ============================================
