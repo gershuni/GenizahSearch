@@ -1578,6 +1578,8 @@ TRANSLATIONS = {
     "Copy Text": "העתק טקסט",
     "Text copied to clipboard": "הטקסט הועתק ללוח",
     "No text to copy": "אין טקסט להעתקה",
+    "Copy failed. Select the text and copy it manually.": "ההעתקה נכשלה. סמן את הטקסט והעתק אותו ידנית.",
+    "Could not confirm the copy.": "לא ניתן היה לאשר את ההעתקה.",
     "Add Selected to List": "הוסף נבחרים לרשימה",
     "Copy Selected Text": "העתק טקסט נבחר",
     "No results selected": "לא נבחרו תוצאות",

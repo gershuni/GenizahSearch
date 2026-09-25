@@ -41,6 +41,7 @@ from shared.fgp_service import (
 from web.components.joins_panel import fetch_connected_fragments, create_joins_dialog
 from urllib.parse import quote
 from web.components.typography import h3
+from web.clipboard import copy_text_to_clipboard
 import logging
 import re
 from shared.search_regex import compile as compile_search_regex, SearchBudgetExceeded, search_budget
@@ -177,19 +178,12 @@ def _isolated_label(text, *, classes='', style=''):
 # Standalone helpers (zero closure dependencies)
 # ---------------------------------------------------------------------------
 
-def copy_result_text(text):
-    """Copy text to clipboard."""
-    if text:
-        # Escape backticks for JavaScript
-        escaped_text = text.replace('`', '\\`')
-        ui.run_javascript(f'''
-            navigator.clipboard.writeText(`{escaped_text}`).then(() => {{
-                console.log('Text copied to clipboard');
-            }});
-        ''')
-        ui.notify(tr('Text copied to clipboard'), type='positive')
-    else:
-        ui.notify(tr('No text to copy'), type='warning')
+async def copy_result_text(text):
+    """Copy text to the clipboard exactly; the toast reports the browser's answer.
+
+    Async: the button lambdas return this coroutine and NiceGUI awaits it.
+    """
+    await copy_text_to_clipboard(text)
 
 def show_add_to_list_dialog(result):
     from web.components import show_add_to_list_dialog as show_dialog
@@ -2242,7 +2236,9 @@ def open_advanced_dialog(search_state, refs, index, result):
                                             icon='format_list_numbered',
                                             on_click=_toggle_quick_view_line_numbers,
                                         ).props(f'flat round size=sm aria-label="{tr("Toggle line numbers")}"').tooltip(tr('Toggle line numbers'))
-                                        ui.button(icon='content_copy', on_click=lambda t=display_text: copy_result_text(t)).props(f'flat round size=sm aria-label="{tr("Copy Text")}"').tooltip(tr('Copy Text'))
+                                        # Copy the version on screen: handle_version_change updates
+                                        # current_display_text['value'] (raw text, never the 'html' key).
+                                        ui.button(icon='content_copy', on_click=lambda: copy_result_text(current_display_text.get('value') or '')).props(f'flat round size=sm aria-label="{tr("Copy Text")}"').tooltip(tr('Copy Text'))
                                         if sys_id and current_text:
                                             ui.button(icon='edit', on_click=lambda: toggle_edit_mode(current_text)).props(f'flat round size=sm aria-label="{tr("Edit")}"').tooltip(tr('Edit'))
 

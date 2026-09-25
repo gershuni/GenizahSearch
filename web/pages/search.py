@@ -15,6 +15,7 @@ from web.state import state
 from web.pages.search_helpers import compute_selected_uids
 from web.translations import tr, is_rtl, get_language
 from web.components.typography import h2, h3, h4
+from web.clipboard import copy_text_to_clipboard
 from web.components.filter_panel import (
     build_domain_options, build_author_options, build_work_options,
     build_filter_summary, has_active_filters, persist_value,
@@ -2893,8 +2894,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         dialog.open()
 
-    def bulk_copy_text():
-        """Copy all selected results' text to clipboard."""
+    async def bulk_copy_text():
+        """Copy all selected results' text to clipboard (exactly; toast = real outcome)."""
         if not search_state.selected_indices:
             ui.notify(tr('No results selected'), type='warning')
             return
@@ -2923,16 +2924,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             compiled_text.append(f"=== {i}. {shelfmark} ===\n{text}\n")
 
         final_text = '\n'.join(compiled_text)
-        # Escape backticks for JavaScript
-        escaped_text = final_text.replace('`', '\\`')
-
-        # Copy to clipboard
-        ui.run_javascript(f'''
-            navigator.clipboard.writeText(`{escaped_text}`).then(() => {{
-                console.log('Bulk text copied to clipboard');
-            }});
-        ''')
-        ui.notify(f"{len(selected_results)} {tr('results copied to clipboard')}", type='positive')
+        await copy_text_to_clipboard(
+            final_text,
+            success_message=f"{len(selected_results)} {tr('results copied to clipboard')}",
+        )
 
     def cancel_search():
         """Cancel the current search and show partial results."""
