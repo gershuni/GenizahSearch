@@ -130,6 +130,25 @@ def test_literal_markup_in_transcription_is_visible_text(text, term, with_term):
         assert parsed.marks == term
 
 
+# The matched term itself contains ASCII markup: a search phrase that spans
+# editorial notation yields exactly such a term (terms come from the snippet's
+# *...* markers), so the text INSIDE <mark> must be escaped too.
+_MARKUP_IN_TERM_CASES = [
+    ("al-Ṣa<y>dalānī", ["a<y>d"]),
+    ("x <span data-n=1> y", ["<span data-n=1>"]),
+    ("Manj<ar>ūr and <b>x</b>", ["j<ar>ū", "<b>x</b>"]),
+]
+
+
+@pytest.mark.parametrize("text,terms", _MARKUP_IN_TERM_CASES)
+def test_markup_inside_a_matched_term_is_visible_text(text, terms):
+    """The matched part is escaped as well as the gaps between matches."""
+    parsed = _parse(_highlight(text, terms))
+    assert set(parsed.tags) <= {"mark", "br"}, parsed.tags
+    assert parsed.text == text
+    assert parsed.marks == terms
+
+
 def test_entities_in_source_text_are_shown_literally():
     text = "A &amp; B &lt;c&gt;"
     out = _highlight(text, ["B"])
@@ -315,6 +334,25 @@ def _check_call_sites(tree: ast.Module) -> list[str]:
     )
     if decodes and marks and stores and not (decodes[0] < marks[0] and decodes[0] < stores[0]):
         problems.append("handle_version_change decodes FGP text after using it")
+
+    # Only FGP text is decoded: every decode sits under an `if` whose TEST reads
+    # the 'is_fgp' flag (version_selector and choose_default_source set it on
+    # every FGP source), so PGP/V0.8/community text keeps its literal entities.
+    parents = {}
+    for n in ast.walk(dialog):
+        for child in ast.iter_child_nodes(n):
+            parents[child] = n
+    for call in _calls_to(dialog, "_fgp_text_for_display"):
+        node, guarded = call, False
+        while node in parents:
+            parent = parents[node]
+            if isinstance(parent, ast.If) and node in parent.body:
+                guarded = any(isinstance(c, ast.Constant) and c.value == "is_fgp"
+                              for c in ast.walk(parent.test))
+                break
+            node = parent
+        if not guarded:
+            problems.append(f"FGP decode at line {call.lineno} is not guarded by an is_fgp test")
     return problems
 
 
@@ -345,6 +383,36 @@ def test_call_site_guard_can_fail():
     problems = _check_call_sites(ast.parse(seeded))
     assert any("'<br>'" in p for p in problems)
     assert any("new_html" in p for p in problems)
+    # Both decodes above are unconditional, so both are flagged.
+    assert sum("not guarded by an is_fgp test" in p for p in problems) == 2
+
+
+def test_fgp_decode_guard_can_fail():
+    """The is_fgp predicate check flags a decode under the wrong flag and in an
+    else branch, and accepts one under a real is_fgp test."""
+    seeded = textwrap.dedent('''
+        def _apply_highlight_marks(text, terms):
+            return text
+        def _fgp_text_for_display(text):
+            return text
+        def open_advanced_dialog():
+            def render_content():
+                t = 'x'
+                if src.get('is_pgp'):  # is_fgp
+                    t = _fgp_text_for_display(t)
+                text_html = _apply_highlight_marks(t, [])
+            def handle_version_change(new_text, info):
+                if info.get('is_fgp'):
+                    new_text = _fgp_text_for_display(new_text)
+                else:
+                    new_text = _fgp_text_for_display(new_text)
+                current_display_text['value'] = new_text
+                new_html = _apply_highlight_marks(new_text, [])
+    ''')
+    flagged = [p for p in _check_call_sites(ast.parse(seeded))
+               if "not guarded by an is_fgp test" in p]
+    assert len(flagged) == 2, flagged
+    assert not any("line 14" in p for p in flagged), flagged
 
 
 # ---------------------------------------------------------------------------
