@@ -8,8 +8,10 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ### Hardening: the database enforces privilege and moderation columns (2026-09-25)
 
-Applied to the production Supabase project on 2026-09-25 and verified there (68 checks, all as
-expected). No app change.
+Applied to the production Supabase project on 2026-09-25 and verified there with
+`scripts/verify_privileged_column_guards.sql`: 74 checks, all as expected, 0 skipped (the
+endorsement resets below were re-applied the same day; before that run, the four checks covering
+them failed as they should). No app change.
 
 - Triggers on `profiles`, `corrections`, `discoveries` and `fragment_joins`
   (`migrations/add_privileged_column_guards.sql`) now decide which values a signed-in client may
