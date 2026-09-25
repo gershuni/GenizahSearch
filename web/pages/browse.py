@@ -512,6 +512,29 @@ VIEWER_STYLES = '''
 # BrowsePageRefs imported from web.pages.browse_enrichment (Phase 73, Plan 01)
 
 
+def _document_transcription_html(full_text: str) -> str:
+    """HTML for the "View whole document" dialog's PGP transcription.
+
+    The text is ESCAPED: it is rendered with ``ui.html(..., sanitize=False)``,
+    and PGP editions use tag-like notation ('al-Ṣa<y>dalānī', '<upside down>')
+    that a browser would otherwise parse as markup and drop. The only markup is
+    this wrapper; ``white-space: pre-wrap`` keeps the line breaks.
+    """
+    return (
+        '<div dir="rtl" style="'
+        'white-space: pre-wrap; '
+        "font-family: 'SBL Hebrew', 'Frank Ruehl CLM', 'Ezra SIL', serif; "
+        'font-size: 1.1rem; '
+        'line-height: 1.8; '
+        'padding: 12px; '
+        'background: var(--bg-secondary, #f9fafb); '
+        'border-radius: 8px; '
+        'border: 1px solid #e5e7eb; '
+        'color: var(--text-primary);'
+        f'">{html_module.escape(full_text or "")}</div>'
+    )
+
+
 def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None, initial_shelfmark: Optional[str] = None, initial_volume_ie: Optional[str] = None, embedded: bool = False, open_computed: bool = False):
     """Create the professional manuscript viewer page UI.
 
@@ -2723,19 +2746,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                                         ui.icon('text_snippet', size='xs').classes('text-green-600')
                                                         ui.label(tr('Full Transcription')).classes('text-sm font-bold').style('color: var(--text-primary);')
                                                         ui.badge('PGP', color='blue').props('outline dense').classes('text-xs')
-                                                    ui.html(f'''
-                                                        <div dir="rtl" style="
-                                                            white-space: pre-wrap;
-                                                            font-family: 'SBL Hebrew', 'Frank Ruehl CLM', 'Ezra SIL', serif;
-                                                            font-size: 1.1rem;
-                                                            line-height: 1.8;
-                                                            padding: 12px;
-                                                            background: var(--bg-secondary, #f9fafb);
-                                                            border-radius: 8px;
-                                                            border: 1px solid #e5e7eb;
-                                                            color: var(--text-primary);
-                                                        ">{full_text}</div>
-                                                    ''', sanitize=False)
+                                                    # Escaped by the builder: notation such as
+                                                    # '<upside down>' shows literally.
+                                                    ui.html(_document_transcription_html(full_text), sanitize=False)
 
                                 dialog.open()
 
