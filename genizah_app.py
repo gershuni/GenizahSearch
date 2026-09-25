@@ -4939,7 +4939,13 @@ class GenizahGUI(QMainWindow):
             # i.e. after closeEvent has saved the session; started from here
             # it would read the session before this copy had saved it.
             request_restart()
-            QApplication.instance().quit()
+            # Close this window rather than quit(): quit() closes the top-level
+            # windows in no set order, and a Joins Lab closed first was saved
+            # as closed, so it did not reopen after the restart. This
+            # closeEvent runs first, with the Lab still open; the event loop
+            # then ends with the last main window (a Lab is a child dialog),
+            # also when a running letter-level search defers the close.
+            self.close()
         else:
             label = "עברית" if new_lang == 'he' else "English"
             # Update button to show the opposite of the new pending language

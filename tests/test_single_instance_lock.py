@@ -210,11 +210,8 @@ def test_relaunch_happens_only_when_requested_and_names_this_process(monkeypatch
                          {"cwd": os.getcwd()})]
 
 
-def test_language_restart_leaves_the_relaunch_to_main(monkeypatch):
-    """toggle_language used to Popen the new copy BEFORE this one's closeEvent
-    saved the session, so the new copy could restore a stale session (and would
-    now find the lock still held)."""
-    import genizah_app
+def _answering_yes():
+    """genizah_app's QMessageBox, answering the restart question Yes."""
     from PyQt6.QtWidgets import QMessageBox as RealBox
 
     class FakeBox:
@@ -229,8 +226,17 @@ def test_language_restart_leaves_the_relaunch_to_main(monkeypatch):
         def exec(self):
             return RealBox.StandardButton.Yes
 
-    launched, quits, saved = [], [], []
-    monkeypatch.setattr(genizah_app, "QMessageBox", FakeBox)
+    return FakeBox
+
+
+def test_language_restart_leaves_the_relaunch_to_main(monkeypatch):
+    """toggle_language used to Popen the new copy BEFORE this one's closeEvent
+    saved the session, so the new copy could restore a stale session (and would
+    now find the lock still held)."""
+    import genizah_app
+
+    launched, quits, closes, saved = [], [], [], []
+    monkeypatch.setattr(genizah_app, "QMessageBox", _answering_yes())
     monkeypatch.setattr(genizah_app, "save_language", saved.append)
     monkeypatch.setattr(genizah_app, "QApplication", types.SimpleNamespace(
         instance=lambda: types.SimpleNamespace(quit=lambda: quits.append(True))))
@@ -240,12 +246,60 @@ def test_language_restart_leaves_the_relaunch_to_main(monkeypatch):
     # no later test in the process relaunches anything.
     monkeypatch.setattr(si, "_restart_requested", False)
     gui = genizah_app.GenizahGUI.__new__(genizah_app.GenizahGUI)
+    gui.close = lambda: closes.append(True)
 
     gui.toggle_language("he")
 
     assert launched == [], "the new copy was started before this one had closed"
-    assert saved == ["he"] and quits == [True]
+    assert saved == ["he"] and closes == [True]
+    assert quits == [], "quit() closes the windows in no set order (see the next test)"
     assert si._restart_requested is True
+
+
+@pytest.mark.gui
+def test_the_language_restart_closes_the_main_window_first_and_the_loop_still_ends(monkeypatch):
+    """quit() closed the top-level windows in no set order (Qt walks a hash of
+    them), and when the Joins Lab went first the main window's closeEvent saved
+    it as closed, so it did not reopen after the restart. Closing the main
+    window runs its closeEvent while every child window is still open, and the
+    event loop still ends, so __main__ goes on to relaunch. Several child
+    windows, so that quit() gets the order right by chance only rarely."""
+    import genizah_app
+    from PyQt6.QtCore import QTimer
+    from PyQt6.QtWidgets import QApplication, QDialog, QMainWindow
+    from desktop import single_instance as si
+
+    monkeypatch.setattr(si, "_restart_requested", False)
+    monkeypatch.setattr(genizah_app, "QMessageBox", _answering_yes())
+    monkeypatch.setattr(genizah_app, "save_language", lambda lang: None)
+    seen = []
+
+    class Main(QMainWindow):
+        toggle_language = genizah_app.GenizahGUI.toggle_language
+
+        def closeEvent(self, event):
+            # GenizahGUI's saves join_lab.open from the Lab's visibility here.
+            seen.append(("the main window closes, children open:",
+                         sum(child.isVisible() for child in children)))
+            super().closeEvent(event)
+
+    app = QApplication.instance()
+    main = Main()
+    main.show()
+    children = [QDialog(main) for _ in range(4)]    # the Joins Lab is a non-modal child dialog
+    for child in children:
+        child.setModal(False)
+        child.show()
+    watchdog = QTimer()
+    watchdog.setSingleShot(True)
+    watchdog.timeout.connect(lambda: (seen.append("the event loop did not end"), app.exit(1)))
+    watchdog.start(5000)
+    QTimer.singleShot(0, lambda: main.toggle_language("he"))
+    code = app.exec()
+    watchdog.stop()
+
+    assert seen == [("the main window closes, children open:", 4)]
+    assert code == 0 and si._restart_requested is True
 
 
 # ---------------------------------------------------------------------------
