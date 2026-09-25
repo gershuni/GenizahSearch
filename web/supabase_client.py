@@ -193,6 +193,44 @@ def reset_client():
     _client = None
 
 
+# PostgREST timeout (seconds) for the public reads below. The library default
+# is 120 s; these reads run in NiceGUI's shared thread pool, so during a
+# Supabase outage a long timeout would park pool threads for minutes and starve
+# every other run.io_bound on the site. Kept separate from get_client(), whose
+# timeout is unchanged.
+PUBLIC_READ_TIMEOUT_S = 5
+
+_public_read_client: Optional[Client] = None
+_public_read_client_lock = threading.Lock()
+
+
+def get_public_read_client() -> Client:
+    """Anonymous client with a short PostgREST timeout, for PUBLIC reads only.
+
+    Use it for tables whose SELECT policy is ``USING (true)`` (fragment_joins,
+    profiles, published_joins / published_join_fragments), where the result
+    does not depend on who is asking. It reads no per-user storage, so it gives
+    the same answer on the event loop and in a worker thread. Never use it for
+    writes, or for per-user tables (lists, corrections, comments): there the
+    anonymous role silently gets 0 rows.
+    """
+    global _public_read_client
+    if _public_read_client is None:
+        with _public_read_client_lock:
+            if _public_read_client is None:
+                if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+                    raise ValueError(
+                        "SUPABASE_URL / SUPABASE_ANON_KEY not set! "
+                        "Set them in environment variables or .env file."
+                    )
+                from supabase.lib.client_options import SyncClientOptions
+                _public_read_client = create_client(
+                    SUPABASE_URL, SUPABASE_ANON_KEY,
+                    options=SyncClientOptions(postgrest_client_timeout=PUBLIC_READ_TIMEOUT_S),
+                )
+    return _public_read_client
+
+
 def _is_jwt_expired(error) -> bool:
     """Check if a Supabase error is a JWT expiry."""
     msg = str(error)
@@ -1123,26 +1161,31 @@ def delete_list(list_id: int, permanent: bool = False) -> Dict:
     Args:
         list_id: The list ID
         permanent: If True, permanently delete (no recovery). Default is soft delete.
+
+    Returns ``{'success': True}`` only when a row was changed; 0 rows (the list
+    is already gone, or RLS filtered it) is ``{'error': ..., 'no_rows': True}``.
     """
     try:
         client = get_user_client()
         if permanent:
             # Permanent delete - also deletes items via CASCADE
-            client.table('user_lists').delete().eq('id', list_id).execute()
+            response = client.table('user_lists').delete().eq('id', list_id).execute()
         else:
             # Soft delete - set deleted_at timestamp
             from datetime import datetime, timezone
             try:
-                client.table('user_lists').update({
+                response = client.table('user_lists').update({
                     'deleted_at': datetime.now(timezone.utc).isoformat()
                 }).eq('id', list_id).execute()
             except Exception as soft_err:
                 # Fallback to hard delete if deleted_at column doesn't exist
                 if 'deleted_at' in str(soft_err):
-                    client.table('user_lists').delete().eq('id', list_id).execute()
+                    response = client.table('user_lists').delete().eq('id', list_id).execute()
                 else:
                     raise soft_err
-        return {'success': True}
+        if response.data:
+            return {'success': True}
+        return {'error': 'Nothing was deleted', 'no_rows': True}
     except Exception as e:
         return {'error': str(e)}
 
@@ -1165,16 +1208,26 @@ def restore_list(list_id: int) -> Dict:
 
 
 def empty_trash(user_id: str) -> Dict:
-    """Permanently delete all soft-deleted lists for a user."""
+    """Permanently delete all soft-deleted lists for a user.
+
+    Reads the trash itself rather than through ``get_deleted_lists``, which
+    turns a read error into ``[]``: a failed read must not look like an empty
+    trash. ``deleted_count`` counts only the rows really deleted; if any
+    listed row was not deleted (RLS, or already gone) the result is an error
+    that still carries the count.
+    """
     try:
         client = get_user_client()
-        # Get all deleted lists
-        deleted = get_deleted_lists(user_id)
-        count = len(deleted)
-        # Permanently delete each one
-        for lst in deleted:
-            client.table('user_lists').delete().eq('id', lst['id']).execute()
-        return {'success': True, 'deleted_count': count}
+        listed = client.table('user_lists').select('id').eq('user_id', user_id).not_.is_(
+            'deleted_at', 'null').execute().data or []
+        deleted = 0
+        for lst in listed:
+            response = client.table('user_lists').delete().eq('id', lst['id']).execute()
+            if response.data:
+                deleted += 1
+        if deleted < len(listed):
+            return {'error': 'Some lists were not deleted', 'deleted_count': deleted}
+        return {'success': True, 'deleted_count': deleted}
     except Exception as e:
         return {'error': str(e)}
 
@@ -1238,11 +1291,13 @@ def update_list_item(item_id: int, data: Dict) -> Dict:
 
 
 def delete_list_item(item_id: int) -> Dict:
-    """Delete a list item."""
+    """Delete a list item; 0 deleted rows is ``{'error': ..., 'no_rows': True}``, never success."""
     try:
         client = get_user_client()
-        client.table('list_items').delete().eq('id', item_id).execute()
-        return {'success': True}
+        response = client.table('list_items').delete().eq('id', item_id).execute()
+        if response.data:
+            return {'success': True}
+        return {'error': 'Nothing was deleted', 'no_rows': True}
     except Exception as e:
         return {'error': str(e)}
 
@@ -1363,11 +1418,13 @@ def update_project(project_id: int, data: Dict) -> Dict:
 
 
 def delete_project(project_id: int) -> Dict:
-    """Delete a project."""
+    """Delete a project; 0 deleted rows (already gone, or RLS) is ``{'error': ..., 'no_rows': True}``."""
     try:
         client = get_user_client()
-        client.table('projects').delete().eq('id', project_id).execute()
-        return {'success': True}
+        response = client.table('projects').delete().eq('id', project_id).execute()
+        if response.data:
+            return {'success': True}
+        return {'error': 'Nothing was deleted', 'no_rows': True}
     except Exception as e:
         return {'error': str(e)}
 
@@ -1469,6 +1526,24 @@ def update_correction(correction_id: int, data: Dict) -> Dict:
         if response.data:
             return {'success': True, 'correction': response.data[0]}
         return {'error': 'Update failed'}
+    except Exception as e:
+        return {'error': str(e)}
+
+
+def update_comment(comment_id: int, content: str) -> Dict:
+    """Update a comment's text as the logged-in user.
+
+    Uses ``get_user_client()``, so call it ON the event loop (it reads the
+    user's tokens from storage; in a worker thread it silently degrades to the
+    anonymous client). 0 changed rows -- RLS rejected the edit -- is reported as
+    ``{'error': ..., 'no_rows': True}``, never as success.
+    """
+    try:
+        client = get_user_client()
+        response = client.table('comments').update({'content': content}).eq('id', comment_id).execute()
+        if response.data:
+            return {'success': True, 'comment': response.data[0]}
+        return {'error': 'Update failed', 'no_rows': True}
     except Exception as e:
         return {'error': str(e)}
 
@@ -1675,17 +1750,18 @@ def create_discovery(user_id: str, title: str, content: str, type: str = 'discov
 
 def get_fragment_joins(user_id: str = None, fragment_sys_id: str = None,
                        status: str = None) -> List[Dict]:
-    """Get fragment joins with optional filters."""
+    """Get fragment joins with optional filters. BLOCKING network I/O.
+
+    Reads through ``get_public_read_client()`` (anonymous, 5 s PostgREST
+    timeout). fragment_joins and profiles are publicly readable -- "Anyone can
+    view joins" ``FOR SELECT USING (true)`` and profiles ``SELECT USING (true)``
+    in supabase_setup.sql; the creator-only policy was replaced in March 2026 --
+    so every viewer gets the same rows, and the result is identical whether
+    this runs on the event loop or in a worker thread (every caller now runs it
+    in a worker). No user token is read and no token refresh can happen here.
+    """
     try:
-        # Use authenticated client when available — RLS only shows
-        # proposed joins to their creator (status='confirmed' OR auth.uid()=user_id)
-        try:
-            client = get_user_client()
-        except Exception:
-            # Phase 92.1 KEEP get_client(): legitimate Exception fallback ONLY when
-            # get_user_client itself raised. fragment_joins SELECT is `TO public` so
-            # the anon singleton still returns rows. Pattern verified correct.
-            client = get_client()  # Operation failed; use fallback value
+        client = get_public_read_client()
         query = client.table('fragment_joins').select('*')
 
         if user_id:
@@ -1712,14 +1788,7 @@ def get_fragment_joins(user_id: str = None, fragment_sys_id: str = None,
             row['created_by_username'] = profiles_map.get(row.get('user_id'), '')
         return rows
     except Exception as e:
-        if _is_jwt_expired(e):
-            logger.warning("JWT expired in get_fragment_joins, refreshing session and retrying")
-            _refresh_user_session()
-            try:
-                return get_fragment_joins(user_id=user_id, fragment_sys_id=fragment_sys_id, status=status)
-            except Exception as e2:
-                logger.error(f"Error getting joins (retry): {e2}")
-                return []
+        # No JWT-expiry retry: the read client carries no user token.
         logger.error(f"Error getting joins: {e}")
         return []
 
@@ -1758,11 +1827,20 @@ def create_fragment_join(user_id: str, fragment_a_sys_id: str, fragment_a_shelfm
 
 
 def delete_fragment_join(join_id: int) -> Dict:
-    """Delete a fragment join."""
+    """Delete a fragment join.
+
+    Returns ``{'success': True}`` only when a row was actually deleted. RLS
+    filters a delete the caller may not make to 0 rows and PostgREST answers
+    200 with ``[]``, so an empty ``response.data`` is reported as
+    ``{'error': ..., 'no_rows': True}``. The error strings are English and for
+    logs; pages show their own translated message.
+    """
     try:
         client = get_user_client()
-        client.table('fragment_joins').delete().eq('id', join_id).execute()
-        return {'success': True}
+        response = client.table('fragment_joins').delete().eq('id', join_id).execute()
+        if response.data:
+            return {'success': True}
+        return {'error': 'Nothing was deleted', 'no_rows': True}
     except Exception as e:
         return {'error': str(e)}
 
@@ -1772,21 +1850,39 @@ def delete_fragment_join(join_id: int) -> Dict:
 # ============================================================================
 
 def delete_comment(comment_id: int) -> Dict:
-    """Delete a comment."""
+    """Delete a comment.
+
+    Returns ``{'success': True}`` only when a row was actually deleted. RLS
+    filters a delete the caller may not make to 0 rows and PostgREST answers
+    200 with ``[]``, so an empty ``response.data`` is reported as
+    ``{'error': ..., 'no_rows': True}``. The error strings are English and for
+    logs; pages show their own translated message.
+    """
     try:
         client = get_user_client()
-        client.table('comments').delete().eq('id', comment_id).execute()
-        return {'success': True}
+        response = client.table('comments').delete().eq('id', comment_id).execute()
+        if response.data:
+            return {'success': True}
+        return {'error': 'Nothing was deleted', 'no_rows': True}
     except Exception as e:
         return {'error': str(e)}
 
 
 def delete_correction(correction_id: int) -> Dict:
-    """Delete a correction."""
+    """Delete a correction.
+
+    Returns ``{'success': True}`` only when a row was actually deleted. RLS
+    filters a delete the caller may not make to 0 rows and PostgREST answers
+    200 with ``[]``, so an empty ``response.data`` is reported as
+    ``{'error': ..., 'no_rows': True}``. The error strings are English and for
+    logs; pages show their own translated message.
+    """
     try:
         client = get_user_client()
-        client.table('corrections').delete().eq('id', correction_id).execute()
-        return {'success': True}
+        response = client.table('corrections').delete().eq('id', correction_id).execute()
+        if response.data:
+            return {'success': True}
+        return {'error': 'Nothing was deleted', 'no_rows': True}
     except Exception as e:
         return {'error': str(e)}
 

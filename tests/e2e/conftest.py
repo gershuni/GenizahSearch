@@ -11,7 +11,9 @@ Tests skip in two scenarios:
 2. ChromeDriver not found/not matching Chrome version -> RuntimeError skip
 """
 
+import contextlib
 import os
+import secrets
 import shutil
 import threading
 import runpy
@@ -19,6 +21,29 @@ from pathlib import Path
 from collections.abc import Generator
 
 import pytest
+
+
+@contextlib.contextmanager
+def e2e_storage_secret() -> Generator[None, None, None]:
+    """Give the web app these tests start a storage secret for the test's duration.
+
+    web/main.py refuses to start without GENIZAH_STORAGE_SECRET. A non-blank
+    value already in the environment is kept; otherwise a random per-run value
+    is set and removed again afterwards.
+    """
+    name = 'GENIZAH_STORAGE_SECRET'
+    if os.environ.get(name, '').strip():
+        yield
+        return
+    previous = os.environ.get(name)
+    os.environ[name] = secrets.token_urlsafe(32)
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = previous
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +205,9 @@ try:
         screen_.start_server = custom_start_server
 
         try:
-            yield screen_
+            # The test body starts the server (screen.open), so it runs inside this.
+            with e2e_storage_secret():
+                yield screen_
 
             logs = [record for record in screen_.caplog.get_records('call') if record.levelname == 'ERROR']
             if screen_.is_open:

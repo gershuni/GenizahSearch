@@ -19,6 +19,11 @@ from web.supabase_client import (
     get_client,
     get_user_client,
     get_user_corrections_count,
+    # Aliased: the page has closures of the same names, and calling the helper
+    # by its own name from inside such a closure would recurse forever.
+    delete_correction as sb_delete_correction,
+    delete_comment as sb_delete_comment,
+    update_comment as sb_update_comment,
 )
 from web.state import state
 from web.bounded_io import bounded_io_bound
@@ -58,6 +63,65 @@ def _fetch_top_profiles(limit: int) -> List[Dict]:
     client = get_client()
     response = client.table('profiles').select('*').order('reputation', desc=True).limit(limit).execute()
     return response.data or []
+
+
+# ---------------------------------------------------------------------------
+# Write actions behind the page's click handlers.
+#
+# They go through the row-checking helpers in web/supabase_client.py, which
+# build the client with get_user_client(). These run ON the event loop, from a
+# NiceGUI click handler: app.storage.user resolves through request_contextvar,
+# which each element's event listener captures when it is created and re-sets
+# before calling the handler (nicegui/element.py EventListener /
+# _handle_event). Do NOT move them into run.io_bound: in a worker thread the
+# token read returns {} and get_user_client() silently becomes anonymous, so
+# RLS filters every write to 0 rows again. If they are ever offloaded, build
+# the client on the loop and pass it in.
+#
+# A result with 'no_rows' means RLS let nothing change (the row is not the
+# user's, a correction is no longer a draft, or a policy is missing). The
+# helpers' English error strings go to the log only; the user sees a fixed,
+# translated message.
+# ---------------------------------------------------------------------------
+
+def _notify_write_failure(result: Dict) -> None:
+    logger.warning("corrections page write failed: %s", result.get('error'))
+    if result.get('no_rows'):
+        ui.notify(tr('Nothing was changed. You may not have permission.'), type='negative')
+    else:
+        ui.notify(tr('The change could not be saved. Check your connection and try again.'), type='negative')
+
+
+def _delete_correction_action(corr_id: int) -> None:
+    """Delete one correction as the logged-in user; reload only if a row was deleted."""
+    result = sb_delete_correction(corr_id)
+    if 'error' in result:
+        _notify_write_failure(result)
+        return
+    ui.notify(tr('Correction deleted'), type='positive')
+    ui.navigate.reload()
+
+
+def _delete_comment_action(comment_id: int, dialog) -> None:
+    """Delete one comment as the logged-in user. The confirm dialog closes either way."""
+    result = sb_delete_comment(comment_id)
+    dialog.close()
+    if 'error' in result:
+        _notify_write_failure(result)
+        return
+    ui.notify(tr('Comment deleted'), type='positive')
+    ui.navigate.reload()
+
+
+def _save_comment_action(comment_id: int, content: str, dialog) -> None:
+    """Save an edited comment. On failure the edit dialog stays open so the text is kept."""
+    result = sb_update_comment(comment_id, content)
+    if 'error' in result:
+        _notify_write_failure(result)
+        return
+    ui.notify(tr('Comment updated'), type='positive')
+    dialog.close()
+    ui.navigate.reload()
 
 
 async def fetch_leaderboard_users(limit: int = 20) -> List[Dict]:
@@ -287,13 +351,7 @@ async def create_corrections_page():
                     else:
                         def delete_correction(corr_id: int):
                             """Delete a correction after confirmation."""
-                            try:
-                                client = get_client()
-                                client.table('corrections').delete().eq('id', corr_id).execute()
-                                ui.notify(tr('Correction deleted'), type='positive')
-                                ui.navigate.reload()
-                            except Exception as e:
-                                ui.notify(str(e), type='negative')
+                            _delete_correction_action(corr_id)
 
                         for corr in corrections:
                             create_edit_card(corr, delete_correction)
@@ -647,15 +705,7 @@ async def create_corrections_page():
                                     with ui.row().classes('justify-end gap-2 mt-4'):
                                         ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
                                         def do_delete():
-                                            try:
-                                                client = get_client()
-                                                client.table('comments').delete().eq('id', cid).execute()
-                                                confirm_dialog.close()
-                                                ui.notify(tr('Comment deleted'), type='positive')
-                                                ui.navigate.reload()
-                                            except Exception as e:
-                                                confirm_dialog.close()
-                                                ui.notify(str(e), type='negative')
+                                            _delete_comment_action(cid, confirm_dialog)
                                         ui.button(tr('Delete'), on_click=do_delete).props('color=negative')
                                 confirm_dialog.open()
 
@@ -677,16 +727,7 @@ async def create_corrections_page():
                     ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
 
                     def save_comment():
-                        try:
-                            client = get_client()
-                            client.table('comments').update({
-                                'content': text_area.value
-                            }).eq('id', comment['id']).execute()
-                            ui.notify(tr('Comment updated'), type='positive')
-                            dialog.close()
-                            ui.navigate.reload()
-                        except Exception as e:
-                            ui.notify(str(e), type='negative')
+                        _save_comment_action(comment['id'], text_area.value, dialog)
 
                     ui.button(tr('Save'), icon='save', on_click=save_comment).props('color=primary')
 

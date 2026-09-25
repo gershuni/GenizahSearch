@@ -185,10 +185,9 @@ _COPY_EXPORT_APIS = (
 _EXPECTED_COPY_EXPORT_EGRESS = {
     "ui.download": ("web/pages/findings.py",),
     "Workbook(": ("web/discovery_export_service.py",),
-    #: PRE-EXISTING and non-discovery: `web/api.py` serves several unrelated
-    #: file routes. Declared so the module can be scanned for NEW egress
-    #: without its existing routes reading as a regression.
-    "FileResponse": ("web/api.py",),
+    #: `FileResponse` is no longer allowed anywhere: the last one in
+    #: `web/api.py` belonged to a file route removed on 2026-09-25, so a new
+    #: one now reads as unexpected egress.
     #: The discovery export route's own response.
     "spreadsheetml": ("web/api.py",),
 }

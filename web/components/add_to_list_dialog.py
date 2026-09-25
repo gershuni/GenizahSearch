@@ -7,16 +7,41 @@ Provides a reusable dialog for adding items to personal lists with:
 - Option to create a new list inline
 - Optional note field (empty by default)
 - Per-user storage when logged in
-- Per-device storage for anonymous users
+- A sign-in prompt for anonymous visitors (see require_login_for_lists)
 """
 
 from nicegui import ui
 from web.translations import tr, get_language
 from web.components.typography import h3
-from web.auth_state import GlobalAuthState
+from web.auth_state import GlobalAuthState, create_login_dialog
 from web.state import state
 from genizah_core import get_library_display
 from typing import Optional, Callable
+
+
+def require_login_for_lists() -> bool:
+    """Return True for a signed-in visitor; otherwise prompt and return False.
+
+    Anonymous visitors have no lists (improvement sweep C2: the old anonymous
+    store was one server-wide store shared by every visitor). Call this at
+    the top of every lists entry point, BEFORE any lists_mgr access, from a
+    click handler's live slot context so the prompt can mount. Never
+    schedule it through asyncio.ensure_future.
+    """
+    if GlobalAuthState.is_logged_in():
+        return True
+    with ui.dialog() as prompt, ui.card().classes('gap-4 p-4'):
+        ui.label(tr('Sign in to access your saved research lists.')).classes(
+            'text-base font-semibold'
+        )
+        with ui.row().classes('gap-2 justify-end'):
+            ui.button(tr('Cancel'), on_click=prompt.close).props('flat')
+            ui.button(
+                tr('Sign in'),
+                on_click=lambda: (prompt.close(), create_login_dialog().open()),
+            ).props('color=primary unelevated')
+    prompt.open()
+    return False
 
 
 def get_star_icon(lists_mgr, sys_id: str) -> str:
@@ -70,11 +95,13 @@ async def _create_and_add_handler(
     if not name:
         ui.notify(tr('Please enter a list name'), type='warning')
         return False
+    if not is_logged_in:
+        # The dialog is login-gated, so this is a session that expired while
+        # it was open. Anonymous visitors have no lists (sweep C2).
+        ui.notify(tr('Please log in to access lists'), type='warning')
+        return False
     try:
-        if is_logged_in:
-            new_list_id = await lists_mgr.create_list(name, project_id=project_id)
-        else:
-            new_list_id = lists_mgr.create_list_sync(name, project_id=project_id)
+        new_list_id = await lists_mgr.create_list(name, project_id=project_id)
     except Exception as e:
         ui.notify(f"Error: {e}", type='negative')
         return False
@@ -82,10 +109,7 @@ async def _create_and_add_handler(
         ui.notify(tr('Failed to create list'), type='negative')
         return False
     try:
-        if is_logged_in:
-            result = await lists_mgr.add_item(sys_id, new_list_id, note=new_list_note_value, fl_id=fl_id)
-        else:
-            result = lists_mgr.add_item_sync(sys_id, new_list_id, note=new_list_note_value, fl_id=fl_id)
+        result = await lists_mgr.add_item(sys_id, new_list_id, note=new_list_note_value, fl_id=fl_id)
     except Exception as e:
         ui.notify(f"Error: {e}", type='negative')
         return False
@@ -119,6 +143,10 @@ def show_add_to_list_dialog(
         fl_id: Optional FL ID for page-specific additions
         on_success: Optional callback after successful addition
     """
+    # Sweep C2: first, before touching lists_mgr at all (even its truthiness).
+    if not require_login_for_lists():
+        return None
+
     if not sys_id:
         ui.notify(tr('Cannot add: missing system ID'), type='warning')
         return
@@ -278,11 +306,12 @@ def show_add_to_list_dialog(
                     creating_new_list['active'] = True
                     return
 
-                # Add item - use async if authenticated, sync otherwise
-                if GlobalAuthState.is_logged_in():
-                    result = await lists_mgr.add_item(sys_id, selected_list.value, note=note_input.value, fl_id=fl_id)
-                else:
-                    result = lists_mgr.add_item_sync(sys_id, selected_list.value, note=note_input.value, fl_id=fl_id)
+                if not GlobalAuthState.is_logged_in():
+                    # Session expired while the dialog was open (sweep C2:
+                    # anonymous visitors have no lists to add to).
+                    ui.notify(tr('Please log in to access lists'), type='warning')
+                    return
+                result = await lists_mgr.add_item(sys_id, selected_list.value, note=note_input.value, fl_id=fl_id)
 
                 if result:
                     ui.notify(tr('Added to list'), type='positive')

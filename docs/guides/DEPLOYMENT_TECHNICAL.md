@@ -148,6 +148,9 @@ GenizahSearch uses a simplified architecture with Supabase as the backend and SQ
 SUPABASE_URL=https://xxxxx.supabase.co
 SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
+# Web session storage secret (REQUIRED; the app refuses to start without it)
+GENIZAH_STORAGE_SECRET=<random, 32+ characters>
+
 # Application Settings
 GENIZAH_PORT=8081
 NICEGUI_RELOAD=false
@@ -158,6 +161,12 @@ WEB_PUZZLE_ENABLED=false
 # Optional - PostHog analytics
 POSTHOG_API_KEY=phc_xxxxx
 ```
+
+`GENIZAH_STORAGE_SECRET` must be in this file **before** deploying code that reads it (from
+2026-09-25): without it `python -m web.main` exits at startup and `Restart=always` restarts it
+every 5 s. Generate it on the server with
+`python3 -c "import secrets; print(secrets.token_urlsafe(32))"`. Setting or changing it signs
+every web user out once; never commit it or paste it into a log.
 
 `WEB_PUZZLE_ENABLED` is an emergency kill switch for the web puzzle UI and route. Leave it set to `false` until the puzzle image pipeline is considered production-ready again.
 
@@ -1094,6 +1103,7 @@ Key environment variables in `/home/ubuntu/GenizahSearch/.env`:
 |----------|-------------|---------|
 | `SUPABASE_URL` | Supabase project URL | Required |
 | `SUPABASE_ANON_KEY` | Supabase anonymous key | Required |
+| `GENIZAH_STORAGE_SECRET` | Signs the web session cookie; 32+ characters; the app refuses to start without it | Required |
 | `POSTHOG_API_KEY` | PostHog analytics key | Optional |
 | `NICEGUI_RECONNECT_TIMEOUT` | WebSocket reconnect timeout (seconds) | 30 |
 | `NICEGUI_RELOAD` | Hot reload (dev only) | false |

@@ -6,6 +6,9 @@ Uses a simple key-value approach where English is the key
 and translations are the values. Supports RTL languages.
 """
 
+from contextlib import contextmanager
+from typing import Iterator
+
 from shared.genizah_translations import TRANSLATIONS
 
 # Current language state
@@ -21,6 +24,24 @@ def set_language(lang: str) -> None:
 def get_language() -> str:
     """Get the current language code."""
     return _current_lang
+
+
+@contextmanager
+def using_language(lang: str) -> Iterator[None]:
+    """Render a synchronous block in ``lang``, then restore the previous language.
+
+    For UI built after an await (a deferred fill), when another visitor's page
+    render may have set the process-global language in the meantime. The block
+    must not await: the restore is only safe because nothing else runs on the
+    loop between the set and the restore.
+    """
+    global _current_lang
+    previous = _current_lang
+    _current_lang = lang
+    try:
+        yield
+    finally:
+        _current_lang = previous
 
 
 def is_rtl() -> bool:

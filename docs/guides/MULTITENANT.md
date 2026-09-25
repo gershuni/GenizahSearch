@@ -116,6 +116,15 @@ The replacement is a per-request factory call in the page handlers (`/lists`, `/
 
 If you need to cache lists data, do it inside a single request flow (e.g., a local variable in the page handler) — NOT at module scope.
 
+**Anonymous visitors have no lists (2026-09-25).** `UserListsManager` used to fall back to the
+process-wide `ListsManager` (the server's `lists.pkl`) for anyone not signed in, and a process-wide
+store is not per visitor. The fallback is gone: the manager is Supabase-only, ignores the
+`local_mgr` it is given, and returns empty reads / refused writes when anonymous. Every lists entry
+point calls `web.components.add_to_list_dialog.require_login_for_lists()` (or the equivalent
+`GlobalAuthState.is_logged_in()` check) before touching `state.lists_mgr`; `/lists` renders a
+sign-in state. Guard: `tests/test_anonymous_lists_containment.py`. Do not reintroduce a
+server-side anonymous store; a per-browser one would have to key through `web/safe_storage.py`.
+
 ## §6 Atomic auth writes (Phase 91)
 
 Auth state writes touch THREE storage keys (`auth_user`, `auth_profile`, `auth_session`). Partial writes are a real failure mode — a NiceGUI session prune can interrupt a multi-write between keys. Phase 91 made the writes safer:

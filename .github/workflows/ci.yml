@@ -224,6 +224,8 @@ jobs:
           NICEGUI_SHOW: 'false'
         run: |
           export GENIZAH_DISCOVERY_DATA_DIR="$RUNNER_TEMP/$FIXTURE_DIR"
+          # The web app refuses to start without a storage secret; use a fresh one per run.
+          export GENIZAH_STORAGE_SECRET="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
           python -m web.main > "$RUNNER_TEMP/server.log" 2>&1 &
           echo $! > "$RUNNER_TEMP/server.pid"
 

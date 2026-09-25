@@ -14,6 +14,9 @@ pip install -r requirements.txt
 ```
 
 ## Run
+The web app needs `GENIZAH_STORAGE_SECRET` (any random 32+ character value locally, e.g. from
+`python -c "import secrets; print(secrets.token_urlsafe(32))"`) in `.env` or the environment;
+it refuses to start without it.
 ```bash
 python -m web.main
 GENIZAH_PORT=8082 python -m web.main

@@ -544,6 +544,18 @@ The scanner's known blind spots — module-level `table = get_client().table` al
 
 Partial-auth tables (`corrections`, `comments`) — those with both a `TO public USING (<filter>)` AND a `TO authenticated USING (auth.uid()=<owner>)` SELECT branch — are deliberately NOT in `BANNED_TABLES` because their `get_client()` reads remain valid for the public branch. The per-function migration in `web/supabase_client.py` switches to `get_user_client()` for those readers so the authenticated branch becomes reachable. If a future schema change extends such a table to a user-private-only filter (no public branch), add it to `BANNED_TABLES`.
 
+**Writes (2026-09-25).** No insert/update/delete/upsert/rpc may go through the anonymous
+singleton `get_client()`: RLS filters such a write to 0 rows and PostgREST still answers 200, so
+the page reports a success that never happened. Build the client with `get_user_client()` on the
+event loop (or pass it in with `client=`), and check `response.data`: the write helpers in
+`web/supabase_client.py` (`delete_correction`, `delete_comment`, `update_comment`,
+`delete_fragment_join`) return `{'error': ..., 'no_rows': True}` when nothing changed, and callers
+show a translated "Nothing was changed" message. A deliberately anonymous-capable RPC (identification
+reviews) goes through `get_user_client()`, which falls back to the anonymous client for logged-out
+visitors. Guard: `tests/test_no_anonymous_writes.py`. Public reads that must not block
+(`fragment_joins`, `profiles`, published puzzle joins) use `get_public_read_client()`, an anonymous
+client with a 5 s PostgREST timeout.
+
 Note: `discoveries` is NOT in this partial-auth list. Its only SELECT policy is `TO public USING (is_hidden=false)` (see `scripts/fix_rls_policies.sql:60-95`) — there is no `TO authenticated` branch, so the anon client and authenticated client return identical rows and `get_client()` reads are correct. Do not add `discoveries` to `BANNED_TABLES`.
 
 ---

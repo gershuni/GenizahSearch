@@ -368,6 +368,35 @@ def _resolve_passage_timeout() -> float:
     return _read_timeout('SEARCH_API_PASSAGE_TIMEOUT', DEFAULT_PASSAGE_TIMEOUT)
 
 
+def _resolve_fjms_filters_sync(filters_dict: dict) -> Optional[set]:
+    """Validate ``filters_dict`` and resolve it to a restrict set. BLOCKING.
+
+    Both steps read the FJMS SQLite sidecar (a date filter can take seconds),
+    so the async endpoints must not call them inline: uvicorn runs a single
+    worker, and a call on the event loop stalls every other request. Await
+    this through ``loop.run_in_executor`` instead, like
+    ``_intersect_library_filter`` below. The FJMS singleton is
+    ``thread_safe=True`` (per-thread connections), so a worker is safe.
+
+    Raises ``shared.api_errors.APIError`` from ``validate_filter_values``
+    unchanged; it re-raises at the ``await``, so the endpoints' 400/503 paths
+    are the same as before.
+
+    Late-binds ``shared.fjms_service`` at CALL time so test fixtures can
+    monkeypatch ``validate_filter_values`` / ``get_filter_sys_ids``.
+    """
+    from shared import fjms_service as _fjms_module
+    _fjms_module.validate_filter_values(filters_dict)
+    return _fjms_module.get_filter_sys_ids(
+        domains=filters_dict.get('domains'),
+        authors=filters_dict.get('authors'),
+        works=filters_dict.get('works'),
+        material_include=filters_dict.get('materials'),
+        date_from=filters_dict.get('date_from'),
+        date_to=filters_dict.get('date_to'),
+    )
+
+
 async def _intersect_library_filter(restrict_sys_ids, filters_dict, meta_mgr):
     """SEED-026 (API library filter): if ``filters_dict`` carries a ``library`` list,
     intersect the resolved library sys_id set into ``restrict_sys_ids``.
@@ -1568,20 +1597,13 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             if req.filters is not None:
                 filters_dict = req.filters.model_dump(exclude_none=True)
                 # Concern #3: validate_filter_values raises APIError from
-                # shared.api_errors.
-                # Late binding via the module attribute so test fixtures can
-                # monkeypatch shared.fjms_service.{validate_filter_values,
-                # is_valid_domain_token, get_filter_sys_ids}.
-                from shared import fjms_service as _fjms_module
-                _fjms_module.validate_filter_values(filters_dict)
-
-                restrict_sys_ids = _fjms_module.get_filter_sys_ids(
-                    domains=filters_dict.get('domains'),
-                    authors=filters_dict.get('authors'),
-                    works=filters_dict.get('works'),
-                    material_include=filters_dict.get('materials'),
-                    date_from=filters_dict.get('date_from'),
-                    date_to=filters_dict.get('date_to'),
+                # shared.api_errors; it re-raises here, at the await.
+                # Off the event loop: both FJMS steps are blocking SQLite
+                # reads (see _resolve_fjms_filters_sync, which late-binds
+                # shared.fjms_service for test fixtures).
+                loop = asyncio.get_running_loop()
+                restrict_sys_ids = await loop.run_in_executor(
+                    None, _resolve_fjms_filters_sync, filters_dict
                 )
                 # SEED-026: intersect the library filter BEFORE the result cap.
                 restrict_sys_ids = await _intersect_library_filter(
@@ -2213,15 +2235,11 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
 
         if req.filters is not None:
             filters_dict = req.filters.model_dump(exclude_none=True)
-            from shared import fjms_service as _fjms_module
-            _fjms_module.validate_filter_values(filters_dict)
-            restrict_sys_ids = _fjms_module.get_filter_sys_ids(
-                domains=filters_dict.get('domains'),
-                authors=filters_dict.get('authors'),
-                works=filters_dict.get('works'),
-                material_include=filters_dict.get('materials'),
-                date_from=filters_dict.get('date_from'),
-                date_to=filters_dict.get('date_to'),
+            # Off the event loop (blocking FJMS SQLite reads); an APIError from
+            # validation re-raises at the await.
+            loop = asyncio.get_running_loop()
+            restrict_sys_ids = await loop.run_in_executor(
+                None, _resolve_fjms_filters_sync, filters_dict
             )
             # SEED-026: intersect the library filter BEFORE the result cap (parity
             # with /api/search; otherwise filters.library would be silently ignored).

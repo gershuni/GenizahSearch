@@ -58,35 +58,37 @@ class TestListsRoundTrip:
 
     def test_add_synthetic_to_list_via_user_lists_manager(self, monkeypatch):
         """Supabase list_items.sys_id is an opaque string column — synthetic
-        IDs flow through unchanged. Verify by stubbing the local-storage backend
-        and asserting add_item_sync returns truthy and surfaces the synthetic
-        sys_id to the storage layer verbatim.
+        IDs flow through unchanged. Verify by stubbing the Supabase writer
+        (``web.user_lists.add_list_item``) and asserting add_item_sync returns
+        truthy and surfaces the synthetic sys_id to it verbatim.
 
-        UserListsManager.is_authenticated is a property reading
-        GlobalAuthState.is_logged_in(); monkeypatch to force the local-only
-        path so we exercise local_mgr.add_item directly.
+        This used to drive the ANONYMOUS path into a MagicMock local store.
+        Anonymous visitors no longer have lists (improvement sweep C2: the
+        local store was one server-wide store shared by every visitor), so
+        the round trip now goes through the signed-in path, which is the only
+        one that writes.
         """
         from web.user_lists import UserListsManager
         import web.user_lists as _ul
 
-        # Force unauthenticated path (no Supabase round-trip needed).
-        monkeypatch.setattr(_ul.GlobalAuthState, "is_logged_in", staticmethod(lambda: False))
+        monkeypatch.setattr(_ul.GlobalAuthState, "is_logged_in", staticmethod(lambda: True))
+        writes = []
+        monkeypatch.setattr(
+            _ul, "add_list_item",
+            lambda *a, **k: writes.append((a, k)) or {"success": True},
+        )
 
-        # Build a UserListsManager with the bare attributes add_item_sync needs.
-        mgr = UserListsManager.__new__(UserListsManager)
-        mgr.meta_mgr = None
-        mgr.local_mgr = MagicMock()
-        mgr.local_mgr.add_item = MagicMock(return_value=True)
-
-        result = mgr.add_item_sync(SYNTHETIC_ID, list_id="default")
+        mgr = UserListsManager(meta_mgr=None)
+        # A numeric list id skips the 'default' lookup (a Supabase read).
+        result = mgr.add_item_sync(SYNTHETIC_ID, list_id="7")
         assert result is True, (
             "UserListsManager.add_item_sync returned falsy for synthetic sys_id"
         )
         # Confirm the synthetic sys_id reached the storage layer verbatim.
-        mgr.local_mgr.add_item.assert_called_once()
-        call_args = mgr.local_mgr.add_item.call_args
-        assert SYNTHETIC_ID in str(call_args), (
-            f"synthetic sys_id not passed to local_mgr.add_item; got {call_args}"
+        assert len(writes) == 1, writes
+        args, _kwargs = writes[0]
+        assert args[:2] == (7, SYNTHETIC_ID), (
+            f"synthetic sys_id not passed to add_list_item verbatim; got {writes[0]}"
         )
 
     def test_user_lists_manager_treats_synthetic_as_opaque_string(self):

@@ -10,7 +10,7 @@ Features:
 - Edit notes and tags for items
 - Export lists
 - Per-user storage (syncs across devices when logged in)
-- Per-device storage (for anonymous users)
+- Anonymous visitors see a sign-in prompt and no lists (sweep C2)
 """
 
 import logging
@@ -21,7 +21,10 @@ from web.translations import tr, get_language
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.components.typography import h1, h3
 from web.components.project_tree import create_project_tree
-from web.auth_state import GlobalAuthState
+# Every write callback on this page goes through this runner (sign-in re-checked, awaited,
+# failure toasted); tests/test_lists_page_write_callbacks.py pins it.
+from web.components.lists_write import run_lists_write as _run_lists_write
+from web.auth_state import GlobalAuthState, create_login_dialog
 from genizah_core import get_library_display
 from typing import Optional, Dict
 import asyncio
@@ -137,20 +140,25 @@ def create_inline_edit_label(
             # Focus the input
             ui.run_javascript(f'document.querySelector("[id=\\"{input_el.id}\\"] input")?.focus(); document.querySelector("[id=\\"{input_el.id}\\"] input")?.select();')
 
-        def save_edit():
-            """Save the new name and exit edit mode."""
+        async def save_edit():
+            """Save the new name and exit edit mode.
+
+            Enter and blur both call this; leaving edit mode BEFORE the await
+            makes the second call a no-op instead of a second write.
+            """
             if not editing_state['active']:
                 return
             new_name = input_el.value.strip()
-            if new_name and new_name != label_el.text:
-                # Call API to update
-                if lists_mgr:
-                    lists_mgr.update_list(list_id, name=new_name)
-                    label_el.text = new_name
-                    ui.notify(f"{tr_func('List renamed to')}: {new_name}", type='positive')
-                    if on_save_callback:
-                        on_save_callback()
+            old_name = label_el.text
             cancel_edit()
+            if new_name and new_name != old_name and lists_mgr:
+                renamed = await _run_lists_write(lambda: lists_mgr.update_list(list_id, name=new_name))
+                if not renamed:
+                    return
+                label_el.text = new_name
+                ui.notify(f"{tr_func('List renamed to')}: {new_name}", type='positive')
+                if on_save_callback:
+                    on_save_callback()
 
         def cancel_edit():
             """Cancel editing and restore the label."""
@@ -158,10 +166,10 @@ def create_inline_edit_label(
             input_el.set_visibility(False)
             label_el.set_visibility(True)
 
-        def handle_keydown(e):
+        async def handle_keydown(e):
             """Handle keyboard events in the input."""
             if e.args.get('key') == 'Enter':
-                save_edit()
+                await save_edit()
             elif e.args.get('key') == 'Escape':
                 cancel_edit()
 
@@ -169,6 +177,22 @@ def create_inline_edit_label(
         label_el.on('click', start_editing, [])
         input_el.on('keydown', handle_keydown)
         input_el.on('blur', save_edit)
+
+
+def _render_anonymous_lists_page():
+    """Sign-in empty state for anonymous visitors. Reads no lists at all."""
+    with ui.column().classes('w-full items-center gap-4'):
+        h1(tr('Personal Lists'), classes='text-3xl font-bold text-green-800')
+        with ui.card().classes('p-6 items-center gap-3').mark('lists-anonymous-gate'):
+            ui.icon('lock', size='lg').style('color: var(--text-muted);')
+            ui.label(tr('Sign in to access your saved research lists.')).style(
+                'color: var(--text-secondary);'
+            )
+            ui.button(
+                tr('Sign in'),
+                icon='login',
+                on_click=lambda: create_login_dialog().open(),
+            ).classes('bg-primary text-white')
 
 
 def create_lists_page():
@@ -184,6 +208,14 @@ def create_lists_page():
             self.refresh_trigger: int = 0
 
     page_state = ListsPageState()
+
+    # Sweep C2: anonymous visitors have no lists. Return BEFORE any
+    # state.lists_mgr access: the old anonymous store was one server-wide
+    # store shared by every visitor. Login reloads the page, so the full
+    # page appears after sign-in.
+    if not GlobalAuthState.is_logged_in():
+        _render_anonymous_lists_page()
+        return
 
     # Main container references
     lists_sidebar_container = None
@@ -262,12 +294,11 @@ def create_lists_page():
                     return
 
                 if state.lists_mgr:
-                    # Use async method if authenticated, sync otherwise
-                    if GlobalAuthState.is_logged_in():
-                        list_id = await state.lists_mgr.create_list(name, color=selected_color['value'])
-                    else:
-                        list_id = state.lists_mgr.create_list_sync(name, color=selected_color['value'])
-
+                    list_id = await _run_lists_write(
+                        lambda: state.lists_mgr.create_list(name, color=selected_color['value'])
+                    )
+                    if not list_id:
+                        return
                     ui.notify(f"{tr('List created')}: {name}", type='positive')
                     dialog.close()
                     await async_refresh_ui()
@@ -291,13 +322,13 @@ def create_lists_page():
 
             async def delete_list():
                 if state.lists_mgr:
-                    if GlobalAuthState.is_logged_in() and hasattr(state.lists_mgr, 'delete_list'):
-                        try:
-                            await state.lists_mgr.delete_list(list_id)
-                        except TypeError:
-                            state.lists_mgr.delete_list(list_id)
-                    else:
-                        state.lists_mgr.delete_list(list_id)
+                    deleted = await _run_lists_write(lambda: state.lists_mgr.delete_list(list_id))
+                    if not deleted:
+                        # 0 rows usually means another tab already deleted it: close the
+                        # now-stale dialog and refresh (the runner toasted the failure).
+                        dialog.close()
+                        await async_refresh_ui()
+                        return
                     ui.notify(f"{tr('List deleted')}: {list_name}", type='info')
                     dialog.close()
                     page_state.selected_list_id = None
@@ -368,10 +399,15 @@ def create_lists_page():
                             ui.notify(tr('Please select a list to restore.'), type='warning')
                             return
                         if hasattr(state.lists_mgr, 'restore_list'):
-                            try:
-                                await state.lists_mgr.restore_list(selected_list_id['value'])
-                            except TypeError:
-                                state.lists_mgr.restore_list(selected_list_id['value'])
+                            restored = await _run_lists_write(
+                                lambda: state.lists_mgr.restore_list(selected_list_id['value'])
+                            )
+                            if not restored:
+                                # 0 rows usually means another tab already did it: close the
+                                # now-stale dialog and refresh (the runner toasted the failure).
+                                dialog.close()
+                                await async_refresh_ui()
+                                return
                             ui.notify(tr('List restored'), type='positive')
                             dialog.close()
                             await async_refresh_ui()
@@ -381,20 +417,32 @@ def create_lists_page():
                             ui.notify(tr('Please select a list to delete.'), type='warning')
                             return
                         if hasattr(state.lists_mgr, 'permanently_delete_list'):
-                            try:
-                                await state.lists_mgr.permanently_delete_list(selected_list_id['value'])
-                            except TypeError:
-                                state.lists_mgr.permanently_delete_list(selected_list_id['value'])
+                            purged = await _run_lists_write(
+                                lambda: state.lists_mgr.permanently_delete_list(selected_list_id['value'])
+                            )
+                            if not purged:
+                                # 0 rows usually means another tab already did it: close the
+                                # now-stale dialog and refresh (the runner toasted the failure).
+                                dialog.close()
+                                await async_refresh_ui()
+                                return
                             ui.notify(tr('List deleted permanently'), type='info')
                             dialog.close()
                             await async_refresh_ui()
 
                     async def empty_trash():
                         if hasattr(state.lists_mgr, 'empty_trash'):
-                            try:
-                                count = await state.lists_mgr.empty_trash()
-                            except TypeError:
-                                count = state.lists_mgr.empty_trash()
+                            # 0 deleted is a legitimate answer, so only None is a failure.
+                            count = await _run_lists_write(
+                                lambda: state.lists_mgr.empty_trash(), falsy_is_failure=False
+                            )
+                            if count is None:
+                                # The runner already toasted the failure. A partial Empty Trash
+                                # may have deleted some rows, so close this now-stale dialog
+                                # (its rows and ids may be gone) and refresh the page.
+                                dialog.close()
+                                await async_refresh_ui()
+                                return
                             ui.notify(tr('Deleted {} lists permanently.').format(count), type='info')
                             dialog.close()
                             await async_refresh_ui()
@@ -434,16 +482,25 @@ def create_lists_page():
                 value=', '.join(item_data.get('tags', []))
             ).classes('w-full mb-4').props('outlined')
 
-            def save_changes():
+            async def save_changes():
                 if state.lists_mgr:
-                    # Update note
-                    if note_input.value != item_data.get('note', ''):
-                        state.lists_mgr.update_item_note(item_id, note_input.value)
+                    # Update note (the manager methods are async: a bare call never ran)
+                    new_note = note_input.value
+                    if new_note != item_data.get('note', ''):
+                        noted = await _run_lists_write(
+                            lambda: state.lists_mgr.update_item_note(item_id, new_note)
+                        )
+                        if not noted:
+                            return
 
                     # Update tags
                     new_tags = [t.strip() for t in tags_input.value.split(',') if t.strip()]
                     if new_tags != item_data.get('tags', []):
-                        state.lists_mgr.update_item_tags(item_id, new_tags)
+                        tagged = await _run_lists_write(
+                            lambda: state.lists_mgr.update_item_tags(item_id, new_tags)
+                        )
+                        if not tagged:
+                            return
 
                     ui.notify(tr('Item updated'), type='positive')
                     dialog.close()
@@ -828,17 +885,15 @@ def create_lists_page():
     async def remove_item_from_list(item_id: str, list_id: str):
         """Remove an item from the current list."""
         if state.lists_mgr:
-            if GlobalAuthState.is_logged_in() and hasattr(state.lists_mgr, 'remove_item_from_list'):
-                try:
-                    result = await state.lists_mgr.remove_item_from_list(item_id, list_id)
-                except TypeError:
-                    result = state.lists_mgr.remove_item_from_list_sync(item_id, list_id)
-            else:
-                result = state.lists_mgr.remove_item_from_list(item_id, list_id)
-
-            if result:
-                ui.notify(tr('Item removed from list'), type='info')
+            result = await _run_lists_write(
+                lambda: state.lists_mgr.remove_item_from_list(item_id, list_id)
+            )
+            if not result:
+                # Already removed elsewhere, or a failed write: refresh so the view is current.
                 await async_refresh_ui()
+                return
+            ui.notify(tr('Item removed from list'), type='info')
+            await async_refresh_ui()
 
     def export_list(list_id: str):
         """Export list to Excel."""
@@ -861,37 +916,10 @@ def create_lists_page():
             except Exception as e:
                 ui.notify(f"{tr('Export failed')}: {str(e)}", type='negative')
 
-    # --- Migration Dialog ---
-    async def show_migration_dialog():
-        """Show dialog to migrate local lists to user account."""
-        with ui.dialog() as dialog, ui.card().classes('p-6 min-w-[500px]'):
-            h3(tr('Move browser lists to your account'), classes='text-xl font-bold mb-4')
-            ui.label(tr("Your browser has saved lists that haven't been moved to your account yet.")).classes('mb-2')
-            ui.label(tr('Moving them will make them available on all your devices and apps.')).classes('mb-4').style('color: var(--text-secondary);')
-
-            async def do_migration():
-                if hasattr(state.lists_mgr, 'migrate_local_to_user'):
-                    result = await state.lists_mgr.migrate_local_to_user()
-                    if 'error' not in result:
-                        ui.notify(
-                            f"{tr('Migration complete')}: {result.get('lists_migrated', 0)} {tr('lists')}, "
-                            f"{result.get('items_migrated', 0)} {tr('items')}",
-                            type='positive'
-                        )
-                        dialog.close()
-                        await async_refresh_ui()
-                    else:
-                        ui.notify(f"{tr('Migration failed')}: {result.get('error')}", type='negative')
-                else:
-                    ui.notify(tr('Migration not available'), type='warning')
-
-            with ui.row().classes('w-full justify-end gap-2'):
-                ui.button(tr('Later'), on_click=dialog.close).props('flat')
-                ui.button(tr('Move to account'), on_click=do_migration).classes('bg-primary text-white')
-
-        dialog.open()
-
     # --- Main Layout ---
+    # Signed-in only: anonymous visitors returned early above (sweep C2).
+    # The "Move to account" card and dialog are gone: they copied the whole
+    # server-wide anonymous store into one account and then wiped it.
     with ui.column().classes('w-full h-[calc(100vh-120px)]'):
         # Page Title
         with ui.row().classes('w-full items-center justify-between mb-4'):
@@ -899,20 +927,17 @@ def create_lists_page():
             h1(tr('Personal Lists'), classes='text-3xl font-bold text-green-800')
             with ui.row().classes('items-center gap-2'):
                 # Show sync status
-                if GlobalAuthState.is_logged_in():
-                    ui.icon('cloud_done', size='sm').classes('text-green-600').tooltip(tr('Lists auto-sync between this site and the desktop app'))
+                ui.icon('cloud_done', size='sm').classes('text-green-600').tooltip(tr('Lists auto-sync between this site and the desktop app'))
 
-                    # Phase 92.2 / Reviews Codex-MEDIUM-1: probe lifecycle point 3
-                    async def _refresh_button_click():
-                        _lists_task_probe('refresh_button_click')
-                        await async_refresh_ui()
+                # Phase 92.2 / Reviews Codex-MEDIUM-1: probe lifecycle point 3
+                async def _refresh_button_click():
+                    _lists_task_probe('refresh_button_click')
+                    await async_refresh_ui()
 
-                    ui.button(
-                        icon='refresh',
-                        on_click=_refresh_button_click,
-                    ).props('flat round dense').tooltip(tr('Refresh lists from cloud'))
-                else:
-                    ui.icon('cloud_off', size='sm').classes('text-gray-400').tooltip(tr('Local storage only - log in to sync'))
+                ui.button(
+                    icon='refresh',
+                    on_click=_refresh_button_click,
+                ).props('flat round dense').tooltip(tr('Refresh lists from cloud'))
                 ui.button(
                     tr('Create List'),
                     icon='add',
@@ -925,25 +950,7 @@ def create_lists_page():
                 ).props('flat').classes('text-gray-600')
 
         # Description with sync status
-        if GlobalAuthState.is_logged_in():
-            ui.label(tr('Your lists are synced across all your devices')).classes('mb-4').style('color: var(--text-secondary);')
-        else:
-            with ui.row().classes('items-center gap-2 mb-4'):
-                ui.label(tr('Lists are stored locally.')).style('color: var(--text-secondary);')
-                ui.link(tr('Log in to sync across devices'), '/').classes('text-primary underline')
-
-        # Check for migration opportunity (logged in with local lists)
-        if GlobalAuthState.is_logged_in():
-            local_mgr = state.get_local_lists_mgr()
-            if local_mgr and hasattr(state.lists_mgr, 'has_local_lists'):
-                if state.lists_mgr.has_local_lists():
-                    with ui.card().classes('w-full p-4 mb-4 bg-blue-50 border-l-4 border-blue-500'):
-                        with ui.row().classes('items-center gap-3'):
-                            ui.icon('sync', size='md').classes('text-blue-600')
-                            with ui.column().classes('flex-grow'):
-                                ui.label(tr('Browser lists found')).classes('font-semibold text-blue-800')
-                                ui.label(tr("This browser has lists that haven't been moved to your account. Move them now?")).classes('text-sm text-blue-600')
-                            ui.button(tr('Move to account'), on_click=show_migration_dialog).classes('bg-blue-500 text-white')
+        ui.label(tr('Your lists are synced across all your devices')).classes('mb-4').style('color: var(--text-secondary);')
 
         # Main Content: Sidebar + Content
         with ui.splitter(value=25).classes('w-full flex-grow') as splitter:

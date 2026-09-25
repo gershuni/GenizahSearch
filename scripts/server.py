@@ -70,6 +70,24 @@ def is_server_running() -> Tuple[bool, Optional[int]]:
     return False, None
 
 
+def _require_storage_secret() -> None:
+    """Refuse (SystemExit, non-zero) before spawning when GENIZAH_STORAGE_SECRET is missing.
+
+    The web app itself refuses to start without it, but this launcher sends the
+    child's output to DEVNULL, so the refusal would be invisible. Loads .env the
+    way web/main.py does and applies the same rule via web.session_hardening,
+    which is import-light (it does not import the web app or NiceGUI).
+    """
+    from dotenv import load_dotenv
+
+    load_dotenv(PROJECT_DIR / '.env')
+    if str(PROJECT_DIR) not in sys.path:
+        sys.path.insert(0, str(PROJECT_DIR))
+    from web.session_hardening import resolve_storage_secret
+
+    resolve_storage_secret()  # the value is not needed here, only the check
+
+
 def start_server() -> bool:
     """Start the web server."""
     running, pid = is_server_running()
@@ -77,6 +95,8 @@ def start_server() -> bool:
     if running:
         print(f"  {SERVER_NAME} already running (PID {pid}) on port {DEFAULT_PORT}")
         return True
+
+    _require_storage_secret()
 
     print(f"  Starting {SERVER_NAME} on port {DEFAULT_PORT}...")
 

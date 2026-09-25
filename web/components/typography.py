@@ -80,11 +80,13 @@ def render_line_numbered_html(
     When `show_line_numbers=False` the helper returns plain rendered HTML
     with NO gutter — the body still gets the same RTL+Hebrew-font styling.
 
-    `highlight_html` (if provided) is the caller's pre-escaped, highlight-
-    marked HTML (e.g. from `highlight_text(text)` at browse.py:1573-1597,
-    or from `_apply_highlight_marks` in search_results.py). When None, the
-    raw `text` is HTML-escaped locally so XSS-bearing source text cannot
-    inject live tags.
+    `highlight_html` (if provided) is TRUSTED as-is: the caller MUST pass
+    HTML it has already escaped and highlight-marked itself (Browse's
+    `highlight_text(text)`, or `_apply_highlight_marks` in
+    search_results.py, which escapes the text and writes only its own
+    `<mark>`/`<br>` tags). This function does not escape it again. When
+    None, the raw `text` is HTML-escaped locally so markup-like source text
+    cannot inject live tags.
 
     Defense-in-depth: if `highlight_html` contains `<br>` separators (some
     callers pre-convert `\\n` to `<br>` before rendering), the helper

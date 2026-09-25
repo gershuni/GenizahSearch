@@ -634,7 +634,13 @@ def _render_suggestion_row(
             # Add as Join button
             if original_sys_id:
                 def _add_as_join(aid=alma_id, sm=s['shelfmark'], orig_id=original_sys_id, orig_sm=original_shelfmark):
+                    from web.auth_state import GlobalAuthState
                     from web.components.joins_panel import show_add_join_form
+                    if not GlobalAuthState.is_logged_in():
+                        # Check before closing, so an anonymous click does not
+                        # dismiss this dialog for nothing (sweep C2).
+                        ui.notify(tr('Login to create joins'), type='warning')
+                        return
                     dialog.close()
                     show_add_join_form(
                         current_shelfmark=orig_sm or '',

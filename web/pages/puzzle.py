@@ -2983,8 +2983,13 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                     sel_shelfmark, _ = state.meta_mgr.get_meta_for_id(sel_sys_id)
                     sel_shelfmark = sel_shelfmark or sel_sys_id
 
-                # Fetch connected fragments — run in UI context (needs app.storage.user for auth)
-                joins_data = fetch_connected_fragments(
+                # Fetch connected fragments OFF the event loop: it is blocking
+                # Supabase + SQLite work, and force_refresh means it always goes
+                # to the network. No per-user auth is involved (the joins read
+                # is public, via the anonymous read client), so a worker gives
+                # the same result. None = app stopping; the code below is None-safe.
+                joins_data = await run.io_bound(
+                    fetch_connected_fragments,
                     shelfmark=sel_shelfmark,
                     document_id=sel_sys_id,
                     pgpid=None,

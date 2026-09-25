@@ -40,14 +40,15 @@ SECURITY & MULTITENANT INVARIANTS
 
 NOTE — "Choose from my lists" login gate (D-06, LOCKED DECISION)
 -----------------------------------------------------------------
-An anonymous web visitor's ``UserListsManager.data`` DOES fall back to a
-local ``ListsManager`` (``web/user_lists.py:92-96``) and ``web/main.py:2270``
-wires one process-wide (``state._local_lists_mgr``; ``web/state.py:20-21/
-45-52``).  However, that local store is a SINGLE process-global server-side
-pkl shared across ALL anonymous sessions — not per-user, not per-session.
-Surfacing it as "My Lists" to anonymous web visitors would mix data across
-users (the very reason Phase 87–89 moved per-user state to Supabase /
-safe_storage).  D-06 (locked) therefore gates "Choose from my lists" on
+An anonymous web visitor's ``UserListsManager.data`` USED to fall back to
+the local ``ListsManager`` that ``web/main.py`` wires process-wide
+(``state._local_lists_mgr``).  That local store is a SINGLE process-global
+server-side pkl shared across ALL anonymous sessions — not per-user, not
+per-session.  Improvement sweep C2 removed the fallback everywhere: the
+manager is now Supabase-only and anonymous visitors have no lists.
+Surfacing that store as "My Lists" would mix data across users (the very
+reason Phase 87–89 moved per-user state to Supabase / safe_storage).
+D-06 (locked) therefore gates "Choose from my lists" on
 login: "my lists" routes ONLY to the per-user Supabase lists.  An explicit
 login-prompt dialog is shown for anonymous visitors — NOT a silent failure,
 NOT the shared local store.
@@ -1831,10 +1832,12 @@ def create_joins_lab_page(
                             )
                         else:
                             err = result.get('error', '')
-                            ui.notify(
-                                tr('Could not remove join. Check your connection.'),
-                                type='negative', timeout=8000,
-                            )
+                            if result.get('no_rows'):
+                                # RLS let nothing change: not a connection problem.
+                                msg = tr('Nothing was changed. You may not have permission.')
+                            else:
+                                msg = tr('Could not remove join. Check your connection.')
+                            ui.notify(msg, type='negative', timeout=8000)
                             logger.warning('delete_fragment_join error: %s', err)
                     except RuntimeError:
                         return  # SEED-008 D-20: client/tab deleted mid-fetch

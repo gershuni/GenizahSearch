@@ -4,8 +4,11 @@ User Lists Manager - Supabase-backed lists management for the web interface.
 
 This module provides a lists manager that:
 - Uses Supabase when user is logged in (cloud storage)
-- Falls back to local ListsManager when user is not logged in (per-device storage)
-- Handles migration of local lists to user account on login
+- Gives anonymous visitors no lists at all: empty reads, refused writes
+
+Anonymous visitors used to fall back to the process-wide local ListsManager
+(the server's lists.pkl), which every visitor shared (improvement sweep C2).
+That fallback is gone; the shared store is never read or written from here.
 
 Usage:
     from web.user_lists import get_lists_manager
@@ -73,10 +76,11 @@ PROJECT_COLORS = [
 
 class UserListsManager:
     """
-    Auth-aware lists manager that wraps both Supabase and local storage.
+    Auth-aware, Supabase-only lists manager.
 
     When a user is logged in, all operations go through Supabase.
-    When not logged in, operations use the local ListsManager (pkl file).
+    When not logged in, reads return empty/default data and writes return a
+    falsy result. The local ListsManager (pkl file) is never consulted.
     """
 
     def __init__(self, local_mgr: Optional[ListsManager] = None, meta_mgr=None):
@@ -84,7 +88,9 @@ class UserListsManager:
         Initialize the user lists manager.
 
         Args:
-            local_mgr: Optional local ListsManager for fallback
+            local_mgr: Accepted for signature compatibility only and IGNORED.
+                It is the process-wide store shared by every web visitor, so
+                reading it would show one visitor's lists to another (sweep C2).
             meta_mgr: Metadata manager for enriching items
 
         Phase 89 (2026-05-14): The 10s TTL cache was removed. Each .data /
@@ -94,7 +100,10 @@ class UserListsManager:
         capture (web/components/add_to_list_dialog.py, project_tree.py); see
         Phase 89 CONTEXT.md D-03/D-04.
         """
-        self.local_mgr = local_mgr
+        # C2 containment: never keep the shared store. No method reads
+        # self.local_mgr any more; the attribute stays None for callers that
+        # still inspect it.
+        self.local_mgr = None
         self.meta_mgr = meta_mgr
 
     @property
@@ -114,8 +123,6 @@ class UserListsManager:
         """
         if self.is_authenticated:
             return self._get_cached_data()
-        elif self.local_mgr:
-            return self.local_mgr.data
         return self._get_default_data()
 
     def _get_default_data(self) -> Dict:
@@ -220,8 +227,6 @@ class UserListsManager:
                 return len(items)
             except (ValueError, Exception):
                 return 0
-        elif self.local_mgr:
-            return len(self.local_mgr.get_items_in_list(list_id))
         return 0
 
     def get_all_lists(self, include_recent: bool = True) -> List[Dict]:
@@ -238,8 +243,6 @@ class UserListsManager:
                     'count': 0  # Count loaded on demand
                 })
             return lists
-        elif self.local_mgr:
-            return self.local_mgr.get_all_lists(include_recent)
         return []
 
     async def create_list(self, name: str, color: str = None, project_id: str = None) -> Optional[str]:
@@ -269,11 +272,6 @@ class UserListsManager:
                 return str(result['list']['id'])
             LOGGER.error(f"Failed to create list: {result.get('error')}")
             return None
-        elif self.local_mgr:
-            list_id = self.local_mgr.create_list(name, color)
-            if list_id and project_id:
-                self.local_mgr.update_list_project(list_id, project_id)
-            return list_id
         return None
 
     def create_list_sync(self, name: str, color: str = None, project_id: str = None) -> Optional[str]:
@@ -294,11 +292,6 @@ class UserListsManager:
                 self.invalidate_cache()
                 return str(result['list']['id'])
             return None
-        elif self.local_mgr:
-            list_id = self.local_mgr.create_list(name, color)
-            if list_id and project_id:
-                self.local_mgr.update_list_project(list_id, project_id)
-            return list_id
         return None
 
     async def update_list(self, list_id: str, name: str = None, color: str = None) -> bool:
@@ -321,8 +314,6 @@ class UserListsManager:
                 self.invalidate_cache()
                 return True
             return False
-        elif self.local_mgr:
-            return self.local_mgr.update_list(list_id, name, color)
         return False
 
     async def update_list_project(self, list_id: str, project_id: Optional[str]) -> bool:
@@ -339,8 +330,6 @@ class UserListsManager:
                 self.invalidate_cache()
                 return True
             return False
-        elif self.local_mgr:
-            return self.local_mgr.update_list_project(list_id, project_id)
         return False
 
     async def delete_list(self, list_id: str) -> bool:
@@ -356,8 +345,6 @@ class UserListsManager:
                 self.invalidate_cache()
                 return True
             return False
-        elif self.local_mgr:
-            return self.local_mgr.delete_list(list_id)
         return False
 
     def get_deleted_lists(self) -> List[Dict]:
@@ -365,8 +352,6 @@ class UserListsManager:
         if self.is_authenticated:
             from web.supabase_client import get_deleted_lists as sb_get_deleted_lists
             return sb_get_deleted_lists(self.user_id)
-        elif self.local_mgr:
-            return self.local_mgr.get_deleted_lists()
         return []
 
     async def restore_list(self, list_id: str) -> bool:
@@ -383,8 +368,6 @@ class UserListsManager:
                 self.invalidate_cache()
                 return True
             return False
-        elif self.local_mgr:
-            return self.local_mgr.restore_list(list_id)
         return False
 
     async def permanently_delete_list(self, list_id: str) -> bool:
@@ -400,22 +383,23 @@ class UserListsManager:
                 self.invalidate_cache()
                 return True
             return False
-        elif self.local_mgr:
-            return self.local_mgr.permanently_delete_list(list_id)
         return False
 
-    async def empty_trash(self) -> int:
-        """Permanently delete all soft-deleted lists. Returns count deleted."""
+    async def empty_trash(self) -> Optional[int]:
+        """Permanently delete all soft-deleted lists. Returns the count deleted, or None on failure.
+
+        None (not 0) for a failure or a signed-out caller, so the page can tell
+        a failed Empty Trash from an empty one.
+        """
         if self.is_authenticated:
             from web.supabase_client import empty_trash as sb_empty_trash
             result = sb_empty_trash(self.user_id)
-            if result.get('success'):
+            if result.get('deleted_count'):
                 self.invalidate_cache()
+            if result.get('success'):
                 return result.get('deleted_count', 0)
-            return 0
-        elif self.local_mgr:
-            return self.local_mgr.empty_trash()
-        return 0
+            return None
+        return None
 
     # === Item Operations ===
 
@@ -456,8 +440,6 @@ class UserListsManager:
                 self.invalidate_cache()
                 return True
             return False
-        elif self.local_mgr:
-            return self.local_mgr.add_item(sys_id, list_id, note, tags, source, fl_id, img)
         return False
 
     def add_item_sync(self, sys_id: str, list_id: str = 'default',
@@ -492,8 +474,6 @@ class UserListsManager:
                 tags=tags
             )
             return result.get('success', False)
-        elif self.local_mgr:
-            return self.local_mgr.add_item(sys_id, list_id, note, tags, source, fl_id, img)
         return False
 
     async def remove_item_from_list(self, item_id: str, list_id: str) -> bool:
@@ -509,8 +489,6 @@ class UserListsManager:
                 self.invalidate_cache()
                 return True
             return False
-        elif self.local_mgr:
-            return self.local_mgr.remove_item_from_list(item_id, list_id)
         return False
 
     def remove_item_from_list_sync(self, item_id: str, list_id: str) -> bool:
@@ -526,8 +504,6 @@ class UserListsManager:
                 self.invalidate_cache()
                 return True
             return False
-        elif self.local_mgr:
-            return self.local_mgr.remove_item_from_list(item_id, list_id)
         return False
 
     async def update_item_note(self, item_id: str, note: str, list_id: str = None) -> bool:
@@ -543,8 +519,6 @@ class UserListsManager:
                 self.invalidate_cache()
                 return True
             return False
-        elif self.local_mgr:
-            return self.local_mgr.update_item(item_id, note=note)
         return False
 
     async def update_item_tags(self, item_id: str, tags: List[str], list_id: str = None) -> bool:
@@ -560,8 +534,6 @@ class UserListsManager:
                 self.invalidate_cache()
                 return True
             return False
-        elif self.local_mgr:
-            return self.local_mgr.update_item(item_id, tags=tags)
         return False
 
     def _is_recent_list(self, list_id: str, *, is_authenticated: Optional[bool] = None) -> bool:
@@ -605,8 +577,6 @@ class UserListsManager:
             except ValueError:
                 return []
             return get_list_items(list_id_int)
-        elif self.local_mgr:
-            return self.local_mgr.get_items_in_list(list_id)
         return []
 
     def get_items_in_list_sync(self, list_id: str, *, client=None,
@@ -628,9 +598,8 @@ class UserListsManager:
         `self.is_authenticated` -> `GlobalAuthState.is_logged_in()` ->
         `safe_user_get(USER_KEY)`, which in a worker thread has no NiceGUI UI
         context and degrades to None (web/safe_storage.py). `is_authenticated`
-        then reads False, execution falls through to the `local_mgr` branch, and
-        a signed-in user silently gets local-or-empty results while the
-        carefully-supplied authenticated `client` is never touched at all.
+        then reads False and a signed-in user silently gets empty results while
+        the carefully-supplied authenticated `client` is never touched at all.
         """
         authed = self.is_authenticated if is_authenticated is None else is_authenticated
         uid = self.user_id if user_id is None else user_id
@@ -642,8 +611,6 @@ class UserListsManager:
             except ValueError:
                 return []
             return get_list_items(list_id_int, client=client)
-        elif self.local_mgr:
-            return self.local_mgr.get_items_in_list(list_id)
         return []
 
     @staticmethod
@@ -661,15 +628,18 @@ class UserListsManager:
         ]
 
     def is_item_in_any_list(self, item_id: str) -> bool:
-        """Check if item is in any list."""
-        if self.local_mgr:
-            return self.local_mgr.is_item_in_any_list(item_id)
+        """Check if item is in any list.
+
+        Always False for now. This used to read the shared local store with no
+        auth check, so every star icon (for signed-in users too) reflected
+        what anonymous visitors had saved (sweep C2). A per-page Supabase
+        membership set for signed-in users is a follow-up; a per-row Supabase
+        call here would run up to 200 blocking reads per results page.
+        """
         return False
 
     def get_item_lists(self, item_id: str) -> List[str]:
-        """Get lists containing an item."""
-        if self.local_mgr:
-            return self.local_mgr.get_item_lists(item_id)
+        """Get lists containing an item. Always [] (see is_item_in_any_list)."""
         return []
 
     # === Recent Items ===
@@ -683,8 +653,6 @@ class UserListsManager:
                 shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id)
 
             add_recent_item(self.user_id, sys_id, shelfmark, title, fl_id)
-        elif self.local_mgr:
-            self.local_mgr.add_to_recent(sys_id, fl_id, img)
 
     def add_to_recent_sync(self, sys_id: str, fl_id: str = None, img: str = None):
         """Synchronous version of add_to_recent."""
@@ -695,15 +663,11 @@ class UserListsManager:
                 shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id)
 
             add_recent_item(self.user_id, sys_id, shelfmark, title, fl_id)
-        elif self.local_mgr:
-            self.local_mgr.add_to_recent(sys_id, fl_id, img)
 
     # === Tags ===
 
     def get_all_tags(self) -> List[str]:
-        """Get all tags."""
-        if self.local_mgr:
-            return self.local_mgr.get_all_tags()
+        """Get all tags. Always []: the only source was the shared local store (sweep C2)."""
         return []
 
     # === Projects ===
@@ -716,8 +680,6 @@ class UserListsManager:
             for pid, pdata in data.get('projects', {}).items():
                 projects.append({'id': pid, **pdata})
             return projects
-        elif self.local_mgr:
-            return self.local_mgr.get_projects()
         return []
 
     def get_next_project_color(self) -> str:
@@ -743,8 +705,6 @@ class UserListsManager:
                 self.invalidate_cache()
                 return str(result['project']['id'])
             return None
-        elif self.local_mgr:
-            return self.local_mgr.create_project(name, color)
         return None
 
     def create_project_sync(self, name: str, color: str = None) -> Optional[str]:
@@ -758,8 +718,6 @@ class UserListsManager:
                 self.invalidate_cache()
                 return str(result['project']['id'])
             return None
-        elif self.local_mgr:
-            return self.local_mgr.create_project(name, color)
         return None
 
     async def update_project(self, project_id: str, name: str = None) -> bool:
@@ -782,8 +740,6 @@ class UserListsManager:
                 self.invalidate_cache()
                 return True
             return False
-        elif self.local_mgr:
-            return self.local_mgr.update_project(project_id, name)
         return False
 
     async def delete_project(self, project_id: str, delete_lists: bool = False) -> bool:
@@ -815,8 +771,6 @@ class UserListsManager:
                 self.invalidate_cache()
                 return True
             return False
-        elif self.local_mgr:
-            return self.local_mgr.delete_project(project_id, delete_lists)
         return False
 
     async def move_list_to_project(self, list_id: str, project_id: Optional[str]) -> bool:
@@ -836,8 +790,6 @@ class UserListsManager:
                 self.invalidate_cache()
                 return True
             return False
-        elif self.local_mgr:
-            return self.local_mgr.update_list_project(list_id, project_id)
         return False
 
     def get_list_display_color(self, list_id: str, data: Optional[Dict] = None) -> str:
@@ -854,9 +806,7 @@ class UserListsManager:
                   CONTEXT.md D-FANOUT-01). When None, falls back to _get_cached_data().
         """
         if data is None:
-            data = self._get_cached_data() if self.is_authenticated else (
-                self.local_mgr.data if self.local_mgr else self._get_default_data()
-            )
+            data = self._get_cached_data() if self.is_authenticated else self._get_default_data()
 
         list_data = data.get('lists', {}).get(str(list_id), {})
 
@@ -886,9 +836,7 @@ class UserListsManager:
             Dict mapping project_id (or None for standalone) to list of lists
         """
         if data is None:
-            data = self._get_cached_data() if self.is_authenticated else (
-                self.local_mgr.data if self.local_mgr else self._get_default_data()
-            )
+            data = self._get_cached_data() if self.is_authenticated else self._get_default_data()
 
         by_project: Dict[Optional[str], List[Dict]] = {None: []}
 
@@ -912,98 +860,40 @@ class UserListsManager:
     # === Migration ===
 
     async def migrate_local_to_user(self) -> Dict:
+        """Retired: always returns an error dict and never touches any store.
+
+        "Move to account" copied the WHOLE process-wide local store (every
+        anonymous visitor's lists, not the caller's) into the caller's
+        account and then called clear_all(), which rewrote lists.pkl (sweep
+        C2). Kept only so a stale caller gets a harmless error, not an
+        AttributeError. It must never read the local store or clear it.
         """
-        Migrate local lists to user account.
-        Should be called after user logs in if they have local lists.
-        """
-        if not self.is_authenticated or not self.local_mgr:
-            return {"error": "Not authenticated or no local lists"}
-
-        local_data = self.local_mgr.data
-        migrated_lists = 0
-        migrated_items = 0
-
-        # Migrate each list
-        for list_id, list_data in local_data.get('lists', {}).items():
-            if list_data.get('is_system'):
-                continue
-
-            # Create the list in Supabase
-            result = sb_create_list(
-                self.user_id,
-                list_data.get('name', 'Imported List'),
-                name_en=list_data.get('name_en'),
-                color=list_data.get('color', '#FFD700'),
-                is_default=list_data.get('is_default', False)
-            )
-
-            if result.get('success'):
-                new_list_id = result['list']['id']
-                migrated_lists += 1
-
-                # Migrate items in this list
-                items = self.local_mgr.get_items_in_list(list_id)
-                for item in items:
-                    item_result = add_list_item(
-                        new_list_id,
-                        item.get('sys_id'),
-                        shelfmark=item.get('shelfmark'),
-                        title=item.get('title'),
-                        fl_id=item.get('fl_id'),
-                        note=item.get('note', ''),
-                        tags=item.get('tags', [])
-                    )
-                    if item_result.get('success'):
-                        migrated_items += 1
-
-        # Clear local lists after successful migration
-        if migrated_lists > 0:
-            self.local_mgr.clear_all()
-            self.invalidate_cache()
-
-        return {
-            "success": True,
-            "migrated_lists": migrated_lists,
-            "migrated_items": migrated_items
-        }
+        return {"error": "Moving browser lists to an account is no longer available"}
 
     def has_local_lists(self) -> bool:
-        """Check if there are local lists that could be migrated."""
-        if not self.local_mgr:
-            return False
-
-        data = self.local_mgr.data
-
-        # Check for user-created lists
-        for list_id, list_data in data.get('lists', {}).items():
-            if not list_data.get('is_system') and not list_data.get('is_default'):
-                return True
-
-        # Check for items
-        if data.get('items'):
-            return True
-
+        """Retired with migrate_local_to_user: there are no per-browser lists."""
         return False
 
     # === Export ===
 
     def export_list(self, list_id: str, include_metadata: bool = True) -> Optional[Dict]:
-        """Export a list to dictionary."""
-        if self.local_mgr:
-            return self.local_mgr.export_list(list_id, include_metadata)
+        """Export a list to dictionary.
+
+        Always None: the only implementation read the shared local store with
+        no auth check (sweep C2). The Excel export at
+        /api/export/list/{list_id}/excel builds its own export from Supabase.
+        """
         return None
 
     # === Compatibility Methods ===
 
     def save(self):
-        """Save data - for local manager compatibility."""
-        if self.local_mgr:
-            self.local_mgr.save()
+        """No-op. Saving would rewrite the shared lists.pkl (sweep C2)."""
+        return None
 
     def load(self):
-        """Load data - for local manager compatibility."""
-        if self.local_mgr:
-            self.local_mgr.load()
+        """No-op. Supabase data is fetched fresh on every read."""
+        return None
 
     async def refresh_data(self) -> Dict:
         """Refresh and return data from the backing store.
@@ -1016,12 +906,11 @@ class UserListsManager:
         compatible because Python lets `None`-returning callers ignore
         the return value; the only caller that consumes the new return
         is the threaded async_refresh_ui added in Phase 92.2 Task 6 Part D.
+        Anonymous callers get the default skeleton (sweep C2).
         """
         self.invalidate_cache()
         if self.is_authenticated:
             return self._get_cached_data()
-        if self.local_mgr:
-            return self.local_mgr.data
         return self._get_default_data()
 
 
@@ -1031,7 +920,7 @@ def get_lists_manager(local_mgr: Optional[ListsManager] = None,
     Get the appropriate lists manager based on auth state.
 
     Args:
-        local_mgr: Local ListsManager instance
+        local_mgr: Ignored (signature compatibility; see UserListsManager)
         meta_mgr: Metadata manager for enriching items
 
     Returns:

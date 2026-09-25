@@ -15,6 +15,7 @@ from web.state import state
 from web.pages.search_helpers import compute_selected_uids
 from web.translations import tr, is_rtl, get_language
 from web.components.typography import h2, h3, h4
+from web.clipboard import copy_text_to_clipboard
 from web.components.filter_panel import (
     build_domain_options, build_author_options, build_work_options,
     build_filter_summary, has_active_filters, persist_value,
@@ -86,6 +87,30 @@ def _web_manual_transcription_ids(sys_ids):
     Used by the PGP-tag-browse and session-restore paths, which would otherwise call
     the shared union helper that always includes FGP regardless of the web flag."""
     return union_manual_transcriptions(get_sys_ids_with_pgp_text(sys_ids), _web_fgp_sys_ids(sys_ids))
+
+
+def _bulk_add_items(lists_mgr, sys_ids, list_id):
+    """Add ``sys_ids`` to ``list_id`` for the signed-in user; toast the real outcome.
+
+    Returns the number added, or None when the visitor is no longer signed in.
+    The bulk-add dialog's sign-in check ran when it opened; a session can end
+    while it is open, and every write then returns False. Nothing added is a
+    failure, some added a warning, all added a success -- never "0 items added"
+    as a success.
+    """
+    from web.auth_state import GlobalAuthState
+    if not GlobalAuthState.is_logged_in():
+        ui.notify(tr('Please log in to access lists'), type='warning')
+        return None
+    wanted = [s for s in sys_ids if s]
+    added = sum(1 for s in wanted if lists_mgr.add_item_sync(s, list_id))
+    if added == 0:
+        ui.notify(tr('The change could not be saved. Check your connection and try again.'), type='negative')
+    elif added < len(wanted):
+        ui.notify(f"{added} {tr('items added to list')}", type='warning')
+    else:
+        ui.notify(f"{added} {tr('items added to list')}", type='positive')
+    return added
 
 
 def create_search_page(initial_query: str = None, initial_tag: str = None,
@@ -2750,6 +2775,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     def bulk_add_to_list():
         """Add all selected results to a list."""
+        from web.components.add_to_list_dialog import require_login_for_lists
+        if not require_login_for_lists():  # sweep C2: before any lists_mgr read
+            return
         if not search_state.selected_indices:
             ui.notify(tr('No results selected'), type='warning')
             return
@@ -2843,17 +2871,18 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 ui.notify(tr('Please enter a list name'), type='warning')
                                 return
 
+                            from web.auth_state import GlobalAuthState
+                            if not GlobalAuthState.is_logged_in():
+                                # The session ended while the dialog was open.
+                                ui.notify(tr('Please log in to access lists'), type='warning')
+                                return
                             new_list_id = state.lists_mgr.create_list_sync(name, color=selected_color['value'])
-                            if new_list_id:
-                                added_count = 0
-                                for res in selected_results:
-                                    display = res.get('display', {})
-                                    sys_id = display.get('id')
-                                    if sys_id and state.lists_mgr.add_item_sync(sys_id, new_list_id):
-                                        added_count += 1
-
-                                ui.notify(f"{tr('List created')}: {name}", type='positive')
-                                ui.notify(f"{added_count} {tr('items added to list')}", type='positive')
+                            if not new_list_id:
+                                ui.notify(tr('Failed to create list'), type='negative')
+                                return
+                            ui.notify(f"{tr('List created')}: {name}", type='positive')
+                            sys_ids = [res.get('display', {}).get('id') for res in selected_results]
+                            if _bulk_add_items(state.lists_mgr, sys_ids, new_list_id):
                                 dialog.close()
 
                         ui.button(tr('Create and Add'), on_click=create_and_add_all).classes('btn-primary')
@@ -2872,15 +2901,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             creating_new_list['active'] = True
                             return
 
-                        added_count = 0
-                        for res in selected_results:
-                            display = res.get('display', {})
-                            sys_id = display.get('id')
-                            if sys_id and state.lists_mgr.add_item_sync(sys_id, selected_list.value):
-                                added_count += 1
-
-                        ui.notify(f"{added_count} {tr('items added to list')}", type='positive')
-                        dialog.close()
+                        sys_ids = [res.get('display', {}).get('id') for res in selected_results]
+                        if _bulk_add_items(state.lists_mgr, sys_ids, selected_list.value):
+                            dialog.close()
 
                     add_btn = ui.button(tr('Add All'), on_click=add_all).classes('btn-primary')
                     if not list_options:
@@ -2890,8 +2913,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         dialog.open()
 
-    def bulk_copy_text():
-        """Copy all selected results' text to clipboard."""
+    async def bulk_copy_text():
+        """Copy all selected results' text to clipboard (exactly; toast = real outcome)."""
         if not search_state.selected_indices:
             ui.notify(tr('No results selected'), type='warning')
             return
@@ -2920,16 +2943,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             compiled_text.append(f"=== {i}. {shelfmark} ===\n{text}\n")
 
         final_text = '\n'.join(compiled_text)
-        # Escape backticks for JavaScript
-        escaped_text = final_text.replace('`', '\\`')
-
-        # Copy to clipboard
-        ui.run_javascript(f'''
-            navigator.clipboard.writeText(`{escaped_text}`).then(() => {{
-                console.log('Bulk text copied to clipboard');
-            }});
-        ''')
-        ui.notify(f"{len(selected_results)} {tr('results copied to clipboard')}", type='positive')
+        await copy_text_to_clipboard(
+            final_text,
+            success_message=f"{len(selected_results)} {tr('results copied to clipboard')}",
+        )
 
     def cancel_search():
         """Cancel the current search and show partial results."""

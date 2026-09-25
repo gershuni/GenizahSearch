@@ -1,6 +1,6 @@
 # Codebase Index
 
-> Last updated: 2026-09-18
+> Last updated: 2026-09-25
 
 Auto-generated index of classes and methods. New sections for modules can be
 appended via `python scripts/gen_code_index_section.py <file.py> ...` (walks
@@ -1013,9 +1013,22 @@ Partial entry: the filter-state → read paths only, not the whole surface.
 
 ## web/framework_patches.py
 
+- **Function** `_validate_session_id` — session id validation: a non-canonical id is replaced with a fresh uuid4 before NiceGUI user storage is looked up (2026-09-25)
+- **Class** `_CacheSafeRequestTrackingMiddleware` — skips session work for public assets; otherwise validates the session id, then defers to NiceGUI
 - **Function** `_patch_nicegui_esm_handler` (Line 20) — add is_file() guard to ESM route handler (prevents RuntimeError on directory URLs)
 - **Function** `_patch_html_lang_attribute` (Line 63) — patch NiceGUI index.html to add `lang="he"` for Lighthouse a11y
 - **Function** `apply_all_patches` (Line 92) — apply all NiceGUI monkey-patches; call once before ui.run()
+
+## web/session_hardening.py
+
+- **Function** `resolve_storage_secret` — return the stripped `GENIZAH_STORAGE_SECRET`, or refuse to start (SystemExit; never prints the value)
+- **Function** `is_canonical_session_id` — whether a value is a canonical lowercase uuid4 string
+- **Function** `require_session_id_validation` — refuse to start unless NiceGUI will install the validating middleware
+
+## web/clipboard.py
+
+- **Function** `clipboard_write_js` — the JavaScript expression that writes a text exactly and resolves to a bool
+- **Function** `copy_text_to_clipboard` — async; copy in the browser and toast the real outcome (success / failed / unconfirmed)
 
 ## web/auth_state.py
 
@@ -1518,7 +1531,9 @@ Imported by `web/api.py` handlers `GET /api/export/json` (Line ~1920) and `GET /
 
 ## web/pages/search_results.py
 
-- **Function** `copy_result_text` (Line 47) — Copy text to clipboard.
+- **Function** `_apply_highlight_marks` — Quick View text as HTML: escaped, search terms marked on the raw text, newlines as `<br>`
+- **Function** `_fgp_text_for_display` — decode the HTML entities FGP sidecar text stores (web-side only)
+- **Function** `copy_result_text` — async; copy text to the clipboard through `web.clipboard.copy_text_to_clipboard`
 - **Function** `show_add_to_list_dialog` (Line 61)
 - **Function** `toggle_expansion` (Line 86) — Toggle inline accordion expansion for a result card.
 - **Function** `render_results` (Line 115)
