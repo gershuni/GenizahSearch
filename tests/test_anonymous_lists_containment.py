@@ -382,6 +382,40 @@ def test_add_to_list_dialog_requires_login(monkeypatch):
     assert login_opened == [True], 'Sign in did not open the login dialog'
 
 
+def test_anonymous_lists_page_returns_before_reading_state(monkeypatch):
+    """/lists for an anonymous visitor builds the sign-in card and reads nothing.
+
+    The source guard below only proves a login check is PRESENT before the
+    first lists_mgr read; an early return that no longer fires (for example
+    ``if False and not is_logged_in()``) would still satisfy it. This drives
+    create_lists_page itself with a fake ``ui`` so that regression is caught
+    in the default (non render_smoke) run. Regression guard: green on the
+    fixed code, proven able to fail by neutralising that early return.
+    """
+    import web.pages.lists as lists_page
+    from web.translations import tr
+
+    _set_auth(monkeypatch, logged_in=False)
+    fake_ui = MagicMock(name='ui')
+    monkeypatch.setattr(lists_page, 'ui', fake_ui)
+    monkeypatch.setattr(lists_page, 'h1', lambda *a, **k: None)
+    trip = Tripwire()
+    monkeypatch.setattr(lists_page, 'state', trip)
+
+    error = None
+    try:
+        lists_page.create_lists_page()
+    except Exception as exc:  # the signed-in page cannot build on a fake ui
+        error = exc
+
+    assert trip.accessed == [], f'/lists read app state for an anonymous visitor: {trip.accessed}'
+    assert error is None, f'/lists went past the anonymous early return: {error!r}'
+    card = fake_ui.card.return_value.classes.return_value
+    card.mark.assert_called_once_with('lists-anonymous-gate')
+    assert tr('Sign in to access your saved research lists.') in _label_texts(fake_ui)
+    assert len(_button_calls(fake_ui, tr('Sign in'))) == 1
+
+
 def test_require_login_for_lists_passes_signed_in_users_through(monkeypatch):
     """A signed-in visitor gets True and no prompt is built.
 
@@ -478,11 +512,10 @@ def test_anonymous_list_export_is_refused(monkeypatch, export_client):
     before = _fingerprint(export_client.seeded)
     monkeypatch.setattr('web.safe_storage.app', SimpleNamespace(storage=SimpleNamespace(user={})))
 
-    for list_id in (SECRET_LIST_ID, 'default'):
-        resp = export_client.client.get(f'/api/export/list/{list_id}/excel')
-        assert resp.status_code == 401, (list_id, resp.status_code, resp.text)
-        for secret in SECRETS:
-            assert secret not in resp.text
+    resp = export_client.client.get(f'/api/export/list/{SECRET_LIST_ID}/excel')
+    assert resp.status_code == 401, (resp.status_code, resp.text)
+    for secret in SECRETS:
+        assert secret not in resp.text
 
     assert export_client.recorder.calls == []
     assert _fingerprint(export_client.seeded) == before

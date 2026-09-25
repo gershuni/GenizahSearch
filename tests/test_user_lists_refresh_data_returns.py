@@ -13,7 +13,6 @@ Uses asyncio.run() to avoid pytest-asyncio dependency (mirrors Phase 91 pattern)
 """
 
 import asyncio
-from unittest.mock import MagicMock
 
 from web.user_lists import UserListsManager
 
@@ -42,9 +41,20 @@ def test_refresh_data_anonymous_ignores_local_mgr(monkeypatch):
     """
     monkeypatch.setattr('web.auth_state.GlobalAuthState.is_logged_in', staticmethod(lambda: False))
 
-    local_mgr_mock = MagicMock()
     local_data = {'lists': {'leak': {'name': 'Leak'}}, 'projects': {}, 'items': {}, 'recent': []}
-    local_mgr_mock.data = local_data
+
+    class _LocalMgr:
+        # A property, not a MagicMock attribute: MagicMock does not record
+        # reads of an assigned attribute, so it could not see a .data read.
+        def __init__(self):
+            self.reads = 0
+
+        @property
+        def data(self):
+            self.reads += 1
+            return local_data
+
+    local_mgr_mock = _LocalMgr()
     mgr = UserListsManager(local_mgr=local_mgr_mock)
     monkeypatch.setattr(mgr, 'invalidate_cache', lambda: None)
 
@@ -54,7 +64,7 @@ def test_refresh_data_anonymous_ignores_local_mgr(monkeypatch):
     assert result is not local_data, "anonymous refresh returned the shared local store"
     assert 'leak' not in result.get('lists', {})
     assert result == mgr._get_default_data()
-    assert local_mgr_mock.mock_calls == [], local_mgr_mock.mock_calls
+    assert local_mgr_mock.reads == 0, "anonymous refresh read local_mgr.data"
 
 
 def test_refresh_data_default_branch_returns_dict(monkeypatch):
