@@ -60,6 +60,7 @@ from desktop.widgets import (
     ShelfmarkCompleter,
 )
 from desktop.column_chooser import ColumnChooser, ColumnFitter
+from desktop.single_instance import acquire_instance_lock, relaunch_if_requested, request_restart, restarted_from
 from desktop.widgets.flow_layout import FlowWidget
 from desktop.widgets.overflow_row import OverflowRow
 from desktop.widgets.line_number_text_edit import (
@@ -4864,8 +4865,10 @@ class GenizahGUI(QMainWindow):
         msgbox.button(QMessageBox.StandardButton.No).setText(tr("No"))
         reply = msgbox.exec()
         if reply == QMessageBox.StandardButton.Yes:
-            import subprocess
-            subprocess.Popen([sys.executable] + sys.argv, cwd=os.getcwd())
+            # The new copy is started by __main__ after the event loop ends,
+            # i.e. after closeEvent has saved the session; started from here
+            # it would read the session before this copy had saved it.
+            request_restart()
             QApplication.instance().quit()
         else:
             label = "עברית" if new_lang == 'he' else "English"
@@ -31897,7 +31900,32 @@ if __name__ == "__main__":
     if os.path.exists(icon_path):
         app_icon = QIcon(icon_path)
         app.setWindowIcon(app_icon)
-    
+
+    # One running copy per data folder: two copies each save their whole lists
+    # and settings over the same files, so the last save silently drops the
+    # other window's edits. Taken after the headless self-tests above (the
+    # packaging smoke runs them while the app may be open) and before any
+    # window exists. _instance_lock is never released by hand: it lives until
+    # the process exits, because an upload still in flight after the window
+    # closes can save lists.pkl during teardown.
+    _instance_lock, _other_copy_running = acquire_instance_lock(
+        Config.INDEX_DIR, parent_pid=restarted_from(sys.argv))
+    if _other_copy_running:
+        if CURRENT_LANG == 'he':
+            app.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        QMessageBox.information(
+            None, tr("Already running"),
+            tr("Dicta Genizah Search Pro is already open. Only one copy can run at a time, "
+               "because two copies would overwrite each other's lists and settings. Switch to "
+               "the open window. If none is visible, it is still starting or closing; try "
+               "again in a moment."))
+        sys.exit(0)
+
     window = GenizahGUI()
     window.showMaximized()
-    sys.exit(app.exec())
+    _exit_code = app.exec()
+    # If a language change asked for a restart, the new copy starts only now,
+    # after closeEvent has saved the session. It waits for this process (named
+    # on its command line) to exit and release _instance_lock.
+    relaunch_if_requested()
+    sys.exit(_exit_code)
