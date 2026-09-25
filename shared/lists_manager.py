@@ -13,10 +13,13 @@ import logging
 import os
 import pickle
 import re
+import shutil
+import threading
 import time
 
 from shared.genizah_translations import TRANSLATIONS
 
+from shared.atomic_io import DEFAULT_BUSY_BUDGET, read_bytes, replace_file, write_bytes_atomic
 from shared.config import Config
 
 LOGGER = logging.getLogger("genizah." + __name__)
@@ -50,6 +53,24 @@ class ListsManager:
 
     LISTS_FILE = os.path.join(Config.INDEX_DIR, "lists.pkl")
     MAX_RECENT_ITEMS = 50
+    BACKUP_COUNT = 3
+    # How long load() keeps retrying a lists.pkl that Windows reports busy
+    # (antivirus, the indexer) before treating it as unreadable. It runs once,
+    # at startup, and a busy file taken for a damaged one would be set aside.
+    LOAD_BUSY_BUDGET = 5.0
+
+    # Class-level: every instance writes the same LISTS_FILE, and the desktop
+    # saves from worker threads too (auto-sync and the logout sync).
+    _save_lock = threading.Lock()
+    # What the last load() found, for the desktop to report: 'ok', 'missing',
+    # 'recovered' (lists.pkl was unreadable and a backup was loaded) or
+    # 'failed' (nothing was readable; the lists start empty). Class-level
+    # defaults so an instance built without __init__ behaves like a fresh start.
+    load_status = 'missing'
+    load_error = None
+    recovered_from = None
+    unreadable_copy = None
+    _backup_done = False
 
     # Default colors for lists
     DEFAULT_COLORS = [
@@ -102,69 +123,164 @@ class ListsManager:
             'all_tags': []  # for autocomplete
         }
 
+    def _backup_paths(self):
+        return [f"{self.LISTS_FILE}.bak{i}" for i in range(1, self.BACKUP_COUNT + 1)]
+
+    def _read_store(self, path, budget=DEFAULT_BUSY_BUDGET):
+        """Unpickle one copy of the store and fill in the fields newer builds expect."""
+        loaded = pickle.loads(read_bytes(path, budget=budget))
+        # Merge with defaults to handle new fields
+        defaults = self._get_default_data()
+        for key in defaults:
+            if key not in loaded:
+                loaded[key] = defaults[key]
+        # Ensure system lists exist
+        if 'default' not in loaded['lists']:
+            loaded['lists']['default'] = defaults['lists']['default']
+        if 'recent' not in loaded['lists']:
+            loaded['lists']['recent'] = defaults['lists']['recent']
+        if 'projects' not in loaded:
+            loaded['projects'] = defaults['projects']
+        if 'lists_order' not in loaded:
+            loaded['lists_order'] = defaults['lists_order']
+        if 'projects_order' not in loaded:
+            loaded['projects_order'] = defaults['projects_order']
+        if not loaded.get('lists_order'):
+            loaded['lists_order'] = list(loaded.get('lists', {}).keys())
+        if not loaded.get('projects_order'):
+            loaded['projects_order'] = list(loaded.get('projects', {}).keys())
+        for project_data in loaded.get('projects', {}).values():
+            if 'color' not in project_data:
+                project_data['color'] = self._get_next_project_color(loaded.get('projects', {}))
+        for list_data in loaded.get('lists', {}).values():
+            if 'project_id' not in list_data:
+                list_data['project_id'] = None
+        # Backfill sys_id on stored items (older format used key only)
+        for item_id, item_data in loaded.get('items', {}).items():
+            if isinstance(item_data, dict) and 'sys_id' not in item_data:
+                item_data['sys_id'] = item_id
+        return loaded
+
     def load(self):
-        """Load lists from file."""
-        if os.path.exists(self.LISTS_FILE):
+        """Load lists from file, falling back to .bak1, .bak2, .bak3 in that order.
+
+        Never writes, renames or rotates anything: the web server builds a
+        ListsManager at startup and must leave the file alone. A missing
+        lists.pkl is a fresh start (or a deliberate delete), so the backups are
+        not consulted. load_status says what was found.
+        """
+        self.load_status, self.load_error, self.recovered_from = 'missing', None, None
+        self.unreadable_copy = None
+        self._backup_done = False
+        self.data = self._get_default_data()
+        if not os.path.exists(self.LISTS_FILE):
+            return
+        try:
+            self.data = self._read_store(self.LISTS_FILE, budget=self.LOAD_BUSY_BUDGET)
+            self.load_status = 'ok'
+            return
+        except FileNotFoundError:
+            return  # removed between the check and the read: the same as missing
+        except Exception as e:
+            self.load_error = str(e)
+            LOGGER.error("Failed to load lists from %s: %s", self.LISTS_FILE, e)
+        for path in self._backup_paths():
+            if not os.path.exists(path):
+                continue
             try:
-                with open(self.LISTS_FILE, 'rb') as f:
-                    loaded = pickle.load(f)
-                    # Merge with defaults to handle new fields
-                    defaults = self._get_default_data()
-                    for key in defaults:
-                        if key not in loaded:
-                            loaded[key] = defaults[key]
-                    # Ensure system lists exist
-                    if 'default' not in loaded['lists']:
-                        loaded['lists']['default'] = defaults['lists']['default']
-                    if 'recent' not in loaded['lists']:
-                        loaded['lists']['recent'] = defaults['lists']['recent']
-                    if 'projects' not in loaded:
-                        loaded['projects'] = defaults['projects']
-                    if 'lists_order' not in loaded:
-                        loaded['lists_order'] = defaults['lists_order']
-                    if 'projects_order' not in loaded:
-                        loaded['projects_order'] = defaults['projects_order']
-                    if not loaded.get('lists_order'):
-                        loaded['lists_order'] = list(loaded.get('lists', {}).keys())
-                    if not loaded.get('projects_order'):
-                        loaded['projects_order'] = list(loaded.get('projects', {}).keys())
-                    for project_data in loaded.get('projects', {}).values():
-                        if 'color' not in project_data:
-                            project_data['color'] = self._get_next_project_color(loaded.get('projects', {}))
-                    for list_data in loaded.get('lists', {}).values():
-                        if 'project_id' not in list_data:
-                            list_data['project_id'] = None
-                    # Backfill sys_id on stored items (older format used key only)
-                    for item_id, item_data in loaded.get('items', {}).items():
-                        if isinstance(item_data, dict) and 'sys_id' not in item_data:
-                            item_data['sys_id'] = item_id
-                    self.data = loaded
+                self.data = self._read_store(path)
             except Exception as e:
-                LOGGER.warning(f"Failed to load lists: {e}")
-                self.data = self._get_default_data()
-        else:
-            self.data = self._get_default_data()
+                LOGGER.error("Lists backup %s is unreadable too: %s", path, e)
+                continue
+            self.load_status, self.recovered_from = 'recovered', path
+            LOGGER.warning("Recovered lists from backup %s", path)
+            return
+        self.load_status = 'failed'
+
+    def _rotate_backups(self):
+        """bak2 -> bak3, bak1 -> bak2, then copy lists.pkl -> bak1."""
+        paths = self._backup_paths()
+        for older, newer in zip(reversed(paths[:-1]), reversed(paths[1:])):
+            if os.path.exists(older):
+                replace_file(older, newer)
+        shutil.copy2(self.LISTS_FILE, paths[0])
+
+    def _keep_unreadable_locked(self):
+        """Copy the lists.pkl that load() could not read to lists.pkl.unreadable-<time>.
+
+        Called with _save_lock held, before anything replaces lists.pkl. An
+        OSError propagates, so the caller does not overwrite the only copy.
+        """
+        keep = f"{self.LISTS_FILE}.unreadable-{time.strftime('%Y%m%d-%H%M%S')}"
+        shutil.copy2(self.LISTS_FILE, keep)
+        LOGGER.warning("Kept the unreadable lists file as %s", keep)
+        self.unreadable_copy = keep
+        self._backup_done = True
+        return keep
+
+    def keep_unreadable_copy(self):
+        """After a load that could not read lists.pkl, copy it aside now.
+
+        Returns the copy's path, or None when there is nothing to keep or the
+        copy failed (lists.pkl is then left as it is: save() refuses to replace
+        it until the copy succeeds).
+        """
+        with self._save_lock:
+            if self.unreadable_copy:
+                return self.unreadable_copy
+            if (self.load_status not in ('recovered', 'failed') or self._backup_done
+                    or not os.path.exists(self.LISTS_FILE)):
+                return None
+            try:
+                return self._keep_unreadable_locked()
+            except OSError as e:
+                LOGGER.error("Could not keep a copy of the unreadable lists file: %s", e)
+                return None
 
     def save(self):
-        """Save lists to file."""
-        try:
-            os.makedirs(Config.INDEX_DIR, exist_ok=True)
-            # Create backup before saving (keep last 3 backups)
-            if os.path.exists(self.LISTS_FILE):
-                import shutil
-                for i in range(2, 0, -1):
-                    old_backup = f"{self.LISTS_FILE}.bak{i}"
-                    new_backup = f"{self.LISTS_FILE}.bak{i+1}"
-                    if os.path.exists(old_backup):
-                        if os.path.exists(new_backup):
-                            os.remove(new_backup)
-                        shutil.move(old_backup, new_backup)
-                backup_file = f"{self.LISTS_FILE}.bak1"
-                shutil.copy2(self.LISTS_FILE, backup_file)
-            with open(self.LISTS_FILE, 'wb') as f:
-                pickle.dump(self.data, f)
-        except Exception as e:
-            LOGGER.error(f"Failed to save lists: {e}")
+        """Save lists to file. Returns True when lists.pkl was written.
+
+        Atomic (temp file + os.replace) and serialised across threads. The
+        backups rotate once per session -- on the first save after a load that
+        read lists.pkl itself -- so .bak1-3 are the store as it stood at the
+        start of the last three sessions, not the last three edits. After a load
+        that could not read lists.pkl, its bytes are kept as
+        lists.pkl.unreadable-<time> before anything replaces it, and the
+        backups are left alone.
+        """
+        with self._save_lock:
+            try:
+                payload = pickle.dumps(self.data)
+                if not self._backup_done and os.path.exists(self.LISTS_FILE):
+                    if self.load_status == 'ok':
+                        try:
+                            self._rotate_backups()
+                        except OSError as e:
+                            LOGGER.warning("Could not rotate the list backups: %s", e)
+                    elif self.load_status in ('recovered', 'failed'):
+                        self._keep_unreadable_locked()
+                self._backup_done = True
+                write_bytes_atomic(self.LISTS_FILE, payload)
+                return True
+            except Exception as e:
+                LOGGER.error("Failed to save lists: %s", e)
+                return False
+
+    def write_snapshot(self, label):
+        """Write the in-memory store to lists.pkl.<label>, atomically.
+
+        The cloud sync takes one before each direction ('pre-download',
+        'pre-upload'), so the state it started from can be recovered by hand.
+        Returns True when the snapshot was written.
+        """
+        path = f"{self.LISTS_FILE}.{label}"
+        with self._save_lock:
+            try:
+                write_bytes_atomic(path, pickle.dumps(self.data))
+                return True
+            except Exception as e:
+                LOGGER.error("Could not write the lists snapshot %s: %s", path, e)
+                return False
 
     def clear_all(self):
         """Clear all lists and reset to default state. Used after migration."""

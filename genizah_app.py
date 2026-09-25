@@ -1562,6 +1562,40 @@ class GenizahGUI(QMainWindow):
         self.set_results_loading(True)
         QTimer.singleShot(100, self.start_background_init)
 
+    def _report_lists_load_problem(self):
+        """Tell the user when lists.pkl could not be read at startup.
+
+        ListsManager.load() never writes, so the unreadable file is copied aside
+        here, before any save can replace it, and the notice names that copy.
+        """
+        mgr = getattr(self, 'lists_mgr', None)
+        status = getattr(mgr, 'load_status', 'ok')
+        if status not in ('recovered', 'failed'):
+            return
+        try:
+            kept = mgr.keep_unreadable_copy() or mgr.LISTS_FILE
+            kept_name = os.path.basename(kept)
+            folder = os.path.dirname(os.path.abspath(kept))
+            if status == 'recovered':
+                try:
+                    when = time.strftime('%Y-%m-%d %H:%M',
+                                         time.localtime(os.path.getmtime(mgr.recovered_from)))
+                except OSError:
+                    when = os.path.basename(mgr.recovered_from)
+                QMessageBox.warning(
+                    self, tr("Lists restored from a backup"),
+                    tr("Your saved lists could not be read, so they were restored from a backup "
+                       "saved on {}. Changes made after that may be missing. The unreadable file "
+                       "is kept as {} in:\n{}").format(when, kept_name, folder))
+            else:
+                QMessageBox.warning(
+                    self, tr("Lists could not be loaded"),
+                    tr("Your saved lists could not be read and no readable backup was found, so "
+                       "your lists are empty. The unreadable file is kept as {} in:\n{}").format(
+                        kept_name, folder))
+        except Exception as e:
+            logger.warning("Could not report the lists load problem: %s", e)
+
     def start_background_init(self):
         try:
             self.startup_thread = StartupThread()
@@ -1649,6 +1683,7 @@ class GenizahGUI(QMainWindow):
 
             # Initialize Lists Tab UI
             self.lists_refresh_all()
+            self._report_lists_load_problem()
 
             db_path = os.path.join(Config.INDEX_DIR, "tantivy_db")
             index_exists = os.path.exists(db_path) and os.listdir(db_path)
@@ -2521,7 +2556,7 @@ class GenizahGUI(QMainWindow):
                         )
                     )
                 else:
-                    QMessageBox.warning(self, tr("Sync Error"), result.get('error', 'Unknown error'))
+                    QMessageBox.warning(self, tr("Sync Error"), tr(result.get('error') or 'Unknown error'))
 
             elif action == 'upload':
                 # Upload local lists to cloud
@@ -2536,28 +2571,30 @@ class GenizahGUI(QMainWindow):
                         )
                     )
                 else:
-                    QMessageBox.warning(self, tr("Sync Error"), result.get('error', 'Unknown error'))
+                    QMessageBox.warning(self, tr("Sync Error"), tr(result.get('error') or 'Unknown error'))
 
             elif action == 'merge':
                 # Both directions
                 download_result = self.lists_mgr.sync_from_cloud()
-                upload_result = self.lists_mgr.sync_to_cloud()
-
-                if download_result.get('success') and upload_result.get('success'):
-                    QMessageBox.information(
-                        self, tr("Sync Complete"),
-                        tr("Lists merged successfully! Downloaded {dl} lists, uploaded {ul} lists.").format(
-                            dl=download_result.get('lists_added', 0),
-                            ul=upload_result.get('lists_pushed', 0)
-                        )
-                    )
+                if not download_result.get('success'):
+                    # The upload would push this computer's copy over cloud
+                    # notes that were never merged in, so a Merge whose
+                    # download failed stops before it.
+                    QMessageBox.warning(self, tr("Sync Error"),
+                                        tr(download_result.get('error') or 'Unknown error'))
                 else:
-                    errors = []
-                    if not download_result.get('success'):
-                        errors.append(f"Download: {download_result.get('error')}")
-                    if not upload_result.get('success'):
-                        errors.append(f"Upload: {upload_result.get('error')}")
-                    QMessageBox.warning(self, tr("Sync Error"), "\n".join(errors))
+                    upload_result = self.lists_mgr.sync_to_cloud()
+                    if upload_result.get('success'):
+                        QMessageBox.information(
+                            self, tr("Sync Complete"),
+                            tr("Lists merged successfully! Downloaded {dl} lists, uploaded {ul} lists.").format(
+                                dl=download_result.get('lists_added', 0),
+                                ul=upload_result.get('lists_pushed', 0)
+                            )
+                        )
+                    else:
+                        QMessageBox.warning(self, tr("Sync Error"),
+                                            f"Upload: {tr(upload_result.get('error') or 'Unknown error')}")
 
             # Refresh the lists UI if it exists
             if hasattr(self, 'lists_tree'):

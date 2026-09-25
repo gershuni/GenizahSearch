@@ -1,0 +1,746 @@
+# -*- coding: utf-8 -*-
+"""lists.pkl, config.pkl and lang.pkl survive interrupted writes, unreadable
+files, busy files and concurrent saves, and the cloud sync keeps a snapshot of
+the local lists from before each direction.
+
+Every test drives the real call sites -- ListsManager() / add_to_recent /
+create_list / add_item, genizah_core.save_app_config / save_language, the
+desktop's startup notice and its sync dialog handler -- against files in
+tmp_path. ``ListsManager.LISTS_FILE`` is bound at import to the real data
+folder and the Config paths are read per call, so the fixture below redirects
+all of them.
+"""
+import ast
+import builtins
+import errno
+import glob
+import hashlib
+import logging
+import os
+import pickle
+import threading
+import time
+import types
+from pathlib import Path
+
+import pytest
+
+import genizah_core
+from genizah_core import Config
+from shared import lists_manager as lm
+from shared import lists_sync
+
+USER_LIST = "My research"
+NOTE = "important note"
+
+
+@pytest.fixture(autouse=True)
+def personal_state(tmp_path, monkeypatch):
+    """Point every personal-state path at tmp_path; returns the lists.pkl path."""
+    pkl = tmp_path / "lists.pkl"
+    monkeypatch.setattr(Config, "INDEX_DIR", str(tmp_path))
+    monkeypatch.setattr(Config, "SESSION_FILE", str(tmp_path / "session.json"))
+    monkeypatch.setattr(Config, "CONFIG_FILE", str(tmp_path / "config.pkl"))
+    monkeypatch.setattr(Config, "LANGUAGE_FILE", str(tmp_path / "lang.pkl"))
+    monkeypatch.setattr(lm.ListsManager, "LISTS_FILE", str(pkl))
+    return pkl
+
+
+@pytest.fixture
+def store(personal_state):
+    return personal_state
+
+
+@pytest.fixture
+def cfg_file(tmp_path):
+    return tmp_path / "config.pkl"
+
+
+@pytest.fixture
+def no_sleep(monkeypatch):
+    """Record the retry pauses instead of sleeping through them."""
+    pauses = []
+    monkeypatch.setattr(time, "sleep", pauses.append)
+    return pauses
+
+
+def _sha(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _list_names(path):
+    """The list names stored in one copy of the store, or None if unreadable."""
+    try:
+        with open(path, "rb") as fh:
+            data = pickle.load(fh)
+        return {v.get("name") for v in data["lists"].values()}
+    except Exception:
+        return None
+
+
+def _names(mgr):
+    return {v.get("name") for v in mgr.data["lists"].values()}
+
+
+def _fingerprint(directory):
+    return sorted((p.name, _sha(p), p.stat().st_mtime_ns) for p in directory.iterdir())
+
+
+def _two_sessions(store):
+    """Session 1 builds a list; session 2 only browses. Returns the list id."""
+    m = lm.ListsManager(None)
+    list_id = m.create_list(USER_LIST)
+    assert m.add_item("990001", list_id, note=NOTE)
+    m = lm.ListsManager(None)
+    m.add_to_recent("990002")
+    assert USER_LIST in _list_names(store)
+    assert USER_LIST in _list_names(f"{store}.bak1")
+    return list_id
+
+
+def _truncate(path):
+    """Cut the file in half: what a kill or power loss mid-write leaves."""
+    half = Path(path).read_bytes()[: Path(path).stat().st_size // 2]
+    Path(path).write_bytes(half)
+    return half
+
+
+class _Records(logging.Handler):
+    """The 'genizah' loggers do not propagate, so caplog never sees them."""
+
+    def __init__(self, level):
+        super().__init__(level)
+        self.messages = []
+
+    def emit(self, record):
+        self.messages.append(record.getMessage())
+
+
+@pytest.fixture
+def lists_errors():
+    handler = _Records(logging.ERROR)
+    lm.LOGGER.addHandler(handler)
+    yield handler.messages
+    lm.LOGGER.removeHandler(handler)
+
+
+def _busy_reads(monkeypatch, path, times):
+    """Opening `path` for reading raises the Windows sharing error `times` times."""
+    real_open = builtins.open
+    left = {"n": times}
+
+    def fake_open(file, mode="r", *args, **kwargs):
+        if (isinstance(file, (str, os.PathLike)) and os.path.abspath(file) == os.path.abspath(path)
+                and "r" in mode and left["n"] > 0):
+            left["n"] -= 1
+            raise PermissionError(13, "The process cannot access the file because "
+                                      "it is being used by another process", str(path))
+        return real_open(file, mode, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", fake_open)
+    return left
+
+
+# ---------------------------------------------------------------------------
+# lists.pkl: recovery from the backups
+# ---------------------------------------------------------------------------
+
+def test_truncated_lists_pkl_recovers_from_backup_and_keeps_the_backups(store):
+    list_id = _two_sessions(store)
+    truncated = _truncate(store)
+
+    m = lm.ListsManager(None)
+
+    assert USER_LIST in _names(m), "a truncated lists.pkl came back as empty lists although .bak1 was good"
+    item = m.data["items"]["990001"]
+    assert item["note"] == NOTE and list_id in item["lists"]
+    assert m.load_status == "recovered"
+    assert m.recovered_from == f"{store}.bak1"
+
+    backups = {p: _sha(p) for p in sorted(glob.glob(f"{store}.bak*"))}
+    for sys_id in ("990010", "990011", "990012"):  # ordinary browsing saves
+        m.add_to_recent(sys_id)
+
+    assert {p: _sha(p) for p in sorted(glob.glob(f"{store}.bak*"))} == backups, \
+        "saves after a recovery rotated the backups"
+    assert USER_LIST in _list_names(store)
+    kept = glob.glob(f"{store}.unreadable-*")
+    assert len(kept) == 1 and Path(kept[0]).read_bytes() == truncated
+
+
+def test_recovery_skips_an_unreadable_bak1_and_loads_bak2(store):
+    m = lm.ListsManager(None)
+    m.create_list(USER_LIST)
+    Path(f"{store}.bak2").write_bytes(store.read_bytes())
+    Path(f"{store}.bak1").write_bytes(b"torn backup")
+    store.write_bytes(b"torn store")
+
+    m = lm.ListsManager(None)
+
+    assert USER_LIST in _names(m)
+    assert m.load_status == "recovered"
+    assert m.recovered_from == f"{store}.bak2"
+
+
+def test_recovery_reaches_bak3_when_it_is_the_only_readable_copy(store):
+    m = lm.ListsManager(None)
+    m.create_list(USER_LIST)
+    Path(f"{store}.bak3").write_bytes(store.read_bytes())
+    Path(f"{store}.bak1").write_bytes(b"torn backup 1")
+    Path(f"{store}.bak2").write_bytes(b"torn backup 2")
+    store.write_bytes(b"torn store")
+
+    m = lm.ListsManager(None)
+
+    assert USER_LIST in _names(m)
+    assert m.load_status == "recovered"
+    assert m.recovered_from == f"{store}.bak3"
+
+
+def test_load_never_writes_even_when_it_recovers(store):
+    # The web server builds a ListsManager at startup (web/main.py) and must
+    # leave the file alone.
+    _two_sessions(store)
+    _truncate(store)
+    before = _fingerprint(store.parent)
+
+    m = lm.ListsManager(None)
+
+    assert USER_LIST in _names(m)
+    assert _fingerprint(store.parent) == before
+
+
+def test_unreadable_store_without_a_readable_backup_is_kept_not_rotated(store):
+    store.write_bytes(b"not a pickle")
+    for i in (1, 2, 3):
+        (store.parent / f"lists.pkl.bak{i}").write_bytes(b"also broken %d" % i)
+    backups = {p: _sha(p) for p in sorted(glob.glob(f"{store}.bak*"))}
+
+    m = lm.ListsManager(None)
+    m.add_to_recent("990010")
+
+    kept = glob.glob(f"{store}.unreadable-*")
+    assert len(kept) == 1 and Path(kept[0]).read_bytes() == b"not a pickle"
+    assert m.load_status == "failed"
+    assert {p: _sha(p) for p in sorted(glob.glob(f"{store}.bak*"))} == backups
+    assert _list_names(store) is not None
+
+
+def test_a_busy_lists_file_at_startup_is_waited_for_not_replaced(store, monkeypatch, no_sleep):
+    """Antivirus or the indexer holding lists.pkl for a few seconds at startup
+    must not make it look unreadable (that would load an older backup and let
+    the first save replace the newer file)."""
+    _two_sessions(store)
+    with monkeypatch.context() as mp:
+        _busy_reads(mp, store, times=6)  # about 2.25 s of retries
+        m = lm.ListsManager(None)
+
+    assert USER_LIST in _names(m), "a busy lists.pkl was read as unreadable"
+    assert m.load_status == "ok"
+    assert 0 < sum(no_sleep) <= lm.ListsManager.LOAD_BUSY_BUDGET
+    m.add_to_recent("990010")
+    assert USER_LIST in _list_names(store), "the first save after a busy load dropped the user's list"
+
+
+# ---------------------------------------------------------------------------
+# lists.pkl: how saves write
+# ---------------------------------------------------------------------------
+
+def test_backups_rotate_once_per_session_not_on_every_save(store):
+    m = lm.ListsManager(None)
+    m.create_list(USER_LIST)
+    at_start = _sha(store)
+
+    m = lm.ListsManager(None)
+    for i in range(5):
+        m.add_to_recent(f"99000{i}")
+
+    assert _sha(f"{store}.bak1") == at_start
+    assert not os.path.exists(f"{store}.bak2")
+
+
+def test_a_save_that_fails_midway_leaves_the_previous_file(store):
+    m = lm.ListsManager(None)
+    m.create_list(USER_LIST)
+    good = _sha(store)
+    # Anything that makes pickling fail part-way (a concurrent mutation:
+    # "dictionary changed size during iteration"; MemoryError) used to leave
+    # the truncated file behind, because it was opened 'wb' first.
+    m.data["items"]["broken"] = {"sys_id": "broken", "lists": [], "fn": lambda: None}
+
+    m.add_to_recent("990010")
+
+    assert _sha(store) == good
+    assert not glob.glob(str(store.parent / "*.tmp"))
+
+
+def test_a_save_still_lands_while_another_program_holds_the_file(store, monkeypatch, no_sleep):
+    """A program keeping lists.pkl open without delete sharing makes Windows
+    refuse the rename. The save must still reach the disk (written in place,
+    as before) instead of failing silently, and the log must say so."""
+    _two_sessions(store)
+    m = lm.ListsManager(None)
+    real_replace = os.replace
+
+    def refuse_lists_pkl(src, dst):
+        if os.path.abspath(dst) == os.path.abspath(store):
+            raise PermissionError(13, "Access is denied", str(dst))
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", refuse_lists_pkl)
+    handler = _Records(logging.WARNING)
+    atomic_log = logging.getLogger("genizah.shared.atomic_io")
+    atomic_log.addHandler(handler)
+    try:
+        for sys_id in ("990010", "990011", "990012"):
+            m.add_to_recent(sys_id)
+            with open(store, "rb") as fh:
+                assert pickle.load(fh)["recent_items"][0] == sys_id
+    finally:
+        atomic_log.removeHandler(handler)
+
+    assert USER_LIST in _list_names(store)
+    assert any("in place" in w for w in handler.messages), \
+        f"the save did not go through the atomic write and its logged fallback: {handler.messages}"
+    assert not glob.glob(str(store.parent / "*.tmp"))
+
+
+def test_concurrent_saves_from_the_sync_thread_do_not_fail(store, lists_errors):
+    m = lm.ListsManager(None)
+    list_id = m.create_list(USER_LIST)
+    for i in range(1000):
+        m.data["items"][f"99{i:07d}"] = {
+            "sys_id": f"99{i:07d}", "lists": [list_id], "tags": [], "note": "n" * 60,
+            "source": "", "added": 0.0, "modified": 0.0,
+            "shelfmark_override": None, "fl_id": None, "img": None}
+    m.save()
+
+    def sync_thread():  # sync_to_cloud saves before and after its requests
+        for _ in range(100):
+            m.save()
+
+    worker = threading.Thread(target=sync_thread)
+    worker.start()
+    for i in range(100):  # the UI thread: a manuscript view each
+        m.add_to_recent(f"98{i:07d}")
+    worker.join(60)
+
+    assert not worker.is_alive()
+    assert lists_errors == []
+    with open(store, "rb") as fh:
+        assert pickle.load(fh)["recent_items"] == m.data["recent_items"]
+
+
+def test_a_stalled_save_on_the_sync_thread_cannot_land_over_a_newer_one(store, monkeypatch):
+    """The save lock: the auto-sync worker takes its snapshot, then stalls; the
+    UI saves a newer state meanwhile. Without the lock the worker's older
+    snapshot lands last and the newer edit is gone from disk."""
+    m = lm.ListsManager(None)
+    m.create_list(USER_LIST)
+    real = pickle
+    stalled, release = threading.Event(), threading.Event()
+
+    class GatedPickle:
+        def __getattr__(self, name):
+            return getattr(real, name)
+
+        @staticmethod
+        def dumps(obj, *args, **kwargs):
+            payload = real.dumps(obj, *args, **kwargs)
+            if threading.current_thread().name == "sync-worker":
+                stalled.set()
+                release.wait(10)
+            return payload
+
+        @staticmethod
+        def dump(obj, fh, *args, **kwargs):  # the old save() pickled into the open file
+            fh.write(GatedPickle.dumps(obj, *args, **kwargs))
+
+    monkeypatch.setitem(lm.ListsManager.save.__globals__, "pickle", GatedPickle())
+    worker = threading.Thread(target=m.save, name="sync-worker")
+    worker.start()
+    assert stalled.wait(10)
+    ui = threading.Thread(target=m.add_to_recent, args=("990077",))
+    ui.start()
+    ui.join(0.5)  # with the lock the UI save waits here; without it, it lands now
+    release.set()
+    worker.join(10)
+    ui.join(10)
+
+    with open(store, "rb") as fh:
+        assert real.load(fh)["recent_items"] == m.data["recent_items"] == ["990077"]
+
+
+# ---------------------------------------------------------------------------
+# config.pkl and lang.pkl
+# ---------------------------------------------------------------------------
+
+GOOD_CFG = {"telemetry_enabled": True, "viewer_text_pt": 14, "last_save_folder": "D:/x"}
+
+
+def _write_cfg(path, cfg=GOOD_CFG):
+    with open(path, "wb") as fh:
+        pickle.dump(cfg, fh)
+
+
+def _read_cfg(path):
+    with open(path, "rb") as fh:
+        return pickle.load(fh)
+
+
+def test_save_app_config_keeps_an_unreadable_file(cfg_file):
+    _write_cfg(cfg_file)
+    truncated = _truncate(cfg_file)
+
+    genizah_core.save_app_config({"line_numbers": True})
+
+    kept = glob.glob(f"{cfg_file}.unreadable-*")
+    assert len(kept) == 1 and Path(kept[0]).read_bytes() == truncated
+    assert _read_cfg(cfg_file) == {"line_numbers": True}
+
+
+def test_save_app_config_does_not_overwrite_a_file_it_cannot_read(cfg_file, monkeypatch, no_sleep):
+    _write_cfg(cfg_file)
+    good = _sha(cfg_file)
+    with monkeypatch.context() as mp:
+        _busy_reads(mp, cfg_file, times=100)
+        genizah_core.save_app_config({"line_numbers": True})
+
+    assert _sha(cfg_file) == good
+
+
+def test_save_app_config_rides_out_one_busy_read(cfg_file, monkeypatch, no_sleep):
+    _write_cfg(cfg_file)
+    with monkeypatch.context() as mp:
+        _busy_reads(mp, cfg_file, times=1)
+        genizah_core.save_app_config({"line_numbers": True})
+
+    assert _read_cfg(cfg_file) == {**GOOD_CFG, "line_numbers": True}
+
+
+def test_a_config_save_that_fails_midway_leaves_the_previous_file(cfg_file):
+    _write_cfg(cfg_file)
+    good = _sha(cfg_file)
+
+    genizah_core.save_app_config({"callback": lambda: None})  # cannot be pickled
+
+    assert _sha(cfg_file) == good
+    assert not glob.glob(str(cfg_file.parent / "*.tmp"))
+
+
+def test_concurrent_config_saves_keep_every_key(cfg_file):
+    """The UI thread and a worker thread saving different preferences at the
+    same time: each save is a read-modify-write, so without the lock one reads
+    the file while the other is rewriting it, or both read the same old state,
+    and keys are lost."""
+    _write_cfg(cfg_file)
+
+    def saver(prefix):
+        for i in range(60):
+            genizah_core.save_app_config({f"{prefix}{i}": i})
+
+    threads = [threading.Thread(target=saver, args=(p,)) for p in ("ui_", "worker_")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(60)
+
+    cfg = _read_cfg(cfg_file)
+    missing = [k for p in ("ui_", "worker_") for k in (f"{p}{i}" for i in range(60)) if k not in cfg]
+    assert missing == []
+    assert all(cfg[k] == v for k, v in GOOD_CFG.items())
+
+
+class _DiskFullWrites:
+    """A write handle that stores half of what it is given, then fails:
+    what a full disk (or a kill) in the middle of a save leaves behind."""
+
+    def __init__(self, fh):
+        self._fh = fh
+
+    def write(self, data):
+        data = bytes(data)
+        self._fh.write(data[: max(1, len(data) // 2)])
+        self._fh.flush()
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    def __getattr__(self, name):
+        return getattr(self._fh, name)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self._fh.close()
+        return False
+
+
+def test_a_language_save_that_dies_midway_keeps_the_previous_choice(tmp_path, monkeypatch):
+    genizah_core.save_language("he")
+    assert genizah_core.load_language() == "he"
+    real_open, real_fdopen = builtins.open, os.fdopen
+
+    def failing_open(file, mode="r", *args, **kwargs):
+        fh = real_open(file, mode, *args, **kwargs)
+        if "w" in mode and str(tmp_path) in os.path.abspath(str(file)):
+            return _DiskFullWrites(fh)
+        return fh
+
+    def failing_fdopen(fd, mode="r", *args, **kwargs):
+        fh = real_fdopen(fd, mode, *args, **kwargs)
+        return _DiskFullWrites(fh) if "w" in mode else fh
+
+    with monkeypatch.context() as mp:
+        mp.setattr(builtins, "open", failing_open)
+        mp.setattr(os, "fdopen", failing_fdopen)
+        genizah_core.save_language("en")
+
+    assert genizah_core.load_language() == "he", "a torn lang.pkl reset the interface to English"
+    assert not glob.glob(str(tmp_path / "*.tmp"))
+
+
+# ---------------------------------------------------------------------------
+# The desktop tells the user
+# ---------------------------------------------------------------------------
+
+def _is_hebrew(ch):
+    return "\u0590" <= ch <= "\u05ff"
+
+
+@pytest.fixture
+def genizah_app_module():
+    import genizah_app
+    return genizah_app
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_startup_reports_a_recovered_lists_file(store, monkeypatch, genizah_app_module, lang):
+    _two_sessions(store)
+    truncated = _truncate(store)
+    monkeypatch.setattr(genizah_core, "CURRENT_LANG", lang)
+    shown = []
+    monkeypatch.setattr(genizah_app_module, "QMessageBox", types.SimpleNamespace(
+        warning=lambda parent, title, text: shown.append((title, text))))
+    gui = genizah_app_module.GenizahGUI.__new__(genizah_app_module.GenizahGUI)
+    gui.lists_mgr = lm.ListsManager(None)
+
+    gui._report_lists_load_problem()
+
+    assert len(shown) == 1
+    title, text = shown[0]
+    assert title == genizah_core.tr("Lists restored from a backup")
+    kept = glob.glob(f"{store}.unreadable-*")
+    assert len(kept) == 1 and Path(kept[0]).read_bytes() == truncated, \
+        "the notice names a kept copy that does not exist yet"
+    assert os.path.basename(kept[0]) in text and str(store.parent) in text
+    when = time.strftime("%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(f"{store}.bak1")))
+    assert when in text
+    if lang == "he":
+        assert _is_hebrew(text[0]) and _is_hebrew(title[0])
+
+
+def test_startup_reports_lists_that_could_not_be_loaded_and_says_nothing_otherwise(
+        store, monkeypatch, genizah_app_module):
+    shown = []
+    monkeypatch.setattr(genizah_app_module, "QMessageBox", types.SimpleNamespace(
+        warning=lambda parent, title, text: shown.append((title, text))))
+    gui = genizah_app_module.GenizahGUI.__new__(genizah_app_module.GenizahGUI)
+
+    gui.lists_mgr = lm.ListsManager(None)  # a fresh install
+    gui._report_lists_load_problem()
+    gui.lists_mgr.create_list(USER_LIST)
+    gui.lists_mgr = lm.ListsManager(None)  # an ordinary start
+    gui._report_lists_load_problem()
+    assert shown == []
+
+    store.write_bytes(b"not a pickle")
+    for path in glob.glob(f"{store}.bak*"):
+        os.remove(path)
+    gui.lists_mgr = lm.ListsManager(None)
+    gui._report_lists_load_problem()
+
+    assert [t for t, _ in shown] == [genizah_core.tr("Lists could not be loaded")]
+    kept = glob.glob(f"{store}.unreadable-*")
+    assert len(kept) == 1 and os.path.basename(kept[0]) in shown[0][1]
+
+
+def test_on_startup_finished_reports_right_after_building_the_lists():
+    source = (Path(__file__).resolve().parents[1] / "genizah_app.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    gui_cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "GenizahGUI")
+    method = next(n for n in gui_cls.body
+                  if isinstance(n, ast.FunctionDef) and n.name == "on_startup_finished")
+    wanted = ("ListsManager(self.meta_mgr)", "self.lists_refresh_all()", "self._report_lists_load_problem()")
+    calls = sorted((n for n in ast.walk(method) if isinstance(n, ast.Call) and ast.unparse(n) in wanted),
+                   key=lambda n: (n.lineno, n.col_offset))
+    assert [ast.unparse(n) for n in calls] == list(wanted)
+
+
+# ---------------------------------------------------------------------------
+# Cloud sync: a snapshot before each direction, and Merge stops on a failed download
+# ---------------------------------------------------------------------------
+
+TODAY = "today's reading of the colophon"
+OLD = "an older note, saved in the cloud"
+
+
+class _FakeCloud:
+    """Enough of supabase-py's table API for lists_sync, over in-memory rows."""
+
+    def __init__(self):
+        self.tables = {
+            "projects": [],
+            "user_lists": [{"id": "cl-1", "user_id": "u1", "name": USER_LIST, "color": "#4CAF50"}],
+            "list_items": [{"id": "ci-1", "list_id": "cl-1", "sys_id": "990001", "fl_id": None,
+                            "note": OLD, "tags": []}],
+        }
+        self.writes = []
+        self.fail_next_read = False
+        self._n = 0
+
+    def table(self, name):
+        return _FakeQuery(self, name)
+
+
+class _FakeQuery:
+    def __init__(self, cloud, name):
+        self.cloud, self.name, self.op, self.payload, self.filters = cloud, name, "select", None, []
+
+    def select(self, *args):
+        self.op = "select"
+        return self
+
+    def insert(self, payload):
+        self.op, self.payload = "insert", payload
+        return self
+
+    def update(self, payload):
+        self.op, self.payload = "update", payload
+        return self
+
+    def eq(self, column, value):
+        self.filters.append((column, value))
+        return self
+
+    def execute(self):
+        rows = self.cloud.tables[self.name]
+        matched = [r for r in rows if all(r.get(c) == v for c, v in self.filters)]
+        if self.op == "select":
+            if self.cloud.fail_next_read:
+                self.cloud.fail_next_read = False
+                raise ConnectionError("the network went away")
+            return types.SimpleNamespace(data=[dict(r) for r in matched])
+        self.cloud.writes.append((self.name, self.op, self.payload))
+        if self.op == "insert":
+            out = []
+            for p in self.payload if isinstance(self.payload, list) else [self.payload]:
+                self.cloud._n += 1
+                row = dict(p, id=f"{self.name}-{self.cloud._n}")
+                rows.append(row)
+                out.append(dict(row))
+            return types.SimpleNamespace(data=out)
+        for r in matched:
+            r.update(self.payload)
+        return types.SimpleNamespace(data=[dict(r) for r in matched])
+
+
+@pytest.fixture
+def synced(store, monkeypatch):
+    """A local store holding today's note and a fake cloud holding an older one."""
+    m = lm.ListsManager(None)
+    list_id = m.create_list(USER_LIST)
+    assert m.add_item("990001", list_id, note=TODAY)
+    cloud = _FakeCloud()
+    monkeypatch.setattr(lists_sync, "SUPABASE_AVAILABLE", True)
+    monkeypatch.setattr(lists_sync, "SUPABASE_ANON_KEY", "test-key")
+    sync = lists_sync.ListsCloudSync(m)
+    sync.set_user("u1")
+    sync.set_client(cloud)
+    monkeypatch.setattr(lists_sync, "_sync_instance", sync)
+    return types.SimpleNamespace(mgr=m, cloud=cloud, store=store)
+
+
+def _note_in(path):
+    with open(path, "rb") as fh:
+        return pickle.load(fh)["items"]["990001"]["note"]
+
+
+def _run_sync_dialog_action(genizah_app, monkeypatch, mgr, action):
+    """Drive GenizahGUI._do_sync_action -- the sync dialog's buttons -- with Qt faked out."""
+    shown = []
+
+    class _Progress:
+        def __init__(self, *args):
+            pass
+
+        def __getattr__(self, name):
+            return lambda *args: None
+
+    monkeypatch.setattr(genizah_app, "QProgressDialog", _Progress)
+    monkeypatch.setattr(genizah_app, "QApplication", types.SimpleNamespace(processEvents=lambda: None))
+    monkeypatch.setattr(genizah_app, "QMessageBox", types.SimpleNamespace(
+        information=lambda parent, title, text: shown.append(("information", text)),
+        warning=lambda parent, title, text: shown.append(("warning", text)),
+        critical=lambda parent, title, text: shown.append(("critical", text))))
+    host = types.SimpleNamespace(lists_mgr=mgr)
+    genizah_app.GenizahGUI._do_sync_action(host, types.SimpleNamespace(accept=lambda: None), action)
+    return shown
+
+
+def test_a_merge_keeps_todays_note_in_the_pre_download_snapshot(synced, monkeypatch, genizah_app_module):
+    shown = _run_sync_dialog_action(genizah_app_module, monkeypatch, synced.mgr, "merge")
+
+    assert [kind for kind, _ in shown] == ["information"], shown
+    assert _note_in(synced.store) == OLD  # the download took the cloud's note
+    assert _note_in(f"{synced.store}.pre-download") == TODAY, \
+        "the upload half of the Merge replaced the snapshot taken before the download"
+    assert _note_in(f"{synced.store}.pre-upload") == OLD
+
+
+def test_an_upload_alone_snapshots_before_it_and_leaves_the_download_snapshot(synced):
+    """Auto-sync (after every list change) and the logout sync only upload."""
+    assert synced.mgr.sync_to_cloud()["success"]
+    assert _note_in(f"{synced.store}.pre-upload") == TODAY
+    assert not os.path.exists(f"{synced.store}.pre-download")
+
+    Path(f"{synced.store}.pre-download").write_bytes(b"an earlier download's snapshot")
+    synced.mgr.add_to_recent("990010")
+    assert synced.mgr.sync_to_cloud()["success"]
+    assert Path(f"{synced.store}.pre-download").read_bytes() == b"an earlier download's snapshot"
+
+
+def _block_the_download_snapshot(store):
+    # A folder where the snapshot file should go: neither the rename nor the
+    # in-place write can put a file there.
+    os.mkdir(f"{store}.pre-download")
+
+
+def test_a_download_without_its_snapshot_changes_nothing(synced, no_sleep):
+    _block_the_download_snapshot(synced.store)
+    before_disk = _sha(synced.store)
+    before_memory = pickle.dumps(synced.mgr.data)
+
+    result = synced.mgr.sync_from_cloud()
+
+    assert result["success"] is False
+    assert result["error"] == lists_sync.DOWNLOAD_BACKUP_FAILED
+    assert result["error"] in genizah_core.TRANSLATIONS  # the dialog shows it translated
+    assert pickle.dumps(synced.mgr.data) == before_memory
+    assert _sha(synced.store) == before_disk
+    assert synced.cloud.writes == []
+
+
+@pytest.mark.parametrize("cause", ["network", "snapshot"])
+def test_a_merge_whose_download_fails_never_uploads(synced, monkeypatch, genizah_app_module, no_sleep, cause):
+    if cause == "network":
+        synced.cloud.fail_next_read = True
+    else:
+        _block_the_download_snapshot(synced.store)
+    cloud_before = {name: [dict(r) for r in rows] for name, rows in synced.cloud.tables.items()}
+
+    shown = _run_sync_dialog_action(genizah_app_module, monkeypatch, synced.mgr, "merge")
+
+    assert synced.cloud.writes == [], "the Merge uploaded after its download failed"
+    assert synced.cloud.tables == cloud_before
+    assert [kind for kind, _ in shown] == ["warning"]
+    assert _note_in(synced.store) == TODAY

@@ -29,6 +29,12 @@ from shared.supabase_provider import get_url, get_anon_key
 SUPABASE_URL = get_url()
 SUPABASE_ANON_KEY = get_anon_key()
 
+# English text, translated where it is shown (the desktop sync dialog).
+DOWNLOAD_BACKUP_FAILED = (
+    "Your lists on this computer could not be backed up, so nothing was downloaded. "
+    "Check that the data folder can be written to, then try again."
+)
+
 
 class ListsCloudSync:
     """
@@ -147,14 +153,22 @@ class ListsCloudSync:
             logger.error(f"Error getting cloud lists preview: {e}")
             return {'success': False, 'lists': [], 'error': str(e)}
 
-    def _backup_local_data(self) -> bool:
-        """Create a backup of local data before sync. Returns True if backup succeeded."""
+    def _backup_local_data(self, direction: str) -> bool:
+        """Snapshot the local lists before a sync. Returns True if the snapshot was written.
+
+        One file per direction, lists.pkl.pre-download and lists.pkl.pre-upload,
+        written from the in-memory store. A Merge runs the download and then the
+        upload, so the upload's snapshot must not replace the download's: the
+        download is the direction that rewrites local notes, tags and
+        memberships, and .pre-download is the state from before it. (A save is
+        not a fresh backup: ListsManager rotates .bak1-3 once per session.)
+        """
         if not self.lists_manager:
             return False
         try:
-            # Force a save with backup (the save() method creates rotating backups)
-            self.lists_manager.save()
-            logger.info("Created backup before sync")
+            if not self.lists_manager.write_snapshot(f"pre-{direction}"):
+                return False
+            logger.info("Saved a snapshot of the local lists before the %s", direction)
             return True
         except Exception as e:
             logger.error(f"Failed to create backup: {e}")
@@ -227,9 +241,11 @@ class ListsCloudSync:
         if self._sync_in_progress:
             return {'success': False, 'error': 'Sync already in progress'}
 
-        # SAFETY: Always backup before sync
-        if not self._backup_local_data():
-            logger.warning("Proceeding with sync despite backup failure")
+        # A download rewrites local notes, tags and memberships and merges
+        # duplicate items, so it does not start without its snapshot.
+        if not self._backup_local_data('download'):
+            logger.error("Download cancelled: the local lists could not be backed up first")
+            return {'success': False, 'error': DOWNLOAD_BACKUP_FAILED}
 
         self._sync_in_progress = True
         result = {
@@ -473,8 +489,9 @@ class ListsCloudSync:
         if self._sync_in_progress:
             return {'success': False, 'error': 'Sync already in progress'}
 
-        # SAFETY: Always backup before sync
-        if not self._backup_local_data():
+        # An upload changes nothing local except the cloud ids it records, so
+        # it goes ahead without its snapshot.
+        if not self._backup_local_data('upload'):
             logger.warning("Proceeding with sync despite backup failure")
 
         self._sync_in_progress = True

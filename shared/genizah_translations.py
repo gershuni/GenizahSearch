@@ -3635,6 +3635,15 @@ TRANSLATIONS.update({
     "Downloaded {lists} lists and {items} items from cloud.": "הורדו {lists} רשימות ו-{items} פריטים מהענן.",
     "Uploaded {lists} lists and {items} items to cloud.": "הועלו {lists} רשימות ו-{items} פריטים לענן.",
     "Lists merged successfully! Downloaded {dl} lists, uploaded {ul} lists.": "הרשימות מוזגו בהצלחה! הורדו {dl} רשימות, הועלו {ul} רשימות.",
+    "Your lists on this computer could not be backed up, so nothing was downloaded. Check that the data folder can be written to, then try again.":
+        "לא ניתן היה לגבות את הרשימות שבמחשב הזה, ולכן לא הורד דבר. יש לוודא שאפשר לכתוב לתיקיית הנתונים, ולנסות שוב.",
+    # lists.pkl could not be read at startup (desktop notice)
+    "Lists restored from a backup": "הרשימות שוחזרו מגיבוי",
+    "Your saved lists could not be read, so they were restored from a backup saved on {}. Changes made after that may be missing. The unreadable file is kept as {} in:\n{}":
+        "לא ניתן היה לקרוא את הרשימות השמורות, ולכן הן שוחזרו מגיבוי שנשמר ב-{}. ייתכן ששינויים שנעשו אחרי מועד זה חסרים. הקובץ שלא ניתן היה לקרוא נשמר בשם {} בתיקייה:\n{}",
+    "Lists could not be loaded": "לא ניתן היה לטעון את הרשימות",
+    "Your saved lists could not be read and no readable backup was found, so your lists are empty. The unreadable file is kept as {} in:\n{}":
+        "לא ניתן היה לקרוא את הרשימות השמורות ולא נמצא גיבוי קריא, ולכן הרשימות ריקות. הקובץ שלא ניתן היה לקרוא נשמר בשם {} בתיקייה:\n{}",
 
     # --- Data-update notification (desktop) ---
     "New research data available:": "נתוני מחקר חדשים זמינים:",
