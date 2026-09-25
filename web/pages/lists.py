@@ -21,6 +21,9 @@ from web.translations import tr, get_language
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.components.typography import h1, h3
 from web.components.project_tree import create_project_tree
+# Every write callback on this page goes through this runner (sign-in re-checked, awaited,
+# failure toasted); tests/test_lists_page_write_callbacks.py pins it.
+from web.components.lists_write import run_lists_write as _run_lists_write
 from web.auth_state import GlobalAuthState, create_login_dialog
 from genizah_core import get_library_display
 from typing import Optional, Dict
@@ -31,35 +34,6 @@ logger = logging.getLogger(__name__)
 # Phase 92.2 D-FANOUT-01 + Reviews MUST-FIX 1: sentinel distinguishes
 # 'caller did not pass counts' from 'counts intentionally None (legacy fallback)'.
 _COUNTS_UNSET = object()
-
-
-async def _run_lists_write(write, *, falsy_is_failure: bool = True):
-    """Run one lists write for the signed-in user; return its result, or None.
-
-    Every write callback on this page goes through here, as
-    ``result = await _run_lists_write(lambda: state.lists_mgr.<method>(...))``
-    followed by ``if not result: return`` (tests/test_lists_page_write_callbacks.py).
-
-    * The page's sign-in gate runs once, at render; a session can end while the
-      page stays open, so sign-in is re-checked here, before any write.
-    * ``write`` returns the manager's coroutine and it is AWAITED here: the
-      UserListsManager write methods are async, and a bare call never runs.
-    * A write that raises or reports nothing done (None / False) toasts a
-      failure and returns None. Pass ``falsy_is_failure=False`` when a falsy
-      result is a legitimate answer (Empty Trash can delete 0 lists).
-    """
-    if not GlobalAuthState.is_logged_in():
-        ui.notify(tr('Please log in to access lists'), type='warning')
-        return None
-    try:
-        result = await write()
-    except Exception as e:
-        logger.warning("lists write failed: %s", e)
-        result = None
-    if result is None or (falsy_is_failure and not result):
-        ui.notify(tr('The change could not be saved. Check your connection and try again.'), type='negative')
-        return None
-    return result
 
 
 def _load_list_item_counts() -> Optional[Dict[int, int]]:
@@ -350,6 +324,10 @@ def create_lists_page():
                 if state.lists_mgr:
                     deleted = await _run_lists_write(lambda: state.lists_mgr.delete_list(list_id))
                     if not deleted:
+                        # 0 rows usually means another tab already deleted it: close the
+                        # now-stale dialog and refresh (the runner toasted the failure).
+                        dialog.close()
+                        await async_refresh_ui()
                         return
                     ui.notify(f"{tr('List deleted')}: {list_name}", type='info')
                     dialog.close()
@@ -425,6 +403,10 @@ def create_lists_page():
                                 lambda: state.lists_mgr.restore_list(selected_list_id['value'])
                             )
                             if not restored:
+                                # 0 rows usually means another tab already did it: close the
+                                # now-stale dialog and refresh (the runner toasted the failure).
+                                dialog.close()
+                                await async_refresh_ui()
                                 return
                             ui.notify(tr('List restored'), type='positive')
                             dialog.close()
@@ -439,6 +421,10 @@ def create_lists_page():
                                 lambda: state.lists_mgr.permanently_delete_list(selected_list_id['value'])
                             )
                             if not purged:
+                                # 0 rows usually means another tab already did it: close the
+                                # now-stale dialog and refresh (the runner toasted the failure).
+                                dialog.close()
+                                await async_refresh_ui()
                                 return
                             ui.notify(tr('List deleted permanently'), type='info')
                             dialog.close()
@@ -903,6 +889,8 @@ def create_lists_page():
                 lambda: state.lists_mgr.remove_item_from_list(item_id, list_id)
             )
             if not result:
+                # Already removed elsewhere, or a failed write: refresh so the view is current.
+                await async_refresh_ui()
                 return
             ui.notify(tr('Item removed from list'), type='info')
             await async_refresh_ui()

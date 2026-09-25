@@ -51,6 +51,8 @@ def lists_page(monkeypatch):
     mod = pytest.importorskip('web.pages.lists')
     fake_ui = MagicMock()
     monkeypatch.setattr(mod, 'ui', fake_ui)
+    import web.components.lists_write as runner_mod  # a hard import: a missing runner must fail, not skip
+    monkeypatch.setattr(runner_mod, 'ui', fake_ui)
     return mod
 
 
@@ -200,9 +202,12 @@ def _receiver_is_lists_mgr(call: ast.Call) -> bool:
             and ast.unparse(call.func.value).endswith('lists_mgr'))
 
 
+RUNNER_NAMES = {'_run_lists_write', 'run_lists_write'}
+
+
 def _is_run_lists_write(call) -> bool:
     return (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
-            and call.func.id == '_run_lists_write')
+            and call.func.id in RUNNER_NAMES)
 
 
 def _write_call_problems(source: str) -> list[str]:
@@ -252,8 +257,12 @@ def _write_call_problems(source: str) -> list[str]:
     return problems
 
 
-def test_every_lists_write_goes_through_the_checked_runner():
-    problems = _write_call_problems(LISTS_PY.read_text(encoding='utf-8'))
+PROJECT_TREE_PY = LISTS_PY.parent.parent / 'components' / 'project_tree.py'
+
+
+@pytest.mark.parametrize('path', [LISTS_PY, PROJECT_TREE_PY], ids=['lists.py', 'project_tree.py'])
+def test_every_lists_write_goes_through_the_checked_runner(path):
+    problems = _write_call_problems(path.read_text(encoding='utf-8'))
     assert problems == [], '\n'.join(problems)
 
 
@@ -294,17 +303,40 @@ def test_the_write_call_rule_can_fail(source, expected):
     assert len(_write_call_problems(source)) == expected, _write_call_problems(source)
 
 
-def test_empty_trash_failure_still_rebuilds_the_trash_dialog():
-    """A partial Empty Trash deletes some rows and then fails: the dialog must not keep
-    showing (and offering actions on) rows that are gone. On failure the callback
-    closes the dialog and refreshes the page before returning."""
-    tree = ast.parse(LISTS_PY.read_text(encoding='utf-8'))
-    fn = next(n for n in ast.walk(tree)
-              if isinstance(n, ast.AsyncFunctionDef) and n.name == 'empty_trash')
-    guard = next(n for n in ast.walk(fn) if isinstance(n, ast.If)
-                 and 'count' in {x.id for x in ast.walk(n.test) if isinstance(x, ast.Name)})
-    called = {ast.unparse(c.func) for c in ast.walk(ast.Module(body=guard.body, type_ignores=[]))
-              if isinstance(c, ast.Call)}
-    assert 'dialog.close' in called, 'the failure branch leaves the stale trash dialog open'
-    assert 'async_refresh_ui' in called, 'the failure branch does not refresh the page'
-    assert isinstance(guard.body[-1], ast.Return)
+STALE_ON_FAILURE = [
+    # (file, callback, calls the failure branch must make before returning)
+    (LISTS_PY, 'delete_list', {'dialog.close', 'async_refresh_ui'}),
+    (LISTS_PY, 'restore_selected', {'dialog.close', 'async_refresh_ui'}),
+    (LISTS_PY, 'delete_permanently', {'dialog.close', 'async_refresh_ui'}),
+    (LISTS_PY, 'empty_trash', {'dialog.close', 'async_refresh_ui'}),
+    (LISTS_PY, 'remove_item_from_list', {'async_refresh_ui'}),
+    (PROJECT_TREE_PY, 'delete_project', {'dialog.close', 'on_refresh'}),
+    (PROJECT_TREE_PY, 'delete_list', {'dialog.close', 'on_refresh'}),
+]
+
+
+@pytest.mark.parametrize('path,name,required', STALE_ON_FAILURE,
+                         ids=[f'{p.name}:{n}' for p, n, _ in STALE_ON_FAILURE])
+def test_a_failed_delete_or_restore_does_not_leave_a_stale_view(path, name, required):
+    """A delete/restore that changed 0 rows usually means another tab already did it: the
+    open dialog (and the view behind it) now shows rows that are gone. The failure branch
+    must close the dialog and refresh before returning; the runner has already toasted."""
+    tree = ast.parse(path.read_text(encoding='utf-8'))
+    fns = [n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == name]
+    assert fns, f'{name} not found in {path.name}'
+    for fn in fns:
+        # The guard on the runner's result: the `if` whose test names the variable
+        # assigned from `await run_lists_write(...)` (not an earlier input check).
+        results = {a.targets[0].id for a in ast.walk(fn)
+                   if isinstance(a, ast.Assign) and len(a.targets) == 1
+                   and isinstance(a.targets[0], ast.Name) and isinstance(a.value, ast.Await)
+                   and _is_run_lists_write(a.value.value)}
+        guards = [n for n in ast.walk(fn) if isinstance(n, ast.If)
+                  and results & {x.id for x in ast.walk(n.test) if isinstance(x, ast.Name)}
+                  and any(isinstance(n2, ast.Return) for n2 in n.body)]
+        assert guards, f'{path.name}:{name} has no failure guard on the runner result'
+        guard = guards[0]
+        called = {ast.unparse(c.func) for c in ast.walk(ast.Module(body=guard.body, type_ignores=[]))
+                  if isinstance(c, ast.Call)}
+        missing = required - called
+        assert not missing, f'{path.name}:{name} failure branch does not call {sorted(missing)}'

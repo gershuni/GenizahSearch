@@ -25,7 +25,9 @@ Usage:
 from nicegui import ui
 from web.translations import tr
 from web.components.typography import h2, h3
-from web.auth_state import GlobalAuthState
+# Every lists write in this sidebar goes through this runner (sign-in re-checked, awaited,
+# failure toasted); tests/test_lists_page_write_callbacks.py pins it.
+from web.components.lists_write import run_lists_write
 from typing import Optional, Callable, Dict, List
 import logging
 
@@ -471,22 +473,13 @@ def show_create_project_dialog(lists_mgr, on_refresh: Optional[Callable] = None)
                 ui.notify(tr('Please enter a project name'), type='warning')
                 return
 
-            try:
-                if GlobalAuthState.is_logged_in():
-                    project_id = await lists_mgr.create_project(name)
-                else:
-                    project_id = lists_mgr.create_project_sync(name)
-
-                if project_id:
-                    ui.notify(f"{tr('Project created')}: {name}", type='positive')
-                    dialog.close()
-                    if on_refresh:
-                        on_refresh()
-                else:
-                    ui.notify(tr('Failed to create project'), type='negative')
-            except Exception as e:
-                LOGGER.error(f"Error creating project: {e}")
-                ui.notify(f"Error: {e}", type='negative')
+            project_id = await run_lists_write(lambda: lists_mgr.create_project(name))
+            if not project_id:
+                return  # the runner toasted; keep the dialog so the name is not lost
+            ui.notify(f"{tr('Project created')}: {name}", type='positive')
+            dialog.close()
+            if on_refresh:
+                on_refresh()
 
         with ui.row().classes('w-full justify-end gap-2 mt-4'):
             ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
@@ -538,23 +531,14 @@ def show_create_list_dialog(
                 ui.notify(tr('Please enter a list name'), type='warning')
                 return
 
-            try:
-                project_id = selected_project['value']
-                if GlobalAuthState.is_logged_in():
-                    list_id = await lists_mgr.create_list(name, project_id=project_id)
-                else:
-                    list_id = lists_mgr.create_list_sync(name, project_id=project_id)
-
-                if list_id:
-                    ui.notify(f"{tr('List created')}: {name}", type='positive')
-                    dialog.close()
-                    if on_refresh:
-                        on_refresh()
-                else:
-                    ui.notify(tr('Failed to create list'), type='negative')
-            except Exception as e:
-                LOGGER.error(f"Error creating list: {e}")
-                ui.notify(f"Error: {e}", type='negative')
+            project_id = selected_project['value']
+            list_id = await run_lists_write(lambda: lists_mgr.create_list(name, project_id=project_id))
+            if not list_id:
+                return  # the runner toasted; keep the dialog so the name is not lost
+            ui.notify(f"{tr('List created')}: {name}", type='positive')
+            dialog.close()
+            if on_refresh:
+                on_refresh()
 
         with ui.row().classes('w-full justify-end gap-2 mt-4'):
             ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
@@ -585,22 +569,13 @@ def show_rename_project_dialog(
                 dialog.close()
                 return
 
-            try:
-                if GlobalAuthState.is_logged_in():
-                    success = await lists_mgr.update_project(project_id, name)
-                else:
-                    success = lists_mgr.update_project(project_id, name)
-
-                if success:
-                    ui.notify(f"{tr('Project renamed to')}: {name}", type='positive')
-                    dialog.close()
-                    if on_refresh:
-                        on_refresh()
-                else:
-                    ui.notify(tr('Failed to rename project'), type='negative')
-            except Exception as e:
-                LOGGER.error(f"Error renaming project: {e}")
-                ui.notify(f"Error: {e}", type='negative')
+            success = await run_lists_write(lambda: lists_mgr.update_project(project_id, name))
+            if not success:
+                return  # the runner toasted; keep the dialog so the name is not lost
+            ui.notify(f"{tr('Project renamed to')}: {name}", type='positive')
+            dialog.close()
+            if on_refresh:
+                on_refresh()
 
         with ui.row().classes('w-full justify-end gap-2 mt-4'):
             ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
@@ -631,22 +606,13 @@ def show_rename_list_dialog(
                 dialog.close()
                 return
 
-            try:
-                if GlobalAuthState.is_logged_in():
-                    success = await lists_mgr.update_list(list_id, name=name)
-                else:
-                    success = lists_mgr.update_list(list_id, name=name)
-
-                if success:
-                    ui.notify(f"{tr('List renamed to')}: {name}", type='positive')
-                    dialog.close()
-                    if on_refresh:
-                        on_refresh()
-                else:
-                    ui.notify(tr('Failed to rename list'), type='negative')
-            except Exception as e:
-                LOGGER.error(f"Error renaming list: {e}")
-                ui.notify(f"Error: {e}", type='negative')
+            success = await run_lists_write(lambda: lists_mgr.update_list(list_id, name=name))
+            if not success:
+                return  # the runner toasted; keep the dialog so the name is not lost
+            ui.notify(f"{tr('List renamed to')}: {name}", type='positive')
+            dialog.close()
+            if on_refresh:
+                on_refresh()
 
         with ui.row().classes('w-full justify-end gap-2 mt-4'):
             ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
@@ -684,23 +650,21 @@ def show_delete_project_dialog(
             )
 
         async def delete_project():
-            try:
-                delete_lists = delete_lists_option['value']
-                if GlobalAuthState.is_logged_in():
-                    success = await lists_mgr.delete_project(project_id, delete_lists=delete_lists)
-                else:
-                    success = lists_mgr.delete_project(project_id, delete_lists=delete_lists)
-
-                if success:
-                    ui.notify(f"{tr('Project deleted')}: {project_name}", type='info')
-                    dialog.close()
-                    if on_refresh:
-                        on_refresh()
-                else:
-                    ui.notify(tr('Failed to delete project'), type='negative')
-            except Exception as e:
-                LOGGER.error(f"Error deleting project: {e}")
-                ui.notify(f"Error: {e}", type='negative')
+            delete_lists = delete_lists_option['value']
+            success = await run_lists_write(
+                lambda: lists_mgr.delete_project(project_id, delete_lists=delete_lists)
+            )
+            if not success:
+                # 0 rows usually means another tab already deleted it: close the now-stale
+                # dialog and refresh the sidebar (the runner toasted the failure).
+                dialog.close()
+                if on_refresh:
+                    on_refresh()
+                return
+            ui.notify(f"{tr('Project deleted')}: {project_name}", type='info')
+            dialog.close()
+            if on_refresh:
+                on_refresh()
 
         with ui.row().classes('w-full justify-end gap-2 mt-4'):
             ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
@@ -725,22 +689,18 @@ def show_delete_list_dialog(
         ui.label(tr('All items in this list will be removed.')).classes('text-sm text-red-500 mb-4')
 
         async def delete_list():
-            try:
-                if GlobalAuthState.is_logged_in():
-                    success = await lists_mgr.delete_list(list_id)
-                else:
-                    success = lists_mgr.delete_list(list_id)
-
-                if success:
-                    ui.notify(f"{tr('List deleted')}: {list_name}", type='info')
-                    dialog.close()
-                    if on_refresh:
-                        on_refresh()
-                else:
-                    ui.notify(tr('Failed to delete list'), type='negative')
-            except Exception as e:
-                LOGGER.error(f"Error deleting list: {e}")
-                ui.notify(f"Error: {e}", type='negative')
+            success = await run_lists_write(lambda: lists_mgr.delete_list(list_id))
+            if not success:
+                # 0 rows usually means another tab already deleted it: close the now-stale
+                # dialog and refresh the sidebar (the runner toasted the failure).
+                dialog.close()
+                if on_refresh:
+                    on_refresh()
+                return
+            ui.notify(f"{tr('List deleted')}: {list_name}", type='info')
+            dialog.close()
+            if on_refresh:
+                on_refresh()
 
         with ui.row().classes('w-full justify-end gap-2 mt-4'):
             ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
@@ -791,14 +751,9 @@ def show_move_to_project_dialog(lists_mgr, list_id: str, on_refresh: Optional[Ca
                 # If new project name given, create it first
                 if new_name:
                     LOGGER.debug(f"Creating new project: {new_name}")
-                    if GlobalAuthState.is_logged_in():
-                        target_project_id = await lists_mgr.create_project(new_name)
-                    else:
-                        target_project_id = lists_mgr.create_project_sync(new_name) if hasattr(lists_mgr, 'create_project_sync') else None
-
+                    target_project_id = await run_lists_write(lambda: lists_mgr.create_project(new_name))
                     if not target_project_id:
-                        ui.notify(tr('Failed to create project'), type='negative')
-                        return
+                        return  # the runner toasted the failure
                     LOGGER.debug(f"Created project with id: {target_project_id}")
                 else:
                     # Use selected project (empty string means no project)
@@ -811,19 +766,18 @@ def show_move_to_project_dialog(lists_mgr, list_id: str, on_refresh: Optional[Ca
                     ui.notify(tr('Feature not available'), type='warning')
                     return
 
-                success = await lists_mgr.update_list_project(list_id, target_project_id)
-                LOGGER.debug(f"update_list_project returned: {success}")
-
-                if success:
-                    if target_project_id:
-                        ui.notify(tr('List moved to project'), type='positive')
-                    else:
-                        ui.notify(tr('List removed from project'), type='positive')
-                    dialog.close()
-                    if on_refresh:
-                        on_refresh()
+                success = await run_lists_write(
+                    lambda: lists_mgr.update_list_project(list_id, target_project_id)
+                )
+                if not success:
+                    return  # the runner toasted the failure
+                if target_project_id:
+                    ui.notify(tr('List moved to project'), type='positive')
                 else:
-                    ui.notify(tr('Failed to update list'), type='negative')
+                    ui.notify(tr('List removed from project'), type='positive')
+                dialog.close()
+                if on_refresh:
+                    on_refresh()
             except Exception as e:
                 LOGGER.error(f"Error moving list to project: {e}", exc_info=True)
                 ui.notify(f"Error: {e}", type='negative')
