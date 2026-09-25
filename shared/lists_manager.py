@@ -394,9 +394,10 @@ class ListsManager:
                 from the palette via _get_next_project_color().
 
         Phase 89 (D-06): the optional ``color`` parameter was added for parity
-        with web/user_lists.py:UserListsManager.create_project, which passes
-        ``self.local_mgr.create_project(name, color)`` and previously raised
-        TypeError when local_mgr was a stock ListsManager. Desktop callers
+        with web/user_lists.py:UserListsManager.create_project, which used to
+        pass ``self.local_mgr.create_project(name, color)`` (and raised
+        TypeError when local_mgr was a stock ListsManager). The web no longer
+        falls back to this store at all (improvement sweep C2). Desktop callers
         (genizah_app.py:12237, 12996) pass ``name`` only and are unaffected.
         """
         import time
