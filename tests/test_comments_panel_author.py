@@ -18,8 +18,19 @@ from PyQt6.QtWidgets import QApplication, QListWidget  # noqa: E402
 
 import genizah_core  # noqa: E402
 import genizah_app  # noqa: E402
+from shared.config import Config  # noqa: E402
+from shared.lists_manager import ListsManager  # noqa: E402
 
 _APP = QApplication.instance() or QApplication([])
+
+
+@pytest.fixture(autouse=True)
+def _personal_state_in_tmp(tmp_path, monkeypatch):
+    """Nothing here should write personal state; if it ever does, it lands in tmp_path."""
+    monkeypatch.setattr(Config, "SESSION_FILE", str(tmp_path / "session.json"))
+    monkeypatch.setattr(Config, "CONFIG_FILE", str(tmp_path / "config.pkl"))
+    monkeypatch.setattr(Config, "LANGUAGE_FILE", str(tmp_path / "lang.pkl"))
+    monkeypatch.setattr(ListsManager, "LISTS_FILE", str(tmp_path / "lists.pkl"))
 
 
 def _row(author):

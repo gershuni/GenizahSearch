@@ -25,9 +25,20 @@ from desktop.corrections_ui import (  # noqa: E402
     CommentDialog, CommentsViewerDialog, MyCommentsDialog,
 )
 from desktop.supabase_corrections_client import SupabaseCorrectionsClient  # noqa: E402
+from shared.config import Config  # noqa: E402
 from shared.genizah_translations import TRANSLATIONS  # noqa: E402
+from shared.lists_manager import ListsManager  # noqa: E402
 
 _APP = QApplication.instance() or QApplication([])
+
+
+@pytest.fixture(autouse=True)
+def _personal_state_in_tmp(tmp_path, monkeypatch):
+    """Nothing here should write personal state; if it ever does, it lands in tmp_path."""
+    monkeypatch.setattr(Config, "SESSION_FILE", str(tmp_path / "session.json"))
+    monkeypatch.setattr(Config, "CONFIG_FILE", str(tmp_path / "config.pkl"))
+    monkeypatch.setattr(Config, "LANGUAGE_FILE", str(tmp_path / "lang.pkl"))
+    monkeypatch.setattr(ListsManager, "LISTS_FILE", str(tmp_path / "lists.pkl"))
 
 _SYS_ID = "990000000000000001"
 # Exactly the columns create_comment writes; nothing the dialog offers may be missing.
@@ -74,9 +85,15 @@ def test_add_comment_offers_no_type_or_anonymous_choice(monkeypatch, lang):
         dlg.deleteLater()
 
 
+@pytest.mark.parametrize("public", [True, False], ids=["public", "private"])
 @pytest.mark.parametrize("page_number, scope", [(2, 'page'), (None, 'manuscript')])
-def test_add_comment_still_posts_and_claims_nothing_unstored(monkeypatch, page_number, scope):
-    """Browse / Manuscript Viewer pass a page; the context menu and Comments viewer do not."""
+def test_add_comment_still_posts_and_claims_nothing_unstored(monkeypatch, page_number, scope,
+                                                             public):
+    """Browse / Manuscript Viewer pass a page; the context menu and Comments viewer do not.
+
+    "Public comment" is the one choice left, and it is stored: unticking it must post
+    a private comment, not a public one.
+    """
     monkeypatch.setattr(genizah_core, 'CURRENT_LANG', 'en')
     cli, captured = _supabase_client()
     real_create = cli.create_comment
@@ -85,6 +102,7 @@ def test_add_comment_still_posts_and_claims_nothing_unstored(monkeypatch, page_n
                         page_number=page_number)
     try:
         dlg.content_input.setPlainText("a comment")
+        dlg.public_check.setChecked(public)
         with patch.object(QMessageBox, 'information') as ok, \
                 patch.object(QMessageBox, 'warning') as err:
             dlg.submit_comment()
@@ -97,7 +115,7 @@ def test_add_comment_still_posts_and_claims_nothing_unstored(monkeypatch, page_n
         assert payload['page_number'] == page_number, "filed under a different page"
         assert payload['sys_id'] == _SYS_ID
         assert payload['content'] == "a comment"
-        assert payload['is_public'] is True
+        assert payload['is_public'] is public, "the Public comment box was not honoured"
     finally:
         dlg.deleteLater()
 
