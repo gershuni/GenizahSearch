@@ -810,6 +810,18 @@ def test_editing_the_exclude_list_keeps_filtered_rows_hidden(window):
     assert _hidden(w, C) == [True], "the exclude-list re-render showed a Printed-filtered row again"
 
 
+def test_editing_the_exclude_list_rewrites_the_status_when_no_row_changes(window):
+    """The dialog's OK always writes the summary. An id that is not in the
+    table changes no row, so the visibility pass writes nothing, and the line
+    would stay whatever wrote last."""
+    w = window
+    _search(w, [_res(A, 1), _res(B, 1)])
+    w.status_label.setText(tr("Loaded {} items.").format(2))   # metadata finished last
+    w.excluded_sys_ids = {C}                                    # not in this table
+    w._rerender_with_exclusions()
+    assert w.status_label.text() == _showing(2, 2)
+
+
 def test_the_exclude_list_applies_to_the_next_search(window):
     w = window
     w.excluded_sys_ids = {B}
@@ -866,6 +878,39 @@ def test_clearing_the_domain_filter_keeps_exclusions_and_says_so(window):
     w._apply_domain_exclusions()
     assert _hidden(w, A) == [True]
     assert w.status_label.text() == _showing(2, 3, excluded=1)
+
+
+def test_the_domain_filter_line_counts_visible_rows_and_the_excluded(window):
+    w = window
+    _search(w, [_res(A, 1), _res(B, 1), _res(C, 1)])
+    w._exclude_word_search_result(A, _row_of(w, A)[0])
+    w._has_result_domains = True
+    w._result_domain_map = {B: ["Liturgy"], C: ["Bible"]}
+    w._domain_exclusions = {"Liturgy"}                  # the Domain dialog's OK
+    w._apply_domain_exclusions()
+    assert _hidden(w, A) == [True] and _hidden(w, B) == [True]
+    assert w.status_label.text() == (
+        tr("Showing {} of {} results (filtering {} domains)").format(1, 3, 1)
+        + f" (1 {EXCLUDED})")
+
+
+def test_a_responsa_search_line_keeps_its_expanded_term_count(window):
+    w = window
+    w.word_excluded_sys_ids = {A}
+    first = dict(_res(A, 1), responsa_expanded_count=4)
+    _search(w, [first, _res(B, 1)])
+    assert w.status_label.text() == (
+        tr("Showing {} of {} results (searching {} expanded terms)").format(1, 2, 4)
+        + f" (1 {EXCLUDED})")
+
+
+def test_a_stopped_search_line_says_its_results_are_partial(window):
+    w = window
+    w.word_excluded_sys_ids = {A}
+    w._search_was_cancelled = True                      # Stop, with results delivered
+    _search(w, [_res(A, 1), _res(B, 1)])
+    assert w.status_label.text() == (
+        _showing(1, 2, excluded=1) + f" ({tr('Partial results')})")
 
 
 def test_a_tag_search_says_that_exclusions_hide_rows(window, monkeypatch):
@@ -1079,15 +1124,20 @@ def test_export_with_every_row_hidden_says_so_and_writes_nothing(window, monkeyp
     _search(w, [_res(A, 1), _res(B, 1)])
     w._exclude_word_search_result(A, _row_of(w, A)[0])
     w._exclude_word_search_result(B, _row_of(w, B)[0])
-    saves, infos = [], []
+    saves, events = [], []
     monkeypatch.setattr(app.QFileDialog, "getSaveFileName",
                         staticmethod(lambda *a, **k: saves.append(a) or ("", "")))
     monkeypatch.setattr(app.QMessageBox, "information",
-                        staticmethod(lambda *a, **k: infos.append(a)))
+                        staticmethod(lambda *a, **k: events.append(("message", a[2]))))
+    w._emit_feature_opened = lambda **k: events.append(("opened", k))
     w._default_report_path = lambda q, name: str(tmp_path / "never.xlsx")
     w.export_results("csv")
     assert saves == [], "offered to save an export of a table whose every row is hidden"
-    assert [a[2] for a in infos] == [tr(NOTHING_TO_EXPORT)], "no message saying why nothing was exported"
+    # The export dialog counts as opened with or without data (MEDIUM-8),
+    # so the guard comes after that event and before the save dialog.
+    assert events == [("opened", {"dialog_name": "export"}),
+                      ("message", tr(NOTHING_TO_EXPORT))], (
+        "the nothing-to-export message is missing, or it suppressed the export-opened event")
 
 
 def test_the_nothing_to_export_message_has_a_hebrew_translation():

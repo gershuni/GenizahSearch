@@ -338,6 +338,10 @@ def test_restore_mode_never_still_persists_optouts_and_corpus(monkeypatch):
         corpus_scope_combo=ComboStub(),
         search_progress=ProgressStub(),
         my_library_tab=MyLibraryStub(),
+        # The preferences step labels the restored Exclude list, and the
+        # restore's last step recomputes the "Load more results" button.
+        _update_exclusion_display=lambda surface='search': None,
+        _update_load_more_button=lambda: None,
     )
     restore_fake._apply_persistent_session_preferences = types.MethodType(
         genizah_app.GenizahGUI._apply_persistent_session_preferences,
@@ -349,7 +353,20 @@ def test_restore_mode_never_still_persists_optouts_and_corpus(monkeypatch):
         lambda: saved["state"],
     )
 
-    genizah_app.GenizahGUI._restore_session(restore_fake)
+    # _restore_session logs and swallows its own exceptions, so a gap in
+    # this fake would end the restore early with every assertion below green.
+    import logging
+    errors = []
+    handler = logging.Handler(level=logging.ERROR)
+    handler.emit = errors.append
+    genizah_app.logger.addHandler(handler)
+    try:
+        genizah_app.GenizahGUI._restore_session(restore_fake)
+    finally:
+        genizah_app.logger.removeHandler(handler)
+    assert not [r.getMessage() for r in errors
+                if r.getMessage().startswith(("Failed to restore session",
+                                              "could not update the load-more button"))]
 
     assert restore_fake._local_file_optouts == {path}
     assert restore_fake._search_corpus_scope == "local"

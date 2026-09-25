@@ -239,13 +239,30 @@ def test_restore_mode_ask_applies_prefs_before_has_data(monkeypatch):
         corpus_scope_combo=ComboStub(),
         search_progress=ProgressStub(),
         my_library_tab=MyLibStub(),
+        # The preferences step labels the restored Exclude list, and the
+        # restore's last step recomputes the "Load more results" button.
+        _update_exclusion_display=lambda surface='search': None,
+        _update_load_more_button=lambda: None,
     )
     fake._apply_persistent_session_preferences = types.MethodType(
         genizah_app.GenizahGUI._apply_persistent_session_preferences,
         fake,
     )
 
-    genizah_app.GenizahGUI._restore_session(fake)
+    # _restore_session logs and swallows its own exceptions, so a gap in
+    # this fake would end the restore early with every assertion below green.
+    import logging
+    errors = []
+    handler = logging.Handler(level=logging.ERROR)
+    handler.emit = errors.append
+    genizah_app.logger.addHandler(handler)
+    try:
+        genizah_app.GenizahGUI._restore_session(fake)
+    finally:
+        genizah_app.logger.removeHandler(handler)
+    assert not [r.getMessage() for r in errors
+                if r.getMessage().startswith(("Failed to restore session",
+                                              "could not update the load-more button"))]
 
     # With has_data=False (no results), restore returns early — but prefs
     # must still have been applied by _apply_persistent_session_preferences.
