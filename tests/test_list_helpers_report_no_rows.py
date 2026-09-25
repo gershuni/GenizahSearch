@@ -145,3 +145,14 @@ def test_manager_empty_trash_signed_out_is_none(monkeypatch):
     from web.user_lists import UserListsManager
     monkeypatch.setattr(UserListsManager, 'is_authenticated', property(lambda self: False))
     assert asyncio.run(UserListsManager(None, None).empty_trash()) is None
+
+
+@pytest.mark.parametrize('rows,ok', [([], False), ([{'id': 4}], True)])
+def test_delete_project_reports_no_rows(monkeypatch, rows, ok):
+    """A project already deleted in another tab (or filtered by RLS) is not 'deleted'."""
+    mod, client = _stub(monkeypatch)
+    _rows(client, delete=rows)
+    result = mod.delete_project(4)
+    assert ('success' in result) is ok, result
+    if not ok:
+        assert result.get('no_rows') is True

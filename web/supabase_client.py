@@ -1418,11 +1418,13 @@ def update_project(project_id: int, data: Dict) -> Dict:
 
 
 def delete_project(project_id: int) -> Dict:
-    """Delete a project."""
+    """Delete a project; 0 deleted rows (already gone, or RLS) is ``{'error': ..., 'no_rows': True}``."""
     try:
         client = get_user_client()
-        client.table('projects').delete().eq('id', project_id).execute()
-        return {'success': True}
+        response = client.table('projects').delete().eq('id', project_id).execute()
+        if response.data:
+            return {'success': True}
+        return {'error': 'Nothing was deleted', 'no_rows': True}
     except Exception as e:
         return {'error': str(e)}
 

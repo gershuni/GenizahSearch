@@ -451,6 +451,11 @@ def create_lists_page():
                                 lambda: state.lists_mgr.empty_trash(), falsy_is_failure=False
                             )
                             if count is None:
+                                # The runner already toasted the failure. A partial Empty Trash
+                                # may have deleted some rows, so close this now-stale dialog
+                                # (its rows and ids may be gone) and refresh the page.
+                                dialog.close()
+                                await async_refresh_ui()
                                 return
                             ui.notify(tr('Deleted {} lists permanently.').format(count), type='info')
                             dialog.close()

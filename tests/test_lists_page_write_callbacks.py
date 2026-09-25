@@ -292,3 +292,19 @@ async def cb():
 ])
 def test_the_write_call_rule_can_fail(source, expected):
     assert len(_write_call_problems(source)) == expected, _write_call_problems(source)
+
+
+def test_empty_trash_failure_still_rebuilds_the_trash_dialog():
+    """A partial Empty Trash deletes some rows and then fails: the dialog must not keep
+    showing (and offering actions on) rows that are gone. On failure the callback
+    closes the dialog and refreshes the page before returning."""
+    tree = ast.parse(LISTS_PY.read_text(encoding='utf-8'))
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.AsyncFunctionDef) and n.name == 'empty_trash')
+    guard = next(n for n in ast.walk(fn) if isinstance(n, ast.If)
+                 and 'count' in {x.id for x in ast.walk(n.test) if isinstance(x, ast.Name)})
+    called = {ast.unparse(c.func) for c in ast.walk(ast.Module(body=guard.body, type_ignores=[]))
+              if isinstance(c, ast.Call)}
+    assert 'dialog.close' in called, 'the failure branch leaves the stale trash dialog open'
+    assert 'async_refresh_ui' in called, 'the failure branch does not refresh the page'
+    assert isinstance(guard.body[-1], ast.Return)
