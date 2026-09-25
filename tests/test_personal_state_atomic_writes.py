@@ -814,6 +814,57 @@ def test_startup_reports_lists_that_could_not_be_loaded_and_says_nothing_otherwi
         assert _is_hebrew(title[0]) and _is_hebrew(text[0])
 
 
+@pytest.mark.parametrize("lang", ["en", "he"])
+@pytest.mark.parametrize("backup", ["a readable backup", "no backup"])
+def test_startup_says_the_lists_cannot_be_saved_while_the_file_stays_busy(
+        store, monkeypatch, no_sleep, genizah_app_module, lang, backup):
+    """lists.pkl stays busy past the startup budget: load() falls back, and the
+    copy of lists.pkl fails for the same reason. The notice said the file "is
+    kept as lists.pkl", and every save after it failed with only a log line."""
+    _two_sessions(store)
+    if backup == "no backup":
+        for path in glob.glob(f"{store}.bak*"):
+            os.remove(path)
+    monkeypatch.setattr(genizah_core, "CURRENT_LANG", lang)
+    shown = []
+    monkeypatch.setattr(genizah_app_module, "QMessageBox", types.SimpleNamespace(
+        warning=lambda parent, title, text: shown.append((title, text))))
+    gui = genizah_app_module.GenizahGUI.__new__(genizah_app_module.GenizahGUI)
+    before = store.read_bytes()
+
+    with monkeypatch.context() as mp:
+        _busy_reads(mp, store, times=10 ** 6)       # busy for the whole session
+        gui.lists_mgr = lm.ListsManager(None)
+        gui._report_lists_load_problem()
+        gui.lists_mgr.add_to_recent("990010")
+        assert gui.lists_mgr.save() is False        # what the notice warns of
+
+    assert gui.lists_mgr.load_status == (
+        "recovered" if backup == "a readable backup" else "failed")
+    assert store.read_bytes() == before and not glob.glob(f"{store}.unreadable-*")
+    assert len(shown) == 1
+    title, text = shown[0]
+    tr = genizah_core.tr
+    assert title == tr("Lists cannot be saved")
+    tail = ("Another program appears to be using the lists file, and until it can be "
+            "read your lists cannot be saved: changes you make now may be lost. Close any "
+            "other program that may be using the file and restart the application. The "
+            "file is in:\n{}")
+    if backup == "a readable backup":
+        when = time.strftime("%Y-%m-%d %H:%M",
+                             time.localtime(os.path.getmtime(f"{store}.bak1")))
+        assert text == tr("Your saved lists could not be read, so they were restored "
+                          "from a backup saved on {}. " + tail).format(when, store.parent)
+    else:
+        assert text == tr("Your saved lists could not be read and no readable backup "
+                          "was found, so your lists are empty. " + tail).format(store.parent)
+    if lang == "he":
+        assert _is_hebrew(title[0]) and _is_hebrew(text[0])
+
+    assert gui.lists_mgr.save() is True             # once it can be read: kept, then saved
+    assert len(glob.glob(f"{store}.unreadable-*")) == 1
+
+
 def test_on_startup_finished_reports_right_after_building_the_lists():
     source = (Path(__file__).resolve().parents[1] / "genizah_app.py").read_text(encoding="utf-8")
     tree = ast.parse(source)

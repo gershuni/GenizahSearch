@@ -1572,21 +1572,45 @@ class GenizahGUI(QMainWindow):
 
         ListsManager.load() never writes, so the unreadable file is copied aside
         here, before any save can replace it, and the notice names that copy.
+        When the copy fails too -- lists.pkl stayed busy past the startup
+        budget, and the copy cannot read it either -- save() refuses to replace
+        it, so nothing is saved until it can be read, and the notice says so.
         """
         mgr = getattr(self, 'lists_mgr', None)
         status = getattr(mgr, 'load_status', 'ok')
         if status not in ('recovered', 'failed'):
             return
         try:
-            kept = mgr.keep_unreadable_copy() or mgr.LISTS_FILE
-            kept_name = os.path.basename(kept)
-            folder = os.path.dirname(os.path.abspath(kept))
+            when = None
             if status == 'recovered':
                 try:
                     when = time.strftime('%Y-%m-%d %H:%M',
                                          time.localtime(os.path.getmtime(mgr.recovered_from)))
                 except OSError:
                     when = os.path.basename(mgr.recovered_from)
+            kept = mgr.keep_unreadable_copy()
+            if kept is None and os.path.exists(mgr.LISTS_FILE):
+                folder = os.path.dirname(os.path.abspath(mgr.LISTS_FILE))
+                if status == 'recovered':
+                    text = tr("Your saved lists could not be read, so they were restored from a "
+                              "backup saved on {}. Another program appears to be using the lists "
+                              "file, and until it can be read your lists cannot be saved: changes "
+                              "you make now may be lost. Close any other program that may be using "
+                              "the file and restart the application. The file is in:\n{}").format(
+                                  when, folder)
+                else:
+                    text = tr("Your saved lists could not be read and no readable backup was "
+                              "found, so your lists are empty. Another program appears to be using "
+                              "the lists file, and until it can be read your lists cannot be saved: "
+                              "changes you make now may be lost. Close any other program that may "
+                              "be using the file and restart the application. The file is "
+                              "in:\n{}").format(folder)
+                QMessageBox.warning(self, tr("Lists cannot be saved"), text)
+                return
+            kept = kept or mgr.LISTS_FILE
+            kept_name = os.path.basename(kept)
+            folder = os.path.dirname(os.path.abspath(kept))
+            if status == 'recovered':
                 QMessageBox.warning(
                     self, tr("Lists restored from a backup"),
                     tr("Your saved lists could not be read, so they were restored from a backup "

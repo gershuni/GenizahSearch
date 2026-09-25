@@ -3648,6 +3648,12 @@ TRANSLATIONS.update({
     "Lists could not be loaded": "לא ניתן היה לטעון את הרשימות",
     "Your saved lists could not be read and no readable backup was found, so your lists are empty. The unreadable file is kept as {} in:\n{}":
         "לא ניתן היה לקרוא את הרשימות השמורות ולא נמצא גיבוי קריא, ולכן הרשימות ריקות. הקובץ שלא ניתן היה לקרוא נשמר בשם {} בתיקייה:\n{}",
+    # ...and lists.pkl could not even be copied aside, so no save can replace it
+    "Lists cannot be saved": "לא ניתן לשמור את הרשימות",
+    "Your saved lists could not be read, so they were restored from a backup saved on {}. Another program appears to be using the lists file, and until it can be read your lists cannot be saved: changes you make now may be lost. Close any other program that may be using the file and restart the application. The file is in:\n{}":
+        "לא ניתן היה לקרוא את הרשימות השמורות, ולכן הן שוחזרו מגיבוי שנשמר ב-{}. נראה שתוכנה אחרת משתמשת בקובץ הרשימות, ועד שניתן יהיה לקרוא אותו לא ניתן לשמור את הרשימות: שינויים שייעשו עכשיו עלולים ללכת לאיבוד. יש לסגור כל תוכנה אחרת שעשויה להשתמש בקובץ ולהפעיל מחדש את התוכנה. הקובץ נמצא בתיקייה:\n{}",
+    "Your saved lists could not be read and no readable backup was found, so your lists are empty. Another program appears to be using the lists file, and until it can be read your lists cannot be saved: changes you make now may be lost. Close any other program that may be using the file and restart the application. The file is in:\n{}":
+        "לא ניתן היה לקרוא את הרשימות השמורות ולא נמצא גיבוי קריא, ולכן הרשימות ריקות. נראה שתוכנה אחרת משתמשת בקובץ הרשימות, ועד שניתן יהיה לקרוא אותו לא ניתן לשמור את הרשימות: שינויים שייעשו עכשיו עלולים ללכת לאיבוד. יש לסגור כל תוכנה אחרת שעשויה להשתמש בקובץ ולהפעיל מחדש את התוכנה. הקובץ נמצא בתיקייה:\n{}",
 
     # --- Data-update notification (desktop) ---
     "New research data available:": "נתוני מחקר חדשים זמינים:",
