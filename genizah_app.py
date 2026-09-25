@@ -20511,15 +20511,11 @@ class GenizahGUI(QMainWindow):
         self.status_label.setText(tr("Ready."))
         self.status_label.setStyleSheet("")
 
-        # 14. Clear session state file for fresh start
-        try:
-            from shared.session_persistence import clear_session_state
-            clear_session_state()
-        except Exception:
-            pass  # Share operation failed; continue
-
-        # 15. Save the cleared state
-        self._schedule_session_save()
+        # 14. Save the cleared state now, not debounced: a crash right after
+        # New must not leave the discarded search on disk. session.json is
+        # overwritten, never deleted, because _save_session carries the Joins
+        # Lab state forward from the file when its window was not built.
+        self._save_session()
 
     def _on_search_progress(self, current, total):
         # Once the LOCAL phase is announced the bar is indeterminate on purpose.
@@ -26269,15 +26265,12 @@ class GenizahGUI(QMainWindow):
         if hasattr(self, 'lbl_comp_status'):
             self.lbl_comp_status.setText("")
 
-        # 15. Clear session state file for fresh start
-        try:
-            from shared.session_persistence import clear_session_state
-            clear_session_state()
-        except Exception:
-            pass  # Share operation failed; continue
-
-        # 16. Save the cleared state
-        self._schedule_session_save()
+        # 15. Save the cleared state now, not debounced: a crash right after
+        # New must not leave the discarded search (or its "interrupted" flag)
+        # on disk. session.json is overwritten, never deleted, because
+        # _save_session carries the Joins Lab state forward from the file
+        # when its window was not built.
+        self._save_session()
 
     def _emit_comp_search_telemetry(self, action: str, result_count=None) -> None:
         """Emit desktop_search_executed for a composition search run (Phase 114 USAGE-03).
