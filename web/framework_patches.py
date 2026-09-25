@@ -9,12 +9,15 @@ from __future__ import annotations
 import logging
 import mimetypes
 import re
+import uuid
 
 from packaging.version import Version as _V
 
 import nicegui as _nicegui
 from nicegui.storage import RequestTrackingMiddleware as _NiceGUIRequestTrackingMiddleware
 from starlette.middleware.sessions import SessionMiddleware as _StarletteSessionMiddleware
+
+from web.session_hardening import is_canonical_session_id
 
 logger = logging.getLogger(__name__)
 _NV = _V(_nicegui.__version__)
@@ -24,6 +27,9 @@ _NV = _V(_nicegui.__version__)
 # this module logs a WARNING asking the dev to re-audit whether the upstream
 # bugs (ESM is_file handler, missing <html lang>) were actually fixed upstream
 # before removing the patch files. Bump this constant deliberately after audit.
+# Skipping the static-asset session patch also skips session id validation, so
+# the web app's startup block refuses to start on such a version
+# (web.session_hardening.require_session_id_validation).
 _PATCH_AUDIT_THRESHOLD = _V('3.8.0')
 if _NV > _PATCH_AUDIT_THRESHOLD:
     logger.warning(
@@ -71,12 +77,34 @@ class _CacheSafeSessionMiddleware(_StarletteSessionMiddleware):
         await super().__call__(scope, receive, send)
 
 
+def _validate_session_id(scope) -> None:
+    """Session id validation, run before NiceGUI looks up or creates user storage.
+
+    Keeps every session id in the form NiceGUI itself mints, a canonical
+    lowercase uuid4 string: any other value is replaced with a fresh one.
+    Every other session key is kept, so the validation signs nobody out.
+    A session body that is not a JSON object becomes an empty session first.
+    """
+    session = scope.get('session')
+    if not isinstance(session, dict):
+        session = {}
+        scope['session'] = session
+    if not is_canonical_session_id(session.get('id')):
+        session['id'] = str(uuid.uuid4())
+
+
 class _CacheSafeRequestTrackingMiddleware(_NiceGUIRequestTrackingMiddleware):
-    """Avoid creating NiceGUI user storage for public asset requests."""
+    """Skip NiceGUI user storage for public asset requests; validate the session id otherwise.
+
+    ``web.session_hardening.require_session_id_validation()`` refuses to start
+    the web app unless this class is the one NiceGUI installs.
+    """
 
     async def dispatch(self, request, call_next):
         if _is_public_cacheable_asset_path(request.url.path):
+            # _CacheSafeSessionMiddleware bypassed these paths: no session in scope.
             return await call_next(request)
+        _validate_session_id(request.scope)
         return await super().dispatch(request, call_next)
 
 
@@ -87,6 +115,11 @@ def _patch_static_asset_session_middleware() -> None:
     constructs them inside ``set_storage_secret``. Replacing those two module
     references here changes only the instances NiceGUI is about to install; it
     does not monkey-patch Starlette globally.
+
+    The request-tracking class also carries the session id validation. When
+    this patch is skipped (NiceGUI newer than the audited version),
+    ``web.session_hardening.require_session_id_validation()`` makes the web
+    app refuse to start rather than run without it.
     """
     if _NV > _PATCH_AUDIT_THRESHOLD:
         logger.warning(

@@ -3420,6 +3420,14 @@ def _find_free_port(start_port: int, max_attempts: int = 10) -> int:
 
 
 if __name__ in {'__main__', '__mp_main__'}:
+    # Hardening, checked here and never at import time (tests and scripts import
+    # this module without the variable): the storage secret comes from the
+    # environment (GENIZAH_STORAGE_SECRET, required -- no fallback), and the web
+    # app refuses to start unless session id validation is installed.
+    from web.session_hardening import require_session_id_validation, resolve_storage_secret
+    storage_secret = resolve_storage_secret()
+    require_session_id_validation()
+
     # Production settings via environment variables
     reload_enabled = os.environ.get('NICEGUI_RELOAD', 'true').lower() == 'true'
     show_browser = os.environ.get('NICEGUI_SHOW', 'true').lower() == 'true'
@@ -3444,7 +3452,7 @@ if __name__ in {'__main__', '__mp_main__'}:
         port=run_port,
         reload=reload_enabled,
         show=show_browser,
-        storage_secret='genizah-secret-v5',
+        storage_secret=storage_secret,
         favicon=favicon_path,
         reconnect_timeout=reconnect_timeout,
     )
