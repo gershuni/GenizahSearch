@@ -924,7 +924,20 @@ def test_a_tag_search_says_that_exclusions_hide_rows(window, monkeypatch):
                                          {"sys_id": B, "pgpid": 2}])
     assert _hidden(w, A) == [True]
     assert w.status_label.text() == (
-        tr("Tag: {} - {} results").format("letters", 2) + " " + _showing(1, 2, excluded=1))
+        tr("Tag: {} - {} results").format("letters", 2) + ". " + _showing(1, 2, excluded=1))
+
+
+@pytest.mark.parametrize("message, joined", [
+    ("Loaded 5 items", "Loaded 5 items. "),
+    ("Loaded 5 items.", "Loaded 5 items. "),
+    ("Metadata load cancelled. Loaded 3/5.", "Metadata load cancelled. Loaded 3/5. "),
+    ("Really?", "Really? "),
+])
+def test_a_message_and_the_summary_read_as_two_sentences(window, message, joined):
+    w = window
+    w.word_excluded_sys_ids = {A}
+    _search(w, [_res(A, 1), _res(B, 1)])
+    assert w._with_search_summary(message) == joined + _showing(1, 2, excluded=1)
 
 
 def test_the_all_terms_rerender_keeps_the_excluded_note(window, monkeypatch):

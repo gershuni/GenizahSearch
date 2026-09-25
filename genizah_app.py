@@ -21881,9 +21881,14 @@ class GenizahGUI(QMainWindow):
 
     def _with_search_summary(self, message):
         """`message`, followed by the results summary when any row is hidden,
-        so a message that replaces the summary does not hide that fact."""
+        so a message that replaces the summary does not hide that fact. Two
+        sentences: a full stop ends `message` unless punctuation already
+        does ("Tag: letters - 2 results. Showing 1 of 2 results ...")."""
         table = self.results_table
         if any(table.isRowHidden(r) for r in range(table.rowCount())):
+            message = message.rstrip()
+            if not message.endswith(('.', '!', '?', ':')):
+                message += '.'
             return f"{message} {self._search_status_summary()}"
         return message
 
