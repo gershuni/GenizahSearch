@@ -12,7 +12,12 @@ from nicegui import run, ui
 from web.translations import tr, is_rtl
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.auth_state import GlobalAuthState
-from web.supabase_client import get_fragment_joins, create_fragment_join, delete_fragment_join, get_client
+from web.supabase_client import get_fragment_joins, create_fragment_join, delete_fragment_join
+# Every Supabase read left in this module is a PUBLIC read (published puzzle
+# joins, profiles) that runs in a worker thread, so it goes through the
+# anonymous short-timeout read client. The local name stays `get_client`
+# because tests and callers patch `web.components.joins_panel.get_client`.
+from web.supabase_client import get_public_read_client as get_client
 from web.state import state
 from typing import Optional, Callable, Dict, List
 from urllib.parse import quote
@@ -67,6 +72,72 @@ def _resolve_shelfmark_to_sys_id(member_shelfmark: str) -> Optional[str]:
     return None
 
 
+def _joins_cache_key(shelfmark, document_id, pgpid, confirmed_only=False) -> str:
+    """The one cache key shared by fetch_connected_fragments and peek_connected_fragments."""
+    base_key = f"doc:{document_id}:pgp:{pgpid}" if document_id else f"shelf:{shelfmark}:pgp:{pgpid}"
+    return f"{base_key}:confirmed" if confirmed_only else base_key
+
+
+def _cache_get_fresh(cache_key: str) -> Optional[Dict]:
+    with _joins_cache_lock:
+        entry = _joins_cache.get(cache_key)
+    if entry is None:
+        return None
+    cached_time, cached_data = entry
+    if time.time() - cached_time < _CACHE_TTL:
+        return cached_data
+    return None
+
+
+def peek_connected_fragments(shelfmark: str = None, document_id: str = None, pgpid: int = None,
+                             confirmed_only: bool = False) -> Optional[Dict]:
+    """Return the cached connected-fragments result, or None on a miss. NO I/O.
+
+    Safe to call on the event loop. The toolbar Joins button
+    (create_joins_button.load_count) already fetches the same key off the loop
+    on every /browse view, so this usually hits; on a miss the caller fills the
+    section later with ``load_connected_fragments_into``.
+    """
+    return _cache_get_fresh(_joins_cache_key(shelfmark, document_id, pgpid, confirmed_only))
+
+
+async def load_connected_fragments_into(slot, render: Callable[[Dict], None],
+                                        is_current: Callable[[], bool], **fetch_kwargs) -> bool:
+    """Fetch connected fragments in a worker thread, then render them into ``slot``.
+
+    ``fetch_connected_fragments`` does blocking Supabase and SQLite work, so it
+    runs through ``run.io_bound``. By the time it returns the page may have
+    moved on, so nothing is rendered when the result is None (app stopping or
+    cancelled), when ``slot`` or its client has been deleted, or when
+    ``is_current()`` is False. ``render`` runs synchronously inside
+    ``with slot:`` -- a task started with background_tasks.create has an
+    EMPTY slot stack, so it must not call ui.notify / ui.run_javascript.
+
+    Returns True when ``render`` ran.
+    """
+    try:
+        data = await run.io_bound(fetch_connected_fragments, **fetch_kwargs)
+    except Exception as e:
+        logger.warning("deferred joins fetch failed: %s", e)
+        return False
+    if data is None:
+        return False
+    if getattr(slot, 'is_deleted', False):
+        return False
+    if getattr(getattr(slot, 'client', None), '_deleted', False):
+        return False
+    try:
+        if not is_current():
+            return False
+        with slot:
+            render(data)
+    except RuntimeError as e:
+        # The client was torn down between the checks and the render.
+        logger.debug("deferred joins render skipped: %s", e)
+        return False
+    return True
+
+
 def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pgpid: int = None, force_refresh: bool = False, confirmed_only: bool = False) -> Dict:
     """
     Fetch all fragments connected to the given shelfmark or document_id.
@@ -99,16 +170,13 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pg
     # browse-dialog full-joins cache (which uses the unconfirmed key).
     # Phase-120 Lab path (confirmed_only=False) uses the non-':confirmed' key so
     # proposed joins inserted by the current user appear after a force_refresh.
-    base_key = f"doc:{document_id}:pgp:{pgpid}" if document_id else f"shelf:{shelfmark}:pgp:{pgpid}"
-    cache_key = f"{base_key}:confirmed" if confirmed_only else base_key
+    cache_key = _joins_cache_key(shelfmark, document_id, pgpid, confirmed_only)
 
     # Check cache (unless force refresh)
     if not force_refresh:
-        with _joins_cache_lock:
-            if cache_key in _joins_cache:
-                cached_time, cached_data = _joins_cache[cache_key]
-                if time.time() - cached_time < _CACHE_TTL:
-                    return cached_data
+        cached_data = _cache_get_fresh(cache_key)
+        if cached_data is not None:
+            return cached_data
 
     try:
         # Fetch user joins from Supabase.
@@ -434,6 +502,52 @@ def delete_join(join_id: int) -> bool:
     return False
 
 
+def _fetch_community_puzzle_joins(document_id: str) -> List[Dict]:
+    """Published puzzle joins that contain ``document_id``. BLOCKING -- use run.io_bound.
+
+    Three PostgREST reads on public data (published_join_fragments,
+    published_joins with is_published=True, profiles) through the anonymous
+    short-timeout read client. Each returned row carries ``_author`` and
+    ``_thumb_url`` (``get_public_url`` builds a URL locally, no request).
+    Returns [] on any error.
+    """
+    try:
+        client = get_client()
+        pjf_resp = client.table('published_join_fragments').select(
+            'join_id, shelfmark'
+        ).eq('sys_id', document_id).execute()
+        if not pjf_resp.data:
+            return []
+        join_ids = list(set(r['join_id'] for r in pjf_resp.data))
+        pj_resp = client.table('published_joins').select(
+            'id, user_id, title, shelfmarks, thumbnail_path, created_at'
+        ).in_('id', join_ids).eq('is_published', True).execute()
+        pj_rows = pj_resp.data or []
+        if not pj_rows:
+            return []
+        # Resolve author names
+        pj_user_ids = list(set(r['user_id'] for r in pj_rows))
+        pj_profiles = {}
+        try:
+            pj_profiles_resp = client.table('profiles').select(
+                'id, full_name'
+            ).in_('id', pj_user_ids).execute()
+            pj_profiles = {
+                p['id']: p.get('full_name', 'Anonymous')
+                for p in (pj_profiles_resp.data or [])
+            }
+        except Exception:
+            pass  # Author names are optional; fall back to 'Anonymous'
+        bucket = client.storage.from_('puzzle-images')
+        for pj in pj_rows:
+            pj['_author'] = pj_profiles.get(pj['user_id'], 'Anonymous')
+            pj['_thumb_url'] = bucket.get_public_url(pj['thumbnail_path']) if pj.get('thumbnail_path') else ''
+        return pj_rows
+    except Exception as e:
+        logger.error("Community Puzzle Joins error: %s", e)
+        return []
+
+
 def create_joins_button(
     shelfmark: str,
     document_id: str = None,
@@ -583,6 +697,10 @@ def create_joins_dialog(
                 fetch_connected_fragments,
                 shelfmark=shelfmark, document_id=document_id, pgpid=pgpid,
             )
+            # Community puzzle joins: blocking PostgREST reads, also off the loop.
+            community_rows = []
+            if WEB_PUZZLE_ENABLED and document_id:
+                community_rows = await run.io_bound(_fetch_community_puzzle_joins, document_id) or []
 
             # Delete spinner only if it exists and hasn't been deleted
             if not spinner_state['deleted']:
@@ -867,75 +985,49 @@ def create_joins_dialog(
                         ui.label(tr('Login to create joins')).classes('text-sm')
 
                 # ── Community Puzzle Joins section ──
-                if WEB_PUZZLE_ENABLED and document_id:
+                # (rows fetched off the loop above, by _fetch_community_puzzle_joins)
+                if community_rows:
                     try:
-                        client = get_client()
-                        pjf_resp = client.table('published_join_fragments').select(
-                            'join_id, shelfmark'
-                        ).eq('sys_id', document_id).execute()
-                        if pjf_resp.data:
-                            join_ids = list(set(r['join_id'] for r in pjf_resp.data))
-                            pj_resp = client.table('published_joins').select(
-                                'id, user_id, title, shelfmarks, thumbnail_path, created_at'
-                            ).in_('id', join_ids).eq('is_published', True).execute()
-                            pj_rows = pj_resp.data or []
-                            if pj_rows:
-                                # Resolve author names
-                                pj_user_ids = list(set(r['user_id'] for r in pj_rows))
-                                pj_profiles = {}
-                                try:
-                                    pj_profiles_resp = client.table('profiles').select(
-                                        'id, full_name'
-                                    ).in_('id', pj_user_ids).execute()
-                                    pj_profiles = {
-                                        p['id']: p.get('full_name', 'Anonymous')
-                                        for p in (pj_profiles_resp.data or [])
-                                    }
-                                except Exception:
-                                    pass  # Thumbnail load failed; full image will replace it
+                        pj_rows = community_rows
+                        ui.separator().classes('my-3')
+                        with ui.row().classes('items-center gap-2'):
+                            ui.icon('extension', size='sm').classes('text-cyan-600')
+                            ui.label(tr('Community Puzzle Joins')).classes(
+                                'text-subtitle2 font-bold'
+                            ).style('color: var(--text-primary);')
 
-                                ui.separator().classes('my-3')
-                                with ui.row().classes('items-center gap-2'):
-                                    ui.icon('extension', size='sm').classes('text-cyan-600')
-                                    ui.label(tr('Community Puzzle Joins')).classes(
-                                        'text-subtitle2 font-bold'
-                                    ).style('color: var(--text-primary);')
+                        for pj in pj_rows:
+                            pj_thumb_url = pj.get('_thumb_url', '')
+                            pj_title = pj.get('title', '') or 'Untitled'
+                            pj_author = pj.get('_author', 'Anonymous')
+                            pj_shelfmarks = pj.get('shelfmarks', [])
 
-                                bucket = client.storage.from_('puzzle-images')
-                                for pj in pj_rows:
-                                    pj_thumb_url = ''
-                                    if pj.get('thumbnail_path'):
-                                        pj_thumb_url = bucket.get_public_url(pj['thumbnail_path'])
-                                    pj_title = pj.get('title', '') or 'Untitled'
-                                    pj_author = pj_profiles.get(pj['user_id'], 'Anonymous')
-                                    pj_shelfmarks = pj.get('shelfmarks', [])
+                            def make_pj_click(pj_id=pj['id']):
+                                def go_to_puzzle():
+                                    dialog.close()
+                                    ui.navigate.to(f'/puzzle?doc={pj_id}')
+                                return go_to_puzzle
 
-                                    def make_pj_click(pj_id=pj['id']):
-                                        def go_to_puzzle():
-                                            dialog.close()
-                                            ui.navigate.to(f'/puzzle?doc={pj_id}')
-                                        return go_to_puzzle
-
-                                    with ui.card().classes(
-                                        'w-full p-2 cursor-pointer hover:bg-cyan-50'
-                                    ).on('click', make_pj_click()):
-                                        with ui.row().classes('items-center gap-2 w-full'):
-                                            if pj_thumb_url:
-                                                ui.image(pj_thumb_url).style(
-                                                    'width: 48px; height: 48px; object-fit: contain; '
-                                                    'border-radius: 4px;'
-                                                )
-                                            else:
-                                                ui.icon('extension', size='lg').classes('text-cyan-400')
-                                            with ui.column().classes('gap-0 flex-1'):
-                                                ui.label(pj_title).classes('text-body2 font-medium')
-                                                if pj_shelfmarks:
-                                                    ui.label(' + '.join(pj_shelfmarks[:3])).classes(
-                                                        'text-caption font-mono'
-                                                    ).style('color: var(--text-secondary);')
-                                                ui.label(pj_author).classes('text-caption').style(
-                                                    'color: var(--text-tertiary);'
-                                                )
+                            with ui.card().classes(
+                                'w-full p-2 cursor-pointer hover:bg-cyan-50'
+                            ).on('click', make_pj_click()):
+                                with ui.row().classes('items-center gap-2 w-full'):
+                                    if pj_thumb_url:
+                                        ui.image(pj_thumb_url).style(
+                                            'width: 48px; height: 48px; object-fit: contain; '
+                                            'border-radius: 4px;'
+                                        )
+                                    else:
+                                        ui.icon('extension', size='lg').classes('text-cyan-400')
+                                    with ui.column().classes('gap-0 flex-1'):
+                                        ui.label(pj_title).classes('text-body2 font-medium')
+                                        if pj_shelfmarks:
+                                            ui.label(' + '.join(pj_shelfmarks[:3])).classes(
+                                                'text-caption font-mono'
+                                            ).style('color: var(--text-secondary);')
+                                        ui.label(pj_author).classes('text-caption').style(
+                                            'color: var(--text-tertiary);'
+                                        )
                     except Exception as e:
                         logger.error("Community Puzzle Joins error: %s", e)
 

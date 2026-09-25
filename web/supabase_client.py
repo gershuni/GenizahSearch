@@ -193,6 +193,44 @@ def reset_client():
     _client = None
 
 
+# PostgREST timeout (seconds) for the public reads below. The library default
+# is 120 s; these reads run in NiceGUI's shared thread pool, so during a
+# Supabase outage a long timeout would park pool threads for minutes and starve
+# every other run.io_bound on the site. Kept separate from get_client(), whose
+# timeout is unchanged.
+PUBLIC_READ_TIMEOUT_S = 5
+
+_public_read_client: Optional[Client] = None
+_public_read_client_lock = threading.Lock()
+
+
+def get_public_read_client() -> Client:
+    """Anonymous client with a short PostgREST timeout, for PUBLIC reads only.
+
+    Use it for tables whose SELECT policy is ``USING (true)`` (fragment_joins,
+    profiles, published_joins / published_join_fragments), where the result
+    does not depend on who is asking. It reads no per-user storage, so it gives
+    the same answer on the event loop and in a worker thread. Never use it for
+    writes, or for per-user tables (lists, corrections, comments): there the
+    anonymous role silently gets 0 rows.
+    """
+    global _public_read_client
+    if _public_read_client is None:
+        with _public_read_client_lock:
+            if _public_read_client is None:
+                if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+                    raise ValueError(
+                        "SUPABASE_URL / SUPABASE_ANON_KEY not set! "
+                        "Set them in environment variables or .env file."
+                    )
+                from supabase.lib.client_options import SyncClientOptions
+                _public_read_client = create_client(
+                    SUPABASE_URL, SUPABASE_ANON_KEY,
+                    options=SyncClientOptions(postgrest_client_timeout=PUBLIC_READ_TIMEOUT_S),
+                )
+    return _public_read_client
+
+
 def _is_jwt_expired(error) -> bool:
     """Check if a Supabase error is a JWT expiry."""
     msg = str(error)
@@ -1693,17 +1731,18 @@ def create_discovery(user_id: str, title: str, content: str, type: str = 'discov
 
 def get_fragment_joins(user_id: str = None, fragment_sys_id: str = None,
                        status: str = None) -> List[Dict]:
-    """Get fragment joins with optional filters."""
+    """Get fragment joins with optional filters. BLOCKING network I/O.
+
+    Reads through ``get_public_read_client()`` (anonymous, 5 s PostgREST
+    timeout). fragment_joins and profiles are publicly readable -- "Anyone can
+    view joins" ``FOR SELECT USING (true)`` and profiles ``SELECT USING (true)``
+    in supabase_setup.sql; the creator-only policy was replaced in March 2026 --
+    so every viewer gets the same rows, and the result is identical whether
+    this runs on the event loop or in a worker thread (every caller now runs it
+    in a worker). No user token is read and no token refresh can happen here.
+    """
     try:
-        # Use authenticated client when available — RLS only shows
-        # proposed joins to their creator (status='confirmed' OR auth.uid()=user_id)
-        try:
-            client = get_user_client()
-        except Exception:
-            # Phase 92.1 KEEP get_client(): legitimate Exception fallback ONLY when
-            # get_user_client itself raised. fragment_joins SELECT is `TO public` so
-            # the anon singleton still returns rows. Pattern verified correct.
-            client = get_client()  # Operation failed; use fallback value
+        client = get_public_read_client()
         query = client.table('fragment_joins').select('*')
 
         if user_id:
@@ -1730,14 +1769,7 @@ def get_fragment_joins(user_id: str = None, fragment_sys_id: str = None,
             row['created_by_username'] = profiles_map.get(row.get('user_id'), '')
         return rows
     except Exception as e:
-        if _is_jwt_expired(e):
-            logger.warning("JWT expired in get_fragment_joins, refreshing session and retrying")
-            _refresh_user_session()
-            try:
-                return get_fragment_joins(user_id=user_id, fragment_sys_id=fragment_sys_id, status=status)
-            except Exception as e2:
-                logger.error(f"Error getting joins (retry): {e2}")
-                return []
+        # No JWT-expiry retry: the read client carries no user token.
         logger.error(f"Error getting joins: {e}")
         return []
 
