@@ -1424,6 +1424,16 @@ def test_load_more_stays_centred_when_the_table_scrolls_sideways(load_more):
 
 # --- the Search tab as the app builds it ------------------------------------
 
+class _InertPGPTagsWorker:
+    """Stands in for the tag loader thread: connectable, never runs."""
+
+    def __init__(self, *a, **k):
+        self.finished = SimpleNamespace(connect=lambda *a, **k: None)
+
+    def start(self):
+        pass
+
+
 @pytest.fixture
 def search_tab(window, monkeypatch):
     """create_search_tab for real, over the window fixture's collaborators,
@@ -1431,6 +1441,10 @@ def search_tab(window, monkeypatch):
     w = window
     w._zero_result_refine = False
     monkeypatch.setattr(app, "BATCH_SIZE", 20)
+    # The builder starts a thread reading pgp.db whose `finished` fills a
+    # combo box of this tab. Nothing waits for it, so it could land after the
+    # tab is gone -- in a later test, on a deleted QComboBox.
+    monkeypatch.setattr(app, "PGPTagsWorker", _InertPGPTagsWorker)
     panel = w.create_search_tab()
     panel.resize(1000, 700)
     panel.show()
