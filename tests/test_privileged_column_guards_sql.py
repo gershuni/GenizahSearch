@@ -29,10 +29,12 @@ def _without_comments(sql: str) -> str:
     return re.sub(r"--[^\n]*", "", sql)
 
 
-def _function_body(sql: str, name: str) -> str:
-    m = re.search(rf"create or replace function public\.{name}\(\).*?\$\$(.*?)\$\$;", sql, re.S | re.I)
+def _function_parts(sql: str, name: str) -> tuple:
+    """(declaration up to AS $$, body) of one guard's CREATE FUNCTION, comments excluded."""
+    m = re.search(rf"create or replace function public\.{name}\(\)(.*?)\bas\s+\$\$(.*?)\$\$;",
+                  _without_comments(sql), re.S | re.I)
     assert m, f"{name} is not defined"
-    return m.group(1)
+    return m.group(1), m.group(2)
 
 
 def wide_correction_delete_policies(sql: str) -> list:
@@ -60,10 +62,13 @@ def test_migration_installs_all_four_guards_in_one_transaction():
 def test_every_guard_exempts_only_server_side_callers_and_raises_42501():
     sql = _sql(MIGRATION)
     for name in GUARDS:
-        body = _function_body(sql, name)
+        declaration, body = _function_parts(sql, name)
         assert "current_user not in ('anon', 'authenticated')" in body, name
         assert "errcode = '42501'" in body, name
-        assert re.search(r"security\s+invoker", sql[sql.index(f"public.{name}()"):], re.I), name
+        # As a definer the function would run as its owner, and current_user would never be
+        # anon/authenticated -- every caller would be exempt.
+        assert re.search(r"\bsecurity\s+invoker\b", declaration, re.I), name
+        assert not re.search(r"\bsecurity\s+definer\b", declaration, re.I), name
 
 
 def test_migration_drops_the_any_status_correction_delete_policy():
