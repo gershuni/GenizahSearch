@@ -45,10 +45,14 @@ CREATE POLICY "Users can update own corrections" ON corrections
 FOR UPDATE TO authenticated
 USING (auth.uid() = author_id);
 
+-- Authors may delete only drafts (hardening, 2026-09-25; see
+-- migrations/add_privileged_column_guards.sql). The older any-status policy is
+-- dropped, not recreated.
 DROP POLICY IF EXISTS "Users can delete own corrections" ON corrections;
-CREATE POLICY "Users can delete own corrections" ON corrections
+DROP POLICY IF EXISTS "Users can delete own draft corrections" ON corrections;
+CREATE POLICY "Users can delete own draft corrections" ON corrections
 FOR DELETE TO authenticated
-USING (auth.uid() = author_id);
+USING (auth.uid() = author_id AND status = 'draft');
 
 -- Allow admins to update any correction (for approval/rejection)
 DROP POLICY IF EXISTS "Admins can update any correction" ON corrections;
