@@ -4673,7 +4673,12 @@ class GenizahGUI(QMainWindow):
         if not res:
             return
 
-        sys_id = res.get('sys_id') or res.get('system_id', '')
+        # Genizah hits carry their id only in display['id'] (no top-level
+        # sys_id), so without the middle term every action below got ''.
+        # LOCAL hits do carry a top-level sys_id and still take the LOCAL
+        # branch.
+        sys_id = (res.get('sys_id') or (res.get('display') or {}).get('id')
+                  or res.get('system_id', ''))
         shelfmark = res.get('shelfmark', '')
         if not shelfmark and self.meta_mgr:
             try:
@@ -4752,7 +4757,11 @@ class GenizahGUI(QMainWindow):
         # Exclude from word search results (Phase 45-03)
         menu.addSeparator()
         action_exclude = menu.addAction(tr("Exclude this manuscript"))
-        action_exclude.triggered.connect(lambda: self._exclude_word_search_result(sys_id, row))
+        # Record the System ID cell's text: it is the id every row of this
+        # manuscript shows, and the one the exclusion check compares.
+        exclude_sid = item.text().strip() or sys_id
+        action_exclude.triggered.connect(
+            lambda: self._exclude_word_search_result(exclude_sid, row))
 
         # Copy actions
         menu.addSeparator()

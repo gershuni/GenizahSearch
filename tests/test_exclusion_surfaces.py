@@ -23,16 +23,23 @@ bound onto a lightweight stub and the labels are trivial fakes.
 import ast
 import io
 import os
-from types import MethodType
+import sys
+from types import MethodType, SimpleNamespace
 
 import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtWidgets import QApplication, QLabel
+from PyQt6.QtCore import QPoint
+from PyQt6.QtWidgets import (QApplication, QComboBox, QLabel, QLineEdit,
+                             QMainWindow, QProgressBar, QPushButton,
+                             QTableWidget)
 
+import genizah_app as app
 from genizah_app import GenizahGUI
+from shared.config import Config
 from shared.exclusion_service import ExclusionSource
+from shared.lists_manager import ListsManager
 
 _APP = QApplication.instance() or QApplication([])
 
@@ -464,3 +471,237 @@ def test_the_search_restore_no_longer_hand_rolls_the_fallback():
     )
     assert "self._update_exclusion_display('search')" in s
     assert "self._update_exclusion_display('composition')" in s
+
+
+# ===========================================================================
+# The Search results table, driven for real
+# ===========================================================================
+#
+# A real GenizahGUI (__new__ + QMainWindow.__init__, no app startup) with a
+# real QTableWidget, driven through the entry points the UI uses. Everything
+# with side effects elsewhere (disk, threads, network) is stubbed, and the
+# personal-state files point into tmp_path.
+
+A, B, C = "990000000000100001", "990000000000200002", "990000000000300003"
+
+
+@pytest.fixture(autouse=True)
+def _personal_state_in_tmp(tmp_path, monkeypatch):
+    """No test in this file may reach the developer's own session, config,
+    language or lists file."""
+    monkeypatch.setattr(Config, "INDEX_DIR", str(tmp_path))
+    monkeypatch.setattr(Config, "SESSION_FILE", str(tmp_path / "session.json"))
+    monkeypatch.setattr(Config, "CONFIG_FILE", str(tmp_path / "config.pkl"))
+    monkeypatch.setattr(Config, "LANGUAGE_FILE", str(tmp_path / "lang.pkl"))
+    monkeypatch.setattr(ListsManager, "LISTS_FILE", str(tmp_path / "lists.pkl"))
+
+
+@pytest.fixture
+def slot_errors(monkeypatch):
+    """An exception escaping a Qt slot (a menu action's lambda) aborts the
+    process unless sys.excepthook is ours. Record it, then fail the test."""
+    errors = []
+    monkeypatch.setattr(sys, "excepthook", lambda et, ev, tb: errors.append(ev))
+    yield errors
+    assert not errors, f"exception inside a Qt slot: {errors!r}"
+
+
+def _res(sid, page):
+    # The shape a real Genizah hit has: NO top-level sys_id -- the id lives in
+    # display['id'] and in the header.
+    return {
+        "display": {"id": sid, "source": "V0.8", "img": str(page),
+                    "shelfmark": "", "title": ""},
+        "snippet": f"*word* {sid[-2:]}/{page}",
+        "full_text": "text",
+        "uid": f"{sid}_{page}",
+        "raw_header": f"{sid}_P{page}",
+        "raw_file_hl": "",
+        "highlight_pattern": "word",
+        "scope": "genizah",
+        "score": 1.0,
+    }
+
+
+class _Meta:
+    def __init__(self):
+        self.nli_cache = {}
+        self.csv_bank = {A: {}, B: {}, C: {}}
+
+    def parse_full_id_components(self, raw_header):
+        return {"sys_id": (raw_header or "").split("_")[0], "ie_id": None,
+                "p_num": "1", "fl_id": None}
+
+    def get_meta_for_id(self, sid):
+        return (f"T-S {sid[-3:]}", f"title {sid[-3:]}")
+
+    def get_library_for_id(self, sid):
+        return "CUL"
+
+
+class _Header:
+    def set_filter_active(self, col, on):
+        pass
+
+    def blockSignals(self, b):
+        return False
+
+    def setChecked(self, b):
+        pass
+
+
+@pytest.fixture
+def window(slot_errors, monkeypatch):
+    monkeypatch.setattr(app, "_resolve_display_title",
+                        lambda sid, title, **k: title or "")
+    w = GenizahGUI.__new__(GenizahGUI)
+    QMainWindow.__init__(w)
+    cols = dict(COL_CHECKBOX=0, COL_ACTIONS=1, COL_SYS_ID=2, COL_LIBRARY=3,
+                COL_SHELF=4, COL_IMG=5, COL_TITLE=6, COL_SNIPPET=7, COL_SRC=8,
+                COL_PGP=9, COL_DOMAIN=10, COL_PRINTED=11, COL_TRANSCRIPTION=12)
+    for k, v in cols.items():
+        setattr(w, k, v)
+    w.results_table = QTableWidget()
+    w.results_table.setColumnCount(13)
+    w.status_label = QLabel()
+    w.lbl_search_export = QLabel()
+    w.lbl_main_exclude_status = QLabel()
+    w.lbl_domain_filter = QLabel()
+    w.btn_domain_filter = QPushButton()
+    w.btn_search = QPushButton()
+    w.search_progress = QProgressBar()
+    w.query_input = QLineEdit()
+    w.mode_combo = QComboBox()
+    w.chk_search_header = _Header()
+    w.meta_mgr = _Meta()
+    w.export_buttons = []
+    # results state
+    w.last_results = []
+    w.results_loaded = 0
+    w.shelfmark_items_by_sid = {}
+    w.title_items_by_sid = {}
+    w.result_row_by_sys_id = {}
+    w._res_map_by_sid = {}
+    w.refinement_chain = []
+    w.refinement_restrict_sys_ids = None
+    w._refine_mode = False
+    w._all_terms_filter = False
+    w._restoring_session = False
+    w.is_searching = False
+    w._responsa_expanded_count = 0
+    w._search_was_cancelled = False
+    w.last_search_query = "word"
+    w.hovered_row = -1
+    w.search_thread = None
+    w._pause_search = SimpleNamespace(state="idle", elapsed=lambda t: 1.0)
+    w.pre_search_filters = {}
+    w.pre_search_restrict_sys_ids = None
+    # filter state
+    w.list_filter_state = {"active": False, "mode": "in", "lists": "all"}
+    w._domain_exclusions = set()
+    w._has_result_domains = False
+    w._result_domain_map = {}
+    w._result_domain_counts = {}
+    w._domain_name_map = {}
+    w._post_measurement_filters = {}
+    w._local_filter_state_search = "all"
+    w._local_filter_inactive_chip_visible = False
+    w._local_file_optouts = set()
+    w.results_filters = {}
+    w._printed_filter_state = "all"
+    w._printed_sys_ids = set()
+    w._manual_transcription_sys_ids = set()
+    w._pgp_pages_by_sys_id = {}
+    w._result_measurement_map = {}
+    w._measurement_fetch_complete = True
+    # exclusions: the right-click set and the Search tab's list
+    w.word_excluded_sys_ids = set()
+    w.excluded_sys_ids = set()
+    w.excluded_shelfmarks = set()
+    w.excluded_raw_entries = []
+    w.exclusion_sources = []
+    # collaborators with side effects elsewhere (disk, threads, network)
+    w._save_session = lambda: None
+    w._schedule_session_save = lambda: None
+    w._write_pgp_badge_cell = lambda row, sid: None
+    w._update_search_row_list_indicator = lambda row, res=None: None
+    w._lookup_local_filepath = lambda sid: None
+    w._prime_local_filepath_cache = lambda results: None
+    w._update_local_filter_visibility_search = lambda: None
+    w._set_local_scope_strip_visible = lambda v: None
+    w._add_regular_search_to_history = lambda: None
+    w._notify_search_complete = lambda n, q: None
+    w._update_search_within_btn = lambda: None
+    w._update_refinement_strip = lambda: None
+    w._update_filter_chip_bar = lambda: None
+    w._emit_search_telemetry = lambda *a, **k: None
+    w._emit_feature_opened = lambda **k: None
+    w._apply_pause_state = lambda *a: None
+    # Production's enrichment start re-runs the visibility pass
+    # (_launch_enrichment_workers._start -> _apply_results_table_filters).
+    w._launch_enrichment_workers = (
+        lambda results, defer=False: w._apply_results_table_filters())
+    return w
+
+
+def _row_of(w, sid):
+    return [r for r in range(w.results_table.rowCount())
+            if w.results_table.item(r, w.COL_SYS_ID).text() == sid]
+
+
+def _hidden(w, sid):
+    rows = _row_of(w, sid)
+    assert rows, f"{sid} has no row"
+    return [w.results_table.isRowHidden(r) for r in rows]
+
+
+def _search(w, results):
+    """A search landing: what start_search's worker delivers."""
+    w.on_search_finished(list(results))
+
+
+@pytest.fixture
+def menus(monkeypatch):
+    captured = []
+    monkeypatch.setattr(app.QMenu, "exec",
+                        lambda self, *a, **k: captured.append(self))
+    return captured
+
+
+def _menu_action(w, menus, row, text):
+    y = w.results_table.rowViewportPosition(row) + 2
+    assert w.results_table.rowAt(y) == row
+    w._show_results_context_menu(QPoint(5, y))
+    [act] = [a for a in menus[-1].actions() if a.text() == text]
+    return act
+
+
+# --------------------------------------------------------------------------
+# The results menu acts on the manuscript that was clicked
+# --------------------------------------------------------------------------
+
+_SHELF_B = f"T-S {B[-3:]}"
+
+
+@pytest.mark.parametrize("label,method,expected", [
+    ("View Document", "_context_view_document", (B,)),
+    ("Submit Correction...", "_context_submit_correction", (B, _SHELF_B)),
+    ("Add Comment...", "_context_add_comment", (B, _SHELF_B)),
+    ("View Corrections...", "_context_view_corrections", (B, _SHELF_B)),
+    ("View Comments...", "_context_view_comments", (B, _SHELF_B)),
+    ("Share Discovery...", "_context_share_discovery", (B, _SHELF_B)),
+    ("Exclude this manuscript", "_exclude_word_search_result", (B, 1)),
+])
+def test_every_results_menu_action_receives_the_clicked_manuscript(
+        window, menus, label, method, expected):
+    """A Genizah hit has no top-level sys_id; the menu read only that key, so
+    all seven actions received '' (a comment or correction was filed against
+    document ''; the exclusion was a silent no-op)."""
+    w = window
+    w.last_results = [_res(A, 1), _res(B, 1)]
+    w.load_next_batch()
+    calls = []
+    setattr(w, method, lambda *a: calls.append(a))
+    _menu_action(w, menus, 1, app.tr(label)).trigger()
+    assert calls == [expected], (
+        f"{label!r} received {calls!r} for the row of {B}")
