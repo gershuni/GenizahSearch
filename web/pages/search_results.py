@@ -99,6 +99,54 @@ def _hit_scope_phrase(snippet, adv_state, page):
         return phrase
     return phrase if adv_state.hit_scope == current else None
 
+
+# ---------------------------------------------------------------------------
+# Quick View text -> HTML (escaped by construction)
+# ---------------------------------------------------------------------------
+
+def _apply_highlight_marks(text: str, terms: list) -> str:
+    """Quick View text as HTML: escaped, search terms marked, newlines as <br>.
+
+    The result goes to ``ui.html(..., sanitize=False)``, so the only markup in it
+    is what this function writes itself. Transcription notation such as
+    ``<upside down>`` or ``al-Ṣa<y>dalānī`` stays visible text.
+
+    Terms are matched exactly (case-sensitive) on the RAW text, all at once with
+    one alternation, longest first, so a later term can never match inside
+    markup an earlier term inserted, and overlapping terms never nest. A mark
+    that crosses a line break is closed and reopened on each line, so every row
+    of the line-numbered grid (render_line_numbered_html) has balanced tags.
+    Pure function: no ui.* calls (it runs from version_selector's deferred path).
+    """
+    if not text:
+        return ''
+    uniq = sorted({t for t in (terms or []) if t}, key=lambda t: (-len(t), t))
+    if not uniq:
+        return html.escape(text).replace('\n', '<br>')
+    rx = re.compile('|'.join(re.escape(t) for t in uniq))
+    out = []
+    pos = 0
+    for m in rx.finditer(text):
+        out.append(html.escape(text[pos:m.start()]))
+        out.append('\n'.join(
+            f'<mark class="highlight-match">{html.escape(part)}</mark>' if part else ''  # common.css: readable in light AND dark
+            for part in m.group(0).split('\n')
+        ))
+        pos = m.end()
+    out.append(html.escape(text[pos:]))
+    return ''.join(out).replace('\n', '<br>')
+
+
+def _fgp_text_for_display(text) -> str:
+    """Decode the HTML entities FGP sidecar text stores ('&deg;' and a few others).
+
+    Quick View used to hand FGP text to the browser unescaped, which decoded
+    them; now that the text is escaped, decode them ONCE here so '&deg;' keeps
+    showing as a degree sign. Web-side only on purpose: the desktop renders the
+    same text as Qt HTML and relies on the entities staying encoded.
+    """
+    return html.unescape(text) if text else ''
+
 # ---------------------------------------------------------------------------
 # Bidi isolation (Finding #15)
 # ---------------------------------------------------------------------------
@@ -1360,16 +1408,6 @@ def open_advanced_dialog(search_state, refs, index, result):
         except Exception as e:
             ui.notify(f"{tr('Error')}: {str(e)}", type='negative')
 
-    def _apply_highlight_marks(text: str, terms: list) -> str:
-        """Apply <mark> highlight tags around terms and convert newlines to <br>."""
-        for term in terms:
-            if term in text:
-                text = text.replace(
-                    term,
-                    f'<mark class="highlight-match">{term}</mark>'  # common.css: readable in light AND dark
-                )
-        return text.replace('\n', '<br>')
-
     def render_content(result):
         """Render the main content area."""
         adv_state.content_container.clear()
@@ -1518,22 +1556,21 @@ def open_advanced_dialog(search_state, refs, index, result):
                 must_contain=_hit_scope_phrase(snippet, adv_state, page))
             if _dec.get('eligible') and _dec.get('source'):
                 display_text = _dec['source'].get('content', current_text or '')
+                if _dec['source'].get('is_fgp'):
+                    display_text = _fgp_text_for_display(display_text)
             else:
                 display_text = current_text or (snippet.replace('*', '') if snippet else '')
         elif pgp_transcription and pgp_transcription.get('content'):
             display_text = pgp_transcription['content']
         else:
-            display_text = current_text or snippet.replace('*', '') if snippet else ''
+            display_text = current_text or (snippet.replace('*', '') if snippet else '')
 
-        # Apply highlighting from snippet if we have match markers
+        # Highlight terms come from the snippet's *...* match markers.
         if snippet and '*' in snippet and display_text:
-            import re as re_module
-            highlighted_terms = re_module.findall(r'\*([^*]+)\*', snippet)
-            adv_state.highlight_terms = highlighted_terms
-            text_html = _apply_highlight_marks(display_text, highlighted_terms)
+            adv_state.highlight_terms = _SNIPPET_MATCH_RE.findall(snippet)
         else:
             adv_state.highlight_terms = []
-            text_html = display_text.replace('\n', '<br>') if display_text else ''
+        text_html = _apply_highlight_marks(display_text or '', adv_state.highlight_terms)
 
         with adv_state.content_container:
 
@@ -2087,7 +2124,8 @@ def open_advanced_dialog(search_state, refs, index, result):
                     def render_text_section(html_to_render: str):
                         """Render pre-formatted HTML text content + optional line-number gutter (Phase 999.4).
 
-                        Quick View always passes pre-built highlight HTML; per D-10 the line
+                        Quick View always passes pre-built highlight HTML from the
+                        module-level _apply_highlight_marks (escaped by construction); per D-10 the line
                         count is taken from the SOURCE text (current_display_text['value']),
                         not from the rendered HTML.
                         """
@@ -2224,12 +2262,11 @@ def open_advanced_dialog(search_state, refs, index, result):
 
                             def handle_version_change(new_text: str, version_info: dict):
                                 """Handle version selection - update displayed text."""
+                                if version_info.get('is_fgp') or version_info.get('source') == 'fgp':
+                                    new_text = _fgp_text_for_display(new_text)
                                 current_display_text['value'] = new_text
                                 # Re-apply search term highlighting to new version text
-                                if adv_state.highlight_terms and new_text:
-                                    new_html = _apply_highlight_marks(new_text, adv_state.highlight_terms)
-                                else:
-                                    new_html = new_text.replace('\n', '<br>') if new_text else ''
+                                new_html = _apply_highlight_marks(new_text or '', adv_state.highlight_terms)
                                 current_display_text['html'] = new_html
                                 render_text_section(new_html)
                                 source = version_info.get('source', 'unknown')
