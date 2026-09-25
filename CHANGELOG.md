@@ -38,7 +38,7 @@ Reaches users with the next desktop installer.
   applies to every search, and the status line says how many rows are hidden. Exporting a view in
   which every row is hidden now says there is nothing to export instead of exporting every result.
   When the visible rows fit without scrolling and more results remain, a "Load more results"
-  button appears over the table.
+  button appears under the table.
 
 ### Hardening: the database enforces privilege and moderation columns (2026-09-25)
 
