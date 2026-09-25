@@ -1457,6 +1457,7 @@ class GenizahGUI(QMainWindow):
         self._zero_result_refine: bool = False         # True when last refine got 0 results (D-14a)
         self._all_terms_filter: bool = False             # "Only results with all terms" checkbox state
         self.word_excluded_sys_ids = set()  # per-result exclusions for word search mode
+        self._search_rows_excluded = 0  # rows the last visibility pass hid by exclusion
         self.filter_sources = {}  # dict of {ref: cleaned_text}
         self.filter_enabled_sources = set()  # set of enabled source refs
         self.results_filters = {}
@@ -19243,45 +19244,16 @@ class GenizahGUI(QMainWindow):
         return en_name
 
     def _apply_domain_exclusions(self):
-        """Apply domain exclusions by hiding/showing table rows."""
-        hide_uncategorized = "Uncategorized" in self._domain_exclusions
+        """Apply domain exclusions through the one results visibility pass.
 
-        if not self._domain_exclusions:
-            # No exclusions -- show all rows
-            for row in range(self.results_table.rowCount()):
-                self.results_table.setRowHidden(row, False)
-            visible = self.results_table.rowCount()
-        else:
-            visible = 0
-            for row in range(self.results_table.rowCount()):
-                # Read sys_id directly from table cell (survives sorting)
-                item = self.results_table.item(row, self.COL_SYS_ID)
-                sys_id = item.text().strip() if item else None
-                # Get domains for this result
-                result_domains = self._result_domain_map.get(sys_id, []) if sys_id else []
-                if not result_domains:
-                    # No domain data -- hide if Uncategorized is excluded
-                    self.results_table.setRowHidden(row, hide_uncategorized)
-                    if not hide_uncategorized:
-                        visible += 1
-                elif all(d in self._domain_exclusions for d in result_domains):
-                    # ALL domains excluded -- hide
-                    self.results_table.setRowHidden(row, True)
-                else:
-                    # At least one domain not excluded -- show
-                    self.results_table.setRowHidden(row, False)
-                    visible += 1
-        total = len(self.last_results) if self.last_results else 0
-        if self._domain_exclusions:
-            self.status_label.setText(
-                tr("Showing {} of {} results (filtering {} domains)").format(visible, total, len(self._domain_exclusions))
-            )
-        else:
-            self.status_label.setText(
-                tr("Showing {} of {} results").format(
-                    min(self.results_loaded, total), total
-                )
-            )
+        This used to hide/show rows from the domain rule alone, which showed
+        again every row another filter or a manuscript exclusion had hidden.
+        _apply_results_table_filters applies the domain rule (its step C)
+        together with the rest.
+        """
+        self._apply_results_table_filters()
+        self.status_label.setText(
+            self._search_status_summary(domains=len(self._domain_exclusions)))
 
     # ---- Post-search measurement filter dialog (Phase 54) ----
 
@@ -19598,13 +19570,17 @@ class GenizahGUI(QMainWindow):
                 self.run_composition()
 
     def _exclude_word_search_result(self, sys_id, row):
-        """Exclude a single manuscript from word search results."""
+        """Exclude a manuscript -- every row of it -- from the search results.
+
+        It stays excluded until New, across later searches and restarts
+        (owner, 2026-09-25). The visibility pass applies it, so no re-filter
+        or batch load brings it back; `row` is only the row clicked.
+        """
         if not sys_id:
             return
         self.word_excluded_sys_ids.add(sys_id)
-        self.results_table.setRowHidden(row, True)
-        # Update status
-        total = len(self.last_results) if self.last_results else 0
+        self._apply_results_table_filters()
+        # Update status: the count is the standing set, which spans searches.
         excluded_count = len(self.word_excluded_sys_ids)
         self.status_label.setText(
             tr("Excluded {} manuscripts from results").format(excluded_count)
@@ -20786,15 +20762,10 @@ class GenizahGUI(QMainWindow):
         self.results_table.setSortingEnabled(True)
         self._apply_results_table_filters()
 
-        # Update Status (include expanded term count for Responsa searches)
-        expanded_count = getattr(self, '_responsa_expanded_count', 0)
-        partial_suffix = f" ({tr('Partial results')})" if getattr(self, '_search_was_cancelled', False) else ""
-        if expanded_count > 0:
-            self.status_label.setText(tr("Showing {} of {} results (searching {} expanded terms)").format(
-                self.results_loaded, len(self.last_results), expanded_count
-            ) + partial_suffix)
-        else:
-            self.status_label.setText(tr("Showing {} of {} results").format(self.results_loaded, len(self.last_results)) + partial_suffix)
+        # Update Status: the rows actually visible, with the excluded note
+        # (exclusions outlive the search that made them) and the expanded
+        # term count for Responsa searches.
+        self.status_label.setText(self._search_status_summary())
 
         # Trigger Metadata
         if ids_to_fetch:
@@ -20960,12 +20931,7 @@ class GenizahGUI(QMainWindow):
             self.status_label.setText(warning)
             self.status_label.setStyleSheet("color: #f39c12; font-weight: bold;")
             def _restore_status():
-                self.status_label.setText(
-                    tr("Showing {} of {} results").format(
-                        min(self.results_loaded, len(self.last_results)),
-                        len(self.last_results)
-                    )
-                )
+                self.status_label.setText(self._search_status_summary())
                 self.status_label.setStyleSheet("")
             QTimer.singleShot(5000, _restore_status)
 
@@ -21045,7 +21011,7 @@ class GenizahGUI(QMainWindow):
             traceback.print_exc()
         finally:
             if hasattr(self, 'status_label'):
-                self.status_label.setText('')
+                self.status_label.setText(self._search_status_or_blank())
         self._update_refinement_strip()
         self._update_search_within_btn()
         self._schedule_session_save()
@@ -21078,7 +21044,7 @@ class GenizahGUI(QMainWindow):
         """Apply the restrict set rebuilt by the off-thread chain replay."""
         self.refinement_restrict_sys_ids = result_set
         if hasattr(self, 'status_label'):
-            self.status_label.setText('')
+            self.status_label.setText(self._search_status_or_blank())
         if hasattr(self, '_update_refinement_strip'):
             self._update_refinement_strip()
         if hasattr(self, '_update_search_within_btn'):
@@ -21090,9 +21056,18 @@ class GenizahGUI(QMainWindow):
         self.refinement_chain = []
         self.refinement_restrict_sys_ids = None
         if hasattr(self, 'status_label'):
-            self.status_label.setText('')
+            self.status_label.setText(self._search_status_or_blank())
         if hasattr(self, '_update_refinement_strip'):
             self._update_refinement_strip()
+
+    def _search_status_or_blank(self):
+        """What the replay leaves in the status label once it is done: the
+        results summary when the table has rows (so the excluded note stays
+        on screen), '' otherwise."""
+        table = getattr(self, 'results_table', None)
+        if table is not None and table.rowCount():
+            return self._search_status_summary()
+        return ''
 
     def _enter_refine_mode(self):
         """D-02, D-03: Activate refine mode on desktop search bar."""
@@ -21265,7 +21240,9 @@ class GenizahGUI(QMainWindow):
         n_shown = len(filtered)
         n_total = len(original)
         if n_shown < n_total:
-            self.status_label.setText(f"{n_shown:,} {tr('of')} {n_total:,} ({tr('Only results with all terms')})")
+            # Counted from the table, so exclusions and filters are honest.
+            self.status_label.setText(
+                f"{self._search_status_summary()} ({tr('Only results with all terms')})")
 
     def _clear_refinement_chain(self):
         """D-11: Remove entire chain, return to unrestricted search."""
@@ -21667,7 +21644,63 @@ class GenizahGUI(QMainWindow):
                 lbl.setText(tr("My Library filter inactive — no LOCAL hits in this query"))
             lbl.setVisible(visible)
 
+    def _row_is_excluded(self, row):
+        """Is this results row's manuscript excluded on the Search surface?
+
+        Two sets: 'Exclude this manuscript' (word_excluded_sys_ids) and the
+        Exclude Manuscripts list (excluded_sys_ids). Both stand until New,
+        across later searches and restarts.
+        """
+        item = self.results_table.item(row, self.COL_SYS_ID)
+        sid = item.text().strip() if item else ''
+        return bool(sid) and (sid in self.word_excluded_sys_ids
+                              or sid in self.excluded_sys_ids)
+
+    def _search_excluded_note(self):
+        """' (N excluded)' for the rows the last visibility pass hid by
+        exclusion, or ''."""
+        n = getattr(self, '_search_rows_excluded', 0)
+        return f" ({n} {tr('excluded')})" if n else ""
+
+    def _search_status_summary(self, domains=0):
+        """The Search results status line, from the table as it is now.
+
+        The one composer for every writer of that line, so none of them can
+        claim more visible rows than the table shows or drop the note saying
+        exclusions hide some.
+        """
+        table = self.results_table
+        visible = sum(1 for r in range(table.rowCount()) if not table.isRowHidden(r))
+        total = len(self.last_results) if self.last_results else 0
+        expanded = getattr(self, '_responsa_expanded_count', 0)
+        if domains:
+            text = tr("Showing {} of {} results (filtering {} domains)").format(
+                visible, total, domains)
+        elif expanded > 0:
+            text = tr("Showing {} of {} results (searching {} expanded terms)").format(
+                visible, total, expanded)
+        else:
+            text = tr("Showing {} of {} results").format(visible, total)
+        text += self._search_excluded_note()
+        if getattr(self, '_search_was_cancelled', False):
+            text += f" ({tr('Partial results')})"
+        return text
+
+    def _with_search_summary(self, message):
+        """`message`, followed by the results summary when any row is hidden,
+        so a message that replaces the summary does not hide that fact."""
+        table = self.results_table
+        if any(table.isRowHidden(r) for r in range(table.rowCount())):
+            return f"{message} {self._search_status_summary()}"
+        return message
+
     def _apply_results_table_filters(self):
+        """Recompute the visibility of every Search results row.
+
+        The one pass that decides it: the manuscript exclusions first, then
+        the filters. Writes the status summary when it changed any row or the
+        excluded count, and returns how many rows the exclusions hide.
+        """
         # 1. Gather rules
         list_active = self.list_filter_state.get('active', False)
         list_mode = self.list_filter_state.get('mode', 'in')
@@ -21700,12 +21733,30 @@ class GenizahGUI(QMainWindow):
         } if (_local_filter_active or _optout_active) and not self._local_filter_inactive_chip_visible else None
         self._show_local_filter_chip('search', self._local_filter_inactive_chip_visible)
 
-        if not self.results_filters and not list_active and not has_domain_exclusions and self._printed_filter_state == 'all' and not _has_meas_post and not _local_filter_active and not _optout_active:
-            for row in range(self.results_table.rowCount()):
-                self.results_table.setRowHidden(row, False)
-            return
+        no_filters = (not self.results_filters and not list_active and not has_domain_exclusions
+                      and self._printed_filter_state == 'all' and not _has_meas_post
+                      and not _local_filter_active and not _optout_active)
+
+        changed = False
+        excluded_rows = 0
+
+        def _set_hidden(row, hidden):
+            nonlocal changed
+            if self.results_table.isRowHidden(row) != hidden:
+                self.results_table.setRowHidden(row, hidden)
+                changed = True
 
         for row in range(self.results_table.rowCount()):
+            # Exclusions first, with or without a filter: they are not a
+            # filter the user clears, they hold until New.
+            if self._row_is_excluded(row):
+                excluded_rows += 1
+                _set_hidden(row, True)
+                continue
+            if no_filters:
+                _set_hidden(row, False)
+                continue
+
             visible = True
 
             # A. Check Column Filters
@@ -21716,7 +21767,7 @@ class GenizahGUI(QMainWindow):
                     break
 
             if not visible:
-                self.results_table.setRowHidden(row, True)
+                _set_hidden(row, True)
                 continue
 
             # B. Check List Filter
@@ -21797,18 +21848,16 @@ class GenizahGUI(QMainWindow):
                 if row_sys_id not in _local_visible_sys_ids:
                     visible = False
 
-            self.results_table.setRowHidden(row, not visible)
+            _set_hidden(row, not visible)
 
-        # Update status with visible/total count when any filter is active
-        total = self.results_table.rowCount()
-        visible_count = sum(1 for r in range(total) if not self.results_table.isRowHidden(r))
-        any_filter = (self.results_filters or list_active or has_domain_exclusions
-                      or self._printed_filter_state != 'all' or _has_meas_post
-                      or _local_filter_active)
-        if any_filter and visible_count < total:
-            self.status_label.setText(
-                tr("Showing {} of {} results").format(visible_count, total)
-            )
+        # Rewrite the status whenever the visible set changed -- including
+        # the last filter or exclusion being removed, which leaves no filter
+        # active but a line that still counts the rows it hid.
+        previous_excluded = getattr(self, '_search_rows_excluded', 0)
+        self._search_rows_excluded = excluded_rows
+        if (changed or excluded_rows != previous_excluded) and self.results_table.rowCount():
+            self.status_label.setText(self._search_status_summary())
+        return excluded_rows
 
     def _result_page_num(self, res):
         """The 1-based page a results row is showing, or None.
@@ -22204,7 +22253,9 @@ class GenizahGUI(QMainWindow):
         self.results_table.setColumnHidden(self.COL_SRC, True)
 
         self.load_next_batch()
-        self.status_label.setText(tr("Tag: {} - {} results").format(tag, len(formatted)))
+        # Standing exclusions apply to a tag search too; say so when they hide rows.
+        self.status_label.setText(self._with_search_summary(
+            tr("Tag: {} - {} results").format(tag, len(formatted))))
         # Phase 114 USAGE-03: emit search telemetry for the success path.
         # `tag` and `len(formatted)` are safe; only the bucket is included, not the count (D-04).
         # The tag text itself MUST NOT appear in any prop — only len(formatted) → bucket.
@@ -22678,7 +22729,8 @@ class GenizahGUI(QMainWindow):
         self._apply_results_table_filters()
 
         if self.meta_to_fetch_count == 0:
-            self.status_label.setText(tr("Metadata already loaded for {} items.").format(self.meta_cached_count))
+            self.status_label.setText(self._with_search_summary(
+                tr("Metadata already loaded for {} items.").format(self.meta_cached_count)))
             return
 
         self.meta_loader = ShelfmarkLoaderThread(self.meta_mgr, ids)
@@ -22731,10 +22783,14 @@ class GenizahGUI(QMainWindow):
     def on_meta_finished(self, cancelled):
         total_loaded = self.meta_cached_count + self.meta_progress_current
         total_expected = self.meta_cached_count + self.meta_to_fetch_count
+        # These replace the results summary once metadata completes, so keep
+        # it when rows are hidden.
         if cancelled:
-            self.status_label.setText(tr("Metadata load cancelled. Loaded {}/{}.").format(total_loaded, total_expected))
+            self.status_label.setText(self._with_search_summary(
+                tr("Metadata load cancelled. Loaded {}/{}.").format(total_loaded, total_expected)))
         else:
-            self.status_label.setText(tr("Loaded {} items.").format(total_expected))
+            self.status_label.setText(self._with_search_summary(
+                tr("Loaded {} items.").format(total_expected)))
         self.meta_loader = None
 
     def _format_metadata_status(self):
@@ -22958,8 +23014,9 @@ class GenizahGUI(QMainWindow):
                 res = item.data(Qt.ItemDataRole.UserRole)
                 if res:
                     sorted_results.append(res)
-        if not sorted_results:
-            sorted_results = self.last_results
+        # Empty is an answer: substituting last_results here exported every
+        # result, hidden and excluded ones included. show_full_text_for_result
+        # keeps its own [res] fallback.
         return sorted_results
 
     def _extract_fl_id(self, res):
@@ -24117,6 +24174,10 @@ class GenizahGUI(QMainWindow):
 
         # D-03: emit export dialog open BEFORE the save dialog (no no-data guard here — MEDIUM-8)
         self._emit_feature_opened(dialog_name='export')
+        if not self._collect_sorted_results():
+            QMessageBox.information(self, tr("Export Results"), tr(
+                "Nothing to export: every result in the table is hidden by a filter or an exclusion."))
+            return
         path, _ = QFileDialog.getSaveFileName(self, tr("Export Results"), default_path, selected_filter)
         if not path: return
         # D-03: emit export action AFTER path is chosen (cancelled save → no action emit — MEDIUM-8)
@@ -25831,32 +25892,18 @@ class GenizahGUI(QMainWindow):
         return normalize_shelfmark(shelfmark)
 
     def _rerender_with_exclusions(self):
-        """Hide/show table rows based on current exclusion state (Approach C).
+        """Re-apply the Search tab's Exclude Manuscripts list to the table.
 
-        Iterates existing QTableWidget rows and toggles visibility.
-        Preserves enrichment state (domain badges, printed indicators, etc.)
-        without re-rendering or re-calling on_search_finished.
+        Runs the one visibility pass, which reads the list and keeps every
+        filter (this used to loop over the list alone and showed again every
+        row a filter had hidden). Preserves enrichment state (domain badges,
+        printed indicators, etc.) without re-rendering.
         """
         if not hasattr(self, 'results_table') or self.results_table.rowCount() == 0:
             return
-        hidden_count = 0
-        for row in range(self.results_table.rowCount()):
-            item = self.results_table.item(row, self.COL_CHECKBOX)
-            if not item:
-                continue
-            result = item.data(Qt.ItemDataRole.UserRole)
-            sid = result.get('display', {}).get('id') if result else None
-            should_hide = bool(sid and sid in self.excluded_sys_ids)
-            self.results_table.setRowHidden(row, should_hide)
-            if should_hide:
-                hidden_count += 1
-        # Update status label
-        total = self.results_table.rowCount()
-        visible = total - hidden_count
-        if hidden_count > 0:
-            self.status_label.setText(
-                f"{visible} / {total} {tr('Results')} ({hidden_count} {tr('excluded')})"
-            )
+        self._apply_results_table_filters()
+        # Always, so removing the last exclusion drops the note as well.
+        self.status_label.setText(self._search_status_summary())
 
     def _update_exclusion_display(self, surface='search'):
         """Update ONE surface's exclusion status label (D-07 breakdown).
@@ -30205,7 +30252,8 @@ class GenizahGUI(QMainWindow):
 
         History no longer stores result snapshots (that bloated
         search_history.json and froze the UI). We restore the query, search
-        params, pre-search filters and exclusions, then re-run the search.
+        params, pre-search filters and the domain/printed filters, then
+        re-run the search.
         Legacy entries that still carry a 'results' snapshot are restored
         instantly for backward compatibility.
         """
@@ -30253,8 +30301,9 @@ class GenizahGUI(QMainWindow):
 
         self._domain_exclusions = set(state.get('domain_exclusions', []))
         self._printed_filter_state = state.get('printed_filter', 'all')
-        self.excluded_sys_ids = set(state.get('excluded_sys_ids', []))
-        self.excluded_shelfmarks = set(state.get('excluded_shelfmarks', []))
+        # The Exclude Manuscripts list is NOT taken from the history entry: it
+        # stands until New, like the right-click exclusions, and replacing
+        # only its ids here left the label and the dialog showing another list.
 
         results = state.get('results', [])
         if results:
@@ -30582,6 +30631,35 @@ class GenizahGUI(QMainWindow):
                 # through the same deferral the full restore uses.
                 self._comp_method_deferred = 'passage'
 
+        # The Search surface's manuscript exclusions -- the right-click set
+        # and the Exclude Manuscripts list -- stand until New, across later
+        # searches and restarts (owner, 2026-09-25). They belong to this path,
+        # not to the search replay: a zero-result search followed by a
+        # restart (no data to restore), `restore_mode='never'` and a declined
+        # prompt all return before the replay, and would empty them.
+        raw_word = state.get('word_excluded_sys_ids', [])
+        self.word_excluded_sys_ids = (
+            set(raw_word) if isinstance(raw_word, (list, tuple, set)) else set())
+        self.excluded_sys_ids = set(reg.get('excluded_sys_ids', []))
+        self.excluded_shelfmarks = set(reg.get('excluded_shelfmarks', []))
+        self.excluded_raw_entries = reg.get('excluded_raw_entries', [])
+        # Phase 56: Restore multi-source exclusion state
+        if reg.get('exclusion_sources'):
+            self.exclusion_sources = deserialize_sources(reg['exclusion_sources'])
+            self.excluded_sys_ids = compute_excluded_ids(self.exclusion_sources)
+        elif self.excluded_sys_ids:
+            # Backward compat: wrap old flat set into ExclusionSource
+            self.exclusion_sources = [ExclusionSource(
+                label=tr('Previous session'),
+                source_type='file',
+                source_id='legacy',
+                sys_ids=set(self.excluded_sys_ids),
+                unresolved=list(self.excluded_shelfmarks),
+            )]
+        # The label (SEARCH surface; the composition restore labels its own).
+        # The raw-entry fallback lives inside _update_exclusion_display.
+        self._update_exclusion_display('search')
+
     def _save_session(self):
         """Save current search state to disk for session persistence."""
         from shared.session_persistence import load_session_state, save_session_state
@@ -30855,31 +30933,12 @@ class GenizahGUI(QMainWindow):
             # has_data gate (Phase 96 fix-8) so it applies even when no results.
             # (No-op here; left as comment to preserve history.)
             self._printed_sys_ids = set(reg.get('printed_ids', []))
-            self.excluded_sys_ids = set(reg.get('excluded_sys_ids', []))
-            self.excluded_shelfmarks = set(reg.get('excluded_shelfmarks', []))
-            self.excluded_raw_entries = reg.get('excluded_raw_entries', [])
-            # Phase 56: Restore multi-source exclusion state
-            if reg.get('exclusion_sources'):
-                self.exclusion_sources = deserialize_sources(reg['exclusion_sources'])
-                self.excluded_sys_ids = compute_excluded_ids(self.exclusion_sources)
-            elif self.excluded_sys_ids:
-                # Backward compat: wrap old flat set into ExclusionSource
-                self.exclusion_sources = [ExclusionSource(
-                    label=tr('Previous session'),
-                    source_type='file',
-                    source_id='legacy',
-                    sys_ids=set(self.excluded_sys_ids),
-                    unresolved=list(self.excluded_shelfmarks),
-                )]
+            # The manuscript exclusions (both sets) and their label were
+            # restored by _apply_persistent_session_preferences above, so the
+            # replay below already hides what they exclude.
             self.results_filters = reg.get('results_filters', {})
             self.filter_sources = reg.get('filter_sources', {})
             self.filter_enabled_sources = set(reg.get('filter_enabled_sources', []))
-
-            # Update exclusion status label (SEARCH surface -- the
-            # composition block below restores and labels its own). The
-            # raw-entry fallback now lives inside _update_exclusion_display,
-            # so both surfaces get it.
-            self._update_exclusion_display('search')
 
             # Restore regular search results
             if reg.get('results'):
@@ -31088,7 +31147,6 @@ class GenizahGUI(QMainWindow):
             # Restore pre-search filters (Phase 45-03)
             self.pre_search_filters = state.get('pre_search_filters', {})
             self._post_measurement_filters = state.get('post_measurement_filters', {})
-            self.word_excluded_sys_ids = set(state.get('word_excluded_sys_ids', []))
             if self.pre_search_filters:
                 # Recompute restrict_sys_ids from saved filters.
                 # FINDING 2 (129-07): pass meta_mgr so library restriction is

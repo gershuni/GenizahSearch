@@ -171,6 +171,12 @@ class _Win:
     # handlers this file already drives, and a stand-in would let either call
     # vanish without a test noticing.
     _apply_default_comp_method = APP._apply_default_comp_method
+    # The persistent-preference path also restores the Search tab's standing
+    # exclusions and relabels them.
+    _EXCLUSION_ATTRS = APP._EXCLUSION_ATTRS
+    _EXCLUSION_LABELS = APP._EXCLUSION_LABELS
+    _excl_get = APP._excl_get
+    _update_exclusion_display = APP._update_exclusion_display
 
 
 def _unannounced(w):

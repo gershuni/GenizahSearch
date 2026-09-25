@@ -36,9 +36,10 @@ from PyQt6.QtWidgets import (QApplication, QComboBox, QLabel, QLineEdit,
                              QTableWidget)
 
 import genizah_app as app
+import shared.session_persistence as session_persistence
 from genizah_app import GenizahGUI
 from shared.config import Config
-from shared.exclusion_service import ExclusionSource
+from shared.exclusion_service import ExclusionSource, serialize_sources
 from shared.lists_manager import ListsManager
 
 _APP = QApplication.instance() or QApplication([])
@@ -396,9 +397,12 @@ def test_an_empty_snapshot_is_legacy():
 
 
 def test_the_composition_restore_runs_after_the_search_restore():
-    """The migration reads the search list, so ordering is load-bearing."""
+    """The migration reads the search list, so ordering is load-bearing. The
+    search list is restored with the persistent preferences, which run first."""
+    prefs = _method_source("_apply_persistent_session_preferences")
+    assert "self.exclusion_sources = deserialize_sources(reg['exclusion_sources'])" in prefs
     s = _method_source("_restore_session")
-    reg = s.index("self.exclusion_sources = deserialize_sources(reg['exclusion_sources'])")
+    reg = s.index("self._apply_persistent_session_preferences(state)")
     comp = s.index("self.comp_exclusion_sources = list(")
     assert reg < comp
 
@@ -464,12 +468,14 @@ def test_the_label_fallback_still_writes_only_its_own_surface(labels):
 
 
 def test_the_search_restore_no_longer_hand_rolls_the_fallback():
-    """One fallback, in the shared helper, or the surfaces drift again."""
+    """One fallback, in the shared helper, or the surfaces drift again. The
+    Search label is restored with the Search list, on the persistent path."""
     s = _method_source("_restore_session")
-    assert "self.lbl_main_exclude_status.setText(" not in s, (
+    prefs = _method_source("_apply_persistent_session_preferences")
+    assert "self.lbl_main_exclude_status.setText(" not in s + prefs, (
         "the restore must go through _update_exclusion_display"
     )
-    assert "self._update_exclusion_display('search')" in s
+    assert "self._update_exclusion_display('search')" in prefs
     assert "self._update_exclusion_display('composition')" in s
 
 
@@ -494,6 +500,9 @@ def _personal_state_in_tmp(tmp_path, monkeypatch):
     monkeypatch.setattr(Config, "CONFIG_FILE", str(tmp_path / "config.pkl"))
     monkeypatch.setattr(Config, "LANGUAGE_FILE", str(tmp_path / "lang.pkl"))
     monkeypatch.setattr(ListsManager, "LISTS_FILE", str(tmp_path / "lists.pkl"))
+    # Derived from INDEX_DIR once, at import.
+    monkeypatch.setattr(session_persistence, "HISTORY_FILE",
+                        str(tmp_path / "search_history.json"))
 
 
 @pytest.fixture
@@ -526,11 +535,14 @@ def _res(sid, page):
 class _Meta:
     def __init__(self):
         self.nli_cache = {}
-        self.csv_bank = {A: {}, B: {}, C: {}}
+        self.csv_bank = {sid: {"shelfmark": f"T-S {sid[-3:]}"} for sid in (A, B, C)}
 
     def parse_full_id_components(self, raw_header):
         return {"sys_id": (raw_header or "").split("_")[0], "ie_id": None,
                 "p_num": "1", "fl_id": None}
+
+    def parse_header_smart(self, raw_header):
+        return (raw_header or "").split("_")[0], "1"
 
     def get_meta_for_id(self, sid):
         return (f"T-S {sid[-3:]}", f"title {sid[-3:]}")
@@ -593,6 +605,8 @@ def window(slot_errors, monkeypatch):
     w.last_search_query = "word"
     w.hovered_row = -1
     w.search_thread = None
+    w.searcher = None
+    w.meta_loader = None
     w._pause_search = SimpleNamespace(state="idle", elapsed=lambda t: 1.0)
     w.pre_search_filters = {}
     w.pre_search_restrict_sys_ids = None
@@ -635,6 +649,7 @@ def window(slot_errors, monkeypatch):
     w._update_refinement_strip = lambda: None
     w._update_filter_chip_bar = lambda: None
     w._emit_search_telemetry = lambda *a, **k: None
+    w._emit_pgp_tag_search_telemetry = lambda *a, **k: None
     w._emit_feature_opened = lambda **k: None
     w._apply_pause_state = lambda *a: None
     # Production's enrichment start re-runs the visibility pass
@@ -705,3 +720,381 @@ def test_every_results_menu_action_receives_the_clicked_manuscript(
     _menu_action(w, menus, 1, app.tr(label)).trigger()
     assert calls == [expected], (
         f"{label!r} received {calls!r} for the row of {B}")
+
+
+# --------------------------------------------------------------------------
+# An exclusion hides every row of the manuscript, and nothing brings it back
+# --------------------------------------------------------------------------
+
+tr = app.tr
+EXCLUDED = tr("excluded")
+
+
+def _showing(visible, total, excluded=0):
+    line = tr("Showing {} of {} results").format(visible, total)
+    return line + (f" ({excluded} {EXCLUDED})" if excluded else "")
+
+
+def test_right_click_exclude_hides_every_row_of_the_manuscript(window, menus):
+    w = window
+    _search(w, [_res(A, 1), _res(B, 1), _res(A, 2)])
+    _menu_action(w, menus, _row_of(w, A)[0], tr("Exclude this manuscript")).trigger()
+    assert w.word_excluded_sys_ids == {A}
+    assert _hidden(w, A) == [True, True], "'Exclude this manuscript' left a row of it visible"
+    assert _hidden(w, B) == [False]
+
+
+def test_the_printed_cycle_does_not_bring_an_excluded_row_back(window):
+    w = window
+    _search(w, [_res(A, 1), _res(B, 1)])
+    w._exclude_word_search_result(A, _row_of(w, A)[0])
+    for state in ("hide_printed", "only_printed", "all"):
+        w._open_results_filter_dialog(w.COL_PRINTED)   # the header click
+        assert w._printed_filter_state == state
+        assert _hidden(w, A) == [True], f"excluded row came back at Printed={state}"
+
+
+def test_the_next_batch_load_does_not_bring_an_excluded_row_back(window):
+    w = window
+    w.last_results = [_res(A, 1), _res(B, 1), _res(A, 2), _res(C, 1)]
+    w.load_next_batch(batch_size=2)
+    w._exclude_word_search_result(A, _row_of(w, A)[0])
+    w.load_next_batch(batch_size=2)                     # what scrolling does
+    assert w.results_table.rowCount() == 4
+    assert _hidden(w, A) == [True, True], (
+        "the scroll load showed the excluded row again, or the manuscript's later row")
+    assert w.status_label.text() == _showing(2, 4, excluded=2)
+
+
+def test_an_exclusion_holds_across_searches_until_new(window):
+    w = window
+    _search(w, [_res(A, 1), _res(B, 1)])
+    w._exclude_word_search_result(A, _row_of(w, A)[0])
+
+    _search(w, [_res(C, 1), _res(A, 5), _res(B, 2)])   # a later search (owner ruling)
+    assert _hidden(w, A) == [True], "a later search showed a manuscript excluded in an earlier one"
+    assert w.status_label.text() == _showing(2, 3, excluded=1), (
+        "the later search hides a row and its status line does not say so")
+
+    w._reset_search()                                   # New
+    assert w.word_excluded_sys_ids == set()
+    _search(w, [_res(A, 1)])
+    assert _hidden(w, A) == [False], "New must end the exclusion"
+    assert w.status_label.text() == _showing(1, 1)
+
+
+def test_the_status_counts_visible_rows_with_a_filter_and_an_exclusion(window):
+    w = window
+    w._printed_sys_ids = {C}
+    w._printed_filter_state = "hide_printed"
+    w.excluded_sys_ids = {A}
+    _search(w, [_res(A, 1), _res(B, 1), _res(C, 1)])
+    assert _hidden(w, A) == [True] and _hidden(w, C) == [True]
+    assert w.status_label.text() == _showing(1, 3, excluded=1), (
+        "the first number must be the rows the table shows")
+
+
+# --------------------------------------------------------------------------
+# The Search tab's Exclude Manuscripts list
+# --------------------------------------------------------------------------
+
+def test_editing_the_exclude_list_keeps_filtered_rows_hidden(window):
+    w = window
+    _search(w, [_res(A, 1), _res(B, 1), _res(C, 1)])
+    w._printed_sys_ids = {C}
+    w._open_results_filter_dialog(w.COL_PRINTED)        # hide_printed: C hidden
+    assert _hidden(w, C) == [True]
+    w.excluded_sys_ids = {A}
+    w._rerender_with_exclusions()                       # the dialog's OK
+    assert _hidden(w, A) == [True]
+    assert _hidden(w, C) == [True], "the exclude-list re-render showed a Printed-filtered row again"
+
+
+def test_the_exclude_list_applies_to_the_next_search(window):
+    w = window
+    w.excluded_sys_ids = {B}
+    _search(w, [_res(A, 1), _res(B, 1)])
+    assert _hidden(w, B) == [True], "the Search tab's Exclude list did not apply to a new search"
+
+
+def test_removing_the_last_exclusion_rewrites_the_status(window):
+    w = window
+    _search(w, [_res(A, 1), _res(B, 1)])
+    w.exclusion_sources = [_src("lst", {A})]
+    w.excluded_sys_ids = {A}
+    w._rerender_with_exclusions()                       # the dialog's OK
+    assert w.status_label.text() == _showing(1, 2, excluded=1)
+    w._remove_exclusion_source("lst", "search")         # and its per-source remove
+    assert _hidden(w, A) == [False]
+    assert w.status_label.text() == _showing(2, 2), (
+        "the status still counts an exclusion that no longer exists")
+
+
+# --------------------------------------------------------------------------
+# The other passes and status writers
+# --------------------------------------------------------------------------
+
+def test_domain_enrichment_does_not_bring_an_excluded_row_back(window):
+    w = window
+    w._domain_exclusions = {"Liturgy"}                  # remembered across searches
+    _search(w, [_res(A, 1), _res(B, 1)])
+    w._exclude_word_search_result(A, _row_of(w, A)[0])
+    w._on_domain_enrichment_loaded({A: [{"domain": "Bible"}], B: [{"domain": "Liturgy"}]})
+    assert _hidden(w, B) == [True]
+    assert _hidden(w, A) == [True], "domain enrichment showed the excluded manuscript again"
+
+
+def test_clearing_the_domain_filter_keeps_exclusions_and_says_so(window):
+    w = window
+    _search(w, [_res(A, 1), _res(B, 1), _res(C, 1)])
+    w._exclude_word_search_result(A, _row_of(w, A)[0])
+    w._has_result_domains = True
+    w._domain_exclusions = set()                        # the Domain dialog, cleared
+    w._apply_domain_exclusions()
+    assert _hidden(w, A) == [True]
+    assert w.status_label.text() == _showing(2, 3, excluded=1)
+
+
+def test_a_tag_search_says_that_exclusions_hide_rows(window, monkeypatch):
+    import shared.document_service as ds
+    import shared.transcription_service as ts
+    monkeypatch.setattr(ts, "get_sys_ids_with_manual_transcriptions", lambda ids: set())
+    monkeypatch.setattr(ds, "get_pgp_urls_for_pgpids", lambda ids: {})
+    w = window
+    w.word_excluded_sys_ids = {A}                       # standing, from an earlier search
+    w._on_tag_search_results("letters", [{"sys_id": A, "pgpid": 1},
+                                         {"sys_id": B, "pgpid": 2}])
+    assert _hidden(w, A) == [True]
+    assert w.status_label.text() == (
+        tr("Tag: {} - {} results").format("letters", 2) + " " + _showing(1, 2, excluded=1))
+
+
+def test_the_all_terms_rerender_keeps_the_excluded_note(window, monkeypatch):
+    w = window
+    _search(w, [_res(A, 1), _res(B, 1), _res(C, 1)])
+    w._exclude_word_search_result(A, _row_of(w, A)[0])
+    monkeypatch.setattr(app, "compute_all_terms_filter",
+                        lambda chain: {f"{A}_1", f"{B}_1"})
+    monkeypatch.setattr(app, "enrich_snippet_with_chain_terms", lambda s, c, q: s)
+    w.refinement_chain = [object(), object()]
+    w._all_terms_filter = True
+    w._apply_all_terms_filter_and_rerender()
+    assert _hidden(w, A) == [True]
+    assert w.status_label.text() == (
+        _showing(1, 3, excluded=1) + f" ({tr('Only results with all terms')})")
+
+
+def test_the_responsa_warning_timer_writes_an_honest_line(window, monkeypatch):
+    timers = []
+    monkeypatch.setattr(app.QTimer, "singleShot",
+                        staticmethod(lambda ms, fn: timers.append((ms, fn))))
+    w = window
+    w.word_excluded_sys_ids = {A}
+    first = dict(_res(A, 1), responsa_warning="too many terms")
+    _search(w, [first, _res(B, 1)])
+    [restore_status] = [fn for ms, fn in timers if ms == 5000]
+    restore_status()
+    assert w.status_label.text() == _showing(1, 2, excluded=1)
+
+
+@pytest.mark.parametrize("finish", ["loaded", "cancelled", "already loaded"])
+def test_metadata_completion_keeps_the_summary_when_rows_are_hidden(window, finish):
+    w = window
+    _search(w, [_res(A, 1), _res(B, 1)])
+    w._exclude_word_search_result(A, _row_of(w, A)[0])
+    if finish == "already loaded":
+        w.meta_mgr.nli_cache = {A: {}, B: {}}
+        w.start_metadata_loading([A, B])
+        message = tr("Metadata already loaded for {} items.").format(2)
+    else:
+        w.meta_cached_count, w.meta_to_fetch_count, w.meta_progress_current = 0, 2, 2
+        w.on_meta_finished(finish == "cancelled")
+        message = (tr("Metadata load cancelled. Loaded {}/{}.").format(2, 2)
+                   if finish == "cancelled" else tr("Loaded {} items.").format(2))
+    assert w.status_label.text() == message + " " + _showing(1, 2, excluded=1), (
+        "metadata completion replaced the line that says rows are hidden")
+
+
+@pytest.mark.parametrize("writer", ["restore finished", "restore failed", "replay"])
+def test_a_refinement_replay_leaves_the_summary_not_a_blank(window, monkeypatch, writer):
+    w = window
+    _search(w, [_res(A, 1), _res(B, 1)])
+    w._exclude_word_search_result(A, _row_of(w, A)[0])
+    if writer == "restore finished":
+        w._on_replay_for_restore_finished(set())
+    elif writer == "restore failed":
+        w._on_replay_for_restore_error("boom")
+    else:
+        monkeypatch.setattr(app, "replay_chain", lambda chain, searcher, scope: set())
+        w._replay_refinement_chain()
+    assert w.status_label.text() == _showing(1, 2, excluded=1)
+
+
+# --------------------------------------------------------------------------
+# A history click keeps the standing Exclude list
+# --------------------------------------------------------------------------
+
+_HISTORY = {"domain_exclusions": [], "printed_filter": "all"}
+
+
+def test_a_history_click_does_not_drop_the_current_exclude_list(window):
+    w = window
+    w.exclusion_sources = [_src("my list", {B})]
+    w.excluded_sys_ids = {B}
+    w._update_exclusion_display("search")
+    label = w.lbl_main_exclude_status.text()
+    w._restore_regular_search_from_state(dict(_HISTORY, excluded_sys_ids=[]), entry=None)
+    _search(w, [_res(A, 1), _res(B, 1)])
+    assert w.excluded_sys_ids == {B}, "the history entry replaced the Exclude list"
+    assert _hidden(w, B) == [True]
+    assert w.lbl_main_exclude_status.text() == label
+
+
+def test_a_history_click_does_not_install_an_old_exclude_list(window):
+    w = window
+    w._restore_regular_search_from_state(dict(_HISTORY, excluded_sys_ids=[B]), entry=None)
+    _search(w, [_res(A, 1), _res(B, 1)])
+    assert w.excluded_sys_ids == set(), (
+        "the history entry installed ids the label and the dialog know nothing of")
+    assert _hidden(w, B) == [False]
+
+
+# --------------------------------------------------------------------------
+# The exclusions survive every kind of restart
+# --------------------------------------------------------------------------
+
+class _Records(list):
+    def handle(self, record):
+        self.append(record)
+
+
+def _session_state(results=()):
+    return {
+        "version": 1,
+        "regular_search": {
+            "query": "word",
+            "results": list(results),
+            "excluded_sys_ids": [B],
+            "excluded_raw_entries": [B],
+            "exclusion_sources": serialize_sources([_src("my list", {B})]),
+        },
+        "composition_search": {},
+        "word_excluded_sys_ids": [A],
+    }
+
+
+@pytest.fixture
+def restore(window, monkeypatch):
+    """Runs the real _restore_session over `state`. It logs and swallows its
+    own exceptions, so a harness gap would pass silently: fail on any."""
+    import logging
+    w = window
+    for name in ("_update_local_filter_btn_search", "_update_local_filter_btn_composition",
+                 "_update_local_filter_btn_parallels", "_honour_deferred_comp_method",
+                 "_apply_default_comp_method", "_refresh_search_history",
+                 "_refresh_comp_history"):
+        setattr(w, name, lambda *a, **k: None)
+    w._restore_comp_passage_preferences = lambda comp, absent_method=None: None
+    w._passage_snapshot_must_wait = lambda comp: False
+    w._display_restored_comp_snapshot = lambda comp: False
+    records = _Records()
+    handler = logging.Handler(level=logging.ERROR)
+    handler.emit = records.handle
+    app.logger.addHandler(handler)
+
+    def run(state, restore_mode, answer=None):
+        monkeypatch.setattr(app, "load_app_config", lambda: {"restore_mode": restore_mode})
+        monkeypatch.setattr(session_persistence, "load_session_state", lambda: state)
+        if answer is not None:
+            monkeypatch.setattr(app.QMessageBox, "exec", lambda self: answer)
+        w._restore_session()
+        assert not records, [r.getMessage() for r in records]
+        return w
+
+    yield run
+    app.logger.removeHandler(handler)
+
+
+@pytest.mark.parametrize("case", ["zero-result search", "restore_mode never", "declined"])
+def test_both_exclusion_sets_and_the_label_survive_a_restart(restore, case):
+    if case == "zero-result search":
+        w = restore(_session_state(results=()), "ask")          # nothing to restore
+    elif case == "restore_mode never":
+        w = restore(_session_state(results=[_res(A, 1)]), "never")
+    else:
+        w = restore(_session_state(results=[_res(A, 1)]), "ask",
+                    answer=app.QMessageBox.StandardButton.No)
+    assert w.word_excluded_sys_ids == {A}, "the right-click exclusion did not survive the restart"
+    assert w.excluded_sys_ids == {B}, "the Exclude Manuscripts list did not survive the restart"
+    assert "1" in w.lbl_main_exclude_status.text(), "the Exclude label says nothing is excluded"
+    _search(w, [_res(A, 1), _res(B, 1), _res(C, 1)])
+    assert _hidden(w, A) == [True] and _hidden(w, B) == [True]
+    assert w.status_label.text() == _showing(1, 3, excluded=2)
+
+
+def test_a_restored_search_hides_what_the_restored_exclusions_exclude(restore):
+    w = restore(_session_state(results=[_res(A, 1), _res(B, 1), _res(C, 1)]), "always")
+    assert _hidden(w, A) == [True], "the replay ran before the right-click set was restored"
+    assert _hidden(w, B) == [True], "the replay ignored the Exclude Manuscripts list"
+    assert _hidden(w, C) == [False]
+
+
+# --------------------------------------------------------------------------
+# Export
+# --------------------------------------------------------------------------
+
+NOTHING_TO_EXPORT = ("Nothing to export: every result in the table is hidden "
+                     "by a filter or an exclusion.")
+
+
+def _all_hidden(w):
+    _search(w, [_res(A, 1), _res(B, 1), _res(A, 2)])
+    for r in range(w.results_table.rowCount()):
+        w.results_table.setRowHidden(r, True)
+    return w
+
+
+def test_the_collector_returns_nothing_when_every_row_is_hidden(window):
+    w = _all_hidden(window)
+    assert w._collect_sorted_results() == [], (
+        "an empty visible set was replaced by every result, excluded ones included")
+
+
+def test_export_with_every_row_hidden_says_so_and_writes_nothing(window, monkeypatch, tmp_path):
+    w = window
+    _search(w, [_res(A, 1), _res(B, 1)])
+    w._exclude_word_search_result(A, _row_of(w, A)[0])
+    w._exclude_word_search_result(B, _row_of(w, B)[0])
+    saves, infos = [], []
+    monkeypatch.setattr(app.QFileDialog, "getSaveFileName",
+                        staticmethod(lambda *a, **k: saves.append(a) or ("", "")))
+    monkeypatch.setattr(app.QMessageBox, "information",
+                        staticmethod(lambda *a, **k: infos.append(a)))
+    w._default_report_path = lambda q, name: str(tmp_path / "never.xlsx")
+    w.export_results("csv")
+    assert saves == [], "offered to save an export of a table whose every row is hidden"
+    assert [a[2] for a in infos] == [tr(NOTHING_TO_EXPORT)], "no message saying why nothing was exported"
+
+
+def test_the_nothing_to_export_message_has_a_hebrew_translation():
+    from shared.genizah_translations import TRANSLATIONS
+    assert TRANSLATIONS.get(NOTHING_TO_EXPORT), "user-visible string without a Hebrew entry"
+
+
+# Guards (green before and after): the collector's other caller, and a partial view.
+
+def test_view_result_still_opens_the_clicked_result_when_every_row_is_hidden(window):
+    w = _all_hidden(window)
+    opened = []
+    w._show_result_dialog = lambda results, idx: opened.append((results, idx))
+    res = w.last_results[1]
+    w.show_full_text_for_result(res)
+    [(results, idx)] = opened
+    assert results[idx] is res
+
+
+def test_the_collector_returns_exactly_the_visible_rows(window):
+    w = window
+    _search(w, [_res(A, 1), _res(B, 1), _res(C, 1)])
+    w.results_table.setRowHidden(_row_of(w, B)[0], True)
+    assert [r["display"]["id"] for r in w._collect_sorted_results()] == [A, C]
