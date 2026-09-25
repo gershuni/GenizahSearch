@@ -2,7 +2,8 @@
 would notice if it drifted. These checks pin the parts a later edit is most likely to break:
 the migration installs all four guards in one transaction, the provisioning scripts do not
 recreate the any-status correction DELETE policy, and the verification script still runs
-every check inside a transaction it never commits.
+every check inside a transaction it never commits, and that editing endorsed content
+(a pinned or featured discovery, a confirmed join) removes the endorsement.
 """
 import re
 from pathlib import Path
@@ -99,4 +100,14 @@ def test_verification_never_commits_and_keeps_all_its_checks():
     assert statements[0] == "begin" and statements[-1] == "rollback"
     assert "commit" not in statements and "end" not in statements
     names = re.findall(r"^select pg_temp\.check_as\('([A-Z]\d+[a-z]?) ", sql, re.M)
-    assert len(names) == 68 and len(set(names)) == 68
+    assert len(names) == 74 and len(set(names)) == 74
+
+
+def test_editing_endorsed_content_removes_the_endorsement():
+    sql = _sql(MIGRATION)
+    _, discovery = _function_parts(sql, "guard_discovery_privileges")
+    assert "new.is_pinned := false" in discovery and "new.status := 'active'" in discovery
+    _, join = _function_parts(sql, "guard_fragment_join_privileges")
+    assert "new.status := 'proposed'" in join and "new.confirmed_by := null" in join
+    for column in ("fragment_a_sys_id", "fragment_b_sys_id", "join_type", "confidence", "evidence"):
+        assert f"'{column}'" in join, column

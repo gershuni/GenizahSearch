@@ -15,7 +15,8 @@ expected). No app change.
   (`migrations/add_privileged_column_guards.sql`) now decide which values a signed-in client may
   write, instead of the apps alone: roles and reputation are admin-only; a reviewed correction is
   frozen; pinning, un-hiding, closing and featuring discoveries and confirming joins are
-  admin-only.
+  admin-only; editing a pinned or featured discovery, or what a confirmed join asserts, removes
+  the endorsement.
 - Corrections can be deleted only as drafts (by their author) or by an admin.
 - `scripts/fix_rls_policies.sql` no longer recreates the any-status delete policy, and
   `supabase_setup.sql` points to the migration.

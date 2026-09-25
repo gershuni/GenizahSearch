@@ -27,9 +27,13 @@
 --   discoveries     INSERT: not hidden, not pinned, status active (NULLs filled).
 --                   UPDATE: no pin changes; the author may hide their own row
 --                   (the desktop soft delete) but not un-hide it; status only
---                   between active and answered.
+--                   between active and answered. Editing the content of a
+--                   pinned or featured discovery removes the pin / the
+--                   featured status.
 --   fragment_joins  INSERT: status proposed (NULL filled), no confirmation
---                   fields. UPDATE: status / confirmed_by / confirmed_at fixed.
+--                   fields. UPDATE: status / confirmed_by / confirmed_at fixed;
+--                   changing the fragments, type, confidence or evidence of a
+--                   confirmed or rejected join returns it to proposed.
 --
 -- Rollback (keep guard_profile_privileges in place):
 --   drop trigger if exists guard_correction_privileges on public.corrections;
@@ -273,6 +277,22 @@ begin
     end if;
   end if;
 
+  -- A pin or a featured status is an admin's endorsement of the CONTENT. If the
+  -- author changes the content (anything but the counters, the flags guarded
+  -- above and the answered state), the endorsement comes off; an admin can put
+  -- it back after looking.
+  if (coalesce(old.is_pinned, false) or coalesce(old.status, '') = 'featured')
+     and (to_jsonb(new) - array['updated_at', 'upvotes', 'downvotes', 'view_count', 'is_answered',
+                                'status', 'is_hidden', 'is_pinned'])
+         is distinct from
+         (to_jsonb(old) - array['updated_at', 'upvotes', 'downvotes', 'view_count', 'is_answered',
+                                'status', 'is_hidden', 'is_pinned']) then
+    new.is_pinned := false;
+    if coalesce(old.status, '') = 'featured' then
+      new.status := 'active';
+    end if;
+  end if;
+
   return new;
 end;
 $$;
@@ -319,6 +339,22 @@ begin
      or new.confirmed_by is distinct from old.confirmed_by
      or new.confirmed_at is distinct from old.confirmed_at then
     raise exception 'not authorized to set this value' using errcode = '42501';
+  end if;
+
+  -- A confirmation (or rejection) is a decision about THIS pair of fragments.
+  -- If the owner changes what the join asserts, it goes back to proposed.
+  -- Notes are commentary and do not reset it.
+  if old.status in ('confirmed', 'rejected')
+     and (select jsonb_object_agg(k, to_jsonb(new) -> k)
+            from unnest(array['fragment_a_sys_id', 'fragment_a_shelfmark', 'fragment_b_sys_id',
+                              'fragment_b_shelfmark', 'join_type', 'confidence', 'evidence']) as k)
+         is distinct from
+         (select jsonb_object_agg(k, to_jsonb(old) -> k)
+            from unnest(array['fragment_a_sys_id', 'fragment_a_shelfmark', 'fragment_b_sys_id',
+                              'fragment_b_shelfmark', 'join_type', 'confidence', 'evidence']) as k) then
+    new.status := 'proposed';
+    new.confirmed_by := null;
+    new.confirmed_at := null;
   end if;
 
   return new;

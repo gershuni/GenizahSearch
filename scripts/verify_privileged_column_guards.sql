@@ -6,7 +6,7 @@
 --
 -- It picks four real profiles (an admin and three others, which it makes a
 -- plain user, a reviewer and an editor inside its own transaction), creates
--- fixture rows with known states, and runs 68 checks as PostgREST would
+-- fixture rows with known states, and runs 74 checks as PostgREST would
 -- (SET ROLE authenticated / anon plus request.jwt.claims). Each check runs in
 -- its own sub-transaction that is always undone. Outcomes: BLOCKED (SQLSTATE
 -- 42501 from a guard or an RLS WITH CHECK), NO ROWS (RLS filtered the row),
@@ -98,6 +98,15 @@ begin
   values ((select id from who where label = 'plain'), 'RLS-VERIFY-A', 'RLS-VERIFY-B', 'proposed');
   insert into fx select 'j_plain', max(id) from public.fragment_joins
    where fragment_a_sys_id = 'RLS-VERIFY-A' and user_id = (select id from who where label = 'plain');
+  -- endorsed rows: a pinned and a featured discovery, a confirmed join
+  perform pg_temp.fx_discovery('d_pinned_plain',   'plain', false, 'active');
+  perform pg_temp.fx_discovery('d_featured_plain', 'plain', false, 'featured');
+  update public.discoveries set is_pinned = true where id = (select id from fx where name = 'd_pinned_plain');
+  insert into public.fragment_joins (user_id, fragment_a_sys_id, fragment_b_sys_id, status, confirmed_by, confirmed_at)
+  values ((select id from who where label = 'plain'), 'RLS-VERIFY-D', 'RLS-VERIFY-E', 'confirmed',
+          (select id from who where label = 'admin'), now());
+  insert into fx select 'j_confirmed_plain', max(id) from public.fragment_joins
+   where fragment_a_sys_id = 'RLS-VERIFY-D' and user_id = (select id from who where label = 'plain');
 end $$;
 
 -- ---------------------------------------------------------------- the runner
@@ -298,6 +307,15 @@ select pg_temp.check_as('D10 user reopens own closed discovery', 'plain', 'BLOCK
   $q$update public.discoveries set status = 'active' where id = {d_closed_plain}$q$);
 select pg_temp.check_as('D11 user edits own discovery text', 'plain', 'ALLOWED',
   $q$update public.discoveries set content = 'edited' where id = {d_visible_plain}$q$);
+select pg_temp.check_as('D14 user edits the text of own pinned discovery: pin comes off', 'plain', 'ALLOWED',
+  $q$update public.discoveries set content = 'rewritten' where id = {d_pinned_plain}$q$,
+  $v$select is_pinned = false from public.discoveries where id = {d_pinned_plain}$v$);
+select pg_temp.check_as('D15 user edits the text of own featured discovery: back to active', 'plain', 'ALLOWED',
+  $q$update public.discoveries set title = 'rewritten' where id = {d_featured_plain}$q$,
+  $v$select status = 'active' and is_pinned = false from public.discoveries where id = {d_featured_plain}$v$);
+select pg_temp.check_as('D16 user marks own pinned discovery answered: stays pinned', 'plain', 'ALLOWED',
+  $q$update public.discoveries set status = 'answered' where id = {d_pinned_plain}$q$,
+  $v$select is_pinned = true from public.discoveries where id = {d_pinned_plain}$v$);
 select pg_temp.check_as('D12 user hides someone else''s discovery', 'plain', 'NO ROWS',
   $q$update public.discoveries set is_hidden = true where id = {d_visible_other}$q$);
 select pg_temp.check_as('D13 admin pins a user''s discovery', 'admin', 'ALLOWED',
@@ -321,6 +339,15 @@ select pg_temp.check_as('F4 user sets confirmed_by on own join', 'plain', 'BLOCK
   $q$update public.fragment_joins set confirmed_by = {me} where id = {j_plain}$q$);
 select pg_temp.check_as('F4b user sets confirmed_at on own join', 'plain', 'BLOCKED',
   $q$update public.fragment_joins set confirmed_at = now() where id = {j_plain}$q$);
+select pg_temp.check_as('F7 user changes a fragment of own confirmed join: back to proposed', 'plain', 'ALLOWED',
+  $q$update public.fragment_joins set fragment_b_sys_id = 'RLS-VERIFY-F' where id = {j_confirmed_plain}$q$,
+  $v$select status = 'proposed' and confirmed_by is null and confirmed_at is null from public.fragment_joins where id = {j_confirmed_plain}$v$);
+select pg_temp.check_as('F8 user changes the join type of own confirmed join: back to proposed', 'plain', 'ALLOWED',
+  $q$update public.fragment_joins set join_type = case when join_type = 'physical' then 'content' else 'physical' end where id = {j_confirmed_plain}$q$,
+  $v$select status = 'proposed' from public.fragment_joins where id = {j_confirmed_plain}$v$);
+select pg_temp.check_as('F9 user edits the notes of own confirmed join: stays confirmed', 'plain', 'ALLOWED',
+  $q$update public.fragment_joins set notes = 'edited' where id = {j_confirmed_plain}$q$,
+  $v$select status = 'confirmed' and confirmed_by is not null from public.fragment_joins where id = {j_confirmed_plain}$v$);
 select pg_temp.check_as('F5 user edits own join notes', 'plain', 'ALLOWED',
   $q$update public.fragment_joins set notes = 'edited' where id = {j_plain}$q$);
 select pg_temp.check_as('F6 admin confirms a user''s join', 'admin', 'ALLOWED',

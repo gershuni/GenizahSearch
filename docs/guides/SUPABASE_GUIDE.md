@@ -419,8 +419,8 @@ The policies above check only who owns a row. Which VALUES a client may write is
 |---|---|
 | `profiles` | `role` and `reputation` never change; an insert is role `user`, reputation 0 |
 | `corrections` | insert as draft or pending (approved only by an editor); a reviewed row is frozen (vote counters excepted); an author only submits a draft; review stamps only with a review of someone else's row |
-| `discoveries` | no pinning; the author may hide their own row (the desktop soft delete) but not un-hide it; status only active <-> answered; inserts start unhidden, unpinned, active |
-| `fragment_joins` | `status`, `confirmed_by`, `confirmed_at` never change; inserts start proposed |
+| `discoveries` | no pinning; the author may hide their own row (the desktop soft delete) but not un-hide it; status only active <-> answered; inserts start unhidden, unpinned, active; editing the content of a pinned or featured discovery removes the pin / featured status |
+| `fragment_joins` | `status`, `confirmed_by`, `confirmed_at` never change; inserts start proposed; changing the fragments, type, confidence or evidence of a confirmed or rejected join returns it to proposed (notes do not) |
 
 Exempt: admins (their own profile has role `admin`) and any caller whose `current_user` is not
 `anon`/`authenticated` -- the SQL editor, `service_role`, and SECURITY DEFINER functions such as
@@ -429,7 +429,7 @@ caller's role itself**, because the guards step aside for it.
 
 - **Verify:** `scripts/verify_privileged_column_guards.sql` (paste into the SQL editor; choose "Run
   without RLS" if warned -- its tables are temporary). It ends in a `VERIFY RESULTS` error by design;
-  a pass is 0 skipped and all 68 checks as expected.
+  a pass is 0 skipped and all 74 checks as expected.
 - **Roll back:** the drop statements at the top of the migration. Keep `guard_profile_privileges`.
 - **Changing a rule:** edit the migration's function, re-run the whole file (it is idempotent and
   one transaction), then re-run the verification.
