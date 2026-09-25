@@ -1294,22 +1294,25 @@ class _IdleSearchThread:
         return False
 
 
-def _start_a_search_that_never_lands(w, monkeypatch):
-    """The real start_search, with a worker that delivers nothing."""
-    monkeypatch.setattr(app, "SearchThread", _IdleSearchThread)
+def _start_a_search_that_never_lands(w, monkeypatch, thread_cls=_IdleSearchThread):
+    """The real start_search, with a worker that delivers nothing (unless
+    the test makes it)."""
+    monkeypatch.setattr(app, "SearchThread", thread_cls)
     w.searcher = SimpleNamespace(parse_query_syntax=lambda q, responsa_mode=False: (None, q))
-    w.mode_combo.addItems(["literal"] * 8)
+    if w.mode_combo.count() == 0:
+        w.mode_combo.addItems(["literal"] * 8)
     w.mode_combo.setCurrentIndex(0)
     w.MODE_RESPONSA, w.MODE_PGP_TAGS = 2, 7         # set by the UI builder
     w.gap_input, w.exclude_input = QLineEdit(), QLineEdit()
     w.text_position_combo = QComboBox()
     w.btn_lab_mode_toggle, w.search_within_btn = QPushButton(), QPushButton()
-    w._run_seq = 0
+    w._run_seq = getattr(w, "_run_seq", 0)
     w._pause_search.reset_for_run = lambda run_id, now: None
     w.query_input.setText("other")
     w.start_search()
     w._search_elapsed_timer.stop()
     assert w.results_table.rowCount() == 0 and w.is_searching
+    return w.search_thread
 
 
 def test_load_more_is_hidden_while_a_search_runs(load_more, monkeypatch):
@@ -1357,6 +1360,126 @@ def test_the_all_terms_view_shows_nothing_after_a_search_that_failed(load_more, 
     w.on_error("bad pattern")
     w._toggle_all_terms_filter(True)
     assert w.results_table.rowCount() == 0, "the all-terms view rendered the previous run's rows"
+
+
+# --- New discards the run it stops -------------------------------------------
+
+class _QueuedSignal:
+    """A worker signal whose emission the test delivers when it chooses --
+    as Qt delivers a queued one, after the call that cancelled the run has
+    returned."""
+
+    def __init__(self):
+        self.slots = []
+
+    def connect(self, fn):
+        self.slots.append(fn)
+
+    def disconnect(self):
+        self.slots = []
+
+    def deliver(self, *args):
+        for fn in list(self.slots):
+            fn(*args)
+
+
+class _RunningSearchThread:
+    """Mid-run until cancelled. A cancelled search still hands back what it
+    found so far, which is what Stop shows as partial results."""
+
+    def __init__(self, *a, **k):
+        self.results_signal = _QueuedSignal()
+        self.progress_signal = _QueuedSignal()
+        self.status_signal = _QueuedSignal()
+        self.error_signal = _QueuedSignal()
+        self.running = False
+
+    def start(self):
+        self.running = True
+
+    def isRunning(self):
+        return self.running
+
+    def request_cancel(self):
+        self.running = False
+
+    def wait(self, *a):
+        return True
+
+    def terminate(self):
+        self.running = False
+
+
+@pytest.mark.parametrize("queued", ["results", "an error", "a status line"])
+def test_new_drops_what_the_run_it_stopped_still_delivers(load_more, monkeypatch, queued):
+    """The rows rendered under the cleared query box, and the debounced save
+    they scheduled overwrote the cleared session New had just written."""
+    w = load_more
+    saves, errors = [], []
+    w._schedule_session_save = lambda: saves.append("debounced")
+    monkeypatch.setattr(app.QMessageBox, "critical",
+                        staticmethod(lambda *a, **k: errors.append(a)))
+    run = _start_a_search_that_never_lands(w, monkeypatch, _RunningSearchThread)
+    w._reset_search()                                   # New
+    assert not run.isRunning()
+    if queued == "results":
+        run.results_signal.deliver(_rows(B, 5))         # the partial results
+    elif queued == "an error":
+        run.error_signal.deliver("bad pattern")
+    else:
+        run.status_signal.deliver("Scanning chunks...")
+    assert w.results_table.rowCount() == 0, "the stopped run's rows rendered after New"
+    assert w.last_results == [] and w.query_input.text() == ""
+    assert w.status_label.text() == tr("Ready.")
+    assert errors == [], "the stopped run's error was shown after New"
+    assert saves == [], "a save was scheduled over the session New cleared"
+
+    later = _start_a_search_that_never_lands(w, monkeypatch, _RunningSearchThread)
+    later.results_signal.deliver(_rows(B, 3))           # the next search lands as ever
+    assert w.results_table.rowCount() == 3 and len(w.last_results) == 3
+    assert saves == ["debounced"]
+
+
+def test_stop_still_shows_the_partial_results_of_the_run_it_stopped(load_more, monkeypatch):
+    """Dropping them is New's alone."""
+    w = load_more
+    run = _start_a_search_that_never_lands(w, monkeypatch, _RunningSearchThread)
+    w.stop_search()
+    run.results_signal.deliver(_rows(B, 3))
+    assert w.results_table.rowCount() == 3 and len(w.last_results) == 3
+
+
+class _QueuedTagWorker:
+    def __init__(self, tag):
+        self.finished = _QueuedSignal()
+
+    def start(self):
+        pass
+
+    def isRunning(self):
+        return False
+
+
+def test_new_drops_a_tag_search_that_lands_after_it(load_more, monkeypatch):
+    import shared.document_service as ds
+    import shared.transcription_service as ts
+    monkeypatch.setattr(ts, "get_sys_ids_with_manual_transcriptions", lambda ids: set())
+    monkeypatch.setattr(ds, "get_pgp_urls_for_pgpids", lambda ids: {})
+    monkeypatch.setattr(app, "PGPTagSearchWorker", _QueuedTagWorker)
+    w = load_more
+    w.tag_search_combo = QComboBox()
+    w.tag_search_combo.addItem("letters", "letters")
+    w._pgp_tag_search_worker = None
+    w._execute_tag_search()
+    run = w._pgp_tag_search_worker
+    w._reset_search()                                   # New, while the tag loads
+    run.finished.deliver("letters", [{"sys_id": A, "pgpid": 1}])
+    assert w.results_table.rowCount() == 0, "the tag search rendered after New"
+    assert w.status_label.text() == tr("Ready.")
+
+    w._execute_tag_search()
+    w._pgp_tag_search_worker.finished.deliver("letters", [{"sys_id": A, "pgpid": 1}])
+    assert w.results_table.rowCount() == 1
 
 
 def test_a_click_is_checked_again_and_loads_nothing_while_a_search_runs(load_more):

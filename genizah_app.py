@@ -1506,6 +1506,9 @@ class GenizahGUI(QMainWindow):
         self._run_seq = 0
         self._pause_search = _PauseCtx()
         self._pause_comp = _PauseCtx()
+        # Advanced by each tab's New; see _deliver_unless_discarded.
+        self._search_new_generation = 0
+        self._comp_new_generation = 0
         self.last_browse_field = None
         self.current_browse_sid = None
         self.current_browse_p = None
@@ -19931,6 +19934,28 @@ class GenizahGUI(QMainWindow):
         self._revalidate_comp_method()
         self._save_session()
 
+    def _deliver_unless_discarded(self, attr, generation, slot, *args):
+        """Pass a search worker's signal to `slot` unless New discarded its run.
+
+        A cancelled worker still delivers what it found so far -- Stop shows
+        that as partial results. When New cancels one, that delivery is
+        already queued by the time New returns, and it rendered the stopped
+        run's rows under the cleared query box and scheduled a session save
+        over the cleared session New had just written. New advances `attr`
+        (`_search_new_generation` or `_comp_new_generation`); each slot
+        carries the value its run started under. Stop does not advance it.
+        """
+        if generation != getattr(self, attr, 0):
+            logger.info("dropped a signal from a run that New discarded")
+            return
+        slot(*args)
+
+    def _discardable(self, attr, slot):
+        """`slot` for a worker signal, bound to the New generation current
+        NOW -- call it where the run starts. See _deliver_unless_discarded."""
+        generation = getattr(self, attr, 0)
+        return lambda *args: self._deliver_unless_discarded(attr, generation, slot, *args)
+
     def _drain_previous_worker(self, attr, ctx):
         """Refuse to rebind a worker slot while the old worker is still alive.
 
@@ -20137,18 +20162,21 @@ class GenizahGUI(QMainWindow):
                 _corpus_scope = self.corpus_scope_combo.currentData() or "genizah"
             self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words, responsa_options=responsa_options, restrict_sys_ids=compute_effective_restrict(getattr(self, 'pre_search_restrict_sys_ids', None), self.refinement_restrict_sys_ids), text_position=text_position, corpus_scope=_corpus_scope, run_id=_run_id)
 
-        self.search_thread.results_signal.connect(self.on_search_finished)
+        # Every signal that writes the table or the status line is dropped
+        # once New discards this run (_deliver_unless_discarded).
+        _live = partial(self._discardable, '_search_new_generation')
+        self.search_thread.results_signal.connect(_live(self.on_search_finished))
         self.search_thread.progress_signal.connect(self._on_search_progress)
         if hasattr(self.search_thread, 'pause_ack_signal'):
             self.search_thread.pause_ack_signal.connect(
                 lambda rid, ep: self._on_pause_ack(self._pause_search, rid, ep))
         if hasattr(self.search_thread, 'phase_signal'):
-            self.search_thread.phase_signal.connect(self._on_search_phase)
+            self.search_thread.phase_signal.connect(_live(self._on_search_phase))
 
         if hasattr(self.search_thread, 'status_signal'):
-             self.search_thread.status_signal.connect(self.status_label.setText)
+            self.search_thread.status_signal.connect(_live(self.status_label.setText))
 
-        self.search_thread.error_signal.connect(self.on_error)
+        self.search_thread.error_signal.connect(_live(self.on_error))
         # Phase 115 PERF-01: connect perf_signal with mode/corpus bound at thread start
         # (REVIEWS finding 2 — capture at thread-start when _current_search_run is fresh,
         # NOT at signal-delivery time when it may be stale from a prior run).
@@ -20450,6 +20478,10 @@ class GenizahGUI(QMainWindow):
         # would re-show the "nothing in your local files" strip on the fresh
         # screen; block the hint until the next run starts (Codex, PR #343).
         self._local_scope_hint_blocked = True
+        # Whatever the run started before this click still has queued --
+        # results, an error, a status line, whether or not the thread is
+        # still running -- is dropped on arrival (_deliver_unless_discarded).
+        self._search_new_generation = getattr(self, '_search_new_generation', 0) + 1
         # 1. Stop any running search thread
         self._apply_pause_state(self._pause_search, 'hidden')
         self._pause_search.state = 'idle'
@@ -22230,9 +22262,11 @@ class GenizahGUI(QMainWindow):
         # CR-114-01: bind THIS run's token into the slot so a stale slot from a superseded
         # worker carries its OLD token and is skipped by the emit helper's token guard.
         _tel_tok = self._pgp_tag_active_token
-        self._pgp_tag_search_worker.finished.connect(
-            lambda tag, results, t=_tel_tok: self._on_tag_search_results(tag, results, t)
-        )
+        # New pressed while the tag loads drops its results on arrival, as it
+        # does a text search's (_deliver_unless_discarded).
+        self._pgp_tag_search_worker.finished.connect(self._discardable(
+            '_search_new_generation',
+            lambda tag, results, t=_tel_tok: self._on_tag_search_results(tag, results, t)))
         self._pgp_tag_search_worker.start()
 
     def _on_tag_search_results(self, tag, results, token=None):
@@ -26359,6 +26393,11 @@ class GenizahGUI(QMainWindow):
                         "Clearing once the current witness finishes."))
             QTimer.singleShot(400, self._retry_pending_reset)
             return
+        # From here the reset happens now. Whatever the composition or
+        # grouping run still has queued -- a cancelled scan's partial rows, a
+        # grouping result, an error -- is dropped on arrival
+        # (_deliver_unless_discarded).
+        self._comp_new_generation = getattr(self, '_comp_new_generation', 0) + 1
         self._apply_pause_state(self._pause_comp, 'hidden')
         self._pause_comp.state = 'idle'
         # 1. Stop any running composition thread
@@ -26542,6 +26581,9 @@ class GenizahGUI(QMainWindow):
             return
         self._run_seq += 1
         _comp_run_id = self._run_seq
+        # This run's results, errors and status lines are dropped once New
+        # discards it (_deliver_unless_discarded).
+        _comp_live = partial(self._discardable, '_comp_new_generation')
         self._pause_comp.reset_for_run(_comp_run_id, time.monotonic())
 
         self.is_comp_running = True
@@ -26723,7 +26765,7 @@ class GenizahGUI(QMainWindow):
                 corpus_scope=_comp_scope,
                 run_id=_comp_run_id
             )
-            self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
+            self.comp_thread.scan_finished_signal.connect(_comp_live(self.on_comp_scan_finished))
 
         # 2. נתיב רגיל (STANDARD MODE)
         else:
@@ -26827,9 +26869,9 @@ class GenizahGUI(QMainWindow):
                     prior_rows=_prior_rows,
                     prior_filtered=_prior_filtered)
                 self.comp_thread.scan_finished_signal.connect(
-                    self.on_comp_scan_finished)
+                    _comp_live(self.on_comp_scan_finished))
                 self.comp_thread.witness_progress_signal.connect(
-                    self._on_witness_progress)
+                    _comp_live(self._on_witness_progress))
             else:
                 # --- התיקון הקריטי כאן: הסרת progress_callback ---
                 self.comp_thread = CompositionThread(
@@ -26850,9 +26892,9 @@ class GenizahGUI(QMainWindow):
                     run_id=_comp_run_id
                 )
                 if hasattr(self.comp_thread, 'scan_finished_signal'):
-                    self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
+                    self.comp_thread.scan_finished_signal.connect(_comp_live(self.on_comp_scan_finished))
                 else:
-                    self.comp_thread.finished_signal.connect(self.on_comp_search_finished)
+                    self.comp_thread.finished_signal.connect(_comp_live(self.on_comp_search_finished))
 
         self.comp_thread.progress_signal.connect(self.on_comp_progress)
         if hasattr(self.comp_thread, 'pause_ack_signal'):
@@ -26860,9 +26902,9 @@ class GenizahGUI(QMainWindow):
                 lambda rid, ep: self._on_pause_ack(self._pause_comp, rid, ep))
 
         if hasattr(self.comp_thread, 'status_signal'):
-             self.comp_thread.status_signal.connect(self.on_comp_status_update)
+            self.comp_thread.status_signal.connect(_comp_live(self.on_comp_status_update))
 
-        self.comp_thread.error_signal.connect(self.on_comp_error)
+        self.comp_thread.error_signal.connect(_comp_live(self.on_comp_error))
 
         # Phase 115 PERF-01: connect perf_signal with mode/corpus bound at thread start
         # (REVIEWS finding 2 — capture at thread-start when _current_comp_search_run is fresh).
@@ -27216,9 +27258,12 @@ class GenizahGUI(QMainWindow):
             self.searcher, items, self.spin_filter.value(), filtered_items=filtered_items
         )
         self.group_thread.progress_signal.connect(self.on_comp_progress)
-        self.group_thread.status_signal.connect(lambda s: self.comp_progress.setFormat(s))
-        self.group_thread.finished_signal.connect(self.on_comp_finished)
-        self.group_thread.error_signal.connect(self.on_grouping_error)
+        # Dropped once New discards this run (_deliver_unless_discarded).
+        _comp_live = partial(self._discardable, '_comp_new_generation')
+        self.group_thread.status_signal.connect(
+            _comp_live(lambda s: self.comp_progress.setFormat(s)))
+        self.group_thread.finished_signal.connect(_comp_live(self.on_comp_finished))
+        self.group_thread.error_signal.connect(_comp_live(self.on_grouping_error))
         self.group_thread.start()
 
     def on_grouping_error(self, err):

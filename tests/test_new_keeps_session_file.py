@@ -14,8 +14,11 @@ back on the next launch.
 These drive the real call sites: the method the New button is connected to,
 the real `_save_session`, and whatever save New left pending on the timer.
 """
+import ast
+import inspect
 import json
 import os
+import textwrap
 import types
 
 import pytest
@@ -83,6 +86,8 @@ class _Host:
     _is_browsing_local = APP._is_browsing_local
     _comp_chunk_preference = APP._comp_chunk_preference
     _PASSAGE_FORCED_CONTROLS = APP._PASSAGE_FORCED_CONTROLS
+    _discardable = APP._discardable
+    _deliver_unless_discarded = APP._deliver_unless_discarded
 
     def __init__(self):
         self._restoring_session = False
@@ -199,3 +204,75 @@ def test_new_keeps_the_joins_lab_state_when_the_lab_was_not_opened(session_file,
     else:
         assert saved["composition_search"]["source_text"] == ""
         assert saved["composition_search"]["results"] == []
+
+
+# --- New drops what the run it stopped still delivers ----------------------
+
+class _StoppableCompThread:
+    """A composition run in flight. Cancelled, it still hands back its
+    partial rows, and Qt delivers them after New has returned."""
+
+    def __init__(self):
+        self.running = True
+
+    def isRunning(self):
+        return self.running
+
+    def request_cancel(self):
+        self.running = False
+
+    def wait(self, *a):
+        return True
+
+    def terminate(self):
+        self.running = False
+
+
+def test_new_drops_what_the_composition_run_it_stopped_still_delivers(session_file):
+    host = _Host()
+    host.comp_thread = _StoppableCompThread()
+    host._emit_comp_search_telemetry = lambda *a, **k: None
+    rendered = []
+    # What run_composition connects the scan's completion to, as the run starts.
+    queued = host._discardable("_comp_new_generation", rendered.append)
+    APP._reset_composition(host)                         # New
+    assert not host.comp_thread.isRunning()
+    queued({"main": OLD_COMP_RESULTS, "filtered": []})
+    assert rendered == [], "the stopped run's rows reached the cleared tab"
+    # The next run connects after New, and its rows arrive as ever.
+    host._discardable("_comp_new_generation", rendered.append)({"main": []})
+    assert rendered == [{"main": []}]
+
+
+def _connects(method):
+    """(signal, slot source) of every `<obj>.<signal>.connect(<slot>)` in `method`."""
+    tree = ast.parse(textwrap.dedent(inspect.getsource(getattr(APP, method))))
+    return [(node.func.value.attr, ast.unparse(node.args[0]))
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "connect"
+            and isinstance(node.func.value, ast.Attribute)]
+
+
+# Every signal whose slot writes the tab. Progress and pause acknowledgements
+# are left out: the first only moves a bar New hid, and the second carries
+# its own run id.
+_WRITES_THE_TAB = {"results_signal", "scan_finished_signal", "finished_signal",
+                   "error_signal", "status_signal", "phase_signal",
+                   "witness_progress_signal"}
+
+
+@pytest.mark.parametrize("method, guard", [
+    ("start_search", "_live("),
+    ("run_composition", "_comp_live("),
+    ("start_grouping", "_comp_live("),
+])
+def test_every_worker_signal_that_writes_the_tab_is_dropped_after_new(method, guard):
+    """run_composition and start_grouping cannot run in this harness, so their
+    wiring is read: a slot connected bare still delivers a stopped run's rows
+    after New. (The Search tab's, and the tag search's, are also driven, in
+    test_exclusion_surfaces.)"""
+    connects = [(sig, slot) for sig, slot in _connects(method) if sig in _WRITES_THE_TAB]
+    assert connects, f"{method} connects none of these signals any more"
+    bare = [(sig, slot) for sig, slot in connects if not slot.startswith(guard)]
+    assert not bare, f"{method} connects these without the New guard: {bare}"
