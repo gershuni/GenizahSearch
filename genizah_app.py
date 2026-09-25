@@ -14613,7 +14613,9 @@ class GenizahGUI(QMainWindow):
             page_number = comment.get('page_number')
             content = comment.get('content') or ''
             text = (content[:50] + '...') if len(content) > 50 else content
-            author = comment.get('author_username') or tr('Anonymous')
+            # Comments are never anonymous (the table has no such column);
+            # when the name was not loaded the author line is left out.
+            author = comment.get('author_username')
 
             # Get shelfmark and title from sys_id
             shelfmark = sys_id or tr('Unknown')
@@ -14636,7 +14638,7 @@ class GenizahGUI(QMainWindow):
             display_text = f"💬 {display_shelfmark}"
             if title_preview:
                 display_text += f" - {title_preview}"
-            if show_author:
+            if show_author and author:
                 display_text += f"\n   {tr('by {}').format(author)}"
             display_text += f"\n   {text}"
 
