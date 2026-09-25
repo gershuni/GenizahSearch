@@ -1660,63 +1660,82 @@ moved out of `genizah_core.py` (→ `shared/*`) and `genizah_app.py` (→ `deskt
     - Method `delete_join_local` (Line 511) — Delete a join locally and queue for server sync.
     - Method `get_all_shelfmarks_with_joins` (Line 542) — Get list of all shelfmarks that have joins (for autocomplete).
 
+## shared/atomic_io.py
+
+- **Function** `_pauses` (Line 30) — RETRY_DELAYS, then 0.5 s steps, adding up to ``budget`` seconds.
+- **Function** `is_busy` (Line 41) — True for the error Windows raises while another program holds the file.
+- **Function** `_retry_while_busy` (Line 46)
+- **Function** `_read_all` (Line 57)
+- **Function** `read_bytes` (Line 62) — Return the whole file, retrying for up to ``budget`` seconds while Windows reports it busy.
+- **Function** `replace_file` (Line 71) — ``os.replace(src, dst)``, retried while Windows reports either file busy.
+- **Function** `_write_in_place` (Line 76)
+- **Function** `_discard` (Line 83)
+- **Function** `write_bytes_atomic` (Line 90) — Replace the contents of ``path`` with ``data``, all or nothing.
+
 ## shared/lists_manager.py
 
-- **Function** `_tr` (Line 25) — Translate text if current language is Hebrew.
-- **Class** `ListsManager` (Line 39) — Manages personal lists (starred/saved manuscripts) with tags and notes.
-    - Method `__init__` (Line 68) — Initialize the lists manager.
-    - Method `_get_default_data` (Line 74) — Return the default data structure.
-    - Method `load` (Line 105) — Load lists from file.
-    - Method `save` (Line 148) — Save lists to file.
-    - Method `clear_all` (Line 169) — Clear all lists and reset to default state. Used after migration.
-    - Method `enable_cloud_sync` (Line 176) — Enable cloud sync for the given user (call after login).
-    - Method `disable_cloud_sync` (Line 195) — Disable cloud sync (call on logout).
-    - Method `sync_from_cloud` (Line 204) — Pull lists from cloud and merge with local data.
-    - Method `is_sync_available` (Line 215) — Check if cloud sync is available (user logged in, network ok).
-    - Property `_last_sync` (Line 227) — Get timestamp of last sync (for debouncing).
-    - Method `sync_to_cloud` (Line 236) — Push local lists to cloud.
-    - Method `get_cloud_lists_preview` (Line 247) — Get preview of cloud lists without syncing (for dialog display).
-    - Method `get_local_lists_summary` (Line 258) — Get summary of local lists for dialog display.
-    - Method `get_all_lists` (Line 274) — Get all lists sorted alphabetically (system lists have special handling).
-    - Method `get_deleted_lists` (Line 303) — Get soft-deleted lists (trash view).
-    - Method `_get_list_item_count` (Line 317) — Get the number of items in a list.
-    - Method `create_list` (Line 328) — Create a new list. Returns the list ID.
-    - Method `update_list` (Line 355) — Update list properties.
-    - Method `update_list_project` (Line 372) — Assign a list to a project (or clear project).
-    - Method `create_project` (Line 388) — Create a new project. Returns the project ID.
-    - Method `get_projects` (Line 415) — Get projects sorted by name.
-    - Method `update_project` (Line 429) — Update a project's properties.
-    - Method `delete_project` (Line 439) — Delete a project and optionally its lists.
-    - Method `_get_next_project_color` (Line 462)
-    - Method `apply_list_layout` (Line 474) — Apply list ordering and project assignments in one save.
-    - Method `delete_list` (Line 498) — Soft-delete a list (move to trash).
-    - Method `restore_list` (Line 533) — Restore a soft-deleted list from trash.
-    - Method `permanently_delete_list` (Line 546) — Permanently delete a list (no recovery).
-    - Method `empty_trash` (Line 550) — Permanently delete all soft-deleted lists.
-    - Method `duplicate_list` (Line 559) — Duplicate a list with all its items.
-    - Method `merge_lists` (Line 581) — Merge source list into target list.
-    - Method `find_duplicate_lists` (Line 603) — Find all duplicate lists (same name) and return info for resolution.
-    - Method `merge_duplicate_group` (Line 656) — Merge a group of duplicate lists into one.
-    - Method `auto_merge_duplicate_group` (Line 707) — Automatically merge a duplicate group using heuristics.
-    - Method `restore_project_hierarchy` (Line 729) — Restore project hierarchy for orphaned lists by color matching.
-    - Method `_build_item_id` (Line 758)
-    - Method `add_item` (Line 765) — Add an item to a list. Returns True if added, False if already exists.
-    - Method `add_items_bulk` (Line 809) — Add multiple items to a list at once.
-    - Method `update_item` (Line 862) — Update an item's properties.
-    - Method `remove_item_from_list` (Line 890) — Remove an item from a specific list.
-    - Method `move_items_to_list` (Line 908) — Move items from one list to another.
-    - Method `get_items_in_list` (Line 923) — Get all items in a list with their metadata.
-    - Method `get_item` (Line 948) — Get a single item's data.
-    - Method `is_item_in_any_list` (Line 958) — Check if an item is in any list (excluding recent).
-    - Method `get_item_lists` (Line 962) — Get list of lists an item belongs to.
-    - Method `add_to_recent` (Line 970) — Add an item to the recently viewed list.
-    - Method `get_all_tags` (Line 1014) — Get all tags for autocomplete.
-    - Method `add_tag_to_items` (Line 1018) — Add a tag to multiple items.
-    - Method `export_list` (Line 1038) — Export a list to a dictionary suitable for JSON serialization.
-    - Method `import_list` (Line 1076) — Import a list from exported data. Returns (list_id, imported_count, unidentified_count).
-    - Method `shelfmark_sort_key` (Line 1124) — Sort key for shelfmarks that handles dots correctly.
-    - Method `get_items_sorted` (Line 1142) — Get items in a list, sorted by the specified field.
-    - Method `get_item_copy_text` (Line 1167) — Generate text for copying item info.
+- **Function** `_tr` (Line 28) — Translate text if current language is Hebrew.
+- **Function** `_worth_retrying_at_startup` (Line 41) — Any failed read of lists.pkl is retried at startup, except a file that is gone.
+- **Class** `ListsManager` (Line 46) — Manages personal lists (starred/saved manuscripts) with tags and notes.
+    - Method `__init__` (Line 95) — Initialize the lists manager.
+    - Method `_get_default_data` (Line 101) — Return the default data structure.
+    - Method `_backup_paths` (Line 132)
+    - Method `_read_store` (Line 135) — Unpickle one copy of the store and fill in the fields newer builds expect.
+    - Method `load` (Line 170) — Load lists from file, falling back to .bak1, .bak2, .bak3 in that order.
+    - Method `_rotate_backups` (Line 207) — bak2 -> bak3, bak1 -> bak2, then copy lists.pkl -> bak1.
+    - Method `_keep_unreadable_locked` (Line 215) — Copy the lists.pkl that load() could not read to lists.pkl.unreadable-<time>.
+    - Method `keep_unreadable_copy` (Line 228) — After a load that could not read lists.pkl, copy it aside now.
+    - Method `save` (Line 247) — Save lists to file. Returns True when lists.pkl was written.
+    - Method `write_snapshot` (Line 276) — Write the in-memory store to lists.pkl.<label>, atomically.
+    - Method `clear_all` (Line 292) — Clear all lists and reset to default state. Used after migration.
+    - Method `enable_cloud_sync` (Line 299) — Enable cloud sync for the given user (call after login).
+    - Method `disable_cloud_sync` (Line 318) — Disable cloud sync (call on logout).
+    - Method `sync_from_cloud` (Line 327) — Pull lists from cloud and merge with local data.
+    - Method `is_sync_available` (Line 338) — Check if cloud sync is available (user logged in, network ok).
+    - Property `_last_sync` (Line 350) — Get timestamp of last sync (for debouncing).
+    - Method `sync_to_cloud` (Line 359) — Push local lists to cloud.
+    - Method `get_cloud_lists_preview` (Line 370) — Get preview of cloud lists without syncing (for dialog display).
+    - Method `get_local_lists_summary` (Line 381) — Get summary of local lists for dialog display.
+    - Method `get_all_lists` (Line 397) — Get all lists sorted alphabetically (system lists have special handling).
+    - Method `get_deleted_lists` (Line 426) — Get soft-deleted lists (trash view).
+    - Method `_get_list_item_count` (Line 440) — Get the number of items in a list.
+    - Method `create_list` (Line 451) — Create a new list. Returns the list ID.
+    - Method `update_list` (Line 478) — Update list properties.
+    - Method `update_list_project` (Line 495) — Assign a list to a project (or clear project).
+    - Method `create_project` (Line 511) — Create a new project. Returns the project ID.
+    - Method `get_projects` (Line 539) — Get projects sorted by name.
+    - Method `update_project` (Line 553) — Update a project's properties.
+    - Method `delete_project` (Line 563) — Delete a project and optionally its lists.
+    - Method `_get_next_project_color` (Line 586)
+    - Method `apply_list_layout` (Line 598) — Apply list ordering and project assignments in one save.
+    - Method `delete_list` (Line 622) — Soft-delete a list (move to trash).
+    - Method `restore_list` (Line 657) — Restore a soft-deleted list from trash.
+    - Method `permanently_delete_list` (Line 670) — Permanently delete a list (no recovery).
+    - Method `empty_trash` (Line 674) — Permanently delete all soft-deleted lists.
+    - Method `duplicate_list` (Line 683) — Duplicate a list with all its items.
+    - Method `merge_lists` (Line 705) — Merge source list into target list.
+    - Method `find_duplicate_lists` (Line 727) — Find all duplicate lists (same name) and return info for resolution.
+    - Method `merge_duplicate_group` (Line 780) — Merge a group of duplicate lists into one.
+    - Method `auto_merge_duplicate_group` (Line 831) — Automatically merge a duplicate group using heuristics.
+    - Method `restore_project_hierarchy` (Line 853) — Restore project hierarchy for orphaned lists by color matching.
+    - Method `_build_item_id` (Line 882)
+    - Method `add_item` (Line 889) — Add an item to a list. Returns True if added, False if already exists.
+    - Method `add_items_bulk` (Line 933) — Add multiple items to a list at once.
+    - Method `update_item` (Line 986) — Update an item's properties.
+    - Method `remove_item_from_list` (Line 1014) — Remove an item from a specific list.
+    - Method `move_items_to_list` (Line 1032) — Move items from one list to another.
+    - Method `get_items_in_list` (Line 1047) — Get all items in a list with their metadata.
+    - Method `get_item` (Line 1072) — Get a single item's data.
+    - Method `is_item_in_any_list` (Line 1082) — Check if an item is in any list (excluding recent).
+    - Method `get_item_lists` (Line 1086) — Get list of lists an item belongs to.
+    - Method `add_to_recent` (Line 1094) — Add an item to the recently viewed list.
+    - Method `get_all_tags` (Line 1138) — Get all tags for autocomplete.
+    - Method `add_tag_to_items` (Line 1142) — Add a tag to multiple items.
+    - Method `export_list` (Line 1162) — Export a list to a dictionary suitable for JSON serialization.
+    - Method `import_list` (Line 1200) — Import a list from exported data. Returns (list_id, imported_count, unidentified_count).
+    - Method `shelfmark_sort_key` (Line 1248) — Sort key for shelfmarks that handles dots correctly.
+    - Method `get_items_sorted` (Line 1266) — Get items in a list, sorted by the specified field.
+    - Method `get_item_copy_text` (Line 1291) — Generate text for copying item info.
 
 ## shared/browse_map_utils.py
 
@@ -2009,6 +2028,14 @@ moved out of `genizah_core.py` (→ `shared/*`) and `genizah_app.py` (→ `deskt
     - Method `execute_update` (Line 352) — Run the installer in silent mode (Windows only).
     - Method `on_cancel` (Line 417) — Handle cancel button click.
     - Method `closeEvent` (Line 432) — Handle dialog close event.
+
+## desktop/single_instance.py
+
+- **Function** `restarted_from` (Line 44) — The pid named by ``--restarted-from=<pid>`` in argv, or None.
+- **Function** `restart_argv` (Line 56) — The command line that relaunches this app, naming ``pid`` as the copy to wait for.
+- **Function** `acquire_instance_lock` (Line 62) — Return (lock, other_copy_running).
+- **Function** `request_restart` (Line 93) — Relaunch the app once its event loop has ended (see relaunch_if_requested).
+- **Function** `relaunch_if_requested` (Line 99) — Start the new copy if request_restart() was called. Returns True if one was started.
 
 ## Phase 145 — Passage-Matching Parallels Search (web beta)
 
