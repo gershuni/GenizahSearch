@@ -1161,26 +1161,31 @@ def delete_list(list_id: int, permanent: bool = False) -> Dict:
     Args:
         list_id: The list ID
         permanent: If True, permanently delete (no recovery). Default is soft delete.
+
+    Returns ``{'success': True}`` only when a row was changed; 0 rows (the list
+    is already gone, or RLS filtered it) is ``{'error': ..., 'no_rows': True}``.
     """
     try:
         client = get_user_client()
         if permanent:
             # Permanent delete - also deletes items via CASCADE
-            client.table('user_lists').delete().eq('id', list_id).execute()
+            response = client.table('user_lists').delete().eq('id', list_id).execute()
         else:
             # Soft delete - set deleted_at timestamp
             from datetime import datetime, timezone
             try:
-                client.table('user_lists').update({
+                response = client.table('user_lists').update({
                     'deleted_at': datetime.now(timezone.utc).isoformat()
                 }).eq('id', list_id).execute()
             except Exception as soft_err:
                 # Fallback to hard delete if deleted_at column doesn't exist
                 if 'deleted_at' in str(soft_err):
-                    client.table('user_lists').delete().eq('id', list_id).execute()
+                    response = client.table('user_lists').delete().eq('id', list_id).execute()
                 else:
                     raise soft_err
-        return {'success': True}
+        if response.data:
+            return {'success': True}
+        return {'error': 'Nothing was deleted', 'no_rows': True}
     except Exception as e:
         return {'error': str(e)}
 
@@ -1203,16 +1208,26 @@ def restore_list(list_id: int) -> Dict:
 
 
 def empty_trash(user_id: str) -> Dict:
-    """Permanently delete all soft-deleted lists for a user."""
+    """Permanently delete all soft-deleted lists for a user.
+
+    Reads the trash itself rather than through ``get_deleted_lists``, which
+    turns a read error into ``[]``: a failed read must not look like an empty
+    trash. ``deleted_count`` counts only the rows really deleted; if any
+    listed row was not deleted (RLS, or already gone) the result is an error
+    that still carries the count.
+    """
     try:
         client = get_user_client()
-        # Get all deleted lists
-        deleted = get_deleted_lists(user_id)
-        count = len(deleted)
-        # Permanently delete each one
-        for lst in deleted:
-            client.table('user_lists').delete().eq('id', lst['id']).execute()
-        return {'success': True, 'deleted_count': count}
+        listed = client.table('user_lists').select('id').eq('user_id', user_id).not_.is_(
+            'deleted_at', 'null').execute().data or []
+        deleted = 0
+        for lst in listed:
+            response = client.table('user_lists').delete().eq('id', lst['id']).execute()
+            if response.data:
+                deleted += 1
+        if deleted < len(listed):
+            return {'error': 'Some lists were not deleted', 'deleted_count': deleted}
+        return {'success': True, 'deleted_count': deleted}
     except Exception as e:
         return {'error': str(e)}
 
@@ -1276,11 +1291,13 @@ def update_list_item(item_id: int, data: Dict) -> Dict:
 
 
 def delete_list_item(item_id: int) -> Dict:
-    """Delete a list item."""
+    """Delete a list item; 0 deleted rows is ``{'error': ..., 'no_rows': True}``, never success."""
     try:
         client = get_user_client()
-        client.table('list_items').delete().eq('id', item_id).execute()
-        return {'success': True}
+        response = client.table('list_items').delete().eq('id', item_id).execute()
+        if response.data:
+            return {'success': True}
+        return {'error': 'Nothing was deleted', 'no_rows': True}
     except Exception as e:
         return {'error': str(e)}
 

@@ -385,16 +385,21 @@ class UserListsManager:
             return False
         return False
 
-    async def empty_trash(self) -> int:
-        """Permanently delete all soft-deleted lists. Returns count deleted."""
+    async def empty_trash(self) -> Optional[int]:
+        """Permanently delete all soft-deleted lists. Returns the count deleted, or None on failure.
+
+        None (not 0) for a failure or a signed-out caller, so the page can tell
+        a failed Empty Trash from an empty one.
+        """
         if self.is_authenticated:
             from web.supabase_client import empty_trash as sb_empty_trash
             result = sb_empty_trash(self.user_id)
-            if result.get('success'):
+            if result.get('deleted_count'):
                 self.invalidate_cache()
+            if result.get('success'):
                 return result.get('deleted_count', 0)
-            return 0
-        return 0
+            return None
+        return None
 
     # === Item Operations ===
 
