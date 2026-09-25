@@ -295,7 +295,8 @@ def test_main_takes_the_lock_after_the_self_tests_and_before_the_window():
                 if isinstance(n, ast.If) and ast.unparse(n.test) == other_running]
     assert refusals, "a second copy must be refused before the window is built"
     refusal = ast.unparse(refusals[0])
-    assert "sys.exit(0)" in refusal and "QMessageBox.information" in refusal
+    # A box whose OK button reads tr("OK") (QMessageBox.information's is English).
+    assert "sys.exit(0)" in refusal and "_show_ok_notice(None, 'information'" in refusal
     assert "setLayoutDirection(Qt.LayoutDirection.RightToLeft)" in refusal
 
 

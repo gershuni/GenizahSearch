@@ -715,6 +715,39 @@ def genizah_app_module():
     return genizah_app
 
 
+def _box_recording(shown):
+    """genizah_app's QMessageBox as _show_ok_notice builds one, without Qt:
+    exec() appends (title, text) to `shown`, and the OK label to .ok_labels."""
+    class Box:
+        Icon = types.SimpleNamespace(Warning="warning", Information="information")
+        StandardButton = types.SimpleNamespace(Ok="ok")
+        ok_labels = []
+
+        def __init__(self, parent=None):
+            self.title = self.body = self.ok_label = None
+
+        def setIcon(self, icon):
+            pass
+
+        def setWindowTitle(self, title):
+            self.title = title
+
+        def setText(self, text):
+            self.body = text
+
+        def setStandardButtons(self, buttons):
+            pass
+
+        def button(self, which):
+            return types.SimpleNamespace(setText=lambda label: setattr(self, "ok_label", label))
+
+        def exec(self):
+            shown.append((self.title, self.body))
+            Box.ok_labels.append(self.ok_label)
+
+    return Box
+
+
 class _DistinctStamps:
     """lists_manager's clock, with a new timestamp for every copy it names, so
     a second unreadable-<time> copy cannot hide under the first one's name."""
@@ -739,8 +772,7 @@ def test_startup_reports_a_recovered_lists_file(store, monkeypatch, genizah_app_
     monkeypatch.setattr(genizah_core, "CURRENT_LANG", lang)
     monkeypatch.setattr(lm, "time", _DistinctStamps())
     shown = []
-    monkeypatch.setattr(genizah_app_module, "QMessageBox", types.SimpleNamespace(
-        warning=lambda parent, title, text: shown.append((title, text))))
+    monkeypatch.setattr(genizah_app_module, "QMessageBox", _box_recording(shown))
     gui = genizah_app_module.GenizahGUI.__new__(genizah_app_module.GenizahGUI)
     gui.lists_mgr = lm.ListsManager(None)
 
@@ -757,8 +789,10 @@ def test_startup_reports_a_recovered_lists_file(store, monkeypatch, genizah_app_
     stamp = "%Y-%m-%d %H:%M"
     assert time.strftime(stamp, time.localtime(three_days_ago)) in text
     assert time.strftime(stamp, time.localtime(os.path.getmtime(store))) not in text
+    assert genizah_app_module.QMessageBox.ok_labels == [genizah_core.tr("OK")]
     if lang == "he":
         assert _is_hebrew(text[0]) and _is_hebrew(title[0])
+        assert _is_hebrew(genizah_app_module.QMessageBox.ok_labels[0][0])
 
     for sys_id in ("990010", "990011"):  # the session goes on
         gui.lists_mgr.add_to_recent(sys_id)
@@ -770,8 +804,7 @@ def test_the_notice_names_the_copy_an_earlier_save_already_kept(store, monkeypat
     _two_sessions(store)
     truncated = _truncate(store)
     shown = []
-    monkeypatch.setattr(genizah_app_module, "QMessageBox", types.SimpleNamespace(
-        warning=lambda parent, title, text: shown.append((title, text))))
+    monkeypatch.setattr(genizah_app_module, "QMessageBox", _box_recording(shown))
     gui = genizah_app_module.GenizahGUI.__new__(genizah_app_module.GenizahGUI)
     gui.lists_mgr = lm.ListsManager(None)
     gui.lists_mgr.add_to_recent("990010")  # a save that ran before the notice
@@ -789,8 +822,7 @@ def test_startup_reports_lists_that_could_not_be_loaded_and_says_nothing_otherwi
         store, monkeypatch, genizah_app_module, lang):
     monkeypatch.setattr(genizah_core, "CURRENT_LANG", lang)
     shown = []
-    monkeypatch.setattr(genizah_app_module, "QMessageBox", types.SimpleNamespace(
-        warning=lambda parent, title, text: shown.append((title, text))))
+    monkeypatch.setattr(genizah_app_module, "QMessageBox", _box_recording(shown))
     gui = genizah_app_module.GenizahGUI.__new__(genizah_app_module.GenizahGUI)
 
     gui.lists_mgr = lm.ListsManager(None)  # a fresh install
@@ -809,9 +841,11 @@ def test_startup_reports_lists_that_could_not_be_loaded_and_says_nothing_otherwi
     assert [t for t, _ in shown] == [genizah_core.tr("Lists could not be loaded")]
     kept = glob.glob(f"{store}.unreadable-*")
     assert len(kept) == 1 and os.path.basename(kept[0]) in shown[0][1]
+    assert genizah_app_module.QMessageBox.ok_labels == [genizah_core.tr("OK")]
     if lang == "he":
         title, text = shown[0]
         assert _is_hebrew(title[0]) and _is_hebrew(text[0])
+        assert _is_hebrew(genizah_app_module.QMessageBox.ok_labels[0][0])
 
 
 @pytest.mark.parametrize("lang", ["en", "he"])
@@ -827,8 +861,7 @@ def test_startup_says_the_lists_cannot_be_saved_while_the_file_stays_busy(
             os.remove(path)
     monkeypatch.setattr(genizah_core, "CURRENT_LANG", lang)
     shown = []
-    monkeypatch.setattr(genizah_app_module, "QMessageBox", types.SimpleNamespace(
-        warning=lambda parent, title, text: shown.append((title, text))))
+    monkeypatch.setattr(genizah_app_module, "QMessageBox", _box_recording(shown))
     gui = genizah_app_module.GenizahGUI.__new__(genizah_app_module.GenizahGUI)
     before = store.read_bytes()
 
@@ -858,8 +891,10 @@ def test_startup_says_the_lists_cannot_be_saved_while_the_file_stays_busy(
     else:
         assert text == tr("Your saved lists could not be read and no readable backup "
                           "was found, so your lists are empty. " + tail).format(store.parent)
+    assert genizah_app_module.QMessageBox.ok_labels == [tr("OK")]
     if lang == "he":
         assert _is_hebrew(title[0]) and _is_hebrew(text[0])
+        assert _is_hebrew(genizah_app_module.QMessageBox.ok_labels[0][0])
 
     assert gui.lists_mgr.save() is True             # once it can be read: kept, then saved
     assert len(glob.glob(f"{store}.unreadable-*")) == 1

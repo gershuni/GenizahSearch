@@ -1132,7 +1132,10 @@ def test_the_collector_returns_nothing_when_every_row_is_hidden(window):
         "an empty visible set was replaced by every result, excluded ones included")
 
 
-def test_export_with_every_row_hidden_says_so_and_writes_nothing(window, monkeypatch, tmp_path):
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_export_with_every_row_hidden_says_so_and_writes_nothing(window, monkeypatch, tmp_path, lang):
+    import genizah_core
+    monkeypatch.setattr(genizah_core, "CURRENT_LANG", lang)
     w = window
     _search(w, [_res(A, 1), _res(B, 1)])
     w._exclude_word_search_result(A, _row_of(w, A)[0])
@@ -1140,8 +1143,9 @@ def test_export_with_every_row_hidden_says_so_and_writes_nothing(window, monkeyp
     saves, events = [], []
     monkeypatch.setattr(app.QFileDialog, "getSaveFileName",
                         staticmethod(lambda *a, **k: saves.append(a) or ("", "")))
-    monkeypatch.setattr(app.QMessageBox, "information",
-                        staticmethod(lambda *a, **k: events.append(("message", a[2]))))
+    ok = app.QMessageBox.StandardButton.Ok
+    monkeypatch.setattr(app.QMessageBox, "exec", lambda box: events.append(
+        ("message", box.text(), box.button(ok).text())))
     w._emit_feature_opened = lambda **k: events.append(("opened", k))
     w._default_report_path = lambda q, name: str(tmp_path / "never.xlsx")
     w.export_results("csv")
@@ -1149,8 +1153,11 @@ def test_export_with_every_row_hidden_says_so_and_writes_nothing(window, monkeyp
     # The export dialog counts as opened with or without data (MEDIUM-8),
     # so the guard comes after that event and before the save dialog.
     assert events == [("opened", {"dialog_name": "export"}),
-                      ("message", tr(NOTHING_TO_EXPORT))], (
-        "the nothing-to-export message is missing, or it suppressed the export-opened event")
+                      ("message", tr(NOTHING_TO_EXPORT), tr("OK"))], (
+        "the nothing-to-export message is missing, its OK button is not in the "
+        "interface language, or it suppressed the export-opened event")
+    if lang == "he":
+        assert "\u0590" <= events[1][2][0] <= "\u05ff", events[1]
 
 
 def test_the_nothing_to_export_message_has_a_hebrew_translation():

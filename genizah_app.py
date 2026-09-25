@@ -1336,6 +1336,20 @@ def _format_txt_genizah_block(result_dict, full_text=None):
     return f"=== {d.get('shelfmark', '')} | {d.get('title', '')} ===\n{snippet}"
 
 
+def _show_ok_notice(parent, kind, title, text):
+    """QMessageBox.information/.warning (`kind` is 'information' or
+    'warning'), with its one button labelled tr("OK"). The static calls label
+    it in Qt's own language, which is English in the Hebrew interface."""
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Warning if kind == 'warning'
+                else QMessageBox.Icon.Information)
+    box.setWindowTitle(title)
+    box.setText(text)
+    box.setStandardButtons(QMessageBox.StandardButton.Ok)
+    box.button(QMessageBox.StandardButton.Ok).setText(tr("OK"))
+    box.exec()
+
+
 def _telemetry_result_bucket(count: int) -> str:
     """Coarse result-count bucket for Phase 114 telemetry (D-07/D-08).
 
@@ -1605,20 +1619,20 @@ class GenizahGUI(QMainWindow):
                               "changes you make now may be lost. Close any other program that may "
                               "be using the file and restart the application. The file is "
                               "in:\n{}").format(folder)
-                QMessageBox.warning(self, tr("Lists cannot be saved"), text)
+                _show_ok_notice(self, 'warning', tr("Lists cannot be saved"), text)
                 return
             kept = kept or mgr.LISTS_FILE
             kept_name = os.path.basename(kept)
             folder = os.path.dirname(os.path.abspath(kept))
             if status == 'recovered':
-                QMessageBox.warning(
-                    self, tr("Lists restored from a backup"),
+                _show_ok_notice(
+                    self, 'warning', tr("Lists restored from a backup"),
                     tr("Your saved lists could not be read, so they were restored from a backup "
                        "saved on {}. Changes made after that may be missing. The unreadable file "
                        "is kept as {} in:\n{}").format(when, kept_name, folder))
             else:
-                QMessageBox.warning(
-                    self, tr("Lists could not be loaded"),
+                _show_ok_notice(
+                    self, 'warning', tr("Lists could not be loaded"),
                     tr("Your saved lists could not be read and no readable backup was found, so "
                        "your lists are empty. The unreadable file is kept as {} in:\n{}").format(
                         kept_name, folder))
@@ -24377,7 +24391,7 @@ class GenizahGUI(QMainWindow):
         # D-03: emit export dialog open BEFORE the save dialog (no no-data guard here — MEDIUM-8)
         self._emit_feature_opened(dialog_name='export')
         if not self._collect_sorted_results():
-            QMessageBox.information(self, tr("Export Results"), tr(
+            _show_ok_notice(self, 'information', tr("Export Results"), tr(
                 "Nothing to export: every result in the table is hidden by a filter or an exclusion."))
             return
         path, _ = QFileDialog.getSaveFileName(self, tr("Export Results"), default_path, selected_filter)
@@ -32201,8 +32215,8 @@ if __name__ == "__main__":
     if _other_copy_running:
         if CURRENT_LANG == 'he':
             app.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        QMessageBox.information(
-            None, tr("Already running"),
+        _show_ok_notice(
+            None, 'information', tr("Already running"),
             tr("Dicta Genizah Search Pro is already open. Only one copy can run at a time, "
                "because two copies would overwrite each other's lists and settings. Switch to "
                "the open window. If none is visible, it is still starting or closing; try "
