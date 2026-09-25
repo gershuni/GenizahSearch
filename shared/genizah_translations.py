@@ -3641,6 +3641,13 @@ TRANSLATIONS.update({
     "Your lists on this computer could not be backed up, so nothing was downloaded. Check that the data folder can be written to, then try again.":
         "לא ניתן היה לגבות את הרשימות שבמחשב הזה, ולכן לא הורד דבר. יש לוודא שאפשר לכתוב לתיקיית הנתונים, ולנסות שוב.",
     "The cloud lists were downloaded, but the upload failed: {}": "הרשימות מהענן הורדו, אבל ההעלאה נכשלה: {}",
+    # The sync layer's own messages (shared/lists_sync.py, shared/lists_manager.py)
+    "Sync already in progress": "סנכרון כבר מתבצע",
+    "Sync not available": "הסנכרון אינו זמין",
+    "No Supabase client": "אין חיבור לשרת הענן",
+    "Cloud sync not available": "הסנכרון לענן אינו זמין",
+    "Unknown error": "שגיאה לא ידועה",
+    "Uploaded {} item(s), but {} failed to upload to the cloud.": "הועלו {} פריטים, אבל {} לא הועלו לענן.",
     # lists.pkl could not be read at startup (desktop notice)
     "Lists restored from a backup": "הרשימות שוחזרו מגיבוי",
     "Your saved lists could not be read, so they were restored from a backup saved on {}. Changes made after that may be missing. The unreadable file is kept as {} in:\n{}":

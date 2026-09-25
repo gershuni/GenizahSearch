@@ -2466,6 +2466,23 @@ class GenizahGUI(QMainWindow):
         except Exception as e:
             logger.exception("Cloud sync dialog error: %s", e)
 
+    @staticmethod
+    def _sync_error_text(result):
+        """A failed sync `result`'s message, in the interface language.
+
+        The sync layer writes English (the web server imports it too), and
+        tr() finds its fixed messages as keys. A partial upload's message
+        carries two counts, so it is built again here from the counts, over
+        the translated format.
+        """
+        error = result.get('error') or 'Unknown error'
+        pushed, failed = result.get('items_pushed', 0), result.get('items_failed', 0)
+        if failed:
+            from shared.lists_sync import UPLOAD_PARTLY_FAILED
+            if error == UPLOAD_PARTLY_FAILED.format(pushed, failed):
+                return tr(UPLOAD_PARTLY_FAILED).format(pushed, failed)
+        return tr(error)
+
     def _show_lists_sync_dialog(self, local_lists, cloud_lists, cloud_error=None):
         """Show dialog to let user choose how to sync lists."""
         dialog = QDialog(self)
@@ -2486,7 +2503,7 @@ class GenizahGUI(QMainWindow):
 
         # Show error if any
         if cloud_error:
-            error_label = QLabel(f"Error: {cloud_error}")
+            error_label = QLabel(tr("Error: {}").format(tr(cloud_error)))
             error_label.setStyleSheet("color: #f44336; font-size: 12px; margin-bottom: 10px;")
             error_label.setWordWrap(True)
             layout.addWidget(error_label)
@@ -2585,7 +2602,7 @@ class GenizahGUI(QMainWindow):
                         )
                     )
                 else:
-                    QMessageBox.warning(self, tr("Sync Error"), tr(result.get('error') or 'Unknown error'))
+                    QMessageBox.warning(self, tr("Sync Error"), self._sync_error_text(result))
 
             elif action == 'upload':
                 # Upload local lists to cloud
@@ -2600,7 +2617,7 @@ class GenizahGUI(QMainWindow):
                         )
                     )
                 else:
-                    QMessageBox.warning(self, tr("Sync Error"), tr(result.get('error') or 'Unknown error'))
+                    QMessageBox.warning(self, tr("Sync Error"), self._sync_error_text(result))
 
             elif action == 'merge':
                 # Both directions
@@ -2610,7 +2627,7 @@ class GenizahGUI(QMainWindow):
                     # notes that were never merged in, so a Merge whose
                     # download failed stops before it.
                     QMessageBox.warning(self, tr("Sync Error"),
-                                        tr(download_result.get('error') or 'Unknown error'))
+                                        self._sync_error_text(download_result))
                 else:
                     upload_result = self.lists_mgr.sync_to_cloud()
                     if upload_result.get('success'):
@@ -2625,7 +2642,7 @@ class GenizahGUI(QMainWindow):
                         QMessageBox.warning(
                             self, tr("Sync Error"),
                             tr("The cloud lists were downloaded, but the upload failed: {}").format(
-                                tr(upload_result.get('error') or 'Unknown error')))
+                                self._sync_error_text(upload_result)))
 
             # Refresh the lists UI if it exists
             if hasattr(self, 'lists_tree'):

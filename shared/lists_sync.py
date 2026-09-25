@@ -34,6 +34,9 @@ DOWNLOAD_BACKUP_FAILED = (
     "Your lists on this computer could not be backed up, so nothing was downloaded. "
     "Check that the data folder can be written to, then try again."
 )
+# Formatted with (items_pushed, items_failed); the dialog formats the
+# translation from the same two counts.
+UPLOAD_PARTLY_FAILED = "Uploaded {} item(s), but {} failed to upload to the cloud."
 
 
 class ListsCloudSync:
@@ -737,10 +740,8 @@ class ListsCloudSync:
             # surfaced so the caller shows a warning instead of a false "done".
             if result['items_failed']:
                 result['success'] = False
-                result['error'] = (
-                    f"Uploaded {result['items_pushed']} item(s), but "
-                    f"{result['items_failed']} failed to upload to the cloud."
-                )
+                result['error'] = UPLOAD_PARTLY_FAILED.format(
+                    result['items_pushed'], result['items_failed'])
             else:
                 result['success'] = True
 

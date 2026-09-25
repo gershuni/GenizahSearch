@@ -983,7 +983,8 @@ def _run_sync_dialog_action(genizah_app, monkeypatch, mgr, action):
         information=lambda parent, title, text: shown.append(("information", text)),
         warning=lambda parent, title, text: shown.append(("warning", text)),
         critical=lambda parent, title, text: shown.append(("critical", text))))
-    host = types.SimpleNamespace(lists_mgr=mgr)
+    host = types.SimpleNamespace(lists_mgr=mgr,
+                                 _sync_error_text=genizah_app.GenizahGUI._sync_error_text)
     genizah_app.GenizahGUI._do_sync_action(host, types.SimpleNamespace(accept=lambda: None), action)
     return shown
 
@@ -1062,5 +1063,55 @@ def test_a_merge_whose_upload_fails_says_so_in_the_interface_language(
     assert [kind for kind, _ in shown] == ["warning"]
     text = shown[0][1]
     assert _is_hebrew(text[0]), f"the upload error is not in the interface language: {text!r}"
-    assert "Sync already in progress" in text
+    assert text == genizah_core.tr("The cloud lists were downloaded, but the upload failed: {}").format(
+        genizah_core.TRANSLATIONS["Sync already in progress"]), (
+        f"the reason inside the message is not in the interface language: {text!r}")
     assert _note_in(synced.store) == OLD  # the download half did land
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_a_partial_upload_is_reported_in_the_interface_language_with_its_counts(
+        synced, monkeypatch, genizah_app_module, lang):
+    monkeypatch.setattr(genizah_core, "CURRENT_LANG", lang)
+    monkeypatch.setattr(synced.mgr, "sync_to_cloud", lambda: {
+        "success": False, "items_pushed": 3, "items_failed": 2,
+        "error": lists_sync.UPLOAD_PARTLY_FAILED.format(3, 2)})
+
+    shown = _run_sync_dialog_action(genizah_app_module, monkeypatch, synced.mgr, "upload")
+
+    assert shown == [("warning", genizah_core.tr(lists_sync.UPLOAD_PARTLY_FAILED).format(3, 2))]
+    if lang == "he":
+        assert _is_hebrew(shown[0][1][0]), shown
+
+
+def _sync_error_literals():
+    """Every fixed message the sync layer puts in a result's 'error'."""
+    root = Path(__file__).resolve().parents[1] / "shared"
+    found = set()
+    for name in ("lists_sync.py", "lists_manager.py"):
+        tree = ast.parse((root / name).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Dict):
+                values = [v for k, v in zip(node.keys, node.values)
+                          if isinstance(k, ast.Constant) and k.value == "error"]
+            elif isinstance(node, ast.Assign):
+                values = [node.value for t in node.targets
+                          if isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Constant)
+                          and t.slice.value == "error"]
+            else:
+                continue
+            found |= {v.value for v in values
+                      if isinstance(v, ast.Constant) and isinstance(v.value, str)}
+    return found
+
+
+def test_every_sync_error_the_dialog_can_show_has_a_hebrew_entry():
+    """The dialog shows tr(error); only DOWNLOAD_BACKUP_FAILED had an entry, so
+    the rest reached the Hebrew interface in English."""
+    literals = _sync_error_literals()
+    assert {"Sync already in progress", "Sync not available", "No Supabase client",
+            "Cloud sync not available"} <= literals, literals   # the scan still sees them
+    shown = literals | {"Unknown error",                        # the dialog's own fallback
+                        lists_sync.DOWNLOAD_BACKUP_FAILED, lists_sync.UPLOAD_PARTLY_FAILED}
+    missing = sorted(m for m in shown if not genizah_core.TRANSLATIONS.get(m))
+    assert missing == [], f"shown in English in the Hebrew interface: {missing}"
