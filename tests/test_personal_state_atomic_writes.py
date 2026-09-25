@@ -18,6 +18,7 @@ import hashlib
 import logging
 import os
 import pickle
+import shutil
 import threading
 import time
 import types
@@ -27,6 +28,7 @@ import pytest
 
 import genizah_core
 from genizah_core import Config
+from shared import atomic_io
 from shared import lists_manager as lm
 from shared import lists_sync
 
@@ -124,8 +126,9 @@ def lists_errors():
     lm.LOGGER.removeHandler(handler)
 
 
-def _busy_reads(monkeypatch, path, times):
-    """Opening `path` for reading raises the Windows sharing error `times` times."""
+def _busy_reads(monkeypatch, path, times, error=None):
+    """Opening `path` for reading fails `times` times: with the Windows sharing
+    error, or with what ``error()`` returns."""
     real_open = builtins.open
     left = {"n": times}
 
@@ -133,6 +136,8 @@ def _busy_reads(monkeypatch, path, times):
         if (isinstance(file, (str, os.PathLike)) and os.path.abspath(file) == os.path.abspath(path)
                 and "r" in mode and left["n"] > 0):
             left["n"] -= 1
+            if error is not None:
+                raise error()
             raise PermissionError(13, "The process cannot access the file because "
                                       "it is being used by another process", str(path))
         return real_open(file, mode, *args, **kwargs)
@@ -242,6 +247,51 @@ def test_a_busy_lists_file_at_startup_is_waited_for_not_replaced(store, monkeypa
     assert USER_LIST in _list_names(store), "the first save after a busy load dropped the user's list"
 
 
+def test_a_read_that_fails_for_a_moment_at_startup_is_retried_too(store, monkeypatch, no_sleep):
+    """Not only the busy-file error: a network or removable drive can fail a
+    read for a moment. Taking that for a damaged file would load .bak1 -- the
+    store as the last session found it -- and drop that session's changes."""
+    _two_sessions(store)  # session 2 viewed 990002; .bak1 is from before it
+    with monkeypatch.context() as mp:
+        _busy_reads(mp, store, times=3, error=lambda: OSError(
+            errno.EIO, "The request could not be performed because of an I/O device error", str(store)))
+        m = lm.ListsManager(None)
+
+    assert "990002" in m.data["recent_items"], "a passing read error at startup loaded an older backup"
+    assert m.load_status == "ok"
+    assert 0 < sum(no_sleep) <= lm.ListsManager.LOAD_BUSY_BUDGET
+
+
+def test_a_save_that_cannot_keep_the_unreadable_file_leaves_it_alone(store, monkeypatch):
+    """After a recovery, lists.pkl can be newer than the backup that was loaded
+    (it stayed busy past the startup budget, say). The first save copies it
+    aside, and if that copy fails the save must not replace the only copy."""
+    _two_sessions(store)
+    truncated = _truncate(store)
+    m = lm.ListsManager(None)
+    assert m.load_status == "recovered"
+    real_copy2 = shutil.copy2
+
+    def copy2(src, dst, *args, **kwargs):
+        if ".unreadable-" in os.path.basename(str(dst)):
+            raise PermissionError(13, "Access is denied", str(dst))
+        return real_copy2(src, dst, *args, **kwargs)
+
+    with monkeypatch.context() as mp:
+        mp.setattr(shutil, "copy2", copy2)
+        m.add_to_recent("990010")
+        saved = m.save()
+
+    assert store.read_bytes() == truncated, "lists.pkl was replaced although it could not be kept first"
+    assert saved is False
+    assert not glob.glob(f"{store}.unreadable-*")
+
+    assert m.save() is True  # the copy can be made now: kept first, then written
+    kept = glob.glob(f"{store}.unreadable-*")
+    assert len(kept) == 1 and Path(kept[0]).read_bytes() == truncated
+    assert USER_LIST in _list_names(store)
+
+
 # ---------------------------------------------------------------------------
 # lists.pkl: how saves write
 # ---------------------------------------------------------------------------
@@ -259,6 +309,23 @@ def test_backups_rotate_once_per_session_not_on_every_save(store):
     assert not os.path.exists(f"{store}.bak2")
 
 
+def test_the_backups_hold_the_start_of_each_of_the_last_three_sessions(store):
+    """.bak1 is the store as the latest session found it, .bak2 as the one
+    before found it, .bak3 the one before that: the ladder load() climbs down."""
+    for k in range(1, 6):
+        m = lm.ListsManager(None)
+        m.create_list(f"Session {k}")  # the session's first save
+        m.add_to_recent(f"99000{k}")  # and a second one
+
+    def sessions(path):
+        return sorted(n for n in _list_names(path) if n.startswith("Session "))
+
+    assert sessions(store) == [f"Session {k}" for k in range(1, 6)]
+    assert sessions(f"{store}.bak1") == [f"Session {k}" for k in range(1, 5)]
+    assert sessions(f"{store}.bak2") == [f"Session {k}" for k in range(1, 4)]
+    assert sessions(f"{store}.bak3") == [f"Session {k}" for k in range(1, 3)]
+
+
 def test_a_save_that_fails_midway_leaves_the_previous_file(store):
     m = lm.ListsManager(None)
     m.create_list(USER_LIST)
@@ -272,6 +339,23 @@ def test_a_save_that_fails_midway_leaves_the_previous_file(store):
 
     assert _sha(store) == good
     assert not glob.glob(str(store.parent / "*.tmp"))
+
+
+def test_a_save_that_cannot_be_serialised_leaves_the_backups_alone(store):
+    m = lm.ListsManager(None)
+    m.create_list(USER_LIST)
+    at_start = _sha(store)
+    m = lm.ListsManager(None)  # a new session: its first save rotates the backups
+    before = _fingerprint(store.parent)
+    m.data["items"]["broken"] = {"sys_id": "broken", "lists": [], "fn": lambda: None}
+
+    m.add_to_recent("990010")
+
+    assert _fingerprint(store.parent) == before, "a save that wrote nothing still rotated the backups"
+    del m.data["items"]["broken"]
+    m.add_to_recent("990011")
+    assert _sha(f"{store}.bak1") == at_start
+    assert not os.path.exists(f"{store}.bak2")
 
 
 def test_a_save_still_lands_while_another_program_holds_the_file(store, monkeypatch, no_sleep):
@@ -303,6 +387,110 @@ def test_a_save_still_lands_while_another_program_holds_the_file(store, monkeypa
     assert any("in place" in w for w in handler.messages), \
         f"the save did not go through the atomic write and its logged fallback: {handler.messages}"
     assert not glob.glob(str(store.parent / "*.tmp"))
+
+
+@pytest.mark.parametrize("target", ["lists.pkl", "config.pkl"])
+def test_a_briefly_refused_rename_is_retried_not_written_in_place(
+        store, cfg_file, monkeypatch, no_sleep, target):
+    """A reader holding the file for a moment (antivirus, the indexer, this
+    app's own config read on another thread) makes Windows refuse the rename.
+    The save waits and renames; the in-place write, which a kill can tear, is
+    only for a file that stays blocked."""
+    if target == "lists.pkl":
+        m = lm.ListsManager(None)
+        m.create_list(USER_LIST)
+        path, save = store, lambda: m.add_to_recent("990010")
+    else:
+        _write_cfg(cfg_file)
+        path, save = cfg_file, lambda: genizah_core.save_app_config({"line_numbers": True})
+    real_replace = os.replace
+    refused, renamed, in_place = [], [], []
+
+    def replace_refused_once(src, dst):
+        if os.path.abspath(dst) == os.path.abspath(path):
+            if not refused:
+                refused.append(dst)
+                raise PermissionError(13, "Access is denied", str(dst))
+            renamed.append(dst)
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", replace_refused_once)
+    monkeypatch.setattr(atomic_io, "_write_in_place", lambda p, data: in_place.append(p))
+    handler = _Records(logging.WARNING)
+    atomic_log = logging.getLogger("genizah.shared.atomic_io")
+    atomic_log.addHandler(handler)
+    try:
+        save()
+    finally:
+        atomic_log.removeHandler(handler)
+
+    assert refused and len(renamed) == 1, "the save did not retry the refused rename"
+    assert in_place == [] and not any("in place" in w for w in handler.messages)
+    if target == "lists.pkl":
+        with open(store, "rb") as fh:
+            assert pickle.load(fh)["recent_items"][:1] == ["990010"]
+    else:
+        assert _read_cfg(cfg_file) == {**GOOD_CFG, "line_numbers": True}
+    assert not glob.glob(str(store.parent / "*.tmp"))
+
+
+def test_the_in_place_fallback_also_waits_out_a_busy_file(store, monkeypatch, no_sleep):
+    """The rename stays refused, and the in-place write meets the same busy
+    file once: the save still lands."""
+    m = lm.ListsManager(None)
+    m.create_list(USER_LIST)
+    real_replace, real_open = os.replace, builtins.open
+    busy_writes = {"n": 1}
+
+    def refuse_lists_pkl(src, dst):
+        if os.path.abspath(dst) == os.path.abspath(store):
+            raise PermissionError(13, "Access is denied", str(dst))
+        return real_replace(src, dst)
+
+    def busy_open(file, mode="r", *args, **kwargs):
+        if (isinstance(file, (str, os.PathLike)) and os.path.abspath(file) == os.path.abspath(store)
+                and "w" in mode and busy_writes["n"] > 0):
+            busy_writes["n"] -= 1
+            raise PermissionError(13, "The process cannot access the file because "
+                                      "it is being used by another process", str(file))
+        return real_open(file, mode, *args, **kwargs)
+
+    with monkeypatch.context() as mp:
+        mp.setattr(os, "replace", refuse_lists_pkl)
+        mp.setattr(builtins, "open", busy_open)
+        m.add_to_recent("990010")
+
+    assert busy_writes["n"] == 0
+    with open(store, "rb") as fh:
+        assert pickle.load(fh)["recent_items"][:1] == ["990010"], "the save was lost to one busy write"
+    assert USER_LIST in _list_names(store)
+
+
+def test_the_new_bytes_reach_the_disk_before_they_replace_the_file(store, monkeypatch):
+    """Without the flush to disk before the rename, a power cut just after it
+    can leave a zero-length lists.pkl on NTFS."""
+    m = lm.ListsManager(None)
+    m.create_list(USER_LIST)
+    real_fsync, real_replace = os.fsync, os.replace
+    events = []
+
+    def fsync(fd):
+        events.append(("fsync", os.fstat(fd)))
+        return real_fsync(fd)
+
+    def replace(src, dst):
+        events.append(("replace", os.stat(src), os.path.abspath(dst)))
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(os, "fsync", fsync)
+    monkeypatch.setattr(os, "replace", replace)
+    m.add_to_recent("990010")
+
+    renames = [i for i, e in enumerate(events) if e[0] == "replace" and e[2] == os.path.abspath(store)]
+    assert len(renames) == 1, "the save did not rename a finished temporary file over lists.pkl"
+    moved = events[renames[0]][1]
+    assert any(e[0] == "fsync" and os.path.samestat(e[1], moved) for e in events[:renames[0]]), \
+        "the temporary file was renamed over lists.pkl before its bytes were flushed to disk"
 
 
 def test_concurrent_saves_from_the_sync_thread_do_not_fail(store, lists_errors):
@@ -396,6 +584,20 @@ def test_save_app_config_keeps_an_unreadable_file(cfg_file):
 
     kept = glob.glob(f"{cfg_file}.unreadable-*")
     assert len(kept) == 1 and Path(kept[0]).read_bytes() == truncated
+    assert _read_cfg(cfg_file) == {"line_numbers": True}
+
+
+def test_a_config_file_that_is_not_a_dict_counts_as_unreadable(cfg_file):
+    """Every preference save updates the dict it reads, so a config.pkl
+    holding anything else would make every later save fail."""
+    _write_cfg(cfg_file, ["not", "a", "dict"])
+    before = cfg_file.read_bytes()
+
+    assert genizah_core.load_app_config() == {}
+    genizah_core.save_app_config({"line_numbers": True})
+
+    kept = glob.glob(f"{cfg_file}.unreadable-*")
+    assert len(kept) == 1 and Path(kept[0]).read_bytes() == before
     assert _read_cfg(cfg_file) == {"line_numbers": True}
 
 
@@ -513,11 +715,29 @@ def genizah_app_module():
     return genizah_app
 
 
+class _DistinctStamps:
+    """lists_manager's clock, with a new timestamp for every copy it names, so
+    a second unreadable-<time> copy cannot hide under the first one's name."""
+
+    def __init__(self):
+        self.n = 0
+
+    def strftime(self, fmt, *args):
+        self.n += 1
+        return f"20260101-0000{self.n:02d}"
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
 @pytest.mark.parametrize("lang", ["en", "he"])
 def test_startup_reports_a_recovered_lists_file(store, monkeypatch, genizah_app_module, lang):
     _two_sessions(store)
+    three_days_ago = time.time() - 3 * 24 * 3600
+    os.utime(f"{store}.bak1", (three_days_ago, three_days_ago))
     truncated = _truncate(store)
     monkeypatch.setattr(genizah_core, "CURRENT_LANG", lang)
+    monkeypatch.setattr(lm, "time", _DistinctStamps())
     shown = []
     monkeypatch.setattr(genizah_app_module, "QMessageBox", types.SimpleNamespace(
         warning=lambda parent, title, text: shown.append((title, text))))
@@ -533,14 +753,41 @@ def test_startup_reports_a_recovered_lists_file(store, monkeypatch, genizah_app_
     assert len(kept) == 1 and Path(kept[0]).read_bytes() == truncated, \
         "the notice names a kept copy that does not exist yet"
     assert os.path.basename(kept[0]) in text and str(store.parent) in text
-    when = time.strftime("%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(f"{store}.bak1")))
-    assert when in text
+    # The date tells the user which changes may be missing: the backup's, not lists.pkl's.
+    stamp = "%Y-%m-%d %H:%M"
+    assert time.strftime(stamp, time.localtime(three_days_ago)) in text
+    assert time.strftime(stamp, time.localtime(os.path.getmtime(store))) not in text
     if lang == "he":
         assert _is_hebrew(text[0]) and _is_hebrew(title[0])
 
+    for sys_id in ("990010", "990011"):  # the session goes on
+        gui.lists_mgr.add_to_recent(sys_id)
+    assert glob.glob(f"{store}.unreadable-*") == kept, "the saves after the notice kept another copy"
+    assert USER_LIST in _list_names(store)
 
+
+def test_the_notice_names_the_copy_an_earlier_save_already_kept(store, monkeypatch, genizah_app_module):
+    _two_sessions(store)
+    truncated = _truncate(store)
+    shown = []
+    monkeypatch.setattr(genizah_app_module, "QMessageBox", types.SimpleNamespace(
+        warning=lambda parent, title, text: shown.append((title, text))))
+    gui = genizah_app_module.GenizahGUI.__new__(genizah_app_module.GenizahGUI)
+    gui.lists_mgr = lm.ListsManager(None)
+    gui.lists_mgr.add_to_recent("990010")  # a save that ran before the notice
+
+    gui._report_lists_load_problem()
+
+    kept = glob.glob(f"{store}.unreadable-*")
+    assert len(kept) == 1 and Path(kept[0]).read_bytes() == truncated
+    assert len(shown) == 1 and os.path.basename(kept[0]) in shown[0][1], \
+        "the notice does not name the copy that holds the unreadable file"
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
 def test_startup_reports_lists_that_could_not_be_loaded_and_says_nothing_otherwise(
-        store, monkeypatch, genizah_app_module):
+        store, monkeypatch, genizah_app_module, lang):
+    monkeypatch.setattr(genizah_core, "CURRENT_LANG", lang)
     shown = []
     monkeypatch.setattr(genizah_app_module, "QMessageBox", types.SimpleNamespace(
         warning=lambda parent, title, text: shown.append((title, text))))
@@ -562,6 +809,9 @@ def test_startup_reports_lists_that_could_not_be_loaded_and_says_nothing_otherwi
     assert [t for t, _ in shown] == [genizah_core.tr("Lists could not be loaded")]
     kept = glob.glob(f"{store}.unreadable-*")
     assert len(kept) == 1 and os.path.basename(kept[0]) in shown[0][1]
+    if lang == "he":
+        title, text = shown[0]
+        assert _is_hebrew(title[0]) and _is_hebrew(text[0])
 
 
 def test_on_startup_finished_reports_right_after_building_the_lists():
@@ -738,9 +988,28 @@ def test_a_merge_whose_download_fails_never_uploads(synced, monkeypatch, genizah
         _block_the_download_snapshot(synced.store)
     cloud_before = {name: [dict(r) for r in rows] for name, rows in synced.cloud.tables.items()}
 
+    monkeypatch.setattr(genizah_core, "CURRENT_LANG", "he")
+
     shown = _run_sync_dialog_action(genizah_app_module, monkeypatch, synced.mgr, "merge")
 
     assert synced.cloud.writes == [], "the Merge uploaded after its download failed"
     assert synced.cloud.tables == cloud_before
     assert [kind for kind, _ in shown] == ["warning"]
     assert _note_in(synced.store) == TODAY
+    if cause == "snapshot":
+        assert shown[0][1] == genizah_core.TRANSLATIONS[lists_sync.DOWNLOAD_BACKUP_FAILED]
+
+
+def test_a_merge_whose_upload_fails_says_so_in_the_interface_language(
+        synced, monkeypatch, genizah_app_module):
+    monkeypatch.setattr(genizah_core, "CURRENT_LANG", "he")
+    monkeypatch.setattr(synced.mgr, "sync_to_cloud",
+                        lambda: {"success": False, "error": "Sync already in progress"})
+
+    shown = _run_sync_dialog_action(genizah_app_module, monkeypatch, synced.mgr, "merge")
+
+    assert [kind for kind, _ in shown] == ["warning"]
+    text = shown[0][1]
+    assert _is_hebrew(text[0]), f"the upload error is not in the interface language: {text!r}"
+    assert "Sync already in progress" in text
+    assert _note_in(synced.store) == OLD  # the download half did land

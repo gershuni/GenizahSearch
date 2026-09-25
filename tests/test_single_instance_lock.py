@@ -8,6 +8,7 @@ The lock is a QLockFile at INDEX_DIR/app.lock, taken in genizah_app's
 __main__ after the headless self-test branches and before GenizahGUI().
 """
 import ast
+import logging
 import os
 import subprocess
 import sys
@@ -99,6 +100,87 @@ def test_a_relaunched_copy_waits_for_its_parent_and_for_no_one_else(tmp_path):
         _stop(holder)
 
 
+class _FakeClock:
+    def __init__(self):
+        self.now = 0.0
+
+    def monotonic(self):
+        return self.now
+
+
+def _seconds_until_refused(monkeypatch, lock_info, parent_pid):
+    """Run acquire_instance_lock with its default waits against a copy that
+    never lets go, on a fake clock; return how long it waited before refusing."""
+    from PyQt6.QtCore import QLockFile
+    from desktop import single_instance as si
+
+    clock = _FakeClock()
+
+    class _NeverFreed:
+        LockError = QLockFile.LockError
+
+        def __init__(self, path):
+            pass
+
+        def tryLock(self, timeout_ms):
+            clock.now += max(timeout_ms, 1) / 1000
+            return False
+
+        def error(self):
+            return QLockFile.LockError.LockFailedError
+
+        def getLockInfo(self):
+            return lock_info
+
+    monkeypatch.setattr(si, "QLockFile", _NeverFreed)
+    monkeypatch.setattr(si, "time", clock)
+    lock, other_running = si.acquire_instance_lock("unused", parent_pid=parent_pid)
+    assert lock is None and other_running is True
+    return clock.now
+
+
+def test_the_default_waits_are_three_seconds_and_several_minutes_for_the_parent(monkeypatch):
+    """__main__ passes neither wait, so these defaults are what users get: a
+    launch waits 3 s for a copy that is closing; a relaunched copy waits for
+    the copy that relaunched it for minutes (an upload in flight can keep it
+    alive long after its window closed), but for no one else."""
+    parent = 4242
+    launch = _seconds_until_refused(monkeypatch, (True, parent, "host", "app"), parent_pid=None)
+    assert launch == pytest.approx(3.0, abs=0.01)
+    for_parent = _seconds_until_refused(monkeypatch, (True, parent, "host", "app"), parent_pid=parent)
+    assert 5 * 60 <= for_parent <= 15 * 60, for_parent
+    for_other = _seconds_until_refused(monkeypatch, (True, parent + 1, "host", "app"), parent_pid=parent)
+    assert for_other == pytest.approx(3.0, abs=0.01)
+
+
+def test_a_lock_holder_that_cannot_be_read_is_not_taken_for_the_parent(monkeypatch):
+    """getLockInfo() returns (ok, pid, hostname, appname), and the pid means
+    nothing when ok is False."""
+    parent = 4242
+    waited = _seconds_until_refused(monkeypatch, (False, parent, "", ""), parent_pid=parent)
+    assert waited == pytest.approx(3.0, abs=0.01), "an unreadable lock file was waited on as the parent"
+
+
+def test_a_lock_that_cannot_be_created_lets_the_app_run_unguarded(tmp_path):
+    """No lock file possible (a missing or read-only folder): the app starts
+    without the guard rather than refusing to start at all."""
+    from desktop import single_instance as si
+
+    records = []
+    handler = logging.Handler(logging.WARNING)
+    handler.emit = records.append
+    si.LOGGER.addHandler(handler)
+    try:
+        started = time.monotonic()
+        lock, other_running = si.acquire_instance_lock(str(tmp_path / "missing" / "folder"))
+    finally:
+        si.LOGGER.removeHandler(handler)
+
+    assert (lock, other_running) == (None, False)
+    assert time.monotonic() - started < 2
+    assert any("unguarded" in r.getMessage() for r in records)
+
+
 def test_the_restart_command_line_names_this_process_once():
     from desktop import single_instance as si
 
@@ -153,15 +235,17 @@ def test_language_restart_leaves_the_relaunch_to_main(monkeypatch):
     monkeypatch.setattr(genizah_app, "QApplication", types.SimpleNamespace(
         instance=lambda: types.SimpleNamespace(quit=lambda: quits.append(True))))
     monkeypatch.setattr(subprocess, "Popen", lambda argv, **kwargs: launched.append(argv))
+    from desktop import single_instance as si
+    # Recorded before toggle_language sets it, so teardown puts back False and
+    # no later test in the process relaunches anything.
+    monkeypatch.setattr(si, "_restart_requested", False)
     gui = genizah_app.GenizahGUI.__new__(genizah_app.GenizahGUI)
 
     gui.toggle_language("he")
 
     assert launched == [], "the new copy was started before this one had closed"
     assert saved == ["he"] and quits == [True]
-    from desktop import single_instance as si
     assert si._restart_requested is True
-    monkeypatch.setattr(si, "_restart_requested", False)
 
 
 # ---------------------------------------------------------------------------

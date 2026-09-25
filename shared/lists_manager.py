@@ -19,7 +19,7 @@ import time
 
 from shared.genizah_translations import TRANSLATIONS
 
-from shared.atomic_io import DEFAULT_BUSY_BUDGET, read_bytes, replace_file, write_bytes_atomic
+from shared.atomic_io import DEFAULT_BUSY_BUDGET, is_busy, read_bytes, replace_file, write_bytes_atomic
 from shared.config import Config
 
 LOGGER = logging.getLogger("genizah." + __name__)
@@ -38,6 +38,10 @@ def _tr(text: str) -> str:
     return text
 
 
+def _worth_retrying_at_startup(exc):
+    """Any failed read of lists.pkl is retried at startup, except a file that is gone."""
+    return not isinstance(exc, FileNotFoundError)
+
 
 class ListsManager:
     """
@@ -54,9 +58,11 @@ class ListsManager:
     LISTS_FILE = os.path.join(Config.INDEX_DIR, "lists.pkl")
     MAX_RECENT_ITEMS = 50
     BACKUP_COUNT = 3
-    # How long load() keeps retrying a lists.pkl that Windows reports busy
-    # (antivirus, the indexer) before treating it as unreadable. It runs once,
-    # at startup, and a busy file taken for a damaged one would be set aside.
+    # How long load() keeps retrying a lists.pkl it cannot read -- Windows
+    # reports it busy while antivirus or the indexer holds it, and a network or
+    # removable drive can fail a read for a moment -- before treating it as
+    # unreadable. It runs once, at startup, and a file taken for a damaged one
+    # would be set aside and an older backup loaded in its place.
     LOAD_BUSY_BUDGET = 5.0
 
     # Class-level: every instance writes the same LISTS_FILE, and the desktop
@@ -126,9 +132,9 @@ class ListsManager:
     def _backup_paths(self):
         return [f"{self.LISTS_FILE}.bak{i}" for i in range(1, self.BACKUP_COUNT + 1)]
 
-    def _read_store(self, path, budget=DEFAULT_BUSY_BUDGET):
+    def _read_store(self, path, budget=DEFAULT_BUSY_BUDGET, retry_if=is_busy):
         """Unpickle one copy of the store and fill in the fields newer builds expect."""
-        loaded = pickle.loads(read_bytes(path, budget=budget))
+        loaded = pickle.loads(read_bytes(path, budget=budget, retry_if=retry_if))
         # Merge with defaults to handle new fields
         defaults = self._get_default_data()
         for key in defaults:
@@ -176,7 +182,8 @@ class ListsManager:
         if not os.path.exists(self.LISTS_FILE):
             return
         try:
-            self.data = self._read_store(self.LISTS_FILE, budget=self.LOAD_BUSY_BUDGET)
+            self.data = self._read_store(self.LISTS_FILE, budget=self.LOAD_BUSY_BUDGET,
+                                         retry_if=_worth_retrying_at_startup)
             self.load_status = 'ok'
             return
         except FileNotFoundError:

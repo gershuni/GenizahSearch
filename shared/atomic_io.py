@@ -38,11 +38,18 @@ def _pauses(budget):
     return pauses
 
 
-def _retry_while_busy(fn, *args, budget=DEFAULT_BUSY_BUDGET):
+def is_busy(exc):
+    """True for the error Windows raises while another program holds the file."""
+    return isinstance(exc, PermissionError)
+
+
+def _retry_while_busy(fn, *args, budget=DEFAULT_BUSY_BUDGET, retry_if=is_busy):
     for pause in _pauses(budget):
         try:
             return fn(*args)
-        except PermissionError:
+        except OSError as exc:
+            if not retry_if(exc):
+                raise
             time.sleep(pause)
     return fn(*args)
 
@@ -52,9 +59,13 @@ def _read_all(path):
         return fh.read()
 
 
-def read_bytes(path, budget=DEFAULT_BUSY_BUDGET):
-    """Return the whole file, retrying for up to ``budget`` seconds while Windows reports it busy."""
-    return _retry_while_busy(_read_all, path, budget=budget)
+def read_bytes(path, budget=DEFAULT_BUSY_BUDGET, retry_if=is_busy):
+    """Return the whole file, retrying for up to ``budget`` seconds while Windows reports it busy.
+
+    ``retry_if`` picks the OSErrors worth another attempt (by default only the
+    busy-file PermissionError); any other error is raised at once.
+    """
+    return _retry_while_busy(_read_all, path, budget=budget, retry_if=retry_if)
 
 
 def replace_file(src, dst):

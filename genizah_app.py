@@ -2594,8 +2594,10 @@ class GenizahGUI(QMainWindow):
                             )
                         )
                     else:
-                        QMessageBox.warning(self, tr("Sync Error"),
-                                            f"Upload: {tr(upload_result.get('error') or 'Unknown error')}")
+                        QMessageBox.warning(
+                            self, tr("Sync Error"),
+                            tr("The cloud lists were downloaded, but the upload failed: {}").format(
+                                tr(upload_result.get('error') or 'Unknown error')))
 
             # Refresh the lists UI if it exists
             if hasattr(self, 'lists_tree'):
