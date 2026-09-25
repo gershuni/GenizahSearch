@@ -122,6 +122,7 @@ class _Host:
     def _passage_batch_in_flight(self): return False
     def _witness_notify(self, msg): pass
     def _refresh_witness_panel(self): pass
+    def _update_load_more_button(self, *a): pass
 
 
 @pytest.fixture
