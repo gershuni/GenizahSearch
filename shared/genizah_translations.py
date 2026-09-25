@@ -2886,6 +2886,7 @@ TRANSLATIONS = {
     "Showing {} of {} results (filtering {} domains)": "מציג {} מתוך {} תוצאות (מסנן {} תחומים)",
     "Nothing to export: every result in the table is hidden by a filter or an exclusion.":
         "אין מה לייצא: כל התוצאות בטבלה מוסתרות בסינון או בהחרגה.",
+    "Load more results ({} not loaded)": "טען תוצאות נוספות ({} לא נטענו)",
     # Desktop-specific Phase 42 strings
     "Min chunks: ": "מינ' מקטעים: ",
     "Minimum chunk matches per manuscript": "מינימום התאמות מקטע לכתב יד",

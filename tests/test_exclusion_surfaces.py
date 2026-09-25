@@ -33,7 +33,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt6.QtCore import QPoint
 from PyQt6.QtWidgets import (QApplication, QComboBox, QLabel, QLineEdit,
                              QMainWindow, QProgressBar, QPushButton,
-                             QTableWidget)
+                             QTableWidget, QWidget)
 
 import genizah_app as app
 import shared.session_persistence as session_persistence
@@ -817,6 +817,19 @@ def test_the_exclude_list_applies_to_the_next_search(window):
     assert _hidden(w, B) == [True], "the Search tab's Exclude list did not apply to a new search"
 
 
+def test_clearing_the_last_filter_rewrites_the_status(window):
+    """The pass wrote its line only while a filter was active, so the line
+    that counted the rows the last filter hid stayed after it was cleared."""
+    w = window
+    w._printed_sys_ids = {C}
+    _search(w, [_res(A, 1), _res(B, 1), _res(C, 1)])
+    for state, line in (("hide_printed", _showing(2, 3)), ("only_printed", _showing(1, 3)),
+                        ("all", _showing(3, 3))):
+        w._open_results_filter_dialog(w.COL_PRINTED)
+        assert w._printed_filter_state == state
+        assert w.status_label.text() == line, f"stale status at Printed={state}"
+
+
 def test_removing_the_last_exclusion_rewrites_the_status(window):
     w = window
     _search(w, [_res(A, 1), _res(B, 1)])
@@ -968,18 +981,19 @@ class _Records(list):
         self.append(record)
 
 
-def _session_state(results=()):
+def _session_state(results=(), word=(A,), listed=(B,)):
     return {
         "version": 1,
         "regular_search": {
             "query": "word",
             "results": list(results),
-            "excluded_sys_ids": [B],
-            "excluded_raw_entries": [B],
-            "exclusion_sources": serialize_sources([_src("my list", {B})]),
+            "excluded_sys_ids": list(listed),
+            "excluded_raw_entries": list(listed),
+            "exclusion_sources": (serialize_sources([_src("my list", set(listed))])
+                                  if listed else []),
         },
         "composition_search": {},
-        "word_excluded_sys_ids": [A],
+        "word_excluded_sys_ids": list(word),
     }
 
 
@@ -1098,3 +1112,199 @@ def test_the_collector_returns_exactly_the_visible_rows(window):
     _search(w, [_res(A, 1), _res(B, 1), _res(C, 1)])
     w.results_table.setRowHidden(_row_of(w, B)[0], True)
     assert [r["display"]["id"] for r in w._collect_sorted_results()] == [A, C]
+
+
+# --------------------------------------------------------------------------
+# "Load more results": the next batch stays reachable when nothing scrolls
+# --------------------------------------------------------------------------
+#
+# The next batch loads on a scroll to the bottom. A table whose visible rows
+# fit in the window has no scroll range, so with the first batch all excluded
+# ("Showing 0 of 50") nothing further could ever load.
+
+@pytest.fixture
+def load_more(window, monkeypatch):
+    """The real button, wired by the real builder, beside a table shown at a
+    known size, with 20-row batches."""
+    w = window
+    create = getattr(w, "_create_load_more_button", None)
+    w._test_holder = QWidget()
+    if create is not None:
+        create().setParent(w._test_holder)
+    monkeypatch.setattr(app, "BATCH_SIZE", 20)
+    w.results_table.resize(900, 400)
+    w.results_table.show()
+    yield w
+    w.results_table.hide()
+
+
+def _load_more_state(w):
+    """(shown, text) once Qt has laid the rows out."""
+    QApplication.processEvents()
+    btn = getattr(w, "btn_load_more_results", None)
+    assert btn is not None, "the Search tab has no 'Load more results' button"
+    return (not btn.isHidden(), btn.text())
+
+
+def _load_more_text(n):
+    return tr("Load more results ({} not loaded)").format(n)
+
+
+def _rows(sid, n, start=1):
+    return [_res(sid, p) for p in range(start, start + n)]
+
+
+def _search_in_flight(w, results):
+    w.is_searching = True                   # reset_ui clears it as the run ends
+    _search(w, results)
+
+
+def test_load_more_appears_when_the_whole_first_batch_is_excluded(load_more):
+    w = load_more
+    w.excluded_sys_ids = {A}
+    _search_in_flight(w, _rows(A, 20) + _rows(B, 30))
+    assert w.status_label.text() == _showing(0, 50, excluded=20)
+    assert _load_more_state(w) == (True, _load_more_text(30)), (
+        "the first batch is all excluded and nothing can scroll: batch 2 is unreachable")
+
+
+def test_load_more_appears_after_a_restore_whose_first_batch_is_excluded(load_more, restore):
+    w = restore(_session_state(results=_rows(A, 50) + _rows(B, 50), word=(A,), listed=()),
+                "always")
+    assert w.results_table.rowCount() == 50                 # the restore's first batch
+    assert _load_more_state(w) == (True, _load_more_text(50)), (
+        "the restore replayed a fully excluded first batch and left nothing to load the rest")
+
+
+def test_load_more_is_hidden_while_the_restore_runs(load_more):
+    w = load_more
+    w.excluded_sys_ids = {A}
+    w._restoring_session = True
+    _search(w, _rows(A, 50) + _rows(B, 30))                 # a restore's first batch is 50
+    assert w.results_table.rowCount() == 50
+    assert _load_more_state(w)[0] is False
+    w._restoring_session = False
+    w._update_load_more_button()                            # what the restore's end does
+    assert _load_more_state(w) == (True, _load_more_text(30))
+
+
+def test_load_more_is_hidden_when_the_table_can_scroll(load_more):
+    w = load_more
+    w.results_table.resize(900, 200)
+    _search_in_flight(w, _rows(B, 40))
+    assert _load_more_state(w)[0] is False, "the button showed while scrolling works"
+    assert w.results_table.verticalScrollBar().maximum() > 0
+
+
+def test_load_more_follows_the_scroll_range_when_the_window_changes(load_more):
+    """Nothing but the scroll bar's rangeChanged recomputes it on a resize."""
+    w = load_more
+    w.results_table.resize(900, 2000)
+    _search_in_flight(w, _rows(B, 40))
+    assert _load_more_state(w) == (True, _load_more_text(20))
+    w.results_table.resize(900, 200)
+    assert _load_more_state(w)[0] is False, "stale after the table became scrollable"
+    w.results_table.resize(900, 2000)
+    assert _load_more_state(w) == (True, _load_more_text(20))
+
+
+def test_load_more_is_hidden_when_nothing_remains(load_more):
+    w = load_more
+    w.excluded_sys_ids = {A}
+    _search_in_flight(w, _rows(A, 5))
+    assert _load_more_state(w)[0] is False
+
+
+def test_a_click_loads_exactly_one_batch_and_updates_the_count(load_more):
+    w = load_more
+    w.results_table.resize(900, 2000)       # no batch here ever overflows the view
+    w.excluded_sys_ids = {A}
+    _search_in_flight(w, _rows(A, 40) + _rows(B, 30))
+    assert _load_more_state(w) == (True, _load_more_text(50))
+    w.btn_load_more_results.click()
+    assert w.results_table.rowCount() == 40 and w.results_loaded == 40
+    assert _load_more_state(w) == (True, _load_more_text(30))
+    assert w.status_label.text() == _showing(0, 70, excluded=40)
+
+
+class _Signal:
+    def connect(self, fn):
+        pass
+
+
+class _IdleSearchThread:
+    """Takes start_search's run and never delivers it."""
+
+    def __init__(self, *a, **k):
+        self.results_signal = self.progress_signal = self.error_signal = _Signal()
+
+    def start(self):
+        pass
+
+    def isRunning(self):
+        return False
+
+
+def test_load_more_is_hidden_while_a_search_runs(load_more, monkeypatch):
+    """start_search empties the table but the previous run's results stay in
+    last_results until the new ones land; a click then would render them
+    into the new run's table."""
+    w = load_more
+    w.excluded_sys_ids = {A}
+    _search_in_flight(w, _rows(A, 20) + _rows(B, 30))
+    assert _load_more_state(w)[0] is True
+    monkeypatch.setattr(app, "SearchThread", _IdleSearchThread)
+    w.searcher = SimpleNamespace(parse_query_syntax=lambda q, responsa_mode=False: (None, q))
+    w.mode_combo.addItems(["literal"] * 8)
+    w.mode_combo.setCurrentIndex(0)
+    w.MODE_RESPONSA, w.MODE_PGP_TAGS = 2, 7         # set by the UI builder
+    w.gap_input, w.exclude_input = QLineEdit(), QLineEdit()
+    w.text_position_combo = QComboBox()
+    w.btn_lab_mode_toggle, w.search_within_btn = QPushButton(), QPushButton()
+    w._run_seq = 0
+    w._pause_search.reset_for_run = lambda run_id, now: None
+    w.query_input.setText("word")
+    w.start_search()                        # the next search, still running
+    w._search_elapsed_timer.stop()
+    assert w.results_table.rowCount() == 0 and w.is_searching
+    assert _load_more_state(w)[0] is False, (
+        "the button offers the previous run's results during a search")
+
+
+@pytest.mark.parametrize("ending", ["New", "a zero-result search", "a zero-result tag search"])
+def test_load_more_does_not_outlive_the_results_it_counted(load_more, ending):
+    w = load_more
+    w.excluded_sys_ids = {A}
+    _search_in_flight(w, _rows(A, 20) + _rows(B, 30))
+    assert _load_more_state(w)[0] is True
+    if ending == "New":
+        w._reset_search()
+    elif ending == "a zero-result search":
+        _search_in_flight(w, [])
+    else:
+        w._on_tag_search_results("letters", [])
+    assert _load_more_state(w)[0] is False
+
+
+def test_after_the_all_terms_view_the_count_is_what_a_click_loads_from(load_more, monkeypatch):
+    """The all-terms view swaps last_results for the render and restores the
+    full set; a click reads the full set, so the label must count it."""
+    w = load_more
+    w.excluded_sys_ids = {A}
+    _search_in_flight(w, _rows(A, 25) + _rows(B, 25))
+    monkeypatch.setattr(app, "compute_all_terms_filter",
+                        lambda chain: {f"{A}_{p}" for p in range(1, 26)})
+    monkeypatch.setattr(app, "enrich_snippet_with_chain_terms", lambda s, c, q: s)
+    w.refinement_chain = [object(), object()]
+    w._all_terms_filter = True
+    w._apply_all_terms_filter_and_rerender()
+    assert w.results_table.rowCount() == 20
+    remaining = len(w.last_results) - w.results_loaded
+    assert _load_more_state(w) == (True, _load_more_text(remaining)), (
+        "the label counts the swapped-in view, not what a click will read")
+
+
+def test_the_load_more_label_has_a_hebrew_translation():
+    from shared.genizah_translations import TRANSLATIONS
+    assert TRANSLATIONS.get("Load more results ({} not loaded)"), (
+        "user-visible string without a Hebrew entry")

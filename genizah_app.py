@@ -5609,6 +5609,7 @@ class GenizahGUI(QMainWindow):
 
         # Add controls to status row
         bot.addWidget(self.status_label, 1)
+        bot.addWidget(self._create_load_more_button())
         bot.addWidget(self._zero_result_back_btn)
 
         # Add to List button
@@ -20092,6 +20093,7 @@ class GenizahGUI(QMainWindow):
         for b in self.export_buttons: b.setEnabled(False)
         self.result_row_by_sys_id = {}
         self.hovered_row = -1
+        self._update_load_more_button()
 
         # Build Responsa options if Responsa mode is selected in combo
         responsa_options = None
@@ -20415,6 +20417,8 @@ class GenizahGUI(QMainWindow):
         self.search_progress.setVisible(False)
         if hasattr(self, '_search_elapsed_timer'):
             self._search_elapsed_timer.stop()
+        # The button is hidden while a search runs; this is where it stops.
+        self._update_load_more_button()
 
     def _update_search_elapsed(self):
         """Tick every 1s to keep elapsed time updating during search."""
@@ -20539,6 +20543,7 @@ class GenizahGUI(QMainWindow):
         # 13. Update status bar
         self.status_label.setText(tr("Ready."))
         self.status_label.setStyleSheet("")
+        self._update_load_more_button()
 
         # 14. Save the cleared state now, not debounced: a crash right after
         # New must not leave the discarded search on disk. session.json is
@@ -20566,6 +20571,44 @@ class GenizahGUI(QMainWindow):
         bar = self.results_table.verticalScrollBar()
         if bar.maximum() > 0 and value >= bar.maximum() * 0.95:
             self.load_next_batch()
+
+    def _create_load_more_button(self):
+        """The Search tab's "Load more results" button, beside the status.
+
+        Scrolling is the only other way to load the next batch, and a table
+        whose visible rows fit in the window has nothing to scroll -- no rows
+        visible at all (a first batch every row of which is excluded or
+        filtered out), or a few short ones. Without the button no further
+        batch could ever load. The table's scroll range drives it, so it is
+        never stale after Qt lays the rows out.
+        """
+        btn = QPushButton()
+        btn.setVisible(False)
+        # The same call a scroll makes, reading the same state at click time.
+        btn.clicked.connect(lambda: self.load_next_batch())
+        self.btn_load_more_results = btn
+        self.results_table.verticalScrollBar().rangeChanged.connect(
+            self._update_load_more_button)
+        return btn
+
+    def _update_load_more_button(self, *_):
+        """Show "Load more results" exactly when results remain unloaded and
+        the table cannot scroll. Reads only current state and loads nothing,
+        so it is safe to call from anywhere, any number of times. The
+        visibility pass calls it, which covers every batch load."""
+        btn = getattr(self, 'btn_load_more_results', None)
+        if btn is None:
+            return
+        remaining = len(getattr(self, 'last_results', None) or []) - getattr(self, 'results_loaded', 0)
+        show = (remaining > 0
+                # A running search has emptied the table but still holds the
+                # previous run's results; a restore recomputes this at its end.
+                and not getattr(self, 'is_searching', False)
+                and not getattr(self, '_restoring_session', False)
+                and self.results_table.verticalScrollBar().maximum() == 0)
+        if show:
+            btn.setText(tr("Load more results ({} not loaded)").format(remaining))
+        btn.setVisible(show)
 
     def load_next_batch(self, batch_size=None):
         if self.results_loaded >= len(self.last_results):
@@ -20834,6 +20877,7 @@ class GenizahGUI(QMainWindow):
             self.last_results = []
             for b in self.export_buttons: b.setEnabled(False)
             self.results_table.setRowCount(0)
+            self._update_load_more_button()
             self.result_row_by_sys_id = {}
             self.shelfmark_items_by_sid = {}
             self.title_items_by_sid = {}
@@ -21237,6 +21281,8 @@ class GenizahGUI(QMainWindow):
         self.title_items_by_sid = {}
         self.load_next_batch()
         self.last_results = original  # restore full set for future operations
+        # Recount against the full set, which a click on the button reads.
+        self._update_load_more_button()
         n_shown = len(filtered)
         n_total = len(original)
         if n_shown < n_total:
@@ -21857,6 +21903,7 @@ class GenizahGUI(QMainWindow):
         self._search_rows_excluded = excluded_rows
         if (changed or excluded_rows != previous_excluded) and self.results_table.rowCount():
             self.status_label.setText(self._search_status_summary())
+        self._update_load_more_button()
         return excluded_rows
 
     def _result_page_num(self, res):
@@ -22148,6 +22195,7 @@ class GenizahGUI(QMainWindow):
             self.last_results = []
             self.results_loaded = 0
             self.results_table.setRowCount(0)
+            self._update_load_more_button()
             self.result_row_by_sys_id = {}
             self.shelfmark_items_by_sid = {}
             self.title_items_by_sid = {}
@@ -31239,6 +31287,12 @@ class GenizahGUI(QMainWindow):
                 self._apply_default_comp_method()
             except Exception:                                # noqa: BLE001
                 logger.exception('could not apply the default search method')
+            # "Load more results" stays hidden while the restore runs; a
+            # replayed first batch every row of which is excluded needs it.
+            try:
+                self._update_load_more_button()
+            except Exception:                                # noqa: BLE001
+                logger.exception('could not update the load-more button')
             self.search_progress.setVisible(False)
             # Phase 96 fix-8 (supersedes fix-7): notify MyLibraryTab
             # unconditionally in the finally block so that _auto_select_first_folder
