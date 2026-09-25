@@ -26,6 +26,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import os
 import re
 import sys
 from base64 import b64decode, b64encode
@@ -212,9 +213,31 @@ def _startup_call_problems(source: str) -> list[str]:
         return [f'expected one ui.run call in the startup block, found {len(runs)}']
     run_pos = (runs[0].lineno, runs[0].col_offset)
 
+    names = ('resolve_storage_secret', 'require_session_id_validation')
     problems: list[str] = []
-    for name in ('resolve_storage_secret', 'require_session_id_validation'):
-        calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and _call_name(n) == name]
+    # Local names the helpers are imported under (``from ... import x as y``),
+    # so a call through an alias is still counted. Importing either helper
+    # outside the startup block is itself a problem: it is the first step of
+    # running it at import time.
+    local_names = {name: {name} for name in names}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom) or not (node.module or '').endswith('session_hardening'):
+            continue
+        for alias in node.names:
+            if alias.name not in local_names:
+                continue
+            local_names[alias.name].add(alias.asname or alias.name)
+            if id(node) not in in_block:
+                problems.append(f'{alias.name} is imported outside the startup block')
+
+    for name in names:
+        calls = [
+            n for n in ast.walk(tree)
+            if isinstance(n, ast.Call) and (
+                _call_name(n) == name
+                or (isinstance(n.func, ast.Name) and n.func.id in local_names[name])
+            )
+        ]
         if len(calls) != 1:
             problems.append(f'{name}() is called {len(calls)} times in web/main.py (expected 1)')
             continue
@@ -273,11 +296,56 @@ if __name__ in {'__main__', '__mp_main__'}:
         _GOOD_SOURCE.replace('    require_session_id_validation()\n', '    # require_session_id_validation()\n'),
         _startup_call_problems, id='check-only-in-a-comment',
     ),
+    pytest.param(
+        _GOOD_SOURCE.replace(
+            "if __name__ in {'__main__', '__mp_main__'}:",
+            "from web.session_hardening import resolve_storage_secret as _early\n"
+            "_early()\n"
+            "if __name__ in {'__main__', '__mp_main__'}:",
+        ),
+        _startup_call_problems, id='aliased-resolver-at-import-time',
+    ),
+    pytest.param(
+        _GOOD_SOURCE.replace(
+            "if __name__ in {'__main__', '__mp_main__'}:",
+            "from web.session_hardening import require_session_id_validation\n"
+            "if __name__ in {'__main__', '__mp_main__'}:",
+        ).replace(
+            '    from web.session_hardening import require_session_id_validation, resolve_storage_secret\n',
+            '    from web.session_hardening import resolve_storage_secret\n',
+        ),
+        _startup_call_problems, id='helper-imported-at-module-level',
+    ),
+    pytest.param(
+        _GOOD_SOURCE.replace(
+            'require_session_id_validation, resolve_storage_secret',
+            'require_session_id_validation as _check, resolve_storage_secret',
+        ).replace('    require_session_id_validation()\n', '')
+        + '    _check()\n',
+        _startup_call_problems, id='aliased-check-after-ui-run',
+    ),
 ])
 def test_startup_guards_catch_a_seeded_violation(source, checker):
     """The two AST guards above must be able to fail."""
     assert checker(_GOOD_SOURCE) == []
     assert checker(source) != []
+
+
+def test_startup_guard_counts_aliased_calls_in_the_startup_block():
+    """Importing the two helpers under other names inside the startup block is
+    still the correct shape, so the guard must count those calls, not report
+    them as missing."""
+    source = (
+        _GOOD_SOURCE
+        .replace(
+            'require_session_id_validation, resolve_storage_secret',
+            'require_session_id_validation as _check, resolve_storage_secret as _resolve',
+        )
+        .replace('= resolve_storage_secret()', '= _resolve()')
+        .replace('    require_session_id_validation()\n', '    _check()\n')
+    )
+    assert '_resolve()' in source and '_check()' in source
+    assert _startup_call_problems(source) == []
 
 
 @pytest.mark.parametrize('environ', [
@@ -563,3 +631,81 @@ def test_server_launcher_refuses_without_a_storage_secret(monkeypatch, tmp_path)
     assert spawned == [], 'the launcher spawned the web app without a storage secret'
     assert exit_code not in (0, None, 'did not exit')
     assert 'GENIZAH_STORAGE_SECRET' in str(exit_code)
+
+
+# ---------------------------------------------------------------------------
+# the end-to-end test fixture starts the real web app with a storage secret
+# ---------------------------------------------------------------------------
+
+E2E_CONFTEST = REPO_ROOT / 'tests' / 'e2e' / 'conftest.py'
+
+
+def _load_e2e_conftest():
+    spec = importlib.util.spec_from_file_location('_e2e_conftest_under_test', E2E_CONFTEST)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_e2e_storage_secret_is_set_for_the_test_and_removed_after(monkeypatch):
+    from web.session_hardening import resolve_storage_secret
+
+    monkeypatch.delenv('GENIZAH_STORAGE_SECRET', raising=False)
+    conftest = _load_e2e_conftest()
+    with conftest.e2e_storage_secret():
+        resolve_storage_secret()  # would raise SystemExit if missing or short
+    assert 'GENIZAH_STORAGE_SECRET' not in os.environ
+
+
+def test_e2e_storage_secret_keeps_a_value_already_set(monkeypatch):
+    existing = 'e2e-existing-secret-' + 'x' * 32
+    monkeypatch.setenv('GENIZAH_STORAGE_SECRET', existing)
+    conftest = _load_e2e_conftest()
+    with conftest.e2e_storage_secret():
+        assert os.environ['GENIZAH_STORAGE_SECRET'] == existing
+    assert os.environ['GENIZAH_STORAGE_SECRET'] == existing
+
+
+def _screen_fixture_problems(source: str) -> list[str]:
+    """The ``screen`` fixture yields inside ``with e2e_storage_secret():``."""
+    tree = ast.parse(source)
+    fixtures = [
+        n for n in ast.walk(tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == 'screen'
+    ]
+    if len(fixtures) != 1:
+        return [f'expected one screen fixture, found {len(fixtures)}']
+    guarded_yields = set()
+    for node in ast.walk(fixtures[0]):
+        if not isinstance(node, ast.With):
+            continue
+        if any(
+            isinstance(item.context_expr, ast.Call) and _call_name(item.context_expr) == 'e2e_storage_secret'
+            for item in node.items
+        ):
+            guarded_yields |= {id(n) for n in ast.walk(node) if isinstance(n, ast.Yield)}
+    yields = [n for n in ast.walk(fixtures[0]) if isinstance(n, ast.Yield)]
+    if not yields:
+        return ['the screen fixture never yields']
+    if any(id(y) not in guarded_yields for y in yields):
+        return ['the screen fixture yields outside with e2e_storage_secret()']
+    return []
+
+
+def test_e2e_screen_fixture_starts_the_app_with_a_storage_secret():
+    assert _screen_fixture_problems(E2E_CONFTEST.read_text(encoding='utf-8')) == []
+
+
+@pytest.mark.parametrize('source', [
+    pytest.param('def screen():\n    yield 1\n', id='no-guard'),
+    pytest.param('def screen():\n    # with e2e_storage_secret():\n    yield 1\n', id='guard-only-in-a-comment'),
+    pytest.param(
+        'def screen():\n    with e2e_storage_secret():\n        pass\n    yield 1\n',
+        id='yield-after-the-guard',
+    ),
+])
+def test_screen_fixture_guard_catches_a_seeded_violation(source):
+    """The guard above must be able to fail."""
+    good = 'def screen():\n    with e2e_storage_secret():\n        yield 1\n'
+    assert _screen_fixture_problems(good) == []
+    assert _screen_fixture_problems(source) != []
