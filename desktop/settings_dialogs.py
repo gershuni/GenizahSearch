@@ -1388,6 +1388,7 @@ class SettingsDialog(QDialog):
             row.addStretch()
             layout.addLayout(row)
 
+        # The server route /api/visual_similarity_db was removed on 2026-09-25; any future download needs a new, rate-limited delivery path (SEED-005), so do not re-enable this as is.
         # — Visual Similarity Download — deferred (nginx proxy_max_temp_file_size blocks 1.3GB)
         # TODO: re-enable after fixing nginx config for large file downloads
 

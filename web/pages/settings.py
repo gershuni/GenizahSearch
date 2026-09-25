@@ -381,6 +381,7 @@ def create_settings_page():
                                 ui.badge(tr('Not loaded'), color='gray')
                         except Exception:
                             ui.badge(tr('Not loaded'), color='gray')  # Visual similarity lookup failed; continue
+                        # The server route /api/visual_similarity_db was removed on 2026-09-25; any future download needs a new, rate-limited delivery path (SEED-005), so do not re-enable this as is.
                         # VS DB download deferred — nginx proxy_max_temp_file_size blocks 1.3GB response
                         # ui.button(
                         #     tr('Download full visual similarity database'), icon='download',
