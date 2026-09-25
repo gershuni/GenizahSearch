@@ -33,6 +33,35 @@ logger = logging.getLogger(__name__)
 _COUNTS_UNSET = object()
 
 
+async def _run_lists_write(write, *, falsy_is_failure: bool = True):
+    """Run one lists write for the signed-in user; return its result, or None.
+
+    Every write callback on this page goes through here, as
+    ``result = await _run_lists_write(lambda: state.lists_mgr.<method>(...))``
+    followed by ``if not result: return`` (tests/test_lists_page_write_callbacks.py).
+
+    * The page's sign-in gate runs once, at render; a session can end while the
+      page stays open, so sign-in is re-checked here, before any write.
+    * ``write`` returns the manager's coroutine and it is AWAITED here: the
+      UserListsManager write methods are async, and a bare call never runs.
+    * A write that raises or reports nothing done (None / False) toasts a
+      failure and returns None. Pass ``falsy_is_failure=False`` when a falsy
+      result is a legitimate answer (Empty Trash can delete 0 lists).
+    """
+    if not GlobalAuthState.is_logged_in():
+        ui.notify(tr('Please log in to access lists'), type='warning')
+        return None
+    try:
+        result = await write()
+    except Exception as e:
+        logger.warning("lists write failed: %s", e)
+        result = None
+    if result is None or (falsy_is_failure and not result):
+        ui.notify(tr('The change could not be saved. Check your connection and try again.'), type='negative')
+        return None
+    return result
+
+
 def _load_list_item_counts() -> Optional[Dict[int, int]]:
     """Return batched item counts for logged-in users; None means legacy fallback.
 
@@ -137,20 +166,25 @@ def create_inline_edit_label(
             # Focus the input
             ui.run_javascript(f'document.querySelector("[id=\\"{input_el.id}\\"] input")?.focus(); document.querySelector("[id=\\"{input_el.id}\\"] input")?.select();')
 
-        def save_edit():
-            """Save the new name and exit edit mode."""
+        async def save_edit():
+            """Save the new name and exit edit mode.
+
+            Enter and blur both call this; leaving edit mode BEFORE the await
+            makes the second call a no-op instead of a second write.
+            """
             if not editing_state['active']:
                 return
             new_name = input_el.value.strip()
-            if new_name and new_name != label_el.text:
-                # Call API to update
-                if lists_mgr:
-                    lists_mgr.update_list(list_id, name=new_name)
-                    label_el.text = new_name
-                    ui.notify(f"{tr_func('List renamed to')}: {new_name}", type='positive')
-                    if on_save_callback:
-                        on_save_callback()
+            old_name = label_el.text
             cancel_edit()
+            if new_name and new_name != old_name and lists_mgr:
+                renamed = await _run_lists_write(lambda: lists_mgr.update_list(list_id, name=new_name))
+                if not renamed:
+                    return
+                label_el.text = new_name
+                ui.notify(f"{tr_func('List renamed to')}: {new_name}", type='positive')
+                if on_save_callback:
+                    on_save_callback()
 
         def cancel_edit():
             """Cancel editing and restore the label."""
@@ -158,10 +192,10 @@ def create_inline_edit_label(
             input_el.set_visibility(False)
             label_el.set_visibility(True)
 
-        def handle_keydown(e):
+        async def handle_keydown(e):
             """Handle keyboard events in the input."""
             if e.args.get('key') == 'Enter':
-                save_edit()
+                await save_edit()
             elif e.args.get('key') == 'Escape':
                 cancel_edit()
 
@@ -286,12 +320,11 @@ def create_lists_page():
                     return
 
                 if state.lists_mgr:
-                    # Use async method if authenticated, sync otherwise
-                    if GlobalAuthState.is_logged_in():
-                        list_id = await state.lists_mgr.create_list(name, color=selected_color['value'])
-                    else:
-                        list_id = state.lists_mgr.create_list_sync(name, color=selected_color['value'])
-
+                    list_id = await _run_lists_write(
+                        lambda: state.lists_mgr.create_list(name, color=selected_color['value'])
+                    )
+                    if not list_id:
+                        return
                     ui.notify(f"{tr('List created')}: {name}", type='positive')
                     dialog.close()
                     await async_refresh_ui()
@@ -315,13 +348,9 @@ def create_lists_page():
 
             async def delete_list():
                 if state.lists_mgr:
-                    if GlobalAuthState.is_logged_in() and hasattr(state.lists_mgr, 'delete_list'):
-                        try:
-                            await state.lists_mgr.delete_list(list_id)
-                        except TypeError:
-                            state.lists_mgr.delete_list(list_id)
-                    else:
-                        state.lists_mgr.delete_list(list_id)
+                    deleted = await _run_lists_write(lambda: state.lists_mgr.delete_list(list_id))
+                    if not deleted:
+                        return
                     ui.notify(f"{tr('List deleted')}: {list_name}", type='info')
                     dialog.close()
                     page_state.selected_list_id = None
@@ -392,10 +421,11 @@ def create_lists_page():
                             ui.notify(tr('Please select a list to restore.'), type='warning')
                             return
                         if hasattr(state.lists_mgr, 'restore_list'):
-                            try:
-                                await state.lists_mgr.restore_list(selected_list_id['value'])
-                            except TypeError:
-                                state.lists_mgr.restore_list(selected_list_id['value'])
+                            restored = await _run_lists_write(
+                                lambda: state.lists_mgr.restore_list(selected_list_id['value'])
+                            )
+                            if not restored:
+                                return
                             ui.notify(tr('List restored'), type='positive')
                             dialog.close()
                             await async_refresh_ui()
@@ -405,20 +435,23 @@ def create_lists_page():
                             ui.notify(tr('Please select a list to delete.'), type='warning')
                             return
                         if hasattr(state.lists_mgr, 'permanently_delete_list'):
-                            try:
-                                await state.lists_mgr.permanently_delete_list(selected_list_id['value'])
-                            except TypeError:
-                                state.lists_mgr.permanently_delete_list(selected_list_id['value'])
+                            purged = await _run_lists_write(
+                                lambda: state.lists_mgr.permanently_delete_list(selected_list_id['value'])
+                            )
+                            if not purged:
+                                return
                             ui.notify(tr('List deleted permanently'), type='info')
                             dialog.close()
                             await async_refresh_ui()
 
                     async def empty_trash():
                         if hasattr(state.lists_mgr, 'empty_trash'):
-                            try:
-                                count = await state.lists_mgr.empty_trash()
-                            except TypeError:
-                                count = state.lists_mgr.empty_trash()
+                            # 0 deleted is a legitimate answer, so only None is a failure.
+                            count = await _run_lists_write(
+                                lambda: state.lists_mgr.empty_trash(), falsy_is_failure=False
+                            )
+                            if count is None:
+                                return
                             ui.notify(tr('Deleted {} lists permanently.').format(count), type='info')
                             dialog.close()
                             await async_refresh_ui()
@@ -458,16 +491,25 @@ def create_lists_page():
                 value=', '.join(item_data.get('tags', []))
             ).classes('w-full mb-4').props('outlined')
 
-            def save_changes():
+            async def save_changes():
                 if state.lists_mgr:
-                    # Update note
-                    if note_input.value != item_data.get('note', ''):
-                        state.lists_mgr.update_item_note(item_id, note_input.value)
+                    # Update note (the manager methods are async: a bare call never ran)
+                    new_note = note_input.value
+                    if new_note != item_data.get('note', ''):
+                        noted = await _run_lists_write(
+                            lambda: state.lists_mgr.update_item_note(item_id, new_note)
+                        )
+                        if not noted:
+                            return
 
                     # Update tags
                     new_tags = [t.strip() for t in tags_input.value.split(',') if t.strip()]
                     if new_tags != item_data.get('tags', []):
-                        state.lists_mgr.update_item_tags(item_id, new_tags)
+                        tagged = await _run_lists_write(
+                            lambda: state.lists_mgr.update_item_tags(item_id, new_tags)
+                        )
+                        if not tagged:
+                            return
 
                     ui.notify(tr('Item updated'), type='positive')
                     dialog.close()
@@ -852,17 +894,13 @@ def create_lists_page():
     async def remove_item_from_list(item_id: str, list_id: str):
         """Remove an item from the current list."""
         if state.lists_mgr:
-            if GlobalAuthState.is_logged_in() and hasattr(state.lists_mgr, 'remove_item_from_list'):
-                try:
-                    result = await state.lists_mgr.remove_item_from_list(item_id, list_id)
-                except TypeError:
-                    result = state.lists_mgr.remove_item_from_list_sync(item_id, list_id)
-            else:
-                result = state.lists_mgr.remove_item_from_list(item_id, list_id)
-
-            if result:
-                ui.notify(tr('Item removed from list'), type='info')
-                await async_refresh_ui()
+            result = await _run_lists_write(
+                lambda: state.lists_mgr.remove_item_from_list(item_id, list_id)
+            )
+            if not result:
+                return
+            ui.notify(tr('Item removed from list'), type='info')
+            await async_refresh_ui()
 
     def export_list(list_id: str):
         """Export list to Excel."""

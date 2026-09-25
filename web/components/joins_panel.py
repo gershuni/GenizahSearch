@@ -138,7 +138,56 @@ async def load_connected_fragments_into(slot, render: Callable[[Dict], None],
     return True
 
 
+# Single-flight for fetch_connected_fragments: cache key -> Event set when the
+# caller doing that key's lookup finishes. Guarded by _joins_cache_lock.
+_joins_inflight: Dict[str, threading.Event] = {}
+# How long a second caller waits for the first one's result before doing its own
+# lookup. Above the lookup's own worst case (two 5 s PostgREST reads + SQLite).
+_JOINS_INFLIGHT_WAIT_S = 15.0
+
+
 def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pgpid: int = None, force_refresh: bool = False, confirmed_only: bool = False) -> Dict:
+    """Connected fragments for a shelfmark or document_id; ONE lookup per cache key at a time.
+
+    BLOCKING (Supabase + SQLite): call it through run.io_bound, never on the
+    event loop. On a cold cache the Browse Related Fragments fill and the
+    toolbar Joins button ask for the same key within ~100 ms; the second caller
+    now waits for the first one's result instead of repeating the lookup. If
+    the first produced nothing cacheable (its error result is not cached), or
+    took longer than _JOINS_INFLIGHT_WAIT_S, the waiter does its own lookup.
+    ``force_refresh`` always goes to the source. Arguments and result as in
+    ``_fetch_connected_fragments_uncached``.
+    """
+    kwargs = dict(shelfmark=shelfmark, document_id=document_id, pgpid=pgpid,
+                  confirmed_only=confirmed_only)
+    if force_refresh:
+        return _fetch_connected_fragments_uncached(force_refresh=True, **kwargs)
+    cache_key = _joins_cache_key(shelfmark, document_id, pgpid, confirmed_only)
+    cached = _cache_get_fresh(cache_key)
+    if cached is not None:
+        return cached
+    with _joins_cache_lock:
+        event = _joins_inflight.get(cache_key)
+        leader = event is None
+        if leader:
+            event = threading.Event()
+            _joins_inflight[cache_key] = event
+    if not leader:
+        event.wait(_JOINS_INFLIGHT_WAIT_S)
+        cached = _cache_get_fresh(cache_key)
+        if cached is not None:
+            return cached
+        return _fetch_connected_fragments_uncached(**kwargs)
+    try:
+        return _fetch_connected_fragments_uncached(**kwargs)
+    finally:
+        with _joins_cache_lock:
+            if _joins_inflight.get(cache_key) is event:
+                del _joins_inflight[cache_key]
+        event.set()
+
+
+def _fetch_connected_fragments_uncached(shelfmark: str = None, document_id: str = None, pgpid: int = None, force_refresh: bool = False, confirmed_only: bool = False) -> Dict:
     """
     Fetch all fragments connected to the given shelfmark or document_id.
     Merges user-created pairwise joins (fragment_joins table) with PGP

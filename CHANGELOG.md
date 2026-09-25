@@ -30,6 +30,10 @@ every 5 s. The new secret signs every web user out once.
   `<upside down>` literally, and search highlights no longer break the text or each other.
 - Copy buttons copy the exact text (backslash sequences included) and say "copied" only when the
   browser confirms it; Quick View copies the version on screen.
+- `/lists`: renaming a list and editing an item's note or tags now really save (the page started
+  those writes without awaiting them, so they never ran), and every list action reports a failure
+  instead of success when nothing was saved. Search's bulk "Add to List" no longer reports
+  "0 items added" as a success.
 
 ## [9.3.0] - 2026-09-24 — Fresh PGP data, small screens, and urgent fixes
 

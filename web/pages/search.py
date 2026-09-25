@@ -89,6 +89,30 @@ def _web_manual_transcription_ids(sys_ids):
     return union_manual_transcriptions(get_sys_ids_with_pgp_text(sys_ids), _web_fgp_sys_ids(sys_ids))
 
 
+def _bulk_add_items(lists_mgr, sys_ids, list_id):
+    """Add ``sys_ids`` to ``list_id`` for the signed-in user; toast the real outcome.
+
+    Returns the number added, or None when the visitor is no longer signed in.
+    The bulk-add dialog's sign-in check ran when it opened; a session can end
+    while it is open, and every write then returns False. Nothing added is a
+    failure, some added a warning, all added a success -- never "0 items added"
+    as a success.
+    """
+    from web.auth_state import GlobalAuthState
+    if not GlobalAuthState.is_logged_in():
+        ui.notify(tr('Please log in to access lists'), type='warning')
+        return None
+    wanted = [s for s in sys_ids if s]
+    added = sum(1 for s in wanted if lists_mgr.add_item_sync(s, list_id))
+    if added == 0:
+        ui.notify(tr('The change could not be saved. Check your connection and try again.'), type='negative')
+    elif added < len(wanted):
+        ui.notify(f"{added} {tr('items added to list')}", type='warning')
+    else:
+        ui.notify(f"{added} {tr('items added to list')}", type='positive')
+    return added
+
+
 def create_search_page(initial_query: str = None, initial_tag: str = None,
                        initial_mode: str = None, initial_variants: int = None,
                        initial_ja: int = None, initial_flex_spaces: int = None,
@@ -2847,17 +2871,18 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 ui.notify(tr('Please enter a list name'), type='warning')
                                 return
 
+                            from web.auth_state import GlobalAuthState
+                            if not GlobalAuthState.is_logged_in():
+                                # The session ended while the dialog was open.
+                                ui.notify(tr('Please log in to access lists'), type='warning')
+                                return
                             new_list_id = state.lists_mgr.create_list_sync(name, color=selected_color['value'])
-                            if new_list_id:
-                                added_count = 0
-                                for res in selected_results:
-                                    display = res.get('display', {})
-                                    sys_id = display.get('id')
-                                    if sys_id and state.lists_mgr.add_item_sync(sys_id, new_list_id):
-                                        added_count += 1
-
-                                ui.notify(f"{tr('List created')}: {name}", type='positive')
-                                ui.notify(f"{added_count} {tr('items added to list')}", type='positive')
+                            if not new_list_id:
+                                ui.notify(tr('Failed to create list'), type='negative')
+                                return
+                            ui.notify(f"{tr('List created')}: {name}", type='positive')
+                            sys_ids = [res.get('display', {}).get('id') for res in selected_results]
+                            if _bulk_add_items(state.lists_mgr, sys_ids, new_list_id):
                                 dialog.close()
 
                         ui.button(tr('Create and Add'), on_click=create_and_add_all).classes('btn-primary')
@@ -2876,15 +2901,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             creating_new_list['active'] = True
                             return
 
-                        added_count = 0
-                        for res in selected_results:
-                            display = res.get('display', {})
-                            sys_id = display.get('id')
-                            if sys_id and state.lists_mgr.add_item_sync(sys_id, selected_list.value):
-                                added_count += 1
-
-                        ui.notify(f"{added_count} {tr('items added to list')}", type='positive')
-                        dialog.close()
+                        sys_ids = [res.get('display', {}).get('id') for res in selected_results]
+                        if _bulk_add_items(state.lists_mgr, sys_ids, selected_list.value):
+                            dialog.close()
 
                     add_btn = ui.button(tr('Add All'), on_click=add_all).classes('btn-primary')
                     if not list_options:
