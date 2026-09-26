@@ -14,6 +14,7 @@ Features:
 """
 
 import logging
+import re
 
 from nicegui import ui
 from web.state import state
@@ -34,6 +35,40 @@ logger = logging.getLogger(__name__)
 # Phase 92.2 D-FANOUT-01 + Reviews MUST-FIX 1: sentinel distinguishes
 # 'caller did not pass counts' from 'counts intentionally None (legacy fallback)'.
 _COUNTS_UNSET = object()
+
+
+def _page_text(page) -> str:
+    """A list item's page as text: '' when it has none (rows from before the page column
+    have no 'page' key; entries for a folio or the whole manuscript hold NULL)."""
+    return '' if page is None else str(page).strip()
+
+
+def list_item_page_label(shelfmark, page):
+    """The shelfmark shown for a list item, with "Page N" when the item is one page.
+
+    The desktop records the page in its own column. The web's "Add page to list" writes
+    "<shelfmark> - Page N" into the shelfmark itself, in the interface language, and a
+    desktop may later fill the page column on that row too -- so a shelfmark that already
+    ends with that page is left as it is.
+    """
+    page = _page_text(page)
+    if not page:
+        return shelfmark
+    base = (shelfmark or '').rstrip()
+    if re.search(rf'(?:^|\W)(?:Page|עמוד|דף)\s+{re.escape(page)}$', base):
+        return shelfmark
+    label = f"{tr('Page')} {page}"
+    return f"{base} - {label}" if base else label
+
+
+def list_item_browse_url(sys_id, page) -> str:
+    """/browse link for a list item, opened at its page when the page is a number."""
+    url = f'/browse?sys_id={sys_id}'
+    page = _page_text(page)
+    if re.fullmatch(r'[0-9]+', page):
+        # /browse takes `page: int`; a page such as 'Unknown' opens the first page.
+        url += f'&page={page}'
+    return url
 
 
 def _load_list_item_counts() -> Optional[Dict[int, int]]:
@@ -461,7 +496,7 @@ def create_lists_page():
             # Changed to H3
             h3(tr('Edit Item'), classes='text-xl font-bold mb-2')
 
-            shelfmark = item_data.get('shelfmark', 'Unknown')
+            shelfmark = list_item_page_label(item_data.get('shelfmark', 'Unknown'), item_data.get('page'))
             # Get library name for display
             sys_id = item_data.get('sys_id', item_id)
             library_name = ''
@@ -681,17 +716,24 @@ def create_lists_page():
 
             # Get items — use captured lists_mgr (not state.lists_mgr factory)
             items_list = lists_mgr.get_items_in_list_sync(list_id)
-            items_data = [(item.get('item_id'), item) for item in items_list]
+            is_recent = (
+                lists_mgr._is_recent_list(list_id)
+                if hasattr(lists_mgr, '_is_recent_list') else False
+            )
+            # The id the note/tag edit and Remove act on. An ordinary list's items are raw
+            # list_items rows, whose row id is 'id' (they have no 'item_id'); the edit and
+            # remove calls do int(item_id) and address that row. Only the recent list's
+            # formatted items carry 'item_id'.
+            items_data = [
+                (item.get('item_id') if is_recent else str(item.get('id')), item)
+                for item in items_list
+            ]
 
             # expected_count: prefer threaded counts dict over len(items_data) when available.
             # W3: the recent system list is never in the batched counts dict (its items live in
             # recent_items, not list_items), so trust the actually-loaded items_data for it rather
             # than the stale batched value.
             expected_count = len(items_data)
-            is_recent = (
-                lists_mgr._is_recent_list(list_id)
-                if hasattr(lists_mgr, '_is_recent_list') else False
-            )
             if counts is not None and not is_recent:
                 try:
                     expected_count = counts.get(int(list_id), len(items_data))
@@ -720,6 +762,7 @@ def create_lists_page():
                     note = item_data.get('note', '')
                     tags = item_data.get('tags', [])
                     fl_id = item_data.get('fl_id')
+                    page = item_data.get('page')
 
                     # Enrich metadata if needed
                     if not shelfmark or shelfmark == 'Unknown':
@@ -727,6 +770,7 @@ def create_lists_page():
                             shelf_temp, title_temp = state.meta_mgr.get_meta_for_id(sys_id)
                             shelfmark = shelf_temp or shelfmark
                             title = title or title_temp
+                    shelfmark = list_item_page_label(shelfmark, page)
 
                     # Get library name for display
                     library_name = ''
@@ -765,10 +809,10 @@ def create_lists_page():
 
                             # Actions
                             with ui.column().classes('gap-1'):
-                                # Browse button
+                                # Browse button (at the item's page, when it is one page)
                                 ui.button(
                                     icon='menu_book',
-                                    on_click=lambda sid=sys_id: ui.navigate.to(f'/browse?sys_id={sid}')
+                                    on_click=lambda url=list_item_browse_url(sys_id, page): ui.navigate.to(url)
                                 ).props('flat round dense').tooltip(tr('Browse'))
 
                                 # Open in Joins Lab button (Phase 120 D-19)
