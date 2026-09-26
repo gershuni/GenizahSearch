@@ -5,6 +5,7 @@ import ctypes
 import os
 import platform
 import time
+import weakref
 import requests
 from PyQt6.QtCore import QThread, pyqtSignal
 from genizah_core import SearchEngine, Indexer, MetadataManager, VariantManager, get_logger
@@ -30,20 +31,25 @@ def _keep_until_finished(worker) -> None:
     and the single-instance relaunch; terminate() can kill a thread inside a lock and
     hang the exit. tests/test_kept_qthreads_exit_cleanly.py pins the exit behaviour.
 
-    The release closure captures only the worker's id: a closure or default argument
+    The release closure holds only a weak reference: a closure or default argument
     holding the worker itself forms worker -> slot -> closure -> worker, which only the
     cyclic GC frees, on whatever thread happens to trigger it. Released this way, the
-    last reference drops on the UI thread inside the queued finished() slot.
+    last reference drops on the UI thread inside the queued finished() slot. Not the
+    worker's id() either: a worker handed over during its finish step is released at
+    once, yet its queued finished() is still delivered after it has been freed, and a
+    worker kept since then may have been given the same address.
     """
     if worker is None:
         return
     if any(w is worker for w in _ORPHANED_WORKERS):
         return
+    ref = weakref.ref(worker)
     _ORPHANED_WORKERS.append(worker)
-    wid = id(worker)
 
     def _release():
-        _ORPHANED_WORKERS[:] = [w for w in _ORPHANED_WORKERS if id(w) != wid]
+        target = ref()
+        if target is not None:
+            _ORPHANED_WORKERS[:] = [w for w in _ORPHANED_WORKERS if w is not target]
 
     try:
         worker.finished.connect(_release)

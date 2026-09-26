@@ -749,3 +749,52 @@ def test_a_finished_worker_is_released_at_once():
     jw._keep_until_finished(w)
     lists = (_orphans(), jw._ORPHANED_WORKERS)
     assert not any(x is w for lst in lists for x in lst), "a finished worker was kept"
+
+
+class _FakeSignal:
+    def __init__(self):
+        self.slots = []
+
+    def connect(self, slot):
+        self.slots.append(slot)
+
+
+class _FakeWorker:
+    """All the keeper touches: finished.connect and isRunning."""
+
+    def __init__(self, running):
+        self.finished = _FakeSignal()
+        self._running = running
+
+    def isRunning(self):
+        return self._running
+
+
+def test_a_late_release_never_drops_a_worker_kept_since():
+    """A worker handed over during its finish step is released at once, yet its queued
+    finished() is still delivered after it has been freed; a worker kept in between
+    usually gets the freed address. The late release must not match that worker."""
+    newer = None
+    try:
+        for _ in range(50):
+            early = _FakeWorker(running=False)      # in its finish step
+            jw._keep_until_finished(early)
+            late_release = early.finished.slots[0]  # its finished() is still queued
+            early_id = id(early)
+            del early
+            newer = _FakeWorker(running=True)
+            jw._keep_until_finished(newer)
+            if id(newer) == early_id:
+                break
+            newer._running = False
+            for slot in newer.finished.slots:
+                slot()
+        else:
+            pytest.skip("no freed address was reused")
+        late_release()                               # the freed worker's finished()
+        assert _kept(newer), "a late release dropped a worker kept after it"
+    finally:
+        if newer is not None:
+            newer._running = False
+            for slot in newer.finished.slots:
+                slot()
