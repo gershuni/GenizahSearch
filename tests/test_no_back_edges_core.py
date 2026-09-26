@@ -133,6 +133,8 @@ EXTRACTED_MODULES = [
     "shared/visual_similarity_service.py",
     # 2026-09-24: genizahsearch.com page links for the desktop.
     "shared/web_links.py",
+    # 2026-09-25: crash-safe writes for config.pkl, lang.pkl and lists.pkl.
+    "shared/atomic_io.py",
 ]
 
 # Compound statement types whose bodies run at import time

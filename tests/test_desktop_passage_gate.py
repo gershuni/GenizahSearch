@@ -139,10 +139,17 @@ class _Win:
     _witness_dialog_is_open = APP._witness_dialog_is_open
     _reset_composition = APP._reset_composition
     _retry_pending_reset = APP._retry_pending_reset
+    _reset_is_pending = APP._reset_is_pending
     _refuse_stop_during_passage_scan = APP._refuse_stop_during_passage_scan
     # Borrowed, not stubbed: Reset clears the auto-expand state before it
     # defers, and a stand-in would let that call vanish silently.
     _stop_auto_expand = APP._stop_auto_expand
+
+    def _emit_comp_search_telemetry(self, action, result_count=None):
+        # A recorder, not the real one: New reports a batch it discards as
+        # cancelled, and the telemetry module is not what this file tests.
+        self.telemetry_actions = getattr(self, 'telemetry_actions', []) + [action]
+
     _on_pause_clicked = APP._on_pause_clicked
     _on_passage_build_finished = APP._on_passage_build_finished
     _passage_snapshot_must_wait = APP._passage_snapshot_must_wait
@@ -171,6 +178,12 @@ class _Win:
     # handlers this file already drives, and a stand-in would let either call
     # vanish without a test noticing.
     _apply_default_comp_method = APP._apply_default_comp_method
+    # The persistent-preference path also restores the Search tab's standing
+    # exclusions and relabels them.
+    _EXCLUSION_ATTRS = APP._EXCLUSION_ATTRS
+    _EXCLUSION_LABELS = APP._EXCLUSION_LABELS
+    _excl_get = APP._excl_get
+    _update_exclusion_display = APP._update_exclusion_display
 
 
 def _unannounced(w):
@@ -2142,7 +2155,7 @@ def test_reset_of_a_batch_defers_rather_than_clearing_the_results(monkeypatch):
                         staticmethod(lambda ms, fn: None))
     APP._reset_composition(w)
     assert w.comp_tree.cleared == 0, 'results were cleared mid-batch'
-    assert w._reset_pending is True
+    assert APP._reset_is_pending(w)
 
 
 def test_the_deferred_reset_retries_while_the_batch_is_still_running(monkeypatch):
@@ -2158,13 +2171,17 @@ def test_the_deferred_reset_retries_while_the_batch_is_still_running(monkeypatch
     w = _batch_window(monkeypatch, running=True)
     scheduled, reset_calls = [], []
     monkeypatch.setattr(genizah_app.QTimer, 'singleShot',
-                        staticmethod(lambda ms, fn: scheduled.append(ms)))
+                        staticmethod(lambda ms, fn: scheduled.append((ms, fn))))
+    APP._reset_composition(w)          # New, mid-batch: arms the retry
+    [(_ms, retry)] = scheduled
+    scheduled.clear()
+    # The INSTANCE, not APP: `_Win` copied the unbound method onto its own
+    # class, so patching APP would not be seen through the stub.
     w._reset_composition = lambda: reset_calls.append(1)
-    w._reset_pending = True
-    APP._retry_pending_reset(w)
+    retry()
     assert reset_calls == [], 'the reset ran while the batch was still going'
-    assert w._reset_pending is True, 'it forgot it was still waiting'
-    assert scheduled == [400], 'the retry gave up while the batch ran'
+    assert APP._reset_is_pending(w), 'it forgot it was still waiting'
+    assert [ms for ms, _fn in scheduled] == [400], 'the retry gave up while the batch ran'
 
 
 def test_the_deferred_reset_completes_once_the_batch_is_done(monkeypatch):
@@ -2172,17 +2189,17 @@ def test_the_deferred_reset_completes_once_the_batch_is_done(monkeypatch):
     where the batch's own signals are delivered, so blocking here would stop
     the thread it is waiting for from ever reporting done."""
     w = _batch_window(monkeypatch)
-    w.is_comp_running = False          # the batch has finished
-    done = []
-    # The INSTANCE, not APP: `_Win` copied the unbound method onto its own
-    # class, so patching APP would not be seen through the stub.
-    w._reset_composition = lambda: done.append(1)
+    scheduled, done = [], []
     monkeypatch.setattr(genizah_app.QTimer, 'singleShot',
-                        staticmethod(lambda ms, fn: done.append('rescheduled')))
-    w._reset_pending = True
-    APP._retry_pending_reset(w)
+                        staticmethod(lambda ms, fn: scheduled.append(fn)))
+    APP._reset_composition(w)          # New, mid-batch: arms the retry
+    [retry] = scheduled
+    w.comp_thread._running = False     # the batch has finished
+    w._reset_composition = lambda: done.append(1)
+    retry()
     assert done == [1], done
-    assert w._reset_pending is False
+    assert len(scheduled) == 1, 'it rescheduled after the batch had ended'
+    assert w._reset_pending is None
 
 
 def test_neither_deferred_reset_helper_ever_terminates():

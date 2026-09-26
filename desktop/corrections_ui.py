@@ -43,6 +43,19 @@ def safe_date_str(date_value, default: str = "") -> str:
 logger = logging.getLogger(__name__)
 
 
+def _comment_scope_label(comment) -> str:
+    """Badge text for a comment: the page it is filed under, or the whole manuscript.
+
+    `comments` has no category column; `comment_type` holds the stored `scope`
+    ('page' or 'manuscript'; 'general' on desktop rows written before
+    2026-05-12). The website places a comment by its `page_number`
+    (web/components/notes_display.py), so the number decides, not the scope.
+    """
+    if comment.page_number:
+        return f"{tr('Page')} {comment.page_number}"
+    return tr("Entire manuscript")
+
+
 class LoginDialog(QDialog):
     """Dialog for user login"""
     login_success = pyqtSignal(object)  # Emits User object
@@ -2485,21 +2498,8 @@ class CommentDialog(QDialog):
             context_label.setStyleSheet("color: gray;")
             layout.addWidget(context_label)
 
-        # Comment type
-        type_layout = QHBoxLayout()
-        type_layout.addWidget(QLabel(tr("Type:")))
-        self.type_combo = QComboBox()
-        self.type_combo.addItems([
-            tr("General Comment"),
-            tr("Question"),
-            tr("Scholarly Note"),
-            tr("Suggestion"),
-            tr("Issue Report")
-        ])
-        self.type_values = ['general', 'question', 'scholarly_note', 'suggestion', 'issue']
-        type_layout.addWidget(self.type_combo)
-        type_layout.addStretch()
-        layout.addLayout(type_layout)
+        # No Type or "Post anonymously" choice: the comments table stores
+        # neither, and the website shows every comment's author.
 
         # Comment content
         layout.addWidget(QLabel(tr("Your comment:")))
@@ -2513,9 +2513,6 @@ class CommentDialog(QDialog):
         self.public_check.setChecked(True)
         self.public_check.setToolTip(tr("Uncheck to make this comment private (only visible to you)"))
         options_layout.addWidget(self.public_check)
-
-        self.anonymous_check = QCheckBox(tr("Post anonymously"))
-        options_layout.addWidget(self.anonymous_check)
 
         options_layout.addStretch()
         layout.addLayout(options_layout)
@@ -2542,16 +2539,12 @@ class CommentDialog(QDialog):
             QMessageBox.warning(self, tr("Error"), tr("Please enter a comment"))
             return
 
-        comment_type = self.type_values[self.type_combo.currentIndex()]
-
         comment, error = self.client.create_comment(
             content=content,
             document_id=self.document_id,
             correction_id=self.correction_id,
-            comment_type=comment_type,
             page_number=self.page_number,
-            is_public=self.public_check.isChecked(),
-            is_anonymous=self.anonymous_check.isChecked()
+            is_public=self.public_check.isChecked()
         )
 
         if comment:
@@ -2672,15 +2665,9 @@ class CommentsViewerDialog(QDialog):
         # Header
         header_layout = QHBoxLayout()
 
-        # Type badge
-        type_labels = {
-            'general': tr('Comment'),
-            'question': tr('Question'),
-            'scholarly_note': tr('Scholarly Note'),
-            'suggestion': tr('Suggestion'),
-            'issue': tr('Issue')
-        }
-        type_label = QLabel(type_labels.get(comment.comment_type, comment.comment_type))
+        # Where it applies
+        type_label = QLabel(_comment_scope_label(comment))
+        type_label.setObjectName("comment_scope_badge")
         type_label.setStyleSheet("background: #3498db; color: white; padding: 2px 8px; border-radius: 3px; font-size: 10px;")
         header_layout.addWidget(type_label)
 
@@ -2879,15 +2866,9 @@ class MyCommentsDialog(QDialog):
                     btn_browse.clicked.connect(lambda checked, d=doc_id: self.on_browse(d))
                     header_layout.addWidget(btn_browse)
 
-            # Type
-            type_labels = {
-                'general': tr('Comment'),
-                'question': tr('Question'),
-                'scholarly_note': tr('Scholarly Note'),
-                'suggestion': tr('Suggestion'),
-                'issue': tr('Issue')
-            }
-            type_label = QLabel(type_labels.get(comment.comment_type, comment.comment_type))
+            # Where it applies
+            type_label = QLabel(_comment_scope_label(comment))
+            type_label.setObjectName("comment_scope_badge")
             type_label.setStyleSheet("background: #95a5a6; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;")
             header_layout.addWidget(type_label)
 

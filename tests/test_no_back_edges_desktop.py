@@ -69,6 +69,8 @@ DESKTOP_MODULES = [
     "desktop/column_chooser.py",
     "desktop/widgets/flow_layout.py",
     "desktop/widgets/overflow_row.py",
+    # 2026-09-25: one running copy per data folder.
+    "desktop/single_instance.py",
 ]
 
 # Compound statement types whose bodies run at import time
