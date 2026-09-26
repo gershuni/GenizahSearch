@@ -1442,8 +1442,9 @@ def test_quit_cancel_disarms_a_pending_passage_retry(env, quit_host):
 
 def test_quit_cancel_after_a_deferred_close_clears_the_closing_line(env, quit_host):
     """A close deferred for a letter-level search says 'Closing once the
-    current work finishes'; the close that follows is then cancelled at the
-    puzzle question, and the app stays open -- that line must not stay."""
+    current work finishes'; work is then put on the puzzle, the close that
+    follows is cancelled at the puzzle question, and the app stays open --
+    that line must not stay."""
     quit_host.raise_past_check = False   # a wrong close goes on and fails loudly
     import genizah_app as ga
     busy = ["a letter-level search"]
@@ -1453,12 +1454,12 @@ def test_quit_cancel_after_a_deferred_close_clears_the_closing_line(env, quit_ho
     quit_host._defer_close_for_passage = types.MethodType(
         ga.GenizahGUI._defer_close_for_passage, quit_host)
     quit_host.status_label.setText(_tr("Ready."))
-    env.scratch_pad()
     ev = _close_event()
     assert _run_close(quit_host, ev) is None
-    assert not ev.isAccepted() and env.asks == []       # deferred, not asked yet
+    assert not ev.isAccepted() and env.asks == []       # nothing unsaved: deferred, not asked
     closing = quit_host.status_label.text()
     assert closing != _tr("Ready.") and busy[0] in closing
+    env.scratch_pad()                                   # work put on the puzzle meanwhile
     busy.clear()                                        # the search ended
     env.answer = SB.Cancel
     ev = _close_event()
@@ -1469,12 +1470,249 @@ def test_quit_cancel_after_a_deferred_close_clears_the_closing_line(env, quit_ho
     assert quit_host.status_label.text() == _tr("Ready.")
 
 
+class _Host:
+    """Holds the attributes the close methods read. Not a SimpleNamespace:
+    QTimer.singleShot takes a weak reference to a bound method's object."""
+
+    def __init__(self, **attrs):
+        self.__dict__.update(attrs)
+
+
+@pytest.fixture
+def deferring_host(env, monkeypatch):
+    """A host whose closes run the REAL closeEvent up to its first shutdown
+    step, with the real puzzle question, passage deferral and 400 ms retry.
+    `busy` stands in for passage work, `batch` makes it a multi-witness
+    batch whose request_cancel is recorded in `cancels`. close() is what the
+    retry calls: closeEvent with a fresh event; a close that reaches the
+    shutdown steps is recorded in `shutdowns`."""
+    import desktop.single_instance as si
+    import genizah_app as ga
+    from PyQt6.QtWidgets import QLabel, QPushButton
+    monkeypatch.setattr(si, "_restart_requested", False)
+    host = _Host(_puzzle_window=env.win, status_label=QLabel(""), lang_btn=QPushButton(""),
+                 busy=[], batch=False, cancels=[], shutdowns=[])
+    host._passage_workers_busy = lambda: list(host.busy)
+    host._passage_batch_in_flight = lambda: host.batch and bool(host.busy)
+    host.comp_thread = types.SimpleNamespace(request_cancel=lambda: host.cancels.append(1))
+    for name in ("_defer_close_for_passage", "_retry_pending_close",
+                 "_defer_close_for_puzzle", "_close_waits_for_a_prompt"):
+        method = getattr(ga.GenizahGUI, name, None)
+        if method is not None:          # absent on a tree without the prompt guard
+            setattr(host, name, types.MethodType(method, host))
+
+    def _close_result_dialog():
+        raise _PastThePuzzleCheck()
+
+    def _close(source="retry"):
+        ev = _close_event()
+        try:
+            ga.GenizahGUI.closeEvent(host, ev)
+        except _PastThePuzzleCheck:
+            host.shutdowns.append(source)
+        return ev
+
+    host._close_result_dialog = _close_result_dialog
+    host.close = _close
+    _HOSTS.append(host)
+    yield host
+    host.busy.clear()
+    host._close_pending = False         # a retry still queued stops at its next run
+
+
+def _quit_asks(env):
+    return [text for _title, text, _b in env.asks
+            if text == _tr("Save current puzzle before quitting?")]
+
+
+def test_a_retry_during_the_quit_question_does_not_ask_it_again(env, deferring_host):
+    """A close deferred for a letter-level search re-issues itself every
+    400 ms. When a later close's quit question was still open at that
+    moment, the retry ran inside the question's event loop and asked the
+    same question again on top of it."""
+    h = deferring_host
+    h.busy[:] = ["a letter-level search"]
+    ev = h.close("user")
+    assert not ev.isAccepted() and env.asks == [] and h._close_pending   # nothing unsaved yet
+    env.scratch_pad()                   # work put on the puzzle while the close waits
+    h.busy.clear()                      # the search ended
+
+    def _answer(title, text, buttons):
+        if len(env.asks) == 1:
+            pwh.pump(600)               # the user takes longer than the retry interval
+        return SB.Cancel
+
+    env.answer = _answer
+    ev = h.close("user")
+    assert len(env.asks) == 1, f"asked {len(env.asks)} times"
+    assert not ev.isAccepted() and h.shutdowns == []
+    pwh.pump(600)                       # Cancel ended the close attempt
+    assert len(env.asks) == 1 and h.shutdowns == []
+    assert not h._close_pending
+
+
+@pytest.mark.parametrize("prompt", ["new", "save_dialog"])
+def test_a_retry_waits_while_a_puzzle_prompt_is_open(env, deferring_host, monkeypatch, prompt):
+    """The retry of a deferred close came round while the puzzle's New
+    prompt or its Save dialog was open and asked the quit question on top of
+    it. It waits for the answer, then asks."""
+    h = deferring_host
+    h.busy[:] = ["a letter-level search"]
+    h.close("user")                     # deferred; nothing unsaved yet, nothing asked
+    env.scratch_pad()
+    during = []
+
+    def _meanwhile():
+        h.busy.clear()                  # the search ends while the prompt is open
+        pwh.pump(600)
+        during.append((len(env.asks), list(h.shutdowns)))
+
+    if prompt == "new":
+        def _answer(title, text, buttons):
+            if len(env.asks) == 1:
+                _meanwhile()
+            return SB.Cancel
+
+        env.answer = _answer
+        env.win._on_new_puzzle()
+        assert during == [(1, [])], "a quit question was asked over the New prompt"
+    else:
+        def _exec(dlg):
+            _meanwhile()
+            return QDialog.DialogCode.Rejected
+
+        monkeypatch.setattr(QDialog, "exec", _exec)
+        env.win._on_save_join()
+        assert during == [(0, [])], "a quit question was asked over the Save dialog"
+    env.answer = SB.Discard
+    pwh.pump(600)                       # answered: the close goes on and asks now
+    assert len(_quit_asks(env)) == 1
+    assert h.shutdowns == ["retry"]
+
+
+def test_a_retry_after_discard_does_not_close_the_app_under_a_puzzle_prompt(
+        env, deferring_host):
+    """Discard is kept for the close attempt, so the retry asks nothing; it
+    must still wait while a puzzle prompt is open instead of shutting the app
+    down underneath it."""
+    h = deferring_host
+    env.scratch_pad()
+    h.busy[:] = ["a letter-level search"]
+    env.answer = SB.Discard
+    ev = h.close("user")
+    assert not ev.isAccepted() and len(env.asks) == 1 and h._close_pending
+    during = []
+
+    def _answer(title, text, buttons):
+        h.busy.clear()
+        pwh.pump(600)
+        during.append(list(h.shutdowns))
+        return SB.Cancel
+
+    env.answer = _answer
+    env.win._on_new_puzzle()            # the scratch pad is still there: New asks
+    assert during == [[]], "the app shut down under the puzzle's New prompt"
+    pwh.pump(600)
+    assert h.shutdowns == ["retry"]
+    assert len(_quit_asks(env)) == 1
+
+
+def test_a_retry_waits_while_any_modal_dialog_is_open(env, deferring_host):
+    h = deferring_host
+    h.busy[:] = ["a letter-level search"]
+    h.close("user")
+    h.busy.clear()
+    box = QDialog(env.host)
+    _HOSTS.append(box)
+    box.setWindowModality(Qt.WindowModality.ApplicationModal)
+    box.show()
+    pwh.pump()
+    assert QApplication.activeModalWidget() is box
+    pwh.pump(600)
+    assert h.shutdowns == [] and h._close_pending
+    box.hide()
+    pwh.pump(600)
+    assert h.shutdowns == ["retry"]
+
+
+def test_cancel_at_the_quit_question_does_not_stop_a_multi_witness_batch(env, deferring_host):
+    """The close stopped a running (or paused) multi-witness batch before
+    the puzzle question came; Cancel then kept the app open with its batch
+    already stopped."""
+    import desktop.single_instance as si
+    h = deferring_host
+    si.request_restart()
+    env.scratch_pad()
+    h.busy[:] = ["a letter-level search is running"]
+    h.batch = True
+    h.status_label.setText(_tr("Ready."))
+    env.answer = SB.Cancel
+    ev = h.close("user")
+    assert not ev.isAccepted() and len(env.asks) == 1
+    assert h.cancels == [], "the batch was stopped although the app stays open"
+    assert not getattr(h, "_close_pending", False)
+    assert h.status_label.text() == _tr("Ready.")
+    assert si._restart_requested is False
+    pwh.pump(600)
+    assert h.shutdowns == [] and h.cancels == [] and len(env.asks) == 1
+
+
+def test_discard_at_the_quit_question_closes_once_the_witness_finishes(env, deferring_host):
+    import desktop.single_instance as si
+    h = deferring_host
+    si.request_restart()
+    env.scratch_pad()
+    h.busy[:] = ["a letter-level search is running"]
+    h.batch = True
+    env.answer = SB.Discard
+    ev = h.close("user")
+    assert not ev.isAccepted() and len(env.asks) == 1
+    assert h.cancels == [1]             # asked to stop after the witness in flight
+    pwh.pump(500)                       # that witness is still running
+    assert h.shutdowns == [] and len(env.asks) == 1
+    h.busy.clear()                      # it finished
+    pwh.pump(600)
+    assert h.shutdowns == ["retry"]
+    assert len(env.asks) == 1, "the retry asked the quit question again"
+    assert si._restart_requested is True
+
+
+@pytest.mark.parametrize("answer", [SB.Cancel, SB.Discard], ids=["cancel", "discard"])
+def test_the_language_restart_survives_only_when_the_app_closes(env, deferring_host, answer):
+    """A retry that asked the quit question again on top of the open one
+    shut the app down from the inner question while the outer one could
+    still answer Cancel and forget the restart: the app exited and did not
+    come back in the new language (or it shut down twice)."""
+    import desktop.single_instance as si
+    h = deferring_host
+    si.request_restart()                # toggle_language: restart now
+    h.busy[:] = ["a letter-level search"]
+    h.close("user")                     # deferred; nothing unsaved yet
+    env.scratch_pad()
+    h.busy.clear()
+
+    def _answer(title, text, buttons):
+        if len(env.asks) == 1:
+            pwh.pump(600)               # the retry comes round while this question is open
+            return answer
+        return SB.Discard               # a question asked on top of it
+
+    env.answer = _answer
+    h.close("user")
+    pwh.pump(600)
+    closed = answer == SB.Discard
+    assert h.shutdowns == (["user"] if closed else [])
+    assert si._restart_requested is closed
+
+
 def test_quit_check_runs_before_any_shutdown_state():
+    """The puzzle question comes first: the passage deferral stops a
+    multi-witness batch, which a close the user then cancels must not do."""
     import genizah_app as ga
     src = inspect.getsource(ga.GenizahGUI.closeEvent)
     assert "self._defer_close_for_puzzle(event)" in src
     at = src.index("self._defer_close_for_puzzle(event)")
-    assert src.index("self._defer_close_for_passage(event)") < at
+    assert at < src.index("self._defer_close_for_passage(event)")
     assert at < src.index("self._close_result_dialog()")
     assert at < src.index("self._app_shutting_down = True")
 

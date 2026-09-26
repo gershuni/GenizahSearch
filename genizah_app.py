@@ -31757,13 +31757,35 @@ class GenizahGUI(QMainWindow):
 
     def _retry_pending_close(self):
         if not getattr(self, '_close_pending', False):
+            # The close attempt ended (it went ahead, or Cancel kept the app
+            # open): an answer kept for it no longer applies.
+            self._puzzle_quit_answered = False
             return
-        if self._passage_workers_busy():
+        # Also wait while a question is open: re-issued from inside that
+        # question's event loop, the close would ask the puzzle's quit
+        # question on top of it, or shut the app down under it.
+        if self._passage_workers_busy() or self._close_waits_for_a_prompt():
             QTimer.singleShot(400, self._retry_pending_close)
             return
         # No tracked worker remains -- re-issue the close for real.
         self._close_pending = False
         self.close()
+        if not getattr(self, '_close_pending', False):
+            self._puzzle_quit_answered = False
+
+    def _close_waits_for_a_prompt(self):
+        """True while a modal dialog, or a Fragment Puzzle leave prompt or
+        Save dialog, is open."""
+        if QApplication.activeModalWidget() is not None:
+            return True
+        win = getattr(self, '_puzzle_window', None)
+        if win is None or sip.isdeleted(win):
+            return False
+        try:
+            return bool(win.is_prompting())
+        except Exception:
+            logger.exception("closeEvent: asking the Fragment Puzzle for an open prompt failed")
+            return False
 
     def _defer_close_for_puzzle(self, event):
         """Returns True when the user chose to keep the app open because the
@@ -31773,20 +31795,32 @@ class GenizahGUI(QMainWindow):
         that window with X only hides it, a hidden window gets no closeEvent
         when the app quits, and a child window that ignores its close during
         a quit keeps the process alive. A failing check never keeps the app
-        from closing."""
+        from closing.
+
+        Asked before the close is deferred for passage work, so a close the
+        user then cancels has stopped nothing. Discard is kept for the rest
+        of this close attempt: the retry of a deferred close does not ask
+        again. After Save nothing is left unsaved, so the check on the retry
+        asks only about work left unsaved since."""
+        if getattr(self, '_puzzle_quit_answered', False):
+            return False
         win = getattr(self, '_puzzle_window', None)
         if win is None or sip.isdeleted(win):
             return False
         try:
             ok = win.confirm_quit()
+            if ok:
+                # True with work still unsaved: the user chose Discard.
+                self._puzzle_quit_answered = bool(win._has_unsaved_work())
         except Exception:
             logger.exception("closeEvent: the Fragment Puzzle's unsaved-work check failed")
             return False
         if ok:
             return False
         event.ignore()
-        # A close deferred for passage work must not come back through its
-        # retry and ask again.
+        self._puzzle_quit_answered = False
+        # A close deferred for passage work (asked nothing then, as nothing
+        # was unsaved) must not come back through its retry and ask again.
         self._close_pending = False
         # The language restart was waiting for this close; a later ordinary
         # quit must not relaunch the app.
@@ -31808,15 +31842,21 @@ class GenizahGUI(QMainWindow):
         return True
 
     def closeEvent(self, event):
+        # Unsaved Fragment Puzzle work is asked about first: before any
+        # shutdown step, so Cancel leaves a fully working app, and before the
+        # deferral for passage work below, which stops a multi-witness batch
+        # -- nothing may be stopped until the user has answered.
+        if self._defer_close_for_puzzle(event):
+            return
         # Phase 146: BEFORE any shutdown state is set. Deferring after
         # `_app_shutting_down = True` would leave a running app whose
         # telemetry and session-save paths are already disarmed.
         if self._defer_close_for_passage(event):
             return
-        # Unsaved Fragment Puzzle work is asked about here, also before any
-        # shutdown step: Cancel must leave a fully working app.
-        if self._defer_close_for_puzzle(event):
-            return
+        # The close goes ahead, which ends this close attempt: a retry still
+        # queued must not re-issue it, and no answer is kept past it.
+        self._close_pending = False
+        self._puzzle_quit_answered = False
         # The Manuscript Viewer is an unparented top-level window
         # (2026-09-17), so it does not close with this one. Left open it
         # would keep the process alive (quitOnLastWindowClosed never fires)

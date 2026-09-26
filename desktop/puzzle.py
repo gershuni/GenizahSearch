@@ -3,6 +3,7 @@
 import math
 import os
 
+from contextlib import contextmanager
 from functools import partial
 
 from PyQt6.QtWidgets import (
@@ -797,6 +798,7 @@ class PuzzleCanvasWindow(QMainWindow):
         self._failed_keys = set()          # _unplaced keys whose image failed
         self._load_waiting = set()         # keys the current join load still waits for
         self._load_summary = ''            # the status line naming images that failed to load
+        self._prompts_open = 0             # open leave prompts and Save dialogs (is_prompting)
         self._auto_save_timer = QTimer()
         self._auto_save_timer.setSingleShot(True)
         self._auto_save_timer.setInterval(1500)  # 1.5s debounce
@@ -2365,7 +2367,9 @@ class PuzzleCanvasWindow(QMainWindow):
             btn_row.addWidget(btn_cancel)
             btn_row.addWidget(btn_save)
             layout.addLayout(btn_row)
-            if dlg.exec() != QDialog.DialogCode.Accepted:
+            with self._prompting():
+                accepted = dlg.exec() == QDialog.DialogCode.Accepted
+            if not accepted:
                 return False
             title = title_edit.text().strip()
             if not title:
@@ -2382,10 +2386,12 @@ class PuzzleCanvasWindow(QMainWindow):
             if not self._fragments_to_store():
                 # Every fragment was removed: only the title and notes can be
                 # written, and the stored join keeps its fragments.
-                reply = _ask(self, tr("Save"),
-                             tr("The canvas is empty. Save only the title and notes? "
-                                "The saved join keeps its fragments."),
-                             QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Cancel)
+                with self._prompting():
+                    reply = _ask(self, tr("Save"),
+                                 tr("The canvas is empty. Save only the title and notes? "
+                                    "The saved join keeps its fragments."),
+                                 QMessageBox.StandardButton.Save
+                                 | QMessageBox.StandardButton.Cancel)
                 if reply != QMessageBox.StandardButton.Save:
                     return False
             try:
@@ -2533,12 +2539,29 @@ class PuzzleCanvasWindow(QMainWindow):
             text = question
         else:
             text = tr("The last changes to this join could not be saved.")
-        reply = _ask(self, tr("Save current work?"), text,
-                     QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard
-                     | QMessageBox.StandardButton.Cancel)
-        if reply == QMessageBox.StandardButton.Save:
-            return self._on_save_join()
-        return reply == QMessageBox.StandardButton.Discard
+        with self._prompting():
+            reply = _ask(self, tr("Save current work?"), text,
+                         QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard
+                         | QMessageBox.StandardButton.Cancel)
+            if reply == QMessageBox.StandardButton.Save:
+                return self._on_save_join()
+            return reply == QMessageBox.StandardButton.Discard
+
+    @contextmanager
+    def _prompting(self):
+        """Counts one open leave prompt or Save dialog (see is_prompting)."""
+        self._prompts_open += 1
+        try:
+            yield
+        finally:
+            self._prompts_open -= 1
+
+    def is_prompting(self):
+        """True while a leave prompt (New, opening another join, quitting)
+        or the Save dialog waits for an answer. A close of the main window
+        that was deferred for passage work waits for that answer rather than
+        asking its quit question on top of it."""
+        return self._prompts_open > 0
 
     def _on_new_puzzle(self):
         """Clear canvas to a fresh scratch pad."""
