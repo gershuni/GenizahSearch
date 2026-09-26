@@ -13,7 +13,9 @@ W3  An ordinary list's items are raw list_items rows (``id``, no ``item_id``). T
     ``int(item_id)`` raised, so every edit reported "could not be saved". Driven through
     the real page callbacks and the real UserListsManager down to a faked
     web.supabase_client: the edit and the removal address row 41. The recent list keeps
-    its ``item_id``.
+    its ``item_id``. With two cards, each button keeps its own row. A page row a desktop
+    uploaded has a NULL shelfmark: its card and its edit dialog show the catalogue's
+    shelfmark with the page.
 
 The page is driven with a MagicMock ``ui`` (as tests/test_lists_page_write_callbacks.py
 does): no NiceGUI client, no network, no Supabase.
@@ -300,6 +302,83 @@ def test_the_recent_list_still_carries_its_item_id(page):
     (browse,) = _button_clicks(page.ui, 'menu_book')
     browse()
     page.ui.navigate.to.assert_called_with('/browse?sys_id=990002')
+
+
+SECOND_ROW = {
+    'id': 42, 'list_id': 7, 'sys_id': '990002', 'shelfmark': 'ENA 1.2', 'title': None,
+    'fl_id': None, 'note': '', 'tags': [], 'page': None,
+}
+
+
+def _item_labels(fake_ui):
+    """The edit dialog's "Item: ..." line, one per dialog opened so far."""
+    return [c.args[0] for c in fake_ui.label.call_args_list
+            if c.args and isinstance(c.args[0], str) and c.args[0].startswith('Item: ')]
+
+
+def test_each_card_browses_to_and_edits_its_own_row(page, monkeypatch):
+    # The card buttons are built in a loop: each must keep its own row's values, not the
+    # last card's.
+    monkeypatch.setattr(user_lists, 'get_list_items',
+                        lambda list_id, *, client=None: [dict(ROW), dict(SECOND_ROW)])
+    page.select(ORDINARY_LIST)
+
+    assert 'T-S 12.123 - Page 3' in page.headings and 'ENA 1.2' in page.headings, page.headings
+
+    browse_first, browse_second = _button_clicks(page.ui, 'menu_book')
+    browse_first()
+    page.ui.navigate.to.assert_called_with('/browse?sys_id=990001&page=3')
+    browse_second()
+    page.ui.navigate.to.assert_called_with('/browse?sys_id=990002')
+
+    edits = _button_clicks(page.ui, 'edit')
+    removes = _button_clicks(page.ui, 'delete')
+    assert [e.__defaults__[0] for e in edits] == ['41', '42']
+    assert [r.__defaults__[0] for r in removes] == ['41', '42']
+
+    edits[0]()
+    edits[1]()
+    assert _item_labels(page.ui) == ['Item: T-S 12.123 - Page 3', 'Item: ENA 1.2']
+
+    _run(removes[1]())
+    assert page.cloud.deletes == [42]
+
+
+class _FakeMeta:
+    """The catalogue lookups /lists makes for a card: shelfmark and title, and library."""
+
+    def get_meta_for_id(self, sys_id):
+        return ('T-S 12.123', '') if sys_id == '990001' else ('', '')
+
+    def get_library_for_id(self, sys_id):
+        return 'CUL' if sys_id == '990001' else None
+
+
+def _cul(text):
+    return f"{lists_page.get_library_display('CUL', short=False, lang='en')}, {text}"
+
+
+@pytest.fixture
+def desktop_page_row(page, monkeypatch):
+    """A page entry a desktop uploaded: the page column is set and the shelfmark is NULL
+    (the desktop sends only a shelfmark the user typed), so the card takes the shelfmark
+    from the catalogue."""
+    row = dict(ROW, shelfmark=None)
+    monkeypatch.setattr(user_lists, 'get_list_items', lambda list_id, *, client=None: [dict(row)])
+    monkeypatch.setattr(lists_page.state, 'meta_mgr', _FakeMeta())
+    page.select(ORDINARY_LIST)
+    return page
+
+
+def test_a_desktop_page_row_shows_the_catalogue_shelfmark_and_its_page(desktop_page_row):
+    headings = desktop_page_row.headings
+    assert _cul('T-S 12.123 - Page 3') in headings, headings
+
+
+def test_the_edit_dialog_names_a_desktop_page_row_as_its_card_does(desktop_page_row):
+    (edit,) = _button_clicks(desktop_page_row.ui, 'edit')
+    edit()
+    assert _item_labels(desktop_page_row.ui) == [f"Item: {_cul('T-S 12.123 - Page 3')}"]
 
 
 def test_a_row_from_before_the_migration_shows_what_it_showed_before(page, monkeypatch):

@@ -490,21 +490,16 @@ def create_lists_page():
         dialog.open()
 
     # --- Edit Item Dialog ---
-    def show_edit_item_dialog(item_id: str, item_data: dict):
-        """Show dialog to edit item notes and tags."""
+    def show_edit_item_dialog(item_id: str, item_data: dict, display_shelfmark: str):
+        """Show dialog to edit item notes and tags.
+
+        display_shelfmark is the heading of the item's card (library, the catalogue's
+        shelfmark when the row has none, and the page), so both name the item alike.
+        """
         with ui.dialog() as dialog, ui.card().classes('p-6 min-w-[500px]'):
             # Changed to H3
             h3(tr('Edit Item'), classes='text-xl font-bold mb-2')
 
-            shelfmark = list_item_page_label(item_data.get('shelfmark', 'Unknown'), item_data.get('page'))
-            # Get library name for display
-            sys_id = item_data.get('sys_id', item_id)
-            library_name = ''
-            if state.meta_mgr:
-                library_code = state.meta_mgr.get_library_for_id(sys_id)
-                if library_code:
-                    library_name = get_library_display(library_code, short=False, lang=get_language())
-            display_shelfmark = f"{library_name}, {shelfmark}" if library_name else shelfmark
             ui.label(f"{tr('Item')}: {display_shelfmark}").classes('text-sm mb-4').style('color: var(--text-secondary);')
 
             note_input = ui.textarea(
@@ -838,7 +833,9 @@ def create_lists_page():
                                 # Edit button
                                 ui.button(
                                     icon='edit',
-                                    on_click=lambda iid=item_id, idata=item_data: show_edit_item_dialog(iid, idata)
+                                    on_click=lambda iid=item_id, idata=item_data, shown=display_shelfmark: (
+                                        show_edit_item_dialog(iid, idata, shown)
+                                    )
                                 ).props('flat round dense').tooltip(tr('Edit'))
 
                                 # Remove button
