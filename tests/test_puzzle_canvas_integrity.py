@@ -13,6 +13,7 @@ import ast
 import inspect
 import os
 import sys
+import types
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -24,7 +25,9 @@ pytestmark = pytest.mark.gui
 from PyQt6.QtCore import Qt  # noqa: E402
 from PyQt6.QtGui import QCloseEvent  # noqa: E402
 from PyQt6.QtTest import QTest  # noqa: E402
-from PyQt6.QtWidgets import QApplication, QDialog, QGraphicsTextItem, QMessageBox  # noqa: E402
+from PyQt6.QtWidgets import (  # noqa: E402
+    QApplication, QDialog, QGraphicsTextItem, QListWidgetItem, QMessageBox,
+)
 
 import puzzle_window_harness as pwh  # noqa: E402
 
@@ -1006,3 +1009,335 @@ def test_undo_with_no_reload_pending_starts_no_request(env):
     assert ("990001", "1r") in env.win._fragment_items
     assert pwh.take_started() == []
     assert env.win._pending_req == {}
+
+
+# ------------------------------------------------------------------ #10
+# The four "Open in Puzzle" paths outside the window, and quitting.
+
+def _external_fork(env, which):
+    """Drive a REAL 'Open in Puzzle' path; its fork is already in joins.db."""
+    fork_id = env.save(pwh.fragments("99020"), title="Fork of: X")
+    client = types.SimpleNamespace(fork_puzzle_join=lambda join_id: fork_id,
+                                   check_is_published=lambda doc_id: False)
+    import genizah_app as ga
+    host = env.host
+    host._puzzle_window = env.win
+    host._emit_feature_opened = lambda **k: None
+    host._open_puzzle_window = types.MethodType(ga.GenizahGUI._open_puzzle_window, host)
+    if which == "GenizahGUI._on_puzzle_clicked":
+        host.corrections_client = client
+        item = QListWidgetItem("x")
+        item.setData(Qt.ItemDataRole.UserRole, {"id": "J1"})
+        ga.GenizahGUI._on_puzzle_clicked(host, item)
+    else:
+        import desktop.corrections_ui as cu
+        cls_name, meth = which.split(".")
+        dialog = types.SimpleNamespace(client=client, parent=lambda: host,
+                                       accept=lambda: None)
+        getattr(getattr(cu, cls_name), meth)(dialog, "J1")
+    pwh.pump(400)                   # two of the four defer the load by 200 ms
+    pwh.finish_loads()
+    return fork_id
+
+
+EXTERNAL = ["GenizahGUI._on_puzzle_clicked",
+            "DiscoveriesDialog._fork_and_open",
+            "JoinsDialog._fork_and_open_puzzle",
+            "JoinsFeedDialog._fork_and_open_puzzle"]
+
+
+@pytest.mark.parametrize("which", EXTERNAL)
+def test_open_in_puzzle_asks_before_replacing_a_scratch_pad(env, which):
+    """The four fork-and-open paths called _load_document directly and
+    replaced the canvas with no question at all."""
+    env.scratch_pad()
+    env.answer = SB.Cancel
+    fork_id = _external_fork(env, which)
+    assert env.asks == [(_tr("Save current work?"), _tr("Save current puzzle before loading?"),
+                         SB.Save | SB.Discard | SB.Cancel)]
+    assert env.win._current_doc_id is None
+    assert sorted(env.win._fragment_items) == [("990001", "1r"), ("990002", "1r")]
+    env.list_item(fork_id)          # the fork the user asked for is in Saved Joins
+
+
+@pytest.mark.parametrize("which", EXTERNAL)
+def test_open_in_puzzle_with_discard_opens_the_fork(env, which):
+    env.scratch_pad()
+    env.answer = SB.Discard
+    fork_id = _external_fork(env, which)
+    assert len(env.asks) == 1
+    assert env.win._current_doc_id == fork_id
+
+
+class _PastThePuzzleCheck(BaseException):
+    """GenizahGUI.closeEvent went on past the puzzle question. A
+    BaseException, so a try/except Exception around the next step of
+    closeEvent cannot swallow it."""
+
+
+_HOSTS: list = []                   # kept for the process: they hold Qt widgets
+
+
+@pytest.fixture
+def quit_host(env, monkeypatch):
+    """The smallest host the REAL GenizahGUI.closeEvent can run on up to its
+    first shutdown step, with the real _defer_close_for_puzzle bound."""
+    import desktop.single_instance as si
+    import genizah_app as ga
+    from PyQt6.QtWidgets import QLabel, QPushButton
+    monkeypatch.setattr(si, "_restart_requested", False)
+    host = types.SimpleNamespace(_puzzle_window=env.win,
+                                 _defer_close_for_passage=lambda e: False,
+                                 status_label=QLabel(""), lang_btn=QPushButton(""),
+                                 reached=[], raise_past_check=True)
+
+    def _close_result_dialog():
+        host.reached.append("result dialog")
+        if host.raise_past_check:
+            raise _PastThePuzzleCheck()
+
+    host._close_result_dialog = _close_result_dialog
+    defer = getattr(ga.GenizahGUI, "_defer_close_for_puzzle", None)
+    if defer is not None:           # absent on a tree without the quit question
+        host._defer_close_for_puzzle = types.MethodType(defer, host)
+    _HOSTS.append(host)
+    return host
+
+
+def _close_event():
+    ev = QCloseEvent()
+    ev.accept()
+    return ev
+
+
+def _run_close(host, ev):
+    """GenizahGUI.closeEvent on the host; returns the Exception that escaped
+    it, or None. The sentinel (past the puzzle check) is not caught."""
+    import genizah_app as ga
+    return pwh.call_catching(ga.GenizahGUI.closeEvent, host, ev)
+
+
+HEBREW = "עברית"
+
+
+def test_quit_cancel_keeps_the_app_open_and_forgets_the_restart(env, quit_host):
+    """Quitting dropped an unsaved scratch pad with no question (closing the
+    puzzle only hides it). Cancel must stop the close before any shutdown
+    step, and must forget a pending language restart."""
+    quit_host.raise_past_check = False   # a wrong close goes on and fails loudly
+    import desktop.single_instance as si
+    env.scratch_pad()
+    si.request_restart()
+    closing = "Closing once the current work finishes"
+    quit_host.status_label.setText(closing)
+    quit_host._closing_status_text = closing
+    env.answer = SB.Cancel
+    ev = _close_event()
+    escaped = _run_close(quit_host, ev)
+    assert escaped is None, f"closeEvent raised {escaped!r}"
+    assert quit_host.reached == []
+    assert not ev.isAccepted()
+    assert env.asks == [(_tr("Save current work?"), _tr("Save current puzzle before quitting?"),
+                         SB.Save | SB.Discard | SB.Cancel)]
+    launched = []
+    assert si.relaunch_if_requested(popen=lambda *a, **k: launched.append(a)) is False
+    assert launched == []
+    assert quit_host.status_label.text() == _tr("Ready.")
+    assert quit_host.lang_btn.text() == HEBREW          # the saved language is English
+
+
+def test_quit_discard_carries_on_with_the_close(env, quit_host):
+    env.scratch_pad()
+    env.answer = SB.Discard
+    with pytest.raises(_PastThePuzzleCheck):
+        _run_close(quit_host, _close_event())
+    assert len(env.asks) == 1
+
+
+def test_a_failing_quit_check_does_not_keep_the_app_open(env, quit_host, monkeypatch):
+    calls = []
+
+    def _broken():
+        calls.append(1)
+        raise RuntimeError("broken check")
+
+    monkeypatch.setattr(env.win, "confirm_quit", _broken, raising=False)
+    with pytest.raises(_PastThePuzzleCheck):
+        _run_close(quit_host, _close_event())
+    assert calls == [1]
+
+
+def test_quit_shows_a_hidden_puzzle_before_asking(env, quit_host):
+    env.scratch_pad()
+    env.win.close()                  # X only hides it; the work is still there
+    assert not env.win.isVisible()
+    seen = []
+
+    def _answer(title, text, buttons):
+        seen.append(env.win.isVisible())
+        return SB.Discard
+
+    env.answer = _answer
+    with pytest.raises(_PastThePuzzleCheck):
+        _run_close(quit_host, _close_event())
+    assert seen == [True]
+
+
+def test_quit_cancel_with_the_real_saved_language(env, quit_host):
+    """load_language is not a module global of genizah_app (toggle_language
+    imports it locally), so the Cancel path must import it itself."""
+    quit_host.raise_past_check = False   # a wrong close goes on and fails loudly
+    import desktop.single_instance as si
+    import genizah_app as ga
+    from genizah_core import save_language
+    assert not hasattr(ga, "load_language")
+    save_language("he")              # into the conftest-isolated language file
+    si.request_restart()
+    env.scratch_pad()
+    env.answer = SB.Cancel
+    ev = _close_event()
+    escaped = _run_close(quit_host, ev)
+    assert escaped is None, f"closeEvent raised {escaped!r}"
+    assert not ev.isAccepted()
+    assert quit_host.lang_btn.text() == "English"
+
+
+def test_quit_cancel_disarms_a_pending_passage_retry(env, quit_host):
+    """A close deferred for a letter-level search, then a second close after
+    the search ended but before the 400 ms retry: Cancel at the puzzle
+    question must also stop the retry from closing (and asking) again."""
+    quit_host.raise_past_check = False   # a wrong close goes on and fails loudly
+    import genizah_app as ga
+    closes = []
+    quit_host._close_pending = True
+    quit_host.close = lambda: closes.append(1)
+    quit_host._passage_workers_busy = lambda: False
+    env.scratch_pad()
+    env.answer = SB.Cancel
+    escaped = _run_close(quit_host, _close_event())
+    assert escaped is None, f"closeEvent raised {escaped!r}"
+    ga.GenizahGUI._retry_pending_close(quit_host)
+    assert quit_host._close_pending is False
+    assert closes == []
+
+
+def test_quit_check_runs_before_any_shutdown_state():
+    import genizah_app as ga
+    src = inspect.getsource(ga.GenizahGUI.closeEvent)
+    assert "self._defer_close_for_puzzle(event)" in src
+    at = src.index("self._defer_close_for_puzzle(event)")
+    assert src.index("self._defer_close_for_passage(event)") < at
+    assert at < src.index("self._close_result_dialog()")
+    assert at < src.index("self._app_shutting_down = True")
+
+
+# -- a manuscript looked up for one canvas lands only on that canvas --
+
+class _MetaMgr:
+    def get_meta_for_id(self, sys_id):
+        return ("T-S X 7", "")
+
+    def get_library_for_id(self, sys_id):
+        return ""
+
+
+def _request_uncached_manuscript(env, entry, monkeypatch):
+    """Ask for manuscript 990077, whose folio list is not cached, through the
+    puzzle's shelfmark field or GenizahGUI.add_to_puzzle."""
+    meta_mgr = _MetaMgr()
+    env.host.meta_mgr = meta_mgr
+    if entry == "add_shelfmark":
+        env.host._ensure_shelf_map = lambda: None
+        env.host._shelf_to_sys = {_dp().normalize_shelfmark("T-S X 7"): "990077"}
+        env.win.shelfmark_input.setText("T-S X 7")
+        env.win._on_add_shelfmark()
+    else:
+        import genizah_app as ga
+        monkeypatch.setattr(ga, "PuzzleMetaLoaderThread", pwh.FakeMetaLoader, raising=False)
+        host = types.SimpleNamespace(_puzzle_window=env.win, meta_mgr=meta_mgr,
+                                     _emit_feature_opened=lambda **k: None)
+        _HOSTS.append(host)
+        ga.GenizahGUI.add_to_puzzle(host, "990077", "T-S X 7")
+    assert len(pwh.FakeMetaLoader.made) == 1
+    return pwh.FakeMetaLoader.made[0]
+
+
+def _resolve(lookup):
+    lookup.meta_ready.emit("990077", "T-S X 7", [{"label": "1r", "fl_id": "FL77"}])
+
+
+def _join_b(env):
+    from shared.puzzle_model import PuzzleFragment
+    return env.save([PuzzleFragment(sys_id="990011", folio_label="1r", fl_id="FL11",
+                                    shelfmark="T-S B 11", x=10.0, y=20.0)], title="B")
+
+
+@pytest.mark.parametrize("replacement", ["open_join_b", "new"])
+@pytest.mark.parametrize("entry", ["add_shelfmark", "add_to_puzzle"])
+def test_a_fragment_resolved_after_the_canvas_was_replaced_is_not_added(
+        env, monkeypatch, entry, replacement):
+    """A late folio lookup added its manuscript to whatever canvas was open
+    when it arrived -- a join opened meanwhile, which then autosaved it."""
+    doc_b = _join_b(env)
+    lookup = _request_uncached_manuscript(env, entry, monkeypatch)
+    if replacement == "open_join_b":
+        env.open(doc_b)
+    else:
+        env.win._on_new_puzzle()
+    before = sorted(env.win._fragment_items)
+    _resolve(lookup)
+    assert [t for t in pwh.take_started() if t.fl_id == "FL77"] == []
+    assert sorted(env.win._fragment_items) == before
+    assert "990077" not in env.win._folio_lists
+    assert "T-S X 7" not in env.win.statusBar().currentMessage()
+    lookup.meta_failed.emit("990077", "lookup failed")
+    assert "lookup failed" not in env.win.statusBar().currentMessage()
+    env.settle()
+    assert [s for s, _r, _x in env.stored(doc_b)] == ["990011"]
+
+
+@pytest.mark.parametrize("entry", ["add_shelfmark", "add_to_puzzle"])
+def test_a_fragment_resolved_on_the_same_canvas_is_added(env, monkeypatch, entry):
+    """Control: with no replacement the looked-up manuscript is added."""
+    lookup = _request_uncached_manuscript(env, entry, monkeypatch)
+    _resolve(lookup)
+    pwh.finish_loads()
+    assert ("990077", "1r") in env.win._fragment_items
+
+
+@pytest.mark.parametrize("entry", ["add_shelfmark", "add_to_puzzle"])
+def test_a_fragment_resolved_after_a_cancelled_replacement_is_added(env, monkeypatch, entry):
+    """Control: New answered Cancel keeps the canvas, and the lookup made on
+    it still lands there."""
+    env.add(pwh.fragments()[0])
+    lookup = _request_uncached_manuscript(env, entry, monkeypatch)
+    env.answer = SB.Cancel
+    env.win._on_new_puzzle()
+    _resolve(lookup)
+    pwh.finish_loads()
+    assert sorted(env.win._fragment_items) == [("990001", "1r"), ("990077", "1r")]
+
+
+def test_every_metadata_request_goes_through_start_meta_resolve():
+    """A lookup that adds a fragment was started, and its result connected,
+    in two places (one in genizah_app.py); a canvas check added to one
+    would miss the other."""
+    tree = ast.parse((ROOT / "desktop" / "puzzle.py").read_text(encoding="utf-8"))
+    fns = {f.name: f for f in _functions(tree)}
+    assert "_start_meta_resolve" in fns, "no _start_meta_resolve seam"
+    seam, rebuild = fns["_start_meta_resolve"], fns["_spawn_meta_loader"]
+    slots = [n for n in ast.walk(tree) if isinstance(n, ast.Attribute)
+             and n.attr in ("_on_meta_resolved", "_on_meta_failed")]
+    assert slots and all(_inside(n, seam) for n in slots)
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+             and isinstance(n.func, ast.Name) and n.func.id == "PuzzleMetaLoaderThread"]
+    assert len(calls) == 2
+    assert sorted(int(_inside(c, seam)) + 2 * int(_inside(c, rebuild)) for c in calls) == [1, 2]
+    app_tree = ast.parse((ROOT / "genizah_app.py").read_text(encoding="utf-8"))
+    assert not [n for n in ast.walk(app_tree) if isinstance(n, ast.Attribute)
+                and n.attr in ("_on_meta_resolved", "_on_meta_failed")]
+    assert not [n for n in ast.walk(app_tree) if isinstance(n, ast.Name)
+                and n.id == "PuzzleMetaLoaderThread"]
+    assert not [a for n in ast.walk(app_tree) if isinstance(n, ast.ImportFrom)
+                for a in n.names if a.name == "PuzzleMetaLoaderThread"], (
+        "genizah_app.py still imports PuzzleMetaLoaderThread")

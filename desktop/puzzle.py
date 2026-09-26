@@ -1286,13 +1286,22 @@ class PuzzleCanvasWindow(QMainWindow):
         else:
             # Async fl_id resolution via PuzzleMetaLoaderThread
             self.statusBar().showMessage(tr("Resolving images..."), 5000)
-            thread = PuzzleMetaLoaderThread(self.app.meta_mgr, sys_id, shelfmark)
-            thread.meta_ready.connect(self._on_meta_resolved)
-            thread.meta_failed.connect(self._on_meta_failed)
-            self._meta_threads.append(thread)
-            thread.start()
+            self._start_meta_resolve(sys_id, shelfmark)
 
         self.shelfmark_input.clear()
+
+    def _start_meta_resolve(self, sys_id, shelfmark):
+        """Resolve a manuscript's folios in the background, then add its first
+        folio -- to the canvas this was asked on. The result carries the
+        canvas generation, so if New or opening a join replaced the canvas
+        meanwhile it adds nothing. The one place a metadata request that
+        adds a fragment is started (GenizahGUI.add_to_puzzle calls it too)."""
+        gen = self._canvas_gen
+        thread = PuzzleMetaLoaderThread(self.app.meta_mgr, sys_id, shelfmark)
+        thread.meta_ready.connect(partial(self._on_meta_resolved, gen))
+        thread.meta_failed.connect(partial(self._on_meta_failed, gen))
+        self._meta_threads.append(thread)
+        thread.start()
 
     def _show_add_from_list(self):
         """Show picker to add fragments from a personal list."""
@@ -1447,9 +1456,12 @@ class PuzzleCanvasWindow(QMainWindow):
         btn_close.clicked.connect(dlg.close)
         dlg.show()
 
-    def _on_meta_resolved(self, sys_id, shelfmark, images_nli):
+    def _on_meta_resolved(self, gen, sys_id, shelfmark, images_nli):
         """Callback from PuzzleMetaLoaderThread -- cache folio list and add first folio."""
         if sip.isdeleted(self):
+            return
+        if gen != self._canvas_gen:
+            logger.debug("Puzzle: dropped folios of %s resolved for a replaced canvas", sys_id)
             return
         self._folio_lists[sys_id] = images_nli
         first = images_nli[0]
@@ -1461,9 +1473,12 @@ class PuzzleCanvasWindow(QMainWindow):
             tr("Added {} ({} folios)").format(shelfmark, len(images_nli)), 3000
         )
 
-    def _on_meta_failed(self, sys_id, error):
+    def _on_meta_failed(self, gen, sys_id, error):
         """Callback from PuzzleMetaLoaderThread -- show error."""
         if sip.isdeleted(self):
+            return
+        if gen != self._canvas_gen:
+            logger.debug("Puzzle: dropped a folio lookup failure of %s for a replaced canvas", sys_id)
             return
         self.statusBar().showMessage(
             tr("Failed to resolve images: {}").format(error), 5000
@@ -3044,6 +3059,21 @@ class PuzzleCanvasWindow(QMainWindow):
                     it.puzzle_frag.y = it.pos().y()
         else:
             super().keyPressEvent(event)
+
+    def confirm_quit(self):
+        """Asked by GenizahGUI.closeEvent before the app quits: write a
+        pending autosave, then ask about work that would be lost, showing
+        this window first (closing it with X only hides it). True when the
+        app may quit."""
+        self._flush_auto_save(notify=False)
+        if not self._has_unsaved_work():
+            return True
+        if self.isMinimized():
+            self.showNormal()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        return self._confirm_leave_current(tr('Save current puzzle before quitting?'))
 
     def closeEvent(self, event):
         """Write a pending autosave, wait for active loader threads, close.

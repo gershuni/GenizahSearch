@@ -49,7 +49,7 @@ if _CORE_IMPORT_ERROR:
         raise _CORE_IMPORT_ERROR
 from shared.search_engine import PHASE_LOCAL_SEARCH
 from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
-from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, PuzzleMetaLoaderThread, FilterCountWorker, RefinementReplayThread, _keep_until_finished
+from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, FilterCountWorker, RefinementReplayThread, _keep_until_finished
 from desktop.widgets import (
     text_has_pattern_markers,
     ActionsHoverWidget, _format_add_to_list_label,
@@ -15411,7 +15411,7 @@ class GenizahGUI(QMainWindow):
         if fl_id:
             self._puzzle_window.add_fragment(sys_id, shelfmark, folio_label or '1r', fl_id)
         else:
-            # No fl_id provided -- need async resolution via PuzzleMetaLoaderThread
+            # No fl_id provided -- the folios are resolved in the background
             if sys_id in self._puzzle_window._folio_lists and self._puzzle_window._folio_lists[sys_id]:
                 images = self._puzzle_window._folio_lists[sys_id]
                 first = images[0]
@@ -15422,11 +15422,9 @@ class GenizahGUI(QMainWindow):
                     page_index=first.get('page_index', -1)
                 )
             else:
-                thread = PuzzleMetaLoaderThread(self.meta_mgr, sys_id, shelfmark)
-                thread.meta_ready.connect(self._puzzle_window._on_meta_resolved)
-                thread.meta_failed.connect(self._puzzle_window._on_meta_failed)
-                self._puzzle_window._meta_threads.append(thread)
-                thread.start()
+                # The puzzle window's own request: its result is dropped if
+                # the canvas is replaced before it arrives.
+                self._puzzle_window._start_meta_resolve(sys_id, shelfmark)
         self._puzzle_window.show()
         self._puzzle_window.raise_()
         self._puzzle_window.activateWindow()
@@ -31747,11 +31745,13 @@ class GenizahGUI(QMainWindow):
         event.ignore()
         if not getattr(self, '_close_pending', False):
             self._close_pending = True
-            self.status_label.setText(tr(
+            # Kept so a later cancelled close clears exactly this line.
+            self._closing_status_text = tr(
                 "Closing once the current work finishes \u2014 {}. A "
                 "letter-level search cannot be interrupted once it has "
                 "started, and is usually done within a few seconds."
-            ).format(", ".join(reasons)))
+            ).format(", ".join(reasons))
+            self.status_label.setText(self._closing_status_text)
         QTimer.singleShot(400, self._retry_pending_close)
         return True
 
@@ -31765,11 +31765,57 @@ class GenizahGUI(QMainWindow):
         self._close_pending = False
         self.close()
 
+    def _defer_close_for_puzzle(self, event):
+        """Returns True when the user chose to keep the app open because the
+        Fragment Puzzle holds unsaved work (Cancel at its quit prompt).
+
+        Asked here and not in the puzzle window's own closeEvent: closing
+        that window with X only hides it, a hidden window gets no closeEvent
+        when the app quits, and a child window that ignores its close during
+        a quit keeps the process alive. A failing check never keeps the app
+        from closing."""
+        win = getattr(self, '_puzzle_window', None)
+        if win is None or sip.isdeleted(win):
+            return False
+        try:
+            ok = win.confirm_quit()
+        except Exception:
+            logger.exception("closeEvent: the Fragment Puzzle's unsaved-work check failed")
+            return False
+        if ok:
+            return False
+        event.ignore()
+        # A close deferred for passage work must not come back through its
+        # retry and ask again.
+        self._close_pending = False
+        # The language restart was waiting for this close; a later ordinary
+        # quit must not relaunch the app.
+        from desktop.single_instance import cancel_restart
+        restart_cancelled = cancel_restart()
+        try:
+            if restart_cancelled and hasattr(self, 'lang_btn'):
+                # The new language is saved and applies at the next start;
+                # show what toggle_language shows when the restart is declined.
+                from genizah_core import load_language
+                self.lang_btn.setText("English" if load_language() == 'he' else "עברית")
+        except Exception:
+            logger.exception("closeEvent: resetting the language button failed")
+        try:
+            if self.status_label.text() == getattr(self, '_closing_status_text', None):
+                self.status_label.setText(tr("Ready."))
+        except Exception:
+            logger.exception("closeEvent: clearing the closing message failed")
+        return True
+
     def closeEvent(self, event):
         # Phase 146: BEFORE any shutdown state is set. Deferring after
         # `_app_shutting_down = True` would leave a running app whose
         # telemetry and session-save paths are already disarmed.
         if self._defer_close_for_passage(event):
+            return
+        # Unsaved Fragment Puzzle work is asked about here, also before any
+        # shutdown step: Cancel must leave a fully working app.
+        if self._defer_close_for_puzzle(event):
             return
         # The Manuscript Viewer is an unparented top-level window
         # (2026-09-17), so it does not close with this one. Left open it

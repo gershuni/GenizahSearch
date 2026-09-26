@@ -3200,6 +3200,7 @@ TRANSLATIONS = {
     "Save current work?": "לשמור עבודה נוכחית?",
     "Save current puzzle before loading?": "לשמור פאזל נוכחי לפני טעינה?",
     "Save current puzzle before starting new?": "לשמור פאזל נוכחי לפני התחלת חדש?",
+    "Save current puzzle before quitting?": "לשמור פאזל נוכחי לפני היציאה?",
     "Discard": "אל תשמור",
     "The last changes to this join could not be saved.": "השינויים האחרונים בצירוף זה לא נשמרו.",
     "The puzzle could not be saved. It is still on the canvas.": "לא ניתן היה לשמור את הפאזל. הוא עדיין על הקנבס.",
