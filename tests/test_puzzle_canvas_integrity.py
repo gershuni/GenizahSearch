@@ -1483,9 +1483,11 @@ def quit_host(env, monkeypatch):
             raise _PastThePuzzleCheck()
 
     host._close_result_dialog = _close_result_dialog
-    defer = getattr(ga.GenizahGUI, "_defer_close_for_puzzle", None)
-    if defer is not None:           # absent on a tree without the quit question
-        host._defer_close_for_puzzle = types.MethodType(defer, host)
+    for name in ("_defer_close_for_puzzle", "_defer_close_for_prompt",
+                 "_close_waits_for_a_prompt"):
+        method = getattr(ga.GenizahGUI, name, None)
+        if method is not None:      # absent on a tree without that step
+            setattr(host, name, types.MethodType(method, host))
     _HOSTS.append(host)
     return host
 
@@ -1663,7 +1665,8 @@ def deferring_host(env, monkeypatch):
     host._passage_batch_in_flight = lambda: host.batch and bool(host.busy)
     host.comp_thread = types.SimpleNamespace(request_cancel=lambda: host.cancels.append(1))
     for name in ("_defer_close_for_passage", "_retry_pending_close",
-                 "_defer_close_for_puzzle", "_close_waits_for_a_prompt"):
+                 "_defer_close_for_puzzle", "_close_waits_for_a_prompt",
+                 "_defer_close_for_prompt"):
         method = getattr(ga.GenizahGUI, name, None)
         if method is not None:          # absent on a tree without the prompt guard
             setattr(host, name, types.MethodType(method, host))
@@ -1870,6 +1873,152 @@ def test_the_language_restart_survives_only_when_the_app_closes(env, deferring_h
     closed = answer == SB.Discard
     assert h.shutdowns == (["user"] if closed else [])
     assert si._restart_requested is closed
+
+
+# -- the FIRST close, too, waits for an open question --
+
+@pytest.mark.parametrize("prompt", ["new", "open_join", "save_dialog"])
+def test_a_first_close_during_a_puzzle_prompt_waits_for_it(env, deferring_host, monkeypatch,
+                                                           prompt):
+    """Only the retry of a deferred close waited for an open question. A
+    close arriving while the puzzle's New or open prompt, or its Save
+    dialog, was open asked the quit question on top of it at once."""
+    h = deferring_host
+    doc_b = _join_b(env)
+    env.win._refresh_docs_list()
+    env.scratch_pad()
+    during = []
+
+    def _close_meanwhile():
+        ev = h.close("user")
+        pwh.pump(600)                   # longer than the retry interval
+        during.append((len(env.asks), ev.isAccepted(), list(h.shutdowns)))
+
+    if prompt == "save_dialog":
+        def _exec(dlg):
+            _close_meanwhile()
+            return QDialog.DialogCode.Rejected
+
+        monkeypatch.setattr(QDialog, "exec", _exec)
+        env.win._on_save_join()
+        assert during == [(0, False, [])], "a quit question was asked over the Save dialog"
+    else:
+        def _answer(title, text, buttons):
+            if len(env.asks) == 1:
+                _close_meanwhile()
+            return SB.Cancel            # the scratch pad stays
+
+        env.answer = _answer
+        if prompt == "new":
+            env.win._on_new_puzzle()
+        else:
+            env.click_join(doc_b)
+        assert during == [(1, False, [])], "a quit question was asked over the puzzle prompt"
+    env.answer = SB.Discard
+    pwh.pump(600)                       # answered: the close comes round and asks once
+    assert len(_quit_asks(env)) == 1
+    assert h.shutdowns == ["retry"]
+
+
+def test_a_first_close_during_a_puzzle_prompt_closes_once_nothing_is_unsaved(env, deferring_host):
+    h = deferring_host
+    h.close("user")                     # no question open, nothing unsaved: closes at once
+    assert h.shutdowns == ["user"] and env.asks == [] and not h._close_pending
+    h.shutdowns.clear()
+    env.scratch_pad()
+    during = []
+
+    def _answer(title, text, buttons):
+        if len(env.asks) == 1:
+            ev = h.close("user")
+            pwh.pump(600)
+            during.append((len(env.asks), ev.isAccepted(), list(h.shutdowns)))
+        return SB.Discard               # New clears the scratch pad
+
+    env.answer = _answer
+    env.win._on_new_puzzle()
+    assert during == [(1, False, [])], "the close went on under the New prompt"
+    pwh.pump(600)
+    assert len(env.asks) == 1           # nothing left unsaved: no quit question
+    assert h.shutdowns == ["retry"]
+
+
+@pytest.mark.parametrize("answer", [SB.Cancel, SB.Discard], ids=["cancel", "discard"])
+def test_a_second_close_during_the_quit_question_does_not_ask_it_again(env, deferring_host,
+                                                                       answer):
+    """A second close while the quit question was open asked it again on top
+    of it; the inner answer then closed the app (or forgot the language
+    restart) whatever the outer one said."""
+    import desktop.single_instance as si
+    h = deferring_host
+    si.request_restart()
+    env.scratch_pad()
+
+    def _answer(title, text, buttons):
+        if len(env.asks) == 1:
+            h.close("second")
+            pwh.pump(600)
+            return answer
+        return SB.Discard               # a question asked on top of it
+
+    env.answer = _answer
+    h.close("user")
+    pwh.pump(600)
+    assert len(env.asks) == 1, f"asked {len(env.asks)} times"
+    closed = answer == SB.Discard
+    assert h.shutdowns == (["user"] if closed else [])
+    assert si._restart_requested is closed
+
+
+def test_a_first_close_while_a_modal_dialog_is_open_waits_for_it(env, deferring_host):
+    h = deferring_host
+    env.scratch_pad()
+    box = QDialog(env.host)
+    _HOSTS.append(box)
+    box.setWindowModality(Qt.WindowModality.ApplicationModal)
+    box.show()
+    pwh.pump()
+    assert QApplication.activeModalWidget() is box
+    env.answer = SB.Discard
+    ev = h.close("user")
+    assert not ev.isAccepted() and env.asks == [] and h._close_pending
+    pwh.pump(600)
+    assert env.asks == [] and h.shutdowns == []
+    box.hide()
+    pwh.pump(600)
+    assert len(_quit_asks(env)) == 1
+    assert h.shutdowns == ["retry"]
+
+
+def test_a_close_that_waited_for_a_prompt_then_stops_the_batch_and_asks(env, deferring_host):
+    """A close that waited only for an open question has not reached the quit
+    question or the passage deferral. Once the question is answered it must
+    come round and do both, not poll until the batch ends -- a paused batch
+    never does."""
+    h = deferring_host
+    env.scratch_pad()
+    h.busy[:] = ["a letter-level search is running"]
+    h.batch = True
+    during = []
+
+    def _answer(title, text, buttons):
+        if len(env.asks) == 1:
+            h.close("user")
+            pwh.pump(600)
+            during.append((len(env.asks), list(h.cancels), list(h.shutdowns)))
+        return SB.Cancel if len(env.asks) == 1 else SB.Discard
+
+    env.answer = _answer
+    env.win._on_new_puzzle()            # Cancel: the scratch pad stays
+    assert during == [(1, [], [])], "a question was asked, or the batch stopped, under the prompt"
+    pwh.pump(600)
+    assert len(_quit_asks(env)) == 1
+    assert h.cancels == [1]             # asked to stop after the witness in flight
+    assert h.shutdowns == []
+    h.busy.clear()
+    pwh.pump(600)
+    assert h.shutdowns == ["retry"]
+    assert len(_quit_asks(env)) == 1
 
 
 def test_quit_check_runs_before_any_shutdown_state():

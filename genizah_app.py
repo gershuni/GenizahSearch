@@ -31760,14 +31760,23 @@ class GenizahGUI(QMainWindow):
             # The close attempt ended (it went ahead, or Cancel kept the app
             # open): an answer kept for it no longer applies.
             self._puzzle_quit_answered = False
+            self._close_waited_for_prompt = False
             return
         # Also wait while a question is open: re-issued from inside that
         # question's event loop, the close would ask the puzzle's quit
         # question on top of it, or shut the app down under it.
-        if self._passage_workers_busy() or self._close_waits_for_a_prompt():
+        if self._close_waits_for_a_prompt():
             QTimer.singleShot(400, self._retry_pending_close)
             return
-        # No tracked worker remains -- re-issue the close for real.
+        # A close that waited only for a question has not reached the puzzle
+        # question or the passage deferral yet (which stops a multi-witness
+        # batch at its next witness): re-issue it now, passage work or not.
+        if (self._passage_workers_busy()
+                and not getattr(self, '_close_waited_for_prompt', False)):
+            QTimer.singleShot(400, self._retry_pending_close)
+            return
+        # Nothing to wait for -- re-issue the close for real.
+        self._close_waited_for_prompt = False
         self._close_pending = False
         self.close()
         if not getattr(self, '_close_pending', False):
@@ -31786,6 +31795,19 @@ class GenizahGUI(QMainWindow):
         except Exception:
             logger.exception("closeEvent: asking the Fragment Puzzle for an open prompt failed")
             return False
+
+    def _defer_close_for_prompt(self, event):
+        """Returns True when the close waits for an open question: a modal
+        dialog, or a Fragment Puzzle leave prompt or Save dialog running its
+        own event loop. Asked now, the puzzle's quit question would open on
+        top of it; the retry re-issues the close once it is answered."""
+        if not self._close_waits_for_a_prompt():
+            return False
+        event.ignore()
+        self._close_pending = True
+        self._close_waited_for_prompt = True
+        QTimer.singleShot(400, self._retry_pending_close)
+        return True
 
     def _defer_close_for_puzzle(self, event):
         """Returns True when the user chose to keep the app open because the
@@ -31842,6 +31864,10 @@ class GenizahGUI(QMainWindow):
         return True
 
     def closeEvent(self, event):
+        # Any close, the first one included, that arrives while a question
+        # is open waits for its answer, so no quit question is stacked on it.
+        if self._defer_close_for_prompt(event):
+            return
         # Unsaved Fragment Puzzle work is asked about first: before any
         # shutdown step, so Cancel leaves a fully working app, and before the
         # deferral for passage work below, which stops a multi-witness batch
@@ -31857,6 +31883,7 @@ class GenizahGUI(QMainWindow):
         # queued must not re-issue it, and no answer is kept past it.
         self._close_pending = False
         self._puzzle_quit_answered = False
+        self._close_waited_for_prompt = False
         # The Manuscript Viewer is an unparented top-level window
         # (2026-09-17), so it does not close with this one. Left open it
         # would keep the process alive (quitOnLastWindowClosed never fires)
