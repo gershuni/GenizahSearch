@@ -244,6 +244,112 @@ def test_new_drops_what_the_composition_run_it_stopped_still_delivers(session_fi
     assert rendered == [{"main": []}]
 
 
+class _WitnessBatchThread(_StoppableCompThread):
+    """A multi-witness batch: cancelling only asks it to stop at the next
+    witness boundary, so it runs on until the witness in flight finishes."""
+
+    def request_cancel(self):
+        self.cancel_requested = True
+
+
+def _batch_host(monkeypatch):
+    """A host mid-way through a multi-witness batch, with the deferred-reset
+    timer captured instead of armed. Returns (host, batch, timers, emitted)."""
+    host = _Host()
+    host.is_comp_running = True
+    host.comp_thread = batch = _WitnessBatchThread()
+    # The real check adds an isinstance test on the thread; the flag is the
+    # part that matters here.
+    host._passage_batch_in_flight = lambda: host.is_comp_running
+    host._stop_auto_expand = lambda msg: None
+    host._reset_composition = lambda: APP._reset_composition(host)
+    host._retry_pending_reset = lambda: APP._retry_pending_reset(host)
+    host.lbl_comp_status = _Widget()
+    emitted = []
+    host._emit_comp_search_telemetry = lambda action, *a, **k: emitted.append(action)
+    timers = []
+    monkeypatch.setattr(genizah_app.QTimer, "singleShot",
+                        staticmethod(lambda ms, fn: timers.append(fn)))
+    return host, batch, timers, emitted
+
+
+def _bind_batch_slots(host, delivered):
+    """What run_composition connects as the batch starts: its completion,
+    status line and error, each bound to the New generation current now."""
+    return [host._discardable("_comp_new_generation",
+                              lambda payload, kind=kind: delivered.append((kind, payload)))
+            for kind in ("rows", "status", "error")]
+
+
+def test_new_during_a_witness_batch_drops_what_it_delivers_before_the_reset(session_file, monkeypatch):
+    """New waits for the witness in flight before clearing the tab. What the
+    batch delivered in that wait -- its partial rows, which rendered and
+    started grouping, an error, a status line -- still reached the tab,
+    because the discarded run was only marked as such once the reset ran."""
+    host, batch, timers, emitted = _batch_host(monkeypatch)
+    delivered = []
+    on_rows, on_status, on_error = _bind_batch_slots(host, delivered)
+
+    APP._reset_composition(host)                          # New, mid-batch
+    assert batch.cancel_requested and host._reset_pending
+    assert host.comp_text_area.toPlainText() == "old source text", "cleared mid-batch"
+    assert len(timers) == 1
+
+    APP._reset_composition(host)                          # pressed again while it waits
+    assert len(timers) == 1, "a second retry chain would run the reset twice"
+    assert host.lbl_comp_status.text() == genizah_app.tr(
+        "Clearing once the current witness finishes.")
+
+    batch.running = False                                 # the witness in flight finishes
+    on_status("Witness 3/17")
+    on_error("the witness failed")
+    on_rows({"main": OLD_COMP_RESULTS, "filtered": [], "partial": True})
+    assert delivered == [], "the batch New discarded still wrote the tab"
+    assert emitted == ["cancelled"]
+
+    timers.pop()()                                        # the deferred reset
+    assert not host._reset_pending and timers == [], "the reset waited on a batch that had ended"
+    assert host.comp_text_area.toPlainText() == "" and host.is_comp_running is False
+    saved = _on_disk(session_file, "_reset_composition")["composition_search"]
+    assert saved["source_text"] == "" and saved["results"] == []
+
+    # The next search starts after the reset, and everything it sends arrives.
+    on_rows, on_status, on_error = _bind_batch_slots(host, delivered)
+    on_status("Witness 1/2")
+    on_rows({"main": []})
+    assert delivered == [("status", "Witness 1/2"), ("rows", {"main": []})]
+
+
+def test_a_refused_new_leaves_the_running_scan_to_deliver(session_file):
+    """A single letter-level search cannot be stopped, so New is refused and
+    does nothing: the scan's results are still the tab's to show."""
+    host = _Host()
+    host.is_comp_running = True
+    host.comp_thread = _StoppableCompThread()
+    host._refuse_stop_during_passage_scan = lambda: True
+    delivered = []
+    on_rows, _status, _error = _bind_batch_slots(host, delivered)
+
+    APP._reset_composition(host)                          # New, refused
+    assert host.comp_thread.isRunning()
+    on_rows({"main": OLD_COMP_RESULTS})
+    assert delivered == [("rows", {"main": OLD_COMP_RESULTS})]
+
+
+@pytest.mark.parametrize("stop", ["toggle_composition", "cancel_composition"])
+def test_stop_during_a_witness_batch_still_shows_what_it_found(session_file, monkeypatch, stop):
+    """Stop (the button, or Escape) keeps the partial results; only New drops them."""
+    host, batch, _timers, _emitted = _batch_host(monkeypatch)
+    delivered = []
+    on_rows, _status, _error = _bind_batch_slots(host, delivered)
+
+    getattr(APP, stop)(host)
+    assert batch.cancel_requested
+    batch.running = False
+    on_rows({"main": OLD_COMP_RESULTS, "partial": True})
+    assert delivered == [("rows", {"main": OLD_COMP_RESULTS, "partial": True})]
+
+
 def _connects(method):
     """(signal, slot source) of every `<obj>.<signal>.connect(<slot>)` in `method`."""
     tree = ast.parse(textwrap.dedent(inspect.getsource(getattr(APP, method))))

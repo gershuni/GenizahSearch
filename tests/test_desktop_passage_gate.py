@@ -143,6 +143,12 @@ class _Win:
     # Borrowed, not stubbed: Reset clears the auto-expand state before it
     # defers, and a stand-in would let that call vanish silently.
     _stop_auto_expand = APP._stop_auto_expand
+
+    def _emit_comp_search_telemetry(self, action, result_count=None):
+        # A recorder, not the real one: New reports a batch it discards as
+        # cancelled, and the telemetry module is not what this file tests.
+        self.telemetry_actions = getattr(self, 'telemetry_actions', []) + [action]
+
     _on_pause_clicked = APP._on_pause_clicked
     _on_passage_build_finished = APP._on_passage_build_finished
     _passage_snapshot_must_wait = APP._passage_snapshot_must_wait

@@ -26433,8 +26433,15 @@ class GenizahGUI(QMainWindow):
         `QTimer.singleShot`, never a blocking `wait()`: the UI thread is what
         the batch's own signals are delivered on, so blocking here would stop
         the thread it is waiting for from ever reporting done.
+
+        It waits on the thread itself, not on `is_comp_running` alone: New
+        discarded the batch when it was pressed, so the completion that would
+        have cleared that flag is dropped on arrival.
         """
-        if self._passage_batch_in_flight():
+        if not getattr(self, '_reset_pending', False):
+            return  # the reset already happened
+        thread = getattr(self, 'comp_thread', None)
+        if self._passage_batch_in_flight() and thread.isRunning():
             QTimer.singleShot(400, self._retry_pending_reset)
             return
         self._reset_pending = False
@@ -26455,7 +26462,10 @@ class GenizahGUI(QMainWindow):
         # make it killable: the witness in flight can still be seconds away
         # (up to ~19s at Deepest), so Reset asks it to stop and comes back
         # later, the same non-blocking retry `_defer_close_for_passage` uses.
-        if self._passage_batch_in_flight():
+        # The thread is checked as well as the flag: once New has discarded
+        # the batch, its completion no longer clears `is_comp_running`.
+        thread = getattr(self, 'comp_thread', None)
+        if self._passage_batch_in_flight() and thread.isRunning():
             # BEFORE the cancel, not in the deferred reset 400 ms later.
             # The cancelled batch's partial completion renders first, arms
             # the expansion and schedules the next round at ZERO delay --
@@ -26463,13 +26473,27 @@ class GenizahGUI(QMainWindow):
             # cancels a round it just spawned, once per round, and takes a
             # witness-search duration each time to clear.
             self._stop_auto_expand('')
-            self.comp_thread.request_cancel()
+            thread.request_cancel()
             if not getattr(self, '_reset_pending', False):
                 self._reset_pending = True
-                if hasattr(self, 'lbl_comp_status'):
-                    self.lbl_comp_status.setText(tr(
-                        "Clearing once the current witness finishes."))
-            QTimer.singleShot(400, self._retry_pending_reset)
+                # New discards the batch NOW, not when the retry resets the
+                # tab: what it delivers meanwhile -- its partial rows, which
+                # would render and start grouping, an error, a status line
+                # -- is dropped on arrival (_deliver_unless_discarded). That
+                # completion used to report the cancelled run's telemetry,
+                # so the report is made here.
+                self._comp_new_generation = getattr(self, '_comp_new_generation', 0) + 1
+                self._emit_comp_search_telemetry('cancelled')
+                # One retry chain: it reschedules itself until the batch
+                # ends. A second chain would run the reset twice, and the
+                # second could clear a search started after the first.
+                QTimer.singleShot(400, self._retry_pending_reset)
+            # Every time: the refusal helper above has just said the
+            # results found so far are kept, which is Stop's promise, not
+            # New's.
+            if hasattr(self, 'lbl_comp_status'):
+                self.lbl_comp_status.setText(tr(
+                    "Clearing once the current witness finishes."))
             return
         # From here the reset happens now. Whatever the composition or
         # grouping run still has queued -- a cancelled scan's partial rows, a
