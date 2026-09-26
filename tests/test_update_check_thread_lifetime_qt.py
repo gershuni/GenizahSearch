@@ -102,12 +102,17 @@ class GatedSidecar(_ORIG_SIDECAR):
 
 
 class GatedDownload(_ORIG_DOWNLOAD):
+    """Reports a cancel the way the real download does (finished_signal(False, ...));
+    otherwise reports nothing, so no test starts the next queued download."""
+
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
         KEEP.append(self)
 
     def run(self):
         GATE.wait(10)
+        if self._cancelled:
+            self.finished_signal.emit(False, "Download cancelled", self.sidecar_name)
 
 
 @pytest.fixture(autouse=True)
@@ -255,6 +260,27 @@ def test_close_silences_running_update_checks(tmp_path):
     assert h._current_sidecar_download._cancelled
     _settle()
     assert h.results == [] and delivered == [], "a result reached the closing app"
+
+
+def test_a_deferred_close_keeps_the_update_check():
+    """A close deferred for running work leaves the app open: its update check must
+    still report, so the silencing belongs after every deferral."""
+    class DeferringHost(Host):
+        def _defer_close_for_passage(self, event):
+            event.ignore()
+            return True
+
+    h = DeferringHost()
+    h.check_updates_manual()
+    manual = h.update_thread
+    event = QCloseEvent()
+    escaped = call_catching(h.closeEvent, event)
+    assert escaped is None, f"closeEvent raised {escaped!r}"
+    assert not event.isAccepted()
+    assert not _kept(manual), "a deferred close handed the update check to the keeper"
+    _settle()
+    assert h.results == [(False, "v0", "", "", True)], "the update check was silenced"
+    assert h.btn_check_updates.isEnabled()
 
 
 def test_close_silences_update_checks_even_when_closing_the_viewer_fails(tmp_path):

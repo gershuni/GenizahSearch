@@ -269,6 +269,49 @@ def test_page_turn_keeps_the_running_thumbnail_loaders(monkeypatch):
     assert _unreferenced(first_page, wb) == []
 
 
+def test_page_turn_keeps_a_running_pool_loader(monkeypatch):
+    """A card folio flip or Compare image loads through the 5-slot pool, not the grid
+    list: a page turn while it loads must keep that loader too."""
+    monkeypatch.setattr(jw, "ImageLoaderThread", GatedLoader)
+    monkeypatch.setattr(GatedLoader, "delays", {"/320,/": 0.0})   # thumbnails load at once
+    wb = _window()
+    pane = wb._candidate_pane
+    wb.filtered = _candidates(2 * jw._PER_PAGE)
+    pane.render_results()
+    _pump_until(lambda: sum(_has_pix(c.img) for c in pane.cards.values()) == jw._PER_PAGE,
+                what="the page's thumbnails")
+    _pump_until(lambda: not _running(GatedLoader), what="the thumbnail loaders to finish")
+    wb._enqueue_image(QLabel("loading…"), "https://h.invalid/POOLX/full/400,/0/default.jpg")
+    pool = [w for w in _running(GatedLoader) if "/POOLX/" in w.url]
+    assert len(pool) == 1, "the pool image did not start"
+    pane._next_page()                                   # the real page turn
+    assert _alive(pool[0]) and _kept(pool[0]), "the running pool loader was dropped"
+    wb._cancel_images()
+    assert wb._img_threads == [] and getattr(wb, "_grid_img_threads", []) == [], (
+        "a retired loader is still listed")
+
+
+def test_page_turn_keeps_the_running_vs_card_text_workers(monkeypatch):
+    """A visually-similar card with no text fetches its first page on render; the page
+    turn deletes the card, so the card must not be what holds that worker."""
+    import dataclasses
+
+    monkeypatch.setattr(jw, "ImageLoaderThread", GatedLoader)
+    wb = _window(FakeSearcher({1: "gate"}))
+    pane = wb._candidate_pane
+    wb.filtered = [dataclasses.replace(c, via_vs=True, full_text="")
+                   for c in _candidates(2 * jw._PER_PAGE)]
+    pane.render_results()
+    first = _running(_ORIG["_PageTextWorker"])
+    assert len(first) == jw._PER_PAGE, f"{len(first)} card text workers started"
+    cards = list(pane.cards.values())
+    pane._next_page()
+    for w in first:
+        assert _alive(w) and _kept(w), "a running card text worker was dropped"
+        assert not any(v is w for card in cards for v in vars(card).values()), (
+            "a card still holds its text worker")
+
+
 def test_page_turn_keeps_the_running_thumb_resolver():
     started = threading.Event()
 
@@ -400,6 +443,26 @@ def test_a_replaced_thumb_batch_delivers_nothing_to_the_new_rows(monkeypatch):
     assert t1.receivers(t1.resolved) == 0
 
 
+def test_an_empty_known_joins_reload_cuts_the_running_thumb_batch(monkeypatch):
+    """A reload that leaves no rows starts no batch, but must still retire the old one."""
+    class GatedThumbs(_ORIG["ThumbBatchWorker"]):
+        def __init__(self, *a):
+            super().__init__(*a)
+            KEEP.append(self)
+
+        def run(self):
+            GATE.wait(10)
+
+    monkeypatch.setattr(jw, "ThumbBatchWorker", GatedThumbs)
+    wb = _window()
+    rows = [{"other_sid": SID, "other_shelf": "T-S 9", "source": "user"}]
+    wb._on_known_joins_loaded(wb._gen, rows)
+    first = wb._thumb_worker
+    wb._on_known_joins_loaded(wb._gen, [])            # same generation, no rows left
+    assert _alive(first) and _kept(first), "the running thumbnail batch was dropped"
+    assert first.receivers(first.resolved) == 0, "the old batch is still connected"
+
+
 def test_folio_change_keeps_the_running_text_worker_and_image_loader(monkeypatch):
     monkeypatch.setattr(jw, "ImageLoaderThread", GatedLoader)
     wb = _window(FakeSearcher({2: "gate", 3: "gate"}))
@@ -439,6 +502,30 @@ def test_reanchor_keeps_the_running_anchor_and_known_joins_workers(monkeypatch):
     wb.set_anchor(dict(res, display={"id": SID[:-1] + "2", "shelfmark": "T-S 2", "img": 1}))
     for w in (first_anchor, first_joins):
         assert _alive(w) and _kept(w)
+
+
+def test_a_same_anchor_reload_keeps_the_running_known_joins_worker(monkeypatch):
+    """_on_add_as_join reloads the known joins without re-anchoring, possibly while the
+    previous load still runs."""
+    class GatedJoins(_ORIG["_KnownJoinsLoadWorker"]):
+        def __init__(self, *a):
+            super().__init__(*a)
+            KEEP.append(self)
+
+        def run(self):
+            GATE.wait(10)
+            self.done.emit(self._gen, [])
+
+    monkeypatch.setattr(jw, "_KnownJoinsLoadWorker", GatedJoins)
+    wb = _window()
+    wb._anchor_sid = SID
+    wb._anchor_res = {"display": {"id": SID, "shelfmark": "T-S 1"}, "uid": SID}
+    wb._reload_known_joins(wb._gen)
+    first = wb._known_joins_worker
+    wb._reload_known_joins(wb._gen)                       # same generation
+    assert wb._known_joins_worker is not first
+    assert _alive(first) and _kept(first), "the running known-joins worker was dropped"
+    assert first.receivers(first.done) == 0
 
 
 def test_new_known_joins_rows_keep_the_running_thumb_batch(monkeypatch):
@@ -648,3 +735,17 @@ def test_a_kept_worker_is_freed_without_the_cycle_collector(kind, monkeypatch):
         assert ref() is None, f"{kind}: the released worker is alive until gc.collect()"
     finally:
         gc.enable()
+
+
+def test_a_finished_worker_is_released_at_once():
+    """Most retirements hand over workers that have already finished (every grid
+    re-render retires a page of loaded thumbnails, every folio step the previous
+    loader). Their finished() has fired, so holding them would grow the keeper for ever."""
+    gate = _gate()
+    gate.set()
+    w = _GatedQThread(gate)
+    w.start()
+    assert w.wait(5000)
+    jw._keep_until_finished(w)
+    lists = (_orphans(), jw._ORPHANED_WORKERS)
+    assert not any(x is w for lst in lists for x in lst), "a finished worker was kept"
