@@ -5144,6 +5144,14 @@ TRANSLATIONS.update({
     # the first one's lists and settings). Hebrew-first so it lays out RTL.
     "Dicta Genizah Search Pro is already open. Only one copy can run at a time, because two copies would overwrite each other's lists and settings. Switch to the open window. If none is visible, it is still starting or closing; try again in a moment.":
         'התוכנה Dicta Genizah Search Pro כבר פתוחה. רק עותק אחד יכול לפעול בכל פעם, כי כל עותק שומר את הרשימות וההגדרות שלו על גבי אלה של העותק האחר. עברו לחלון הפתוח. אם אין חלון גלוי, התוכנה עדיין נפתחת או נסגרת; נסו שוב בעוד רגע.',
+    # The language-change restart cannot start the new copy: checked before
+    # the window closes (it stays open), or failed after it closed.
+    'Could not restart':
+        'לא ניתן להפעיל מחדש',
+    'The application cannot restart itself right now. The language will change to {} the next time you start it.':
+        'התוכנה אינה יכולה להפעיל את עצמה מחדש כעת. השפה תשתנה ל-{} בהפעלה הבאה.',
+    'The application could not restart itself. Start it again to use the new language.':
+        'התוכנה לא הצליחה להפעיל את עצמה מחדש. יש להפעיל אותה שוב כדי לעבור לשפה החדשה.',
     'The letter-level index is already being built.':
         'האינדקס לחיפוש ברמת האות כבר נבנה כעת.',
     'Transcriptions needed':

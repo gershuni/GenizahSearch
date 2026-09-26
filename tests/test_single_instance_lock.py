@@ -238,6 +238,8 @@ def test_language_restart_leaves_the_relaunch_to_main(monkeypatch):
     launched, quits, closes, saved = [], [], [], []
     monkeypatch.setattr(genizah_app, "QMessageBox", _answering_yes())
     monkeypatch.setattr(genizah_app, "save_language", saved.append)
+    # Whether pytest's own command line could be relaunched is not the question here.
+    monkeypatch.setattr(genizah_app, "relaunch_looks_possible", lambda: True)
     monkeypatch.setattr(genizah_app, "QApplication", types.SimpleNamespace(
         instance=lambda: types.SimpleNamespace(quit=lambda: quits.append(True))))
     monkeypatch.setattr(subprocess, "Popen", lambda argv, **kwargs: launched.append(argv))
@@ -272,6 +274,7 @@ def test_the_language_restart_closes_the_main_window_first_and_the_loop_still_en
     monkeypatch.setattr(si, "_restart_requested", False)
     monkeypatch.setattr(genizah_app, "QMessageBox", _answering_yes())
     monkeypatch.setattr(genizah_app, "save_language", lambda lang: None)
+    monkeypatch.setattr(genizah_app, "relaunch_looks_possible", lambda: True)
     seen = []
 
     class Main(QMainWindow):
@@ -300,6 +303,131 @@ def test_the_language_restart_closes_the_main_window_first_and_the_loop_still_en
 
     assert seen == [("the main window closes, children open:", 4)]
     assert code == 0 and si._restart_requested is True
+
+
+def _recording_box(shown):
+    """genizah_app's QMessageBox: each box it runs appends (title, text, OK
+    label) to `shown` and answers Yes."""
+    from PyQt6.QtWidgets import QMessageBox as RealBox
+
+    class Box:
+        Icon, StandardButton = RealBox.Icon, RealBox.StandardButton
+
+        def __init__(self, *args):
+            self.title = self.text = self.ok_label = None
+
+        def setWindowTitle(self, title):
+            self.title = title
+
+        def setText(self, text):
+            self.text = text
+
+        def button(self, which):
+            def set_label(label):
+                if which == RealBox.StandardButton.Ok:
+                    self.ok_label = label
+            return types.SimpleNamespace(setText=set_label)
+
+        def __getattr__(self, name):  # setIcon, setStandardButtons
+            return lambda *args: None
+
+        def exec(self):
+            shown.append((self.title, self.text, self.ok_label))
+            return RealBox.StandardButton.Yes
+
+    return Box
+
+
+def _is_hebrew(ch):
+    return "֐" <= ch <= "׿"
+
+
+def test_relaunch_looks_possible_only_when_what_it_would_run_is_there(tmp_path, monkeypatch):
+    from desktop import single_instance as si
+
+    exe = tmp_path / "python.exe"
+    exe.write_bytes(b"")
+    script = tmp_path / "genizah_app.py"
+    script.write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert si.relaunch_looks_possible(str(exe), ["genizah_app.py"], frozen=False) is True
+    assert si.relaunch_looks_possible(str(exe), [str(script)], frozen=False) is True
+    assert si.relaunch_looks_possible(str(tmp_path / "gone.exe"), ["genizah_app.py"], frozen=False) is False
+    assert si.relaunch_looks_possible("", ["genizah_app.py"], frozen=False) is False
+    assert si.relaunch_looks_possible(str(exe), ["moved_away.py"], frozen=False) is False
+    assert si.relaunch_looks_possible(str(exe), [], frozen=False) is False
+    # A frozen EXE is the program itself: there is no script to find.
+    assert si.relaunch_looks_possible(str(exe), [str(exe)], frozen=True) is True
+
+    def no_working_folder():
+        raise FileNotFoundError(2, "The system cannot find the file specified")
+
+    monkeypatch.setattr(os, "getcwd", no_working_folder)
+    assert si.relaunch_looks_possible(str(exe), ["genizah_app.py"], frozen=False) is False
+
+
+def test_a_restart_that_cannot_start_keeps_the_window_open(monkeypatch):
+    """The relaunch runs after the window has closed and the event loop has
+    ended, so a command that cannot start then leaves nothing running. Asked
+    first, the answer keeps this window open, and the saved choice applies at
+    the next start."""
+    import genizah_app
+    import genizah_core
+    from desktop import single_instance as si
+
+    monkeypatch.setattr(si, "_restart_requested", False)
+    shown, saved, closes, launched, labels = [], [], [], [], []
+    monkeypatch.setattr(genizah_app, "QMessageBox", _recording_box(shown))
+    monkeypatch.setattr(genizah_app, "save_language", saved.append)
+    monkeypatch.setattr(genizah_app, "relaunch_looks_possible", lambda: False)
+    monkeypatch.setattr(subprocess, "Popen", lambda argv, **kwargs: launched.append(argv))
+    gui = genizah_app.GenizahGUI.__new__(genizah_app.GenizahGUI)
+    gui.close = lambda: closes.append(True)
+    gui.lang_btn = types.SimpleNamespace(setText=labels.append)
+
+    gui.toggle_language("he")
+
+    assert si._restart_requested is False, "a restart that cannot start was requested"
+    assert closes == [] and launched == [], "the window closed with nothing to follow it"
+    assert saved == ["he"]
+    tr = genizah_core.tr
+    assert len(shown) == 2  # the question, then the notice
+    assert shown[1] == (
+        tr("Could not restart"),
+        tr("The application cannot restart itself right now. The language will change "
+           "to {} the next time you start it.").format("עברית"),
+        tr("OK"))
+    assert labels == ["English"], "the button still offers the language just chosen"
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_a_relaunch_that_fails_tells_the_user_to_start_the_app_again(monkeypatch, lang):
+    """The old window has closed and its event loop has ended: if the new copy
+    cannot start, this one exits and nothing is running. Only a log line said
+    so. The QApplication still exists, so a modal box can run."""
+    import genizah_app
+    import genizah_core
+    from desktop import single_instance as si
+
+    monkeypatch.setattr(si, "_restart_requested", False)
+    monkeypatch.setattr(genizah_core, "CURRENT_LANG", lang)
+    shown = []
+    monkeypatch.setattr(genizah_app, "QMessageBox", _recording_box(shown))
+
+    def popen(argv, **kwargs):
+        raise FileNotFoundError(2, "The system cannot find the file specified", argv[0])
+
+    si.request_restart()
+    assert si.relaunch_if_requested(popen=popen, on_failure=genizah_app._report_failed_relaunch) is False
+
+    tr = genizah_core.tr
+    assert shown == [(tr("Could not restart"),
+                      tr("The application could not restart itself. Start it again to use "
+                         "the new language."),
+                      tr("OK"))]
+    if lang == "he":
+        assert all(_is_hebrew(part[0]) for part in shown[0])
 
 
 # ---------------------------------------------------------------------------
@@ -379,6 +507,14 @@ def test_main_relaunches_after_the_event_loop_and_before_exiting():
     assert exec_at < relaunch
     assert _calls(body[-1], "sys.exit") and ast.unparse(body[-1].value.args[0]) == body[exec_at].targets[0].id
     assert relaunch == len(body) - 2, "nothing may run between the relaunch and the exit"
+
+
+def test_main_tells_the_user_when_the_relaunch_fails():
+    body = _main_block()
+    relaunch = _first(body, lambda n: isinstance(n, ast.Expr) and _calls(n, "relaunch_if_requested"),
+                      "relaunch_if_requested()")
+    call = body[relaunch].value
+    assert {k.arg: ast.unparse(k.value) for k in call.keywords} == {"on_failure": "_report_failed_relaunch"}
 
 
 def test_the_instance_lock_is_held_until_the_process_exits():

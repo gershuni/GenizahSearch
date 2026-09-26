@@ -60,7 +60,9 @@ from desktop.widgets import (
     ShelfmarkCompleter,
 )
 from desktop.column_chooser import ColumnChooser, ColumnFitter
-from desktop.single_instance import acquire_instance_lock, relaunch_if_requested, request_restart, restarted_from
+from desktop.single_instance import (
+    acquire_instance_lock, relaunch_if_requested, relaunch_looks_possible, request_restart, restarted_from,
+)
 from desktop.widgets.flow_layout import FlowWidget
 from desktop.widgets.overflow_row import OverflowRow
 from desktop.widgets.line_number_text_edit import (
@@ -1348,6 +1350,16 @@ def _show_ok_notice(parent, kind, title, text):
     box.setStandardButtons(QMessageBox.StandardButton.Ok)
     box.button(QMessageBox.StandardButton.Ok).setText(tr("OK"))
     box.exec()
+
+
+def _report_failed_relaunch(error=None):
+    """The language restart could not start the new copy (relaunch_if_requested's
+    on_failure). The window is closed and the event loop has ended, but the
+    QApplication still exists, so a modal box can still run; after it this copy
+    exits, and nothing else is running."""
+    _show_ok_notice(
+        None, 'warning', tr("Could not restart"),
+        tr("The application could not restart itself. Start it again to use the new language."))
 
 
 def _telemetry_result_bucket(count: int) -> str:
@@ -4934,7 +4946,18 @@ class GenizahGUI(QMainWindow):
         msgbox.button(QMessageBox.StandardButton.Yes).setText(tr("Yes"))
         msgbox.button(QMessageBox.StandardButton.No).setText(tr("No"))
         reply = msgbox.exec()
-        if reply == QMessageBox.StandardButton.Yes:
+        if reply == QMessageBox.StandardButton.Yes and not relaunch_looks_possible():
+            # The relaunch runs after this window has closed and the event
+            # loop has ended, so a command that cannot start then would leave
+            # nothing running. The choice is saved above; it applies at the
+            # next start.
+            label = "עברית" if new_lang == 'he' else "English"
+            self.lang_btn.setText("English" if new_lang == 'he' else "עברית")
+            _show_ok_notice(
+                self, 'warning', tr("Could not restart"),
+                tr("The application cannot restart itself right now. The language will "
+                   "change to {} the next time you start it.").format(label))
+        elif reply == QMessageBox.StandardButton.Yes:
             # The new copy is started by __main__ after the event loop ends,
             # i.e. after closeEvent has saved the session; started from here
             # it would read the session before this copy had saved it.
@@ -32258,6 +32281,7 @@ if __name__ == "__main__":
     _exit_code = app.exec()
     # If a language change asked for a restart, the new copy starts only now,
     # after closeEvent has saved the session. It waits for this process (named
-    # on its command line) to exit and release _instance_lock.
-    relaunch_if_requested()
+    # on its command line) to exit and release _instance_lock. If it cannot be
+    # started, the user is told to start the app again before this one exits.
+    relaunch_if_requested(on_failure=_report_failed_relaunch)
     sys.exit(_exit_code)

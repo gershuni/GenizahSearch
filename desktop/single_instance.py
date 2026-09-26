@@ -18,7 +18,9 @@ on the new command line (``--restarted-from=<pid>``). The new copy waits up to
 PARENT_WAIT_MS (ten minutes) for that process to exit -- an upload still in
 flight can keep it alive for a while -- instead of calling it "already open"
 after the usual LAUNCH_WAIT_MS. If it is still running after that, the new copy
-reports it as the copy already open.
+reports it as the copy already open. Because nothing can keep this copy open
+by then, the restart is only requested when relaunch_looks_possible() says the
+command can start, and a launch that fails anyway is reported to the user.
 """
 import logging
 import os
@@ -92,17 +94,44 @@ def acquire_instance_lock(index_dir, wait_ms=LAUNCH_WAIT_MS, parent_pid=None,
             return None, True
 
 
+def relaunch_looks_possible(executable=None, argv=None, frozen=None):
+    """True when what the relaunch would run is there: the interpreter (or the
+    frozen EXE), the script for a script launch, and the working folder.
+
+    Asked before the window closes for a restart. The relaunch itself runs
+    only after the event loop has ended, so a command that cannot start then
+    leaves nothing running.
+    """
+    executable = sys.executable if executable is None else executable
+    argv = sys.argv if argv is None else argv
+    frozen = getattr(sys, "frozen", False) if frozen is None else frozen
+    try:
+        cwd = os.getcwd()
+    except OSError:
+        return False
+    if not executable or not os.path.isfile(executable) or not os.path.isdir(cwd):
+        return False
+    if not frozen:
+        script = argv[0] if argv else ""
+        if not script or not os.path.isfile(os.path.join(cwd, script)):
+            return False
+    return True
+
+
 def request_restart():
     """Relaunch the app once its event loop has ended (see relaunch_if_requested)."""
     global _restart_requested
     _restart_requested = True
 
 
-def relaunch_if_requested(popen=None):
+def relaunch_if_requested(popen=None, on_failure=None):
     """Start the new copy if request_restart() was called. Returns True if one was started.
 
     Called after ``app.exec()`` returns, so the new copy starts only once this
-    one's closeEvent -- and its session save -- has finished.
+    one's closeEvent -- and its session save -- has finished. If it cannot be
+    started, ``on_failure(error)`` is called -- __main__ passes one that tells
+    the user to start the app again, since this copy is about to exit -- and
+    False is returned.
     """
     global _restart_requested
     if not _restart_requested:
@@ -111,7 +140,12 @@ def relaunch_if_requested(popen=None):
     popen = popen or subprocess.Popen
     try:
         popen(restart_argv(sys.executable, sys.argv, os.getpid()), cwd=os.getcwd())
-    except OSError as e:
+    except Exception as e:
         LOGGER.error("Could not relaunch the app: %s", e)
+        if on_failure is not None:
+            try:
+                on_failure(e)
+            except Exception:
+                LOGGER.exception("Could not report the failed relaunch")
         return False
     return True
