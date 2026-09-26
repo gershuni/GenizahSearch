@@ -65,8 +65,11 @@ def _retire_worker(worker, *signal_names) -> None:
     cancel() only sets a flag (several workers ignore it), the worker has no Qt parent,
     and dropping its last reference while run() executes destroys a running QThread
     (0xC0000409). Each named signal is disconnected, so nothing the worker emits from
-    now on reaches the slot that replaced it; PyQt6 also does not deliver an emission
-    queued before the disconnect (pinned by tests/test_join_workbench_worker_lifetime_qt.py).
+    now on reaches the slot that replaced it. An emission queued before the disconnect
+    is not delivered either when PyQt6 connected the slot through a proxy -- a lambda or
+    an undecorated method, which is what every current caller connects (pinned by
+    tests/test_join_workbench_worker_lifetime_qt.py); a @pyqtSlot-decorated QObject
+    method still receives it.
     """
     if worker is None:
         return
