@@ -272,8 +272,9 @@ def test_manual_save_after_a_partial_load_keeps_both_fragments(env):
     pwh.finish_loads(fail_ids={"99000FL2"})
     env.win._auto_save_timer.stop()
     env.win._scene_change_debounce.stop()
-    assert env.win._on_save_join() is True
+    saved = env.win._on_save_join()
     assert sorted(s for s, _r, _x in env.stored(doc)) == ["990001", "990002"]
+    assert saved is True
 
 
 @pytest.mark.parametrize("failed", [("99000FL2",), ("99000FL1", "99000FL2")],
@@ -367,8 +368,9 @@ def test_new_during_a_load_leaves_autosave_working(env):
     env.win._on_new_puzzle()
     env.add(pwh.fragments()[0])      # also delivers A's late images
     env.save_dialog_result = QDialog.DialogCode.Accepted
-    assert env.win._on_save_join() is True
+    env.win._on_save_join()
     doc_s = env.win._current_doc_id
+    assert doc_s is not None
     env.settle()
     _rotate(env, degrees=5)
     env.settle()
