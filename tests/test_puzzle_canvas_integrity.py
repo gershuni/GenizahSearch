@@ -92,7 +92,7 @@ EMPTY_STORE_NOTE = "The canvas is empty, so the saved join keeps its fragments. 
 REFUSED_STEP = "Folio {} of this manuscript is already in the puzzle."
 
 
-# ------------------------------------------------------------------ #10
+# ------------------------------------------------------------------
 # The canvas is cleared or replaced only after the work on it is safe.
 
 def test_new_asks_before_clearing_a_scratch_pad_that_was_only_dragged(env):
@@ -990,7 +990,7 @@ def test_the_puzzle_close_event_never_ignores():
     assert "self._flush_auto_save(notify=True)" in body
 
 
-# ------------------------------------------------------------------ #22
+# ------------------------------------------------------------------
 # Delete acts only on the canvas, asks for more than one, and can be undone.
 
 CTRL = Qt.KeyboardModifier.ControlModifier
@@ -1253,7 +1253,7 @@ def test_undo_with_no_reload_pending_starts_no_request(env):
     assert env.win._pending_req == {}
 
 
-# ------------------------------------------------------------------ #10
+# ------------------------------------------------------------------
 # The four "Open in Puzzle" paths outside the window, and quitting.
 
 def _external_fork(env, which):
