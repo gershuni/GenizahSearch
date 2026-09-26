@@ -3217,6 +3217,11 @@ TRANSLATIONS = {
     "The canvas is empty. Save only the title and notes? The saved join keeps its fragments.":
         "הקנבס ריק. לשמור רק את הכותרת וההערות? הצירוף השמור ישמור על הקטעים שלו.",
     "Folio {} of this fragment is already on the canvas.": "הדף {} של קטע זה כבר נמצא על הקנבס.",
+    "Delete fragments?": "למחוק קטעים?",
+    "Remove {} fragments from the puzzle?": "להסיר {} קטעים מהפאזל?",
+    "Fragment deleted. Press Ctrl+Z to undo.": "הקטע נמחק. לחצו Ctrl+Z כדי לבטל.",
+    "{} fragments deleted. Press Ctrl+Z to undo.": "נמחקו {} קטעים. לחצו Ctrl+Z כדי לבטל.",
+    "Nothing to undo": "אין מה לבטל",
     "Save the puzzle before publishing": "שמרו את הפאזל לפני פרסום",
     "Save First": "שמירה תחילה",
     "No Fragments": "אין קטעים",

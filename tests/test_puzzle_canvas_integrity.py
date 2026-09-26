@@ -24,7 +24,7 @@ pytestmark = pytest.mark.gui
 from PyQt6.QtCore import Qt  # noqa: E402
 from PyQt6.QtGui import QCloseEvent  # noqa: E402
 from PyQt6.QtTest import QTest  # noqa: E402
-from PyQt6.QtWidgets import QDialog, QGraphicsTextItem, QMessageBox  # noqa: E402
+from PyQt6.QtWidgets import QApplication, QDialog, QGraphicsTextItem, QMessageBox  # noqa: E402
 
 import puzzle_window_harness as pwh  # noqa: E402
 
@@ -746,3 +746,263 @@ def test_the_puzzle_close_event_never_ignores():
     assert "ignore()" not in body
     assert "self._flush_auto_save(notify=True)" in body
 
+
+# ------------------------------------------------------------------ #22
+# Delete acts only on the canvas, asks for more than one, and can be undone.
+
+CTRL = Qt.KeyboardModifier.ControlModifier
+
+
+def _focus(env, widget):
+    env.win.activateWindow()
+    widget.setFocus()
+    pwh.pump()
+    assert QApplication.focusWidget() is widget
+
+
+def _undo(env):
+    undo = getattr(env.win, "_undo_last_delete", None)
+    assert undo is not None, "no undo for Delete"
+    undo()
+
+
+def test_delete_in_the_saved_joins_list_does_not_touch_the_canvas(env):
+    """The list ignores Delete, so it reached the window's keyPressEvent and
+    removed the selected canvas fragment; autosave then wrote that."""
+    doc = env.save(pwh.fragments())
+    env.open(doc)
+    env.win._refresh_docs_list()
+    env.item("990001").setSelected(True)
+    _focus(env, env.win._docs_list)
+    QTest.keyClick(env.win._docs_list, Qt.Key.Key_Delete)
+    assert sorted(env.win._fragment_items) == [("990001", "1r"), ("990002", "1r")]
+    env.settle()                     # any autosave the key started has run
+    assert len(env.stored(doc)) == 2
+
+
+def test_select_all_delete_asks_and_never_autosaves_an_empty_join(env):
+    """Ctrl+A, Delete removed everything without a question and the autosave
+    saved the join with zero fragments."""
+    doc = env.save(pwh.fragments())
+    env.open(doc)
+    env.answer = SB.Yes
+    _focus(env, env.win.canvas_view)
+    QTest.keyClick(env.win.canvas_view, Qt.Key.Key_A, CTRL)
+    QTest.keyClick(env.win.canvas_view, Qt.Key.Key_Delete)
+    assert env.asks == [(_tr("Delete fragments?"),
+                         _tr("Remove {} fragments from the puzzle?").format(2), SB.Yes | SB.No)]
+    assert env.win._fragment_items == {}
+    env.settle()                     # debounce + timer: the autosave runs for real
+    assert sorted(s for s, _r, _x in env.stored(doc)) == ["990001", "990002"]
+    assert env.win.statusBar().currentMessage() == _tr(EMPTY_STORE_NOTE)
+
+
+def test_declining_a_multi_delete_keeps_everything(env):
+    env.scratch_pad()
+    env.select_only(*env.win._fragment_items.values())
+    env.answer = SB.No
+    env.win._delete_selected()       # the toolbar button and the context menu
+    assert len(env.asks) == 1
+    assert len(env.win._fragment_items) == 2
+
+
+def test_ctrl_z_restores_the_last_delete_but_never_into_the_next_puzzle(env):
+    """No undo existed: a deleted fragment's alignment was gone for good."""
+    doc = env.save(pwh.fragments())
+    env.open(doc)
+    it = env.item("990001")
+    it.setRotation(3.0)
+    pos = (it.pos().x(), it.pos().y())
+    env.select_only(it)
+    _focus(env, env.win.canvas_view)
+    QTest.keyClick(env.win.canvas_view, Qt.Key.Key_Delete)
+    assert env.asks == []            # one fragment: no question, undo instead
+    assert env.win.statusBar().currentMessage() == _tr("Fragment deleted. Press Ctrl+Z to undo.")
+    assert ("990001", "1r") not in env.win._fragment_items
+    QTest.keyClick(env.win.canvas_view, Qt.Key.Key_Z, CTRL)
+    back = env.win._fragment_items.get(("990001", "1r"))
+    assert back is it
+    assert (back.pos().x(), back.pos().y(), back.rotation()) == (*pos, 3.0)
+    env.settle()
+    assert sorted(s for s, _r, _x in env.stored(doc)) == ["990001", "990002"]
+    # ...and an undo never crosses into another puzzle.
+    env.select_only(back)
+    QTest.keyClick(env.win.canvas_view, Qt.Key.Key_Delete)
+    env.win._on_new_puzzle()
+    env.add(pwh.fragments("99030")[0])
+    _focus(env, env.win.canvas_view)
+    QTest.keyClick(env.win.canvas_view, Qt.Key.Key_Z, CTRL)
+    assert sorted(env.win._fragment_items) == [("990301", "1r")]
+
+
+def test_delete_with_the_fragment_combo_focused_deletes(env):
+    """Regression pin: choosing a fragment in the fragment combo and pressing
+    Delete must keep working (a canvas-only rule would break it)."""
+    doc = env.save(pwh.fragments())
+    env.open(doc)
+    combo = env.win.combo_fragments
+    _focus(env, combo)
+    combo.setCurrentIndex(-1)
+    combo.setCurrentIndex(0)         # selects that fragment on the canvas
+    chosen = combo.itemData(0)
+    assert [i is env.win._fragment_items[chosen]
+            for i in env.win.canvas_view.get_selected_fragments()] == [True]
+    QTest.keyClick(combo, Qt.Key.Key_Delete)
+    assert chosen not in env.win._fragment_items
+    assert len(env.win._fragment_items) == 1
+
+
+def test_delete_after_a_toolbar_click_deletes(env):
+    """Regression pin: after a toolbar button took the focus, Delete still
+    deletes the selected fragment."""
+    doc = env.save(pwh.fragments())
+    env.open(doc)
+    env.select_only(env.item("990002"))
+    _focus(env, env.win.btn_bg_toggle)
+    QTest.keyClick(env.win.btn_bg_toggle, Qt.Key.Key_Delete)
+    assert sorted(env.win._fragment_items) == [("990001", "1r")]
+
+
+def test_ctrl_z_with_the_fragment_combo_focused_undoes(env):
+    """A non-editable combo swallows Ctrl+Z before the window's keyPressEvent
+    sees it, so an undo there must come from a window shortcut."""
+    doc = env.save(pwh.fragments())
+    env.open(doc)
+    combo = env.win.combo_fragments
+    _focus(env, combo)
+    combo.setCurrentIndex(-1)
+    combo.setCurrentIndex(0)
+    chosen = combo.itemData(0)
+    QTest.keyClick(combo, Qt.Key.Key_Delete)
+    assert chosen not in env.win._fragment_items
+    QTest.keyClick(combo, Qt.Key.Key_Z, CTRL)
+    assert chosen in env.win._fragment_items
+    assert len(env.win._fragment_items) == 2
+
+
+def _ctrl_z_outside_the_canvas(env, where):
+    """Ctrl+Z in the notes field is that field's own undo, and in the Saved
+    Joins list it means nothing: neither may restore (or use up) the undo of
+    a canvas Delete."""
+    doc = env.save(pwh.fragments())
+    env.open(doc)
+    env.win._refresh_docs_list()
+    env.select_only(env.item("990001"))
+    _focus(env, env.win.canvas_view)
+    QTest.keyClick(env.win.canvas_view, Qt.Key.Key_Delete)
+    assert ("990001", "1r") not in env.win._fragment_items
+    widget = env.win._notes_edit if where == "notes" else env.win._docs_list
+    _focus(env, widget)
+    QTest.keyClick(widget, Qt.Key.Key_Z, CTRL)
+    assert ("990001", "1r") not in env.win._fragment_items
+    _focus(env, env.win.canvas_view)
+    QTest.keyClick(env.win.canvas_view, Qt.Key.Key_Z, CTRL)
+    assert ("990001", "1r") in env.win._fragment_items
+
+
+def test_ctrl_z_in_the_notes_field_does_not_touch_the_canvas(env):
+    _ctrl_z_outside_the_canvas(env, "notes")
+
+
+def test_ctrl_z_in_saved_joins_does_nothing(env):
+    _ctrl_z_outside_the_canvas(env, "saved_joins")
+
+
+def test_delete_readd_undo_keeps_one_copy(env):
+    """Undo after the same page was added again must not put a second copy of
+    it on the canvas, and still restores the rest of that Delete."""
+    env.scratch_pad()
+    env.select_only(*env.win._fragment_items.values())
+    env.answer = SB.Yes
+    _focus(env, env.win.canvas_view)
+    QTest.keyClick(env.win.canvas_view, Qt.Key.Key_Delete)
+    assert env.win._fragment_items == {}
+    env.add(pwh.fragments()[0])      # the same page added again from the main window
+    _focus(env, env.win.canvas_view)
+    QTest.keyClick(env.win.canvas_view, Qt.Key.Key_Z, CTRL)
+    on_scene = sorted(i.puzzle_frag.sys_id for i in env.win.canvas_view.get_fragment_items())
+    assert on_scene == ["990001", "990002"]
+    assert sorted(env.win._fragment_items) == [("990001", "1r"), ("990002", "1r")]
+
+
+def test_undo_of_a_crop_mode_delete_restores_a_normal_item(env):
+    """A fragment deleted in crop mode came back still in crop mode, so every
+    later edge drag cropped it."""
+    doc = env.save(pwh.fragments())
+    env.open(doc)
+    env.select_only(env.item("990001"))
+    env.win.btn_crop.setChecked(True)
+    _focus(env, env.win.canvas_view)
+    QTest.keyClick(env.win.canvas_view, Qt.Key.Key_Delete)
+    env.win.btn_crop.setChecked(False)
+    QTest.keyClick(env.win.canvas_view, Qt.Key.Key_Z, CTRL)
+    back = env.win._fragment_items.get(("990001", "1r"))
+    assert back is not None
+    assert back._crop_mode is False
+
+
+def _one_placed_fragment(env):
+    from shared.puzzle_model import PuzzleFragment
+    doc = env.save([PuzzleFragment(sys_id="990001", folio_label="1r", fl_id="FLA",
+                                   shelfmark="T-S A 1", x=10.0, y=20.0)])
+    env.win._load_document(doc)
+    (loader,) = pwh.take_started()
+    loader.deliver(pwh.png_bytes(30, 40))
+    env.settle()
+    env.win._folio_lists["990001"] = [{"fl_id": "FLA", "label": "1r"},
+                                      {"fl_id": "FLB", "label": "1v"}]
+    env.select_only(env.item("990001"))
+    return doc
+
+
+def _size(item):
+    return item.pixmap().width(), item.pixmap().height()
+
+
+@pytest.mark.parametrize("entry", ["navigate_next", "flip_recto_verso", "threshold"])
+def test_undo_of_a_delete_made_while_a_reload_was_pending_loads_the_new_image(env, entry):
+    """The Delete made the pending reload stale; an Undo that started nothing
+    left the item showing the previous folio's image under the new label."""
+    doc = _one_placed_fragment(env)
+    if entry == "navigate_next":
+        env.win._navigate_folio(+1)
+        key = ("990001", "1v")
+    elif entry == "flip_recto_verso":
+        env.win._flip_recto_verso()
+        key = ("990001", "1v")
+    else:
+        env.win.slider_threshold.blockSignals(True)
+        env.win.slider_threshold.setValue(60)
+        env.win.slider_threshold.blockSignals(False)
+        env.win._on_threshold_changed()
+        key = ("990001", "1r")
+    (reload_b,) = pwh.take_started()
+    item = env.win._fragment_items[key]
+    env.win._delete_selected()
+    assert env.asks == []
+    _undo(env)
+    assert env.win._fragment_items.get(key) is item
+    restarted = pwh.take_started()
+    assert len(restarted) == 1, "Undo must restart the reload the Delete made stale"
+    reload_c = restarted[0]
+    assert reload_c.kwargs == reload_b.kwargs
+    assert env.win._pending_req[key][0] == reload_c.req
+    reload_b.deliver(pwh.png_bytes(50, 20))
+    assert _size(item) == (30, 40)   # stale
+    reload_c.deliver(pwh.png_bytes(50, 20))
+    assert _size(env.win._fragment_items[key]) == (50, 20)
+    assert env.win._pending_req == {}
+    env.settle()
+    (stored,) = env.stored_doc(doc).fragments
+    assert stored.folio_label == key[1]
+    if entry == "threshold":
+        assert stored.bg_removal_threshold == 60.0
+
+
+def test_undo_with_no_reload_pending_starts_no_request(env):
+    _one_placed_fragment(env)
+    env.win._delete_selected()
+    _undo(env)
+    assert ("990001", "1r") in env.win._fragment_items
+    assert pwh.take_started() == []
+    assert env.win._pending_req == {}

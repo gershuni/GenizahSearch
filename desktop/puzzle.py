@@ -6,7 +6,7 @@ import os
 from functools import partial
 
 from PyQt6.QtWidgets import (
-    QApplication, QComboBox, QCompleter, QDialog, QDockWidget,
+    QAbstractButton, QAbstractSlider, QApplication, QComboBox, QCompleter, QDialog, QDockWidget,
     QFileDialog, QGraphicsItem, QGraphicsPixmapItem, QGraphicsTextItem,
     QGraphicsScene, QGraphicsView, QGroupBox, QHBoxLayout, QInputDialog,
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu,
@@ -15,8 +15,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QRectF, QSize, QPointF, QTimer, pyqtSignal, QThread
 from PyQt6.QtGui import (
-    QAction, QBrush, QColor, QCursor, QIcon, QImage,
-    QPainter, QPainterPath, QPen, QPixmap, QTransform,
+    QAction, QBrush, QColor, QCursor, QIcon, QImage, QKeySequence,
+    QPainter, QPainterPath, QPen, QPixmap, QShortcut, QTransform,
 )
 from PyQt6 import sip
 
@@ -782,6 +782,9 @@ class PuzzleCanvasWindow(QMainWindow):
         # _clear_canvas bumps it, so a result for a replaced canvas is
         # dropped. Never reset.
         self._canvas_gen = 0
+        # The last Delete, for Ctrl+Z (one level): [(key, item, reload loader
+        # arguments or None)]. Cleared with the canvas.
+        self._undo_delete = None
 
         # Join document state
         self._current_doc_id = None        # None = scratch pad, str = saved document
@@ -1121,6 +1124,14 @@ class PuzzleCanvasWindow(QMainWindow):
         self._scene_change_debounce.setSingleShot(True)
         self._scene_change_debounce.setInterval(500)  # 500ms debounce to batch rapid changes
         self._scene_change_debounce.timeout.connect(self._schedule_auto_save)
+
+        # Ctrl+Z undoes the last Delete. A window shortcut, not a
+        # keyPressEvent branch: a non-editable QComboBox (the fragment combo)
+        # swallows Ctrl+Z before the window sees it. Text fields keep their
+        # own undo (they take the shortcut first).
+        self._undo_shortcut = QShortcut(QKeySequence(QKeySequence.StandardKey.Undo), self)
+        self._undo_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        self._undo_shortcut.activated.connect(self._on_undo_shortcut)
 
     # -- Public API --
 
@@ -2003,15 +2014,79 @@ class PuzzleCanvasWindow(QMainWindow):
         self._schedule_auto_save()
 
     def _delete_selected(self):
-        """Remove selected fragments from the canvas."""
-        for item in self.canvas_view.get_selected_fragments():
+        """Remove selected fragments from the canvas (the Delete key, the
+        trash button and the context menu). More than one asks first; the
+        last Delete can be undone with Ctrl+Z."""
+        selected = self.canvas_view.get_selected_fragments()
+        if not selected:
+            return
+        n = len(selected)
+        if n > 1 and _ask(self, tr("Delete fragments?"),
+                          tr("Remove {} fragments from the puzzle?").format(n),
+                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                          ) != QMessageBox.StandardButton.Yes:
+            return
+        snapshot = []
+        for item in selected:
             pf = item.puzzle_frag
             item_key = (pf.sys_id, pf.folio_label)
             self.canvas_view.scene.removeItem(item)
             self._fragment_items.pop(item_key, None)
-            self._drop_request(item_key)  # an in-flight reload of it is stale
+            # An in-flight reload of it is stale; Undo restarts it.
+            reload_kwargs = self._drop_request(item_key)
+            # The Python reference keeps the item alive after removeItem.
+            snapshot.append((item_key, item, reload_kwargs))
+        self._undo_delete = snapshot
+        if n == 1:
+            message = tr("Fragment deleted. Press Ctrl+Z to undo.")
+        else:
+            message = tr("{} fragments deleted. Press Ctrl+Z to undo.").format(n)
+        self.statusBar().showMessage(message, 5000)
         self._refresh_fragment_combo()
+        self._update_fragments_label()
         self._schedule_auto_save()
+
+    def _undo_last_delete(self):
+        """Put back what the last Delete removed (one level)."""
+        snapshot, self._undo_delete = self._undo_delete, None
+        if not snapshot:
+            self.statusBar().showMessage(tr("Nothing to undo"), 2000)
+            return
+        scene = self.canvas_view.scene
+        scene.clearSelection()
+        for item_key, item, reload_kwargs in snapshot:
+            if item_key in self._fragment_items or item_key in self._pending_fragments:
+                continue  # the same page was added again since
+            item._crop_mode = False  # a Delete made in crop mode
+            scene.addItem(item)
+            self._fragment_items[item_key] = item
+            item.setSelected(True)
+            if reload_kwargs is not None:
+                # The Delete made the reload stale (a folio step or threshold
+                # change); without a fresh one the item would keep the old image.
+                self._start_image_load(item_key, item.puzzle_frag, **reload_kwargs)
+        self._refresh_fragment_combo()
+        self._update_fragments_label()
+        self._schedule_auto_save()
+
+    def _on_undo_shortcut(self):
+        if self._canvas_keys_have_focus():
+            self._undo_last_delete()
+
+    def _canvas_keys_have_focus(self):
+        """True when Delete and Ctrl+Z belong to the canvas: focus is on the
+        canvas, the fragment combo, a toolbar button or slider, or nowhere in
+        particular. A whitelist, so the Saved Joins list, the title and notes,
+        the shelfmark field and anything added later are left alone."""
+        fw = QApplication.focusWidget()
+        if fw is None or fw is self:
+            return True
+        view = self.canvas_view
+        if fw is view or view.isAncestorOf(fw) or fw is self.combo_fragments:
+            return True
+        central = self.centralWidget()
+        return (isinstance(fw, (QAbstractButton, QAbstractSlider))
+                and central is not None and central.isAncestorOf(fw))
 
     # -- Fragment combo --
 
@@ -2466,6 +2541,7 @@ class PuzzleCanvasWindow(QMainWindow):
 
     def _clear_canvas(self):
         """Remove all fragments from canvas."""
+        self._undo_delete = None  # an undo never crosses into another puzzle
         scene = self.canvas_view.scene
         for key in list(self._fragment_items.keys()):
             item = self._fragment_items.pop(key, None)
@@ -2905,7 +2981,9 @@ class PuzzleCanvasWindow(QMainWindow):
         """Keyboard shortcuts for puzzle canvas.
 
         Esc         - Exit crop mode, or close window
-        Delete      - Delete selected fragments
+        Delete      - Delete selected fragments (canvas focus only, see
+                      _canvas_keys_have_focus)
+        Ctrl+Z      - Undo the last Delete (a window shortcut, see __init__)
         R / Shift+R - Rotate selected 1 deg CW / CCW
         F           - Flip recto/verso
         Ctrl+A      - Select all
@@ -2926,7 +3004,8 @@ class PuzzleCanvasWindow(QMainWindow):
             # Confirm crop
             self.btn_crop.setChecked(False)
         elif key == Qt.Key.Key_Delete:
-            self._delete_selected()
+            if self._canvas_keys_have_focus():
+                self._delete_selected()
         elif key == Qt.Key.Key_R:
             if mod & Qt.KeyboardModifier.ShiftModifier:
                 self._rotate_selected(-1)
