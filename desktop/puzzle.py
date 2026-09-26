@@ -1771,7 +1771,8 @@ class PuzzleCanvasWindow(QMainWindow):
             accepted = keep
         for _item, _old_key, new_key, _entry in refused:
             self.statusBar().showMessage(
-                tr("Folio {} of this fragment is already on the canvas.").format(new_key[1]), 4000)
+                tr("Folio {} of this manuscript is already in the puzzle.").format(new_key[1]),
+                4000)
         for _item, old_key, _new_key, _entry in accepted:
             self._fragment_items.pop(old_key, None)
             if old_key in self._pending_req:

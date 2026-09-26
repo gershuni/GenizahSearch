@@ -87,6 +87,9 @@ def _rotate_first_fragment_by_key(env):
 
 
 EMPTY_STORE_NOTE = "The canvas is empty, so the saved join keeps its fragments. Title and notes were saved."
+# A folio step onto a key another fragment holds: on the canvas, loading, or
+# in the join with its image not loaded.
+REFUSED_STEP = "Folio {} of this manuscript is already in the puzzle."
 
 
 # ------------------------------------------------------------------ #10
@@ -688,8 +691,29 @@ def test_stepping_onto_a_folio_already_on_the_canvas_keeps_both(env, entry):
         env.win._flip_recto_verso()
     assert sorted(env.win._fragment_items) == [("990001", "1r"), ("990001", "1v")]
     assert _keys_match_labels(env)
-    assert env.win.statusBar().currentMessage() == _tr(
-        "Folio {} of this fragment is already on the canvas.").format("1v")
+    assert env.win.statusBar().currentMessage() == _tr(REFUSED_STEP).format("1v")
+    env.settle()
+    assert sorted(f.folio_label for f in env.stored_doc(doc).fragments) == ["1r", "1v"]
+
+
+def test_a_step_onto_a_folio_whose_image_failed_is_refused(env):
+    """The other side is in the join but not on the canvas (its image
+    failed): the step is refused all the same, and the refusal must not
+    say that folio is on the canvas."""
+    from shared.puzzle_model import PuzzleFragment
+    doc = env.save([PuzzleFragment(sys_id="990001", folio_label=label, fl_id="FL-" + label,
+                                   shelfmark="T-S A 1", x=10.0 + 300 * i, y=20.0)
+                    for i, label in enumerate(["1r", "1v"])])
+    env.open(doc, fail_ids=("FL-1v",))
+    env.win._folio_lists["990001"] = [{"fl_id": "FL-1r", "label": "1r"},
+                                      {"fl_id": "FL-1v", "label": "1v"}]
+    assert sorted(env.win._fragment_items) == [("990001", "1r")]
+    env.select_only(env.item("990001", "1r"))
+    env.win._navigate_folio(+1)
+    assert sorted(env.win._fragment_items) == [("990001", "1r")]
+    assert env.win.statusBar().currentMessage() == _tr(REFUSED_STEP).format("1v")
+    from shared.genizah_translations import TRANSLATIONS
+    assert TRANSLATIONS[REFUSED_STEP].count("{}") == 1     # the Hebrew line names the folio
     env.settle()
     assert sorted(f.folio_label for f in env.stored_doc(doc).fragments) == ["1r", "1v"]
 
@@ -751,8 +775,7 @@ def test_two_fragments_stepping_onto_the_same_folio_keeps_both(env):
     assert len(env.win._fragment_items) == 2
     assert set(env.win._fragment_items.values()) == items
     assert _keys_match_labels(env)
-    assert env.win.statusBar().currentMessage() == _tr(
-        "Folio {} of this fragment is already on the canvas.").format("1v")
+    assert env.win.statusBar().currentMessage() == _tr(REFUSED_STEP).format("1v")
     pwh.finish_loads()
     env.settle()
     assert len(env.stored_doc(doc).fragments) == 2
