@@ -126,6 +126,7 @@ def _pane_stub(worker):
 
     class _Stub:
         _reap_enrich_worker = JoinCandidatePane._reap_enrich_worker
+        _reap_retired = getattr(JoinCandidatePane, "_reap_retired", None)
 
     s = _Stub()
     s._cross_worker = worker
@@ -367,36 +368,24 @@ def test_widen_synthesis_stops_when_cancelled():
     assert len(res.candidates) < 1 + 2 * len(b_hits)
 
 
-def test_orphans_are_joined_or_terminated_at_quit():
-    import desktop.join_workbench as jw
-
-    log = []
-
-    class _Stubborn:
-        def isRunning(self):
-            return True
-
-        def wait(self, ms=None):
-            log.append(("wait", ms))
-            return ms is None          # bounded wait times out; the post-terminate one returns
-
-        def terminate(self):
-            log.append("terminate")
-
-    w = _Stubborn()
-    jw._ORPHANED_WORKERS.append(w)
-    try:
-        jw._join_orphaned_workers(timeout_ms=5)
-        assert ("wait", 5) in log and "terminate" in log
-        assert jw._ORPHANED_WORKERS == []
-    finally:
-        if w in jw._ORPHANED_WORKERS:
-            jw._ORPHANED_WORKERS.remove(w)
-
-
-def test_keeping_an_orphan_hooks_the_quit_join():
+def test_keeping_a_worker_adds_no_quit_step():
+    """A kept worker is neither waited for nor terminated at quit: a running QThread that
+    is still referenced at exit is not destroyed, so a wait only delays the exit (and the
+    single-instance relaunch) and terminate() can hang it. The exit behaviour itself is
+    pinned by tests/test_kept_qthreads_exit_cleanly.py."""
+    import ast
     import inspect
+    import textwrap
+    import desktop.gui_threads as gt
     import desktop.join_workbench as jw
 
-    assert "_hook_orphan_join()" in inspect.getsource(jw._keep_until_finished)
-    assert "aboutToQuit.connect(_join_orphaned_workers)" in inspect.getsource(jw._hook_orphan_join)
+    def attrs(fn):   # code only: the docstring may say why there is no quit step
+        tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
+        return {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+
+    assert not hasattr(jw, "_join_orphaned_workers")
+    assert not hasattr(jw, "_hook_orphan_join")
+    for fn in (gt._keep_until_finished, gt._retire_worker):
+        assert not {"aboutToQuit", "wait", "terminate"} & attrs(fn), fn.__name__
+    assert jw._keep_until_finished is gt._keep_until_finished
+    assert jw._ORPHANED_WORKERS is gt._ORPHANED_WORKERS

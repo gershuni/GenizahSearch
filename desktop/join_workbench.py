@@ -598,6 +598,9 @@ try:
     from desktop.image_loader import ImageLoaderThread
     from desktop.widgets.line_number_text_edit import apply_line_numbered_text
     from desktop.gui_threads import SearchThread
+    # The worker keeper lives in gui_threads (the main window uses it too). The list is
+    # re-exported under its old name for callers that read jw._ORPHANED_WORKERS.
+    from desktop.gui_threads import _ORPHANED_WORKERS, _keep_until_finished, _retire_worker  # noqa: F401
     _QT_AVAILABLE = True
 except ImportError:
     _QT_AVAILABLE = False
@@ -606,68 +609,9 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # _AnchorLoadWorker — loads anchor metadata + folio text off the UI thread.
 # Carries a generation token (must-fix #7) to allow latest-wins semantics.
+# A replaced worker is never simply dropped: _retire_worker / _keep_until_finished
+# (desktop.gui_threads) hold it until its QThread has finished.
 # ---------------------------------------------------------------------------
-
-# Workers that were still running when their owning pane was torn down. Held here, not
-# on the pane, so Python never frees a running QThread (Windows 0xC0000409); each one
-# removes itself on finished().
-_ORPHANED_WORKERS: list = []
-
-
-_ORPHAN_JOIN_HOOKED = False
-
-
-def _join_orphaned_workers(timeout_ms: int = 10000) -> None:
-    """At application quit, never let interpreter teardown free a running QThread.
-
-    A module-level list only postpones destruction to module finalisation, and the
-    queued finished() release may never run once the event loop has stopped. So on
-    aboutToQuit: wait (bounded) for each orphan, and terminate() a thread that is
-    still running -- a forced stop at exit is recoverable; destroying a running
-    QThread aborts the process (0xC0000409)."""
-    for w in list(_ORPHANED_WORKERS):
-        try:
-            if w.isRunning() and not w.wait(timeout_ms):
-                w.terminate()
-                w.wait()
-        except RuntimeError:
-            pass
-    _ORPHANED_WORKERS.clear()
-
-
-def _hook_orphan_join() -> None:
-    global _ORPHAN_JOIN_HOOKED
-    if _ORPHAN_JOIN_HOOKED:
-        return
-    try:
-        from PyQt6.QtCore import QCoreApplication
-        app = QCoreApplication.instance()
-        if app is not None:
-            app.aboutToQuit.connect(_join_orphaned_workers)
-            _ORPHAN_JOIN_HOOKED = True
-    except Exception:
-        pass
-
-
-def _keep_until_finished(worker) -> None:
-    if worker in _ORPHANED_WORKERS:
-        return
-    _ORPHANED_WORKERS.append(worker)
-    _hook_orphan_join()
-
-    def _release(w=worker):
-        try:
-            _ORPHANED_WORKERS.remove(w)
-        except ValueError:
-            pass
-
-    try:
-        worker.finished.connect(_release)
-        if not worker.isRunning():
-            _release()
-    except (TypeError, RuntimeError):
-        _release()
-
 
 if _QT_AVAILABLE:
     class _AnchorLoadWorker(QThread):
@@ -2155,8 +2099,7 @@ if _QT_AVAILABLE:
             self.snip.setHtml(m.get("snippet_html") or "")
             _force_rtl_right_align(self.snip)
             lay.addWidget(self.snip)
-            # Feature 1: page-text worker ref (None until folio flip is requested)
-            self._card_text_worker = None
+            # Feature 1: folio-flip text token (the workers themselves are held by the keeper)
             self._card_text_gen = 0
 
             # 5. Combined folio-nav + triage row (G-11): [▶ p.N ◀]  …(stretch)…  [Y][?][N]
@@ -2465,19 +2408,14 @@ if _QT_AVAILABLE:
 
             Feature 1: folio flip also updates the snippet.
             RR-12: page is always int here (guard was applied in _card_folio_prev/next).
-            A local _card_text_gen token ensures stale results are dropped.
+            A local _card_text_gen token ensures stale results are dropped. The card keeps
+            no reference to the worker: the keeper holds it until it finishes, so neither
+            a newer flip nor a page turn (which deletes the card) drops a running QThread.
             """
             try:
                 self.snip.setPlainText(tr("loading…"))
             except RuntimeError:
                 return
-            # Cancel any in-flight text worker for this card
-            if self._card_text_worker is not None:
-                try:
-                    self._card_text_worker.cancel()
-                except Exception:
-                    pass
-                self._card_text_worker = None
             self._card_text_gen += 1
             my_gen = self._card_text_gen
             page = self._card_page
@@ -2499,7 +2437,7 @@ if _QT_AVAILABLE:
 
                 worker.done.connect(_on_done)
                 worker.start()
-                self._card_text_worker = worker
+                _keep_until_finished(worker)
             except Exception:
                 pass
 
@@ -2535,7 +2473,7 @@ if _QT_AVAILABLE:
 
                 worker.done.connect(_on_done)
                 worker.start()
-                self._card_text_worker = worker
+                _keep_until_finished(worker)
             except Exception:
                 pass
 
@@ -3178,7 +3116,8 @@ if _QT_AVAILABLE:
                 return
             self._retired_workers.append(old)
             try:
-                old.finished.connect(lambda w=old: self._reap_enrich_worker(w))
+                # The slot captures the worker's id, never the worker (see _reap_retired).
+                old.finished.connect(lambda wid=id(old): self._reap_retired(wid))
             except (TypeError, RuntimeError):
                 pass
             try:
@@ -3420,7 +3359,8 @@ if _QT_AVAILABLE:
             # Still running: keep a reference until it actually finishes (no mid-run destruction).
             self._retired_workers.append(old)
             try:
-                old.finished.connect(lambda w=old: self._reap_enrich_worker(w))
+                # The slot captures the worker's id, never the worker (see _reap_retired).
+                old.finished.connect(lambda wid=id(old): self._reap_retired(wid))
             except (TypeError, RuntimeError):
                 pass
             # Guard the race where it finished between the isRunning() check and the connect.
@@ -3440,6 +3380,14 @@ if _QT_AVAILABLE:
                 self._retired_workers.remove(w)
             except (ValueError, RuntimeError):
                 pass
+
+        def _reap_retired(self, wid: int):
+            """The finished() slot of a retired worker: release it by identity.
+
+            The slot is given the worker's id, not the worker: a slot holding the worker
+            forms worker -> slot -> worker, so the released worker would live on until
+            the cyclic GC ran, on whatever thread happened to trigger it."""
+            self._retired_workers[:] = [w for w in self._retired_workers if id(w) != wid]
 
         def _start_enrich(self):
             """Start the batched enrichment worker."""
@@ -3603,7 +3551,8 @@ if _QT_AVAILABLE:
 
         def _render_grid_page(self):
             """Render the current page of candidates into the grid (QGridLayout)."""
-            # Clear old cards
+            # Clear old cards. _cancel_images also retires this pane's ThumbResolver, so a
+            # previous page's thumbnail URLs can never land on the new cards.
             self.wb._cancel_images()
             self.cards.clear()
             # Remove all widgets from grid
@@ -3626,11 +3575,6 @@ if _QT_AVAILABLE:
 
             # Start ThumbResolver for this page
             if items_for_thumbs and self.wb.meta_mgr is not None:
-                if self._resolver is not None:
-                    try:
-                        self._resolver.cancel()
-                    except Exception:
-                        pass
                 self._resolver = ThumbResolver(self.wb.meta_mgr, items_for_thumbs)
                 self._resolver.resolved.connect(self._on_thumb_url)
                 self._resolver.start()
@@ -4813,16 +4757,18 @@ if _QT_AVAILABLE:
                 # WR-01 (same 0xC0000409 class as _EnrichWorker): reap on finished so the list
                 # does not grow unbounded; closeEvent below waits on any still-running worker so
                 # its QThread is never destroyed mid-run when the modeless dialog is torn down.
-                worker.finished.connect(lambda w=worker: self._reap_pane_text_worker(w))
+                # The slot captures the worker's id, never the worker: worker -> slot -> worker
+                # would keep a reaped worker alive until the cyclic GC ran.
+                worker.finished.connect(lambda wid=id(worker): self._reap_pane_text_worker(wid))
                 worker.start()
             except Exception:
                 pass
 
-        def _reap_pane_text_worker(self, w):
-            """Release a finished _PageTextWorker from the retention list (UI thread)."""
+        def _reap_pane_text_worker(self, wid):
+            """Release a finished _PageTextWorker (given by id) from the retention list (UI thread)."""
             try:
-                self._pane_text_workers.remove(w)
-            except (ValueError, RuntimeError, AttributeError):
+                self._pane_text_workers[:] = [w for w in self._pane_text_workers if id(w) != wid]
+            except (RuntimeError, AttributeError):
                 pass
 
         def closeEvent(self, event):
@@ -5102,7 +5048,6 @@ if _QT_AVAILABLE:
             self._img_queue: list = []
             self._img_active: list = []
             self._img_threads: list = []
-            self._thumb_resolver = None
 
             # Plan 06 — pick-mode callback (None = normal Workbench; set via set_pick_callback).
             # MARKED REMOVABLE (Phase 109 G-08, D-11 one-cycle soft-retire): with the JoinsDialog pick-back
@@ -5800,35 +5745,31 @@ if _QT_AVAILABLE:
             _force_rtl_right_align(self.anchor_text_browser)
 
         def _cancel_workers(self):
-            """Best-effort cancel all in-flight workers.
+            """Retire every per-anchor worker and clear its slot.
 
-            cancel()/quit() cannot stop a blocking run(), so the gen token is
-            the real correctness guard. This is cleanup / resource management.
+            cancel() cannot stop a blocking run(), so each worker is disconnected and
+            handed to the keeper until its QThread finishes; the slot is then free for a
+            new worker (set_anchor starts new ones right after this).
             """
-            for w in (
-                self._anchor_worker,
-                self._page_text_worker,
-                self._img_loader,
-                self._thumb_worker,
-                self._known_joins_worker,
+            for attr, signals in (
+                ("_anchor_worker", ("done",)),
+                ("_page_text_worker", ("done",)),
+                ("_img_loader", ("image_loaded", "load_failed")),
+                ("_thumb_worker", ("resolved",)),
+                ("_known_joins_worker", ("done",)),
             ):
-                if w is None:
-                    continue
-                try:
-                    w.cancel()
-                except Exception:
-                    pass
-                try:
-                    if w.isRunning():
-                        w.quit()
-                except Exception:
-                    pass
+                _retire_worker(getattr(self, attr, None), *signals)
+                setattr(self, attr, None)
 
         def closeEvent(self, event):
-            """Invalidate generation + cancel workers on close."""
+            """Invalidate generation + retire the per-anchor workers on close.
+
+            The window is only hidden (D-02: open_join_workbench shows it again), so the
+            grid's thumbnails are NOT cancelled here: they keep loading and are there
+            when the Lab is reopened. Their threads stay referenced by the window, which
+            is exit-safe."""
             self._gen += 1  # must-fix #7: invalidate any in-flight workers
             self._cancel_workers()
-            self._cancel_images()
             pane = getattr(self, "_candidate_pane", None)
             if pane is not None:
                 try:
@@ -5992,20 +5933,20 @@ if _QT_AVAILABLE:
             self._enqueue_image(label, url, on_pixmap=on_pixmap)
 
         def _cancel_images(self):
-            """Cancel all pending image loads (called on re-anchor / page change / close)."""
+            """Cancel all pending image loads (every grid re-render, view toggle, Clear Lab).
+
+            Running loaders are retired, not dropped: each writes only its own label, so
+            none is disconnected (cutting a pool slot would leave an open Compare pane on
+            "loading…"). The candidate pane's ThumbResolver is retired AND disconnected,
+            so the previous page's URLs never reach the next page's cards."""
             self._img_queue.clear()
             for t in self._img_threads:
-                try:
-                    t.cancel()
-                except Exception:
-                    pass
+                _retire_worker(t)
             self._img_threads.clear()
-            if self._thumb_resolver is not None:
-                try:
-                    self._thumb_resolver.cancel()
-                except Exception:
-                    pass
-                self._thumb_resolver = None
+            pane = getattr(self, "_candidate_pane", None)
+            if pane is not None:
+                _retire_worker(getattr(pane, "_resolver", None), "resolved")
+                pane._resolver = None
 
         # ------------------------------------------------------------------
         # Session persistence (Feature 7) — INPUT only; never saves results.
@@ -6152,14 +6093,10 @@ if _QT_AVAILABLE:
             if gen is None:
                 gen = self._gen
 
-            # Cancel existing known-joins worker
-            if self._known_joins_worker is not None:
-                try:
-                    self._known_joins_worker.cancel()
-                    if self._known_joins_worker.isRunning():
-                        self._known_joins_worker.quit()
-                except Exception:
-                    pass
+            # Retire the existing known-joins worker. The disconnect is what drops its
+            # result: _on_add_as_join reloads under the SAME generation, so the gen check
+            # in _on_known_joins_loaded cannot tell the old rows from the new ones.
+            _retire_worker(self._known_joins_worker, "done")
 
             shelf = r_shelf(self._anchor_res) if self._anchor_res else ""
             self._known_joins_worker = _KnownJoinsLoadWorker(
@@ -6172,6 +6109,12 @@ if _QT_AVAILABLE:
             """Handle known-joins result. Drop if stale. Render rows + fire ThumbBatchWorker."""
             if gen != self._gen:
                 return  # must-fix #7
+
+            # Retire the previous rows' thumbnail batch, even when the new list is empty.
+            # Its results are matched to rows by index and carry the same generation, so
+            # only the disconnect keeps them off the new rows.
+            _retire_worker(self._thumb_worker, "resolved")
+            self._thumb_worker = None
 
             # Clear existing rows (remove all but the trailing stretch)
             while self.joins_rows_layout.count() > 1:
@@ -6212,13 +6155,6 @@ if _QT_AVAILABLE:
 
             # Fire ONE ThumbBatchWorker for all rows (D-10 batch constraint)
             if sids:
-                if self._thumb_worker is not None:
-                    try:
-                        self._thumb_worker.cancel()
-                        if self._thumb_worker.isRunning():
-                            self._thumb_worker.quit()
-                    except Exception:
-                        pass
                 self._thumb_worker = ThumbBatchWorker(self, gen, sids)
                 self._thumb_worker.resolved.connect(self._on_thumb_resolved)
                 self._thumb_worker.start()

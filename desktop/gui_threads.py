@@ -13,6 +13,69 @@ from shared.pause_gate import PauseGate  # noqa: F401 — re-exported for caller
 logger = get_logger(__name__)
 
 
+# Workers that were replaced or torn down while still running. A worker QThread has no
+# Qt parent, so dropping its last Python reference while run() executes destroys a
+# running QThread and aborts the process (Windows 0xC0000409). Each one is held here
+# until its finished() signal. Mutated in place only: desktop.join_workbench re-imports
+# this list by name.
+_ORPHANED_WORKERS: list = []
+
+
+def _keep_until_finished(worker) -> None:
+    """Hold ``worker`` until its QThread has finished, then let it go.
+
+    There is deliberately no quit step (no wait, no terminate() at aboutToQuit): on the
+    pinned PyQt6/sip a running QThread that is still referenced when the process exits
+    is not destroyed, and the process exits cleanly. Waiting would only delay the exit
+    and the single-instance relaunch; terminate() can kill a thread inside a lock and
+    hang the exit. tests/test_kept_qthreads_exit_cleanly.py pins the exit behaviour.
+
+    The release closure captures only the worker's id: a closure or default argument
+    holding the worker itself forms worker -> slot -> closure -> worker, which only the
+    cyclic GC frees, on whatever thread happens to trigger it. Released this way, the
+    last reference drops on the UI thread inside the queued finished() slot.
+    """
+    if worker is None:
+        return
+    if any(w is worker for w in _ORPHANED_WORKERS):
+        return
+    _ORPHANED_WORKERS.append(worker)
+    wid = id(worker)
+
+    def _release():
+        _ORPHANED_WORKERS[:] = [w for w in _ORPHANED_WORKERS if id(w) != wid]
+
+    try:
+        worker.finished.connect(_release)
+        if not worker.isRunning():
+            _release()
+    except (TypeError, RuntimeError):
+        _release()
+
+
+def _retire_worker(worker, *signal_names) -> None:
+    """Stop listening to a replaced worker and keep it until its QThread has finished.
+
+    cancel() only sets a flag (several workers ignore it), the worker has no Qt parent,
+    and dropping its last reference while run() executes destroys a running QThread
+    (0xC0000409). Each named signal is disconnected, so nothing the worker emits from
+    now on reaches the slot that replaced it; PyQt6 also does not deliver an emission
+    queued before the disconnect (pinned by tests/test_join_workbench_worker_lifetime_qt.py).
+    """
+    if worker is None:
+        return
+    try:
+        worker.cancel()
+    except Exception:
+        pass
+    for name in signal_names:
+        try:
+            getattr(worker, name).disconnect()
+        except (TypeError, RuntimeError, AttributeError):
+            pass
+    _keep_until_finished(worker)
+
+
 def _prevent_sleep():
     """Prevent OS sleep while search is running (Windows only)."""
     if platform.system() == 'Windows':

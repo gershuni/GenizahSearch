@@ -1234,7 +1234,7 @@ def test_compare_page_text_worker_teardown_is_crash_safe():
     assert "def _reap_pane_text_worker" in src, "CompareDialog must reap finished _PageTextWorkers"
     # The page-text worker must wire finished() -> reaper
     lpt = src[src.find("def _load_pane_page_text("):src.find("def _reap_pane_text_worker(")]
-    assert "_reap_pane_text_worker(w)" in lpt, "_load_pane_page_text must wire finished() to the reaper"
+    assert "_reap_pane_text_worker(wid)" in lpt, "_load_pane_page_text must wire finished() to the reaper"
 
     # CompareDialog.closeEvent waits on running page-text workers (bounded)
     # (locate the CompareDialog closeEvent specifically — after _reap_pane_text_worker)
