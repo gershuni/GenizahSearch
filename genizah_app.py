@@ -49,7 +49,7 @@ if _CORE_IMPORT_ERROR:
         raise _CORE_IMPORT_ERROR
 from shared.search_engine import PHASE_LOCAL_SEARCH
 from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
-from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, PuzzleMetaLoaderThread, FilterCountWorker, RefinementReplayThread
+from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, PuzzleMetaLoaderThread, FilterCountWorker, RefinementReplayThread, _keep_until_finished
 from desktop.widgets import (
     text_has_pattern_markers,
     ActionsHoverWidget, _format_add_to_list_label,
@@ -30135,9 +30135,16 @@ class GenizahGUI(QMainWindow):
     
     def check_updates_auto(self):
         """Run update checker silently at startup."""
-        self.update_thread = UpdateCheckerThread(APP_VERSION, is_manual=False)
-        self.update_thread.finished_signal.connect(self.on_update_result)
-        self.update_thread.start()
+        # The corner version button is live from init_ui, but this runs only once
+        # startup has finished: a manual check clicked meanwhile may still be running.
+        # Replacing it would drop a running QThread (0xC0000409); it reports anyway.
+        old = getattr(self, 'update_thread', None)
+        if old is not None and old.isRunning():
+            logger.debug("check_updates_auto: a manual update check is already running")
+        else:
+            self.update_thread = UpdateCheckerThread(APP_VERSION, is_manual=False)
+            self.update_thread.finished_signal.connect(self.on_update_result)
+            self.update_thread.start()
 
         # Also check for sidecar data updates
         self.sidecar_update_thread = SidecarUpdateThread()
@@ -30146,6 +30153,19 @@ class GenizahGUI(QMainWindow):
 
     def check_updates_manual(self):
         """Run update checker with UI feedback."""
+        # Never drop a running check (0xC0000409). The corner version label is never
+        # disabled and one double-click emits clicked twice; the startup check may
+        # also still be out, in which case it is silenced and kept until it finishes.
+        old = getattr(self, 'update_thread', None)
+        if old is not None and old.isRunning():
+            if getattr(old, 'is_manual', False):
+                return  # a manual check is already out
+            for sig in (old.finished_signal, old.error_signal):
+                try:
+                    sig.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+            _keep_until_finished(old)
         self.btn_check_updates.setEnabled(False)
         self.btn_check_updates.setText(tr("Checking..."))
 
@@ -30259,6 +30279,11 @@ class GenizahGUI(QMainWindow):
 
         update = self._sidecar_download_queue.pop(0)
         target = os.path.join(self._sidecar_data_dir, update['subdir'], update['name'])
+        # Called from the previous download's finished_signal slot, while that QThread
+        # may still be running: keep it until it has finished rather than dropping it.
+        previous = getattr(self, '_current_sidecar_download', None)
+        if previous is not None:
+            _keep_until_finished(previous)
         self._current_sidecar_download = SidecarDownloadThread(update['url'], target, update['name'])
         self._current_sidecar_download.finished_signal.connect(self._on_sidecar_download_finished)
         self._current_sidecar_download.start()
@@ -31751,7 +31776,11 @@ class GenizahGUI(QMainWindow):
         # would keep the process alive (quitOnLastWindowClosed never fires)
         # and keep pointing, via _app, at a host whose shared workers are
         # about to be torn down. Close it before any shutdown state is set.
-        self._close_result_dialog()
+        # Guarded on its own: a failure here must not skip the shutdown steps below.
+        try:
+            self._close_result_dialog()
+        except Exception:
+            logger.exception("closeEvent: closing the Manuscript Viewer failed")
         # Phase 114 D-09/D-15: set shutdown flag first so Plan-02 search/comp emit
         # guards (REVIEWS HIGH-2) and session_end exactly-once guard both see it
         # before any subsequent teardown fires events.
@@ -31804,13 +31833,40 @@ class GenizahGUI(QMainWindow):
                 mlt.sweep_running_scan_runs()
         except Exception:
             pass
+        # Silence the update checks and a running data download: no update dialog
+        # or data prompt may open over a closing app, and none of these threads may
+        # be dropped while running. Nothing is waited for -- a kept QThread does not
+        # hold up the exit (see desktop.gui_threads._keep_until_finished). Each
+        # thread in its own guard, so one failure cannot skip the others.
+        for name in ('update_thread', 'sidecar_update_thread', '_current_sidecar_download'):
+            try:
+                t = getattr(self, name, None)
+                if t is None:
+                    continue
+                for sig in ('finished_signal', 'error_signal', 'update_available'):
+                    signal = getattr(t, sig, None)
+                    if signal is None:
+                        continue
+                    try:
+                        signal.disconnect()
+                    except (TypeError, RuntimeError):
+                        pass
+                if hasattr(t, 'cancel'):
+                    t.cancel()
+                _keep_until_finished(t)
+            except Exception:
+                logger.exception("closeEvent: silencing %s failed", name)
         # Save session state before closing
         logger.debug(
             "closeEvent: saving session after opt-out flush (scope=%s optouts=%d)",
             getattr(self, '_search_corpus_scope', 'genizah'),
             len(getattr(self, '_local_file_optouts', set())),
         )
-        self._save_session()
+        # Guarded on its own: an escaping failure must not skip the worker stops below.
+        try:
+            self._save_session()
+        except Exception:
+            logger.exception("closeEvent: saving the session failed")
         # Ensure worker threads are stopped before the window is destroyed
         try:
             if getattr(self, 'meta_loader', None) and self.meta_loader.isRunning():
