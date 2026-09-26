@@ -27,7 +27,9 @@ Reaches users with the next desktop installer.
   three manuscript views. Before each cloud sync a snapshot is kept (`lists.pkl.pre-download`,
   `lists.pkl.pre-upload`); a download that cannot take its snapshot does not run, and a Merge
   whose download fails no longer uploads. If the start-of-session backup cannot be made, the
-  save waits (the next save tries again) rather than replacing `lists.pkl` without one.
+  save waits (the next save tries again) rather than replacing `lists.pkl` without one. If list
+  changes stop reaching the disk (for example another program holds `lists.pkl`), the app now
+  says so once and keeps a note on the status bar until a save lands again.
 - **One copy at a time.** Opening a second copy on the same data folder now says the app is
   already open and exits, instead of the two copies overwriting each other's lists and settings.
   Changing the language restarts the app only after the old window has finished saving; if the
