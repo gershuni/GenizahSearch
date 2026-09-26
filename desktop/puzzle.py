@@ -1588,6 +1588,7 @@ class PuzzleCanvasWindow(QMainWindow):
         self._pending_fragments.pop(item_key, None)
         if item_key in self._unplaced:
             self._failed_keys.add(item_key)
+            self._update_fragments_label()   # it stays in the join: name it
         self.statusBar().showMessage(
             tr("Failed to load image: {}").format(error), 5000
         )
@@ -2340,10 +2341,12 @@ class PuzzleCanvasWindow(QMainWindow):
 
         svc = get_puzzle_service()
         if self._current_doc_id is None:
-            if not self._fragment_items:
+            # A fragment added whose image has not arrived is saved too: the
+            # leave prompt's Save is followed by a clear that drops its request.
+            fragments = self._fragments_to_store(with_pending=True)
+            if not fragments:
                 _notify(self, 'information', tr("Empty"), tr("Add fragments before saving"))
                 return False
-            fragments = self._build_fragments_list()
             suggested = auto_suggest_title(fragments)
             # Custom save dialog with title + notes
             dlg = QDialog(self)
@@ -2382,9 +2385,10 @@ class PuzzleCanvasWindow(QMainWindow):
                         tr("The puzzle could not be saved. It is still on the canvas."))
                 return False
             self._current_doc_id = doc_id
+            self._keep_stored_off_canvas(fragments)
             outcome = 'fragments'
         else:
-            if not self._fragments_to_store():
+            if not self._fragments_to_store(with_pending=True):
                 # Every fragment was removed: only the title and notes can be
                 # written, and the stored join keeps its fragments.
                 with self._prompting():
@@ -2396,7 +2400,7 @@ class PuzzleCanvasWindow(QMainWindow):
                 if reply != QMessageBox.StandardButton.Save:
                     return False
             try:
-                outcome = self._write_open_join(recreate=True)
+                outcome = self._write_open_join(recreate=True, with_pending=True)
             except Exception:
                 logger.exception("Saving the open join failed")
                 outcome = None
@@ -2404,6 +2408,8 @@ class PuzzleCanvasWindow(QMainWindow):
                 _notify(self, 'warning', tr("Error"),
                         tr("The puzzle could not be saved. It is still on the canvas."))
                 return False
+            # Nothing ran between the write and here: the same fragments.
+            self._keep_stored_off_canvas(self._fragments_to_store(with_pending=True))
             doc = svc.load_document(self._current_doc_id) or PuzzleDocument(
                 id=self._current_doc_id, title=self._title_edit.text(),
                 notes=self._notes_edit.toPlainText())
@@ -2461,16 +2467,40 @@ class PuzzleCanvasWindow(QMainWindow):
             fragments.append(pf)
         return fragments
 
-    def _fragments_to_store(self):
+    def _fragments_to_store(self, with_pending=False):
         """What a write of the open join contains: the canvas, plus, for a
         saved join, its fragments that are not on the canvas (still loading,
-        or their image failed). Kept apart from _build_fragments_list so the
-        thumbnail and Export never try to draw -- or download -- those."""
+        or their image failed). An explicit Save passes `with_pending` to add
+        the fragments added since whose image has not arrived. Kept apart
+        from _build_fragments_list so the thumbnail and Export never try to
+        draw -- or download -- those."""
         fragments = self._build_fragments_list()
         if self._current_doc_id is not None:
             fragments.extend(pf for key, pf in self._unplaced.items()
                              if key not in self._fragment_items)
+        if with_pending:
+            fragments.extend(self._pending_additions().values())
         return fragments
+
+    def _pending_additions(self):
+        """Fragments added to this canvas whose image has not arrived and that
+        no write holds yet, as {key: PuzzleFragment}. Clearing the canvas
+        drops their requests, so they are unsaved work."""
+        return {key: pf for key, pf in self._pending_fragments.items()
+                if key not in self._fragment_items and key not in self._unplaced}
+
+    def _keep_stored_off_canvas(self, stored):
+        """After an explicit Save wrote `stored`: a stored fragment that is
+        not on the canvas (its image is still loading, or failed while the
+        Save dialog was open) is a fragment of the saved join that is not
+        placed, so every later write keeps it."""
+        for pf in stored:
+            key = (pf.sys_id, pf.folio_label)
+            if key in self._fragment_items or key in self._unplaced:
+                continue
+            self._unplaced[key] = pf
+            if key not in self._pending_fragments:
+                self._failed_keys.add(key)
 
     def _thumbnail_for_save(self, stored):
         """The thumbnail to write with `stored`, or None to keep the stored
@@ -2489,19 +2519,20 @@ class PuzzleCanvasWindow(QMainWindow):
             logger.exception("Puzzle thumbnail failed; the stored one is kept")
             return None
 
-    def _write_open_join(self, recreate):
+    def _write_open_join(self, recreate, with_pending=False):
         """Write the open saved join. Returns None when nothing was written
         (the write failed, or the row is gone and `recreate` is False),
         'fragments', or 'metadata' when the store is empty and only the title
         and notes were written (the stored fragments are kept). Posts no
-        status line: the caller posts exactly one."""
+        status line: the caller posts exactly one. `with_pending`: see
+        _fragments_to_store."""
         import datetime
         from shared.puzzle_model import PuzzleDocument
         from shared.puzzle_service import get_puzzle_service
 
         svc = get_puzzle_service()
         doc = svc.load_document(self._current_doc_id)
-        fragments = self._fragments_to_store()
+        fragments = self._fragments_to_store(with_pending=with_pending)
         if doc is None:
             # Autosave does not bring back a join deleted elsewhere.
             if not recreate or not fragments:
@@ -2523,8 +2554,11 @@ class PuzzleCanvasWindow(QMainWindow):
 
     def _has_unsaved_work(self):
         """Work that leaving now would lose: a scratch pad with a fragment on
-        the canvas or a note, or a saved join whose last write failed. An
-        image still loading does not count."""
+        the canvas or a note, a saved join whose last write failed, and on
+        either a fragment added whose image has not arrived yet (leaving
+        drops its request, and no write holds it)."""
+        if self._pending_additions():
+            return True
         if self._current_doc_id is None:
             return bool(self._fragment_items) or bool(self._notes_edit.toPlainText().strip())
         return self._last_save_failed
@@ -2536,7 +2570,7 @@ class PuzzleCanvasWindow(QMainWindow):
         self._flush_auto_save(notify=False)
         if not self._has_unsaved_work():
             return True
-        if self._current_doc_id is None:
+        if self._current_doc_id is None or not self._last_save_failed:
             text = question
         else:
             text = tr("The last changes to this join could not be saved.")

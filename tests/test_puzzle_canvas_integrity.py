@@ -158,6 +158,150 @@ def test_save_reports_its_outcome(env):
     assert env.stored(env.win._current_doc_id) is not None
 
 
+# -- a fragment whose image has not arrived yet is work too --
+
+def _add_loading(env, fr):
+    """Add a fragment the ordinary way; its image has not arrived."""
+    env.win.add_fragment(fr.sys_id, fr.shelfmark, fr.folio_label, fr.fl_id)
+    pwh.pump()
+    loads = pwh.take_started()
+    assert [t.key for t in loads] == [(fr.sys_id, fr.folio_label)]
+    return loads[0]
+
+
+def _leave(env, transition, doc_b):
+    if transition == "new":
+        env.win._on_new_puzzle()
+        return "Save current puzzle before starting new?"
+    env.click_join(doc_b)
+    pwh.finish_loads()
+    return "Save current puzzle before loading?"
+
+
+def _sys_ids(env, doc_id):
+    return sorted(s for s, _r, _x in env.stored(doc_id))
+
+
+@pytest.mark.parametrize("transition", ["new", "open_join"])
+def test_leaving_asks_about_a_fragment_whose_image_has_not_arrived(env, transition):
+    """A fragment added, then New (or another join) before its image came:
+    nothing was on the canvas, so nothing was asked, and the clear dropped
+    the request -- the fragment was lost without a word."""
+    doc_b = _join_b(env)
+    env.win._refresh_docs_list()
+    load = _add_loading(env, pwh.fragments()[0])
+    env.answer = SB.Cancel
+    question = _leave(env, transition, doc_b)
+    assert env.asks == [(_tr("Save current work?"), _tr(question),
+                         SB.Save | SB.Discard | SB.Cancel)]
+    assert env.win._current_doc_id is None
+    load.deliver()                      # Cancel kept the request: the image still lands
+    pwh.pump()
+    assert sorted(env.win._fragment_items) == [("990001", "1r")]
+
+
+def test_quit_asks_about_a_fragment_whose_image_has_not_arrived(env, quit_host):
+    _add_loading(env, pwh.fragments()[0])
+    env.answer = SB.Cancel
+    ev = _close_event()
+    escaped = _run_close(quit_host, ev)
+    assert escaped is None, f"closeEvent raised {escaped!r}"
+    assert not ev.isAccepted()
+    assert env.asks == [(_tr("Save current work?"), _tr("Save current puzzle before quitting?"),
+                         SB.Save | SB.Discard | SB.Cancel)]
+
+
+@pytest.mark.parametrize("transition", ["new", "open_join", "quit"])
+def test_save_at_the_leave_prompt_stores_a_fragment_whose_image_has_not_arrived(env, transition):
+    """Save at that prompt refused ("Add fragments before saving") or wrote
+    only the canvas; the fragment on its way must be in the saved join."""
+    doc_b = _join_b(env)
+    env.win._refresh_docs_list()
+    load = _add_loading(env, pwh.fragments()[0])
+    env.answer = SB.Save
+    env.save_dialog_result = QDialog.DialogCode.Accepted
+    if transition == "quit":
+        assert env.win.confirm_quit() is True
+    else:
+        _leave(env, transition, doc_b)
+    assert len(env.asks) == 1
+    saved = [d["id"] for d in env.svc.list_documents() if d["id"] != doc_b]
+    assert len(saved) == 1, "the scratch pad was not saved"
+    assert _sys_ids(env, saved[0]) == ["990001"]
+    if transition == "new":
+        load.deliver()                  # the cleared canvas no longer waits for it
+        pwh.pump()
+        assert env.win._fragment_items == {}
+
+
+@pytest.mark.parametrize("transition", ["new", "open_join"])
+def test_discard_at_the_leave_prompt_drops_a_fragment_whose_image_has_not_arrived(
+        env, transition):
+    doc_b = _join_b(env)
+    env.win._refresh_docs_list()
+    load = _add_loading(env, pwh.fragments()[0])
+    env.answer = SB.Discard
+    _leave(env, transition, doc_b)
+    assert len(env.asks) == 1
+    assert [d["id"] for d in env.svc.list_documents()] == [doc_b]    # nothing saved
+    load.deliver()                      # late: it lands on no canvas
+    pwh.pump()
+    assert ("990001", "1r") not in env.win._fragment_items
+    assert env.win._pending_fragments == {}
+
+
+def test_new_asks_only_when_a_fragment_is_placed_or_on_its_way(env):
+    """An empty scratch pad, or one whose only addition failed to load, has
+    nothing to lose and asks nothing; one with an addition on its way asks."""
+    env.win._on_new_puzzle()
+    assert env.win.confirm_quit() is True
+    failed = _add_loading(env, pwh.fragments()[0])
+    failed.fail()
+    pwh.pump()
+    env.win._on_new_puzzle()
+    assert env.win.confirm_quit() is True
+    assert env.asks == []
+    _add_loading(env, pwh.fragments()[1])
+    env.answer = SB.Cancel
+    env.win._on_new_puzzle()
+    assert _titles(env) == [_tr("Save current work?")]
+
+
+def test_leaving_a_saved_join_asks_about_an_added_fragment_still_loading(env):
+    """The same loss on an open saved join: a fragment added to it is in no
+    write until its image is placed, so New dropped it."""
+    doc_a = env.save(pwh.fragments(), title="A")
+    env.open(doc_a)
+    _add_loading(env, pwh.fragments("99030")[0])
+    env.answer = SB.Cancel
+    env.win._on_new_puzzle()
+    assert env.asks == [(_tr("Save current work?"), _tr("Save current puzzle before starting new?"),
+                         SB.Save | SB.Discard | SB.Cancel)]
+    env.asks.clear()
+    env.answer = SB.Save
+    env.win._on_new_puzzle()
+    assert len(env.asks) == 1
+    assert _sys_ids(env, doc_a) == ["990001", "990002", "990301"]
+    assert env.win._current_doc_id is None
+
+
+def test_a_manual_save_keeps_an_added_fragment_whose_image_then_fails(env):
+    """Saved while its image was on its way, the fragment is in the join; the
+    image then failing must not drop it from the next write."""
+    frs = pwh.fragments()
+    env.add(frs[0])
+    load = _add_loading(env, frs[1])
+    env.save_dialog_result = QDialog.DialogCode.Accepted
+    assert env.win._on_save_join() is True
+    doc = env.win._current_doc_id
+    assert _sys_ids(env, doc) == ["990001", "990002"]
+    load.fail()
+    _rotate(env, degrees=5)
+    env.settle()
+    assert _sys_ids(env, doc) == ["990001", "990002"]
+    assert _tr("image not loaded") in env.win._fragments_label.text()
+
+
 def test_new_writes_the_pending_autosave_first(env):
     """New set _current_doc_id = None while the save was still pending, so
     when the timer fired it returned without writing (~2 s of edits lost)."""
