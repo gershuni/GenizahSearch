@@ -3661,6 +3661,11 @@ TRANSLATIONS.update({
         "לא ניתן היה לקרוא את הרשימות השמורות, ולכן הן שוחזרו מגיבוי שנשמר ב-{}. נראה שתוכנה אחרת משתמשת בקובץ הרשימות, ועד שניתן יהיה לקרוא אותו לא ניתן לשמור את הרשימות: שינויים שייעשו עכשיו עלולים ללכת לאיבוד. יש לסגור כל תוכנה אחרת שעשויה להשתמש בקובץ ולהפעיל מחדש את התוכנה. הקובץ נמצא בתיקייה:\n{}",
     "Your saved lists could not be read and no readable backup was found, so your lists are empty. Another program appears to be using the lists file, and until it can be read your lists cannot be saved: changes you make now may be lost. Close any other program that may be using the file and restart the application. The file is in:\n{}":
         "לא ניתן היה לקרוא את הרשימות השמורות ולא נמצא גיבוי קריא, ולכן הרשימות ריקות. נראה שתוכנה אחרת משתמשת בקובץ הרשימות, ועד שניתן יהיה לקרוא אותו לא ניתן לשמור את הרשימות: שינויים שייעשו עכשיו עלולים ללכת לאיבוד. יש לסגור כל תוכנה אחרת שעשויה להשתמש בקובץ ולהפעיל מחדש את התוכנה. הקובץ נמצא בתיקייה:\n{}",
+    # ...and a save during the session did not reach lists.pkl
+    "Your lists could not be saved to {} in:\n{}\n\nChanges you make now may be lost until the file can be written. Another program may be using it or one of its backup files (.bak). Each later change tries again and saves everything once it succeeds.\n\nDetails: {}":
+        "לא ניתן היה לשמור את הרשימות בקובץ {} בתיקייה:\n{}\n\nשינויים שייעשו עכשיו עלולים ללכת לאיבוד עד שניתן יהיה לכתוב את הקובץ. ייתכן שתוכנה אחרת משתמשת בו או באחד מקובצי הגיבוי שלו (.bak). כל שינוי נוסף ינסה לשמור שוב, וכשהשמירה תצליח יישמר הכול.\n\nפרטים: {}",
+    "Your lists are not being saved: changes may be lost until {} can be written.":
+        "הרשימות אינן נשמרות: שינויים עלולים ללכת לאיבוד עד שניתן יהיה לכתוב את {}.",
 
     # --- Data-update notification (desktop) ---
     "New research data available:": "נתוני מחקר חדשים זמינים:",

@@ -419,6 +419,67 @@ def test_a_bak1_that_cannot_be_replaced_leaves_lists_pkl_until_it_can(store, mon
     assert _sessions_in(f"{store}.bak3") == [f"Session {k}" for k in range(1, 3)]
 
 
+def _hooked(m):
+    """Record what save() tells its hooks, and on which thread."""
+    calls = []
+    m.on_save_failed = lambda reason: calls.append(
+        ("failed", reason, threading.current_thread().name))
+    m.on_save_recovered = lambda: calls.append(
+        ("recovered", None, threading.current_thread().name))
+    return calls
+
+
+def test_a_save_that_keeps_failing_says_so_each_time_from_any_thread(store, monkeypatch, no_sleep):
+    """After an ordinary start, a .bak1 another program holds makes the
+    session's first save fail, and every save after it, since each one retries
+    the rotation. The mutators ignore what save() returns, so the hook is the
+    only way the user hears of it -- also of the auto-sync worker's saves."""
+    m = _session_ladder(store, 2)
+    calls = _hooked(m)
+    ui = threading.current_thread().name
+
+    with monkeypatch.context() as mp:
+        _refuse_replace(mp, [f"{store}.bak1"])
+        m.create_list("Session 3")
+        worker = threading.Thread(target=m.save, name="auto-sync")
+        worker.start()
+        worker.join(10)
+
+    assert [(kind, thread) for kind, _, thread in calls] == [("failed", ui), ("failed", "auto-sync")]
+    assert all("lists.pkl.bak1" in reason for _, reason, _ in calls), calls
+    assert "Session 3" not in _list_names(store)
+
+    m.add_to_recent("990010")  # .bak1 is free again
+    m.add_to_recent("990011")
+    assert [kind for kind, _, _ in calls] == ["failed", "failed", "recovered"]
+    assert "Session 3" in _list_names(store)
+
+
+def test_a_failed_save_without_a_hook_or_with_a_broken_one_only_returns_false(store, lists_errors):
+    """The web server builds a ListsManager and sets no hooks; a desktop hook
+    that raises (its window already gone) must not turn a save into a crash."""
+    m = lm.ListsManager(None)
+    m.create_list(USER_LIST)
+    assert m.on_save_failed is None and m.on_save_recovered is None
+    unpicklable = {"sys_id": "broken", "lists": [], "fn": lambda: None}
+
+    m.data["items"]["broken"] = unpicklable
+    assert m.save() is False
+    m.add_to_recent("990010")
+    del m.data["items"]["broken"]
+    assert m.save() is True
+
+    def gone(*args):
+        raise RuntimeError("wrapped C/C++ object has been deleted")
+
+    m.on_save_failed = m.on_save_recovered = gone
+    m.data["items"]["broken"] = unpicklable
+    assert m.save() is False
+    del m.data["items"]["broken"]
+    assert m.save() is True
+    assert sum("has been deleted" in msg for msg in lists_errors) == 2, lists_errors
+
+
 def test_a_save_that_fails_midway_leaves_the_previous_file(store):
     m = lm.ListsManager(None)
     m.create_list(USER_LIST)
@@ -999,10 +1060,194 @@ def test_on_startup_finished_reports_right_after_building_the_lists():
     gui_cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "GenizahGUI")
     method = next(n for n in gui_cls.body
                   if isinstance(n, ast.FunctionDef) and n.name == "on_startup_finished")
-    wanted = ("ListsManager(self.meta_mgr)", "self.lists_refresh_all()", "self._report_lists_load_problem()")
+    wanted = ("ListsManager(self.meta_mgr)", "self.lists_refresh_all()",
+              "self._report_lists_load_problem()", "self._watch_lists_saves()")
     calls = sorted((n for n in ast.walk(method) if isinstance(n, ast.Call) and ast.unparse(n) in wanted),
                    key=lambda n: (n.lineno, n.col_offset))
     assert [ast.unparse(n) for n in calls] == list(wanted)
+
+
+class _StatusBar:
+    def __init__(self):
+        self.message = ""
+
+    def showMessage(self, text, timeout=0):
+        self.message = text
+
+    def currentMessage(self):
+        return self.message
+
+    def clearMessage(self):
+        self.message = ""
+
+
+class _QueuedSignal:
+    """_lists_save_state without Qt, shaped like its queued connection:
+    emit() only queues, deliver() runs what is queued."""
+
+    def __init__(self):
+        self.slots, self.queue = [], []
+
+    def connect(self, slot, *connection_type):
+        self.slots.append(slot)
+
+    def emit(self, *args):
+        self.queue.append(args)
+
+    def deliver(self):
+        while self.queue:
+            args = self.queue.pop(0)
+            for slot in self.slots:
+                slot(*args)
+
+
+def _save_watching_gui(genizah_app_module, monkeypatch, mgr):
+    """The main window with Qt faked out, lists_mgr set and its saves watched."""
+    shown = []
+    monkeypatch.setattr(genizah_app_module, "QMessageBox", _box_recording(shown))
+    gui = genizah_app_module.GenizahGUI.__new__(genizah_app_module.GenizahGUI)
+    gui.lists_mgr = mgr
+    gui._lists_save_warned = gui._lists_save_state_connected = False  # as __init__ sets them
+    bar = _StatusBar()
+    gui.statusBar = lambda: bar
+    gui._lists_save_state = _QueuedSignal()
+    return gui, bar, shown
+
+
+def _not_saved_line(name="lists.pkl"):
+    return genizah_core.tr("Your lists are not being saved: changes may be lost until {} "
+                           "can be written.").format(name)
+
+
+@pytest.mark.parametrize("lang", ["en", "he"])
+def test_failing_saves_warn_once_then_use_the_status_bar_until_one_lands(
+        store, monkeypatch, genizah_app_module, lang):
+    monkeypatch.setattr(genizah_core, "CURRENT_LANG", lang)
+    fake = types.SimpleNamespace(LISTS_FILE=str(store), on_save_failed=None, on_save_recovered=None)
+    gui, bar, shown = _save_watching_gui(genizah_app_module, monkeypatch, fake)
+    gui._watch_lists_saves()
+    tr = genizah_core.tr
+    reason = f"[WinError 32] The process cannot access the file: '{store}.bak1'"
+
+    fake.on_save_failed(reason)
+    assert shown == [], "the warning ran inside the save instead of on the UI thread's turn"
+    gui._lists_save_state.deliver()
+    assert len(shown) == 1
+    title, text = shown[0]
+    assert title == tr("Lists cannot be saved")
+    assert "lists.pkl" in text and str(store.parent) in text and reason in text
+    assert bar.message == _not_saved_line()
+    assert genizah_app_module.QMessageBox.ok_labels == [tr("OK")]
+    if lang == "he":
+        assert _is_hebrew(title[0]) and _is_hebrew(text[0]) and _is_hebrew(bar.message[0])
+
+    bar.showMessage("Link copied", 5000)
+    for _ in range(3):
+        fake.on_save_failed(reason)
+    gui._lists_save_state.deliver()
+    assert len(shown) == 1, "every failed save opened another warning"
+    assert bar.message == _not_saved_line()
+
+    fake.on_save_recovered()
+    gui._lists_save_state.deliver()
+    assert bar.message == "", "the status bar still says the lists are not being saved"
+    assert len(shown) == 1
+
+    bar.showMessage("Link copied", 5000)
+    fake.on_save_recovered()
+    gui._lists_save_state.deliver()
+    assert bar.message == "Link copied", "a landed save cleared someone else's message"
+
+    fake.on_save_failed("a later failure")
+    gui._lists_save_state.deliver()
+    assert len(shown) == 2, "a failure after the saves resumed was not warned of"
+    assert "a later failure" in shown[1][1]
+
+
+def test_after_the_startup_notice_failing_saves_only_use_the_status_bar(
+        store, monkeypatch, no_sleep, genizah_app_module):
+    """The startup notice already said the lists cannot be saved; the saves
+    failing after it do not say it again in a second box. Once the file can
+    be read, a save lands, the line goes and a later failure warns again."""
+    _two_sessions(store)
+    gui, bar, shown = _save_watching_gui(genizah_app_module, monkeypatch, None)
+
+    with monkeypatch.context() as mp:
+        _busy_reads(mp, store, times=10 ** 6)
+        gui.lists_mgr = lm.ListsManager(None)
+        gui._report_lists_load_problem()
+        gui._watch_lists_saves()
+        gui.lists_mgr.add_to_recent("990010")
+        gui.lists_mgr.add_to_recent("990011")
+        gui._lists_save_state.deliver()
+
+    assert [t for t, _ in shown] == [genizah_core.tr("Lists cannot be saved")]
+    assert bar.message == _not_saved_line()
+
+    gui.lists_mgr.add_to_recent("990012")  # readable now: kept aside, then saved
+    gui._lists_save_state.deliver()
+    assert bar.message == "" and len(shown) == 1
+    assert len(glob.glob(f"{store}.unreadable-*")) == 1
+
+    gui.lists_mgr.data["items"]["broken"] = {"sys_id": "broken", "lists": [], "fn": lambda: None}
+    gui.lists_mgr.add_to_recent("990013")
+    gui._lists_save_state.deliver()
+    assert [t for t, _ in shown] == [genizah_core.tr("Lists cannot be saved")] * 2
+
+
+@pytest.mark.gui
+def test_a_save_failing_on_a_worker_thread_is_reported_on_the_ui_thread(
+        store, monkeypatch, genizah_app_module):
+    """Through the real signal: the auto-sync worker's failed save reaches the
+    window queued, and the warning runs on the UI thread, not the worker's."""
+    import sys
+    from PyQt6.QtWidgets import QApplication, QMainWindow
+
+    app = QApplication.instance()
+    escaped = []
+    monkeypatch.setattr(sys, "excepthook", lambda *exc: escaped.append(exc))  # else a slot error aborts
+    shown, on_thread = [], []
+    box = _box_recording(shown)
+    record = box.exec
+
+    def exec_(self):
+        on_thread.append(threading.current_thread())
+        record(self)
+
+    monkeypatch.setattr(box, "exec", exec_)
+    monkeypatch.setattr(genizah_app_module, "QMessageBox", box)
+
+    class Window(genizah_app_module.GenizahGUI):
+        def __init__(self):  # the real window without its UI: only QMainWindow's own
+            QMainWindow.__init__(self)
+
+    lm.ListsManager(None).create_list(USER_LIST)
+    window = Window()
+    m = window.lists_mgr = lm.ListsManager(None)
+    window._watch_lists_saves()
+    m.data["items"]["broken"] = {"sys_id": "broken", "lists": [], "fn": lambda: None}
+    try:
+        worker = threading.Thread(target=m.save, name="auto-sync")
+        worker.start()
+        worker.join(10)
+        assert shown == []
+        app.processEvents()
+        assert len(shown) == 1 and on_thread == [threading.main_thread()]
+        assert window.statusBar().currentMessage() == _not_saved_line()
+
+        window.statusBar().clearMessage()
+        m.add_to_recent("990010")  # on the UI thread: still queued, not run inside the save
+        assert window.statusBar().currentMessage() == ""
+        app.processEvents()
+        assert window.statusBar().currentMessage() == _not_saved_line() and len(shown) == 1
+
+        del m.data["items"]["broken"]
+        m.add_to_recent("990011")
+        app.processEvents()
+        assert window.statusBar().currentMessage() == "" and len(shown) == 1
+        assert escaped == []
+    finally:
+        m.on_save_failed = m.on_save_recovered = None
 
 
 # ---------------------------------------------------------------------------

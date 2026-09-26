@@ -1386,7 +1386,11 @@ class GenizahGUI(QMainWindow):
     # the answer, so the worker never renames anything until the UI thread
     # has actually let go.
     _passage_release_requested = pyqtSignal(int)
-    
+    # (saved, reason) from ListsManager's save hooks, which run on whichever
+    # thread saved -- the auto-sync and logout-sync workers too. Connected
+    # queued, so the slot always runs on the UI thread. See _watch_lists_saves.
+    _lists_save_state = pyqtSignal(bool, str)
+
     def __init__(self):
         super().__init__()
         self.comp_col_library = 1  # Library before Shelfmark
@@ -1417,6 +1421,8 @@ class GenizahGUI(QMainWindow):
         self.indexer = None
         self.lab_engine = None
         self.lists_mgr = None
+        self._lists_save_warned = False  # see _on_lists_save_state
+        self._lists_save_state_connected = False
         self.joins_mgr = None
 
         # Community features - corrections client
@@ -1631,6 +1637,9 @@ class GenizahGUI(QMainWindow):
                               "changes you make now may be lost. Close any other program that may "
                               "be using the file and restart the application. The file is "
                               "in:\n{}").format(folder)
+                # This IS the warning that saves are failing; the ones that
+                # fail after it only update the status bar.
+                self._lists_save_warned = True
                 _show_ok_notice(self, 'warning', tr("Lists cannot be saved"), text)
                 return
             kept = kept or mgr.LISTS_FILE
@@ -1650,6 +1659,63 @@ class GenizahGUI(QMainWindow):
                         kept_name, folder))
         except Exception as e:
             logger.warning("Could not report the lists load problem: %s", e)
+
+    def _watch_lists_saves(self):
+        """Hear about lists.pkl saves that fail, whichever thread ran them.
+
+        Every list change saves, and the mutators ignore what save() returns,
+        so a save that keeps failing (another program holding lists.pkl or a
+        .bak file) otherwise left edits on screen that never reached the disk.
+        ListsManager is shared with the web server and knows nothing of Qt:
+        its hooks only emit _lists_save_state, and the queued connection runs
+        _on_lists_save_state on the UI thread -- also when the save ran on the
+        auto-sync or logout-sync worker, and never in the middle of the
+        caller's own code.
+        """
+        mgr = getattr(self, 'lists_mgr', None)
+        if mgr is None:
+            return
+        if not getattr(self, '_lists_save_state_connected', False):
+            self._lists_save_state.connect(self._on_lists_save_state,
+                                           Qt.ConnectionType.QueuedConnection)
+            self._lists_save_state_connected = True
+        mgr.on_save_failed = lambda reason: self._lists_save_state.emit(False, reason)
+        mgr.on_save_recovered = lambda: self._lists_save_state.emit(True, '')
+
+    def _on_lists_save_state(self, saved, reason):
+        """A lists.pkl save failed (saved False) or landed again (saved True).
+
+        The first failure is a warning, unless the startup notice has already
+        said the lists cannot be saved; every failure puts a line on the status
+        bar. A save that lands takes the line away and re-arms the warning.
+        Each later change retries the save with everything held in memory.
+        """
+        try:
+            path = getattr(getattr(self, 'lists_mgr', None), 'LISTS_FILE', None) \
+                or ListsManager.LISTS_FILE
+            name = os.path.basename(path)
+            line = tr("Your lists are not being saved: changes may be lost until {} "
+                      "can be written.").format(name)
+            bar = self.statusBar()
+            if saved:
+                self._lists_save_warned = False
+                if bar.currentMessage() == line:
+                    bar.clearMessage()
+                return
+            bar.showMessage(line)
+            if getattr(self, '_lists_save_warned', False):
+                return
+            # Before the box: its event loop can deliver the next failure.
+            self._lists_save_warned = True
+            _show_ok_notice(
+                self, 'warning', tr("Lists cannot be saved"),
+                tr("Your lists could not be saved to {} in:\n{}\n\nChanges you make now may "
+                   "be lost until the file can be written. Another program may be using it "
+                   "or one of its backup files (.bak). Each later change tries again and "
+                   "saves everything once it succeeds.\n\nDetails: {}").format(
+                    name, os.path.dirname(os.path.abspath(path)), reason))
+        except Exception as e:
+            logger.warning("Could not report the lists save problem: %s", e)
 
     def start_background_init(self):
         try:
@@ -1739,6 +1805,7 @@ class GenizahGUI(QMainWindow):
             # Initialize Lists Tab UI
             self.lists_refresh_all()
             self._report_lists_load_problem()
+            self._watch_lists_saves()
 
             db_path = os.path.join(Config.INDEX_DIR, "tantivy_db")
             index_exists = os.path.exists(db_path) and os.listdir(db_path)

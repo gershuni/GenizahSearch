@@ -80,6 +80,21 @@ class ListsManager:
     recovered_from = None
     unreadable_copy = None
     _backup_done = False
+    # Told when saves stop reaching lists.pkl and when they reach it again:
+    # on_save_failed(reason) after every save that did not write it, and
+    # on_save_recovered() after the first one that does once saves had been
+    # failing. The mutators (create_list, add_item, add_to_recent, ...) ignore
+    # what save() returns, so without these a failing save is only a log line
+    # while the lists on screen look saved. The desktop sets them on its
+    # instance; the web server leaves them None. Called on whichever thread
+    # saved -- the desktop saves from worker threads too -- with _save_lock
+    # held, so the order they are called in is the order the saves ran: they
+    # must return at once and never save. What they raise is logged.
+    on_save_failed = None
+    on_save_recovered = None
+    # True from a failed save -- or a failed copy of an unreadable lists.pkl,
+    # which every save then needs first -- until a save writes lists.pkl.
+    _saves_failing = False
 
     # Default colors for lists
     DEFAULT_COLORS = [
@@ -181,6 +196,7 @@ class ListsManager:
         self.load_status, self.load_error, self.recovered_from = 'missing', None, None
         self.unreadable_copy = None
         self._backup_done = False
+        self._saves_failing = False
         self.data = self._get_default_data()
         if not os.path.exists(self.LISTS_FILE):
             return
@@ -267,6 +283,7 @@ class ListsManager:
                 return self._keep_unreadable_locked()
             except OSError as e:
                 LOGGER.error("Could not keep a copy of the unreadable lists file: %s", e)
+                self._saves_failing = True  # save() refuses until the copy is made
                 return None
 
     def save(self):
@@ -281,6 +298,9 @@ class ListsManager:
         could not read lists.pkl, its bytes are kept as
         lists.pkl.unreadable-<time> before anything replaces it, and the
         backups are left alone.
+
+        A failed save calls on_save_failed with the reason, and the first save
+        that lands after failures calls on_save_recovered (see the class).
         """
         with self._save_lock:
             try:
@@ -292,10 +312,25 @@ class ListsManager:
                         self._keep_unreadable_locked()
                 self._backup_done = True
                 write_bytes_atomic(self.LISTS_FILE, payload)
-                return True
             except Exception as e:
                 LOGGER.error("Failed to save lists: %s", e)
+                self._saves_failing = True
+                self._tell(self.on_save_failed, str(e) or type(e).__name__)
                 return False
+            if self._saves_failing:
+                self._saves_failing = False
+                self._tell(self.on_save_recovered)
+            return True
+
+    @staticmethod
+    def _tell(hook, *args):
+        """Call a save hook, if one is set; what it raises is logged, not passed on."""
+        if hook is None:
+            return
+        try:
+            hook(*args)
+        except Exception as e:
+            LOGGER.error("A lists save hook failed: %s", e)
 
     def write_snapshot(self, label):
         """Write the in-memory store to lists.pkl.<label>, atomically.
