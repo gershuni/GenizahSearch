@@ -326,6 +326,99 @@ def test_the_backups_hold_the_start_of_each_of_the_last_three_sessions(store):
     assert sessions(f"{store}.bak3") == [f"Session {k}" for k in range(1, 3)]
 
 
+def _sessions_in(path):
+    return sorted(n for n in _list_names(path) if n.startswith("Session "))
+
+
+def _session_ladder(store, count):
+    """`count` sessions, each adding "Session k"; returns a manager for the next one."""
+    for k in range(1, count + 1):
+        lm.ListsManager(None).create_list(f"Session {k}")
+    return lm.ListsManager(None)
+
+
+def _refuse_replace(monkeypatch, held):
+    """os.replace refuses every rename from or onto the paths in `held`, the
+    way Windows does while another program holds the file."""
+    real_replace = os.replace
+    held = {os.path.abspath(p) for p in held}
+
+    def replace(src, dst):
+        if os.path.abspath(src) in held or os.path.abspath(dst) in held:
+            raise PermissionError(13, "The process cannot access the file because "
+                                      "it is being used by another process", str(dst))
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", replace)
+
+
+def test_a_save_that_cannot_copy_lists_pkl_to_bak1_leaves_everything_as_it_was(store, monkeypatch, no_sleep):
+    """The session's first save copies lists.pkl to .bak1 before replacing it.
+    If that copy cannot be made, replacing lists.pkl would leave no copy of the
+    state the session started from: the save must fail and change nothing, and
+    the next save must rotate the backups once and write."""
+    m = _session_ladder(store, 3)
+    before = {p: _sha(p) for p in [str(store)] + sorted(glob.glob(f"{store}.bak*"))}
+    assert len(before) == 3  # lists.pkl, .bak1 and .bak2
+
+    with monkeypatch.context() as mp:
+        _busy_reads(mp, store, times=10 ** 6)  # lists.pkl cannot be read, so not copied
+        m.create_list("Session 4")
+        assert m.save() is False, "lists.pkl was replaced although it could not be backed up"
+
+    assert {p: _sha(p) for p in [str(store)] + sorted(glob.glob(f"{store}.bak*"))} == before
+    assert not glob.glob(str(store.parent / "*.tmp"))
+
+    assert m.save() is True
+    assert _sessions_in(store) == [f"Session {k}" for k in range(1, 5)]
+    assert _sessions_in(f"{store}.bak1") == [f"Session {k}" for k in range(1, 4)]
+    assert _sessions_in(f"{store}.bak2") == [f"Session {k}" for k in range(1, 3)]
+    assert _sessions_in(f"{store}.bak3") == ["Session 1"]
+    rotated = {p: _sha(p) for p in sorted(glob.glob(f"{store}.bak*"))}
+    m.add_to_recent("990010")
+    assert {p: _sha(p) for p in sorted(glob.glob(f"{store}.bak*"))} == rotated, \
+        "the backups rotated twice in one session"
+
+
+@pytest.mark.parametrize("held", ["bak2", "bak3"])
+def test_an_older_backup_that_cannot_move_still_leaves_the_previous_store_in_bak1(
+        store, monkeypatch, no_sleep, held):
+    """A program holding an older backup must not keep the store the session
+    started from out of .bak1 (the save used to write lists.pkl anyway, with
+    .bak1 still a session older)."""
+    m = _session_ladder(store, 4)
+    started_from = store.read_bytes()
+
+    with monkeypatch.context() as mp:
+        _refuse_replace(mp, [f"{store}.{held}"])
+        m.create_list("Session 5")
+        assert m.save() is True
+
+    assert _sessions_in(store) == [f"Session {k}" for k in range(1, 6)]
+    assert Path(f"{store}.bak1").read_bytes() == started_from
+    assert not glob.glob(str(store.parent / "*.tmp"))
+
+
+def test_a_bak1_that_cannot_be_replaced_leaves_lists_pkl_until_it_can(store, monkeypatch, no_sleep):
+    """The new copy cannot take .bak1's place either: lists.pkl is not replaced,
+    and once .bak1 is free the next save completes the rotation."""
+    m = _session_ladder(store, 4)
+    before = store.read_bytes()
+
+    with monkeypatch.context() as mp:
+        _refuse_replace(mp, [f"{store}.bak1"])
+        m.create_list("Session 5")
+        assert m.save() is False
+
+    assert store.read_bytes() == before
+    assert not glob.glob(str(store.parent / "*.tmp"))
+    assert m.save() is True
+    assert _sessions_in(store) == [f"Session {k}" for k in range(1, 6)]
+    assert _sessions_in(f"{store}.bak1") == [f"Session {k}" for k in range(1, 5)]
+    assert _sessions_in(f"{store}.bak2") == [f"Session {k}" for k in range(1, 4)]
+    assert _sessions_in(f"{store}.bak3") == [f"Session {k}" for k in range(1, 3)]
+
+
 def test_a_save_that_fails_midway_leaves_the_previous_file(store):
     m = lm.ListsManager(None)
     m.create_list(USER_LIST)

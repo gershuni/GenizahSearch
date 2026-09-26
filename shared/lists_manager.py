@@ -14,12 +14,15 @@ import os
 import pickle
 import re
 import shutil
+import tempfile
 import threading
 import time
 
 from shared.genizah_translations import TRANSLATIONS
 
-from shared.atomic_io import DEFAULT_BUSY_BUDGET, is_busy, read_bytes, replace_file, write_bytes_atomic
+from shared.atomic_io import (
+    DEFAULT_BUSY_BUDGET, copy_file, discard, is_busy, read_bytes, replace_file, write_bytes_atomic,
+)
 from shared.config import Config
 
 LOGGER = logging.getLogger("genizah." + __name__)
@@ -205,12 +208,34 @@ class ListsManager:
         self.load_status = 'failed'
 
     def _rotate_backups(self):
-        """bak2 -> bak3, bak1 -> bak2, then copy lists.pkl -> bak1."""
+        """Make a copy of lists.pkl the new .bak1: .bak2 -> .bak3, .bak1 -> .bak2.
+
+        The copy is made first, under a temporary name in the same folder, so
+        nothing has moved if it fails (lists.pkl stays busy, the disk is full):
+        this raises, save() leaves lists.pkl alone, and the next save tries
+        again. Moving the older backups down is best effort -- one that cannot
+        move is logged, and at worst an older one is overwritten -- and then the
+        copy takes .bak1's place. If even that fails, this raises too, since
+        replacing lists.pkl would then leave no copy of it.
+        """
         paths = self._backup_paths()
-        for older, newer in zip(reversed(paths[:-1]), reversed(paths[1:])):
-            if os.path.exists(older):
-                replace_file(older, newer)
-        shutil.copy2(self.LISTS_FILE, paths[0])
+        folder = os.path.dirname(os.path.abspath(self.LISTS_FILE))
+        fd, fresh = tempfile.mkstemp(
+            prefix=os.path.basename(self.LISTS_FILE) + '.', suffix='.bak.tmp', dir=folder)
+        os.close(fd)
+        try:
+            copy_file(self.LISTS_FILE, fresh)
+            for older, newer in zip(reversed(paths[:-1]), reversed(paths[1:])):
+                if os.path.exists(older):
+                    try:
+                        replace_file(older, newer)
+                    except OSError as e:
+                        LOGGER.warning("Could not move the list backup %s to %s: %s",
+                                       older, newer, e)
+            replace_file(fresh, paths[0])
+        except BaseException:
+            discard(fresh)
+            raise
 
     def _keep_unreadable_locked(self):
         """Copy the lists.pkl that load() could not read to lists.pkl.unreadable-<time>.
@@ -250,8 +275,10 @@ class ListsManager:
         Atomic (temp file + os.replace) and serialised across threads. The
         backups rotate once per session -- on the first save after a load that
         read lists.pkl itself -- so .bak1-3 are the store as it stood at the
-        start of the last three sessions, not the last three edits. After a load
-        that could not read lists.pkl, its bytes are kept as
+        start of the last three sessions, not the last three edits. When the
+        new .bak1 cannot be made, lists.pkl is not replaced: the save returns
+        False and the next one tries the rotation again. After a load that
+        could not read lists.pkl, its bytes are kept as
         lists.pkl.unreadable-<time> before anything replaces it, and the
         backups are left alone.
         """
@@ -260,10 +287,7 @@ class ListsManager:
                 payload = pickle.dumps(self.data)
                 if not self._backup_done and os.path.exists(self.LISTS_FILE):
                     if self.load_status == 'ok':
-                        try:
-                            self._rotate_backups()
-                        except OSError as e:
-                            LOGGER.warning("Could not rotate the list backups: %s", e)
+                        self._rotate_backups()
                     elif self.load_status in ('recovered', 'failed'):
                         self._keep_unreadable_locked()
                 self._backup_done = True

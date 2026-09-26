@@ -13,6 +13,7 @@ Stdlib-only leaf module: it imports nothing from this project.
 """
 import logging
 import os
+import shutil
 import tempfile
 import time
 
@@ -73,6 +74,11 @@ def replace_file(src, dst):
     _retry_while_busy(os.replace, src, dst)
 
 
+def copy_file(src, dst):
+    """``shutil.copy2(src, dst)``, retried while Windows reports either file busy."""
+    _retry_while_busy(shutil.copy2, src, dst)
+
+
 def _write_in_place(path, data):
     with open(path, 'wb') as fh:
         fh.write(data)
@@ -80,7 +86,8 @@ def _write_in_place(path, data):
         os.fsync(fh.fileno())
 
 
-def _discard(path):
+def discard(path):
+    """Remove ``path`` if it can be removed; never raises."""
     try:
         os.remove(path)
     except OSError:
@@ -110,8 +117,8 @@ def write_bytes_atomic(path, data):
         except PermissionError as exc:
             blocked = exc
     except BaseException:
-        _discard(tmp_path)
+        discard(tmp_path)
         raise
-    _discard(tmp_path)
+    discard(tmp_path)
     LOGGER.warning("Could not replace %s (%s); writing it in place instead", path, blocked)
     _retry_while_busy(_write_in_place, path, data)
