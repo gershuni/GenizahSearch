@@ -720,7 +720,8 @@ def _start_kept(kind, gate, monkeypatch):
 def test_a_kept_worker_is_freed_without_the_cycle_collector(kind, monkeypatch):
     """A slot that holds the worker (a default argument or closure) forms worker -> slot
     -> worker: the released worker then lives until the cyclic GC runs, on whatever
-    thread triggers it. Released by id, the last reference drops in the finished slot."""
+    thread triggers it. Released by a weak reference (the keeper) or by id (the Lab's
+    reap slots), the last reference drops in the finished slot."""
     gate = _gate()
     gc.collect()
     gc.disable()
