@@ -28,7 +28,7 @@ pytestmark = pytest.mark.gui  # real QThreads + a real window: gui bucket only
 from PyQt6.QtCore import QCoreApplication, QThread, pyqtSignal  # noqa: E402
 from PyQt6.QtGui import QImage  # noqa: E402
 from PyQt6.QtTest import QTest  # noqa: E402
-from PyQt6.QtWidgets import QApplication, QTextBrowser  # noqa: E402
+from PyQt6.QtWidgets import QApplication, QLabel, QTextBrowser  # noqa: E402
 
 APP = QApplication.instance() or QApplication(sys.argv)
 
@@ -249,6 +249,12 @@ def _unreferenced(workers, wb):
             if _alive(w) and not _kept(w) and not any(h is w for h in held)]
 
 
+def _anchor(wb, urls):
+    wb._anchor_sid = SID
+    wb._anchor_images = [{"url": u} if u else {} for u in urls]
+    wb._anchor_idx = 0
+
+
 # --- lifetime: a replaced running worker must stay referenced until it finishes -----
 
 def test_page_turn_keeps_the_running_thumbnail_loaders(monkeypatch):
@@ -394,6 +400,17 @@ def test_a_replaced_thumb_batch_delivers_nothing_to_the_new_rows(monkeypatch):
     assert t1.receivers(t1.resolved) == 0
 
 
+def test_folio_change_keeps_the_running_text_worker_and_image_loader(monkeypatch):
+    monkeypatch.setattr(jw, "ImageLoaderThread", GatedLoader)
+    wb = _window(FakeSearcher({2: "gate", 3: "gate"}))
+    _anchor(wb, ["https://h/p1.jpg", "https://h/p2.jpg", "https://h/p3.jpg"])
+    wb._folio_next()
+    first_text, first_img = wb._page_text_worker, wb._img_loader
+    wb._folio_next()
+    assert _alive(first_text) and _kept(first_text)
+    assert _alive(first_img) and _kept(first_img)
+
+
 def test_reanchor_keeps_the_running_anchor_and_known_joins_workers(monkeypatch):
     class GatedAnchor(_ORIG["_AnchorLoadWorker"]):
         def __init__(self, *a):
@@ -475,6 +492,66 @@ def test_a_closed_lab_shows_its_thumbnails_when_reopened(monkeypatch):
     wb.show()
     filled = sum(_has_pix(c.img) for c in pane.cards.values())
     assert filled == jw._PER_PAGE, f"{filled} of {jw._PER_PAGE} cards have their thumbnail"
+
+
+def test_a_compare_image_requested_while_thumbnails_load_starts_at_once(monkeypatch):
+    """Grid thumbnails still all start at once (throughput unchanged), but they no longer
+    fill the 5-slot pool: a card flip or Compare image does not wait behind them."""
+    monkeypatch.setattr(jw, "ImageLoaderThread", GatedLoader)
+    monkeypatch.setattr(GatedLoader, "delays", {"/POOL/": 0.0})
+    wb = _window()
+    pane = wb._candidate_pane
+    wb.filtered = _candidates(jw._PER_PAGE)
+    pane.render_results()
+    _pump_until(lambda: len(_running(GatedLoader)) == jw._PER_PAGE, what="20 thumbnail loaders")
+    lbl = QLabel("loading…")
+    wb._enqueue_image(lbl, "https://h.invalid/POOL/full/400,/0/default.jpg")
+    assert wb._img_queue == [], "the pool image was queued behind the page's thumbnails"
+    _pump_until(lambda: _has_pix(lbl), timeout=2.0, what="the pool image")
+    assert len(_running(GatedLoader)) == jw._PER_PAGE, "the thumbnails finished early"
+    GATE.set()
+    _pump_until(lambda: not _running(GatedLoader), what="the thumbnails to finish")
+    _pump(100)
+    assert sum(_has_pix(c.img) for c in pane.cards.values()) == jw._PER_PAGE
+    assert wb._img_queue == []
+
+
+# --- late results: an earlier folio must never replace the current one ---------------
+
+def test_late_text_of_an_earlier_folio_does_not_replace_the_current_one():
+    wb = _window(FakeSearcher({2: 0.4, 3: 0.02}))
+    _anchor(wb, [None, None, None])                   # no image threads in this test
+    wb._folio_next()
+    QTest.qWait(50)
+    wb._folio_next()
+    _pump_until(lambda: not _running(_ORIG["_PageTextWorker"]), what="the text workers")
+    _pump(100)
+    text = wb.anchor_text_browser.toPlainText()
+    assert wb._anchor_idx == 2
+    assert "TEXT OF FOLIO 3" in text and "TEXT OF FOLIO 2" not in text, text
+
+
+@pytest.mark.parametrize("third", ["https://h/p3.jpg", None], ids=["p3", "no-image"])
+def test_late_image_of_an_earlier_folio_does_not_replace_the_current_one(monkeypatch, third):
+    monkeypatch.setattr(jw, "ImageLoaderThread", GatedLoader)
+    monkeypatch.setattr(GatedLoader, "delays", {"/p2.jpg": 0.4, "/p3.jpg": 0.02})
+    wb = _window()
+    _anchor(wb, ["https://h/p1.jpg", "https://h/p2.jpg", third])
+    wb._folio_next()
+    QTest.qWait(50)
+    wb._folio_next()
+    _pump_until(lambda: not _running(GatedLoader), what="the image loaders")
+    _pump(100)
+    label = wb.anchor_img_label
+    got = None if wb._anchor_full_pix is None else wb._anchor_full_pix.width()
+    if third:
+        assert (wb._anchor_idx, got) == (2, 30)
+        assert _has_pix(label) and label.text() != jw.tr("No image"), (
+            "an earlier folio's late result replaced folio 3's image")
+    else:
+        assert (wb._anchor_idx, got) == (2, None)
+        assert label.text() == jw.tr("No image") and not _has_pix(label), (
+            "an earlier folio's image landed under a folio that has none")
 
 
 # --- no cycle: a released worker is freed without the cycle collector ----------------

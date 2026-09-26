@@ -3582,7 +3582,7 @@ if _QT_AVAILABLE:
             self._update_pagination()
 
         def _on_thumb_url(self, card_idx: int, url: str):
-            """Handle a ThumbResolver URL — enqueue image load on GUI thread."""
+            """Handle a ThumbResolver URL — start the card's image load (GUI thread)."""
             card = self.cards.get(card_idx)
             if card is None:
                 return
@@ -3592,7 +3592,9 @@ if _QT_AVAILABLE:
                 except RuntimeError:
                     pass
                 return
-            # Load via the bounded pool; use "card" target for scaled display
+            # Deliberately NOT the bounded pool: all of a page's thumbnails start at once.
+            # The loader goes to wb._grid_img_threads, outside the pool's count (a pool
+            # image must not wait for a page of thumbnails), where _cancel_images retires it.
             loader = ImageLoaderThread(url)
             def _on_loaded(qi, c=card):
                 try:
@@ -3606,7 +3608,7 @@ if _QT_AVAILABLE:
             loader.image_loaded.connect(_on_loaded)
             loader.load_failed.connect(lambda c=card: c.set_pixmap(None))
             loader.start()
-            self.wb._img_threads.append(loader)
+            self.wb._grid_img_threads.append(loader)
 
         def _render_table(self):
             """Render all filtered candidates into the table view.
@@ -5023,12 +5025,16 @@ if _QT_AVAILABLE:
             # Joins section is collapsed by default; clicking the header expands it.
             self._joins_expanded = False
 
-            # Worker refs (best-effort cancel on re-anchor / close)
+            # Worker refs (retired on re-anchor / close)
             self._anchor_worker = None
             self._page_text_worker = None
             self._img_loader = None
             self._thumb_worker = None
             self._known_joins_worker = None
+            # Folio navigation keeps self._gen, so its text and image requests carry their
+            # own numbers: only the latest request's result is shown.
+            self._page_text_req = 0
+            self._img_req = 0
 
             # Known-join row thumbnail labels (list, indexed by row; set in _build_join_row)
             self._join_thumb_labels = []
@@ -5048,6 +5054,9 @@ if _QT_AVAILABLE:
             self._img_queue: list = []
             self._img_active: list = []
             self._img_threads: list = []
+            # Grid thumbnail loaders: all of a page's start at once and stay OUT of the
+            # pool's count, so a pool image (card flip, Compare pane) never waits for them.
+            self._grid_img_threads: list = []
 
             # Plan 06 — pick-mode callback (None = normal Workbench; set via set_pick_callback).
             # MARKED REMOVABLE (Phase 109 G-08, D-11 one-cycle soft-retire): with the JoinsDialog pick-back
@@ -5556,7 +5565,13 @@ if _QT_AVAILABLE:
                 pass
 
         def _load_current_image(self):
-            """Start an ImageLoaderThread for the current anchor image index."""
+            """Start an ImageLoaderThread for the current anchor image index.
+
+            The previous folio's loader is retired FIRST, before the no-image return, so
+            a slow earlier image can never land under a folio that has none."""
+            _retire_worker(self._img_loader, "image_loaded", "load_failed")
+            self._img_loader = None
+            self._img_req += 1
             url = _image_url_for_idx(self._anchor_images, self._anchor_idx, 2000)
             if not url:
                 try:
@@ -5565,22 +5580,14 @@ if _QT_AVAILABLE:
                     pass
                 return
 
-            # Cancel old loader
-            if self._img_loader is not None:
-                try:
-                    self._img_loader.cancel()
-                    self._img_loader.quit()
-                except Exception:
-                    pass
-
-            gen = self._gen
+            gen, req = self._gen, self._img_req
             self._img_loader = ImageLoaderThread(url)
-            # Capture gen in closure so the lambda drops stale results (must-fix #7)
+            # Capture gen + request number (ints only) so stale results are dropped (must-fix #7)
             self._img_loader.image_loaded.connect(
-                lambda qi, g=gen: self._on_img(g, qi)
+                lambda qi, g=gen, r=req: self._on_img(g, qi, r)
             )
             self._img_loader.load_failed.connect(
-                lambda g=gen: self._on_img_failed(g)
+                lambda g=gen, r=req: self._on_img_failed(g, r)
             )
             self._img_loader.start()
             self._update_folio_controls()
@@ -5596,10 +5603,12 @@ if _QT_AVAILABLE:
             except RuntimeError:
                 pass
 
-        def _on_img(self, gen: int, qimage: QImage):
-            """Handle image_loaded signal. Drop if generation is stale."""
+        def _on_img(self, gen: int, qimage: QImage, req=None):
+            """Handle image_loaded signal. Drop if the generation or the request is stale."""
             if gen != self._gen:
                 return  # must-fix #7
+            if req is not None and req != self._img_req:
+                return  # an earlier folio's image
             self._anchor_full_pix = QPixmap.fromImage(qimage)
             # UAT: show the ENTIRE fragment by default. Fit once per fresh anchor
             # image; folio nav / manual zoom keep the user's current zoom.
@@ -5626,10 +5635,12 @@ if _QT_AVAILABLE:
                 # the manual-zoom clamp floor so the whole fragment is visible.
                 self._zoom = min(ratio, 1.0)
 
-        def _on_img_failed(self, gen: int):
-            """Handle load_failed signal. Drop if generation is stale."""
+        def _on_img_failed(self, gen: int, req=None):
+            """Handle load_failed signal. Drop if the generation or the request is stale."""
             if gen != self._gen:
                 return  # must-fix #7
+            if req is not None and req != self._img_req:
+                return  # an earlier folio's failure
             try:
                 self.anchor_img_label.setText(tr("No image"))
             except RuntimeError:
@@ -5697,13 +5708,7 @@ if _QT_AVAILABLE:
             if self._anchor_idx <= 0:
                 return
             self._anchor_idx -= 1
-            # Folio nav does NOT bump self._gen (stays within same anchor)
-            gen = self._gen
-            self._page_text_worker = _PageTextWorker(
-                self, gen, self._anchor_sid, self._anchor_idx + 1
-            )
-            self._page_text_worker.done.connect(self._on_page_text)
-            self._page_text_worker.start()
+            self._start_page_text()
             self._load_current_image()
 
         def _folio_next(self):
@@ -5711,18 +5716,31 @@ if _QT_AVAILABLE:
             if self._anchor_idx >= len(self._anchor_images) - 1:
                 return
             self._anchor_idx += 1
-            gen = self._gen
-            self._page_text_worker = _PageTextWorker(
-                self, gen, self._anchor_sid, self._anchor_idx + 1
-            )
-            self._page_text_worker.done.connect(self._on_page_text)
-            self._page_text_worker.start()
+            self._start_page_text()
             self._load_current_image()
 
-        def _on_page_text(self, gen: int, text: str):
-            """Handle folio page text result. Drop if stale."""
+        def _start_page_text(self):
+            """Fetch the current folio's text, retiring the previous folio's request.
+
+            Folio nav does NOT bump self._gen (stays within same anchor), so the request
+            number is what drops an earlier folio's text that arrives late."""
+            _retire_worker(self._page_text_worker, "done")
+            self._page_text_req += 1
+            req = self._page_text_req
+            self._page_text_worker = _PageTextWorker(
+                self, self._gen, self._anchor_sid, self._anchor_idx + 1
+            )
+            self._page_text_worker.done.connect(
+                lambda g, t, r=req: self._on_page_text(g, t, r)
+            )
+            self._page_text_worker.start()
+
+        def _on_page_text(self, gen: int, text: str, req=None):
+            """Handle folio page text result. Drop if the generation or the request is stale."""
             if gen != self._gen:
                 return  # must-fix #7
+            if req is not None and req != self._page_text_req:
+                return  # an earlier folio's text
             try:
                 apply_line_numbered_text(
                     self.anchor_text_browser,
@@ -5935,14 +5953,15 @@ if _QT_AVAILABLE:
         def _cancel_images(self):
             """Cancel all pending image loads (every grid re-render, view toggle, Clear Lab).
 
-            Running loaders are retired, not dropped: each writes only its own label, so
-            none is disconnected (cutting a pool slot would leave an open Compare pane on
-            "loading…"). The candidate pane's ThumbResolver is retired AND disconnected,
-            so the previous page's URLs never reach the next page's cards."""
+            Running loaders (pool and grid) are retired, not dropped: each writes only its
+            own label, so none is disconnected (cutting a pool slot would leave an open
+            Compare pane on "loading…"). The candidate pane's ThumbResolver is retired AND
+            disconnected, so the previous page's URLs never reach the next page's cards."""
             self._img_queue.clear()
-            for t in self._img_threads:
+            for t in list(self._img_threads) + list(self._grid_img_threads):
                 _retire_worker(t)
             self._img_threads.clear()
+            self._grid_img_threads.clear()
             pane = getattr(self, "_candidate_pane", None)
             if pane is not None:
                 _retire_worker(getattr(pane, "_resolver", None), "resolved")
