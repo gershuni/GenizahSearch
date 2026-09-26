@@ -1,0 +1,286 @@
+# -*- coding: utf-8 -*-
+"""The list-sync dialog tells the user about notes, whatever the result.
+
+A sync can leave a note different from the account (the upload no longer overwrites a
+cloud note it cannot prove is older), keep both versions of a note (a Download or Merge),
+or be unable to update a note too long for the request (the gateway refuses it). Each
+count gets one line under the dialog's message -- on success AND on failure, for all
+three buttons: an upload in which one item failed and one note was too long must still
+say so. A result without these counts shows exactly today's message.
+
+D1 drives GenizahGUI._do_sync_action -- the dialog's buttons -- with Qt faked out, the
+way tests/test_personal_state_atomic_writes.py does, on a stand-in window that has only
+`lists_mgr` and `_sync_error_text`. D2 checks the four new strings have Hebrew that starts
+with a Hebrew letter. D3 checks Help.html no longer claims that list sync is "disabled
+entirely if every item in a list is local" and says what is true instead.
+"""
+import re
+import types
+from pathlib import Path
+
+import pytest
+
+import genizah_core
+from shared import lists_sync
+from shared.genizah_translations import TRANSLATIONS
+
+ROOT = Path(__file__).resolve().parents[1]
+
+FROM_THE_CLOUD = "from the cloud"
+DIFFERING = ("Notes that differ between this computer and your account: {}. "
+             "They were left as they are; Merge Both keeps both versions.")
+MERGED = ("Notes that differed between this computer and your account: {}. "
+          "Both versions were kept; the account's text is under the line \"--- {} ---\".")
+TOO_LONG = ("Notes too long to update safely in your account: {}. "
+            "They were not changed there and are kept on this computer.")
+NEW_KEYS = (FROM_THE_CLOUD, DIFFERING, MERGED, TOO_LONG)
+
+DOWNLOADED = "Downloaded {lists} lists and {items} items from cloud."
+UPLOADED = "Uploaded {lists} lists and {items} items to cloud."
+MERGED_OK = "Lists merged successfully! Downloaded {dl} lists, uploaded {ul} lists."
+UPLOAD_AFTER_DOWNLOAD_FAILED = "The cloud lists were downloaded, but the upload failed: {}"
+
+
+def _is_hebrew(ch):
+    return "֐" <= ch <= "׿"
+
+
+def _first_letter(text):
+    """The first letter of `text`, skipping {} placeholders, digits and punctuation."""
+    for ch in re.sub(r"\{[^}]*\}", "", text):
+        if ch.isalpha():
+            return ch
+    return ""
+
+
+@pytest.fixture
+def genizah_app():
+    import genizah_app
+    return genizah_app
+
+
+@pytest.fixture(params=["en", "he"])
+def lang(request, monkeypatch):
+    monkeypatch.setattr(genizah_core, "CURRENT_LANG", request.param)
+    return request.param
+
+
+def _tr(text):
+    return genizah_core.tr(text)
+
+
+def _run(genizah_app, monkeypatch, action, download=None, upload=None):
+    """Press one of the dialog's buttons; return the message boxes shown and the calls made."""
+    shown, calls = [], []
+
+    class _Progress:
+        def __init__(self, *args):
+            pass
+
+        def __getattr__(self, name):
+            return lambda *args: None
+
+    monkeypatch.setattr(genizah_app, "QProgressDialog", _Progress)
+    monkeypatch.setattr(genizah_app, "QApplication", types.SimpleNamespace(processEvents=lambda: None))
+    monkeypatch.setattr(genizah_app, "QMessageBox", types.SimpleNamespace(
+        information=lambda parent, title, text: shown.append(("information", text)),
+        warning=lambda parent, title, text: shown.append(("warning", text)),
+        critical=lambda parent, title, text: shown.append(("critical", text))))
+
+    def sync_from_cloud():
+        calls.append("download")
+        return dict(download)
+
+    def sync_to_cloud():
+        calls.append("upload")
+        return dict(upload)
+
+    mgr = types.SimpleNamespace(sync_from_cloud=sync_from_cloud, sync_to_cloud=sync_to_cloud)
+    host = types.SimpleNamespace(lists_mgr=mgr,
+                                 _sync_error_text=genizah_app.GenizahGUI._sync_error_text)
+    genizah_app.GenizahGUI._do_sync_action(host, types.SimpleNamespace(accept=lambda: None), action)
+    return shown, calls
+
+
+def _merged_line(n):
+    return _tr(MERGED).format(n, _tr(FROM_THE_CLOUD))
+
+
+def _differing_line(n):
+    return _tr(DIFFERING).format(n)
+
+
+def _too_long_line(n):
+    return _tr(TOO_LONG).format(n)
+
+
+def _message(first, *lines):
+    return "\n\n".join([first, *lines])
+
+
+def _check_language(text, lang):
+    """In Hebrew every paragraph of the message starts with a Hebrew letter."""
+    if lang == "he":
+        for paragraph in text.split("\n\n"):
+            assert _is_hebrew(_first_letter(paragraph)), f"not in Hebrew: {paragraph!r}"
+        assert FROM_THE_CLOUD not in text, "the marker's label is in English"
+
+
+PARTIAL = {"success": False, "error": lists_sync.UPLOAD_PARTLY_FAILED.format(3, 1),
+           "items_pushed": 3, "items_failed": 1, "notes_too_long": 1, "notes_differing": 1}
+
+
+# ---------------------------------------------------------------------------
+# D1 -- the lines under every result message
+# ---------------------------------------------------------------------------
+
+def test_download_success_reports_the_notes_it_kept_both_of(genizah_app, monkeypatch, lang):
+    shown, _ = _run(genizah_app, monkeypatch, "download",
+                    download={"success": True, "lists_added": 1, "items_added": 4, "notes_merged": 2})
+    assert shown == [("information", _message(
+        _tr(DOWNLOADED).format(lists=1, items=4), _merged_line(2)))]
+    assert "2" in shown[0][1].split("\n\n")[1]
+    assert f"--- {_tr(FROM_THE_CLOUD)} ---" in shown[0][1]
+    _check_language(shown[0][1], lang)
+
+
+def test_download_failure_shows_the_error_and_any_note_line(genizah_app, monkeypatch, lang):
+    shown, _ = _run(genizah_app, monkeypatch, "download",
+                    download={"success": False, "error": "Sync not available"})
+    assert shown == [("warning", _tr("Sync not available"))]
+
+    shown, _ = _run(genizah_app, monkeypatch, "download",
+                    download={"success": False, "error": "Sync not available", "notes_merged": 1})
+    assert shown == [("warning", _message(_tr("Sync not available"), _merged_line(1)))]
+    _check_language(shown[0][1], lang)
+
+
+def test_upload_success_reports_differing_and_too_long_notes(genizah_app, monkeypatch, lang):
+    shown, _ = _run(genizah_app, monkeypatch, "upload",
+                    upload={"success": True, "lists_pushed": 2, "items_pushed": 5,
+                            "notes_differing": 3, "notes_too_long": 1})
+    assert shown == [("information", _message(
+        _tr(UPLOADED).format(lists=2, items=5), _differing_line(3), _too_long_line(1)))]
+    _check_language(shown[0][1], lang)
+
+
+def test_a_partly_failed_upload_still_reports_its_notes(genizah_app, monkeypatch, lang):
+    shown, _ = _run(genizah_app, monkeypatch, "upload", upload=PARTIAL)
+    assert shown == [("warning", _message(
+        _tr(lists_sync.UPLOAD_PARTLY_FAILED).format(3, 1), _differing_line(1), _too_long_line(1)))]
+    _check_language(shown[0][1], lang)
+
+
+def test_merge_success_reports_both_halves(genizah_app, monkeypatch, lang):
+    shown, calls = _run(genizah_app, monkeypatch, "merge",
+                        download={"success": True, "lists_added": 1, "notes_merged": 2},
+                        upload={"success": True, "lists_pushed": 3,
+                                "notes_differing": 1, "notes_too_long": 1})
+    assert calls == ["download", "upload"]
+    assert shown == [("information", _message(
+        _tr(MERGED_OK).format(dl=1, ul=3), _merged_line(2), _differing_line(1), _too_long_line(1)))]
+    _check_language(shown[0][1], lang)
+
+
+def test_a_merge_whose_upload_fails_reports_both_halves(genizah_app, monkeypatch, lang):
+    shown, calls = _run(genizah_app, monkeypatch, "merge",
+                        download={"success": True, "lists_added": 0, "notes_merged": 2},
+                        upload=PARTIAL)
+    assert calls == ["download", "upload"]
+    first = _tr(UPLOAD_AFTER_DOWNLOAD_FAILED).format(_tr(lists_sync.UPLOAD_PARTLY_FAILED).format(3, 1))
+    assert shown == [("warning", _message(
+        first, _merged_line(2), _differing_line(1), _too_long_line(1)))]
+    _check_language(shown[0][1], lang)
+
+
+def test_a_merge_whose_download_fails_never_uploads(
+        genizah_app, monkeypatch, lang):
+    shown, calls = _run(genizah_app, monkeypatch, "merge",
+                        download={"success": False, "error": "Sync already in progress"},
+                        upload={"success": True, "notes_differing": 5})
+    assert calls == ["download"]
+    assert shown == [("warning", _tr("Sync already in progress"))]
+
+    # A failed download reports no counts today; if one ever does, its line is shown too.
+    shown, calls = _run(genizah_app, monkeypatch, "merge",
+                        download={"success": False, "error": "Sync not available", "notes_merged": 1},
+                        upload={"success": True, "notes_differing": 5})
+    assert calls == ["download"]
+    assert shown == [("warning", _message(_tr("Sync not available"), _merged_line(1)))]
+    _check_language(shown[0][1], lang)
+
+
+@pytest.mark.parametrize("action,download,upload,expected", [
+    ("download", {"success": True, "lists_added": 1, "items_added": 2},
+     None, ("information", (DOWNLOADED, {"lists": 1, "items": 2}))),
+    ("upload", None, {"success": True, "lists_pushed": 1, "items_pushed": 2},
+     ("information", (UPLOADED, {"lists": 1, "items": 2}))),
+    ("merge", {"success": True, "lists_added": 1}, {"success": True, "lists_pushed": 2},
+     ("information", (MERGED_OK, {"dl": 1, "ul": 2}))),
+    ("upload", None, {"success": True, "lists_pushed": 1, "items_pushed": 2,
+                      "notes_differing": 0, "notes_too_long": 0},
+     ("information", (UPLOADED, {"lists": 1, "items": 2}))),
+    ("download", {"success": True, "lists_added": 1, "items_added": 2, "notes_merged": 0},
+     None, ("information", (DOWNLOADED, {"lists": 1, "items": 2}))),
+], ids=["download-no-keys", "upload-no-keys", "merge-no-keys", "upload-zero-counts",
+        "download-zero-count"])
+def test_a_result_without_note_counts_shows_todays_message(
+        genizah_app, monkeypatch, lang, action, download, upload, expected):
+    shown, _ = _run(genizah_app, monkeypatch, action, download=download, upload=upload)
+    kind, (template, values) = expected
+    assert shown == [(kind, _tr(template).format(**values))]
+
+
+def test_the_note_lines_come_from_one_helper_that_ignores_missing_keys(genizah_app, lang):
+    lines = genizah_app.GenizahGUI._sync_note_lines
+    assert lines() == []
+    assert lines(download={}, upload={}) == []
+    assert lines(download={"notes_merged": None}, upload={"notes_differing": None}) == []
+    # A download result's upload-side keys are not read, and the reverse.
+    assert lines(download={"notes_differing": 1, "notes_too_long": 1}) == []
+    assert lines(upload={"notes_merged": 1}) == []
+    assert lines(download={"notes_merged": 1}, upload={"notes_differing": 2, "notes_too_long": 3}) == [
+        _merged_line(1), _differing_line(2), _too_long_line(3)]
+
+
+# ---------------------------------------------------------------------------
+# D2 -- the new strings
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("key", NEW_KEYS)
+def test_every_new_sync_string_has_hebrew_starting_with_a_hebrew_letter(key):
+    hebrew = TRANSLATIONS.get(key)
+    assert hebrew and hebrew != key, f"no Hebrew for {key!r}"
+    assert _is_hebrew(_first_letter(hebrew)), f"the Hebrew does not start with a Hebrew letter: {hebrew!r}"
+    assert hebrew.count("{}") == key.count("{}"), "placeholder count differs"
+    hebrew.format(*range(key.count("{}")))  # formats without error
+
+
+def test_the_first_letter_check_can_fail():
+    assert not _is_hebrew(_first_letter("{}: Notes"))
+    assert _is_hebrew(_first_letter("{}: הערות"))
+    assert _is_hebrew(_first_letter("--- מהענן ---"))
+
+
+# ---------------------------------------------------------------------------
+# D3 -- Help.html
+# ---------------------------------------------------------------------------
+
+HELP_EN = ("Lists cloud sync never uploads local items: an entry for one of your own "
+           "documents stays on this computer.")
+HELP_HE = "סנכרון הרשימות לענן לעולם אינו מעלה פריטים מקומיים: פריט של מסמך משלכם נשאר במחשב הזה."
+
+
+def _help_items():
+    html = (ROOT / "Help.html").read_text(encoding="utf-8")
+    return [re.sub(r"\s+", " ", li).strip() for li in re.findall(r"<li>(.*?)</li>", html, re.S)]
+
+
+@pytest.mark.parametrize("text,old", [
+    (HELP_EN, "disabled entirely if every item in a list is local"),
+    (HELP_HE, "מבוטל לחלוטין אם כל פריט ברשימה הוא מקומי"),
+], ids=["en", "he"])
+def test_help_says_local_entries_are_never_uploaded(text, old):
+    items = _help_items()
+    assert items.count(text) == 1, "the Help page does not say it (once, as a list item)"
+    assert not any(old in item for item in items), "the Help page still makes the old claim"

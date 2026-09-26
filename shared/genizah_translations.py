@@ -3641,6 +3641,15 @@ TRANSLATIONS.update({
     "Your lists on this computer could not be backed up, so nothing was downloaded. Check that the data folder can be written to, then try again.":
         "לא ניתן היה לגבות את הרשימות שבמחשב הזה, ולכן לא הורד דבר. יש לוודא שאפשר לכתוב לתיקיית הנתונים, ולנסות שוב.",
     "The cloud lists were downloaded, but the upload failed: {}": "הרשימות מהענן הורדו, אבל ההעלאה נכשלה: {}",
+    # Result lines about notes, each with its count, under the dialog's message (success or failure)
+    "Notes that differ between this computer and your account: {}. They were left as they are; Merge Both keeps both versions.":
+        "הערות שונות בין המחשב הזה לחשבונך: {}. הן נשארו כפי שהן; 'מזג את שתיהן' ישמור את שתי הגרסאות.",
+    "Notes that differed between this computer and your account: {}. Both versions were kept; the account's text is under the line \"--- {} ---\".":
+        "הערות ששונו גם במחשב הזה וגם בחשבונך: {}. שתי הגרסאות נשמרו; הנוסח מהחשבון מופיע מתחת לשורה \"--- {} ---\".",
+    "Notes too long to update safely in your account: {}. They were not changed there and are kept on this computer.":
+        "הערות ארוכות מכדי לעדכן אותן בבטחה בחשבונך: {}. הן לא שונו שם ונשמרות במחשב הזה.",
+    # The label between a note's two versions after a Download or Merge: "--- from the cloud ---"
+    "from the cloud": "מהענן",
     # The sync layer's own messages (shared/lists_sync.py, shared/lists_manager.py)
     "Sync already in progress": "סנכרון כבר מתבצע",
     "Sync not available": "הסנכרון אינו זמין",
