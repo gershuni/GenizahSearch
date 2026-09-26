@@ -26,10 +26,12 @@ Reaches users with the next desktop installer.
   session instead of on every save, so a bad start can no longer push out every good copy within
   three manuscript views. Before each cloud sync a snapshot is kept (`lists.pkl.pre-download`,
   `lists.pkl.pre-upload`); a download that cannot take its snapshot does not run, and a Merge
-  whose download fails no longer uploads.
+  whose download fails no longer uploads. If the start-of-session backup cannot be made, the
+  save waits (the next save tries again) rather than replacing `lists.pkl` without one.
 - **One copy at a time.** Opening a second copy on the same data folder now says the app is
   already open and exits, instead of the two copies overwriting each other's lists and settings.
-  Changing the language restarts the app only after the old window has finished saving.
+  Changing the language restarts the app only after the old window has finished saving; if the
+  app cannot restart itself, it stays open (or says so) and the new language applies next time.
 - **Excluded manuscripts stay excluded.** "Exclude this manuscript" in the results menu now works
   for Genizah results: the menu passed an empty id, so it did nothing, and View Document, Submit
   Correction, Add Comment, View Corrections, View Comments and Share Discovery on that menu had the
