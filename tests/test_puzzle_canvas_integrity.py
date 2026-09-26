@@ -193,6 +193,51 @@ def test_clicking_the_open_join_again_keeps_the_edit(env):
     assert env.item("990001").rotation() == 1.0
 
 
+def test_new_leaves_no_hidden_title_or_note_behind(env):
+    """The Details panel is hidden on a scratch pad, but a note left in it
+    from the join just closed counts as work: New on the empty scratch pad
+    then asked to save it."""
+    doc = env.save(pwh.fragments(), title="A", notes="a note on A")
+    env.open(doc)
+    env.win._on_new_puzzle()
+    assert (env.win._title_edit.text(), env.win._notes_edit.toPlainText()) == ("", "")
+    env.answer = SB.Cancel
+    env.win._on_new_puzzle()
+    assert env.asks == []
+
+
+def test_deleting_the_open_join_leaves_a_scratch_pad_of_what_is_on_the_canvas(env):
+    """Deleting the open join from Saved Joins leaves its canvas as an unsaved
+    scratch pad. The deleted join's fragment that was never shown is not part
+    of it -- a join saved from that canvas must not get it -- and the
+    deleted join's failed save is no longer reported."""
+    doc = env.save(pwh.fragments(), title="A", notes="a note on A")
+    env.open(doc, fail_ids={"99000FL2"})
+    # 990002 is kept in the join, but not on the canvas
+    assert sorted(s for s, _r, _x in env.stored(doc)) == ["990001", "990002"]
+    assert sorted(env.win._fragment_items) == [("990001", "1r")]
+    _fail_an_autosave(env)
+    assert env.win._save_failed_label.isVisible()
+    env.static_answers[_tr("Delete join?")] = SB.Yes
+    env.win._delete_document(doc)
+    assert env.stored(doc) is None
+    assert env.win._current_doc_id is None
+    assert not env.win._save_failed_label.isVisible()
+    assert (env.win._title_edit.text(), env.win._notes_edit.toPlainText()) == ("", "")
+    env.answer = SB.Cancel
+    env.win._on_new_puzzle()                            # the canvas stayed, as a scratch pad
+    assert env.asks == [(_tr("Save current work?"), _tr("Save current puzzle before starting new?"),
+                         SB.Save | SB.Discard | SB.Cancel)]
+    env.save_dialog_result = QDialog.DialogCode.Accepted
+    assert env.win._on_save_join() is True
+    new_doc = env.win._current_doc_id
+    assert new_doc not in (None, doc)
+    _rotate(env, degrees=6)
+    env.settle()
+    assert env.stored(new_doc) == [("990001", env.item("990001").rotation(),
+                                    env.item("990001").pos().x())]
+
+
 def test_closing_the_window_writes_the_pending_autosave(env):
     """closeEvent only waited for threads; the app can quit before the timer."""
     doc = env.save(pwh.fragments())
@@ -224,6 +269,23 @@ def test_a_failed_autosave_is_reported_and_leaving_asks(env):
     assert env.win._current_doc_id == doc and len(env.win._fragment_items) == 2
 
 
+def test_autosave_does_not_bring_back_a_join_deleted_elsewhere(env):
+    """The open join's row disappeared (deleted outside this window, or
+    joins.db could not read it): the autosave wrote nothing and said
+    nothing. It must say so -- and must not quietly re-create the join;
+    only an explicit Save may."""
+    doc = env.save(pwh.fragments())
+    env.open(doc)
+    env.svc.delete_document(doc)
+    _rotate(env, degrees=5)
+    env.settle()
+    assert [n[1] for n in env.notices] == [_tr("Auto-save failed")]
+    assert env.stored(doc) is None
+    assert env.win._last_save_failed is True
+    assert env.win._on_save_join() is True               # Save re-creates it
+    assert [(s, r) for s, r, _x in env.stored(doc)] == [("990001", 5.0), ("990002", 0.0)]
+
+
 def test_autosave_never_empties_a_join_whose_images_all_failed(env):
     """Offline: every image fails, the canvas is empty, a note is typed, and
     the autosave wrote fragments=[] over the join (and the note with it)."""
@@ -251,6 +313,9 @@ def test_open_with_one_image_failing_keeps_both_fragments(env):
     # the user is told, and the autosave's own line does not replace it
     assert env.win.statusBar().currentMessage() == _tr(
         "Fragments whose images could not be loaded: {}. They stay in the join.").format(1)
+    # ...and the Details list names the one that is not shown
+    assert env.win._fragments_label.text().split("\n") == [
+        "T-S A 1 (1r)", "T-S B 2 (1r) -- " + _tr("image not loaded")]
 
 
 def test_new_right_after_an_offline_open_keeps_both_fragments(env):
@@ -394,6 +459,30 @@ def test_late_result_from_the_previous_canvas_is_ignored(env):
     env.settle()
     assert sorted(env.win._fragment_items) == [("990001", "1r"), ("990003", "1r")]
     assert sorted(s for s, _r, _x in env.stored(doc_b)) == ["990001", "990003"]
+    # A's request for 990002 never answered; B's canvas does not wait for it.
+    assert env.win._pending_req == {}
+
+
+def test_a_join_opened_after_new_cut_a_load_short_finishes_its_own_load(env):
+    """New during join A's load, then join B with one image failing: B's load
+    must end (autosave and the fit depend on it) and say what it could not
+    show, whatever A's load was still waiting for."""
+    doc_a = env.save(pwh.fragments("99010"), title="A")
+    doc_b = env.save(pwh.fragments(), title="B")
+    env.win._load_document(doc_a)
+    pwh.take_started()               # A's images never arrive
+    env.win._on_new_puzzle()
+    env.win._load_document(doc_b)
+    assert env.asks == []
+    first, second = pwh.take_started()
+    second.fail()
+    first.deliver()
+    pwh.pump()
+    assert env.win.statusBar().currentMessage() == _tr(
+        "Fragments whose images could not be loaded: {}. They stay in the join.").format(1)
+    assert env.win._loading_document is False
+    env.settle()
+    assert sorted(s for s, _r, _x in env.stored(doc_b)) == ["990001", "990002"]
 
 
 def test_a_partial_canvas_keeps_the_stored_thumbnail(env, monkeypatch):
@@ -503,6 +592,53 @@ def test_leave_prompt_names_a_failed_save(env):
     assert env.win._current_doc_id is None and env.win._fragment_items == {}
 
 
+def _fail_an_autosave(env, sys_id="990001"):
+    env.refuse_writes()
+    _rotate(env, sys_id=sys_id, degrees=3)
+    env.settle()
+    env.allow_writes()
+
+
+def test_the_failed_save_warning_goes_once_the_join_is_saved_or_left(env):
+    """The failure belongs to the join and its unsaved changes: a toolbar
+    Save that lands, or leaving the join with Discard, ends it. Otherwise
+    the red line stays on screen and the next New asks about changes that
+    were saved."""
+    doc_a = env.save(pwh.fragments(), title="A")
+    doc_b = env.save(pwh.fragments("99010"), title="B")
+    env.open(doc_a)
+    _fail_an_autosave(env)
+    assert [n[1] for n in env.notices] == [_tr("Auto-save failed")]
+    label = env.win._save_failed_label
+    assert label.isVisible()
+    # a toolbar Save that lands
+    assert env.win._on_save_join() is True
+    assert not label.isVisible()
+    env.answer = SB.Cancel
+    env.win._on_new_puzzle()
+    assert env.asks == []                               # nothing was left to ask about
+    assert env.win._current_doc_id is None
+    # Discard, then New
+    env.open(doc_a)
+    _fail_an_autosave(env)
+    assert label.isVisible()
+    env.answer = SB.Discard
+    env.win._on_new_puzzle()
+    assert len(env.asks) == 1
+    assert not label.isVisible() and env.win._last_save_failed is False
+    # Discard, then another join: B has not failed (not even its load's
+    # own write has run yet)
+    env.open(doc_a)
+    _fail_an_autosave(env)
+    assert label.isVisible()
+    env.win._load_document(doc_b)
+    assert env.win._current_doc_id == doc_b
+    assert not label.isVisible() and env.win._last_save_failed is False
+    pwh.finish_loads()
+    env.settle()
+    assert not label.isVisible()
+
+
 def test_prompts_label_their_buttons_in_the_interface_language(monkeypatch):
     """The static QMessageBox calls label Save/Discard/Cancel in Qt's own
     language, i.e. in English in the Hebrew interface."""
@@ -576,6 +712,81 @@ def test_flipping_the_whole_puzzle_with_both_sides_on_the_canvas_swaps_them(env,
     assert sorted(f.folio_label for f in env.stored_doc(doc).fragments) == ["1r", "1v"]
 
 
+def _one_manuscript(env, labels):
+    """Pages of manuscript 990001 on a saved join's canvas, one per label,
+    with the folio list 1r, 1v, 2r."""
+    from shared.puzzle_model import PuzzleFragment
+    doc = env.save([PuzzleFragment(sys_id="990001", folio_label=label, fl_id="FL-" + label,
+                                   shelfmark="T-S A 1", x=10.0 + 300 * i, y=20.0)
+                    for i, label in enumerate(labels)])
+    env.open(doc)
+    env.win._folio_lists["990001"] = [{"fl_id": "FL-" + label, "label": label}
+                                      for label in ("1r", "1v", "2r")]
+    return doc
+
+
+def test_a_refused_folio_step_also_refuses_the_step_onto_it(env):
+    """1r and 1v selected, 2r also on the canvas, next folio: 1v -> 2r is
+    refused, so 1v stays -- and 1r -> 1v must then be refused too, or it
+    overwrites 1v's entry and 1v drops out of every later write."""
+    doc = _one_manuscript(env, ["1r", "1v", "2r"])
+    before = dict(env.win._fragment_items)
+    env.select_only(before[("990001", "1r")], before[("990001", "1v")])
+    env.win._navigate_folio(+1)
+    assert env.win._fragment_items == before
+    assert _keys_match_labels(env)
+    env.settle()
+    assert sorted(f.folio_label for f in env.stored_doc(doc).fragments) == ["1r", "1v", "2r"]
+
+
+def test_two_fragments_stepping_onto_the_same_folio_keeps_both(env):
+    """Two selected pages that step onto the same folio in one move (the
+    second's page is not in the folio list, so it counts from the first
+    folio): one moves, the other stays. Both moving put two items on one
+    key, and one of them dropped out of every later write."""
+    doc = _one_manuscript(env, ["1r", "x9"])
+    items = set(env.win._fragment_items.values())
+    env.select_only(*items)
+    env.win._navigate_folio(+1)
+    assert len(env.win._fragment_items) == 2
+    assert set(env.win._fragment_items.values()) == items
+    assert _keys_match_labels(env)
+    assert env.win.statusBar().currentMessage() == _tr(
+        "Folio {} of this fragment is already on the canvas.").format("1v")
+    pwh.finish_loads()
+    env.settle()
+    assert len(env.stored_doc(doc).fragments) == 2
+
+
+@pytest.mark.parametrize("flip", ["_flip_recto_verso", "_flip_entire_puzzle"])
+def test_flipping_an_external_fragment_loads_the_other_side_by_its_url(env, flip):
+    """Regression pin (green on the base by design): the three folio-move
+    sites now share one re-keying helper, and each must still point the
+    fragment at the new page and pass the loader what it passed before. An
+    external library's pages have no fl_id: the flip buttons fetch the other
+    side by its image URL."""
+    env.win.add_fragment("990103", "Ext C", "1r", "", image_url="https://x/c1.jpg", page_index=0)
+    pwh.take_started()[0].deliver()
+    pwh.pump()
+    env.win._folio_lists["990103"] = [
+        {"fl_id": "", "label": "1r", "image_url": "https://x/c1.jpg", "page_index": 0},
+        {"fl_id": "", "label": "1v", "image_url": "https://x/c2.jpg", "page_index": 1}]
+    item = env.item("990103")
+    pf = item.puzzle_frag
+    thr = pf.bg_removal_threshold
+    env.select_only(item)
+    getattr(env.win, flip)()
+    (loader,) = pwh.take_started()
+    assert (pf.folio_label, pf.fl_id, pf.image_url, pf.page_index) == (
+        "1v", "", "https://x/c2.jpg", 1)
+    assert loader.fl_id == ""
+    assert loader.kwargs == dict(threshold=thr, processed=thr > 0,
+                                 is_cul=env.win._has_blue_mat(pf), image_url="https://x/c2.jpg")
+    loader.deliver(pwh.png_bytes(50, 20))
+    assert env.win._fragment_items[("990103", "1v")] is item
+    assert (item.pixmap().width(), item.pixmap().height()) == (50, 20)
+
+
 def test_a_reload_that_arrives_after_the_fragment_moved_on_is_dropped(env):
     """A threshold reload still in flight when the fragment stepped to the
     next folio arrived under the old key and made a second item around the
@@ -591,6 +802,10 @@ def test_a_reload_that_arrives_after_the_fragment_moved_on_is_dropped(env):
     (reload_a,) = pwh.take_started()
     env.win._navigate_folio(+1)
     (reload_b,) = pwh.take_started()
+    # The superseded reload is no longer waited for, in either of the two
+    # dicts that must always hold the same keys.
+    assert set(env.win._pending_fragments) == {("990001", "1v")}
+    assert set(env.win._pending_req) == {("990001", "1v")}
     reload_a.deliver(pwh.png_bytes(30, 40))
     reload_b.deliver(pwh.png_bytes(50, 20))
     pwh.pump()
@@ -797,6 +1012,8 @@ def test_select_all_delete_asks_and_never_autosaves_an_empty_join(env):
     assert env.asks == [(_tr("Delete fragments?"),
                          _tr("Remove {} fragments from the puzzle?").format(2), SB.Yes | SB.No)]
     assert env.win._fragment_items == {}
+    assert env.win.statusBar().currentMessage() == _tr(
+        "{} fragments deleted. Press Ctrl+Z to undo.").format(2)
     env.settle()                     # debounce + timer: the autosave runs for real
     assert sorted(s for s, _r, _x in env.stored(doc)) == ["990001", "990002"]
     assert env.win.statusBar().currentMessage() == _tr(EMPTY_STORE_NOTE)
@@ -1221,6 +1438,35 @@ def test_quit_cancel_disarms_a_pending_passage_retry(env, quit_host):
     ga.GenizahGUI._retry_pending_close(quit_host)
     assert quit_host._close_pending is False
     assert closes == []
+
+
+def test_quit_cancel_after_a_deferred_close_clears_the_closing_line(env, quit_host):
+    """A close deferred for a letter-level search says 'Closing once the
+    current work finishes'; the close that follows is then cancelled at the
+    puzzle question, and the app stays open -- that line must not stay."""
+    quit_host.raise_past_check = False   # a wrong close goes on and fails loudly
+    import genizah_app as ga
+    busy = ["a letter-level search"]
+    quit_host._passage_workers_busy = lambda: list(busy)
+    quit_host._passage_batch_in_flight = lambda: False
+    quit_host._retry_pending_close = lambda: None
+    quit_host._defer_close_for_passage = types.MethodType(
+        ga.GenizahGUI._defer_close_for_passage, quit_host)
+    quit_host.status_label.setText(_tr("Ready."))
+    env.scratch_pad()
+    ev = _close_event()
+    assert _run_close(quit_host, ev) is None
+    assert not ev.isAccepted() and env.asks == []       # deferred, not asked yet
+    closing = quit_host.status_label.text()
+    assert closing != _tr("Ready.") and busy[0] in closing
+    busy.clear()                                        # the search ended
+    env.answer = SB.Cancel
+    ev = _close_event()
+    escaped = _run_close(quit_host, ev)
+    assert escaped is None, f"closeEvent raised {escaped!r}"
+    assert not ev.isAccepted()
+    assert len(env.asks) == 1
+    assert quit_host.status_label.text() == _tr("Ready.")
 
 
 def test_quit_check_runs_before_any_shutdown_state():
