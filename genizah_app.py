@@ -1541,6 +1541,7 @@ class GenizahGUI(QMainWindow):
         # Advanced by each tab's New; see _deliver_unless_discarded.
         self._search_new_generation = 0
         self._comp_new_generation = 0
+        self._reset_pending = None  # a New waiting on a witness; see _reset_is_pending
         self.last_browse_field = None
         self.current_browse_sid = None
         self.current_browse_p = None
@@ -26453,6 +26454,15 @@ class GenizahGUI(QMainWindow):
 
     def toggle_composition(self):
         if self.is_comp_running:
+            # A New pressed during this batch is still waiting for the
+            # witness in flight, and has already discarded what the batch
+            # delivers, so Stop has no results to keep: it finishes the New
+            # -- at once if the witness is done, else when it is. Stopping
+            # the UI here instead left that New's retry armed, and it then
+            # cleared whatever search was started next.
+            if self._reset_is_pending():
+                self._reset_composition()
+                return
             # GUARDED STOP (Phase 146): a passage scan has no cancel hook,
             # so setting the flag would leave "Cancelling..." on screen for
             # up to ~19s and then complete anyway. Scoped to the scan phase
@@ -26494,6 +26504,9 @@ class GenizahGUI(QMainWindow):
 
     def cancel_composition(self):
         """Cancel composition search gracefully (called by Escape shortcut)."""
+        if self._reset_is_pending():
+            self._reset_composition()  # as Stop does: see toggle_composition
+            return
         if self._refuse_stop_during_passage_scan():
             return
         # Escape is a Stop, and a Stop ends the expansion too.
@@ -26516,7 +26529,19 @@ class GenizahGUI(QMainWindow):
         self._refresh_witness_panel()
         self.comp_summary_text = ""  # Clear persistent summary on reset
 
-    def _retry_pending_reset(self):
+    def _reset_is_pending(self):
+        """True while a New pressed during the CURRENT composition run's
+        witness batch is waiting for the witness in flight.
+
+        `_reset_pending` is the request `_reset_composition` armed its retry
+        for: (the batch thread it cancelled, the New generation it started).
+        A request for any other thread belongs to a run that has since been
+        replaced, and counts as nothing.
+        """
+        pending = getattr(self, '_reset_pending', None)
+        return bool(pending) and pending[0] is getattr(self, 'comp_thread', None)
+
+    def _retry_pending_reset(self, request):
         """Poll until the cancelled witness batch has actually finished, then
         do the reset for real.
 
@@ -26527,14 +26552,25 @@ class GenizahGUI(QMainWindow):
         It waits on the thread itself, not on `is_comp_running` alone: New
         discarded the batch when it was pressed, so the completion that would
         have cleared that flag is dropped on arrival.
+
+        `request` is the one this chain was armed for, and the chain acts only
+        while it is still the pending one and its batch still holds the thread
+        slot. A New pressed again after the witness finished, or a Stop,
+        completes the reset without waiting for this timer; a new run takes
+        the slot. A callback still in flight after either must not cancel and
+        clear the search started next -- a bare "pending" flag let it.
         """
-        if not getattr(self, '_reset_pending', False):
-            return  # the reset already happened
+        if request is None or getattr(self, '_reset_pending', None) is not request:
+            return  # the reset already happened, or a later New owns the retry
         thread = getattr(self, 'comp_thread', None)
-        if self._passage_batch_in_flight() and thread.isRunning():
-            QTimer.singleShot(400, self._retry_pending_reset)
+        if thread is not request[0]:
+            # A new run started; the tab New meant to clear is gone.
+            self._reset_pending = None
             return
-        self._reset_pending = False
+        if self._passage_batch_in_flight() and thread.isRunning():
+            QTimer.singleShot(400, partial(self._retry_pending_reset, request))
+            return
+        self._reset_pending = None
         self._reset_composition()
 
     def _reset_composition(self):
@@ -26564,8 +26600,7 @@ class GenizahGUI(QMainWindow):
             # witness-search duration each time to clear.
             self._stop_auto_expand('')
             thread.request_cancel()
-            if not getattr(self, '_reset_pending', False):
-                self._reset_pending = True
+            if not self._reset_is_pending():
                 # New discards the batch NOW, not when the retry resets the
                 # tab: what it delivers meanwhile -- its partial rows, which
                 # would render and start grouping, an error, a status line
@@ -26574,10 +26609,13 @@ class GenizahGUI(QMainWindow):
                 # so the report is made here.
                 self._comp_new_generation = getattr(self, '_comp_new_generation', 0) + 1
                 self._emit_comp_search_telemetry('cancelled')
-                # One retry chain: it reschedules itself until the batch
-                # ends. A second chain would run the reset twice, and the
-                # second could clear a search started after the first.
-                QTimer.singleShot(400, self._retry_pending_reset)
+                # One retry chain per request: it reschedules itself until
+                # the batch ends. A second chain would run the reset twice,
+                # and the second could clear a search started after the
+                # first. The request names this batch, so a chain armed for
+                # an earlier run's batch stops at its next tick.
+                request = self._reset_pending = (thread, self._comp_new_generation)
+                QTimer.singleShot(400, partial(self._retry_pending_reset, request))
             # Every time: the refusal helper above has just said the
             # results found so far are kept, which is Stop's promise, not
             # New's.
@@ -26589,6 +26627,10 @@ class GenizahGUI(QMainWindow):
         # grouping run still has queued -- a cancelled scan's partial rows, a
         # grouping result, an error -- is dropped on arrival
         # (_deliver_unless_discarded).
+        # And a retry an earlier New armed finds its reset done: left
+        # pending, it would reset again once it fired, cancelling and
+        # clearing whatever search had been started by then.
+        self._reset_pending = None
         self._comp_new_generation = getattr(self, '_comp_new_generation', 0) + 1
         self._apply_pause_state(self._pause_comp, 'hidden')
         self._pause_comp.state = 'idle'

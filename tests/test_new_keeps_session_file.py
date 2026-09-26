@@ -88,6 +88,7 @@ class _Host:
     _PASSAGE_FORCED_CONTROLS = APP._PASSAGE_FORCED_CONTROLS
     _discardable = APP._discardable
     _deliver_unless_discarded = APP._deliver_unless_discarded
+    _reset_is_pending = APP._reset_is_pending
 
     def __init__(self):
         self._restoring_session = False
@@ -258,12 +259,13 @@ def _batch_host(monkeypatch):
     host = _Host()
     host.is_comp_running = True
     host.comp_thread = batch = _WitnessBatchThread()
-    # The real check adds an isinstance test on the thread; the flag is the
-    # part that matters here.
-    host._passage_batch_in_flight = lambda: host.is_comp_running
+    # The real check, with the batch class swapped: a run started later is
+    # an ordinary scan, and must not count as a batch.
+    host._passage_batch_in_flight = lambda: (
+        host.is_comp_running and isinstance(host.comp_thread, _WitnessBatchThread))
     host._stop_auto_expand = lambda msg: None
     host._reset_composition = lambda: APP._reset_composition(host)
-    host._retry_pending_reset = lambda: APP._retry_pending_reset(host)
+    host._retry_pending_reset = lambda *request: APP._retry_pending_reset(host, *request)
     host.lbl_comp_status = _Widget()
     emitted = []
     host._emit_comp_search_telemetry = lambda action, *a, **k: emitted.append(action)
@@ -348,6 +350,174 @@ def test_stop_during_a_witness_batch_still_shows_what_it_found(session_file, mon
     batch.running = False
     on_rows({"main": OLD_COMP_RESULTS, "partial": True})
     assert delivered == [("rows", {"main": OLD_COMP_RESULTS, "partial": True})]
+
+
+# --- A New's retry never outlives its request ------------------------------
+
+class _LaterRun(_StoppableCompThread):
+    """A composition run started after New: an ordinary scan, which a reset
+    would cancel and wait for."""
+
+    def __init__(self):
+        super().__init__()
+        self.cancels = 0
+
+    def request_cancel(self):
+        self.cancels += 1
+        super().request_cancel()
+
+
+def _start_a_new_run(host):
+    """What run_composition leaves as a run starts: a new worker in the
+    slot, the run flag up, the search's text in the box."""
+    host.comp_text_area.setText("the next search")
+    host.comp_thread = run = _LaterRun()
+    host.is_comp_running = True
+    return run
+
+
+def _assert_untouched(host, run, delivered, on_rows):
+    assert run.cancels == 0 and run.isRunning(), "the old retry cancelled the new run"
+    assert host.comp_text_area.toPlainText() == "the next search", "the old retry cleared the new run"
+    assert host.is_comp_running is True
+    on_rows({"main": OLD_COMP_RESULTS})
+    assert delivered == [("rows", {"main": OLD_COMP_RESULTS})], "the new run's results were dropped"
+
+
+def test_a_second_new_after_the_witness_finished_ends_the_first_ones_retry(session_file, monkeypatch):
+    """The witness New waited for finished before the 400 ms retry fired, so
+    New pressed again reset at once -- and left the first retry armed, which
+    then cancelled and cleared the search started next."""
+    host, batch, timers, emitted = _batch_host(monkeypatch)
+    APP._reset_composition(host)                          # New, mid-batch
+    batch.running = False                                 # the witness finishes
+    APP._reset_composition(host)                          # New again: resets at once
+    assert host.comp_text_area.toPlainText() == "" and host.is_comp_running is False
+    assert len(timers) == 1, "the immediate reset armed a retry of its own"
+
+    run = _start_a_new_run(host)
+    delivered = []
+    on_rows, _status, _error = _bind_batch_slots(host, delivered)
+    timers.pop()()                                        # the first New's retry fires
+    assert timers == []
+    _assert_untouched(host, run, delivered, on_rows)
+    assert emitted == ["cancelled"]
+
+
+def test_a_second_new_then_typing_the_next_search_keeps_the_text(session_file, monkeypatch):
+    """The same retry, firing before the next search is started: it reset the
+    tab a second time and wiped what the user had begun to type."""
+    host, batch, timers, _emitted = _batch_host(monkeypatch)
+    APP._reset_composition(host)                          # New, mid-batch
+    batch.running = False
+    APP._reset_composition(host)                          # New again: resets at once
+    host.comp_text_area.setText("the next search")        # typed, not yet run
+    timers.pop()()
+    assert host.comp_text_area.toPlainText() == "the next search", "the old retry reset the tab again"
+    assert timers == []
+
+
+@pytest.mark.parametrize("stop", ["toggle_composition", "cancel_composition"])
+def test_stop_after_new_finishes_that_new_and_ends_its_retry(session_file, monkeypatch, stop):
+    """Stop (the button, or Escape) after the witness finished used to reset
+    only the run controls. The New before it had already discarded the
+    batch's results, so there was nothing to keep -- and its retry stayed
+    armed and cleared the next search. Stop now completes the New."""
+    host, batch, timers, _emitted = _batch_host(monkeypatch)
+    APP._reset_composition(host)                          # New, mid-batch
+    batch.running = False                                 # the witness finishes
+    getattr(APP, stop)(host)
+    cleared_by_stop = (host.comp_text_area.toPlainText() == "" and host.is_comp_running is False)
+
+    run = _start_a_new_run(host)
+    delivered = []
+    on_rows, _status, _error = _bind_batch_slots(host, delivered)
+    timers.pop()()                                        # the New's retry fires
+    _assert_untouched(host, run, delivered, on_rows)
+    assert cleared_by_stop, "Stop dropped the New pressed before it"
+
+
+@pytest.mark.parametrize("stop", ["toggle_composition", "cancel_composition"])
+def test_stop_while_new_waits_keeps_waiting_for_the_witness(session_file, monkeypatch, stop):
+    """Stop while the witness is still running changes nothing: New already
+    asked the batch to stop, the tab still says it is being cleared (not that
+    the results found so far are kept -- New dropped them), and the one retry
+    does the reset once the witness finishes."""
+    host, batch, timers, _emitted = _batch_host(monkeypatch)
+    # The real stop guard: it is what says the results are kept.
+    host._comp_last_result_method, host._comp_grouping_active = "passage", False
+    host._passage_scan_in_flight = lambda: APP._passage_scan_in_flight(host)
+    host._refuse_stop_during_passage_scan = lambda: APP._refuse_stop_during_passage_scan(host)
+    APP._reset_composition(host)                          # New, mid-batch
+    getattr(APP, stop)(host)
+    assert host.comp_text_area.toPlainText() == "old source text" and len(timers) == 1
+    assert host.lbl_comp_status.text() == genizah_app.tr(
+        "Clearing once the current witness finishes.")
+
+    batch.running = False
+    timers.pop()()
+    assert host.comp_text_area.toPlainText() == "" and host.is_comp_running is False
+    assert timers == [] and not host._reset_is_pending()
+
+
+def test_a_run_started_while_new_waits_is_not_cleared_by_its_retry(session_file, monkeypatch):
+    """Any path that starts a composition run once the witness is done
+    (run_composition only refuses while the old worker still runs) puts a
+    new worker in the slot. The retry belongs to the batch it was armed for."""
+    host, batch, timers, _emitted = _batch_host(monkeypatch)
+    APP._reset_composition(host)                          # New, mid-batch
+    batch.running = False
+    run = _start_a_new_run(host)
+    delivered = []
+    on_rows, _status, _error = _bind_batch_slots(host, delivered)
+    timers.pop()()
+    assert timers == []
+    _assert_untouched(host, run, delivered, on_rows)
+    assert not host._reset_is_pending()
+
+
+def test_new_during_the_next_batch_arms_its_own_retry(session_file, monkeypatch):
+    """A retry armed for an earlier batch, still in flight when New is pressed
+    during the next one, must not stand in for it: that New discards the new
+    batch at once and gets its own retry, and the old one stops."""
+    host, first, timers, emitted = _batch_host(monkeypatch)
+    APP._reset_composition(host)                          # New during the first batch
+    first.running = False
+    host.comp_text_area.setText("the next search")
+    host.comp_thread = second = _WitnessBatchThread()     # the next batch starts
+    delivered = []
+    on_rows, _status, _error = _bind_batch_slots(host, delivered)
+
+    APP._reset_composition(host)                          # New during it
+    assert second.cancel_requested and len(timers) == 2
+    on_rows({"main": OLD_COMP_RESULTS, "partial": True})
+    assert delivered == [], "the batch New discarded still wrote the tab"
+    assert emitted == ["cancelled", "cancelled"]
+
+    stale, current = timers
+    timers.clear()
+    stale()                                               # the first batch's retry
+    assert host.comp_text_area.toPlainText() == "the next search" and timers == []
+    current()                                             # second batch still running
+    assert len(timers) == 1 and host.comp_text_area.toPlainText() == "the next search"
+    second.running = False
+    timers.pop()()
+    assert host.comp_text_area.toPlainText() == "" and host.is_comp_running is False
+    assert timers == []
+
+
+def test_the_deferred_reset_still_resets_exactly_once(session_file, monkeypatch):
+    host, batch, timers, emitted = _batch_host(monkeypatch)
+    resets = []
+    host.reset_comp_ui = lambda: (resets.append(1), APP.reset_comp_ui(host))
+    APP._reset_composition(host)                          # New, mid-batch
+    timers.pop()()                                        # the witness is still running
+    assert resets == [] and len(timers) == 1, "the retry did not keep waiting"
+    batch.running = False
+    timers.pop()()
+    assert resets == [1] and timers == []
+    assert host.comp_text_area.toPlainText() == "" and host.is_comp_running is False
+    assert emitted == ["cancelled"]
 
 
 def _connects(method):
