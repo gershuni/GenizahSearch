@@ -58,7 +58,44 @@ SYNC_KEYS = (
     "{} ({} items)",
     "... and {} more",
     TOO_LONG_NOT_SAVED,
+    # Sign-in at startup, sign-out
+    "Could not check the lists in your account: {}. List sync stays on; Sync lists now tries again.",
+    "Signing out...",
+    "These lists were not uploaded before you signed out: {}. Your changes to them are saved on "
+    "this computer and are uploaded after you next sign in.",
+    "Your latest list changes were not uploaded before you signed out. They are saved on this "
+    "computer and are uploaded after you next sign in.",
+    "List sync was not on in this session, so your list changes were not uploaded. They are saved "
+    "on this computer and are uploaded after you next sign in.",
+    "Some notes differ from your account and were not uploaded. They are kept on this computer; "
+    "after you next sign in, use Sync lists now, then Merge Both, to keep both versions.",
+    "Your lists cannot be saved on this computer at the moment ({} cannot be written). List changes "
+    "that did not reach your account before you signed out are lost when you close the program.",
+    # Sync lists now, and the website-removal prompt
+    "Sync lists now",
+    "Download, upload or merge your lists with your account on genizahsearch.com",
+    "Sign in to sync your lists with your account",
+    "Entries removed on the website",
+    "These entries were removed from your lists on genizahsearch.com. They are still on this "
+    "computer, and until you choose they stay here and are not uploaded again.",
+    "Decide later",
+    "Remove from this computer too",
+    "Keep it (and add it back on the website)",
+    "Remove all from this computer too",
+    "Keep all (and add them back on the website)",
+    "Choice",
+    "Removed from this computer: {}. To be added back on the website: {}.",
 )
+
+
+def test_the_button_names_in_the_notes_lines_are_the_buttons_labels():
+    """"Sync lists now" and "Merge Both" in the hints are the two buttons' own labels,
+    in both languages."""
+    for key in SYNC_KEYS:
+        if "Sync lists now" in key and key != "Sync lists now":
+            assert "'" + TRANSLATIONS["Sync lists now"] + "'" in TRANSLATIONS[key], key
+        if "Merge Both" in key:
+            assert "'" + TRANSLATIONS["Merge Both"] + "'" in TRANSLATIONS[key], key
 NEW_KEYS = (FROM_THE_CLOUD, DIFFERING, MERGED, TOO_LONG, TAGS) + SYNC_KEYS
 
 DOWNLOADED = "Downloaded {lists} lists and {items} items from cloud."

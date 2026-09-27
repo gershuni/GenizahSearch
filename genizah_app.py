@@ -1400,6 +1400,7 @@ class GenizahGUI(QMainWindow):
     _logout_pending = False
     _logout_generation = 0
     _logout_job = None
+    _logout_timer = None
     LOGOUT_SYNC_BUDGET_S = 10           # the longest a sign-out waits for its last list upload
     LISTS_DIALOG_RECHECK_MS = 500       # how often a held sync question looks for a free screen
     _held_lists_dialog = None
@@ -1409,6 +1410,10 @@ class GenizahGUI(QMainWindow):
     # True while a close waits for an open question to be answered; a list-sync
     # question stays held meanwhile (_sync_dialog_allowed).
     _close_waiting_for_prompt = False
+    btn_lists_sync_now = None           # the Lists tab's Sync lists now
+    _web_removal_timer = None           # a held website-removal offer's re-check
+    _web_removal_offer_manual = False
+    _web_removals_shown = frozenset()   # (item_id, list_id) already offered this session
 
     def __init__(self):
         super().__init__()
@@ -2384,8 +2389,10 @@ class GenizahGUI(QMainWindow):
             pass  # Cache operation failed; continue without cached data
 
     def _update_corner_login_state(self):
-        """Update the corner login button based on login state."""
-        if self.corrections_client.is_logged_in():
+        """Update the corner login button based on login state (and Sync lists now,
+        which needs a sign-in: is_logged_in() makes a request, so it is asked once)."""
+        logged_in = self.corrections_client.is_logged_in()
+        if logged_in:
             user = self.corrections_client.current_user
             if user:
                 self.corner_login_btn.setText(f"{user.username} ({tr('Logout')})")
@@ -2393,6 +2400,15 @@ class GenizahGUI(QMainWindow):
                 self.corner_login_btn.setText(tr("Logout"))
         else:
             self.corner_login_btn.setText(tr("Login"))
+        self._set_lists_sync_now_enabled(logged_in and not self._logout_pending)
+
+    def _set_lists_sync_now_enabled(self, enabled):
+        button = self.btn_lists_sync_now
+        if button is None:
+            return
+        button.setEnabled(bool(enabled))
+        button.setToolTip(tr("Download, upload or merge your lists with your account on genizahsearch.com")
+                          if enabled else tr("Sign in to sync your lists with your account"))
 
     def _set_active_tab(self, target) -> None:
         """Set the active tab programmatically without emitting telemetry.
@@ -2506,6 +2522,8 @@ class GenizahGUI(QMainWindow):
         self._logout_generation += 1
         token = self._logout_generation
         self._drop_held_lists_dialog()
+        self._stop_web_removal_offer()
+        self._set_lists_sync_now_enabled(False)
         if not (self.lists_mgr and self.lists_mgr.is_sync_available()):
             self._finish_logout({'skipped': True, 'sync_off': True}, token=token)
             return
@@ -2517,10 +2535,17 @@ class GenizahGUI(QMainWindow):
         job = self._lists_sync_runner().begin_logout(
             on_done=lambda outcome, t=token: self._finish_logout(outcome, token=t),
             budget_s=self.LOGOUT_SYNC_BUDGET_S)
-        if self._logout_pending and self._logout_generation == token:
-            self._logout_job = job
-        QTimer.singleShot(int(self.LOGOUT_SYNC_BUDGET_S * 1000) + 500,
-                          lambda t=token: self._finish_logout(None, token=t))
+        if not (self._logout_pending and self._logout_generation == token):
+            return  # it ended already
+        self._logout_job = job
+        # The budget, a little past the runner's own deadline for the upload. Owned by
+        # the window, so it cannot fire into a window already gone.
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.setInterval(int(self.LOGOUT_SYNC_BUDGET_S * 1000) + 500)
+        timer.timeout.connect(lambda t=token: self._finish_logout(None, token=t))
+        self._logout_timer = timer
+        timer.start()
 
     def _finish_logout(self, outcome=None, silent=False, token=None):
         """The second half of a sign-out; runs once per sign-out.
@@ -2537,7 +2562,15 @@ class GenizahGUI(QMainWindow):
             return
         self._logout_pending = False
         job, self._logout_job = self._logout_job, None
+        timer, self._logout_timer = self._logout_timer, None
+        if timer is not None:
+            try:
+                timer.stop()
+                timer.deleteLater()
+            except RuntimeError:
+                pass
         runner = self._lists_sync
+        self._stop_web_removal_offer()
 
         def forget_sync():
             self.lists_mgr.disable_cloud_sync()
@@ -3123,14 +3156,17 @@ class GenizahGUI(QMainWindow):
         except Exception as e:
             logger.exception("List sync result could not be shown")
             _show_ok_notice(self, 'warning', tr("Sync Error"), str(e))
+        self._offer_web_removals(manual=True)
 
     def _on_lists_auto_done(self, outcome):
-        """An automatic upload ended (UI thread): the once-a-session notes hints."""
+        """An automatic upload ended (UI thread): the website-removal prompt for
+        entries not offered yet, and the once-a-session notes hints."""
         try:
             outcome = outcome or {}
             if (outcome.get('shutdown') or outcome.get('stale') or outcome.get('cancelled')
                     or getattr(self, '_app_shutting_down', False)):
                 return
+            self._offer_web_removals(manual=False)
             upload = outcome.get('upload') or {}
             lines = []
             if upload.get('notes_differing', 0) > 0 and not self._lists_notes_hint_shown:
@@ -3145,6 +3181,84 @@ class GenizahGUI(QMainWindow):
                 self._lists_sync_status(" ".join(lines))
         except Exception as e:
             logger.exception("Automatic list upload result could not be handled: %s", e)
+
+    def _offer_web_removals(self, manual=False):
+        """Ask about entries the website removed from a list (desktop/lists_web_removals_dialog.py).
+
+        Only on a free screen (_sync_dialog_allowed); otherwise one held offer looks
+        again every LISTS_DIALOG_RECHECK_MS until it can open. A manual sync offers
+        every pending entry, an automatic or startup one only those not offered yet
+        this session. While lists.pkl cannot be saved nothing is offered: an answer
+        could not be kept, and the prompt says the entries stay here -- they wait in
+        memory, and the first sync end after a save lands offers them.
+        """
+        try:
+            mgr = self.lists_mgr
+            # a sign-out drops the offer; the entries are offered after the next sign-in
+            if mgr is None or self._logout_pending or mgr.saves_failing():
+                self._stop_web_removal_offer()
+                return
+            pending = list(mgr.pending_web_removals())
+            if not (manual or self._web_removal_offer_manual):
+                pending = [key for key in pending if key not in self._web_removals_shown]
+            if not pending:
+                self._stop_web_removal_offer()
+                return
+            if not self._sync_dialog_allowed():
+                self._web_removal_offer_manual = self._web_removal_offer_manual or manual
+                if self._web_removal_timer is None:
+                    timer = QTimer(self)
+                    timer.setInterval(self.LISTS_DIALOG_RECHECK_MS)
+                    timer.timeout.connect(self._recheck_web_removal_offer)
+                    self._web_removal_timer = timer
+                    timer.start()
+                return
+            self._stop_web_removal_offer()
+            from desktop.lists_web_removals_dialog import ask_about_web_removals
+            choices = ask_about_web_removals(self, [self._web_removal_entry(*key) for key in pending])
+            self._web_removals_shown = frozenset(self._web_removals_shown) | frozenset(pending)
+            if not choices:
+                return  # closed, or every row left to decide later
+            removed, kept = mgr.resolve_web_removals(choices)
+            if hasattr(self, 'lists_tree'):
+                self.lists_refresh_all()
+            if removed or kept:
+                # A Remove can queue deletes too (a row on its way to that list).
+                self._lists_auto_sync()
+                self._lists_sync_status(tr("Removed from this computer: {}. To be added back on the "
+                                           "website: {}.").format(removed, kept))
+        except Exception as e:
+            logger.exception("The website-removal prompt failed: %s", e)
+
+    def _recheck_web_removal_offer(self):
+        self._offer_web_removals(manual=self._web_removal_offer_manual)
+
+    def _stop_web_removal_offer(self):
+        timer, self._web_removal_timer = self._web_removal_timer, None
+        self._web_removal_offer_manual = False
+        if timer is not None:
+            try:
+                timer.stop()
+                timer.deleteLater()
+            except RuntimeError:
+                pass
+
+    def _web_removal_entry(self, item_id, list_id):
+        """(item_id, list_id, shelfmark text, list name) for one row of the prompt."""
+        item = self.lists_mgr.get_item(item_id) or {}
+        sys_id = item.get('sys_id') or item_id
+        shelfmark = item.get('shelfmark_override')
+        meta = getattr(self, 'meta_mgr', None)
+        if not shelfmark and meta is not None:
+            try:
+                shelfmark = meta.get_meta_for_id(sys_id)[0]
+            except Exception:
+                shelfmark = None
+        text = shelfmark or sys_id
+        if item.get('img') not in (None, ''):
+            text = f"{text}, {tr('Page')} {item['img']}"
+        lst = dict(self.lists_mgr.data.get('lists', {}).get(list_id) or {}, id=list_id)
+        return (item_id, list_id, text, self._get_list_display_name(lst))
 
     def _show_discoveries_dialog(self):
         dialog = DiscoveriesDialog(
@@ -12683,6 +12797,13 @@ class GenizahGUI(QMainWindow):
         btn_trash.setToolTip(tr("View and restore deleted lists"))
         btn_trash.clicked.connect(self.lists_show_trash)
         sidebar_actions.addWidget(btn_trash)
+
+        self.btn_lists_sync_now = QPushButton(tr("Sync lists now"))
+        self.btn_lists_sync_now.clicked.connect(lambda: self._enable_lists_cloud_sync(always_offer=True))
+        sidebar_actions.addWidget(self.btn_lists_sync_now)
+        self._set_lists_sync_now_enabled(
+            bool(getattr(getattr(self, 'corrections_client', None), 'current_user', None))
+            and not self._logout_pending)
 
         sidebar_layout.addLayout(sidebar_actions)
 

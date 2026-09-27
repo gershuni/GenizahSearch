@@ -280,8 +280,14 @@ def gui(monkeypatch):
         return host
 
     yield make
-    for host in hosts:  # no timer of one test fires in the next
-        getattr(host, "_drop_held_lists_dialog", lambda: None)()
+    # No timer of one test may fire in the next: no event loop runs here, so
+    # deleteLater never deletes a host, and its timers would live on.
+    for host in hosts:
+        for stop in ("_drop_held_lists_dialog", "_stop_web_removal_offer"):
+            getattr(host, stop, lambda: None)()
+        timer = getattr(host, "_logout_timer", None)
+        if timer is not None:
+            timer.stop()
         host.deleteLater()
 
 
@@ -1263,7 +1269,7 @@ def test_a_failing_sign_out_at_close_still_stops_the_list_sync(gui):
     _signed_in(host)
     host._do_logout()
 
-    def broken(**kw):
+    def broken(*a, **kw):
         raise ValueError("the sign-out broke")
 
     host._finish_logout = broken
@@ -1310,3 +1316,265 @@ def test_no_false_promise_text_remains():
     docs = [ast.get_docstring(n) or "" for n in ast.walk(tree)
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Module))]
     assert not any("the auto-sync worker" in d for d in docs)
+
+
+# ---------------------------------------------------------------------------
+# Sync lists now, on the Lists tab
+# ---------------------------------------------------------------------------
+
+def _lists_tab(host):
+    host.lists_tab = host.create_lists_tab()
+    return host.btn_lists_sync_now
+
+
+def test_sync_lists_now_is_enabled_only_when_signed_in_and_offers_the_choice_even_when_in_sync(gui, lang):
+    host = gui()
+    button = _lists_tab(host)
+    assert button.text() == tr("Sync lists now")
+
+    host.corrections_client.signed_in = False
+    host._update_corner_login_state()
+    assert not button.isEnabled()
+    assert button.toolTip() == tr("Sign in to sync your lists with your account")
+
+    host.corrections_client.sign_in()
+    host._update_corner_login_state()
+    assert button.isEnabled()
+    assert button.toolTip() == tr("Download, upload or merge your lists with your account on "
+                                  "genizahsearch.com")
+
+    host.lists_mgr.data["lists"][host.list_ids[0]]["cloud_id"] = "cl-0"
+    host.lists_mgr.data["lists"]["default"]["cloud_id"] = "cl-1"
+    button.click()
+    host._lists_sync.finish(host._lists_sync.last("preview"),
+                            {"preview": _preview(2, names=["General", "Local list"])})
+    assert len(host.dialogs) == 1, "Sync lists now did not offer the choice for lists in sync"
+
+    _signed_in(host)
+    host._do_logout()
+    assert not button.isEnabled(), "Sync lists now stayed enabled during the sign-out"
+    host._lists_sync.finish(host._lists_sync.last("logout"), {"upload": {"success": True}})
+    assert not button.isEnabled() and button.toolTip() == tr("Sign in to sync your lists with your account")
+    if lang == "he":
+        assert all(_is_hebrew(_first_letter(t)) for t in (button.text(), button.toolTip()))
+
+
+# ---------------------------------------------------------------------------
+# The website-removal prompt
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def removals():
+    from desktop import lists_web_removals_dialog
+    return lists_web_removals_dialog
+
+
+ENTRIES = [("990000001", "L1", "T-S 1.1", "List one"),
+           ("990000002::img::3", "L1", "T-S 2.2, Page 3", "List one"),
+           ("990000003", "L2", "ENA 3", "List two")]
+
+
+def test_the_removal_dialog_returns_each_choice(removals, lang):
+    dialog = removals.WebRemovalsDialog(None, ENTRIES)
+    try:
+        assert dialog.windowTitle() == tr("Entries removed on the website")
+        assert [dialog.table.horizontalHeaderItem(i).text() for i in range(3)] == [
+            tr("Shelfmark"), tr("List"), tr("Choice")]
+        box = dialog.choice_boxes[0]
+        assert [box.itemText(i) for i in range(box.count())] == [
+            tr("Decide later"), tr("Remove from this computer too"),
+            tr("Keep it (and add it back on the website)")]
+        assert [b.currentData() for b in dialog.choice_boxes] == ["later"] * 3
+        assert (dialog.layoutDirection() == Qt.LayoutDirection.RightToLeft) == (lang == "he")
+        if lang == "he":
+            texts = [w.text() for w in dialog.findChildren(QLabel) + dialog.findChildren(QPushButton)]
+            assert all(_is_hebrew(_first_letter(t)) for t in texts), texts
+        dialog.choice_boxes[0].setCurrentIndex(1)
+        dialog.choice_boxes[2].setCurrentIndex(2)
+        dialog.apply_btn.click()
+        assert dialog.choices() == {("990000001", "L1"): "remove", ("990000003", "L2"): "keep"}
+    finally:
+        dialog.deleteLater()
+
+    for button, choice in (("remove_all_btn", "remove"), ("keep_all_btn", "keep")):
+        dialog = removals.WebRemovalsDialog(None, ENTRIES)
+        getattr(dialog, button).click()
+        assert dialog.choices() == {(e[0], e[1]): choice for e in ENTRIES}
+        dialog.deleteLater()
+
+    dialog = removals.WebRemovalsDialog(None, ENTRIES)
+    dialog.choice_boxes[0].setCurrentIndex(1)
+    dialog.close_btn.click()
+    assert dialog.choices() == {}, "Close decided something"
+    dialog.deleteLater()
+
+
+def test_ask_about_web_removals_shows_the_prompt_and_returns_its_answer(removals, monkeypatch):
+    def answer(self):
+        self.choice_boxes[1].setCurrentIndex(2)
+        self._apply()
+        return 1
+
+    monkeypatch.setattr(removals.WebRemovalsDialog, "exec", answer)
+    assert removals.ask_about_web_removals(None, ENTRIES) == {("990000002::img::3", "L1"): "keep"}
+
+
+def _prompting(removals, host, monkeypatch, pending, decide=None):
+    """pending_web_removals() returns `pending`; the prompt answers `decide`."""
+    asked, resolved = [], []
+
+    def ask(parent, entries):
+        asked.append(list(entries))
+        return dict(decide or {})
+
+    def resolve(choices):
+        resolved.append(dict(choices))
+        return (sum(v == "remove" for v in choices.values()), sum(v == "keep" for v in choices.values()))
+
+    monkeypatch.setattr(removals, "ask_about_web_removals", ask)
+    monkeypatch.setattr(host.lists_mgr, "pending_web_removals", lambda: list(pending))
+    monkeypatch.setattr(host.lists_mgr, "resolve_web_removals", resolve)
+    host.meta_mgr = types.SimpleNamespace(
+        get_meta_for_id=lambda sid: ("T-S 1.1" if sid == "990000001" else "", "a title"))
+    return asked, resolved
+
+
+def _auto_done(host):
+    host._on_lists_auto_done({"upload": {"success": True}})
+
+
+def test_the_removal_prompt_lists_what_the_website_removed_and_applies_each_choice(gui, removals, monkeypatch, lang):
+    host = gui()
+    _signed_in(host)
+    list_id = host.list_ids[0]
+    host.lists_mgr.add_item("990000002", list_id, img="3")
+    pending = [("990000001", list_id), ("990000002::img::3", list_id)]
+    asked, resolved = _prompting(removals, host, monkeypatch, pending,
+                                 decide={pending[0]: "remove", pending[1]: "keep"})
+
+    _auto_done(host)
+
+    assert asked == [[("990000001", list_id, "T-S 1.1", "Local list"),
+                      ("990000002::img::3", list_id, f"990000002, {tr('Page')} 3", "Local list")]]
+    assert resolved == [{pending[0]: "remove", pending[1]: "keep"}]
+    assert host.refreshed and host._lists_sync.names().count("request_auto") == 1
+    assert status(host) == tr("Removed from this computer: {}. To be added back on the website: {}.").format(1, 1)
+    if lang == "he":
+        assert _is_hebrew(_first_letter(status(host)))
+
+
+def test_closing_the_removal_prompt_decides_nothing(gui, removals, monkeypatch):
+    host = gui()
+    _signed_in(host)
+    asked, resolved = _prompting(removals, host, monkeypatch, [("990000001", host.list_ids[0])], decide={})
+    _auto_done(host)
+    assert len(asked) == 1 and resolved == []
+    assert "request_auto" not in host._lists_sync.names()
+
+
+def test_a_remove_only_answer_asks_for_an_upload(gui, removals, monkeypatch):
+    host = gui()
+    _signed_in(host)
+    entry = ("990000001", host.list_ids[0])
+    _prompting(removals, host, monkeypatch, [entry], decide={entry: "remove"})
+    _auto_done(host)
+    assert host._lists_sync.names().count("request_auto") == 1
+
+
+def test_the_removal_prompt_is_not_repeated_after_auto_syncs_but_is_after_sync_lists_now(gui, removals, monkeypatch):
+    host = gui()
+    _signed_in(host)
+    entry = ("990000001", host.list_ids[0])
+    asked, resolved = _prompting(removals, host, monkeypatch, [entry], decide={})   # decide later
+    _auto_done(host)
+    _auto_done(host)
+    assert len(asked) == 1, "an automatic sync offered the same entry again"
+    host._do_sync_action(DIALOG, "upload")
+    host._lists_sync.finish(host._lists_sync.jobs[-1], {"upload": {"success": True}})
+    assert len(asked) == 2, "a manual sync did not offer the entry still pending"
+
+
+@pytest.mark.parametrize("when", ["sign-out", "shutting-down", "close-pending", "close-waiting-for-prompt"])
+def test_the_removal_prompt_is_not_shown_during_sign_out_or_close(gui, removals, monkeypatch, when):
+    host = gui()
+    _signed_in(host)
+    entry = ("990000001", host.list_ids[0])
+    asked, _ = _prompting(removals, host, monkeypatch, [entry], decide={})
+    if when == "sign-out":
+        host._do_logout()
+    elif when == "shutting-down":
+        host._app_shutting_down = True
+    elif when == "close-pending":
+        host._close_pending = True
+    else:
+        host._close_waiting_for_prompt = True
+    _auto_done(host)
+    pump(0.3)
+    assert asked == [], f"the removal prompt opened during {when}"
+    if when.startswith("close"):
+        setattr(host, "_close_pending" if when == "close-pending" else "_close_waiting_for_prompt", False)
+        pump(0.3)                           # the close was cancelled: the held offer opens
+        assert len(asked) == 1
+    elif when == "sign-out":
+        host._lists_sync.finish(host._lists_sync.last("logout"), {"upload": {"success": True}})
+        pump(0.3)
+        assert asked == [], "the offer held from before the sign-out opened after it"
+
+
+@pytest.mark.parametrize("sync", ["auto", "manual", "startup"])
+@pytest.mark.parametrize("blocked", ["hidden", "restoring", "modal-open", "close-pending",
+                                     "close-waiting-for-prompt"])
+def test_nothing_sync_related_appears_before_the_window_is_shown_or_over_the_restore_question(
+        gui, removals, monkeypatch, sync, blocked):
+    host = gui()
+    entry = ("990000001", host.list_ids[0])
+    asked, _ = _prompting(removals, host, monkeypatch, [entry], decide={})
+    set_blocked = {
+        "hidden": lambda on: host.screen.__setitem__("visible", not on),
+        "restoring": lambda on: setattr(host, "_restoring_session", on),
+        "modal-open": lambda on: host.screen.__setitem__("modal", object() if on else None),
+        "close-pending": lambda on: setattr(host, "_close_pending", on),
+        "close-waiting-for-prompt": lambda on: setattr(host, "_close_waiting_for_prompt", on),
+    }[blocked]
+    set_blocked(True)
+    if sync == "startup":
+        host._restore_session = lambda: None
+        host._restore_session_then_lists_sync()
+        host._lists_sync.finish(host._lists_sync.last("preview"), {"preview": _preview(2)})
+        _auto_done(host)
+    elif sync == "manual":
+        _signed_in(host)
+        host._do_sync_action(DIALOG, "upload")
+        host._lists_sync.finish(host._lists_sync.jobs[-1], {"upload": {"success": True}})
+    else:
+        _signed_in(host)
+        _auto_done(host)
+    pump(0.3)
+    assert asked == [] and host.dialogs == [], f"a sync question opened while {blocked}"
+
+    set_blocked(False)
+    pump(0.3)
+    assert len(asked) == 1, "the held removal prompt did not open once the screen was free"
+    if sync == "startup":
+        assert len(host.dialogs) == 1, "the held sync choice did not open once the screen was free"
+    pump(0.2)
+    assert len(asked) == 1 and len(host.dialogs) == (1 if sync == "startup" else 0)
+
+
+def test_no_sync_text_says_saved_while_lists_cannot_be_saved_removal_prompt_held(gui, removals, monkeypatch):
+    host = gui()
+    _signed_in(host)
+    entry = ("990000001", host.list_ids[0])
+    asked, _ = _prompting(removals, host, monkeypatch, [entry], decide={})
+    failing = {"on": True}
+    monkeypatch.setattr(host.lists_mgr, "saves_failing", lambda: failing["on"])
+    _auto_done(host)
+    pump(0.3)
+    assert asked == [], "the prompt (\"until you choose they stay here\") opened while nothing is saved"
+    assert host._web_removal_timer is None, "a held offer keeps looking while saves fail"
+    failing["on"] = False                           # a later edit's save landed
+    _auto_done(host)
+    pump(0.2)
+    assert len(asked) == 1
+    _auto_done(host)
+    assert len(asked) == 1, "offered more than once"

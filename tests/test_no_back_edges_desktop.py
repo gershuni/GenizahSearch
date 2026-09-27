@@ -73,6 +73,8 @@ DESKTOP_MODULES = [
     "desktop/single_instance.py",
     # 2026-09-27: the list syncs, one at a time, off the UI thread.
     "desktop/lists_sync_runner.py",
+    # The website-removal prompt of the list sync.
+    "desktop/lists_web_removals_dialog.py",
 ]
 
 # Compound statement types whose bodies run at import time

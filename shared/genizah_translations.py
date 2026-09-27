@@ -3666,6 +3666,23 @@ TRANSLATIONS.update({
         "הרשימות מהענן הורדו, אבל ההעלאה נעצרה. שאר השינויים שמורים במחשב הזה, אבל עדיין לא הגיעו לחשבונך.",
     "Some notes differ from your account and were not uploaded. To keep both versions, use Sync lists now, then Merge Both.":
         "יש הערות ששונות מאלה שבחשבונך ולכן לא הועלו. כדי לשמור את שתי הגרסאות, לחץ על 'סנכרן רשימות עכשיו' ואז על 'מזג את שתיהן'.",
+    # The Lists tab's button, its tooltip, and its tooltip while signed out
+    "Sync lists now": "סנכרן רשימות עכשיו",
+    "Download, upload or merge your lists with your account on genizahsearch.com":
+        "הורדה, העלאה או מיזוג של הרשימות עם החשבון שלך באתר genizahsearch.com",
+    "Sign in to sync your lists with your account": "יש להתחבר כדי לסנכרן את הרשימות עם החשבון שלך",
+    # The website-removal prompt (desktop/lists_web_removals_dialog.py) and the line after it
+    "Entries removed on the website": "פריטים שהוסרו באתר",
+    "These entries were removed from your lists on genizahsearch.com. They are still on this computer, and until you choose they stay here and are not uploaded again.":
+        "הפריטים האלה הוסרו מהרשימות שלך באתר genizahsearch.com. הם עדיין במחשב הזה, ועד שתבחר הם יישארו כאן ולא יועלו שוב.",
+    "Decide later": "להחליט אחר כך",
+    "Remove from this computer too": "להסיר גם מהמחשב הזה",
+    "Keep it (and add it back on the website)": "להשאיר (ולהוסיף שוב לאתר)",
+    "Remove all from this computer too": "להסיר את כולם גם מהמחשב הזה",
+    "Keep all (and add them back on the website)": "להשאיר את כולם (ולהוסיף שוב לאתר)",
+    "Choice": "בחירה",
+    "Removed from this computer: {}. To be added back on the website: {}.":
+        "הוסרו מהמחשב הזה: {}. יתווספו שוב לאתר: {}.",
     # A restored sign-in at startup whose preview failed (offline): status bar
     "Could not check the lists in your account: {}. List sync stays on; Sync lists now tries again.":
         "לא ניתן היה לבדוק את הרשימות בחשבונך: {}. סנכרון הרשימות נשאר פעיל; 'סנכרן רשימות עכשיו' ינסה שוב.",
