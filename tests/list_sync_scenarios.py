@@ -606,20 +606,26 @@ class Desk:
 
             def save(self):
                 desk.disk = pickle.dumps(self.data)  # also proves the store stays picklable
-                desk.disk_renames = desk.world.renames_of(desk)
+                desk.disk_renames = desk.renames()
                 return True
 
             def write_snapshot(self, label):
                 desk.snaps.append(copy.deepcopy(self.data))
-                desk.snap_renames.append(desk.world.renames_of(desk))
+                snap_renames = desk.__dict__.setdefault('snap_renames', [])
+                snap_renames.append(desk.renames())
                 del desk.snaps[:-12]
-                del desk.snap_renames[:-12]
+                del snap_renames[:-12]
                 return True
 
         lm = ScenarioListsManager(None)
         if data is not None:
             lm.data = data
         return lm
+
+    def renames(self):
+        """A copy of the world's record of this desktop's pending renames (none for a stand-in world)."""
+        of = getattr(self.world, 'renames_of', None)
+        return of(self) if of is not None else {}
 
     def _sync(self, engine):
         s = engine.ListsCloudSync(self.lm)
