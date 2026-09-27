@@ -71,6 +71,13 @@ def list_item_browse_url(sys_id, page) -> str:
     return url
 
 
+def list_item_preview_page(page) -> int:
+    """The page a list item's text preview shows: its page when that is a number, else the
+    first page (the same rule as its Browse link)."""
+    page = _page_text(page)
+    return int(page) if re.fullmatch(r'[0-9]+', page) and int(page) > 0 else 1
+
+
 def _load_list_item_counts() -> Optional[Dict[int, int]]:
     """Return batched item counts for logged-in users; None means legacy fallback.
 
@@ -852,8 +859,8 @@ def create_lists_page():
                             snippet_container = ui.column().classes('w-full')
                             is_expanded = {'value': False}
 
-                            def create_snippet_ui(container, sid, fid, expanded_state):
-                                """Create the snippet UI with lazy loading."""
+                            def create_snippet_ui(container, sid, fid, expanded_state, pnum=1):
+                                """Create the snippet UI with lazy loading (pnum: the item's page)."""
                                 container.clear()
                                 with container:
                                     # Try to get text snippet
@@ -862,7 +869,7 @@ def create_lists_page():
                                         from web.services import get_service
                                         service = get_service()
                                         if service.is_ready:
-                                            page_data = service.get_browse_page(sid, p_num=1)
+                                            page_data = service.get_browse_page(sid, p_num=pnum)
                                             if page_data and page_data.text:
                                                 text_snippet = page_data.text
                                     except Exception as e:
@@ -887,7 +894,7 @@ def create_lists_page():
                                             if len(text_snippet) > max_chars:
                                                 def toggle_expand():
                                                     expanded_state['value'] = not expanded_state['value']
-                                                    create_snippet_ui(container, sid, fid, expanded_state)
+                                                    create_snippet_ui(container, sid, fid, expanded_state, pnum)
 
                                                 with ui.row().classes('w-full justify-center mt-2'):
                                                     btn_text = tr('Show less') if expanded_state['value'] else tr('Show more')
@@ -905,15 +912,15 @@ def create_lists_page():
                             # Load snippet button (lazy load to avoid slow page)
                             load_btn_container = ui.row().classes('w-full')
                             with load_btn_container:
-                                def make_load_handler(container, sid, fid, expanded, btn_container):
+                                def make_load_handler(container, sid, fid, expanded, btn_container, pnum):
                                     def handler():
                                         btn_container.clear()
                                         with container:
                                             ui.spinner(size='sm').classes('mx-auto')
-                                        async def _deferred_snippet(c=container, s=sid, f=fid, e=expanded):
+                                        async def _deferred_snippet(c=container, s=sid, f=fid, e=expanded, p=pnum):
                                             await asyncio.sleep(0.1)
                                             try:
-                                                create_snippet_ui(c, s, f, e)
+                                                create_snippet_ui(c, s, f, e, p)
                                             except Exception:
                                                 pass  # UI element update optional; continue rendering
                                         asyncio.ensure_future(_deferred_snippet())
@@ -922,7 +929,8 @@ def create_lists_page():
                                 ui.button(
                                     tr('Show text preview'),
                                     icon='text_snippet',
-                                    on_click=make_load_handler(snippet_container, sys_id, fl_id, is_expanded, load_btn_container)
+                                    on_click=make_load_handler(snippet_container, sys_id, fl_id, is_expanded, load_btn_container,
+                                                               list_item_preview_page(page))
                                 ).props('flat dense size=sm').style('color: var(--text-tertiary);')
 
     async def remove_item_from_list(item_id: str, list_id: str):

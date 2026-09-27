@@ -415,3 +415,46 @@ def test_a_row_from_before_the_migration_shows_what_it_showed_before(page, monke
     (browse,) = _button_clicks(page.ui, 'menu_book')
     browse()
     page.ui.navigate.to.assert_called_with('/browse?sys_id=990001')
+
+
+# --------------------------------------------------------------------------- the text preview shows the item's page
+
+def test_the_preview_page_is_the_items_page_when_that_is_a_number():
+    assert lists_page.list_item_preview_page('3') == 3
+    assert lists_page.list_item_preview_page(12) == 12
+    for page in (None, '', 'Unknown', '0', '3a'):
+        assert lists_page.list_item_preview_page(page) == 1, page
+
+
+def _preview_pages(fake_ui, monkeypatch):
+    """Click the card's "Show text preview" and return the p_num of every page it read."""
+    import web.services as services
+    asked = []
+
+    class _Service:
+        is_ready = True
+
+        def get_browse_page(self, sys_id, p_num=None, **kw):
+            asked.append((sys_id, p_num))
+            return types.SimpleNamespace(text='text')
+
+    monkeypatch.setattr(services, 'get_service', lambda: _Service())
+    show = _labelled_button_click(fake_ui, 'Show text preview')
+
+    async def click():
+        show()
+        await asyncio.sleep(0.3)   # the handler loads the preview in a task after 0.1 s
+    asyncio.run(click())
+    return asked
+
+
+def test_the_text_preview_of_a_page_item_reads_that_page(page, monkeypatch):
+    page.select(ORDINARY_LIST)
+    assert _preview_pages(page.ui, monkeypatch) == [('990001', 3)]
+
+
+def test_the_text_preview_of_an_item_with_no_page_reads_the_first_page(page, monkeypatch):
+    before = {k: v for k, v in ROW.items() if k != 'page'}
+    monkeypatch.setattr(user_lists, 'get_list_items', lambda list_id, *, client=None: [dict(before)])
+    page.select(ORDINARY_LIST)
+    assert _preview_pages(page.ui, monkeypatch) == [('990001', 1)]
