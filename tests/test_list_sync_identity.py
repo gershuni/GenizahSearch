@@ -1181,23 +1181,159 @@ def test_a_kept_list_that_had_no_cloud_id_keeps_its_trash_state(tmp_path, state,
     assert ends['download-first'] == ends['upload-first']
 
 
-def test_a_list_renamed_on_the_website_keeps_one_local_owner(tmp_path, cloud):
-    # No local list has the new name: the list that holds the id keeps it, and the
-    # Download makes no second local list holding the same cloud list.
+# ---- a list renamed on the website or on this computer
+
+def _rename_on_web(c, cloud_list_id, name):
+    """update_list on the website: name and name_en (web/user_lists.py)."""
+    c.web.table('user_lists').update({'name': name, 'name_en': name}).eq('id', cloud_list_id).execute()
+
+
+def _name_writes(mark, actor='A'):
+    return [r for r in mark(actor=actor, table='user_lists', op='update') if 'name' in r.payload]
+
+
+@pytest.mark.parametrize('first', ['download-first', 'upload-first'])
+def test_a_list_renamed_on_the_website_takes_that_name_and_keeps_its_entries(tmp_path, cloud, first):
+    # Matched by the cloud id it holds, not by name: the Download gives the list the website's
+    # name and keeps its records; an upload -- before that Download or after it -- keeps the name.
     a = make_desk(tmp_path, cloud)
     lid = a.mgr.create_list('L')
     a.mgr.add_item('990001', lid, fl_id='FLa')
     assert a.up()['success']
     five = cloud_id(a, lid)
-    cloud.web.table('user_lists').update({'name': 'Renamed', 'name_en': 'Renamed'}).eq('id', five).execute()
-    assert a.down()['success']
+    records = copy.deepcopy(item(a, '990001::fl::FLa')['cloud_rows'])
+    _rename_on_web(cloud, five, 'Renamed')
+    if first == 'upload-first':
+        mark = cloud.rec.mark()
+        assert a.up()['success']
+        assert _name_writes(mark) == [] and cloud.db.list_by_id(five)['name'] == 'Renamed'
+    result = a.down()
+    assert result['success'] and result['unchecked'] == 0 and result['web_removed'] == []
+    assert a.mgr.data['lists'][lid]['name'] == 'Renamed'
     assert [k for k, ld in a.mgr.data['lists'].items() if ld.get('cloud_id') == five] == [lid]
+    assert item(a, '990001::fl::FLa')['cloud_rows'] == records       # no record dropped for a rename
     state = copy.deepcopy(a.mgr.data)
     assert a.down()['success']
     assert a.mgr.data == state                     # a second Download changes nothing
     mark = cloud.rec.mark()
     assert a.up()['success']
-    assert mark(op='insert') == [] and len(cloud.rows(list_id=five)) == 1
+    assert mark(op='insert') == [] and _name_writes(mark) == [] and len(cloud.rows(list_id=five)) == 1
+    assert cloud.db.list_by_id(five)['name'] == 'Renamed' and a.mgr.data['lists'][lid]['name'] == 'Renamed'
+
+
+@pytest.mark.parametrize('first', ['download-first', 'upload-first'])
+def test_a_list_renamed_here_since_the_last_upload_keeps_its_name_over_the_website(tmp_path, cloud, first):
+    # Renamed on this computer and on the website before this computer uploaded: this
+    # computer's name stands, the next upload sends it, and later website renames are taken again.
+    a = make_desk(tmp_path, cloud)
+    lid = a.mgr.create_list('L')
+    a.mgr.add_item('990001', lid, fl_id='FLa')
+    assert a.up()['success']
+    five = cloud_id(a, lid)
+    records = copy.deepcopy(item(a, '990001::fl::FLa')['cloud_rows'])
+    assert a.mgr.update_list(lid, name='Mine')
+    _rename_on_web(cloud, five, 'Theirs')
+    if first == 'download-first':
+        result = a.down()
+        assert result['success'] and result['unchecked'] == 0 and result['web_removed'] == []
+        assert a.mgr.data['lists'][lid]['name'] == 'Mine'
+        assert item(a, '990001::fl::FLa')['cloud_rows'] == records
+    mark = cloud.rec.mark()
+    assert a.up()['success']
+    assert [r.payload['name'] for r in _name_writes(mark)] == ['Mine']
+    assert cloud.db.list_by_id(five)['name'] == 'Mine'
+    mark = cloud.rec.mark()
+    assert a.down()['success'] and a.up()['success']
+    assert a.mgr.data['lists'][lid]['name'] == 'Mine' and _name_writes(mark) == []
+    _rename_on_web(cloud, five, 'Later')
+    assert a.down()['success']
+    assert a.mgr.data['lists'][lid]['name'] == 'Later'
+    assert item(a, '990001::fl::FLa')['cloud_rows'] == records
+
+
+def test_a_rename_whose_write_reached_no_row_goes_up_with_the_next_upload(tmp_path, cloud):
+    # The list's update answered by an anonymous session writes nothing: the rename made here
+    # is still unsent, so a Download keeps it and the next upload sends it.
+    a = make_desk(tmp_path, cloud)
+    lid = a.mgr.create_list('L')
+    assert a.up()['success']
+    five = cloud_id(a, lid)
+    assert a.mgr.update_list(lid, name='Mine')
+    cloud.rec.hook = lambda client, req: 'anon' if (client.actor, req.t, req.op) == ('A', 'user_lists', 'update') \
+        else None
+    a.up()
+    cloud.rec.hook = None
+    assert cloud.db.list_by_id(five)['name'] == 'L'
+    assert a.down()['success'] and a.mgr.data['lists'][lid]['name'] == 'Mine'
+    assert a.up()['success'] and cloud.db.list_by_id(five)['name'] == 'Mine'
+
+
+def test_two_computers_take_one_website_rename_and_never_rename_it_back(tmp_path, cloud):
+    a, b = make_desk(tmp_path, cloud, 'A'), make_desk(tmp_path, cloud, 'B')
+    lid = a.mgr.create_list('L')
+    a.mgr.add_item('990001', lid, fl_id='FLa')
+    assert a.up()['success'] and b.down()['success']
+    five = cloud_id(a, lid)
+    (blid,) = [k for k, ld in b.mgr.data['lists'].items() if ld.get('cloud_id') == five]
+    _rename_on_web(cloud, five, 'Renamed')
+    b.mgr.add_item('990002', blid, fl_id='FLb')     # B uploads this before it downloads anything
+    mark = cloud.rec.mark()
+    seen = []
+    for d, sync in [(b, 'up'), (a, 'down'), (a, 'up'), (b, 'down')] * 3:
+        assert getattr(d, sync)()['success']
+        seen.append((cloud.db.list_by_id(five)['name'], a.mgr.data['lists'][lid]['name'],
+                     b.mgr.data['lists'][blid]['name']))
+    # the cloud keeps the website's name throughout; each computer takes it at its first
+    # Download and never changes it again
+    assert [s[0] for s in seen] == ['Renamed'] * len(seen)
+    for n in (1, 2):
+        names = [s[n] for s in seen]
+        first = names.index('Renamed')
+        assert set(names[first:]) == {'Renamed'}
+    assert seen[-1] == ('Renamed', 'Renamed', 'Renamed')
+    assert _name_writes(mark, 'A') == [] and _name_writes(mark, 'B') == []
+    for d, key in ((a, lid), (b, blid)):
+        assert sorted(k for k, it in d.mgr.data['items'].items() if key in it['lists']) == [
+            '990001::fl::FLa', '990002::fl::FLb']
+        assert [k for k, ld in d.mgr.data['lists'].items() if ld.get('cloud_id') == five] == [key]
+    assert len(cloud.rows(list_id=five)) == 2
+
+
+@pytest.mark.parametrize('other', ['holds-its-own-cloud-list', 'not-uploaded-yet'])
+def test_a_website_rename_to_another_lists_name_leaves_two_lists_of_that_name(tmp_path, cloud, other):
+    # The name is taken anyway: two local lists may share a name (create_list and
+    # update_list allow it), each keeps its own cloud list and its own entries, and
+    # nothing is merged -- Clean up duplicate lists offers that to the user.
+    a = make_desk(tmp_path, cloud)
+    l_ = a.mgr.create_list('L')
+    a.mgr.add_item('990001', l_, fl_id='FLa')
+    if other == 'holds-its-own-cloud-list':
+        m = a.mgr.create_list('M')
+        a.mgr.add_item('990002', m, fl_id='FLb')
+    assert a.up()['success']
+    if other == 'not-uploaded-yet':
+        m = a.mgr.create_list('M')
+        a.mgr.add_item('990002', m, fl_id='FLb')
+    five = cloud_id(a, l_)
+    _rename_on_web(cloud, five, 'M')
+    result = a.down()
+    assert result['success'] and result['unchecked'] == 0 and result['web_removed'] == []
+    lists = a.mgr.data['lists']
+    assert lists[l_]['name'] == 'M' and lists[m]['name'] == 'M'
+    assert lists[l_]['cloud_id'] == five and lists[m].get('cloud_id') != five
+    assert item(a, '990001::fl::FLa')['lists'] == [l_] and item(a, '990002::fl::FLb')['lists'] == [m]
+    assert [sorted(x['id'] for x in g['lists']) for g in a.mgr.find_duplicate_lists()] == [sorted([l_, m])]
+    mark = cloud.rec.mark()
+    assert a.up()['success']
+    assert _name_writes(mark) == [] and cloud.db.list_by_id(five)['name'] == 'M'
+    nine = cloud_id(a, m)
+    assert nine != five and cloud.db.list_by_id(nine)['name'] == 'M'
+    assert [r['sys_id'] for r in cloud.rows(list_id=five)] == ['990001']
+    assert [r['sys_id'] for r in cloud.rows(list_id=nine)] == ['990002']
+    state = copy.deepcopy(a.mgr.data)
+    mark = cloud.rec.mark()
+    assert a.down()['success'] and a.up()['success']
+    assert a.mgr.data == state and mark(op='insert') == [] and _name_writes(mark) == []
 
 
 @pytest.mark.parametrize('cell', ['remapped-list-upload', 'remapped-list-download', 'two-local-lists-one-name'])
@@ -1212,8 +1348,10 @@ def test_a_record_for_a_list_that_is_no_longer_its_own_is_dropped(tmp_path, clou
         cloud.web.table('user_lists').update({'name': 'Renamed'}).eq('id', five).execute()
         cloud.delete_row(rid)
         nine = cloud.new_list('L')
+        # L took 9 as its own in an earlier pass (a list holding an id owns that cloud list
+        # whatever it is called, so a Download no longer moves L from 5 to 9 by name)
+        a.mgr.data['lists'][lid]['cloud_id'] = nine
         if cell == 'remapped-list-upload':
-            a.mgr.data['lists'][lid]['cloud_id'] = nine     # L took 9 as its own in an earlier Download
             mark = cloud.rec.mark()
             result = a.up()
             assert result['success'] and result['unchecked'] == 0 and result['web_removed'] == []

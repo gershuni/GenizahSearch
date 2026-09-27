@@ -556,8 +556,11 @@ class ListsManager:
         if lst.get('is_system'):
             return False  # Cannot edit system lists
 
-        if name is not None:
+        if name is not None and name != lst.get('name'):
             lst['name'] = name
+            # lists_sync.LIST_STATE_UNSENT: the next upload sends the new name, and a
+            # Download before it keeps it instead of taking the cloud list's name.
+            lst['list_state_unsent'] = True
         if color is not None:
             lst['color'] = color
 

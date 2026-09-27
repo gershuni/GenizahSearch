@@ -30,6 +30,13 @@ Invariants (after every step unless stated):
   7  records carry their account
   8  at the settle every membership has a record naming a row of its own list
   9  at the settle every cloud row reaches a local item that is the same entry
+ 10  list names: a Download gives a list the name of the cloud list it holds, unless
+     the list was renamed on that desktop since an upload last sent its state (then
+     its name stands); an upload writes a name over another only for such a list, and
+     sends it when it clears that mark; a rename made on a desktop (the harness keeps
+     its own record of them) is never undone by a Download before it reached the cloud;
+     at the settle every rename has reached it and every list has its cloud list's
+     name -- so a website rename reaches every desktop and no name flips back
   R  rule checks on every request and around every pass (_check_request, _after_pass)
 
 Nothing here talks to a network or writes a file: saves and snapshots stay in
@@ -74,14 +81,21 @@ USER, OTHER_USER = 'u1', 'u2'
 LONG_FILLER = 'L' * 9000
 INJECTIONS = ('raise_before', 'raise_after', 'api_error', 'anon', 'session_lost', 'web', 'web',
               'other_desktop_pass', 'same_desktop_edit', 'url_too_long',
-              'web_between_pages', 'web_between_pages', 'web_between_pages', 'web_between_pages')
+              'web_between_pages', 'web_between_pages', 'web_between_pages', 'web_between_pages',
+              'web_rename')
+# Of the website ops a seed draws, the share that rename a list; of the desktop ops, the
+# share that do (drawn from a stream of their own, so the other ops keep their values).
+WEB_RENAME_SHARE = 0.125
+DESK_RENAME_SHARE = 0.0625
 # Result errors of a pass that returned before touching anything.
 EARLY_ERRORS = ('Sync not available', 'Sync already in progress', 'No Supabase client')
 # The only keys of a store an upload may change: the design's list, fixed here rather than
 # read from the engine under test (a list's unsent-state flag is cleared once it is sent).
 IDENTITY_FIELDS = {'store': ('cloud_account',), 'projects': ('cloud_id',), 'lists': ('cloud_id', 'list_state_unsent'),
                    'items': ('cloud_id', 'cloud_rows')}
-ALL_CHECKS = frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9, 'R', 'crash'})
+# A list renamed (or otherwise changed) on its desktop since an upload last sent its state.
+UNSENT = 'list_state_unsent'
+ALL_CHECKS = frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 'R', 'crash'})
 
 _NOWHERE = os.path.join(tempfile.gettempdir(), 'genizah-list-sync-scenarios-never-written')
 
@@ -660,6 +674,7 @@ class World:
         self.ctx = None
         self.pending = []
         self.trace = []
+        self.renamed = {}    # (desk, list id) -> the name a desktop rename gave it, until the cloud has it
         self._seed_the_cloud()
 
     # ---- setup
@@ -675,6 +690,7 @@ class World:
         for d in self.desks.values():
             d.use_engine(self.engine)
         self.checking = True
+        self.renamed = {}
         self.legacy_claims = self.engine is self.fixture
         self.live_n, self.live_g = self.copies()
         # the rows as the old engine left them are the starting point of the identity checks
@@ -761,7 +777,23 @@ class World:
         return None
 
     def after(self, client, req):
+        if client.actor in self.desks and req.t == 'user_lists' and req.op == 'update' \
+                and 'name' in (req.payload or {}):
+            self._rename_written(self.desks[client.actor], client, req)
         return None
+
+    def _rename_written(self, d, client, req):
+        """A desktop rename has reached the cloud once an upload's write of it landed."""
+        try:
+            rows = self.db.matching('user_lists', req.filters, client.session_user)
+        except APIError:
+            rows = []
+        new = req.payload['name']
+        for cl in rows:
+            for key, nm in list(self.renamed.items()):
+                ld = d.data['lists'].get(key[1]) if key[0] == d.name else None
+                if ld is not None and nm == new == cl['name'] and _eq(ld.get('cloud_id'), cl['id']):
+                    del self.renamed[key]
 
     def _fire(self, c, client, req):
         kind, sel = c.inject[1], c.inject[2]
@@ -782,6 +814,9 @@ class World:
             return None
         if kind == 'web':
             self.web_op(sel)
+            return None
+        if kind == 'web_rename':
+            self.web_rename(sel)
             return None
         if kind == 'web_between_pages':
             # The website removes rows the earlier pages returned, so the next page starts
@@ -833,6 +868,8 @@ class World:
             vals = val if isinstance(val, list) else [val]
             if col == 'sys_id' and any(str(v).startswith('97') for v in vals):
                 self.pend(6, 'local-sent', f'{name} filtered {req.t} on My Library sys_id {val}')
+        if req.t == 'user_lists' and req.op == 'update' and 'name' in (req.payload or {}):
+            self._check_name_write(d, client, req)
         if req.t != 'list_items':
             return
         if client.page_missing and ('page' in req.selected_cols() or any('page' in p for p in pls)):
@@ -846,6 +883,22 @@ class World:
                 self._check_insert(d, p)
         elif req.op == 'update':
             self._check_update(d, client, req)
+
+    def _check_name_write(self, d, client, req):
+        """An upload writes a list name over another only for a list renamed on that desktop."""
+        try:
+            rows = self.db.matching('user_lists', req.filters, client.session_user)
+        except APIError:
+            rows = []
+        new = req.payload['name']
+        for cl in rows:
+            if cl['name'] == new:
+                continue
+            if not any(_eq(ld.get('cloud_id'), cl['id']) and ld.get('name') == new
+                       and (ld.get(UNSENT) or self.renamed.get((d.name, lid)) == new)
+                       for lid, ld in d.data.get('lists', {}).items()):
+                self.pend(10, 'name-written-back', f'{d.name} wrote the name {new!r} over {cl["name"]!r} on cloud '
+                                                   f'list {cl["id"]}, which no list renamed on {d.name} holds')
 
     def _check_update(self, d, client, req):
         p = req.payload
@@ -990,6 +1043,20 @@ class World:
             self.ctx.web_deleted.add(r['id'])
         self.trace.append(f'web: remove row {r["id"]} ({r["sys_id"]},{r.get("fl_id")})')
         self.retire_if_lost()
+
+    def web_rename(self, sel):
+        """update_list: the website renames a live list, writing name and name_en (web/user_lists.py)."""
+        wl = self.web_lists()
+        if not wl:
+            return
+        lst = wl[sel[1] % len(wl)]
+        # mostly a name another list may have; sometimes one no list has
+        nm = NAMES[sel[2] % len(NAMES)] if sel[3] % 4 else f'R{sel[2] % 5}'
+        old = lst['name']
+        if nm == old:
+            return
+        self.web.table('user_lists').update({'name': nm, 'name_en': nm}).eq('id', lst['id']).execute()
+        self.trace.append(f'web: rename cloud list {lst["id"]} {old} -> {nm}')
 
     def web_op(self, sel):
         kind = sel[0] % 9
@@ -1177,6 +1244,28 @@ class World:
                 self.trace.append(f'{tag}: empty the Trash ({n} list(s))')
                 self.retire_if_lost()
 
+    def desk_rename(self, d, sel):
+        """Rename a list on the desktop (ListsManager.update_list, as the list menu does)."""
+        lists = [lid for lid in self.user_lists(d) if not d.data['lists'][lid].get('deleted_at')]
+        if not lists:
+            return
+        lid = lists[sel[1] % len(lists)]
+        nm = NAMES[sel[2] % len(NAMES)] if sel[3] % 4 else f'D{sel[2] % 5}'
+        if nm == d.data['lists'][lid].get('name'):
+            return
+        d.lm.update_list(lid, name=nm)
+        if self.checking:
+            self.renamed[(d.name, lid)] = nm
+        self.trace.append(f'{d.name}: rename list {lid} -> {nm}')
+
+    def prune_renames(self, d, names_too=False, every=False):
+        """Forget the desktop renames of lists that are gone (or, after a user op, named otherwise;
+        or all of them, when a backup recovery replaced the desktop's lists wholesale)."""
+        for key, nm in list(self.renamed.items()):
+            ld = d.data['lists'].get(key[1]) if key[0] == d.name else {'name': nm}
+            if ld is None or (names_too and ld.get('name') != nm) or (every and key[0] == d.name):
+                del self.renamed[key]
+
     def long_note(self, d, sel):
         data = d.data
         if not data['items']:
@@ -1278,11 +1367,80 @@ class World:
                 for iid, it in d.data.get('items', {}).items():
                     if iid not in store0.get('items', {}) and str(it.get('sys_id') or '').startswith('97'):
                         self.pend(6, 'local-downloaded', f'{d.name}: a Download created My Library item {iid}')
+            if d.data is not None:
+                self._check_renames_after_pass(d, direction)
+            if not edited and d.data is not None:
+                self._check_names_after_pass(d, direction, store0, res, c)
         if reached and switched:
             if self.checking:
                 self.flush(f'{d.name} {direction}')
                 self.check_account(d, f'{d.name} {direction} after an account switch', gone0)
         return res
+
+    def _cloud_lists_of(self, user):
+        return {str(cl['id']): cl for cl in self.db.tables['user_lists']
+                if cl['user_id'] == user and cl['name'] != 'Recently Viewed'}
+
+    def _check_names_after_pass(self, d, direction, store0, res, c):
+        """Invariant 10 around one pass (see the module docstring)."""
+        # a website rename or the other desktop's pass during this one may have renamed a list since
+        moved = c is not None and c.fired and c.inject[1] in ('web_rename', 'other_desktop_pass')
+        # any injection may have hidden a list from the Download (an anonymous read shows none)
+        seen = res.get('success') and not (c is not None and c.fired)
+        cloud = self._cloud_lists_of(d.user)
+        before = store0.get('lists', {})
+        for lid, ld in d.data.get('lists', {}).items():
+            if lid == 'recent' or ld.get('is_system'):
+                continue
+            was = before.get(lid, {})
+            cl = cloud.get(str(ld.get('cloud_id')))
+            if direction == 'down' and was.get(UNSENT) and ld.get('name') != was.get('name'):
+                self.pend(10, 'unsent-name-changed', f'{d.name}: a Download renamed {lid} {was.get("name")!r} -> '
+                                                     f'{ld.get("name")!r}, whose own state was not yet sent')
+            if cl is None or moved:
+                continue
+            if direction == 'down' and seen and not ld.get(UNSENT) and ld.get('name') != cl['name']:
+                self.pend(10, 'rename-not-adopted', f'{d.name}: after a Download list {lid} is named '
+                                                    f'{ld.get("name")!r}, its cloud list {cl["id"]} {cl["name"]!r}')
+            if direction == 'up' and was.get(UNSENT) and not ld.get(UNSENT) \
+                    and ld.get('name') != cl['name']:
+                self.pend(10, 'rename-unsent', f'{d.name}: an upload cleared the unsent mark of {lid} '
+                                               f'{ld.get("name")!r} without sending it (cloud list {cl["id"]} is '
+                                               f'{cl["name"]!r})')
+
+    def _check_renames_after_pass(self, d, direction):
+        """A desktop rename survives every Download until the cloud has it."""
+        self.prune_renames(d, names_too=False)
+        cloud = self._cloud_lists_of(d.user)
+        for key, nm in list(self.renamed.items()):
+            if key[0] != d.name:
+                continue
+            ld = d.data['lists'][key[1]]
+            if direction == 'down' and ld.get('name') != nm:
+                self.pend(10, 'desk-rename-lost', f'{d.name}: a Download renamed {key[1]} {nm!r} -> '
+                                                  f'{ld.get("name")!r} before the cloud had its rename')
+                del self.renamed[key]
+                continue
+            cl = cloud.get(str(ld.get('cloud_id')))
+            if cl is not None and cl['name'] == nm:
+                del self.renamed[key]   # it reached the cloud
+
+    def check_names_settled(self):
+        for d in self.desks.values():
+            self.prune_renames(d, names_too=False)
+        if self.renamed:
+            self.viol(10, 'desk-rename-never-sent', f'settle: desktop renames never reached the cloud: '
+                                                    f'{sorted(self.renamed.items())}')
+        cloud = self._cloud_lists_of(USER)
+        for name, d in self.desks.items():
+            for lid, ld in d.data['lists'].items():
+                if lid == 'recent' or ld.get('is_system'):
+                    continue
+                cl = cloud.get(str(ld.get('cloud_id')))
+                if cl is not None and (ld.get(UNSENT) or ld.get('name') != cl['name']):
+                    self.viol(10, 'names-differ-at-settle', f'settle: {name} list {lid} {ld.get("name")!r} '
+                                                            f'(unsent: {bool(ld.get(UNSENT))}) holds cloud list '
+                                                            f'{cl["id"]} {cl["name"]!r}')
 
     def run_sync(self, d, direction):
         if direction in ('up', 'down'):
@@ -1302,6 +1460,9 @@ class World:
             self.web_op(op[1])
             self.check_tokens(f'{where} web')
             return
+        if kind == 'web_rename':
+            self.web_rename(op[1])
+            return
         if kind == 'migrate':
             if self.db.migrate():
                 self.trace.append('web: the page column is added' + (' (schema cache lags)'
@@ -1309,14 +1470,20 @@ class World:
             return
         d = self.desks[op[1]]
         if kind == 'desk':
+            data = d.data
             self.desk_op(d, op[2])
+            self.prune_renames(d, every=d.data is not data)   # a backup recovery: its own names and marks
             self.check_tokens(f'{where} {d.name} user op')
             return
         if kind == 'long':
             self.long_note(d, op[2])
             return
+        if kind == 'desk_rename':
+            self.desk_rename(d, op[2])
+            return
         if kind == 'restart':
             d.restart()
+            self.prune_renames(d, names_too=True)
             self.trace.append(f'{d.name}: restart (lists.pkl as last saved)')
             self.retire_if_lost()
             return
@@ -1405,6 +1572,7 @@ class World:
                 self.trace.append(f'-- settled after {n + 1} round(s)')
                 self.check_reached(last)
                 self.check_faithful()
+                self.check_names_settled()
                 return
             prev = st
         self.viol(4, 'no-fixed-point', f'no fixed point after {rounds} settle rounds: {_diff(*self._one_more_round())}')
@@ -1469,8 +1637,9 @@ class World:
                             ident(iid, it), (ghost[1], ghost[2], ghost[3]), bool(ghost[4]))):
                         recorded_for[k].add(str(rec.get('id')))
 
-            def local_name(cl):
-                return {'General': lists.get('default', {}).get('name')}.get(cl['name'], cl['name'])
+            def named_for(cl, x):
+                # a list of that name -- or, for 'General', the default list whatever it is called now
+                return lists[x].get('name') == cl['name'] or (x == 'default' and cl['name'] == 'General')
 
             for cl in cloud:
                 if cl.get('deleted_at') or cl['name'] == 'Recently Viewed':
@@ -1478,7 +1647,7 @@ class World:
                 lid = owned.get(str(cl['id']))
                 if lid is None:   # a same-name cloud list is read for the first local list of its name
                     lid = next((x for x in order if x != 'recent' and not lists[x].get('is_system')
-                                and lists[x].get('name') == local_name(cl)), None)
+                                and named_for(cl, x)), None)
                 if lid is None:
                     continue
                 ld = lists[lid]
@@ -1585,6 +1754,7 @@ def cfg_for(seed):
 
 def gen_ops(seed, steps, cfg):
     rng = random.Random(seed * 7919 + 1)
+    renames = random.Random(seed * 7919 + 2)
     ops = []
     back = {}
     for i in range(steps):
@@ -1598,6 +1768,8 @@ def gen_ops(seed, steps, cfg):
         if r < 0.20:
             if not cfg['has_page'] and rng.random() < 0.1:
                 ops.append(('migrate',))
+            elif renames.random() < WEB_RENAME_SHARE:
+                ops.append(('web_rename', sel))
             else:
                 ops.append(('web', sel))
         elif r < 0.55:
@@ -1609,6 +1781,8 @@ def gen_ops(seed, steps, cfg):
                 back[desk] = i + rng.randrange(2, 6)
             elif x < 0.065:
                 ops.append(('long', desk, sel))
+            elif renames.random() < DESK_RENAME_SHARE:
+                ops.append(('desk_rename', desk, sel))
             else:
                 ops.append(('desk', desk, sel))
         else:

@@ -70,6 +70,9 @@ IDENTITY_FIELDS = {
 # and whose own state (Trash, colour, project) differs from that cloud list's: the
 # local state stands until an upload has sent it (a download before then must not
 # import the cloud's), so both orders of the first Download and Upload end alike.
+# A rename on this computer sets it too (ListsManager.update_list): the new name
+# stands over the cloud list's until an upload has sent it, and only an upload of
+# such a list writes a name to an existing cloud list.
 LIST_STATE_UNSENT = 'list_state_unsent'
 
 
@@ -1026,10 +1029,16 @@ class ListsCloudSync:
                 'project_id': cloud_proj_id,
                 'deleted_at': cloud_deleted_at
             }
+            # An existing cloud list gets this list's name only when it was renamed here
+            # since an upload last sent its state: another name there was given on the
+            # website (or by another computer), and this list takes it at its next Download.
+            update_payload = dict(list_payload)
+            if not list_data.get(LIST_STATE_UNSENT):
+                del update_payload['name'], update_payload['name_en']
 
             if cloud_id:
                 # Update existing cloud list by stored cloud_id
-                client.table('user_lists').update(list_payload).eq(
+                response = client.table('user_lists').update(update_payload).eq(
                     'id', cloud_id
                 ).execute()
             else:
@@ -1040,7 +1049,7 @@ class ListsCloudSync:
                     list_data['cloud_id'] = cloud_id
                     held.add(cloud_id)
                     logger.debug(f"Found existing cloud list '{list_name}' with ID {cloud_id}")
-                    client.table('user_lists').update(list_payload).eq(
+                    response = client.table('user_lists').update(update_payload).eq(
                         'id', cloud_id
                     ).execute()
                 else:
@@ -1051,7 +1060,9 @@ class ListsCloudSync:
                         list_data['cloud_id'] = cloud_id
                         held.add(cloud_id)
 
-            if cloud_id:
+            if cloud_id and response.data:
+                # the row answered, so the list's state is in the cloud (a write the session
+                # could not see changed nothing, and the list's own state still stands)
                 list_data.pop(LIST_STATE_UNSENT, None)
             result['lists_pushed'] += 1
 
@@ -1687,12 +1698,15 @@ class ListsCloudSync:
     def _map_lists(self, store, cloud_lists, cloud_project_to_local, result):
         """Each local list's own cloud list, and the same-name cloud lists read for it.
 
-        By name, as before ('General' is the default list), with at most one local
-        owner per cloud list: a list keeps the same-name cloud list whose id it
-        holds, else takes the lowest-id one no local list holds -- the upload makes
-        the same choice. Only the own cloud list sets colour, project and the Trash
-        state -- and not for a list that held no cloud id: it keeps its own until an
-        upload has sent them (LIST_STATE_UNSENT).
+        At most one local owner per cloud list. A list owns the cloud list whose id
+        it holds, whatever either is called now: it takes the name the website gave
+        that list, unless it was renamed here since an upload last sent its state
+        (LIST_STATE_UNSENT) -- then its own name stands, for that upload to send. A
+        list that holds no id takes by name, as before ('General' is the default
+        list), the lowest-id cloud list of its name no local list holds -- the upload
+        makes the same choice. Only the own cloud list sets colour, project and the
+        Trash state -- and not while the list's own state is unsent (a list that held
+        no cloud id, or one renamed here): it keeps its own until an upload has sent it.
         """
         local_lists = store.setdefault('lists', {})
         order = [lid for lid in _list_order(store) if _syncable_list(lid, local_lists[lid])]
@@ -1720,9 +1734,15 @@ class ListsCloudSync:
 
         own = {}
         for lid in order:
-            cid = local_lists[lid].get('cloud_id')
-            if cid in cloud_by_id and held.get(cid) == lid and candidate(cloud_by_id[cid], lid):
+            ld = local_lists[lid]
+            cid = ld.get('cloud_id')
+            if cid in cloud_by_id and held.get(cid) == lid:
                 own[lid] = cid
+                name = cloud_by_id[cid].get('name', '')
+                if ld.get('name') != name and not ld.get(LIST_STATE_UNSENT):
+                    ld['name'] = name          # renamed on the website
+                    if 'name_en' in ld:
+                        ld['name_en'] = name
         taken = set(own.values())
         pending = [lid for lid in order if lid not in own]
         pending.sort(key=lambda lid: 0 if local_lists[lid].get('cloud_id') is not None else 1)
@@ -1755,7 +1775,8 @@ class ListsCloudSync:
                     del ld['deleted_at']
             elif (bool(ld.get('deleted_at')) != bool(local_deleted_at)
                   or (cloud_list.get('color') and cloud_list['color'] != ld.get('color'))
-                  or (local_project_id and local_project_id != ld.get('project_id'))):
+                  or (local_project_id and local_project_id != ld.get('project_id'))
+                  or ld.get('name') != cloud_list.get('name', '')):
                 ld[LIST_STATE_UNSENT] = True    # its own state goes up with the next upload
             else:
                 ld.pop(LIST_STATE_UNSENT, None)
@@ -1764,18 +1785,13 @@ class ListsCloudSync:
             result['lists_updated'] += 1
 
         same_name = collections.defaultdict(list)
-        holding = {local_lists[lid].get('cloud_id') for lid in order}
         for cid in sorted(cloud_by_id, key=_id_key):
-            if cid in taken:
+            if cid in taken:                # every cloud list a local list holds is taken
                 continue
             cl = cloud_by_id[cid]
             first = next((lid for lid in order if candidate(cl, lid)), None)
             if first is not None:
                 same_name[first].append(cid)
-                continue
-            if cid in holding:
-                # Renamed on the website: the list that holds it keeps it (the next upload
-                # sends that list's name), so no second local list is made to own it.
                 continue
             # Create new local list
             import uuid
@@ -2097,7 +2113,7 @@ class ListsCloudSync:
             result['unchecked'] += 1
 
     def _sweep_unowned(self, pass_, store, own, lists_complete, cloud_list_ids, result):
-        """Memberships whose local list has no cloud list of its own in this pass (deleted or renamed there)."""
+        """Memberships whose local list has no cloud list of its own in this pass (deleted there, or none yet)."""
         lists = store.get('lists') or {}
         for iid, it in list((store.get('items') or {}).items()):
             if is_local_sys_id(it.get('sys_id', iid)):
