@@ -333,6 +333,35 @@ REGRESSION_CASES = [
      2742, {'has_page': True, 'max_rows': None, 'p_inject': 0.1, 'past_end_raises': False, 'page_lag': False, 'upgrade': 0},
      [('desk', 'A', (12985, 22937, 35201, 15278, 51992)), ('desk', 'A', (32485, 17432, 21126, 61327, 52528)),
       ('sync', 'A', 'merge', (5, 'api_error', (59488, 48933, 5041, 47272, 43114)))]),
+    # A list renamed on the website or on a desktop (each broke invariant 10 on the engine whose
+    # upload renamed the website's list back):
+    ('a Download left a list renamed on the website under its old name',
+     4, {'has_page': True, 'max_rows': None, 'p_inject': 0.1, 'past_end_raises': True, 'page_lag': False, 'upgrade': 0},
+     [('sync', 'A', 'up', None), ('web_rename', (23348, 20315, 7767, 17937, 54587)), ('sync', 'A', 'down', None)]),
+    ("an upload wrote a list's old name back over the website's rename",
+     16, {'has_page': True, 'max_rows': 2, 'p_inject': 0.25, 'past_end_raises': True, 'page_lag': False, 'upgrade': 0},
+     [('sync', 'B', 'down', None), ('web_rename', (59256, 36963, 14617, 38210, 56426))]),
+    ("a Download gave a list renamed on the desktop, not yet uploaded, the website's name",
+     38, {'has_page': True, 'max_rows': None, 'p_inject': 0.1, 'past_end_raises': False, 'page_lag': False, 'upgrade': 0},
+     [('sync', 'B', 'merge', None), ('desk_rename', 'B', (17863, 10066, 21035, 26839, 22811)),
+      ('sync', 'B', 'down', None)]),
+    # Found once renames were generated: a website paste that put back the note a desktop last saw
+    # on a row is replaced there by that desktop's edit (invariant 1 retires what the paste revived):
+    ('a note pasted back onto a row was replaced there by the desktop edit that had replaced it',
+     412, {'has_page': False, 'max_rows': 2, 'p_inject': 0.1, 'past_end_raises': False, 'page_lag': False, 'upgrade': 0},
+     [('migrate',), ('desk', 'A', (43020, 37478, 63093, 24030, 33365)),
+      ('sync', 'A', 'merge', (3, 'web_rename', (34189, 56224, 46855, 41088, 2204))),
+      ('desk', 'B', (48026, 17584, 63357, 8050, 46235)), ('sync', 'B', 'merge', None),
+      ('web', (9001, 50677, 36323, 2377, 40998)), ('desk', 'B', (6559, 2392, 35662, 2192, 53118)),
+      ('web', (62280, 12650, 20407, 44875, 43614)), ('desk', 'B', (31825, 33649, 15444, 15282, 4627)),
+      ('sync', 'B', 'merge', None),
+      ('sync', 'A', 'down', (22, 'web_between_pages', (24188, 31557, 3564, 50125, 24444))),
+      ('desk', 'B', (10790, 41993, 31662, 40651, 38597)), ('desk', 'A', (20172, 14027, 46191, 36093, 57795)),
+      ('desk', 'A', (37718, 30117, 21181, 27101, 17619)), ('sync', 'B', 'merge', None),
+      ('web', (44353, 13324, 6355, 13947, 5750)), ('desk', 'A', (35832, 13736, 27289, 4254, 3925)),
+      ('sync', 'A', 'up', (16, 'web_rename', (55051, 45246, 18077, 44677, 53706))), ('sync', 'B', 'down', None),
+      ('web', (17606, 7480, 16584, 41056, 488)), ('desk', 'B', (11609, 785, 17263, 59630, 46007)),
+      ('web', (3160, 4457, 48390, 13222, 18737)), ('web', (56600, 41045, 44484, 10634, 40926))]),
 ]
 
 

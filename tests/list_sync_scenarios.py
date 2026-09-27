@@ -669,7 +669,9 @@ class World:
         self.tok = 0
         self.live_n, self.live_g = set(), set()
         # retired note tokens a paste made live again, by the row they were pasted into: if that
-        # row goes, they are retired again (the older copies were already being replaced)
+        # row goes, or a desktop's edit that retired them reaches it (a note write lands only on
+        # the note the desktop last saw, so the paste had put that back), they are retired again
+        # (the older copies were already being replaced)
         self.revived = {}
         self.ctx = None
         self.pending = []
@@ -780,7 +782,21 @@ class World:
         if client.actor in self.desks and req.t == 'user_lists' and req.op == 'update' \
                 and 'name' in (req.payload or {}):
             self._rename_written(self.desks[client.actor], client, req)
+        if client.actor in self.desks and req.t == 'list_items' and req.op == 'update' \
+                and 'note' in (req.payload or {}):
+            self._revived_row_written(req)
         return None
+
+    def _revived_row_written(self, req):
+        rid = next((val for kind, col, val in req.filters if kind == 'eq' and col == 'id'), None)
+        row = next((r for r in self.db.tables['list_items'] if _eq(r['id'], rid)), None) if rid is not None else None
+        if row is None or (row.get('note') or '') != (req.payload['note'] or ''):
+            return   # the write did not land
+        for t, r in list(self.revived.items()):
+            if _eq(r, rid) and t not in toks(row.get('note')):
+                self.live_n.discard(t)
+                del self.revived[t]
+                self.trace.append(f'    {t}, pasted onto row {rid}, is replaced there by the edit that retired it')
 
     def _rename_written(self, d, client, req):
         """A desktop rename has reached the cloud once an upload's write of it landed."""
