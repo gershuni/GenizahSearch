@@ -2884,6 +2884,9 @@ TRANSLATIONS = {
     "Showing {} of {} results": "מציג {} מתוך {} תוצאות",
     "Showing {} of {} results (searching {} expanded terms)": "מציג {} מתוך {} תוצאות (מחפש {} ביטויים מורחבים)",
     "Showing {} of {} results (filtering {} domains)": "מציג {} מתוך {} תוצאות (מסנן {} תחומים)",
+    "Nothing to export: every result in the table is hidden by a filter or an exclusion.":
+        "אין מה לייצא: כל התוצאות בטבלה מוסתרות בסינון או בהחרגה.",
+    "Load more results ({} not loaded)": "טען תוצאות נוספות ({} לא נטענו)",
     # Desktop-specific Phase 42 strings
     "Min chunks: ": "מינ' מקטעים: ",
     "Minimum chunk matches per manuscript": "מינימום התאמות מקטע לכתב יד",
@@ -3635,6 +3638,34 @@ TRANSLATIONS.update({
     "Downloaded {lists} lists and {items} items from cloud.": "הורדו {lists} רשימות ו-{items} פריטים מהענן.",
     "Uploaded {lists} lists and {items} items to cloud.": "הועלו {lists} רשימות ו-{items} פריטים לענן.",
     "Lists merged successfully! Downloaded {dl} lists, uploaded {ul} lists.": "הרשימות מוזגו בהצלחה! הורדו {dl} רשימות, הועלו {ul} רשימות.",
+    "Your lists on this computer could not be backed up, so nothing was downloaded. Check that the data folder can be written to, then try again.":
+        "לא ניתן היה לגבות את הרשימות שבמחשב הזה, ולכן לא הורד דבר. יש לוודא שאפשר לכתוב לתיקיית הנתונים, ולנסות שוב.",
+    "The cloud lists were downloaded, but the upload failed: {}": "הרשימות מהענן הורדו, אבל ההעלאה נכשלה: {}",
+    # The sync layer's own messages (shared/lists_sync.py, shared/lists_manager.py)
+    "Sync already in progress": "סנכרון כבר מתבצע",
+    "Sync not available": "הסנכרון אינו זמין",
+    "No Supabase client": "אין חיבור לשרת הענן",
+    "Cloud sync not available": "הסנכרון לענן אינו זמין",
+    "Unknown error": "שגיאה לא ידועה",
+    "Uploaded {} item(s), but {} failed to upload to the cloud.": "הועלו {} פריטים, אבל {} לא הועלו לענן.",
+    # lists.pkl could not be read at startup (desktop notice)
+    "Lists restored from a backup": "הרשימות שוחזרו מגיבוי",
+    "Your saved lists could not be read, so they were restored from a backup saved on {}. Changes made after that may be missing. The unreadable file is kept as {} in:\n{}":
+        "לא ניתן היה לקרוא את הרשימות השמורות, ולכן הן שוחזרו מגיבוי שנשמר ב-{}. ייתכן ששינויים שנעשו אחרי מועד זה חסרים. הקובץ שלא ניתן היה לקרוא נשמר בשם {} בתיקייה:\n{}",
+    "Lists could not be loaded": "לא ניתן היה לטעון את הרשימות",
+    "Your saved lists could not be read and no readable backup was found, so your lists are empty. The unreadable file is kept as {} in:\n{}":
+        "לא ניתן היה לקרוא את הרשימות השמורות ולא נמצא גיבוי קריא, ולכן הרשימות ריקות. הקובץ שלא ניתן היה לקרוא נשמר בשם {} בתיקייה:\n{}",
+    # ...and lists.pkl could not even be copied aside, so no save can replace it
+    "Lists cannot be saved": "לא ניתן לשמור את הרשימות",
+    "Your saved lists could not be read, so they were restored from a backup saved on {}. Another program appears to be using the lists file, and until it can be read your lists cannot be saved: changes you make now may be lost. Close any other program that may be using the file and restart the application. The file is in:\n{}":
+        "לא ניתן היה לקרוא את הרשימות השמורות, ולכן הן שוחזרו מגיבוי שנשמר ב-{}. נראה שתוכנה אחרת משתמשת בקובץ הרשימות, ועד שניתן יהיה לקרוא אותו לא ניתן לשמור את הרשימות: שינויים שייעשו עכשיו עלולים ללכת לאיבוד. יש לסגור כל תוכנה אחרת שעשויה להשתמש בקובץ ולהפעיל מחדש את התוכנה. הקובץ נמצא בתיקייה:\n{}",
+    "Your saved lists could not be read and no readable backup was found, so your lists are empty. Another program appears to be using the lists file, and until it can be read your lists cannot be saved: changes you make now may be lost. Close any other program that may be using the file and restart the application. The file is in:\n{}":
+        "לא ניתן היה לקרוא את הרשימות השמורות ולא נמצא גיבוי קריא, ולכן הרשימות ריקות. נראה שתוכנה אחרת משתמשת בקובץ הרשימות, ועד שניתן יהיה לקרוא אותו לא ניתן לשמור את הרשימות: שינויים שייעשו עכשיו עלולים ללכת לאיבוד. יש לסגור כל תוכנה אחרת שעשויה להשתמש בקובץ ולהפעיל מחדש את התוכנה. הקובץ נמצא בתיקייה:\n{}",
+    # ...and a save during the session did not reach lists.pkl
+    "Your lists could not be saved to {} in:\n{}\n\nChanges you make now may be lost until the file can be written. Another program may be using it or one of its backup files (.bak). Each later change tries again and saves everything once it succeeds.\n\nDetails: {}":
+        "לא ניתן היה לשמור את הרשימות בקובץ {} בתיקייה:\n{}\n\nשינויים שייעשו עכשיו עלולים ללכת לאיבוד עד שניתן יהיה לכתוב את הקובץ. ייתכן שתוכנה אחרת משתמשת בו או באחד מקובצי הגיבוי שלו (.bak). כל שינוי נוסף ינסה לשמור שוב, וכשהשמירה תצליח יישמר הכול.\n\nפרטים: {}",
+    "Your lists are not being saved: changes may be lost until {} can be written.":
+        "הרשימות אינן נשמרות: שינויים עלולים ללכת לאיבוד עד שניתן יהיה לכתוב את {}.",
 
     # --- Data-update notification (desktop) ---
     "New research data available:": "נתוני מחקר חדשים זמינים:",
@@ -5114,6 +5145,18 @@ TRANSLATIONS.update({
         'התוכנה עדיין עולה. נסה שוב בעוד רגע.',
     'Already running':
         'כבר פועל',
+    # A second copy of the desktop app refuses to start (it would overwrite
+    # the first one's lists and settings). Hebrew-first so it lays out RTL.
+    "Dicta Genizah Search Pro is already open. Only one copy can run at a time, because two copies would overwrite each other's lists and settings. Switch to the open window. If none is visible, it is still starting or closing; try again in a moment.":
+        'התוכנה Dicta Genizah Search Pro כבר פתוחה. רק עותק אחד יכול לפעול בכל פעם, כי כל עותק שומר את הרשימות וההגדרות שלו על גבי אלה של העותק האחר. עברו לחלון הפתוח. אם אין חלון גלוי, התוכנה עדיין נפתחת או נסגרת; נסו שוב בעוד רגע.',
+    # The language-change restart cannot start the new copy: checked before
+    # the window closes (it stays open), or failed after it closed.
+    'Could not restart':
+        'לא ניתן להפעיל מחדש',
+    'The application cannot restart itself right now. The language will change to {} the next time you start it.':
+        'התוכנה אינה יכולה להפעיל את עצמה מחדש כעת. השפה תשתנה ל-{} בהפעלה הבאה.',
+    'The application could not restart itself. Start it again to use the new language.':
+        'התוכנה לא הצליחה להפעיל את עצמה מחדש. יש להפעיל אותה שוב כדי לעבור לשפה החדשה.',
     'The letter-level index is already being built.':
         'האינדקס לחיפוש ברמת האות כבר נבנה כעת.',
     'Transcriptions needed':

@@ -6,6 +6,44 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ## [Unreleased]
 
+### Desktop: saved work stays saved (2026-09-25)
+
+Reaches users with the next desktop installer.
+
+- **New no longer deletes the session file.** Pressing New on the Search or Composition tab
+  deleted `session.json`, which dropped the saved Joins Lab anchor, query inputs and Yes/Maybe/No
+  marks whenever the Joins Lab had not been opened since the app started. New now overwrites the
+  file with the cleared state straight away.
+- **Add Comment offers only what is saved.** It no longer offers "Post anonymously" or a comment
+  type: neither was ever saved, and comments always showed your name on genizahsearch.com. You can
+  edit or delete your comments on the website (Corrections, My Comments). Comment badges now say
+  "Page N" or "Entire manuscript" in the interface language, and the All Comments list no longer
+  labels every comment "by Anonymous".
+- **Lists, settings and the language choice are saved safely.** Each save writes a new file and
+  swaps it in, so a crash or power cut mid-save no longer leaves a cut-off file. If `lists.pkl`
+  cannot be read at startup, the app loads the newest readable backup (`.bak1`-`.bak3`), says so,
+  and keeps the unreadable file as `lists.pkl.unreadable-<time>`. Backups now rotate once per
+  session instead of on every save, so a bad start can no longer push out every good copy within
+  three manuscript views. Before each cloud sync a snapshot is kept (`lists.pkl.pre-download`,
+  `lists.pkl.pre-upload`); a download that cannot take its snapshot does not run, and a Merge
+  whose download fails no longer uploads. If the start-of-session backup cannot be made, the
+  save waits (the next save tries again) rather than replacing `lists.pkl` without one. If list
+  changes stop reaching the disk (for example another program holds `lists.pkl`), the app now
+  says so once and keeps a note on the status bar until a save lands again.
+- **One copy at a time.** Opening a second copy on the same data folder now says the app is
+  already open and exits, instead of the two copies overwriting each other's lists and settings.
+  Changing the language restarts the app only after the old window has finished saving; if the
+  app cannot restart itself, it stays open (or says so) and the new language applies next time.
+- **Excluded manuscripts stay excluded.** "Exclude this manuscript" in the results menu now works
+  for Genizah results: the menu passed an empty id, so it did nothing, and View Document, Submit
+  Correction, Add Comment, View Corrections, View Comments and Share Discovery on that menu had the
+  same problem. An exclusion hides every row of the manuscript and holds through filters, loading
+  more rows, later searches and restarts, until New. The Search tab's Exclude Manuscripts list now
+  applies to every search, and the status line says how many rows are hidden. Exporting a view in
+  which every row is hidden now says there is nothing to export instead of exporting every result.
+  When the visible rows fit without scrolling and more results remain, a "Load more results"
+  button appears under the table.
+
 ### Hardening: the database enforces privilege and moderation columns (2026-09-25)
 
 Applied to the production Supabase project on 2026-09-25 and verified there with

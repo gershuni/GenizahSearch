@@ -224,6 +224,7 @@ _register_skill_package()
 # Phase 95 (Plan 95-01 Wave 0): shared fixtures for LOCAL indexer tests.
 # Used by Wave 1-3 plans (02-08).
 # ---------------------------------------------------------------------------
+import itertools
 import os
 from unittest.mock import MagicMock
 
@@ -468,6 +469,41 @@ def _no_blocking_modal_exec(monkeypatch):
         lambda self: QMessageBox.StandardButton.Cancel,
         raising=False,
     )
+
+
+# ---------------------------------------------------------------------------
+# Personal-state isolation: session.json, config.pkl and lang.pkl.
+#
+# Config resolves INDEX_DIR to the developer's real data folder whenever one
+# exists (CI has none), so a test that reaches a real `_save_session`,
+# `save_app_config` or `save_language` overwrote that developer's own files --
+# and New saves session.json synchronously. Point the three files at a fresh,
+# empty folder for every test so a local run behaves like CI.
+#
+# INDEX_DIR itself is left alone: the index and caches under it are read,
+# not personal state. ListsManager.LISTS_FILE (bound at class definition) and
+# the search-history file are not covered; a test that writes them patches
+# them itself. Requesting `monkeypatch` keeps undo order right: a test's own
+# patch of one of these attributes is undone before this one. One mkdir per
+# test under a session-wide root (`tmp_path_factory.mktemp` per test would
+# rescan the base temp folder every time).
+# ---------------------------------------------------------------------------
+_PERSONAL_STATE_SEQ = itertools.count()
+
+
+@pytest.fixture(scope="session")
+def _personal_state_root(tmp_path_factory):
+    return tmp_path_factory.mktemp("personal_state")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_personal_state_files(monkeypatch, _personal_state_root):
+    from shared.config import Config
+    folder = _personal_state_root / str(next(_PERSONAL_STATE_SEQ))
+    folder.mkdir()
+    monkeypatch.setattr(Config, "SESSION_FILE", str(folder / "session.json"))
+    monkeypatch.setattr(Config, "CONFIG_FILE", str(folder / "config.pkl"))
+    monkeypatch.setattr(Config, "LANGUAGE_FILE", str(folder / "lang.pkl"))
 
 
 # ---------------------------------------------------------------------------

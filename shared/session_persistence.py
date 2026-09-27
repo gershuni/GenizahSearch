@@ -11,7 +11,6 @@ limit enforcement, and interrupted-search detection.
 Exports:
     save_session_state(state_dict, path) -> bool
     load_session_state(path) -> Optional[dict]
-    clear_session_state(path) -> bool
     add_history_entry(search_type, entry, limit) -> bool
     get_history(search_type) -> dict | list
     delete_history_entry(search_type, index) -> bool
@@ -144,25 +143,6 @@ def load_session_state(path: str | None = None) -> Optional[dict]:
     except Exception as e:
         logger.error("Failed to load session state: %s", e)
         return None
-
-
-def clear_session_state(path: str | None = None) -> bool:
-    """
-    Delete the session file if it exists.
-
-    Returns:
-        True if deleted or already absent, False on error.
-    """
-    if path is None:
-        path = Config.SESSION_FILE
-
-    try:
-        if os.path.exists(path):
-            os.remove(path)
-        return True
-    except Exception as e:
-        logger.error("Failed to clear session state: %s", e)
-        return False
 
 
 # ---------------------------------------------------------------------------

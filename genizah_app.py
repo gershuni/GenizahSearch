@@ -60,6 +60,9 @@ from desktop.widgets import (
     ShelfmarkCompleter,
 )
 from desktop.column_chooser import ColumnChooser, ColumnFitter
+from desktop.single_instance import (
+    acquire_instance_lock, relaunch_if_requested, relaunch_looks_possible, request_restart, restarted_from,
+)
 from desktop.widgets.flow_layout import FlowWidget
 from desktop.widgets.overflow_row import OverflowRow
 from desktop.widgets.line_number_text_edit import (
@@ -1335,6 +1338,30 @@ def _format_txt_genizah_block(result_dict, full_text=None):
     return f"=== {d.get('shelfmark', '')} | {d.get('title', '')} ===\n{snippet}"
 
 
+def _show_ok_notice(parent, kind, title, text):
+    """QMessageBox.information/.warning (`kind` is 'information' or
+    'warning'), with its one button labelled tr("OK"). The static calls label
+    it in Qt's own language, which is English in the Hebrew interface."""
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Warning if kind == 'warning'
+                else QMessageBox.Icon.Information)
+    box.setWindowTitle(title)
+    box.setText(text)
+    box.setStandardButtons(QMessageBox.StandardButton.Ok)
+    box.button(QMessageBox.StandardButton.Ok).setText(tr("OK"))
+    box.exec()
+
+
+def _report_failed_relaunch(error=None):
+    """The language restart could not start the new copy (relaunch_if_requested's
+    on_failure). The window is closed and the event loop has ended, but the
+    QApplication still exists, so a modal box can still run; after it this copy
+    exits, and nothing else is running."""
+    _show_ok_notice(
+        None, 'warning', tr("Could not restart"),
+        tr("The application could not restart itself. Start it again to use the new language."))
+
+
 def _telemetry_result_bucket(count: int) -> str:
     """Coarse result-count bucket for Phase 114 telemetry (D-07/D-08).
 
@@ -1359,7 +1386,11 @@ class GenizahGUI(QMainWindow):
     # the answer, so the worker never renames anything until the UI thread
     # has actually let go.
     _passage_release_requested = pyqtSignal(int)
-    
+    # (saved, reason) from ListsManager's save hooks, which run on whichever
+    # thread saved -- the auto-sync and logout-sync workers too. Connected
+    # queued, so the slot always runs on the UI thread. See _watch_lists_saves.
+    _lists_save_state = pyqtSignal(bool, str)
+
     def __init__(self):
         super().__init__()
         self.comp_col_library = 1  # Library before Shelfmark
@@ -1390,6 +1421,8 @@ class GenizahGUI(QMainWindow):
         self.indexer = None
         self.lab_engine = None
         self.lists_mgr = None
+        self._lists_save_warned = False  # see _on_lists_save_state
+        self._lists_save_state_connected = False
         self.joins_mgr = None
 
         # Community features - corrections client
@@ -1456,6 +1489,7 @@ class GenizahGUI(QMainWindow):
         self._zero_result_refine: bool = False         # True when last refine got 0 results (D-14a)
         self._all_terms_filter: bool = False             # "Only results with all terms" checkbox state
         self.word_excluded_sys_ids = set()  # per-result exclusions for word search mode
+        self._search_rows_excluded = 0  # rows the last visibility pass hid by exclusion
         self.filter_sources = {}  # dict of {ref: cleaned_text}
         self.filter_enabled_sources = set()  # set of enabled source refs
         self.results_filters = {}
@@ -1504,6 +1538,10 @@ class GenizahGUI(QMainWindow):
         self._run_seq = 0
         self._pause_search = _PauseCtx()
         self._pause_comp = _PauseCtx()
+        # Advanced by each tab's New; see _deliver_unless_discarded.
+        self._search_new_generation = 0
+        self._comp_new_generation = 0
+        self._reset_pending = None  # a New waiting on a witness; see _reset_is_pending
         self.last_browse_field = None
         self.current_browse_sid = None
         self.current_browse_p = None
@@ -1561,6 +1599,124 @@ class GenizahGUI(QMainWindow):
         self.status_label.setText(tr("Initializing components... Please wait."))
         self.set_results_loading(True)
         QTimer.singleShot(100, self.start_background_init)
+
+    def _report_lists_load_problem(self):
+        """Tell the user when lists.pkl could not be read at startup.
+
+        ListsManager.load() never writes, so the unreadable file is copied aside
+        here, before any save can replace it, and the notice names that copy.
+        When the copy fails too -- lists.pkl stayed busy past the startup
+        budget, and the copy cannot read it either -- save() refuses to replace
+        it, so nothing is saved until it can be read, and the notice says so.
+        """
+        mgr = getattr(self, 'lists_mgr', None)
+        status = getattr(mgr, 'load_status', 'ok')
+        if status not in ('recovered', 'failed'):
+            return
+        try:
+            when = None
+            if status == 'recovered':
+                try:
+                    when = time.strftime('%Y-%m-%d %H:%M',
+                                         time.localtime(os.path.getmtime(mgr.recovered_from)))
+                except OSError:
+                    when = os.path.basename(mgr.recovered_from)
+            kept = mgr.keep_unreadable_copy()
+            if kept is None and os.path.exists(mgr.LISTS_FILE):
+                folder = os.path.dirname(os.path.abspath(mgr.LISTS_FILE))
+                if status == 'recovered':
+                    text = tr("Your saved lists could not be read, so they were restored from a "
+                              "backup saved on {}. Another program appears to be using the lists "
+                              "file, and until it can be read your lists cannot be saved: changes "
+                              "you make now may be lost. Close any other program that may be using "
+                              "the file and restart the application. The file is in:\n{}").format(
+                                  when, folder)
+                else:
+                    text = tr("Your saved lists could not be read and no readable backup was "
+                              "found, so your lists are empty. Another program appears to be using "
+                              "the lists file, and until it can be read your lists cannot be saved: "
+                              "changes you make now may be lost. Close any other program that may "
+                              "be using the file and restart the application. The file is "
+                              "in:\n{}").format(folder)
+                # This IS the warning that saves are failing; the ones that
+                # fail after it only update the status bar.
+                self._lists_save_warned = True
+                _show_ok_notice(self, 'warning', tr("Lists cannot be saved"), text)
+                return
+            kept = kept or mgr.LISTS_FILE
+            kept_name = os.path.basename(kept)
+            folder = os.path.dirname(os.path.abspath(kept))
+            if status == 'recovered':
+                _show_ok_notice(
+                    self, 'warning', tr("Lists restored from a backup"),
+                    tr("Your saved lists could not be read, so they were restored from a backup "
+                       "saved on {}. Changes made after that may be missing. The unreadable file "
+                       "is kept as {} in:\n{}").format(when, kept_name, folder))
+            else:
+                _show_ok_notice(
+                    self, 'warning', tr("Lists could not be loaded"),
+                    tr("Your saved lists could not be read and no readable backup was found, so "
+                       "your lists are empty. The unreadable file is kept as {} in:\n{}").format(
+                        kept_name, folder))
+        except Exception as e:
+            logger.warning("Could not report the lists load problem: %s", e)
+
+    def _watch_lists_saves(self):
+        """Hear about lists.pkl saves that fail, whichever thread ran them.
+
+        Every list change saves, and the mutators ignore what save() returns,
+        so a save that keeps failing (another program holding lists.pkl or a
+        .bak file) otherwise left edits on screen that never reached the disk.
+        ListsManager is shared with the web server and knows nothing of Qt:
+        its hooks only emit _lists_save_state, and the queued connection runs
+        _on_lists_save_state on the UI thread -- also when the save ran on the
+        auto-sync or logout-sync worker, and never in the middle of the
+        caller's own code.
+        """
+        mgr = getattr(self, 'lists_mgr', None)
+        if mgr is None:
+            return
+        if not getattr(self, '_lists_save_state_connected', False):
+            self._lists_save_state.connect(self._on_lists_save_state,
+                                           Qt.ConnectionType.QueuedConnection)
+            self._lists_save_state_connected = True
+        mgr.on_save_failed = lambda reason: self._lists_save_state.emit(False, reason)
+        mgr.on_save_recovered = lambda: self._lists_save_state.emit(True, '')
+
+    def _on_lists_save_state(self, saved, reason):
+        """A lists.pkl save failed (saved False) or landed again (saved True).
+
+        The first failure is a warning, unless the startup notice has already
+        said the lists cannot be saved; every failure puts a line on the status
+        bar. A save that lands takes the line away and re-arms the warning.
+        Each later change retries the save with everything held in memory.
+        """
+        try:
+            path = getattr(getattr(self, 'lists_mgr', None), 'LISTS_FILE', None) \
+                or ListsManager.LISTS_FILE
+            name = os.path.basename(path)
+            line = tr("Your lists are not being saved: changes may be lost until {} "
+                      "can be written.").format(name)
+            bar = self.statusBar()
+            if saved:
+                self._lists_save_warned = False
+                if bar.currentMessage() == line:
+                    bar.clearMessage()
+                return
+            bar.showMessage(line)
+            if getattr(self, '_lists_save_warned', False):
+                return
+            # Before the box: its event loop can deliver the next failure.
+            self._lists_save_warned = True
+            _show_ok_notice(
+                self, 'warning', tr("Lists cannot be saved"),
+                tr("Your lists could not be saved to {} in:\n{}\n\nChanges you make now may "
+                   "be lost until the file can be written. Another program may be using it "
+                   "or one of its backup files (.bak). Each later change tries again and "
+                   "saves everything once it succeeds.\n\nDetails: {}").format(
+                    name, os.path.dirname(os.path.abspath(path)), reason))
+        except Exception as e:
+            logger.warning("Could not report the lists save problem: %s", e)
 
     def start_background_init(self):
         try:
@@ -1649,6 +1805,8 @@ class GenizahGUI(QMainWindow):
 
             # Initialize Lists Tab UI
             self.lists_refresh_all()
+            self._report_lists_load_problem()
+            self._watch_lists_saves()
 
             db_path = os.path.join(Config.INDEX_DIR, "tantivy_db")
             index_exists = os.path.exists(db_path) and os.listdir(db_path)
@@ -2402,6 +2560,23 @@ class GenizahGUI(QMainWindow):
         except Exception as e:
             logger.exception("Cloud sync dialog error: %s", e)
 
+    @staticmethod
+    def _sync_error_text(result):
+        """A failed sync `result`'s message, in the interface language.
+
+        The sync layer writes English (the web server imports it too), and
+        tr() finds its fixed messages as keys. A partial upload's message
+        carries two counts, so it is built again here from the counts, over
+        the translated format.
+        """
+        error = result.get('error') or 'Unknown error'
+        pushed, failed = result.get('items_pushed', 0), result.get('items_failed', 0)
+        if failed:
+            from shared.lists_sync import UPLOAD_PARTLY_FAILED
+            if error == UPLOAD_PARTLY_FAILED.format(pushed, failed):
+                return tr(UPLOAD_PARTLY_FAILED).format(pushed, failed)
+        return tr(error)
+
     def _show_lists_sync_dialog(self, local_lists, cloud_lists, cloud_error=None):
         """Show dialog to let user choose how to sync lists."""
         dialog = QDialog(self)
@@ -2422,7 +2597,7 @@ class GenizahGUI(QMainWindow):
 
         # Show error if any
         if cloud_error:
-            error_label = QLabel(f"Error: {cloud_error}")
+            error_label = QLabel(tr("Error: {}").format(tr(cloud_error)))
             error_label.setStyleSheet("color: #f44336; font-size: 12px; margin-bottom: 10px;")
             error_label.setWordWrap(True)
             layout.addWidget(error_label)
@@ -2521,7 +2696,7 @@ class GenizahGUI(QMainWindow):
                         )
                     )
                 else:
-                    QMessageBox.warning(self, tr("Sync Error"), result.get('error', 'Unknown error'))
+                    QMessageBox.warning(self, tr("Sync Error"), self._sync_error_text(result))
 
             elif action == 'upload':
                 # Upload local lists to cloud
@@ -2536,28 +2711,32 @@ class GenizahGUI(QMainWindow):
                         )
                     )
                 else:
-                    QMessageBox.warning(self, tr("Sync Error"), result.get('error', 'Unknown error'))
+                    QMessageBox.warning(self, tr("Sync Error"), self._sync_error_text(result))
 
             elif action == 'merge':
                 # Both directions
                 download_result = self.lists_mgr.sync_from_cloud()
-                upload_result = self.lists_mgr.sync_to_cloud()
-
-                if download_result.get('success') and upload_result.get('success'):
-                    QMessageBox.information(
-                        self, tr("Sync Complete"),
-                        tr("Lists merged successfully! Downloaded {dl} lists, uploaded {ul} lists.").format(
-                            dl=download_result.get('lists_added', 0),
-                            ul=upload_result.get('lists_pushed', 0)
-                        )
-                    )
+                if not download_result.get('success'):
+                    # The upload would push this computer's copy over cloud
+                    # notes that were never merged in, so a Merge whose
+                    # download failed stops before it.
+                    QMessageBox.warning(self, tr("Sync Error"),
+                                        self._sync_error_text(download_result))
                 else:
-                    errors = []
-                    if not download_result.get('success'):
-                        errors.append(f"Download: {download_result.get('error')}")
-                    if not upload_result.get('success'):
-                        errors.append(f"Upload: {upload_result.get('error')}")
-                    QMessageBox.warning(self, tr("Sync Error"), "\n".join(errors))
+                    upload_result = self.lists_mgr.sync_to_cloud()
+                    if upload_result.get('success'):
+                        QMessageBox.information(
+                            self, tr("Sync Complete"),
+                            tr("Lists merged successfully! Downloaded {dl} lists, uploaded {ul} lists.").format(
+                                dl=download_result.get('lists_added', 0),
+                                ul=upload_result.get('lists_pushed', 0)
+                            )
+                        )
+                    else:
+                        QMessageBox.warning(
+                            self, tr("Sync Error"),
+                            tr("The cloud lists were downloaded, but the upload failed: {}").format(
+                                self._sync_error_text(upload_result)))
 
             # Refresh the lists UI if it exists
             if hasattr(self, 'lists_tree'):
@@ -4633,7 +4812,12 @@ class GenizahGUI(QMainWindow):
         if not res:
             return
 
-        sys_id = res.get('sys_id') or res.get('system_id', '')
+        # Genizah hits carry their id only in display['id'] (no top-level
+        # sys_id), so without the middle term every action below got ''.
+        # LOCAL hits do carry a top-level sys_id and still take the LOCAL
+        # branch.
+        sys_id = (res.get('sys_id') or (res.get('display') or {}).get('id')
+                  or res.get('system_id', ''))
         shelfmark = res.get('shelfmark', '')
         if not shelfmark and self.meta_mgr:
             try:
@@ -4712,7 +4896,11 @@ class GenizahGUI(QMainWindow):
         # Exclude from word search results (Phase 45-03)
         menu.addSeparator()
         action_exclude = menu.addAction(tr("Exclude this manuscript"))
-        action_exclude.triggered.connect(lambda: self._exclude_word_search_result(sys_id, row))
+        # Record the System ID cell's text: it is the id every row of this
+        # manuscript shows, and the one the exclusion check compares.
+        exclude_sid = item.text().strip() or sys_id
+        action_exclude.triggered.connect(
+            lambda: self._exclude_word_search_result(exclude_sid, row))
 
         # Copy actions
         menu.addSeparator()
@@ -4826,10 +5014,29 @@ class GenizahGUI(QMainWindow):
         msgbox.button(QMessageBox.StandardButton.Yes).setText(tr("Yes"))
         msgbox.button(QMessageBox.StandardButton.No).setText(tr("No"))
         reply = msgbox.exec()
-        if reply == QMessageBox.StandardButton.Yes:
-            import subprocess
-            subprocess.Popen([sys.executable] + sys.argv, cwd=os.getcwd())
-            QApplication.instance().quit()
+        if reply == QMessageBox.StandardButton.Yes and not relaunch_looks_possible():
+            # The relaunch runs after this window has closed and the event
+            # loop has ended, so a command that cannot start then would leave
+            # nothing running. The choice is saved above; it applies at the
+            # next start.
+            label = "עברית" if new_lang == 'he' else "English"
+            self.lang_btn.setText("English" if new_lang == 'he' else "עברית")
+            _show_ok_notice(
+                self, 'warning', tr("Could not restart"),
+                tr("The application cannot restart itself right now. The language will "
+                   "change to {} the next time you start it.").format(label))
+        elif reply == QMessageBox.StandardButton.Yes:
+            # The new copy is started by __main__ after the event loop ends,
+            # i.e. after closeEvent has saved the session; started from here
+            # it would read the session before this copy had saved it.
+            request_restart()
+            # Close this window rather than quit(): quit() closes the top-level
+            # windows in no set order, and a Joins Lab closed first was saved
+            # as closed, so it did not reopen after the restart. This
+            # closeEvent runs first, with the Lab still open; the event loop
+            # then ends with the last main window (a Lab is a child dialog),
+            # also when a running letter-level search defers the close.
+            self.close()
         else:
             label = "עברית" if new_lang == 'he' else "English"
             # Update button to show the opposite of the new pending language
@@ -5509,7 +5716,7 @@ class GenizahGUI(QMainWindow):
         self.local_scope_strip.setVisible(False)
         table_layout.addWidget(self.local_scope_strip)
 
-        table_layout.addWidget(self.results_table)
+        table_layout.addLayout(self._install_load_more_button())
 
         self.results_stack = QStackedLayout()
         self.results_stack.addWidget(self.results_placeholder)
@@ -14613,7 +14820,9 @@ class GenizahGUI(QMainWindow):
             page_number = comment.get('page_number')
             content = comment.get('content') or ''
             text = (content[:50] + '...') if len(content) > 50 else content
-            author = comment.get('author_username') or tr('Anonymous')
+            # Comments are never anonymous (the table has no such column);
+            # when the name was not loaded the author line is left out.
+            author = comment.get('author_username')
 
             # Get shelfmark and title from sys_id
             shelfmark = sys_id or tr('Unknown')
@@ -14636,7 +14845,7 @@ class GenizahGUI(QMainWindow):
             display_text = f"💬 {display_shelfmark}"
             if title_preview:
                 display_text += f" - {title_preview}"
-            if show_author:
+            if show_author and author:
                 display_text += f"\n   {tr('by {}').format(author)}"
             display_text += f"\n   {text}"
 
@@ -19190,45 +19399,16 @@ class GenizahGUI(QMainWindow):
         return en_name
 
     def _apply_domain_exclusions(self):
-        """Apply domain exclusions by hiding/showing table rows."""
-        hide_uncategorized = "Uncategorized" in self._domain_exclusions
+        """Apply domain exclusions through the one results visibility pass.
 
-        if not self._domain_exclusions:
-            # No exclusions -- show all rows
-            for row in range(self.results_table.rowCount()):
-                self.results_table.setRowHidden(row, False)
-            visible = self.results_table.rowCount()
-        else:
-            visible = 0
-            for row in range(self.results_table.rowCount()):
-                # Read sys_id directly from table cell (survives sorting)
-                item = self.results_table.item(row, self.COL_SYS_ID)
-                sys_id = item.text().strip() if item else None
-                # Get domains for this result
-                result_domains = self._result_domain_map.get(sys_id, []) if sys_id else []
-                if not result_domains:
-                    # No domain data -- hide if Uncategorized is excluded
-                    self.results_table.setRowHidden(row, hide_uncategorized)
-                    if not hide_uncategorized:
-                        visible += 1
-                elif all(d in self._domain_exclusions for d in result_domains):
-                    # ALL domains excluded -- hide
-                    self.results_table.setRowHidden(row, True)
-                else:
-                    # At least one domain not excluded -- show
-                    self.results_table.setRowHidden(row, False)
-                    visible += 1
-        total = len(self.last_results) if self.last_results else 0
-        if self._domain_exclusions:
-            self.status_label.setText(
-                tr("Showing {} of {} results (filtering {} domains)").format(visible, total, len(self._domain_exclusions))
-            )
-        else:
-            self.status_label.setText(
-                tr("Showing {} of {} results").format(
-                    min(self.results_loaded, total), total
-                )
-            )
+        This used to hide/show rows from the domain rule alone, which showed
+        again every row another filter or a manuscript exclusion had hidden.
+        _apply_results_table_filters applies the domain rule (its step C)
+        together with the rest.
+        """
+        self._apply_results_table_filters()
+        self.status_label.setText(
+            self._search_status_summary(domains=len(self._domain_exclusions)))
 
     # ---- Post-search measurement filter dialog (Phase 54) ----
 
@@ -19545,13 +19725,17 @@ class GenizahGUI(QMainWindow):
                 self.run_composition()
 
     def _exclude_word_search_result(self, sys_id, row):
-        """Exclude a single manuscript from word search results."""
+        """Exclude a manuscript -- every row of it -- from the search results.
+
+        It stays excluded until New, across later searches and restarts
+        (owner, 2026-09-25). The visibility pass applies it, so no re-filter
+        or batch load brings it back; `row` is only the row clicked.
+        """
         if not sys_id:
             return
         self.word_excluded_sys_ids.add(sys_id)
-        self.results_table.setRowHidden(row, True)
-        # Update status
-        total = len(self.last_results) if self.last_results else 0
+        self._apply_results_table_filters()
+        # Update status: the count is the standing set, which spans searches.
         excluded_count = len(self.word_excluded_sys_ids)
         self.status_label.setText(
             tr("Excluded {} manuscripts from results").format(excluded_count)
@@ -19901,6 +20085,28 @@ class GenizahGUI(QMainWindow):
         self._revalidate_comp_method()
         self._save_session()
 
+    def _deliver_unless_discarded(self, attr, generation, slot, *args):
+        """Pass a search worker's signal to `slot` unless New discarded its run.
+
+        A cancelled worker still delivers what it found so far -- Stop shows
+        that as partial results. When New cancels one, that delivery is
+        already queued by the time New returns, and it rendered the stopped
+        run's rows under the cleared query box and scheduled a session save
+        over the cleared session New had just written. New advances `attr`
+        (`_search_new_generation` or `_comp_new_generation`); each slot
+        carries the value its run started under. Stop does not advance it.
+        """
+        if generation != getattr(self, attr, 0):
+            logger.info("dropped a signal from a run that New discarded")
+            return
+        slot(*args)
+
+    def _discardable(self, attr, slot):
+        """`slot` for a worker signal, bound to the New generation current
+        NOW -- call it where the run starts. See _deliver_unless_discarded."""
+        generation = getattr(self, attr, 0)
+        return lambda *args: self._deliver_unless_discarded(attr, generation, slot, *args)
+
     def _drain_previous_worker(self, attr, ctx):
         """Refuse to rebind a worker slot while the old worker is still alive.
 
@@ -20058,11 +20264,18 @@ class GenizahGUI(QMainWindow):
         self.title_items_by_sid = {}
 
         self.results_table.setRowCount(0)
+        # The previous run's results go with its rows. Kept, they outlived
+        # the table on the exits that deliver nothing (an error, a stop
+        # before any results), where "Load more results" or the all-terms
+        # view rendered them under the new query.
+        self.last_results = []
+        self.results_loaded = 0
         self._printed_filter_state = 'all'
         self.chk_search_header.set_filter_active(self.COL_PRINTED, False)
         for b in self.export_buttons: b.setEnabled(False)
         self.result_row_by_sys_id = {}
         self.hovered_row = -1
+        self._update_load_more_button()
 
         # Build Responsa options if Responsa mode is selected in combo
         responsa_options = None
@@ -20100,18 +20313,21 @@ class GenizahGUI(QMainWindow):
                 _corpus_scope = self.corpus_scope_combo.currentData() or "genizah"
             self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words, responsa_options=responsa_options, restrict_sys_ids=compute_effective_restrict(getattr(self, 'pre_search_restrict_sys_ids', None), self.refinement_restrict_sys_ids), text_position=text_position, corpus_scope=_corpus_scope, run_id=_run_id)
 
-        self.search_thread.results_signal.connect(self.on_search_finished)
+        # Every signal that writes the table or the status line is dropped
+        # once New discards this run (_deliver_unless_discarded).
+        _live = partial(self._discardable, '_search_new_generation')
+        self.search_thread.results_signal.connect(_live(self.on_search_finished))
         self.search_thread.progress_signal.connect(self._on_search_progress)
         if hasattr(self.search_thread, 'pause_ack_signal'):
             self.search_thread.pause_ack_signal.connect(
                 lambda rid, ep: self._on_pause_ack(self._pause_search, rid, ep))
         if hasattr(self.search_thread, 'phase_signal'):
-            self.search_thread.phase_signal.connect(self._on_search_phase)
+            self.search_thread.phase_signal.connect(_live(self._on_search_phase))
 
         if hasattr(self.search_thread, 'status_signal'):
-             self.search_thread.status_signal.connect(self.status_label.setText)
+            self.search_thread.status_signal.connect(_live(self.status_label.setText))
 
-        self.search_thread.error_signal.connect(self.on_error)
+        self.search_thread.error_signal.connect(_live(self.on_error))
         # Phase 115 PERF-01: connect perf_signal with mode/corpus bound at thread start
         # (REVIEWS finding 2 — capture at thread-start when _current_search_run is fresh,
         # NOT at signal-delivery time when it may be stale from a prior run).
@@ -20386,6 +20602,8 @@ class GenizahGUI(QMainWindow):
         self.search_progress.setVisible(False)
         if hasattr(self, '_search_elapsed_timer'):
             self._search_elapsed_timer.stop()
+        # The button is hidden while a search runs; this is where it stops.
+        self._update_load_more_button()
 
     def _update_search_elapsed(self):
         """Tick every 1s to keep elapsed time updating during search."""
@@ -20411,6 +20629,10 @@ class GenizahGUI(QMainWindow):
         # would re-show the "nothing in your local files" strip on the fresh
         # screen; block the hint until the next run starts (Codex, PR #343).
         self._local_scope_hint_blocked = True
+        # Whatever the run started before this click still has queued --
+        # results, an error, a status line, whether or not the thread is
+        # still running -- is dropped on arrival (_deliver_unless_discarded).
+        self._search_new_generation = getattr(self, '_search_new_generation', 0) + 1
         # 1. Stop any running search thread
         self._apply_pause_state(self._pause_search, 'hidden')
         self._pause_search.state = 'idle'
@@ -20510,16 +20732,13 @@ class GenizahGUI(QMainWindow):
         # 13. Update status bar
         self.status_label.setText(tr("Ready."))
         self.status_label.setStyleSheet("")
+        self._update_load_more_button()
 
-        # 14. Clear session state file for fresh start
-        try:
-            from shared.session_persistence import clear_session_state
-            clear_session_state()
-        except Exception:
-            pass  # Share operation failed; continue
-
-        # 15. Save the cleared state
-        self._schedule_session_save()
+        # 14. Save the cleared state now, not debounced: a crash right after
+        # New must not leave the discarded search on disk. session.json is
+        # overwritten, never deleted, because _save_session carries the Joins
+        # Lab state forward from the file when its window was not built.
+        self._save_session()
 
     def _on_search_progress(self, current, total):
         # Once the LOCAL phase is announced the bar is indeterminate on purpose.
@@ -20540,6 +20759,112 @@ class GenizahGUI(QMainWindow):
     def check_scroll_load(self, value):
         bar = self.results_table.verticalScrollBar()
         if bar.maximum() > 0 and value >= bar.maximum() * 0.95:
+            self.load_next_batch()
+
+    # Between the results table and "Load more results" under it.
+    _LOAD_MORE_GAP = 4
+
+    def _install_load_more_button(self):
+        """The Search tab's "Load more results" button. Returns the layout
+        to put where the results table goes: the table, and centred right
+        under it, the button.
+
+        Scrolling is the only other way to load the next batch, and a table
+        whose visible rows fit in the window has nothing to scroll -- no rows
+        visible at all (a first batch every row of which is excluded or
+        filtered out), or a few short ones. Without the button no further
+        batch could ever load.
+
+        Under the table, not floated over its viewport: no scroll range does
+        not mean room below the rows (twelve 30 px rows fill a 363 px
+        viewport and still cannot scroll), and there it covered the last
+        row. And not in the footer layout, whose minimum width its label
+        would raise. The table's scroll range drives it, so it is never
+        stale after Qt lays the rows out.
+        """
+        btn = QPushButton()
+        btn.setVisible(False)
+        btn.clicked.connect(self._on_load_more_clicked)
+        self.btn_load_more_results = btn
+        rows = QVBoxLayout()
+        rows.setContentsMargins(0, 0, 0, 0)
+        rows.setSpacing(self._LOAD_MORE_GAP)   # _results_rows_fit counts it
+        rows.addWidget(self.results_table)
+        rows.addWidget(btn, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.results_table.verticalScrollBar().rangeChanged.connect(
+            self._update_load_more_button)
+        return rows
+
+    def _results_rows_fit(self):
+        """True when the visible rows fit in the results table as it is
+        without the "Load more results" row: nothing to scroll there.
+
+        Judged without the button's row on purpose. Showing it takes the
+        row's height (the button's, which is fixed, and the gap) from the
+        table, and rows that just filled the table then overflow it; judged
+        on the smaller table the button would hide at once, the table regrow,
+        and the button show again, for ever. Sizes, not positions: this runs
+        from rangeChanged in the middle of a layout pass, before the button
+        is moved. While it shows, a horizontal scroll bar is counted back
+        too, since the vertical bar that overflow brings can bring it.
+        Counting too much only keeps the button up while the table can also
+        scroll a little, and either one loads the next batch.
+        """
+        table = self.results_table
+        room = table.viewport().height()
+        btn = getattr(self, 'btn_load_more_results', None)
+        if btn is not None and not btn.isHidden():
+            room += btn.sizeHint().height() + self._LOAD_MORE_GAP
+            hbar = table.horizontalScrollBar()
+            if hbar.isVisible():
+                room += hbar.height()
+        return table.verticalHeader().length() <= room
+
+    def _load_more_remaining(self):
+        """How many results "Load more results" reaches, or 0 when it must
+        offer none: nothing unloaded, a run still landing its results
+        (reset_ui recomputes as it ends), a restore running (its last step
+        recomputes), the "Only results with all terms" view (see
+        _all_terms_view_active), or rows that overflow the table
+        (scrolling loads; see _results_rows_fit)."""
+        remaining = len(getattr(self, 'last_results', None) or []) - getattr(self, 'results_loaded', 0)
+        if (remaining <= 0
+                or getattr(self, 'is_searching', False)
+                or getattr(self, '_restoring_session', False)
+                or self._all_terms_view_active()
+                or not self._results_rows_fit()):
+            return 0
+        return remaining
+
+    def _all_terms_view_active(self):
+        """True while "Only results with all terms" narrows the table.
+
+        _apply_all_terms_filter_and_rerender renders a filtered copy of
+        last_results and then puts the full set back, so results_loaded
+        counts positions in the copy. A batch read from last_results at that
+        position would bring rows matching only some of the terms, and rows
+        already shown. The same condition as that method's filter."""
+        chain = getattr(self, 'refinement_chain', None)
+        return bool(getattr(self, '_all_terms_filter', False) and chain
+                    and compute_all_terms_filter(chain) is not None)
+
+    def _update_load_more_button(self, *_):
+        """Show "Load more results" exactly when _load_more_remaining says
+        so. Reads only current state and loads nothing, so it is safe to
+        call from anywhere, any number of times. The visibility pass calls
+        it, which covers every batch load."""
+        btn = getattr(self, 'btn_load_more_results', None)
+        if btn is None:
+            return
+        remaining = self._load_more_remaining()
+        if remaining:
+            btn.setText(tr("Load more results ({} not loaded)").format(remaining))
+        btn.setVisible(bool(remaining))
+
+    def _on_load_more_clicked(self):
+        # Checked again at click time, then the same call a scroll makes,
+        # reading the same state.
+        if self._load_more_remaining():
             self.load_next_batch()
 
     def load_next_batch(self, batch_size=None):
@@ -20737,15 +21062,10 @@ class GenizahGUI(QMainWindow):
         self.results_table.setSortingEnabled(True)
         self._apply_results_table_filters()
 
-        # Update Status (include expanded term count for Responsa searches)
-        expanded_count = getattr(self, '_responsa_expanded_count', 0)
-        partial_suffix = f" ({tr('Partial results')})" if getattr(self, '_search_was_cancelled', False) else ""
-        if expanded_count > 0:
-            self.status_label.setText(tr("Showing {} of {} results (searching {} expanded terms)").format(
-                self.results_loaded, len(self.last_results), expanded_count
-            ) + partial_suffix)
-        else:
-            self.status_label.setText(tr("Showing {} of {} results").format(self.results_loaded, len(self.last_results)) + partial_suffix)
+        # Update Status: the rows actually visible, with the excluded note
+        # (exclusions outlive the search that made them) and the expanded
+        # term count for Responsa searches.
+        self.status_label.setText(self._search_status_summary())
 
         # Trigger Metadata
         if ids_to_fetch:
@@ -20814,6 +21134,7 @@ class GenizahGUI(QMainWindow):
             self.last_results = []
             for b in self.export_buttons: b.setEnabled(False)
             self.results_table.setRowCount(0)
+            self._update_load_more_button()
             self.result_row_by_sys_id = {}
             self.shelfmark_items_by_sid = {}
             self.title_items_by_sid = {}
@@ -20911,12 +21232,7 @@ class GenizahGUI(QMainWindow):
             self.status_label.setText(warning)
             self.status_label.setStyleSheet("color: #f39c12; font-weight: bold;")
             def _restore_status():
-                self.status_label.setText(
-                    tr("Showing {} of {} results").format(
-                        min(self.results_loaded, len(self.last_results)),
-                        len(self.last_results)
-                    )
-                )
+                self.status_label.setText(self._search_status_summary())
                 self.status_label.setStyleSheet("")
             QTimer.singleShot(5000, _restore_status)
 
@@ -20996,7 +21312,7 @@ class GenizahGUI(QMainWindow):
             traceback.print_exc()
         finally:
             if hasattr(self, 'status_label'):
-                self.status_label.setText('')
+                self.status_label.setText(self._search_status_or_blank())
         self._update_refinement_strip()
         self._update_search_within_btn()
         self._schedule_session_save()
@@ -21029,7 +21345,7 @@ class GenizahGUI(QMainWindow):
         """Apply the restrict set rebuilt by the off-thread chain replay."""
         self.refinement_restrict_sys_ids = result_set
         if hasattr(self, 'status_label'):
-            self.status_label.setText('')
+            self.status_label.setText(self._search_status_or_blank())
         if hasattr(self, '_update_refinement_strip'):
             self._update_refinement_strip()
         if hasattr(self, '_update_search_within_btn'):
@@ -21041,9 +21357,18 @@ class GenizahGUI(QMainWindow):
         self.refinement_chain = []
         self.refinement_restrict_sys_ids = None
         if hasattr(self, 'status_label'):
-            self.status_label.setText('')
+            self.status_label.setText(self._search_status_or_blank())
         if hasattr(self, '_update_refinement_strip'):
             self._update_refinement_strip()
+
+    def _search_status_or_blank(self):
+        """What the replay leaves in the status label once it is done: the
+        results summary when the table has rows (so the excluded note stays
+        on screen), '' otherwise."""
+        table = getattr(self, 'results_table', None)
+        if table is not None and table.rowCount():
+            return self._search_status_summary()
+        return ''
 
     def _enter_refine_mode(self):
         """D-02, D-03: Activate refine mode on desktop search bar."""
@@ -21213,10 +21538,15 @@ class GenizahGUI(QMainWindow):
         self.title_items_by_sid = {}
         self.load_next_batch()
         self.last_results = original  # restore full set for future operations
+        # Hides "Load more results" while the view is filtered (a click reads
+        # the full set); offers it again, counted on the full set, when not.
+        self._update_load_more_button()
         n_shown = len(filtered)
         n_total = len(original)
         if n_shown < n_total:
-            self.status_label.setText(f"{n_shown:,} {tr('of')} {n_total:,} ({tr('Only results with all terms')})")
+            # Counted from the table, so exclusions and filters are honest.
+            self.status_label.setText(
+                f"{self._search_status_summary()} ({tr('Only results with all terms')})")
 
     def _clear_refinement_chain(self):
         """D-11: Remove entire chain, return to unrestricted search."""
@@ -21618,7 +21948,68 @@ class GenizahGUI(QMainWindow):
                 lbl.setText(tr("My Library filter inactive — no LOCAL hits in this query"))
             lbl.setVisible(visible)
 
+    def _row_is_excluded(self, row):
+        """Is this results row's manuscript excluded on the Search surface?
+
+        Two sets: 'Exclude this manuscript' (word_excluded_sys_ids) and the
+        Exclude Manuscripts list (excluded_sys_ids). Both stand until New,
+        across later searches and restarts.
+        """
+        item = self.results_table.item(row, self.COL_SYS_ID)
+        sid = item.text().strip() if item else ''
+        return bool(sid) and (sid in self.word_excluded_sys_ids
+                              or sid in self.excluded_sys_ids)
+
+    def _search_excluded_note(self):
+        """' (N excluded)' for the rows the last visibility pass hid by
+        exclusion, or ''."""
+        n = getattr(self, '_search_rows_excluded', 0)
+        return f" ({n} {tr('excluded')})" if n else ""
+
+    def _search_status_summary(self, domains=0):
+        """The Search results status line, from the table as it is now.
+
+        The one composer for every writer of that line, so none of them can
+        claim more visible rows than the table shows or drop the note saying
+        exclusions hide some.
+        """
+        table = self.results_table
+        visible = sum(1 for r in range(table.rowCount()) if not table.isRowHidden(r))
+        total = len(self.last_results) if self.last_results else 0
+        expanded = getattr(self, '_responsa_expanded_count', 0)
+        if domains:
+            text = tr("Showing {} of {} results (filtering {} domains)").format(
+                visible, total, domains)
+        elif expanded > 0:
+            text = tr("Showing {} of {} results (searching {} expanded terms)").format(
+                visible, total, expanded)
+        else:
+            text = tr("Showing {} of {} results").format(visible, total)
+        text += self._search_excluded_note()
+        if getattr(self, '_search_was_cancelled', False):
+            text += f" ({tr('Partial results')})"
+        return text
+
+    def _with_search_summary(self, message):
+        """`message`, followed by the results summary when any row is hidden,
+        so a message that replaces the summary does not hide that fact. Two
+        sentences: a full stop ends `message` unless punctuation already
+        does ("Tag: letters - 2 results. Showing 1 of 2 results ...")."""
+        table = self.results_table
+        if any(table.isRowHidden(r) for r in range(table.rowCount())):
+            message = message.rstrip()
+            if not message.endswith(('.', '!', '?', ':')):
+                message += '.'
+            return f"{message} {self._search_status_summary()}"
+        return message
+
     def _apply_results_table_filters(self):
+        """Recompute the visibility of every Search results row.
+
+        The one pass that decides it: the manuscript exclusions first, then
+        the filters. Writes the status summary when it changed any row or the
+        excluded count, and returns how many rows the exclusions hide.
+        """
         # 1. Gather rules
         list_active = self.list_filter_state.get('active', False)
         list_mode = self.list_filter_state.get('mode', 'in')
@@ -21651,12 +22042,30 @@ class GenizahGUI(QMainWindow):
         } if (_local_filter_active or _optout_active) and not self._local_filter_inactive_chip_visible else None
         self._show_local_filter_chip('search', self._local_filter_inactive_chip_visible)
 
-        if not self.results_filters and not list_active and not has_domain_exclusions and self._printed_filter_state == 'all' and not _has_meas_post and not _local_filter_active and not _optout_active:
-            for row in range(self.results_table.rowCount()):
-                self.results_table.setRowHidden(row, False)
-            return
+        no_filters = (not self.results_filters and not list_active and not has_domain_exclusions
+                      and self._printed_filter_state == 'all' and not _has_meas_post
+                      and not _local_filter_active and not _optout_active)
+
+        changed = False
+        excluded_rows = 0
+
+        def _set_hidden(row, hidden):
+            nonlocal changed
+            if self.results_table.isRowHidden(row) != hidden:
+                self.results_table.setRowHidden(row, hidden)
+                changed = True
 
         for row in range(self.results_table.rowCount()):
+            # Exclusions first, with or without a filter: they are not a
+            # filter the user clears, they hold until New.
+            if self._row_is_excluded(row):
+                excluded_rows += 1
+                _set_hidden(row, True)
+                continue
+            if no_filters:
+                _set_hidden(row, False)
+                continue
+
             visible = True
 
             # A. Check Column Filters
@@ -21667,7 +22076,7 @@ class GenizahGUI(QMainWindow):
                     break
 
             if not visible:
-                self.results_table.setRowHidden(row, True)
+                _set_hidden(row, True)
                 continue
 
             # B. Check List Filter
@@ -21748,18 +22157,17 @@ class GenizahGUI(QMainWindow):
                 if row_sys_id not in _local_visible_sys_ids:
                     visible = False
 
-            self.results_table.setRowHidden(row, not visible)
+            _set_hidden(row, not visible)
 
-        # Update status with visible/total count when any filter is active
-        total = self.results_table.rowCount()
-        visible_count = sum(1 for r in range(total) if not self.results_table.isRowHidden(r))
-        any_filter = (self.results_filters or list_active or has_domain_exclusions
-                      or self._printed_filter_state != 'all' or _has_meas_post
-                      or _local_filter_active)
-        if any_filter and visible_count < total:
-            self.status_label.setText(
-                tr("Showing {} of {} results").format(visible_count, total)
-            )
+        # Rewrite the status whenever the visible set changed -- including
+        # the last filter or exclusion being removed, which leaves no filter
+        # active but a line that still counts the rows it hid.
+        previous_excluded = getattr(self, '_search_rows_excluded', 0)
+        self._search_rows_excluded = excluded_rows
+        if (changed or excluded_rows != previous_excluded) and self.results_table.rowCount():
+            self.status_label.setText(self._search_status_summary())
+        self._update_load_more_button()
+        return excluded_rows
 
     def _result_page_num(self, res):
         """The 1-based page a results row is showing, or None.
@@ -22028,9 +22436,11 @@ class GenizahGUI(QMainWindow):
         # CR-114-01: bind THIS run's token into the slot so a stale slot from a superseded
         # worker carries its OLD token and is skipped by the emit helper's token guard.
         _tel_tok = self._pgp_tag_active_token
-        self._pgp_tag_search_worker.finished.connect(
-            lambda tag, results, t=_tel_tok: self._on_tag_search_results(tag, results, t)
-        )
+        # New pressed while the tag loads drops its results on arrival, as it
+        # does a text search's (_deliver_unless_discarded).
+        self._pgp_tag_search_worker.finished.connect(self._discardable(
+            '_search_new_generation',
+            lambda tag, results, t=_tel_tok: self._on_tag_search_results(tag, results, t)))
         self._pgp_tag_search_worker.start()
 
     def _on_tag_search_results(self, tag, results, token=None):
@@ -22050,6 +22460,7 @@ class GenizahGUI(QMainWindow):
             self.last_results = []
             self.results_loaded = 0
             self.results_table.setRowCount(0)
+            self._update_load_more_button()
             self.result_row_by_sys_id = {}
             self.shelfmark_items_by_sid = {}
             self.title_items_by_sid = {}
@@ -22155,7 +22566,9 @@ class GenizahGUI(QMainWindow):
         self.results_table.setColumnHidden(self.COL_SRC, True)
 
         self.load_next_batch()
-        self.status_label.setText(tr("Tag: {} - {} results").format(tag, len(formatted)))
+        # Standing exclusions apply to a tag search too; say so when they hide rows.
+        self.status_label.setText(self._with_search_summary(
+            tr("Tag: {} - {} results").format(tag, len(formatted))))
         # Phase 114 USAGE-03: emit search telemetry for the success path.
         # `tag` and `len(formatted)` are safe; only the bucket is included, not the count (D-04).
         # The tag text itself MUST NOT appear in any prop — only len(formatted) → bucket.
@@ -22629,7 +23042,8 @@ class GenizahGUI(QMainWindow):
         self._apply_results_table_filters()
 
         if self.meta_to_fetch_count == 0:
-            self.status_label.setText(tr("Metadata already loaded for {} items.").format(self.meta_cached_count))
+            self.status_label.setText(self._with_search_summary(
+                tr("Metadata already loaded for {} items.").format(self.meta_cached_count)))
             return
 
         self.meta_loader = ShelfmarkLoaderThread(self.meta_mgr, ids)
@@ -22682,10 +23096,14 @@ class GenizahGUI(QMainWindow):
     def on_meta_finished(self, cancelled):
         total_loaded = self.meta_cached_count + self.meta_progress_current
         total_expected = self.meta_cached_count + self.meta_to_fetch_count
+        # These replace the results summary once metadata completes, so keep
+        # it when rows are hidden.
         if cancelled:
-            self.status_label.setText(tr("Metadata load cancelled. Loaded {}/{}.").format(total_loaded, total_expected))
+            self.status_label.setText(self._with_search_summary(
+                tr("Metadata load cancelled. Loaded {}/{}.").format(total_loaded, total_expected)))
         else:
-            self.status_label.setText(tr("Loaded {} items.").format(total_expected))
+            self.status_label.setText(self._with_search_summary(
+                tr("Loaded {} items.").format(total_expected)))
         self.meta_loader = None
 
     def _format_metadata_status(self):
@@ -22909,8 +23327,9 @@ class GenizahGUI(QMainWindow):
                 res = item.data(Qt.ItemDataRole.UserRole)
                 if res:
                     sorted_results.append(res)
-        if not sorted_results:
-            sorted_results = self.last_results
+        # Empty is an answer: substituting last_results here exported every
+        # result, hidden and excluded ones included. show_full_text_for_result
+        # keeps its own [res] fallback.
         return sorted_results
 
     def _extract_fl_id(self, res):
@@ -24068,6 +24487,10 @@ class GenizahGUI(QMainWindow):
 
         # D-03: emit export dialog open BEFORE the save dialog (no no-data guard here — MEDIUM-8)
         self._emit_feature_opened(dialog_name='export')
+        if not self._collect_sorted_results():
+            _show_ok_notice(self, 'information', tr("Export Results"), tr(
+                "Nothing to export: every result in the table is hidden by a filter or an exclusion."))
+            return
         path, _ = QFileDialog.getSaveFileName(self, tr("Export Results"), default_path, selected_filter)
         if not path: return
         # D-03: emit export action AFTER path is chosen (cancelled save → no action emit — MEDIUM-8)
@@ -25782,32 +26205,18 @@ class GenizahGUI(QMainWindow):
         return normalize_shelfmark(shelfmark)
 
     def _rerender_with_exclusions(self):
-        """Hide/show table rows based on current exclusion state (Approach C).
+        """Re-apply the Search tab's Exclude Manuscripts list to the table.
 
-        Iterates existing QTableWidget rows and toggles visibility.
-        Preserves enrichment state (domain badges, printed indicators, etc.)
-        without re-rendering or re-calling on_search_finished.
+        Runs the one visibility pass, which reads the list and keeps every
+        filter (this used to loop over the list alone and showed again every
+        row a filter had hidden). Preserves enrichment state (domain badges,
+        printed indicators, etc.) without re-rendering.
         """
         if not hasattr(self, 'results_table') or self.results_table.rowCount() == 0:
             return
-        hidden_count = 0
-        for row in range(self.results_table.rowCount()):
-            item = self.results_table.item(row, self.COL_CHECKBOX)
-            if not item:
-                continue
-            result = item.data(Qt.ItemDataRole.UserRole)
-            sid = result.get('display', {}).get('id') if result else None
-            should_hide = bool(sid and sid in self.excluded_sys_ids)
-            self.results_table.setRowHidden(row, should_hide)
-            if should_hide:
-                hidden_count += 1
-        # Update status label
-        total = self.results_table.rowCount()
-        visible = total - hidden_count
-        if hidden_count > 0:
-            self.status_label.setText(
-                f"{visible} / {total} {tr('Results')} ({hidden_count} {tr('excluded')})"
-            )
+        self._apply_results_table_filters()
+        # Always, so removing the last exclusion drops the note as well.
+        self.status_label.setText(self._search_status_summary())
 
     def _update_exclusion_display(self, surface='search'):
         """Update ONE surface's exclusion status label (D-07 breakdown).
@@ -26045,6 +26454,15 @@ class GenizahGUI(QMainWindow):
 
     def toggle_composition(self):
         if self.is_comp_running:
+            # A New pressed during this batch is still waiting for the
+            # witness in flight, and has already discarded what the batch
+            # delivers, so Stop has no results to keep: it finishes the New
+            # -- at once if the witness is done, else when it is. Stopping
+            # the UI here instead left that New's retry armed, and it then
+            # cleared whatever search was started next.
+            if self._reset_is_pending():
+                self._reset_composition()
+                return
             # GUARDED STOP (Phase 146): a passage scan has no cancel hook,
             # so setting the flag would leave "Cancelling..." on screen for
             # up to ~19s and then complete anyway. Scoped to the scan phase
@@ -26086,6 +26504,9 @@ class GenizahGUI(QMainWindow):
 
     def cancel_composition(self):
         """Cancel composition search gracefully (called by Escape shortcut)."""
+        if self._reset_is_pending():
+            self._reset_composition()  # as Stop does: see toggle_composition
+            return
         if self._refuse_stop_during_passage_scan():
             return
         # Escape is a Stop, and a Stop ends the expansion too.
@@ -26108,18 +26529,48 @@ class GenizahGUI(QMainWindow):
         self._refresh_witness_panel()
         self.comp_summary_text = ""  # Clear persistent summary on reset
 
-    def _retry_pending_reset(self):
+    def _reset_is_pending(self):
+        """True while a New pressed during the CURRENT composition run's
+        witness batch is waiting for the witness in flight.
+
+        `_reset_pending` is the request `_reset_composition` armed its retry
+        for: (the batch thread it cancelled, the New generation it started).
+        A request for any other thread belongs to a run that has since been
+        replaced, and counts as nothing.
+        """
+        pending = getattr(self, '_reset_pending', None)
+        return bool(pending) and pending[0] is getattr(self, 'comp_thread', None)
+
+    def _retry_pending_reset(self, request):
         """Poll until the cancelled witness batch has actually finished, then
         do the reset for real.
 
         `QTimer.singleShot`, never a blocking `wait()`: the UI thread is what
         the batch's own signals are delivered on, so blocking here would stop
         the thread it is waiting for from ever reporting done.
+
+        It waits on the thread itself, not on `is_comp_running` alone: New
+        discarded the batch when it was pressed, so the completion that would
+        have cleared that flag is dropped on arrival.
+
+        `request` is the one this chain was armed for, and the chain acts only
+        while it is still the pending one and its batch still holds the thread
+        slot. A New pressed again after the witness finished, or a Stop,
+        completes the reset without waiting for this timer; a new run takes
+        the slot. A callback still in flight after either must not cancel and
+        clear the search started next -- a bare "pending" flag let it.
         """
-        if self._passage_batch_in_flight():
-            QTimer.singleShot(400, self._retry_pending_reset)
+        if request is None or getattr(self, '_reset_pending', None) is not request:
+            return  # the reset already happened, or a later New owns the retry
+        thread = getattr(self, 'comp_thread', None)
+        if thread is not request[0]:
+            # A new run started; the tab New meant to clear is gone.
+            self._reset_pending = None
             return
-        self._reset_pending = False
+        if self._passage_batch_in_flight() and thread.isRunning():
+            QTimer.singleShot(400, partial(self._retry_pending_reset, request))
+            return
+        self._reset_pending = None
         self._reset_composition()
 
     def _reset_composition(self):
@@ -26137,7 +26588,10 @@ class GenizahGUI(QMainWindow):
         # make it killable: the witness in flight can still be seconds away
         # (up to ~19s at Deepest), so Reset asks it to stop and comes back
         # later, the same non-blocking retry `_defer_close_for_passage` uses.
-        if self._passage_batch_in_flight():
+        # The thread is checked as well as the flag: once New has discarded
+        # the batch, its completion no longer clears `is_comp_running`.
+        thread = getattr(self, 'comp_thread', None)
+        if self._passage_batch_in_flight() and thread.isRunning():
             # BEFORE the cancel, not in the deferred reset 400 ms later.
             # The cancelled batch's partial completion renders first, arms
             # the expansion and schedules the next round at ZERO delay --
@@ -26145,14 +26599,39 @@ class GenizahGUI(QMainWindow):
             # cancels a round it just spawned, once per round, and takes a
             # witness-search duration each time to clear.
             self._stop_auto_expand('')
-            self.comp_thread.request_cancel()
-            if not getattr(self, '_reset_pending', False):
-                self._reset_pending = True
-                if hasattr(self, 'lbl_comp_status'):
-                    self.lbl_comp_status.setText(tr(
-                        "Clearing once the current witness finishes."))
-            QTimer.singleShot(400, self._retry_pending_reset)
+            thread.request_cancel()
+            if not self._reset_is_pending():
+                # New discards the batch NOW, not when the retry resets the
+                # tab: what it delivers meanwhile -- its partial rows, which
+                # would render and start grouping, an error, a status line
+                # -- is dropped on arrival (_deliver_unless_discarded). That
+                # completion used to report the cancelled run's telemetry,
+                # so the report is made here.
+                self._comp_new_generation = getattr(self, '_comp_new_generation', 0) + 1
+                self._emit_comp_search_telemetry('cancelled')
+                # One retry chain per request: it reschedules itself until
+                # the batch ends. A second chain would run the reset twice,
+                # and the second could clear a search started after the
+                # first. The request names this batch, so a chain armed for
+                # an earlier run's batch stops at its next tick.
+                request = self._reset_pending = (thread, self._comp_new_generation)
+                QTimer.singleShot(400, partial(self._retry_pending_reset, request))
+            # Every time: the refusal helper above has just said the
+            # results found so far are kept, which is Stop's promise, not
+            # New's.
+            if hasattr(self, 'lbl_comp_status'):
+                self.lbl_comp_status.setText(tr(
+                    "Clearing once the current witness finishes."))
             return
+        # From here the reset happens now. Whatever the composition or
+        # grouping run still has queued -- a cancelled scan's partial rows, a
+        # grouping result, an error -- is dropped on arrival
+        # (_deliver_unless_discarded).
+        # And a retry an earlier New armed finds its reset done: left
+        # pending, it would reset again once it fired, cancelling and
+        # clearing whatever search had been started by then.
+        self._reset_pending = None
+        self._comp_new_generation = getattr(self, '_comp_new_generation', 0) + 1
         self._apply_pause_state(self._pause_comp, 'hidden')
         self._pause_comp.state = 'idle'
         # 1. Stop any running composition thread
@@ -26269,15 +26748,12 @@ class GenizahGUI(QMainWindow):
         if hasattr(self, 'lbl_comp_status'):
             self.lbl_comp_status.setText("")
 
-        # 15. Clear session state file for fresh start
-        try:
-            from shared.session_persistence import clear_session_state
-            clear_session_state()
-        except Exception:
-            pass  # Share operation failed; continue
-
-        # 16. Save the cleared state
-        self._schedule_session_save()
+        # 15. Save the cleared state now, not debounced: a crash right after
+        # New must not leave the discarded search (or its "interrupted" flag)
+        # on disk. session.json is overwritten, never deleted, because
+        # _save_session carries the Joins Lab state forward from the file
+        # when its window was not built.
+        self._save_session()
 
     def _emit_comp_search_telemetry(self, action: str, result_count=None) -> None:
         """Emit desktop_search_executed for a composition search run (Phase 114 USAGE-03).
@@ -26339,6 +26815,9 @@ class GenizahGUI(QMainWindow):
             return
         self._run_seq += 1
         _comp_run_id = self._run_seq
+        # This run's results, errors and status lines are dropped once New
+        # discards it (_deliver_unless_discarded).
+        _comp_live = partial(self._discardable, '_comp_new_generation')
         self._pause_comp.reset_for_run(_comp_run_id, time.monotonic())
 
         self.is_comp_running = True
@@ -26520,7 +26999,7 @@ class GenizahGUI(QMainWindow):
                 corpus_scope=_comp_scope,
                 run_id=_comp_run_id
             )
-            self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
+            self.comp_thread.scan_finished_signal.connect(_comp_live(self.on_comp_scan_finished))
 
         # 2. נתיב רגיל (STANDARD MODE)
         else:
@@ -26624,9 +27103,9 @@ class GenizahGUI(QMainWindow):
                     prior_rows=_prior_rows,
                     prior_filtered=_prior_filtered)
                 self.comp_thread.scan_finished_signal.connect(
-                    self.on_comp_scan_finished)
+                    _comp_live(self.on_comp_scan_finished))
                 self.comp_thread.witness_progress_signal.connect(
-                    self._on_witness_progress)
+                    _comp_live(self._on_witness_progress))
             else:
                 # --- התיקון הקריטי כאן: הסרת progress_callback ---
                 self.comp_thread = CompositionThread(
@@ -26647,9 +27126,9 @@ class GenizahGUI(QMainWindow):
                     run_id=_comp_run_id
                 )
                 if hasattr(self.comp_thread, 'scan_finished_signal'):
-                    self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
+                    self.comp_thread.scan_finished_signal.connect(_comp_live(self.on_comp_scan_finished))
                 else:
-                    self.comp_thread.finished_signal.connect(self.on_comp_search_finished)
+                    self.comp_thread.finished_signal.connect(_comp_live(self.on_comp_search_finished))
 
         self.comp_thread.progress_signal.connect(self.on_comp_progress)
         if hasattr(self.comp_thread, 'pause_ack_signal'):
@@ -26657,9 +27136,9 @@ class GenizahGUI(QMainWindow):
                 lambda rid, ep: self._on_pause_ack(self._pause_comp, rid, ep))
 
         if hasattr(self.comp_thread, 'status_signal'):
-             self.comp_thread.status_signal.connect(self.on_comp_status_update)
+            self.comp_thread.status_signal.connect(_comp_live(self.on_comp_status_update))
 
-        self.comp_thread.error_signal.connect(self.on_comp_error)
+        self.comp_thread.error_signal.connect(_comp_live(self.on_comp_error))
 
         # Phase 115 PERF-01: connect perf_signal with mode/corpus bound at thread start
         # (REVIEWS finding 2 — capture at thread-start when _current_comp_search_run is fresh).
@@ -27013,9 +27492,12 @@ class GenizahGUI(QMainWindow):
             self.searcher, items, self.spin_filter.value(), filtered_items=filtered_items
         )
         self.group_thread.progress_signal.connect(self.on_comp_progress)
-        self.group_thread.status_signal.connect(lambda s: self.comp_progress.setFormat(s))
-        self.group_thread.finished_signal.connect(self.on_comp_finished)
-        self.group_thread.error_signal.connect(self.on_grouping_error)
+        # Dropped once New discards this run (_deliver_unless_discarded).
+        _comp_live = partial(self._discardable, '_comp_new_generation')
+        self.group_thread.status_signal.connect(
+            _comp_live(lambda s: self.comp_progress.setFormat(s)))
+        self.group_thread.finished_signal.connect(_comp_live(self.on_comp_finished))
+        self.group_thread.error_signal.connect(_comp_live(self.on_grouping_error))
         self.group_thread.start()
 
     def on_grouping_error(self, err):
@@ -30159,7 +30641,8 @@ class GenizahGUI(QMainWindow):
 
         History no longer stores result snapshots (that bloated
         search_history.json and froze the UI). We restore the query, search
-        params, pre-search filters and exclusions, then re-run the search.
+        params, pre-search filters and the domain/printed filters, then
+        re-run the search.
         Legacy entries that still carry a 'results' snapshot are restored
         instantly for backward compatibility.
         """
@@ -30207,8 +30690,9 @@ class GenizahGUI(QMainWindow):
 
         self._domain_exclusions = set(state.get('domain_exclusions', []))
         self._printed_filter_state = state.get('printed_filter', 'all')
-        self.excluded_sys_ids = set(state.get('excluded_sys_ids', []))
-        self.excluded_shelfmarks = set(state.get('excluded_shelfmarks', []))
+        # The Exclude Manuscripts list is NOT taken from the history entry: it
+        # stands until New, like the right-click exclusions, and replacing
+        # only its ids here left the label and the dialog showing another list.
 
         results = state.get('results', [])
         if results:
@@ -30536,6 +31020,35 @@ class GenizahGUI(QMainWindow):
                 # through the same deferral the full restore uses.
                 self._comp_method_deferred = 'passage'
 
+        # The Search surface's manuscript exclusions -- the right-click set
+        # and the Exclude Manuscripts list -- stand until New, across later
+        # searches and restarts (owner, 2026-09-25). They belong to this path,
+        # not to the search replay: a zero-result search followed by a
+        # restart (no data to restore), `restore_mode='never'` and a declined
+        # prompt all return before the replay, and would empty them.
+        raw_word = state.get('word_excluded_sys_ids', [])
+        self.word_excluded_sys_ids = (
+            set(raw_word) if isinstance(raw_word, (list, tuple, set)) else set())
+        self.excluded_sys_ids = set(reg.get('excluded_sys_ids', []))
+        self.excluded_shelfmarks = set(reg.get('excluded_shelfmarks', []))
+        self.excluded_raw_entries = reg.get('excluded_raw_entries', [])
+        # Phase 56: Restore multi-source exclusion state
+        if reg.get('exclusion_sources'):
+            self.exclusion_sources = deserialize_sources(reg['exclusion_sources'])
+            self.excluded_sys_ids = compute_excluded_ids(self.exclusion_sources)
+        elif self.excluded_sys_ids:
+            # Backward compat: wrap old flat set into ExclusionSource
+            self.exclusion_sources = [ExclusionSource(
+                label=tr('Previous session'),
+                source_type='file',
+                source_id='legacy',
+                sys_ids=set(self.excluded_sys_ids),
+                unresolved=list(self.excluded_shelfmarks),
+            )]
+        # The label (SEARCH surface; the composition restore labels its own).
+        # The raw-entry fallback lives inside _update_exclusion_display.
+        self._update_exclusion_display('search')
+
     def _save_session(self):
         """Save current search state to disk for session persistence."""
         from shared.session_persistence import load_session_state, save_session_state
@@ -30809,31 +31322,12 @@ class GenizahGUI(QMainWindow):
             # has_data gate (Phase 96 fix-8) so it applies even when no results.
             # (No-op here; left as comment to preserve history.)
             self._printed_sys_ids = set(reg.get('printed_ids', []))
-            self.excluded_sys_ids = set(reg.get('excluded_sys_ids', []))
-            self.excluded_shelfmarks = set(reg.get('excluded_shelfmarks', []))
-            self.excluded_raw_entries = reg.get('excluded_raw_entries', [])
-            # Phase 56: Restore multi-source exclusion state
-            if reg.get('exclusion_sources'):
-                self.exclusion_sources = deserialize_sources(reg['exclusion_sources'])
-                self.excluded_sys_ids = compute_excluded_ids(self.exclusion_sources)
-            elif self.excluded_sys_ids:
-                # Backward compat: wrap old flat set into ExclusionSource
-                self.exclusion_sources = [ExclusionSource(
-                    label=tr('Previous session'),
-                    source_type='file',
-                    source_id='legacy',
-                    sys_ids=set(self.excluded_sys_ids),
-                    unresolved=list(self.excluded_shelfmarks),
-                )]
+            # The manuscript exclusions (both sets) and their label were
+            # restored by _apply_persistent_session_preferences above, so the
+            # replay below already hides what they exclude.
             self.results_filters = reg.get('results_filters', {})
             self.filter_sources = reg.get('filter_sources', {})
             self.filter_enabled_sources = set(reg.get('filter_enabled_sources', []))
-
-            # Update exclusion status label (SEARCH surface -- the
-            # composition block below restores and labels its own). The
-            # raw-entry fallback now lives inside _update_exclusion_display,
-            # so both surfaces get it.
-            self._update_exclusion_display('search')
 
             # Restore regular search results
             if reg.get('results'):
@@ -31042,7 +31536,6 @@ class GenizahGUI(QMainWindow):
             # Restore pre-search filters (Phase 45-03)
             self.pre_search_filters = state.get('pre_search_filters', {})
             self._post_measurement_filters = state.get('post_measurement_filters', {})
-            self.word_excluded_sys_ids = set(state.get('word_excluded_sys_ids', []))
             if self.pre_search_filters:
                 # Recompute restrict_sys_ids from saved filters.
                 # FINDING 2 (129-07): pass meta_mgr so library restriction is
@@ -31135,6 +31628,12 @@ class GenizahGUI(QMainWindow):
                 self._apply_default_comp_method()
             except Exception:                                # noqa: BLE001
                 logger.exception('could not apply the default search method')
+            # "Load more results" stays hidden while the restore runs; a
+            # replayed first batch every row of which is excluded needs it.
+            try:
+                self._update_load_more_button()
+            except Exception:                                # noqa: BLE001
+                logger.exception('could not update the load-more button')
             self.search_progress.setVisible(False)
             # Phase 96 fix-8 (supersedes fix-7): notify MyLibraryTab
             # unconditionally in the finally block so that _auto_select_first_folder
@@ -31865,7 +32364,33 @@ if __name__ == "__main__":
     if os.path.exists(icon_path):
         app_icon = QIcon(icon_path)
         app.setWindowIcon(app_icon)
-    
+
+    # One running copy per data folder: two copies each save their whole lists
+    # and settings over the same files, so the last save silently drops the
+    # other window's edits. Taken after the headless self-tests above (the
+    # packaging smoke runs them while the app may be open) and before any
+    # window exists. _instance_lock is never released by hand: it lives until
+    # the process exits, because an upload still in flight after the window
+    # closes can save lists.pkl during teardown.
+    _instance_lock, _other_copy_running = acquire_instance_lock(
+        Config.INDEX_DIR, parent_pid=restarted_from(sys.argv))
+    if _other_copy_running:
+        if CURRENT_LANG == 'he':
+            app.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        _show_ok_notice(
+            None, 'information', tr("Already running"),
+            tr("Dicta Genizah Search Pro is already open. Only one copy can run at a time, "
+               "because two copies would overwrite each other's lists and settings. Switch to "
+               "the open window. If none is visible, it is still starting or closing; try "
+               "again in a moment."))
+        sys.exit(0)
+
     window = GenizahGUI()
     window.showMaximized()
-    sys.exit(app.exec())
+    _exit_code = app.exec()
+    # If a language change asked for a restart, the new copy starts only now,
+    # after closeEvent has saved the session. It waits for this process (named
+    # on its command line) to exit and release _instance_lock. If it cannot be
+    # started, the user is told to start the app again before this one exits.
+    relaunch_if_requested(on_failure=_report_failed_relaunch)
+    sys.exit(_exit_code)

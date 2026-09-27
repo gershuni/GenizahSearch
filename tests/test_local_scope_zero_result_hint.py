@@ -302,9 +302,10 @@ def test_strip_is_built_above_the_results_table_and_wired_to_the_button():
     assert 'table_layout.addWidget(self.local_scope_strip)' in src
     assert ('self.btn_local_scope_search_genizah.clicked.connect(\n'
             '            self._search_genizah_instead)') in src
-    # built before the table is added, so it sits above it
+    # built before the table is added (in the layout that also holds the
+    # "Load more results" row under it), so it sits above it
     assert (src.index('table_layout.addWidget(self.local_scope_strip)')
-            < src.index('table_layout.addWidget(self.results_table)'))
+            < src.index('table_layout.addLayout(self._install_load_more_button())'))
     assert f'tr(\n            "{LABEL}")' in src or f'tr("{LABEL}")' in src
     assert f'tr("{BUTTON}")' in src
 

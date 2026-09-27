@@ -7,6 +7,9 @@ import os
 import re
 import pickle
 import csv
+import shutil
+import threading
+import time
 from collections import defaultdict
 from logging.handlers import RotatingFileHandler
 import platform
@@ -50,6 +53,7 @@ from shared.nli_circuit_breaker import (  # noqa: F401
 )
 # Phase 122: Config extracted to shared/config.py — permanent compat facade (v8.3.0)
 from shared.config import Config  # noqa: F401
+from shared.atomic_io import read_bytes, write_bytes_atomic
 # Phase 123: browse_map_utils extracted — permanent compat facade (v8.3.0)
 from shared.browse_map_utils import (  # noqa: F401
     LIBRARY_CODES, normalize_shelfmark, natural_sort_key,
@@ -549,33 +553,66 @@ def load_language():
 def save_language(lang):
     """Save language preference."""
     try:
-        if not os.path.exists(Config.INDEX_DIR): os.makedirs(Config.INDEX_DIR)
-        with open(Config.LANGUAGE_FILE, 'wb') as f:
-            pickle.dump(lang, f)
+        # Atomic: a torn lang.pkl would reset the interface to English.
+        write_bytes_atomic(Config.LANGUAGE_FILE, pickle.dumps(lang))
     except Exception as e:
         LOGGER.error("Failed to save language preference to %s: %s", Config.LANGUAGE_FILE, e)
 
+# The UI thread and worker threads both save preferences; each save is a
+# read-modify-write of the whole file.
+_APP_CONFIG_LOCK = threading.Lock()
+
+def _read_app_config():
+    """Return (cfg, problem) for config.pkl.
+
+    problem is None, 'busy' (the file exists but could not be read, even after
+    retrying -- antivirus or the indexer holding it) or 'unreadable' (it was
+    read but is not a pickled dict).
+    """
+    if not os.path.exists(Config.CONFIG_FILE):
+        return {}, None
+    try:
+        raw = read_bytes(Config.CONFIG_FILE)
+    except FileNotFoundError:
+        return {}, None
+    except OSError as e:
+        LOGGER.warning("Could not read app config %s: %s", Config.CONFIG_FILE, e)
+        return {}, 'busy'
+    try:
+        cfg = pickle.loads(raw)
+    except Exception as e:
+        LOGGER.warning("App config %s is unreadable: %s", Config.CONFIG_FILE, e)
+        return {}, 'unreadable'
+    if not isinstance(cfg, dict):
+        LOGGER.warning("App config %s holds a %s, not a dict", Config.CONFIG_FILE, type(cfg).__name__)
+        return {}, 'unreadable'
+    return cfg, None
+
 def load_app_config():
-    """Load general app configuration."""
-    cfg = {}
-    if os.path.exists(Config.CONFIG_FILE):
-        try:
-            with open(Config.CONFIG_FILE, 'rb') as f:
-                cfg = pickle.load(f)
-        except Exception:
-            pass  # Config key missing or malformed; default value used
-    return cfg
+    """Load general app configuration ({} when it is missing or cannot be read)."""
+    return _read_app_config()[0]
 
 def save_app_config(new_data):
-    """Update general app configuration with new keys."""
-    try:
-        cfg = load_app_config()
-        cfg.update(new_data)
-        if not os.path.exists(Config.INDEX_DIR): os.makedirs(Config.INDEX_DIR)
-        with open(Config.CONFIG_FILE, 'wb') as f:
-            pickle.dump(cfg, f)
-    except Exception as e:
-        LOGGER.error("Failed to save config: %s", e)
+    """Update general app configuration with new keys.
+
+    A config.pkl that exists but could not be read is never overwritten with
+    only the new keys: while it is busy nothing is written, and an unreadable
+    one is first kept as config.pkl.unreadable-<time>.
+    """
+    with _APP_CONFIG_LOCK:
+        try:
+            cfg, problem = _read_app_config()
+            if problem == 'busy':
+                LOGGER.error("Not saving app config: %s could not be read", Config.CONFIG_FILE)
+                return
+            if problem == 'unreadable':
+                keep = f"{Config.CONFIG_FILE}.unreadable-{time.strftime('%Y%m%d-%H%M%S')}"
+                shutil.copy2(Config.CONFIG_FILE, keep)
+                LOGGER.warning("Kept the unreadable app config as %s", keep)
+            cfg.update(new_data)
+            write_bytes_atomic(Config.CONFIG_FILE, pickle.dumps(cfg))
+        except Exception as e:
+            LOGGER.error("Failed to save config: %s", e)
 
 # Global language state
 CURRENT_LANG = load_language()
