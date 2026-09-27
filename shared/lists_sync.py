@@ -61,18 +61,34 @@ PAGE_BACKFILL_PER_PASS = 200
 NOTE_MARK = "from the cloud"
 # The only keys of the local store an upload may change.
 IDENTITY_FIELDS = {
-    'store': ('cloud_account',),
+    'store': ('cloud_account', 'cloud_deletes'),
     'projects': ('cloud_id',),
     'lists': ('cloud_id', 'list_state_unsent', 'list_name_unsent'),
     'items': ('cloud_id', 'cloud_rows'),
 }
-# On a local list that took its cloud list in a download while holding no cloud id,
-# and whose own state (Trash, colour, project) differs from that cloud list's: the
-# local state stands until an upload has sent it (a download before then must not
-# import the cloud's), so both orders of the first Download and Upload end alike.
-# It says nothing about the name: a download still takes a website rename, and an
-# upload sends no name for it.
+# The list a row is in when reading it again failed: equal to no list id.
+UNKNOWN_LIST = object()
+# On a list whose own state (Trash, colour, project) was changed on this computer
+# (ListsManager marks each such change), or that took its cloud list in a download
+# while holding no cloud id and whose state differs from that cloud list's: the local
+# value stands until an upload has sent it -- a download before then keeps it rather
+# than importing the cloud's, as for a rename (LIST_NAME_UNSENT) -- so both orders of
+# a Download and an Upload end alike. Its value names the parts held back (a list of
+# LIST_STATE_FIELDS), or True for all three (the mark before it named them); the cloud's
+# value of every other part is still taken. It says nothing about the name: a download
+# still takes a website rename unless LIST_NAME_UNSENT holds it back.
 LIST_STATE_UNSENT = 'list_state_unsent'
+LIST_STATE_FIELDS = ('color', 'project', 'trash')
+
+
+def _held_state(list_data):
+    """The parts of a list's own state its LIST_STATE_UNSENT mark holds back (a set of LIST_STATE_FIELDS)."""
+    mark = list_data.get(LIST_STATE_UNSENT)
+    if not mark:
+        return set()
+    if isinstance(mark, (list, tuple, set, frozenset)):
+        return set(mark) & set(LIST_STATE_FIELDS)
+    return set(LIST_STATE_FIELDS)
 # On a list renamed on this computer (ListsManager.update_list sets it, and nothing
 # else does) until an upload's write of that name returned the row: the new name
 # stands over the cloud list's at a download, and only an upload of such a list
@@ -242,11 +258,13 @@ def count_differing_notes(store):
     One per local item (however many of its lists say so) with a current membership
     whose record says the cloud's note or tags differed: the item is still in that
     list, and the list is one a pass reaches -- it exists, is synced, and is not in
-    the Trash (restored, its entries count again).
+    the Trash (restored, its entries count again). A moved row kept because the
+    website edited it (a '~' record with 'differs') counts too: a Download folds its
+    text into the entry wherever the row is.
     """
     if not store.get('cloud_account'):
         return 0
-    # copies of the live store's dicts and lists: an auto-upload runs while the user edits
+    # copies of the store's dicts and lists: a direct upload may run while the user edits
     lists = dict(store.get('lists') or {})
 
     def reached(key):
@@ -256,18 +274,104 @@ def count_differing_notes(store):
     n = 0
     for item in list((store.get('items') or {}).values()):
         in_lists = list(item.get('lists') or [])
-        if any(key in in_lists and reached(key) and not rec.get('gone') and rec.get('differs')
+        if any(not rec.get('gone') and rec.get('differs')
+               and ((key in in_lists and reached(key)) or _is_move_key(key))
                for key, rec in _records(item)):
             n += 1
     return n
 
 
+def has_unsent_changes(store, user_id=None):
+    """Whether the store holds a change the next upload of this account would send.
+
+    Read from the store alone (no network), so changes saved in lists.pkl -- made while
+    offline, or left by an upload that did not finish -- count as unsent after a restart.
+    One pass over the store: the desktop asks it once when its list-sync runner is made
+    and at each log-in, never per edit. True when any of:
+    - a removal of this account waits for its delete (store['cloud_deletes']);
+    - a list carries LIST_STATE_UNSENT or LIST_NAME_UNSENT, or a list or project has no
+      cloud id yet (the upload creates it), or has one from another account: when the store
+      was last synced as another account, every list's and project's cloud id is that
+      account's, which the upload clears and replaces with one of this account's;
+    - an entry is in a list whose entries the upload writes (synced, not in the Trash)
+      with no record of its row for this account -- a row the website removed (a 'gone'
+      record, waiting for the user's answer) is not re-sent, so it does not count;
+    - a record's note or tags differ from the entry's (what this computer last agreed
+      with the account), where the record knows them and did not keep a differing note
+      for Merge Both ('differs': the upload leaves those as they are);
+    - a moved row waits to follow its entry, into no list or into one the upload writes
+      (a move into a list in the Trash waits for Restore).
+    My Library entries never count: they are never sent. user_id None: the account the
+    store was last synced with.
+    """
+    account = user_id if user_id is not None else store.get('cloud_account')
+    lists = dict(store.get('lists') or {})
+    # the cloud ids were given by another account: not in this one
+    foreign = store.get('cloud_account') is not None and store.get('cloud_account') != account
+
+    def written(lid):
+        ld = lists.get(lid)
+        return isinstance(ld, dict) and _syncable_list(lid, ld) and not ld.get('deleted_at')
+
+    if any(isinstance(entry, dict) and entry.get('account') == account
+           for entry in list((store.get('cloud_deletes') or {}).values())):
+        return True
+    for lid, ld in lists.items():
+        if isinstance(ld, dict) and _syncable_list(lid, ld) and (
+                ld.get(LIST_STATE_UNSENT) or ld.get(LIST_NAME_UNSENT) or ld.get('cloud_id') is None or foreign):
+            return True
+    if any(isinstance(pd, dict) and (pd.get('cloud_id') is None or foreign)
+           for pd in list((store.get('projects') or {}).values())):
+        return True
+    own = account is not None and store.get('cloud_account') == account   # its records are this account's
+    for iid, it in list((store.get('items') or {}).items()):
+        if not isinstance(it, dict) or is_local_sys_id(it.get('sys_id', iid)):
+            continue
+        in_lists = [lid for lid in list(it.get('lists') or []) if written(lid)]
+        if not own:
+            if in_lists:
+                return True
+            continue
+        recs = it.get('cloud_rows') if isinstance(it.get('cloud_rows'), dict) else {}
+        for lid in in_lists:
+            rec = recs.get(lid)
+            if isinstance(rec, dict) and rec.get('gone'):
+                continue
+            if _live_record(it, lid) is None:
+                return True
+            if rec.get('differs'):
+                continue
+            if 'note' in rec and not _same_text(it.get('note') or '', rec.get('note') or ''):
+                return True
+            if 'tags' in rec and _tagset(it.get('tags')) != _tagset(rec.get('tags')):
+                return True
+        for _, rec in _orphans(it):
+            if not rec.get('differs') and (rec.get('to') is None or written(rec.get('to'))):
+                return True
+    return False
+
+
+def remembered_ids(store, user_id):
+    """The rows a download confirms: every non-gone record's, while the store is this account's."""
+    if store.get('cloud_account') not in (None, user_id):
+        return []
+    return [rec['id'] for it in list((store.get('items') or {}).values())
+            for _, rec in _records(it) if not rec.get('gone') and rec.get('id') is not None]
+
+
 # ---------------------------------------------------------------------------
 # Records: item['cloud_rows'] = {local_list_id: {'id', 'list', 'note'?, 'tags'?, 'gone'?, 'differs'?}}
+# A row whose entry was moved here is kept under '~<row id>' with 'to': the local list
+# it is bound for (shared/lists_manager.py writes it); store['cloud_deletes'] holds the
+# rows of explicit removals, {str(row id): {'id', 'list', 'account'}}, until they go.
 # ---------------------------------------------------------------------------
 
 def _records(item):
     return [(k, r) for k, r in (item.get('cloud_rows') or {}).items() if isinstance(r, dict)]
+
+
+def _is_move_key(key):
+    return isinstance(key, str) and key.startswith('~')
 
 
 def _live_record(item, list_key):
@@ -312,14 +416,34 @@ def _drop_left_tombstones(items):
                 _drop_record(item, key)
 
 
-def _remember(pass_, store, item, list_key, row_id, cloud_list_id, note=None, tags=None, differs=False):
-    """The only writer of a record. note/tags: the cloud values the local copy is known to include."""
-    if store.get('cloud_account') != pass_.user_id:
+def rows_index(store):
+    """Which records name each row: {row id: [(item, list key)]}, for record_row."""
+    named = collections.defaultdict(list)
+    for it in list((store.get('items') or {}).values()):
+        for key, rec in _records(it):
+            if rec.get('id') is not None:
+                named[rec['id']].append((it, key))
+    return named
+
+
+def record_row(store, user_id, item_id, list_key, row_id, cloud_list_id, note=None, tags=None, differs=False,
+               named=None, item=None):
+    """The only writer of a record. note/tags: the cloud values the local copy is known to include.
+
+    Returns True when it wrote. named: rows_index(store), kept up to date here (built when
+    None). The row is this membership's now: another record naming it (this item's for
+    another list, or another item's that the row has left) is stale, and a removal of it
+    this account was waiting to send is over -- the row went to a membership again.
+    """
+    if store.get('cloud_account') != user_id:
         logger.error("Not recording a cloud row: the lists belong to another account")
-        return
-    # The row is this membership's now: another record naming it (this item's for another
-    # list, or another item's that the row has left) is stale.
-    named = pass_.records_naming(store)
+        return False
+    if item is None:
+        item = (store.get('items') or {}).get(item_id)
+        if not isinstance(item, dict):
+            return False
+    if named is None:
+        named = rows_index(store)
     keep = []
     for other_item, key in named.get(row_id, ()):
         if other_item is item and key == list_key:
@@ -342,6 +466,73 @@ def _remember(pass_, store, item, list_key, row_id, cloud_list_id, note=None, ta
     named[row_id] = keep + [(item, list_key)]
     if item.get('cloud_id') is not None and item.get('cloud_id') == row_id:
         item.pop('cloud_id', None)
+    pending = store.get('cloud_deletes')
+    entry = pending.get(str(row_id)) if pending else None
+    if isinstance(entry, dict) and entry.get('account') == user_id:
+        del pending[str(row_id)]
+        if not pending:
+            store.pop('cloud_deletes', None)
+        logger.info("Row %s is an entry's again; its removal is not sent", row_id)
+    return True
+
+
+def _remember(pass_, store, item_id, item, list_key, row_id, cloud_list_id, note=None, tags=None, differs=False):
+    """record_row for a pass, which also tells the pass's on_recorded (an upload on a copy)."""
+    if not record_row(store, pass_.user_id, item_id, list_key, row_id, cloud_list_id, note, tags, differs,
+                      named=pass_.records_naming(store), item=item):
+        return
+    pass_.recorded.add((item_id, list_key))
+    if pass_.report is not None:
+        pass_.report(('row', item_id, list_key, row_id, cloud_list_id, note,
+                      None if tags is None else list(tags), bool(differs)))
+
+
+def _set_field(store, kind, local_id, key, value, report=None):
+    """The one writer, in an upload, of a list's or project's cloud_id or a list's unsent marks.
+
+    value None removes the key. A write that changes the store is told to report (an
+    upload on a copy), as ('field', kind, local id, key, value), so a close can make it again.
+    """
+    target = (store.get(kind) or {}).get(local_id)
+    if not isinstance(target, dict):
+        return
+    if value is None:
+        if key not in target:
+            return
+        target.pop(key, None)
+    else:
+        if target.get(key) == value and key in target:
+            return
+        target[key] = value
+    if report is not None:
+        report(('field', kind, local_id, key, value))
+
+
+def apply_account_guard(store, user_id):
+    """Cloud ids belong to one account: drop another account's, then claim the store for this one.
+
+    Another account's are its entries' row records and its lists' and projects' cloud ids,
+    which name nothing under this account: the lists and projects then pair by name with this
+    account's, as lists never uploaded do, or are made there by the next upload -- and until
+    then they hold no cloud id, so they count as unsent (has_unsent_changes) after a restart.
+    A list's unsent name and state marks stay, as on a list never uploaded. Another account's
+    pending removals stay too, tagged with it: they are sent when that account syncs again.
+    """
+    account = store.get('cloud_account')
+    if account is not None and account != user_id:
+        dropped = 0
+        for item in list((store.get('items') or {}).values()):
+            dropped += len(_records(item))
+            item.pop('cloud_rows', None)
+            item.pop('cloud_id', None)
+        ids = 0
+        for part in ('lists', 'projects'):
+            for data in list((store.get(part) or {}).values()):
+                if isinstance(data, dict) and data.pop('cloud_id', None) is not None:
+                    ids += 1
+        logger.info("Lists were last synced with another account: dropped %d cloud row record(s) and %d list "
+                    "and project cloud id(s)", dropped, ids)
+    store['cloud_account'] = user_id
 
 
 # ---------------------------------------------------------------------------
@@ -390,12 +581,21 @@ def _session_user(client):
         return None
 
 
+class _Stopped(BaseException):
+    """should_stop() said so before a request. Not an Exception: no handler of a failed request takes it."""
+
+
 class _Pass:
     """Everything one sync pass learns; never kept on the sync object."""
 
-    def __init__(self, client, user_id):
+    def __init__(self, client, user_id, should_stop=None, withdrawn=None, report=None):
         self.client = client
         self.user_id = user_id
+        self.should_stop = should_stop
+        self.withdrawn = withdrawn      # () -> the memberships removed meanwhile: not inserted, not moved
+        self.report = report            # on_recorded of an upload on a copy
+        self.recorded = set()           # (item id, list key) given a record in this pass
+        self.pending_rows = {}          # a download: {cloud list: rows this account waits to delete there}
         self.has_page = None
         self.backfill_left = PAGE_BACKFILL_PER_PASS
         self.auth_ok = False
@@ -412,20 +612,28 @@ class _Pass:
         self.named = None        # row id -> [(item, list key)] of the records naming it
 
     def check(self):
-        """Called before every request."""
+        """Called before every request: raises _Stopped once should_stop() is true."""
+        if self.should_stop is not None and self.should_stop():
+            raise _Stopped()
+
+    def withdrawn_now(self):
+        """The memberships the user removed while this pass ran (read right before a write is sent)."""
+        if self.withdrawn is None:
+            return frozenset()
+        try:
+            return frozenset(self.withdrawn())
+        except Exception as e:
+            logger.warning("Could not read the removals made during the upload: %s", e)
+            return frozenset()
 
     def records_naming(self, store):
-        """Which records name each row: built at the pass's first record, then kept by _remember.
+        """Which records name each row: built at the pass's first record, then kept by record_row.
 
-        After it is built no record is made except by _remember; records dropped or
+        After it is built no record is made except by record_row; records dropped or
         changed since are checked again where an entry is used.
         """
         if self.named is None:
-            self.named = collections.defaultdict(list)
-            for it in list((store.get('items') or {}).values()):
-                for key, rec in _records(it):
-                    if rec.get('id') is not None:
-                        self.named[rec['id']].append((it, key))
+            self.named = rows_index(store)
         return self.named
 
     def prove_auth(self):
@@ -530,7 +738,10 @@ class ListsCloudSync:
     - An upload replaces a cloud note or tag set only when only this computer
       changed it since then; a download keeps both differing notes (the cloud's
       under a marked line) and combines tags
-    - Nothing is deleted by a pass; rows the website removed are recorded, not re-uploaded
+    - An upload deletes only the rows this computer remembered for an entry the
+      user removed here (store['cloud_deletes']), by id and list, and a moved row
+      whose destination has its own row, only while the entry holds its text; rows
+      the website removed are recorded, not re-uploaded, and wait for the user
     - My Library (LOCAL) entries are never sent or fetched
 
     Usage:
@@ -580,8 +791,9 @@ class ListsCloudSync:
         self._user_id = user_id
 
     def clear_user(self):
-        """Clear user ID (on logout)."""
+        """Clear user ID (on logout), and the client: no request can go out on the signed-out account's."""
         self._user_id = None
+        self._external_client = None
 
     def is_sync_available(self) -> bool:
         """Check if cloud sync is available."""
@@ -598,19 +810,23 @@ class ListsCloudSync:
                         f"lists_manager={self.lists_manager is not None}")
         return available
 
-    def get_cloud_lists_preview(self) -> Dict[str, Any]:
+    def get_cloud_lists_preview(self, should_stop=None) -> Dict[str, Any]:
         """
         Get a preview of cloud lists without syncing.
         Used to show user what will be synced before they decide.
+        Network only; should_stop() is asked before each request.
 
         Returns:
             Dict with 'success', 'lists' (list of {name, color, item_count}), 'error'
+            (and 'stopped' True when should_stop ended it)
         """
         logger.debug(f"get_cloud_lists_preview called, user_id={self._user_id}")
         if not self.is_sync_available():
             logger.warning("Cloud lists preview: sync not available")
             return {'success': False, 'lists': [], 'error': 'Sync not available'}
 
+        def stopped():
+            return should_stop is not None and should_stop()
         try:
             client = self._get_client()
             if not client:
@@ -618,6 +834,8 @@ class ListsCloudSync:
 
             # Fetch user's lists from cloud
             logger.info(f"Querying user_lists for user_id={self._user_id}")
+            if stopped():
+                return {'success': False, 'lists': [], 'error': 'Sync stopped', 'stopped': True}
             lists_response = client.table('user_lists').select('*').eq(
                 'user_id', self._user_id
             ).execute()
@@ -626,6 +844,8 @@ class ListsCloudSync:
             cloud_lists = []
             for lst in lists_response.data or []:
                 # Get item count for this list
+                if stopped():
+                    return {'success': False, 'lists': [], 'error': 'Sync stopped', 'stopped': True}
                 items_response = client.table('list_items').select('id').eq(
                     'list_id', lst['id']
                 ).execute()
@@ -673,15 +893,7 @@ class ListsCloudSync:
     @staticmethod
     def _guard(store, pass_):
         """Records belong to one account: drop another account's, then claim the store for this one."""
-        account = store.get('cloud_account')
-        if account is not None and account != pass_.user_id:
-            dropped = 0
-            for item in list((store.get('items') or {}).values()):
-                dropped += len(_records(item))
-                item.pop('cloud_rows', None)
-                item.pop('cloud_id', None)
-            logger.info("Lists were last synced with another account: dropped %d cloud row record(s)", dropped)
-        store['cloud_account'] = pass_.user_id
+        apply_account_guard(store, pass_.user_id)
 
     def _paged(self, pass_, build):
         """Read every row of a query, a page at a time by row id. Returns (rows, complete).
@@ -754,6 +966,12 @@ class ListsCloudSync:
     def _read_user_lists(self, pass_, cols):
         client = pass_.client
         return self._paged(pass_, lambda after: _after(client.table('user_lists').select(cols)
+                                                       .eq('user_id', pass_.user_id), after))
+
+    def _read_projects(self, pass_, cols):
+        """Every cloud project of the account, in keyset pages as the lists are: (rows, complete)."""
+        client = pass_.client
+        return self._paged(pass_, lambda after: _after(client.table('projects').select(cols)
                                                        .eq('user_id', pass_.user_id), after))
 
     def _confirm(self, pass_, ids):
@@ -872,17 +1090,29 @@ class ListsCloudSync:
     # Upload
     # ------------------------------------------------------------------
 
-    def sync_to_cloud(self) -> Dict[str, Any]:
+    def sync_to_cloud(self, data=None, should_stop=None, progress=None, backfill_pages=True, withdrawn=None,
+                      on_recorded=None) -> Dict[str, Any]:
         """
         Push local lists and items to Supabase.
+
+        data: a copy of the store to upload from (the desktop's runner, which installs
+        the copy's cloud identity itself: ListsManager.begin_upload/finish_upload); the
+        live store otherwise, snapshotted first and saved after. should_stop() is asked
+        before every request; progress(done, total) counts the lists whose entries are
+        written (0 of total as the upload begins), and progress(0, 0, 'deletes') says the
+        removals are being sent; backfill_pages=False sends no update whose only change is the page;
+        withdrawn() names the memberships removed meanwhile, which are then neither
+        inserted nor moved; on_recorded(report) hears of every record and cloud-id write.
 
         Returns:
             Dict with 'success', 'lists_pushed', 'items_pushed', 'items_failed',
             'notes_kept', 'notes_too_long', 'notes_differing', 'unchecked', 'waiting',
-            'web_removed', 'lists_not_uploaded', 'complete', 'error'.
+            'web_removed', 'lists_not_uploaded', 'rows_deleted', 'removals_failed',
+            'deferred', 'stopped', 'complete', 'error'.
             notes_kept counts memberships (one per list whose row kept its differing
             note or tags); notes_too_long and notes_differing count entries (what the
-            dialog shows).
+            dialog shows). A removal that could not be sent counts in items_failed and
+            removals_failed; a move waiting for its list (in the Trash) in deferred.
         """
         if not self.is_sync_available():
             return {'success': False, 'error': 'Sync not available'}
@@ -892,13 +1122,17 @@ class ListsCloudSync:
         try:
             # An upload changes nothing local except the cloud ids it records, so
             # it goes ahead without its snapshot.
-            if not self._backup_local_data('upload'):
+            if data is None and not self._backup_local_data('upload'):
                 logger.warning("Proceeding with sync despite backup failure")
 
             client = self._get_client()
             if not client:
                 return {'success': False, 'error': 'No Supabase client'}
-            return self._upload(self.lists_manager.data, client)
+            pass_ = _Pass(client, self._user_id, should_stop=should_stop, withdrawn=withdrawn, report=on_recorded)
+            if not backfill_pages:
+                pass_.backfill_left = 0
+            store = self.lists_manager.data if data is None else data
+            return self._upload(store, client, pass_=pass_, on_progress=progress, save=data is None)
         finally:
             self._sync_lock.release()
 
@@ -906,11 +1140,12 @@ class ListsCloudSync:
     def _upload_result():
         return {'success': False, 'lists_pushed': 0, 'items_pushed': 0, 'items_failed': 0,
                 'notes_kept': 0, 'notes_too_long': 0, 'notes_differing': 0, 'unchecked': 0,
-                'waiting': 0, 'web_removed': [], 'lists_not_uploaded': [], 'complete': False,
-                'error': None}
+                'waiting': 0, 'web_removed': [], 'lists_not_uploaded': [], 'rows_deleted': 0,
+                'removals_failed': 0, 'deferred': 0, 'stopped': False, 'complete': False, 'error': None}
 
-    def _upload(self, store, client, only_list=None, only_item=None):
-        pass_ = _Pass(client, self._user_id)
+    def _upload(self, store, client, only_list=None, only_item=None, pass_=None, on_progress=None, save=True):
+        if pass_ is None:
+            pass_ = _Pass(client, self._user_id)
         session = _session_user(client)
         if session is not None and session != str(pass_.user_id):
             logger.warning("The session belongs to another user than the one lists sync was set up for")
@@ -924,7 +1159,14 @@ class ListsCloudSync:
         progress = {'lists': [lists[lid].get('name', 'Unnamed') for lid in _list_order(store)
                               if lid in lists and _syncable_list(lid, lists[lid])
                               and (only_list is None or lid == only_list)],
-                    'writing': None}
+                    'writing': None, 'tell': on_progress, 'written': 0}
+        # what the progress counts: the lists whose entries this upload writes (a list in the
+        # Trash sends its own state only), each once; the deletes are a step of their own
+        progress['total'] = sum(1 for lid in _list_order(store)
+                                if lid in lists and _syncable_list(lid, lists[lid])
+                                and not lists[lid].get('deleted_at') and (only_list is None or lid == only_list))
+        if progress['total'] and only_item is None:
+            self._tell_progress(progress, 0, progress['total'])
         try:
             if only_list is None:
                 pushable, lists_complete, cloud_list_ids = self._push_projects_and_lists(pass_, store, result,
@@ -936,51 +1178,75 @@ class ListsCloudSync:
             self._push_list_items(pass_, store, pushable, lists_complete, cloud_list_ids, result, progress,
                                   only_item=only_item)
             _drop_left_tombstones(store.get('items') or {})
-            self.lists_manager.save()
+            if save:
+                self.lists_manager.save()
             self._last_sync = time.time()
             if result['items_failed']:
                 result['success'] = False
                 result['error'] = UPLOAD_PARTLY_FAILED.format(result['items_pushed'], result['items_failed'])
             else:
                 result['success'] = True
+        except _Stopped:
+            # what it recorded so far stays (a copy's records are installed by the runner)
+            logger.info("Upload stopped before its next request")
+            result['stopped'] = True
+            result['error'] = 'Sync stopped'
+            self._not_uploaded(result, progress)
         except Exception as e:
             logger.error(f"Error syncing to cloud: {e}")
             result['error'] = str(e)
-            names = progress['lists']
-            start = progress['writing'] if progress['writing'] is not None else 0
-            for name in names[start:]:
-                if name not in result['lists_not_uploaded']:
-                    result['lists_not_uploaded'].append(name)
+            self._not_uploaded(result, progress)
         result['notes_too_long'] = len(pass_.too_long)
         result['notes_differing'] = count_differing_notes(store)
         result['complete'] = bool(result['success'] and not result['unchecked'] and not result['waiting']
                                   and not result['lists_not_uploaded'])
         return result
 
+    @staticmethod
+    def _not_uploaded(result, progress):
+        names = progress['lists']
+        start = progress['writing'] if progress['writing'] is not None else 0
+        for name in names[start:]:
+            if name not in result['lists_not_uploaded']:
+                result['lists_not_uploaded'].append(name)
+
     def _push_projects_and_lists(self, pass_, store, result, progress):
         """Projects and lists as before, except that a cloud list has at most one local owner."""
         client = pass_.client
         user_id = pass_.user_id
-        # Fetch existing cloud projects to prevent duplicates
-        pass_.check()
-        existing_projects_response = client.table('projects').select('id, name').eq(
-            'user_id', user_id
-        ).execute()
-        existing_cloud_projects = {proj['name']: proj['id'] for proj in (existing_projects_response.data or [])}
-        valid_project_ids = {proj['id'] for proj in (existing_projects_response.data or [])}
+        # Existing cloud projects, read in full (to prevent duplicates)
+        cloud_projects, projects_complete = self._read_projects(pass_, 'id, name')
+        existing_cloud_projects = {proj['name']: proj['id'] for proj in cloud_projects}
+        valid_project_ids = {proj['id'] for proj in cloud_projects}
 
         # Push projects first (so we have cloud IDs for list references)
         local_projects = store.get('projects', {})
         local_project_to_cloud = {}
+        # Projects a read that did not reach the end left unmatched: kept as they are this pass
+        # (no cloud id dropped, none created), and their lists' project is not sent
+        projects_waiting = set()
+        report = pass_.report
 
         for proj_id, proj_data in list(local_projects.items()):
             cloud_proj_id = proj_data.get('cloud_id')
+            proj_name = proj_data.get('name', 'Unnamed')
             # Validate cloud_id still exists
             if cloud_proj_id and cloud_proj_id not in valid_project_ids:
+                if not projects_complete:
+                    # Not seen by a read that did not reach the end: it may still be there
+                    logger.info("The cloud projects were not all read; project '%s' (cloud project %s) waits "
+                                "for the next upload", proj_name, cloud_proj_id)
+                    projects_waiting.add(proj_id)
+                    continue
                 logger.debug(f"Clearing stale cloud_id {cloud_proj_id} for project '{proj_data.get('name')}'")
                 cloud_proj_id = None
-                proj_data.pop('cloud_id', None)
-            proj_name = proj_data.get('name', 'Unnamed')
+                _set_field(store, 'projects', proj_id, 'cloud_id', None, report)
+            if not cloud_proj_id and proj_name not in existing_cloud_projects and not projects_complete:
+                # A cloud project of this name may lie past what the read returned: create none
+                logger.info("The cloud projects were not all read; project '%s' is not created in the cloud "
+                            "until the next upload", proj_name)
+                projects_waiting.add(proj_id)
+                continue
 
             proj_payload = {
                 'user_id': user_id,
@@ -998,7 +1264,7 @@ class ListsCloudSync:
             elif proj_name in existing_cloud_projects:
                 # Project with same name exists - use it
                 cloud_proj_id = existing_cloud_projects[proj_name]
-                proj_data['cloud_id'] = cloud_proj_id
+                _set_field(store, 'projects', proj_id, 'cloud_id', cloud_proj_id, report)
                 local_project_to_cloud[proj_id] = cloud_proj_id
                 client.table('projects').update(proj_payload).eq(
                     'id', cloud_proj_id
@@ -1008,7 +1274,7 @@ class ListsCloudSync:
                 response = client.table('projects').insert(proj_payload).execute()
                 if response.data:
                     cloud_proj_id = response.data[0]['id']
-                    proj_data['cloud_id'] = cloud_proj_id
+                    _set_field(store, 'projects', proj_id, 'cloud_id', cloud_proj_id, report)
                     local_project_to_cloud[proj_id] = cloud_proj_id
                     existing_cloud_projects[proj_name] = cloud_proj_id
 
@@ -1030,7 +1296,7 @@ class ListsCloudSync:
                 continue
             if cloud_id in held:
                 logger.info("Two local lists held cloud list %s; %s gets its own", cloud_id, list_id)
-                local_lists[list_id].pop('cloud_id', None)
+                _set_field(store, 'lists', list_id, 'cloud_id', None, report)
             else:
                 held.add(cloud_id)
 
@@ -1050,11 +1316,12 @@ class ListsCloudSync:
                 # Gone from a complete read: deleted in the cloud
                 logger.debug(f"Clearing stale cloud_id {cloud_id} for list '{list_name}'")
                 cloud_id = None
-                list_data.pop('cloud_id', None)
+                _set_field(store, 'lists', list_id, 'cloud_id', None, report)
 
             # Map local project_id to cloud project_id
             local_proj_id = list_data.get('project_id')
             cloud_proj_id = local_project_to_cloud.get(local_proj_id) if local_proj_id else None
+            project_waits = local_proj_id in projects_waiting
 
             # Handle soft delete - convert local timestamp to ISO format for cloud
             local_deleted_at = list_data.get('deleted_at')
@@ -1079,6 +1346,9 @@ class ListsCloudSync:
             update_payload = dict(list_payload)
             if not list_data.get(LIST_NAME_UNSENT):
                 del update_payload['name'], update_payload['name_en']
+            if project_waits:
+                # its project could not be matched this pass: the cloud list keeps the project it has
+                del update_payload['project_id']
 
             pass_.check()
             if cloud_id:
@@ -1100,7 +1370,7 @@ class ListsCloudSync:
                 if free:
                     # The lowest same-name cloud list no local list holds (the download picks the same)
                     cloud_id = free[0]
-                    list_data['cloud_id'] = cloud_id
+                    _set_field(store, 'lists', list_id, 'cloud_id', cloud_id, report)
                     held.add(cloud_id)
                     logger.debug(f"Found existing cloud list '{list_name}' with ID {cloud_id}")
                     sent = update_payload
@@ -1113,15 +1383,19 @@ class ListsCloudSync:
                     response = client.table('user_lists').insert(list_payload).execute()
                     if response.data:
                         cloud_id = response.data[0]['id']
-                        list_data['cloud_id'] = cloud_id
+                        _set_field(store, 'lists', list_id, 'cloud_id', cloud_id, report)
                         held.add(cloud_id)
 
             if cloud_id and response.data:
                 # the row answered, so the list's state is in the cloud (a write the session
-                # could not see changed nothing, and the list's own state still stands)
-                list_data.pop(LIST_STATE_UNSENT, None)
+                # could not see changed nothing, and the list's own state still stands) --
+                # unless its project waits for the next upload
+                if not project_waits:
+                    _set_field(store, 'lists', list_id, LIST_STATE_UNSENT, None, report)
                 if 'name' in sent and list_data.get('name') == sent['name']:
-                    list_data.pop(LIST_NAME_UNSENT, None)   # its rename is there too
+                    _set_field(store, 'lists', list_id, LIST_NAME_UNSENT, None, report)   # its rename is there too
+            if project_waits and list_name not in result['lists_not_uploaded']:
+                result['lists_not_uploaded'].append(list_name)     # its project has not reached the cloud
             result['lists_pushed'] += 1
 
             # Skip syncing items for deleted lists
@@ -1139,12 +1413,19 @@ class ListsCloudSync:
         """The item half of an upload, for the given (local list, cloud list) pairs.
 
         Phase 1 reads every list and pairs rows with memberships, then confirms where
-        the remembered rows it did not see are; Phase 2 writes, list by list. My
-        Library (LOCAL) entries are skipped: no insert, update, move or record.
+        the remembered rows it did not see are; Phase 2 writes, list by list; Phase 3
+        sends the deletes (a whole upload only). My Library (LOCAL) entries are
+        skipped: no insert, update, move or record.
         """
         items = store.setdefault('items', {})
         waiting = self._repair_shared_cloud_rows(store, merge=False, has_page=False)
         orphan_ids = _orphan_ids(items)
+        # A row waiting for its delete is paired with no membership in the cloud list its
+        # removal names (putting the entry back in that list gave it its row back already);
+        # found in another list, another computer moved it there, and it is that list's to pair.
+        pending_in = collections.defaultdict(set)
+        for entry in self._pending(pass_, store):
+            pending_in[entry.get('list')].add(entry['id'])
         lists = store.get('lists', {})
         plans = []
         for list_id, cloud_id in pushable:
@@ -1161,7 +1442,8 @@ class ListsCloudSync:
                     continue
                 members.append((iid, it))
             rows, complete = self._fetch_list_rows(pass_, cloud_id)
-            matched = _match_rows(rows, members, list_id, bool(pass_.has_page), pass_.claimed, orphan_ids, set())
+            matched = _match_rows(rows, members, list_id, bool(pass_.has_page), pass_.claimed,
+                                  orphan_ids | pending_in.get(cloud_id, set()), set())
             member_of = dict(members)
             bases = {rid: _base_of(member_of[iid], rid) for rid, iid in matched.items()}
             plans.append({'list': list_id, 'cloud': cloud_id, 'members': members, 'complete': complete,
@@ -1177,6 +1459,12 @@ class ListsCloudSync:
                 if rec:
                     ask.add(rec['id'])
                 ask.update(r['id'] for _, r in _orphans(it))
+        deletes = only_item is None and self._has_deletes(pass_, store)
+        if deletes:
+            # Phase 3 needs to know where every pending removal and every moved row is
+            ask.update(e['id'] for e in self._pending(pass_, store))
+            for it in list(items.values()):
+                ask.update(r['id'] for _, r in _orphans(it))
         self._confirm(pass_, ask)
         pass_.prove_auth()
         owners = {ld.get('cloud_id'): lid for lid, ld in list(lists.items()) if ld.get('cloud_id') is not None}
@@ -1190,7 +1478,30 @@ class ListsCloudSync:
             self._write_list(pass_, store, plan, lists_complete, cloud_list_ids, owners, result)
             if result['items_failed'] > failed_before and names[n] not in result['lists_not_uploaded']:
                 result['lists_not_uploaded'].append(names[n])
+            if only_item is None:
+                progress['written'] = progress.get('written', 0) + 1
+                total = progress.get('total') or len(plans)
+                self._tell_progress(progress, min(progress['written'], total), total)
         progress['writing'] = None
+        if deletes:
+            if only_item is None:
+                self._tell_progress(progress, 0, 0, 'deletes')    # a step of its own, not a list
+            read = {plan['cloud']: plan['complete'] for plan in plans}
+            self._send_deletes(pass_, store, result, read, lists_complete, cloud_list_ids)
+
+    @staticmethod
+    def _tell_progress(progress, done, total, what=None):
+        """progress['tell'](done, total), or (done, total, what) for a step that is not a list."""
+        tell = progress.get('tell')
+        if tell is None:
+            return
+        try:
+            if what is None:
+                tell(done, total)
+            else:
+                tell(done, total, what)
+        except Exception as e:
+            logger.debug("Upload progress callback failed: %s", e)
 
     def _hold_conflicts(self, pass_, plans, owners):
         """Entries whose note (or tags) differ on one of their rows and may not be replaced there.
@@ -1289,9 +1600,11 @@ class ListsCloudSync:
     def _orphan_choice(pass_, it, list_id, cloud_id, owners, drop_absent=False):
         """The orphan whose row this membership takes (moved or adopted): (rank, key, record), or None.
 
-        In this list's own cloud list first (adopted), then located in another list, then
-        not located; ties by the lowest row id. An orphan whose row is in the list of
-        another list this item is in is that membership's to adopt.
+        Only a row bound for this list ('to'), or one bound for no list the item is in; a
+        row bound for another of its lists waits for that one. In this list's own cloud
+        list first (adopted), then located in another list, then not located; ties by the
+        lowest row id. An unbound orphan whose row is in the list of another list this
+        item is in is that membership's to adopt.
         """
         lists = it.get('lists') or []
         cands = []
@@ -1299,6 +1612,9 @@ class ListsCloudSync:
             rid = rec['id']
             if rid in pass_.claimed:
                 continue
+            to = rec.get('to')
+            if to is not None and to != list_id and to in lists:
+                continue                                         # it waits for its own destination
             loc = pass_.where.get(rid)
             if loc is None and pass_.locate_ok and pass_.auth_ok and rid in pass_.absent:
                 if drop_absent:
@@ -1306,7 +1622,7 @@ class ListsCloudSync:
                 continue
             where_now = loc[0] if loc is not None else rec.get('list')
             owner = owners.get(where_now)
-            if owner is not None and owner != list_id and owner in lists:
+            if to != list_id and owner is not None and owner != list_id and owner in lists:
                 continue                                         # that list of this item will adopt it
             rank = 0 if (loc is not None and loc[0] == cloud_id) else (1 if loc is not None else 2)
             cands.append((rank, _id_key(rid), key, rec))
@@ -1333,11 +1649,13 @@ class ListsCloudSync:
         if rank == 0:                                            # adopt: the row is already in this list
             base = dict(rec)
             _drop_record(it, key)
-            _remember(pass_, store, it, list_id, rid, cloud_id, base.get('note'), base.get('tags'),
+            _remember(pass_, store, iid, it, list_id, rid, cloud_id, base.get('note'), base.get('tags'),
                       base.get('differs', False))
             self._write_matched(pass_, store, iid, it, list_id, cloud_id, rid, pass_.rows_by_id.get(rid),
                                 loc[1], loc[2], base, result)
             return True
+        if (iid, list_id) in pass_.withdrawn_now():
+            return True                                          # removed from this list meanwhile: not moved
         src = loc[0] if loc is not None else rec.get('list')
         row = pass_.rows_by_id.get(rid) if loc is not None else None
         base = dict(rec)
@@ -1346,6 +1664,8 @@ class ListsCloudSync:
         if status == 'too_long':
             pass_.too_long.add(iid)
             bases = self._agreed_bases(it, loc[1], loc[2], base)
+            if (iid, list_id) in pass_.withdrawn_now():
+                return True
             status = self._send_rest(pass_, rid, src, sent)
         elif status == 'nomatch':
             now = self._reread(pass_, rid)
@@ -1357,6 +1677,8 @@ class ListsCloudSync:
                 kept = True
                 logger.info("Row %s changed on the website while it was being moved; moved it, note kept", rid)
                 bases = self._agreed_bases(it, loc[1], loc[2], base)
+                if (iid, list_id) in pass_.withdrawn_now():
+                    return True
                 status = self._send_rest(pass_, rid, src, sent)
             else:
                 status = 'error'
@@ -1364,7 +1686,7 @@ class ListsCloudSync:
             if kept:
                 result['notes_kept'] += 1
             _drop_record(it, key)
-            _remember(pass_, store, it, list_id, rid, cloud_id, bases[0], bases[1], kept)
+            _remember(pass_, store, iid, it, list_id, rid, cloud_id, bases[0], bases[1], kept)
             result['items_pushed'] += 1
         else:
             result['items_failed'] += 1                          # the orphan stays for the next pass
@@ -1384,7 +1706,7 @@ class ListsCloudSync:
             resp = pass_.client.table('list_items').select(CONFIRM_COLUMNS).eq('id', rid).execute()
         except Exception as e:
             logger.info("Could not re-read row %s: %s", rid, e)
-            return {'list_id': object()}
+            return {'list_id': UNKNOWN_LIST}
         rows = resp.data or []
         return rows[0] if rows else None
 
@@ -1466,7 +1788,7 @@ class ListsCloudSync:
         if status in ('ok', 'unchanged'):
             if kept:
                 result['notes_kept'] += 1
-            _remember(pass_, store, it, list_id, rid, cloud_id, bases[0], bases[1], kept)
+            _remember(pass_, store, iid, it, list_id, rid, cloud_id, bases[0], bases[1], kept)
             result['items_pushed'] += 1
         else:
             result['items_failed'] += 1
@@ -1563,7 +1885,7 @@ class ListsCloudSync:
                 group = waiting.get(_row_identity(row, has_page))
                 if group:
                     p, iid, it = group.pop(0)
-                    _remember(pass_, store, it, list_id, row['id'], cloud_id, p['note'], p['tags'])
+                    _remember(pass_, store, iid, it, list_id, row['id'], cloud_id, p['note'], p['tags'])
             result['items_failed'] += max(0, len(batch) - len(rows))
 
         def attempt(batch):
@@ -1571,7 +1893,15 @@ class ListsCloudSync:
             payloads = [p for p, _, _ in batch]
             return client.table('list_items').insert(payloads if len(payloads) > 1 else payloads[0]).execute()
 
-        batch = [(payload_of(iid, it), iid, it) for iid, it in members]
+        def left(batch):
+            # read right before each insert request: an entry the user removed from this
+            # list since the upload began is not inserted (nor counted)
+            gone = pass_.withdrawn_now()
+            return [b for b in batch if (b[1], list_id) not in gone] if gone else batch
+
+        batch = left([(payload_of(iid, it), iid, it) for iid, it in members])
+        if not batch:
+            return
         try:
             try:
                 resp = attempt(batch) if len(batch) > 1 else self._insert_one(pass_, batch[0])
@@ -1580,7 +1910,9 @@ class ListsCloudSync:
                     raise
                 pass_.has_page = False
                 logger.info("list_items has no page column in the API's schema yet; inserting without it")
-                batch = [({k: v for k, v in p.items() if k != 'page'}, iid, it) for p, iid, it in batch]
+                batch = left([({k: v for k, v in p.items() if k != 'page'}, iid, it) for p, iid, it in batch])
+                if not batch:
+                    return
                 resp = attempt(batch)
             record(resp.data or [], batch)
             return
@@ -1591,6 +1923,8 @@ class ListsCloudSync:
                 return
             logger.warning(f"Batch insert failed, inserting one by one: {e}")
         for p, iid, it in batch:
+            if (iid, list_id) in pass_.withdrawn_now():
+                continue
             try:
                 resp = self._insert_one(pass_, (p, iid, it))
             except Exception as item_err:
@@ -1613,12 +1947,164 @@ class ListsCloudSync:
             return pass_.client.table('list_items').insert(p).execute()
 
     # ------------------------------------------------------------------
+    # Upload, Phase 3: the deletes
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _pending(pass_, store):
+        """This account's pending removals (another account's wait for it)."""
+        return [e for e in list((store.get('cloud_deletes') or {}).values())
+                if isinstance(e, dict) and e.get('account') == pass_.user_id and e.get('id') is not None]
+
+    def _suppressed(self, pass_, store):
+        """{cloud list id: the rows there this account waits to delete} (a download leaves them out)."""
+        out = collections.defaultdict(set)
+        for entry in self._pending(pass_, store):
+            out[entry.get('list')].add(entry['id'])
+        return out
+
+    def _has_deletes(self, pass_, store):
+        return bool(self._pending(pass_, store)) or any(
+            _orphans(it) for it in list((store.get('items') or {}).values()))
+
+    def _send_deletes(self, pass_, store, result, read, lists_complete, cloud_list_ids):
+        """Explicit removals, then the moved rows whose destination has its own row.
+
+        read: {cloud list id: whether this pass read it in full}, for the lists it read.
+        """
+        for entry in sorted(self._pending(pass_, store), key=lambda e: _id_key(e['id'])):
+            self._send_explicit(pass_, store, entry, result, read, lists_complete, cloud_list_ids)
+        for iid, it in list((store.get('items') or {}).items()):
+            for key, rec in list(_orphans(it)):
+                self._settle_moved_row(pass_, store, iid, it, key, rec, result)
+        pending = store.get('cloud_deletes')
+        if pending is not None and not pending:
+            store.pop('cloud_deletes', None)
+
+    @staticmethod
+    def _unqueue(store, rid):
+        pending = store.get('cloud_deletes') or {}
+        pending.pop(str(rid), None)
+
+    def _send_explicit(self, pass_, store, entry, result, read, lists_complete, cloud_list_ids):
+        """One explicit removal: DELETE by id and the list this computer last knew, no other condition.
+
+        A row found in another list was moved there by another computer: its move wins and
+        nothing is deleted. A delete that fails, or matches nothing while the row cannot be
+        placed, stays for the next upload and fails this one.
+        """
+        rid, lst = entry['id'], entry.get('list')
+        loc = pass_.where.get(rid)
+        if loc is not None and loc[0] != lst:
+            logger.info("Row %s of a removed entry is now in another list; not deleted there", rid)
+            self._unqueue(store, rid)
+            return
+        if (loc is None and pass_.locate_ok and pass_.auth_ok and rid in pass_.absent
+                and (read.get(lst) or (lists_complete and lst not in cloud_list_ids))):
+            # gone already: its list read in full without it (or that list gone), and not found by id
+            self._unqueue(store, rid)
+            return
+        status = self._delete_row(pass_, rid, lst)
+        if status == 'ok':
+            self._unqueue(store, rid)
+            result['rows_deleted'] += 1
+            return
+        if status == 'nomatch':
+            now = self._reread(pass_, rid)
+            if now is None:
+                if _session_user(pass_.client) == str(pass_.user_id):
+                    self._unqueue(store, rid)    # gone meanwhile
+                    return
+            elif now.get('list_id') is not UNKNOWN_LIST and now.get('list_id') != lst:
+                logger.info("Row %s of a removed entry was moved to another list meanwhile; not deleted", rid)
+                self._unqueue(store, rid)
+                return
+        logger.warning("The removal of row %s could not be sent; it is tried again at the next upload", rid)
+        result['items_failed'] += 1
+        result['removals_failed'] += 1
+
+    def _settle_moved_row(self, pass_, store, iid, it, key, rec, result):
+        """A moved row no membership took in Phase 2: gone, redundant, or waiting for its list.
+
+        Redundant: its destination has its own row this pass. It is deleted where it was
+        found, only as it was read and only while the entry holds its note and tags;
+        otherwise it stays (marked differing) until a Download folds its text in.
+        """
+        rid = rec['id']
+        loc = pass_.where.get(rid)
+        if loc is None and pass_.locate_ok and pass_.auth_ok and rid in pass_.absent:
+            _drop_record(it, key)                # its row is gone: nothing to move or delete
+            return
+        lists = list(it.get('lists') or [])
+        to = rec.get('to')
+        if to is not None and to in lists:
+            ready = (iid, to) in pass_.recorded
+        else:                                    # no destination: redundant once every list has its row
+            mine = [lid for lid in lists
+                    if _syncable_list(lid, (store.get('lists') or {}).get(lid) or {'is_system': True})]
+            ready = bool(mine) and all((iid, lid) in pass_.recorded for lid in mine)
+        if not ready or loc is None:
+            result['deferred'] += 1              # its list is in the Trash, has no cloud list yet, or is unread
+            return
+        c_note, c_tags = loc[1], loc[2]
+        x_note, x_tags = it.get('note') or '', list(it.get('tags') or [])
+        b_note, b_tags = rec.get('note'), rec.get('tags')
+        held = (((b_note is not None and _same_text(c_note, b_note)) or _holds(x_note, c_note or ''))
+                and ((b_tags is not None and _tagset(c_tags) == _tagset(b_tags))
+                     or _tagset(c_tags) <= _tagset(x_tags)))
+        if held:
+            status = self._delete_row(pass_, rid, loc[0], (c_note, c_tags))
+            if status == 'ok':
+                _drop_record(it, key)
+                result['rows_deleted'] += 1
+                return
+            if status == 'too_long':
+                pass_.too_long.add(iid)
+                return
+            if status == 'error':
+                result['items_failed'] += 1
+                return
+        # the website changed the row: its text reaches the entry at the next Download
+        result['notes_kept'] += 1
+        rec['differs'] = True
+
+    def _delete_row(self, pass_, rid, list_filter, cond=None):
+        """One DELETE of a row, by id and list, and with cond=(note, tags) only as it was read.
+
+        Returns 'ok' (the row was deleted), 'nomatch', 'too_long' (the condition did not fit
+        the gateway's URL limit: nothing deleted) or 'error'.
+        """
+        q = pass_.client.table('list_items').delete().eq('id', rid).eq('list_id', list_filter)
+        if cond is not None:
+            note_c, tags_c = cond
+            q = q.is_('note', 'null') if note_c is None else q.eq('note', note_c)
+            if tags_c is None:
+                q = q.is_('tags', 'null')
+            else:
+                lit = _tags_filter_literal(tags_c)
+                q = q.contains('tags', lit).contained_by('tags', lit)
+        pass_.check()
+        try:
+            resp = q.execute()
+        except APIError as e:
+            if cond is not None and _is_url_too_long(e):
+                logger.info("Row %s: its note or tags are too long to compare in a request", rid)
+                return 'too_long'
+            logger.warning("list_items delete failed for id=%s: %s", rid, e)
+            return 'error'
+        except Exception as e:
+            logger.warning("list_items delete failed for id=%s: %s", rid, e)
+            return 'error'
+        return 'ok' if resp.data else 'nomatch'
+
+    # ------------------------------------------------------------------
     # Download
     # ------------------------------------------------------------------
 
-    def sync_from_cloud(self) -> Dict[str, Any]:
+    def sync_from_cloud(self, should_stop=None) -> Dict[str, Any]:
         """
-        Pull lists and items from Supabase and merge with local data.
+        Pull lists and items from Supabase and merge with local data: the fetch and the
+        apply below, one after the other on this thread, under one hold of the lock.
 
         IMPORTANT: This only ADDS data from cloud, never removes local data.
         If cloud is empty, local data is preserved unchanged.
@@ -1636,70 +2122,120 @@ class ListsCloudSync:
         if not self._sync_lock.acquire(blocking=False):
             return {'success': False, 'error': 'Sync already in progress'}
         try:
-            # A download rewrites local notes, tags and memberships and merges
-            # duplicate items, so it does not start without its snapshot.
-            if not self._backup_local_data('download'):
-                logger.error("Download cancelled: the local lists could not be backed up first")
-                return {'success': False, 'error': DOWNLOAD_BACKUP_FAILED}
-
-            result = {
-                'success': False,
-                'lists_added': 0,
-                'lists_updated': 0,
-                'items_added': 0,
-                'notes_merged': 0,
-                'tags_merged': 0,
-                'notes_differing': 0,
-                'unchecked': 0,
-                'web_removed': [],
-                'error': None
-            }
-            store = self.lists_manager.data
-            try:
-                client = self._get_client()
-                if not client:
-                    result['error'] = 'No Supabase client'
-                    return result
-                pass_ = _Pass(client, self._user_id)
-                session = _session_user(client)
-                if session is not None and session != str(pass_.user_id):
-                    logger.warning("The session belongs to another user than the one lists sync was set up for")
-                    return {'success': False, 'error': 'Sync not available'}
-                pass_.session_before = session
-                remembered = []
-                if store.get('cloud_account') in (None, pass_.user_id):
-                    remembered = [rec['id'] for it in (store.get('items') or {}).values()
-                                  for _, rec in _records(it) if not rec.get('gone') and rec.get('id') is not None]
-                state = self._fetch_cloud_state(pass_, remembered)
-                self._apply_cloud_state(pass_, store, state, result)
-                self.lists_manager.save()
-                self._last_sync = time.time()
-                result['success'] = True
-            except Exception as e:
-                logger.error(f"Error syncing from cloud: {e}")
-                result['error'] = str(e)
-            result['notes_differing'] = count_differing_notes(store)
-            return result
+            state = self._fetch(remembered_ids(self.lists_manager.data, self._user_id), should_stop)
+            if not state.get('success'):
+                return self._fetch_failed(state)
+            return self._apply(state)
         finally:
             self._sync_lock.release()
 
-    def _fetch_cloud_state(self, pass_, remembered_ids):
+    @staticmethod
+    def _download_result():
+        return {'success': False, 'lists_added': 0, 'lists_updated': 0, 'items_added': 0, 'notes_merged': 0,
+                'tags_merged': 0, 'notes_differing': 0, 'unchecked': 0, 'web_removed': [], 'error': None}
+
+    def _fetch_failed(self, state):
+        """A download whose fetch did not complete: nothing local was read or changed."""
+        if state.get('error') == 'Sync not available':
+            return {'success': False, 'error': 'Sync not available'}
+        result = self._download_result()
+        result['error'] = state.get('error')
+        if state.get('stopped'):
+            result['stopped'] = True
+        result['notes_differing'] = count_differing_notes(self.lists_manager.data)
+        return result
+
+    def fetch_cloud_state(self, remembered_ids, should_stop=None, progress=None) -> Dict[str, Any]:
+        """The network half of a download: reads the cloud, reads and writes nothing local.
+
+        remembered_ids: ListsManager.remembered_row_ids(user), taken on the thread that owns
+        the store. Returns the state for apply_cloud_state -- with 'success', 'stopped', and
+        the fetch's pass under 'pass' (the apply needs what the confirmation found) -- or
+        {'success': False, 'error', 'stopped'?}.
+        """
+        if not self.is_sync_available():
+            return {'success': False, 'error': 'Sync not available'}
+        if not self._sync_lock.acquire(blocking=False):
+            return {'success': False, 'error': 'Sync already in progress'}
+        try:
+            return self._fetch(remembered_ids, should_stop, progress)
+        finally:
+            self._sync_lock.release()
+
+    def _fetch(self, remembered_ids, should_stop=None, progress=None):
+        client = self._get_client()
+        if not client:
+            return {'success': False, 'error': 'No Supabase client'}
+        pass_ = _Pass(client, self._user_id, should_stop=should_stop)
+        session = _session_user(client)
+        if session is not None and session != str(pass_.user_id):
+            logger.warning("The session belongs to another user than the one lists sync was set up for")
+            return {'success': False, 'error': 'Sync not available'}
+        pass_.session_before = session
+        try:
+            state = self._fetch_cloud_state(pass_, list(remembered_ids or ()), progress)
+        except _Stopped:
+            logger.info("Download stopped before its next request")
+            return {'success': False, 'error': 'Sync stopped', 'stopped': True}
+        except Exception as e:
+            logger.error(f"Error syncing from cloud: {e}")
+            return {'success': False, 'error': str(e)}
+        state.update(success=True, stopped=False)
+        state['pass'] = pass_
+        return state
+
+    def apply_cloud_state(self, state) -> Dict[str, Any]:
+        """The local half of a download, from fetch_cloud_state's state: snapshot, merge, save.
+
+        Writes lists.pkl.pre-download first, and changes nothing when it cannot. A state
+        fetched for another user than the one now set up is refused.
+        """
+        if not self._sync_lock.acquire(blocking=False):
+            return {'success': False, 'error': 'Sync already in progress'}
+        try:
+            return self._apply(state)
+        finally:
+            self._sync_lock.release()
+
+    def _apply(self, state):
+        pass_ = state.get('pass') if isinstance(state, dict) else None
+        if pass_ is None or not state.get('success') or pass_.user_id != self._user_id:
+            return {'success': False, 'error': 'Sync not available'}
+        # A download rewrites local notes, tags and memberships and merges
+        # duplicate items, so it does not start without its snapshot.
+        if not self._backup_local_data('download'):
+            logger.error("Download cancelled: the local lists could not be backed up first")
+            return {'success': False, 'error': DOWNLOAD_BACKUP_FAILED}
+        result = self._download_result()
+        store = self.lists_manager.data
+        try:
+            self._apply_cloud_state(pass_, store, state, result)
+            self.lists_manager.save()
+            self._last_sync = time.time()
+            result['success'] = True
+        except Exception as e:
+            logger.error(f"Error syncing from cloud: {e}")
+            result['error'] = str(e)
+        result['notes_differing'] = count_differing_notes(store)
+        return result
+
+    def _fetch_cloud_state(self, pass_, remembered_ids, progress=None):
         """Everything a download needs from the cloud; reads nothing local and writes nothing."""
-        client = pass_.client
-        pass_.check()
-        projects_response = client.table('projects').select('*').eq('user_id', pass_.user_id).execute()
+        cloud_projects, projects_complete = self._read_projects(pass_, '*')
         cloud_lists, lists_complete = self._read_user_lists(pass_, '*')
         rows_by_list = {}
         # Lists in the Trash are read too: a local list that takes one as its own keeps
         # its own Trash state, and when that is live its entries come from there.
-        for lst in sorted(cloud_lists, key=lambda cl: _id_key(cl['id'])):
-            if lst.get('name') == 'Recently Viewed':
-                continue
+        read = [lst for lst in sorted(cloud_lists, key=lambda cl: _id_key(cl['id']))
+                if lst.get('name') != 'Recently Viewed']
+        for n, lst in enumerate(read):
             rows, complete = self._fetch_list_rows(pass_, lst['id'])
             rows_by_list[lst['id']] = {'rows': rows, 'complete': complete}
+            self._tell_progress({'tell': progress}, n + 1, len(read))
         self._confirm(pass_, remembered_ids)
         pass_.prove_auth()
-        return {'user_id': pass_.user_id, 'projects': projects_response.data or [], 'lists': cloud_lists,
+        return {'user_id': pass_.user_id, 'projects': cloud_projects, 'projects_complete': projects_complete,
+                'lists': cloud_lists,
                 'lists_complete': lists_complete, 'has_page': pass_.has_page, 'rows_by_list': rows_by_list,
                 'where': pass_.where, 'absent': pass_.absent, 'locate_ok': pass_.locate_ok,
                 'auth_ok': pass_.auth_ok}
@@ -1769,10 +2305,11 @@ class ListsCloudSync:
         is the default list), the lowest-id cloud list of its name no local list
         holds -- the upload makes the same choice -- and, under the same exception,
         that list's name (only the default list's can differ). Only the own cloud list sets
-        colour, project and the Trash state -- and not while the list's own state is
-        unsent (LIST_STATE_UNSENT: it held no cloud id and its state differed): it
-        keeps its own until an upload has sent it. A rename here never holds these
-        back, and an unsent state never holds back a name.
+        colour, project and the Trash state -- and not a part of it that is unsent
+        (LIST_STATE_UNSENT: changed on this computer; or all of it, when the list held no
+        cloud id and took the cloud list here): that part keeps its own value until an
+        upload has sent it, and stays marked only while it differs from the cloud list's.
+        A rename here never holds these back, and an unsent state never holds back a name.
 
         When the read of the lists was not complete (lists_complete False), a list whose
         cloud id the read did not return keeps that id and gets no cloud list this pass
@@ -1842,26 +2379,34 @@ class ListsCloudSync:
             cloud_project_id = cloud_list.get('project_id')
             local_project_id = cloud_project_to_local.get(cloud_project_id) if cloud_project_id else None
             local_deleted_at = self._cloud_deleted_at(cloud_list)
-            if lid in had_own_id and not ld.get(LIST_STATE_UNSENT):
-                if cloud_list.get('color'):
-                    ld['color'] = cloud_list['color']
-                # Update project assignment if changed
-                if local_project_id:
-                    ld['project_id'] = local_project_id
-                # Sync deleted_at status
+            differs = set()
+            if bool(ld.get('deleted_at')) != bool(local_deleted_at):
+                differs.add('trash')
+            if cloud_list.get('color') and cloud_list['color'] != ld.get('color'):
+                differs.add('color')
+            if ((local_project_id and local_project_id != ld.get('project_id'))
+                    or (not cloud_project_id and ld.get('project_id'))):
+                differs.add('project')
+            # a list that took its cloud list here keeps all of its own state; a list that
+            # held that cloud list keeps the parts changed here since the last upload
+            held = _held_state(ld) if lid in had_own_id else set(LIST_STATE_FIELDS)
+            if 'color' not in held and cloud_list.get('color'):
+                ld['color'] = cloud_list['color']
+            # Update project assignment if changed
+            if 'project' not in held and local_project_id:
+                ld['project_id'] = local_project_id
+            # Sync deleted_at status
+            if 'trash' not in held or not differs & {'trash'}:
                 if local_deleted_at:
-                    ld['deleted_at'] = local_deleted_at
+                    ld['deleted_at'] = local_deleted_at   # (in the Trash on both sides: the cloud's time)
                 elif 'deleted_at' in ld:
                     # Cloud restored the list - remove local deleted_at
                     del ld['deleted_at']
-            elif (bool(ld.get('deleted_at')) != bool(local_deleted_at)
-                  or (cloud_list.get('color') and cloud_list['color'] != ld.get('color'))
-                  or (local_project_id and local_project_id != ld.get('project_id'))):
-                ld[LIST_STATE_UNSENT] = True    # its own state goes up with the next upload
+            still = held & differs
+            if still:
+                ld[LIST_STATE_UNSENT] = sorted(still)    # these parts go up with the next upload
             else:
                 ld.pop(LIST_STATE_UNSENT, None)
-                if local_deleted_at:
-                    ld['deleted_at'] = local_deleted_at   # in the Trash on both sides: the cloud's time
             result['lists_updated'] += 1
 
         same_name = collections.defaultdict(list)
@@ -1931,6 +2476,11 @@ class ListsCloudSync:
             for key, rec in _orphans(it):
                 orphan_of[rec['id']] = (iid, key)
 
+        # A row this account waits to delete (the user removed its entry here) is left out of
+        # the cloud list its removal names: it re-adds no membership, creates no item and folds
+        # no text. Found in another list, another computer moved it there, and its move wins:
+        # that list takes it as the upload would, and the removal is over.
+        pass_.pending_rows = self._suppressed(pass_, store)
         # Rows the confirmation alone located are handled as if their list's read had returned them.
         rows_by_list = {cid: list(entry['rows']) for cid, entry in state['rows_by_list'].items()}
         for rid in sorted(pass_.confirmed_only, key=_id_key):
@@ -1993,7 +2543,7 @@ class ListsCloudSync:
             src = next((s for s in sources.get(iid, ()) if s[0] == rid), None)
             note = (src[1] or '') if src else None
             tags = list(src[2] or []) if src else None
-            _remember(pass_, store, it, list_id, rid, cloud_id, note, tags)
+            _remember(pass_, store, iid, it, list_id, rid, cloud_id, note, tags)
         for iid, srcs in sources.items():
             it = items.get(iid)
             if it is None:
@@ -2023,7 +2573,7 @@ class ListsCloudSync:
         for attempt in range(3):
             claimed = set(pass_.claimed)
             plan, created = self._plan_list(items, list_id, cloud_id, read, rows_by_list, orphan_of, orphan_ids,
-                                            by_sys, has_page, claimed)
+                                            by_sys, has_page, claimed, pass_.pending_rows)
             created_all |= created
             joined = {iid for _, _, iid, _ in plan['matched'] if list_id not in (items[iid].get('lists') or [])}
             if not (created or joined) or attempt == 2:
@@ -2062,15 +2612,18 @@ class ListsCloudSync:
         return matched_own
 
     def _plan_list(self, items, list_id, cloud_id, read, rows_by_list, orphan_of, orphan_ids, by_sys, has_page,
-                   claimed):
+                   claimed, pending=None):
         used = set()
         matched_by_list = {}
         for cid in read:
             rows = []
+            waiting = (pending or {}).get(cid, ())
             for row in rows_by_list[cid]:
                 rid = row.get('id')
                 if rid in orphan_of:
                     continue    # an orphan's row: folded wherever it is; never re-added
+                if rid in waiting:
+                    continue    # its entry was removed from this list here: it re-adds and folds nothing
                 if row.get('sys_id') is not None and is_local_sys_id(row.get('sys_id')):
                     continue
                 rows.append(row)
@@ -2081,10 +2634,13 @@ class ListsCloudSync:
             seen = set()
             cands = [c for c in cands if not (c[0] in seen or seen.add(c[0]))]
             members = [c for c in cands if list_id in (c[1].get('lists') or [])]
-            # An entry moved or removed from this list here is not brought back by
-            # another row of it: that row becomes an entry of its own.
+            # An entry moved from this list here (its row there is on its way to another
+            # list) is not brought back by another row of it: that row becomes an entry
+            # of its own.
             others = [c for c in cands if list_id not in (c[1].get('lists') or [])
-                      and _live_record(c[1], list_id) is None]
+                      and _live_record(c[1], list_id) is None
+                      and not any(_is_move_key(k) and r.get('list') in read for k, r in _records(c[1])
+                                  if not r.get('gone'))]
 
             # A second row of an entry this list already holds folds into it (below)
             # rather than bringing another local item of that entry into the list.

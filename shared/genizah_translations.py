@@ -3653,7 +3653,8 @@ TRANSLATIONS.update({
     "Merge Both": "מזג את שתיהן",
     "Download cloud AND upload local (combine everything)": "הורד מהענן וגם העלה מקומי (שלב הכול)",
     "Skip": "דלג",
-    "Don't sync now - you can sync later from Settings": "אל תסנכרן כעת - ניתן לסנכרן מאוחר יותר מההגדרות",
+    "Don't download from your account now. Uploads continue: until you log out or close the program, your lists are uploaded to your account after each change.":
+        "לא להוריד מהחשבון כעת. ההעלאות נמשכות: עד שתתנתק או תסגור את התוכנה, הרשימות יועלו לחשבונך אחרי כל שינוי.",
     "Syncing lists...": "מסנכרן רשימות...",
     "Sync": "סנכרן",
     "Sync Complete": "הסנכרון הושלם",
@@ -3673,6 +3674,57 @@ TRANSLATIONS.update({
         "תגיות שהיו שונות בין המחשב הזה לחשבונך: {}. התגיות משניהם נשמרו.",
     "Notes too long to update safely in your account: {}. They were not changed there and are kept on this computer.":
         "הערות ארוכות מכדי לעדכן אותן בבטחה בחשבונך: {}. הן לא שונו שם ונשמרות במחשב הזה.",
+    # ...the same while lists.pkl cannot be saved, when nothing is kept on this computer
+    "Notes too long to update safely in your account: {}. They were not changed there.":
+        "הערות ארוכות מכדי לעדכן אותן בבטחה בחשבונך: {}. הן לא שונו שם.",
+    # List sync off the UI thread: the preview, progress and cancel lines
+    "Checking the lists in your account...": "בודק את הרשימות בחשבונך...",
+    "Waiting for the list sync that is already running...": "ממתין לסיום סנכרון הרשימות שכבר פועל...",
+    "Downloading list {} of {}...": "מוריד רשימה {} מתוך {}...",
+    "Uploading list {} of {}...": "מעלה רשימה {} מתוך {}...",
+    "Removing entries from your account...": "מסיר פריטים מחשבונך...",
+    "List sync cancelled. Nothing was changed on this computer.": "סנכרון הרשימות בוטל. דבר לא שונה במחשב הזה.",
+    "Upload stopped. The rest of your changes are saved on this computer but have not reached your account yet.":
+        "ההעלאה נעצרה. שאר השינויים שמורים במחשב הזה, אבל עדיין לא הגיעו לחשבונך.",
+    "The cloud lists were downloaded, but the upload was stopped. The rest of your changes are saved on this computer but have not reached your account yet.":
+        "הרשימות מהענן הורדו, אבל ההעלאה נעצרה. שאר השינויים שמורים במחשב הזה, אבל עדיין לא הגיעו לחשבונך.",
+    "Some notes differ from your account and were not uploaded. To keep both versions, use Sync lists now, then Merge Both.":
+        "יש הערות ששונות מאלה שבחשבונך ולכן לא הועלו. כדי לשמור את שתי הגרסאות, לחץ על 'סנכרן רשימות עכשיו' ואז על 'מזג את שתיהן'.",
+    # The Lists tab's button, its tooltip, and its tooltip while logged out
+    "Sync lists now": "סנכרן רשימות עכשיו",
+    "Download, upload or merge your lists with your account on genizahsearch.com":
+        "הורדה, העלאה או מיזוג של הרשימות עם החשבון שלך באתר genizahsearch.com",
+    "Log in to sync your lists with your account": "יש להתחבר כדי לסנכרן את הרשימות עם החשבון שלך",
+    # The website-removal prompt (desktop/lists_web_removals_dialog.py) and the line after it
+    "Entries removed on the website": "פריטים שהוסרו באתר",
+    "These entries were removed from your lists on genizahsearch.com. They are still on this computer, and until you choose they stay here and are not uploaded again.":
+        "הפריטים האלה הוסרו מהרשימות שלך באתר genizahsearch.com. הם עדיין במחשב הזה, ועד שתבחר הם יישארו כאן ולא יועלו שוב.",
+    "Decide later": "להחליט אחר כך",
+    "Remove from this computer too": "להסיר גם מהמחשב הזה",
+    "Keep it (and add it back on the website)": "להשאיר (ולהוסיף שוב לאתר)",
+    "Remove all from this computer too": "להסיר את כולם גם מהמחשב הזה",
+    "Keep all (and add them back on the website)": "להשאיר את כולם (ולהוסיף שוב לאתר)",
+    "Choice": "בחירה",
+    "Removed from their lists on this computer: {}. To be added back on the website: {}.":
+        "הוסרו מהרשימות במחשב הזה: {}. יתווספו שוב לאתר: {}.",
+    # A restored log-in at startup whose preview failed (offline): status bar
+    "Could not reach your account to check the lists. List sync stays on; Sync lists now tries again.":
+        "לא ניתן היה להתחבר לחשבונך כדי לבדוק את הרשימות. סנכרון הרשימות נשאר פעיל; 'סנכרן רשימות עכשיו' ינסה שוב.",
+    # Log-out: the corner button while it runs, and the notice's paragraphs
+    "Logging out...": "מתנתק...",
+    "These lists were not uploaded before you logged out: {}. Your changes to them are saved on this computer and are uploaded after you next log in.":
+        "הרשימות האלה לא הועלו לפני שהתנתקת: {}. השינויים בהן שמורים במחשב הזה ויועלו אחרי שתתחבר שוב.",
+    "Your latest list changes were not uploaded before you logged out. They are saved on this computer and are uploaded after you next log in.":
+        "השינויים האחרונים ברשימות לא הועלו לפני שהתנתקת. הם שמורים במחשב הזה ויועלו אחרי שתתחבר שוב.",
+    "List sync was not on in this session, so your list changes were not uploaded. They are saved on this computer and are uploaded after you next log in.":
+        "סנכרון הרשימות לא פעל בהפעלה הזו, ולכן השינויים ברשימות לא הועלו. הם שמורים במחשב הזה ויועלו אחרי שתתחבר שוב.",
+    "Some notes differ from your account and were not uploaded. They are kept on this computer; after you next log in, use Sync lists now, then Merge Both, to keep both versions.":
+        "יש הערות ששונות מאלה שבחשבונך ולכן לא הועלו. הן נשמרות במחשב הזה; אחרי שתתחבר שוב, לחץ על 'סנכרן רשימות עכשיו' ואז על 'מזג את שתיהן' כדי לשמור את שתי הגרסאות.",
+    "Your lists cannot be saved on this computer at the moment ({} cannot be written). List changes that did not reach your account before you logged out are lost if you close the program before the file can be saved again.":
+        "לא ניתן לשמור כרגע את הרשימות במחשב הזה (לא ניתן לכתוב את {}). שינויים ברשימות שלא הגיעו לחשבונך לפני שהתנתקת יאבדו אם תסגור את התוכנה לפני שיהיה אפשר לשמור את הקובץ שוב.",
+    # The sync choice dialog's list rows: "• <name> (<n> items)", and "... and <k> more"
+    "{} ({} items)": "{} ({} פריטים)",
+    "... and {} more": "ועוד {}...",
     # The label between a note's two versions after a Download or Merge: "--- from the cloud ---"
     "from the cloud": "מהענן",
     # The sync layer's own messages (shared/lists_sync.py, shared/lists_manager.py)
@@ -3681,6 +3733,7 @@ TRANSLATIONS.update({
     "No Supabase client": "אין חיבור לשרת הענן",
     "Cloud sync not available": "הסנכרון לענן אינו זמין",
     "Unknown error": "שגיאה לא ידועה",
+    "Sync stopped": "הסנכרון נעצר",
     "Uploaded {} item(s), but {} failed to upload to the cloud.": "הועלו {} פריטים, אבל {} לא הועלו לענן.",
     # lists.pkl could not be read at startup (desktop notice)
     "Lists restored from a backup": "הרשימות שוחזרו מגיבוי",

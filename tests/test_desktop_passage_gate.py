@@ -641,7 +641,9 @@ _UNTRANSLATED_BEFORE_THIS_WORK = {
 
 @pytest.mark.parametrize('rel_path', ['genizah_app.py',
                                       os.path.join('web', 'pages',
-                                                   'parallels.py')])
+                                                   'parallels.py'),
+                                      os.path.join('desktop',
+                                                   'lists_web_removals_dialog.py')])
 def test_every_tr_string_has_a_hebrew_entry(rel_path):
     """`tr()` returns its ARGUMENT when the table has no entry, so a missing
     translation is invisible on an English machine and shows up as a lone

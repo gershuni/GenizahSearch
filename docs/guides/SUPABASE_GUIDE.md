@@ -178,6 +178,12 @@ list on the computer (`cloud_rows`); rows are matched by list, `sys_id`, `fl_id`
 claimed once per pass, and every update is filtered by `id` **and** `list_id`. An upload never
 overwrites a cloud note or tag set that differs from what this computer last synced; a Download keeps
 both texts of a clashing note and combines the tags. My Library entries (`97...` sys_ids) are never uploaded or downloaded.
+The desktop also **deletes** `list_items` rows (so it needs the DELETE policy and grant for
+`authenticated`): an entry removed on the computer (from a list, with a list deleted for good, or
+with the Trash emptied) has the row the computer recorded for it deleted by `id` and `list_id`
+alone; a moved entry's row is updated into its new list, or, when that list already has its own
+row, deleted with filters on the note and tags it held. It never deletes a row it did not record,
+or one found in another list (another computer moved it), and it deletes no `user_lists` row.
 Count any that earlier desktop versions may have uploaded with
 `select count(*) from public.list_items where sys_id like '97%';` (delete them the same way if wanted).
 

@@ -1,6 +1,6 @@
 # Codebase Index
 
-> Last updated: 2026-09-25
+> Last updated: 2026-09-27
 
 Auto-generated index of classes and methods. New sections for modules can be
 appended via `python scripts/gen_code_index_section.py <file.py> ...` (walks
@@ -39,670 +39,865 @@ desktop.Y.X` identity holds via the facades.
 
 ## genizah_app.py
 
-- **Function** `space_scroll_action` (Line 118) — Pure decision for desktop results-table Space-scroll.
-- **Function** `paused_seconds` (Line 137) — Seconds spent parked, INCLUDING a pause that is still in progress.
-- **Function** `effective_elapsed` (Line 153) — Working seconds elapsed: monotonic span minus parked time, never negative.
-- **Class** `_PauseCtx` (Line 170) — Pause UI state for ONE operation (the search tab, or the composition tab).
-    - Method `__init__` (Line 182)
-    - Method `reset_for_run` (Line 192)
-    - Method `elapsed` (Line 201) — Working-time elapsed for this operation, excluding parked time.
-    - Method `accepts_ack` (Line 208) — Whether a queued pause acknowledgement belongs to the live pause.
-- **Function** `_aggregate_local_pages_with_separators` (Line 229) — Phase 96 NEW-2 D-14: aggregate page texts with labeled separators.
-- **Function** `_setup_crash_handler` (Line 265)
-- **Class** `LabPanel` (Line 301)
-    - Method `__init__` (Line 302)
-    - Method `set_engine` (Line 315)
-    - Method `enable_controls` (Line 322)
-    - Method `init_ui` (Line 325)
-    - Method `refresh_values` (Line 434)
-    - Method `on_change` (Line 450)
-    - Method `open_scoring` (Line 465)
-    - Method `_mark_rebuild_required` (Line 470)
-    - Method `run_rebuild` (Line 478)
-    - Method `on_rebuild_progress` (Line 510)
-    - Method `on_rebuild_error` (Line 513)
-    - Method `on_rebuild_finished` (Line 518)
-- **Function** `log_tls_relaxation_notice` (Line 529) — Log once that TLS verification is intentionally disabled for thumbnail fetches.
-- **Function** `_get_catalog_filter_sets` (Line 547) — Return ``(pgp_link_sys_ids, edition_sys_ids)`` (both sets).
-- **Function** `reset_catalog_filter_sets` (Line 573) — Invalidate the cached catalog availability sets so the next filtered query
-- **Class** `_CatalogRefreshWorker` (Line 581) — Background worker for catalog browse DB queries (authors/works/results).
-    - Method `__init__` (Line 590)
-    - Method `run` (Line 619)
-- **Class** `_CatalogFacetWorker` (Line 666) — Background worker that computes per-library facet counts for the catalog dialog.
-    - Method `__init__` (Line 680)
-    - Method `run` (Line 699)
-- **Function** `_format_list_star` (Line 731)
-- **Function** `_build_search_results_xlsx_bytes` (Line 747) — Build the 4-sheet workbook bytes for desktop xlsx search-results export.
-- **Function** `_local_page_label` (Line 1163) — D-02 page label for a LOCAL result. ``chunk_locator`` is used VERBATIM
-- **Function** `_build_export_data_row` (Line 1177) — Build one 7-column data_rows entry for export_results.
-- **Function** `_csv_extra_cols` (Line 1215) — Return the extra (Filepath, Page) pair for LOCAL rows in a mixed CSV.
-- **Function** `_local_parent_folder` (Line 1232) — Parent-folder name from a LOCAL filepath, separator-agnostic.
-- **Function** `_format_txt_local_block` (Line 1246) — Return the TXT block string for a LOCAL result (Phase 103 D-09).
-- **Function** `_format_txt_genizah_block` (Line 1285) — Return the TXT block string for a Genizah result.
-- **Function** `_telemetry_result_bucket` (Line 1310) — Coarse result-count bucket for Phase 114 telemetry (D-07/D-08).
-- **Class** `GenizahGUI` (Line 1325) — Main application window orchestrating search, browsing, and indexing.
-    - Method `__init__` (Line 1329)
-    - Method `start_background_init` (Line 1500)
-    - Method `on_startup_finished` (Line 1509)
-    - Method `_sync_telemetry_identity` (Line 1632) — Reconcile PostHog identity against the live Supabase session.
-    - Method `_run_startup_telemetry_coordinator` (Line 1657) — Single boot/opt-in sequence: consent → identity-sync → session_start.
-    - Method `_telemetry_ready` (Line 1716) — Producer gate: True only after the coordinator's session_start branch ran.
-    - Method `_emit_feature_opened` (Line 1728) — Centralized desktop_feature_opened producer (D-03 / D-04 / REVIEWS MEDIUM-9).
-    - Method `_setup_active_ping` (Line 1761) — Wire daily active-user heartbeat (D-16 / USAGE-04).
-    - Method `_on_app_state_changed` (Line 1784) — Focus/resume handler — fires heartbeat on app activation.
-    - Method `_maybe_emit_active_ping` (Line 1804) — Emit desktop_active_ping at most once per UTC day, active-only (USAGE-04 / D-16).
-    - Method `_maybe_flush_perf_summary` (Line 1841) — Periodically flush the per-session perf accumulator (Phase 115 D-04/D-05/KQ-4).
-    - Method `_check_shelfmark_completer_ready` (Line 1871)
-    - Method `setup_shelfmark_completer` (Line 1879) — Initialize the shelfmark autocomplete with data from csv_bank and Parts.
-    - Method `init_ui` (Line 1935)
-    - Method `_update_corner_login_state` (Line 2109) — Update the corner login button based on login state.
-    - Method `_set_active_tab` (Line 2120) — Set the active tab programmatically without emitting telemetry.
-    - Method `_on_tab_changed` (Line 2137) — Handle tab change events.
-    - Method `_corner_login_clicked` (Line 2184) — Handle corner login button click.
-    - Method `_show_login_dialog` (Line 2191)
-    - Method `_show_register_dialog` (Line 2204)
-    - Method `_do_logout` (Line 2215)
-    - Method `_enable_lists_cloud_sync` (Line 2229) — Enable cloud sync for user lists after login - shows sync dialog.
-    - Method `_show_lists_sync_dialog` (Line 2308) — Show dialog to let user choose how to sync lists.
-    - Method `_do_sync_action` (Line 2403) — Execute the chosen sync action.
-    - Method `_disable_lists_cloud_sync` (Line 2474) — Disable cloud sync on logout.
-    - Method `_show_discoveries_dialog` (Line 2498)
-    - Method `_show_create_discovery_dialog` (Line 2506)
-    - Method `_show_all_corrections_dialog` (Line 2531)
-    - Method `_show_my_corrections_dialog` (Line 2535)
-    - Method `_show_my_comments_dialog` (Line 2542)
-    - Method `_browse_toggle_edit_mode` (Line 2555) — Toggle edit mode for inline corrections.
-    - Method `_browse_on_text_changed` (Line 2586) — Handle text changes in edit mode.
-    - Method `_browse_cancel_edit` (Line 2618) — Cancel edit mode and restore original text.
-    - Method `_browse_exit_edit_mode` (Line 2637) — Exit edit mode without restoring text (after successful submit).
-    - Method `_browse_save_correction` (Line 2652) — Save the inline correction.
-    - Method `_browse_change_version` (Line 2795) — Change between text versions.
-    - Method `_browse_load_version` (Line 2811) — Load and display a specific version.
-    - Method `_browse_display_version_text` (Line 2903) — Display version text in the browse text area.
-    - Method `_displayed_folio_label_for_pgp` (Line 2920) — Folio label ('1r','2v',…) of the image at the current browse page.
-    - Method `_displayed_page_for_pgp` (Line 2940) — (_browse_folio_images, 1-based displayed page, total pages).
-    - Method `_displayed_fgp_image_number_for_pgp` (Line 2957) — FGP image number (fgp_image_number_id) of the image at the current page.
-    - Method `_populate_pgp_combo` (Line 2971) — Build combo items with PGP editions and translations grouped.
-    - Method `_browse_full_htr_text` (Line 3125) — Whole-manuscript HTR (V0.8) text — all folios concatenated — for the
-    - Method `_auto_select_pgp_edition` (Line 3142) — Find the first edition item and set it as current.
-    - Method `_check_document_community_status` (Line 3201) — Check if document has comments and load available versions.
-    - Method `_browse_add_comment` (Line 3376) — Open comment dialog for current document.
-    - Method `_browse_view_corrections` (Line 3401) — View corrections for current document.
-    - Method `_browse_view_comments` (Line 3424) — View comments for current document.
-    - Method `_browse_view_joins` (Line 3445) — View joined fragments for current document.
-    - Method `_browse_view_visual_similarity` (Line 3488) — REROUTED (Phase 109, D-10): open the Join Workbench with the Visual source auto-loaded.
-    - Method `_enrich_vs_suggestions` (Line 3513) — Enrich raw VS suggestions with shelfmark, library_code, domain from csv_bank/fjms.
-    - Method `_on_vs_fetch_complete` (Line 3538)
-    - Method `_show_vs_dialog` (Line 3548) — Create and show the enriched Visual Similarity workbench dialog.
-    - Method `_vs_navigate_to` (Line 4002) — Navigate browse to a VS partner manuscript.
-    - Method `_vs_open_joins_with_partner` (Line 4022) — Open JoinsDialog with fragment A (original) and fragment B (partner) pre-filled.
-    - Method `_vs_add_to_puzzle` (Line 4044) — Add a VS partner to the Fragment Puzzle.
-    - Method `_vs_get_partners` (Line 4057) — Get VS partner sys_ids from local DB, cache, or server (synchronous).
-    - Method `_search_in_visual_suggestions` (Line 4084) — Restrict search to visual similarity partner pool ('Search in VS' action).
-    - Method `_browse_visual_suggestions` (Line 4118) — Show VS partner pool as a result set by running a wildcard search restricted to partners.
-    - Method `_clear_vs_restriction` (Line 4148) — Clear the visual similarity search restriction.
-    - Method `_update_vs_breadcrumb` (Line 4157) — Show or hide the VS restriction breadcrumb in the search area.
-    - Method `_update_joins_dropdown` (Line 4186) — Update the joins dropdown menu with connected fragments.
-    - Method `_on_joins_menu_show` (Line 4415) — Called when joins menu is about to show - trigger sync and update.
-    - Method `_navigate_to_joined_fragment` (Line 4426) — Navigate to a joined fragment in browse tab.
-    - Method `_show_results_context_menu` (Line 4434) — Show context menu for search results with community options.
-    - Method `_context_view_document` (Line 4559) — Navigate to browse tab for this document.
-    - Method `_context_submit_correction` (Line 4566) — Open correction dialog from context menu.
-    - Method `_context_add_comment` (Line 4578) — Open comment dialog from context menu.
-    - Method `_context_view_corrections` (Line 4590) — View corrections from context menu.
-    - Method `_context_view_comments` (Line 4601) — View comments from context menu.
-    - Method `_context_share_discovery` (Line 4610) — Share discovery from context menu.
-    - Method `toggle_language` (Line 4625)
-    - Method `create_search_tab` (Line 4657)
-    - Method `set_results_loading` (Line 5297) — Toggle the search results placeholder while components initialize.
-    - Method `create_composition_tab` (Line 5303)
-    - Method `create_browse_tab` (Line 5715)
-    - Method `browse_toggle_lists_panel` (Line 6324) — Toggle the browse lists side panel.
-    - Method `browse_set_lists_panel_visible` (Line 6328) — Show or hide the browse lists side panel.
-    - Method `browse_refresh_lists_panel` (Line 6363) — Refresh the lists tree and items list in the browse panel.
-    - Method `browse_on_list_selected` (Line 6400) — Handle selection of a list in the browse lists panel.
-    - Method `browse_on_list_item_clicked` (Line 6450) — Open a list item in the browse tab using FL/Image ID lookup.
-    - Method `_browse_append_printed_badge` (Line 6495) — Append printed material badge to browse info label text if applicable.
-    - Method `_start_browse_enrichment` (Line 6515) — Centralized enrichment launch — disconnects stale worker, bumps generation counter,
-    - Method `_build_nli_iiif_url_for_page` (Line 6577) — Build a direct NLI IIIF URL for (sys_id, page_idx).
-    - Method `_is_cambridge_display` (Line 6644) — Return True iff display_meta looks like a CUDL-Cambridge source.
-    - Method `_resolve_cambridge_page_or_fallback` (Line 6666) — Compute (display_meta, idx) for a Cambridge CUDL page using
-    - Method `_switch_browse_viewer_to_nli_for_page` (Line 6742) — Flip the browse viewer to NLI and jump to a positional page.
-    - Method `_restore_browse_viewer_to_ext` (Line 6790) — Restore the browse viewer to CUDL after an auto-fallback.
-    - Method `_resolve_cambridge_navigation_index` (Line 6831) — Side-aware index lookup for prev/next navigation on CUDL.
-    - Method `on_browse_enriched_loaded` (Line 6883)
-    - Method `_on_browse_pgp_loaded` (Line 7254) — Handle PGP sources loaded from background thread.
-    - Method `_on_browse_pgp_error` (Line 7337) — Handle PGP source fetch error -- silently fall back to existing behavior.
-    - Method `_build_pgp_extended_info_html` (Line 7341) — Build HTML for PGP metadata section in extended info panels.
-    - Method `_build_fjms_domain_html` (Line 7439) — Build HTML for FJMS domain classifications in extended info.
-    - Method `_build_fjms_catalog_html` (Line 7482) — Build HTML for FJMS catalog metadata in extended info.
-    - Method `_build_catalog_refs_html` (Line 7568) — Build HTML for FIST catalog cross-references in extended info.
-    - Method `_build_secondary_metadata_html` (Line 7589) — Build HTML for secondary metadata (source names, collection, storage).
-    - Method `_build_browse_enriched_html` (Line 7629) — Build HTML for KTI/Oxford/Cambridge enrichment data in Browse extended info.
-    - Method `_browse_toggle_extended_info` (Line 7851) — Toggle browse tab extended info panel visibility.
-    - Method `_show_fjms_bibliography_dialog` (Line 7858) — Open the FJMS bibliography dialog.
-    - Method `_show_nli_bibliography_dialog` (Line 7871) — Open the NLI bibliography dialog.
-    - Method `_show_fjms_catalog_dialog` (Line 7884) — Open the FJMS catalog records dialog from Browse tab (lazy fetch).
-    - Method `_show_browse_measurements_dialog` (Line 7913) — Open measurements dialog from Browse tab (lazy fetch on first click).
-    - Method `_on_browse_ext_link_clicked` (Line 7936) — Handle clicks on links in browse tab extended info.
-    - Method `_search_toggle_translations` (Line 7966) — Toggle show_translations from search tab toolbar button.
-    - Method `_refresh_search_titles` (Line 7986) — Refresh title column in search results to reflect translation state.
-    - Method `_browse_toggle_translations` (Line 7999) — Toggle show_translations from browse tab toolbar button.
-    - Method `_refresh_browse_title` (Line 8022) — Refresh the browse info label to reflect current show_translations state.
-    - Method `_handle_toggle_trans` (Line 8033) — Toggle translated/original text by rebuilding the PGP HTML section.
-    - Method `_refresh_browse_extended_info` (Line 8053) — Refresh the browse extended info panel (after toggling show_translations).
-    - Method `_start_field_translation` (Line 8097) — Start an on-demand field translation via Dicta API.
-    - Method `_get_field_original_text` (Line 8144) — Extract the original English text for a field key from stored metadata.
-    - Method `_on_field_translated` (Line 8188) — Handle completed field translation — refresh the relevant panel.
-    - Method `_navigate_to_catalog_browse` (Line 8214) — Navigate to the catalog browse tab with the specified filter pre-set.
-    - Method `_apply_pending_catalog_nav` (Line 8252) — Apply a pending domain selection after async tree load completes.
-    - Method `_catalog_select_domain_in_tree` (Line 8267) — Select a domain in the catalog browse domain tree by its English key.
-    - Method `_browse_display_pgp_text` (Line 8285) — Display PGP edition/translation text with proper directionality.
-    - Method `_browse_refresh_pgp_for_page` (Line 8302) — Re-fetch PGP/FGP sources for current page (called on page change within same manuscript).
-    - Method `_on_browse_link_clicked` (Line 8330) — Handle clicks on internal links in browse text (View All and Reading Desk modes).
-    - Method `_browse_enter_reading_desk` (Line 8386) — Enter reading desk mode with the given fragments.
-    - Method `_browse_rd_enrich_entry` (Line 8494) — Ensure meta_mgr.nli_cache[sys_id] has image metadata for the reading desk.
-    - Method `_browse_rd_on_sources_loaded` (Line 8555) — Handle PGP sources loaded from ReadingDeskWorker.
-    - Method `_browse_exit_reading_desk` (Line 8571) — Exit reading desk mode and restore normal browse view.
-    - Method `_browse_add_to_view` (Line 8626) — Handle 'Add to View' button click -- enter reading desk or add a manuscript.
-    - Method `_browse_add_to_puzzle` (Line 8698) — Add current browse manuscript to the puzzle canvas.
-    - Method `_browse_open_join_workbench` (Line 8719) — Browse tab entry point for the Join Workbench. D-03 #2.
-    - Method `_browse_rd_add_entry` (Line 8740) — Add a single manuscript entry to the reading desk (duplicate-safe).
-    - Method `_browse_rd_add_by_shelfmark` (Line 8805) — Add a manuscript to the reading desk by shelfmark (toolbar input).
-    - Method `_browse_rd_add_from_list` (Line 8853) — Show the browse lists panel so items can be added to reading desk.
-    - Method `_browse_open_joins_in_reading_desk` (Line 8857) — Open all joined fragments in the reading desk.
-    - Method `_browse_open_pgp_joins_in_reading_desk` (Line 8941) — Open PGP multi-fragment joined document in reading desk.
-    - Method `_browse_rd_render` (Line 8968) — Render reading desk: stacked texts in text pane, stacked images in viewer pane.
-    - Method `_browse_rd_render_images` (Line 9097) — Render stacked images in the viewer pane (right side of browse splitter).
-    - Method `_browse_rd_disconnect_sync` (Line 9236) — Disconnect sync scroll handlers without affecting other signal connections.
-    - Method `_browse_rd_setup_sync_scroll` (Line 9253) — Set up proportional scroll synchronization between text and image panes.
-    - Method `_browse_rd_restore_normal_view` (Line 9301) — Hide reading desk image scroll and restore normal viewer.
-    - Method `_browse_rd_remove_entry` (Line 9313) — Remove a fragment entry from the reading desk and re-render or exit.
-    - Method `_browse_rd_show_version_dialog` (Line 9323) — Show a dialog to select PGP version source for a specific fragment.
-    - Method `toggle_browse_view_all` (Line 9380)
-    - Method `on_browse_page_combo_changed` (Line 9396)
-    - Method `_on_browse_volume_changed` (Line 9413) — Handle volume selector change — switch to a different IE's pages and images.
-    - Method `_refresh_browse_images_for_volume` (Line 9430) — Launch lightweight manifest-only worker for volume switch (no full enrichment).
-    - Method `_on_volume_manifest_loaded` (Line 9456) — Handle volume manifest fetch result — update image viewer for the active volume.
-    - Method `toggle_browse_image` (Line 9544)
-    - Method `_set_browse_image_pane_visible` (Line 9548) — Phase 95 D-27 helper — programmatic equivalent of toggle_browse_image.
-    - Method `browse_search_parallels` (Line 9560)
-    - Method `browse_add_to_list` (Line 9593) — Add current manuscript to a list.
-    - Method `_set_last_browse_field` (Line 9607)
-    - Method `browse_load_page` (Line 9610) — Load single page text and sync viewer.
-    - Method `_apply_browse_highlights` (Line 9623)
-    - Method `browse_load_all` (Line 9642) — Load all pages into the text browser for continuous scrolling.
-    - Method `browse_save_full` (Line 9820)
-    - Method `create_catalog_browse_tab` (Line 9878) — Create the 'Browse by Identification' tab with domain tree, author/work search, and results table.
-    - Method `_catalog_refresh` (Line 10235) — Main refresh: re-fetch results with current filters + pagination, update UI.
-    - Method `_catalog_update_text_summary` (Line 10348) — Update the human-readable text filter summary label.
-    - Method `_catalog_refresh_authors` (Line 10366) — Fetch authors scoped to current domain, update author list widget.
-    - Method `_catalog_filter_authors` (Line 10375) — Filter author list widget based on current text input.
-    - Method `_catalog_refresh_works` (Line 10399) — Fetch works scoped to current domain + author, update works list widget.
-    - Method `_catalog_filter_works` (Line 10411) — Filter works list widget based on current text input.
-    - Method `_catalog_on_domain_select` (Line 10437) — Handle domain tree item click.
-    - Method `_catalog_start_async_refresh` (Line 10450) — Run catalog browse refresh in a background thread (never blocks UI).
-    - Method `_catalog_on_async_refresh_done` (Line 10486) — Handle results from background refresh thread.
-    - Method `_catalog_on_author_select` (Line 10568) — Handle author list item click.
-    - Method `_catalog_on_work_select` (Line 10581) — Handle work list item click.
-    - Method `_catalog_on_date_changed` (Line 10592) — Handle date From/To input change.
-    - Method `_catalog_on_undated_changed` (Line 10607) — Handle include-undated checkbox toggle.
-    - Method `_catalog_set_century` (Line 10614) — Set date range to a single century and refresh.
-    - Method `_catalog_set_century_range` (Line 10621) — Set date range spanning multiple centuries and refresh.
-    - Method `_catalog_clear_date` (Line 10628) — Clear date filter state and UI.
-    - Method `_catalog_add_text_term` (Line 10637) — Add the current text input as a filter term with the selected mode.
-    - Method `_catalog_remove_text_term` (Line 10655) — Remove a text filter term and refresh.
-    - Method `_catalog_render_text_chips` (Line 10668) — Re-render the inline text filter chips below the input in the sidebar.
-    - Method `_catalog_update_avail_filter_btns` (Line 10690) — Set the PGP / scholarly-transcription filter button labels + colors
-    - Method `_catalog_cycle_pgp_filter` (Line 10714) — Cycle the PGP availability filter: all -> has_pgp -> no_pgp -> all.
-    - Method `_catalog_cycle_editions_filter` (Line 10722) — Cycle the scholarly-transcription filter: all -> has_edition -> no_edition -> all.
-    - Method `_open_catalog_library_dialog` (Line 10730) — Open LibraryFilterDialog (GAP-G) and apply the selection (dual-mode, DMF-07).
-    - Method `_catalog_update_library_filter_btn` (Line 10792) — Update the library filter button label + colour to reflect the selection.
-    - Method `_catalog_remove_filter` (Line 10836) — Remove a specific filter (or all) and refresh.
-    - Method `_resolve_catalog_author_display` (Line 10909) — Resolve author value to display name from cached authors list.
-    - Method `_resolve_catalog_work_display` (Line 10919) — Resolve work value to display name from cached works list.
-    - Method `_catalog_update_chips` (Line 10929) — Update the active filter chips bar.
-    - Method `_catalog_build_browse_filters` (Line 11049) — Build pre_search_filters dict from all active catalog browse filters.
-    - Method `_catalog_search_in_results` (Line 11070) — Navigate to search tab with browse filters as pre-search filters.
-    - Method `_catalog_parallels_in_results` (Line 11114) — Navigate to composition tab with browse filters as pre-search filters.
-    - Method `_catalog_view_result` (Line 11156) — Double-click result row: open ResultDialog with prev/next navigation.
-    - Method `_catalog_view_result_by_row` (Line 11160) — Open ResultDialog for the catalog browse result at the given row.
-    - Method `_catalog_browse_manuscript_by_row` (Line 11188) — Navigate to Browse by Shelfmark tab for the given row.
-    - Method `_catalog_on_cell_entered` (Line 11199) — Handle mouse hover on catalog results table rows for action button visibility.
-    - Method `_catalog_next_page` (Line 11217) — Go to next page of results.
-    - Method `_catalog_prev_page` (Line 11222) — Go to previous page of results.
-    - Method `_catalog_populate_tree` (Line 11230) — Start async population of the domain tree. Never blocks main thread.
-    - Method `_catalog_load_tree_from_cache` (Line 11247) — Load tree data from already-cached service (runs on main thread, instant).
-    - Method `_catalog_render_tree` (Line 11263) — Render tree from pre-fetched data (runs on main thread via signal).
-    - Method `create_lists_tab` (Line 11322) — Create the Personal Lists tab for managing starred manuscripts.
-    - Method `lists_toggle_preview` (Line 11633) — Toggle the preview panel visibility.
-    - Method `_normalize_fl_id` (Line 11637)
-    - Method `_format_image_display` (Line 11641)
-    - Method `_get_list_display_name` (Line 11644)
-    - Method `_get_list_display_color` (Line 11652)
-    - Method `lists_set_preview_visible` (Line 11662) — Show/hide preview panel with a slim collapsed bar.
-    - Method `lists_refresh_all` (Line 11711) — Refresh the lists sidebar and current items view.
-    - Method `_lists_auto_sync` (Line 11721) — Auto-sync to cloud after local changes (if logged in).
-    - Method `lists_refresh_sidebar` (Line 11788) — Refresh the lists tree in the sidebar.
-    - Method `lists_handle_tree_reorder` (Line 11876) — Apply drag-and-drop changes to list/project order and assignment.
-    - Method `lists_refresh_items` (Line 11914) — Refresh the items table for the current list.
-    - Method `_get_recent_items_deduped` (Line 12036) — Return Recently Viewed items in view order, with true duplicates collapsed.
-    - Method `lists_on_list_selected` (Line 12070) — Handle list selection in the sidebar.
-    - Method `lists_on_item_clicked` (Line 12080) — Handle item click in the table.
-    - Method `lists_on_item_checkbox_changed` (Line 12093) — Handle checkbox state change.
-    - Method `lists_update_selection_label` (Line 12099) — Update the selection count label.
-    - Method `lists_on_select_all_toggled` (Line 12113) — Toggle all checkboxes in the list table.
-    - Method `lists_sync_select_all_checkbox` (Line 12127) — Sync 'Select All' checkbox state with row selections.
-    - Method `lists_get_selected_item_ids` (Line 12151) — Get list of selected item ids.
-    - Method `lists_show_item_details` (Line 12162) — Show details for a specific item.
-    - Method `_lists_load_preview` (Line 12238) — Load text and image preview for an item.
-    - Method `_lists_load_preview_image` (Line 12272) — Load image for preview panel.
-    - Method `_lists_start_preview_download` (Line 12293) — Download and display preview image for lists panel.
-    - Method `_lists_on_preview_image_loaded` (Line 12313) — Handle preview image loaded for lists panel.
-    - Method `_lists_on_preview_image_failed` (Line 12326) — Handle preview image load failure for lists panel.
-    - Method `_lists_cancel_preview_image_thread` (Line 12333)
-    - Method `lists_clear_details` (Line 12339) — Clear the details panel and preview.
-    - Method `lists_save_item_details` (Line 12365) — Save changes to the current item.
-    - Method `lists_create_new_list` (Line 12373) — Create a new list.
-    - Method `lists_create_new_project` (Line 12382) — Create a new project.
-    - Method `lists_edit_current_list` (Line 12391) — Edit the current list name/color.
-    - Method `lists_delete_current_list` (Line 12406) — Delete the current list.
-    - Method `lists_duplicate_selected_list` (Line 12428) — Duplicate the current list.
-    - Method `lists_merge_lists` (Line 12437) — Show dialog to merge lists.
-    - Method `lists_cleanup_duplicates` (Line 12472) — Clean up duplicate lists created by sync bugs.
-    - Method `_show_duplicate_conflict_dialog` (Line 12523) — Show dialog for user to resolve a duplicate list conflict.
-    - Method `lists_show_trash` (Line 12580) — Show dialog with deleted lists (trash).
-    - Method `_trash_restore` (Line 12642) — Restore selected list from trash.
-    - Method `_trash_delete_permanently` (Line 12657) — Permanently delete selected list from trash.
-    - Method `_trash_empty` (Line 12678) — Empty all trash.
-    - Method `lists_move_selected_items` (Line 12693) — Move selected items to another list.
-    - Method `lists_add_tag_to_selected` (Line 12722) — Add a tag to selected items.
-    - Method `lists_add_tag_to_item` (Line 12736) — Add a tag to a specific item.
-    - Method `lists_remove_selected_items` (Line 12747) — Remove selected items from current list.
-    - Method `lists_remove_item_by_id` (Line 12767) — Remove a specific item from current list.
-    - Method `lists_quick_view_item` (Line 12775) — Quick view the current item.
-    - Method `lists_quick_view_by_id` (Line 12780) — Open quick view dialog for an item.
-    - Method `lists_browse_item` (Line 12824) — Browse the current item in the Browse tab.
-    - Method `lists_browse_by_id` (Line 12829) — Open an item in the Browse tab.
-    - Method `_open_document_result_dialog` (Line 12845) — Open ResultDialog for a document by shelfmark or sys_id.
-    - Method `_browse_document_by_shelfmark` (Line 12899) — Browse a document by shelfmark in the Browse tab.
-    - Method `lists_copy_item_info` (Line 12906) — Copy current item info to clipboard.
-    - Method `_lists_add_to_puzzle` (Line 12911) — Add a list item to the puzzle canvas.
-    - Method `lists_copy_info_by_id` (Line 12924) — Copy item info to clipboard with format options.
-    - Method `_do_copy_info` (Line 12942) — Actually copy the info to clipboard.
-    - Method `lists_export_current_list` (Line 12981) — Export the current list.
-    - Method `lists_import_list` (Line 13005) — Import a list from file.
-    - Method `lists_show_list_context_menu` (Line 13038) — Show context menu for list items in sidebar.
-    - Method `_rename_list` (Line 13151) — Rename a specific list.
-    - Method `_delete_list` (Line 13166) — Delete a specific list.
-    - Method `_duplicate_list` (Line 13189) — Duplicate a specific list.
-    - Method `_export_list` (Line 13198) — Export a specific list (opens format menu).
-    - Method `_export_list_format` (Line 13202) — Export a specific list in the given format.
-    - Method `_format_item_text` (Line 13236) — Format a single item for text export.
-    - Method `_export_as_text` (Line 13263) — Export list as plain text.
-    - Method `_export_as_json` (Line 13280) — Export list as JSON.
-    - Method `_export_as_excel` (Line 13302) — Export list as Excel file.
-    - Method `_export_as_word` (Line 13345) — Export list as Word document.
-    - Method `_save_text_to_file` (Line 13396) — Save text to file.
-    - Method `_copy_to_clipboard` (Line 13410) — Copy text to clipboard.
-    - Method `_send_by_email` (Line 13416) — Robust Email: Copies text to clipboard and opens empty email draft.
-    - Method `lists_apply_filter` (Line 13438) — Apply filter to items table.
-    - Method `show_add_to_list_menu` (Line 13444) — Show menu for adding items to a list.
-    - Method `create_community_tab` (Line 13511) — Create the Community tab with panels for discoveries, corrections, and comments.
-    - Method `_refresh_community_panels` (Line 13736) — Refresh all community panels and update UI state.
-    - Method `_update_community_header` (Line 13784) — Update the community header with user info.
-    - Method `_refresh_discoveries_panel` (Line 13796) — Refresh the discoveries list panel.
-    - Method `_filter_discoveries` (Line 13853) — Filter discoveries list by selected type.
-    - Method `_populate_discoveries_list` (Line 13881) — Populate discoveries list from data.
-    - Method `_refresh_corrections_panel` (Line 13923) — Refresh the corrections list panels.
-    - Method `_populate_my_corrections_list` (Line 13970) — Populate my corrections list from data (only latest per document).
-    - Method `_populate_all_corrections_list` (Line 14005) — Populate all corrections list from data (only latest per user per document).
-    - Method `_refresh_comments_panel` (Line 14041) — Refresh the comments list panels (My Comments + All Comments).
-    - Method `_populate_comments_list` (Line 14098) — Populate comments list from data.
-    - Method `_discoveries_context_menu` (Line 14140) — Show context menu for discoveries list.
-    - Method `_edit_discovery_from_list` (Line 14190) — Open edit dialog for discovery from context menu.
-    - Method `_delete_discovery_from_list` (Line 14196) — Delete discovery from context menu.
-    - Method `_toggle_pin_discovery` (Line 14212) — Toggle pin status from context menu.
-    - Method `_toggle_hide_discovery` (Line 14220) — Toggle hide status from context menu.
-    - Method `_corrections_context_menu` (Line 14231) — Show context menu for corrections list.
-    - Method `_show_correction_details` (Line 14254) — Show correction details dialog.
-    - Method `_comments_context_menu` (Line 14277) — Show context menu for comments list.
-    - Method `_on_discovery_clicked` (Line 14295) — Handle discovery item double-click.
-    - Method `_on_correction_clicked` (Line 14302) — Handle correction item double-click - open ResultDialog.
-    - Method `_on_comment_clicked` (Line 14317) — Handle comment item double-click - open ResultDialog.
-    - Method `_refresh_joins_panel` (Line 14329) — Refresh the joins list panels (My Joins + All Joins).
-    - Method `_populate_joins_list` (Line 14418) — Populate joins list from data.
-    - Method `_populate_puzzles_list` (Line 14451) — Populate puzzle list from published joins data.
-    - Method `_on_puzzle_clicked` (Line 14474) — Handle double-click on a published puzzle — fork and open.
-    - Method `_joins_context_menu` (Line 14488) — Show context menu for joins list.
-    - Method `_on_join_clicked` (Line 14533) — Handle join item double-click - open Fragment A.
-    - Method `_open_join_fragment` (Line 14541) — Open a fragment from a join - navigate to browse tab.
-    - Method `_copy_join_shelfmarks` (Line 14552) — Copy join shelfmarks to clipboard.
-    - Method `_delete_join_from_list` (Line 14558) — Delete a join from the community panel.
-    - Method `_show_joins_feed_dialog` (Line 14577) — Show the full joins feed dialog.
-    - Method `_open_puzzle_window` (Line 14590) — Open the puzzle canvas window (or bring existing one to front).
-    - Method `add_to_puzzle` (Line 14600) — Add a fragment to the puzzle canvas. Opens puzzle window if needed.
-    - Method `open_join_workbench` (Line 14635) — Open the Join Lab (no anchor required). Restores last session state if available.
-    - Method `open_joins_workbench` (Line 14677) — Open (or re-anchor) the Join Workbench. D-01 modeless; single reusable instance.
-    - Method `open_anchor_in_puzzle` (Line 14719) — Public: add a fragment to the Fragment Puzzle canvas (Join Workbench path). SC#5.
-    - Method `open_anchors_in_puzzle` (Line 14723) — Public: add multiple fragments to the Fragment Puzzle canvas.
-    - Method `open_anchor_as_join` (Line 14737) — Public: open JoinsDialog with anchor as Fragment A; scholar enters B freely.
-    - Method `_open_settings_dialog` (Line 14779) — Open the settings dialog.
-    - Method `apply_settings` (Line 14798) — OK path for the Settings dialog (DESK-01 thin named API / SP-4 boundary).
-    - Method `cancel_settings` (Line 14807) — Cancel path for the Settings dialog (DESK-01 thin named API / SP-4).
-    - Method `_on_language_combo_changed` (Line 14815) — Handle language combo box change — close settings dialog first to
-    - Method `_create_citation_bar` (Line 14823) — Create the persistent citation bar at the bottom of the main window.
-    - Method `copy_citation` (Line 14869)
-    - Method `_show_citation_reminder` (Line 14874) — Show a one-time citation reminder dialog on first launch.
-    - Method `_maybe_show_first_run_prompt` (Line 14907) — Gate for the one-time first-run consent dialog.
-    - Method `_maybe_show_telemetry_reask` (Line 14951) — Startup gate for the non-modal telemetry re-ask bar. Never blocks.
-    - Method `on_telemetry_reask_enable` (Line 14971) — User clicked Enable on the re-ask bar — the sole implicit opt-in path.
-    - Method `on_telemetry_reask_learn_more` (Line 14986) — Open the full bilingual privacy disclosure (same as first-run Learn more).
-    - Method `on_telemetry_reask_never` (Line 14994) — User clicked Don't ask again — persist a hard, permanent opt-out.
-    - Method `on_telemetry_reask_dismissed` (Line 15003) — User dismissed the bar with ✕ — ignored this time (count already recorded).
-    - Method `open_help_center` (Line 15011) — Open the bundled Help.html with optional anchor scrolling and fallback content.
-    - Method `get_search_help_text` (Line 15024)
-    - Method `get_comp_help_text` (Line 15028)
-    - Method `get_browse_help_text` (Line 15032)
-    - Method `get_settings_help_text` (Line 15036)
-    - Method `_build_help_fallback_html` (Line 15040)
-    - Method `_sanitize_filename` (Line 15061)
-    - Method `_get_default_save_folder` (Line 15066) — Get the default folder for saving reports. Checks last used location first.
-    - Method `_get_unique_filepath` (Line 15107) — If file exists, add (1), (2), etc. until we find a unique name.
-    - Method `_save_last_folder` (Line 15120) — Remember the folder where user saved a file.
-    - Method `_default_report_path` (Line 15126)
-    - Method `_get_credit_header` (Line 15139)
-    - Method `_show_export_saved_dialog` (Line 15160) — EXPUX-01: 'export complete' dialog with Open File / Open Folder.
-    - Method `_get_lab_config_block` (Line 15192)
-    - Method `open_search_settings` (Line 15206) — Open the Search Settings dialog for variant configuration.
-    - Method `_on_search_mode_changed` (Line 15219) — Show/hide variant controls and swap query/tag input based on selected mode.
-    - Method `_on_comp_mode_changed` (Line 15242) — Show/hide variant slider for composition based on selected mode.
-    - Method `_on_boundary_mode_changed` (Line 15249) — Update UI based on boundary mode selection.
-    - Method `_on_boundary_delimiter_changed` (Line 15274) — Save delimiter setting and update stats when delimiter changes.
-    - Method `_update_boundary_stats` (Line 15286) — Update the boundary statistics label based on current text and settings.
-    - Method `_open_boundary_advanced_dialog` (Line 15326) — Open dialog for advanced boundary search settings.
-    - Method `_set_variant_preset` (Line 15383) — Set variant level from preset button.
-    - Method `_get_current_variant_pairs_count` (Line 15407) — Get the current variant pairs count (from preset or slider).
-    - Method `_sync_variant_sliders` (Line 15416) — Keep variant sliders synchronized between search and composition tabs.
-    - Method `_on_query_text_changed` (Line 15442) — Handle live text changes: detect shortcut prefixes and update variant preview.
-    - Method `_update_variant_count_preview` (Line 15465) — Update the variant count label based on current query and slider value.
-    - Method `update_lab_ui_state` (Line 15506) — Disable standard controls when Lab Mode is active.
-    - Method `on_deep_scan_toggled_search` (Line 15518)
-    - Method `on_deep_scan_toggled_comp` (Line 15524)
-    - Method `on_lab_mode_toggled_search` (Line 15530)
-    - Method `on_lab_mode_toggled_comp` (Line 15546)
-    - Method `_open_domain_filter_dialog` (Line 15566) — Open the domain filter dialog for post-search dynamic filtering.
-    - Method `_update_domain_filter_label` (Line 15588) — Update the domain filter label badge to show exclusion state.
-    - Method `_domain_display_name` (Line 15603) — Get display name for a domain (Hebrew if UI is Hebrew, else English).
-    - Method `_apply_domain_exclusions` (Line 15613) — Apply domain exclusions by hiding/showing table rows.
-    - Method `_open_measurement_filter_dialog` (Line 15656) — Open a dialog to filter results by physical measurements.
-    - Method `_open_pre_search_filter_dialog` (Line 15753) — Open the pre-search filter dialog.
-    - Method `_update_filter_chip_bar` (Line 15769) — Update both search and composition chip bars to reflect active filters.
-    - Method `_add_filter_chip` (Line 15891) — Add a removable chip button to the filter chip bar layout.
-    - Method `_remove_filter` (Line 15905) — Remove a single filter and recompute restrict_sys_ids.
-    - Method `_on_filter_recompute_finished` (Line 15940) — Handle recomputed filter set after chip removal.
-    - Method `_on_restore_filter_finished` (Line 15953) — Handle filter recompute after session/history restore.
-    - Method `_exclude_word_search_result` (Line 15968) — Exclude a single manuscript from word search results.
-    - Method `_on_domain_enrichment_loaded` (Line 15984) — Handle async domain enrichment results from DomainEnrichmentWorker.
-    - Method `_navigate_to_search_with_domain` (Line 16045) — Navigate to search tab with domain context (exclusions cleared).
-    - Method `_collect_comp_domain_data` (Line 16054) — Collect domain data for composition results.
-    - Method `_open_comp_domain_filter_dialog` (Line 16139) — Open the domain filter dialog for composition results.
-    - Method `_update_comp_domain_filter_label` (Line 16168) — Update the composition domain filter label.
-    - Method `_apply_comp_domain_exclusions` (Line 16183) — Apply domain exclusions by hiding/showing composition tree items.
-    - Method `_open_query_builder` (Line 16214) — Open the tabular query builder dialog.
-    - Method `_on_corpus_scope_changed` (Line 16244) — Phase 95 smoke-fix (item 2): persist the corpus scope selection via session JSON.
-    - Method `_on_comp_corpus_scope_changed` (Line 16250) — Phase 110 (COMP-LOC-01): persist the composition corpus scope. Mirrors
-    - Method `_drain_previous_worker` (Line 16263) — Refuse to rebind a worker slot while the old worker is still alive.
-    - Method `toggle_search` (Line 16292)
-    - Method `start_search` (Line 16301)
-    - Method `_emit_search_telemetry` (Line 16476) — Emit desktop_search_executed for a regular search run (Phase 114 USAGE-03).
-    - Method `_on_perf_signal` (Line 16512) — UI-thread slot for all four search thread perf_signal emissions (Phase 115 PERF-01).
-    - Method `_pause_worker_for` (Line 16543) — The live worker a pause context is tracking, or None.
-    - Method `_apply_pause_state` (Line 16549) — Single owner of every Pause/Resume widget mutation.
-    - Method `_pause_elapsed_str` (Line 16599)
-    - Method `_paint_pause_status` (Line 16603) — Write the paused/pausing wording onto whichever surface owns this run.
-    - Method `_on_pause_clicked` (Line 16620) — Pause <-> Resume. The click owns 'pausing'/'running'; only an accepted
-    - Method `_on_pause_ack` (Line 16657) — Queued acknowledgement from a worker that has actually parked.
-    - Method `_on_search_phase` (Line 16672) — A search entered a new phase whose progress is not comparable to the last.
-    - Method `stop_search` (Line 16693)
-    - Method `reset_ui` (Line 16710)
-    - Method `_update_search_elapsed` (Line 16720) — Tick every 1s to keep elapsed time updating during search.
-    - Method `on_error` (Line 16736)
-    - Method `_reset_search` (Line 16738) — Clear all search state and start fresh.
-    - Method `_on_search_progress` (Line 16851)
-    - Method `render_asterisks_to_html` (Line 16862)
-    - Method `check_scroll_load` (Line 16867)
-    - Method `load_next_batch` (Line 16872)
-    - Method `_notify_search_complete` (Line 17086) — Flash taskbar icon if app is not focused when search completes.
-    - Method `on_search_finished` (Line 17123)
-    - Method `_replay_refinement_chain` (Line 17316) — D-13: Re-execute chain to rebuild restrict sets. Shows 'Re-evaluating...' feedback.
-    - Method `_replay_for_restore` (Line 17334) — Replay the refinement chain during session restore, OFF the UI thread.
-    - Method `_on_replay_for_restore_finished` (Line 17358) — Apply the restrict set rebuilt by the off-thread chain replay.
-    - Method `_on_replay_for_restore_error` (Line 17368) — Replay failed -- clear the chain rather than leave stale state.
-    - Method `_enter_refine_mode` (Line 17378) — D-02, D-03: Activate refine mode on desktop search bar.
-    - Method `_exit_refine_mode` (Line 17421) — D-02a: Cancel refine mode without search.
-    - Method `_update_refinement_strip` (Line 17427) — D-04, D-05, D-06, D-07, D-10: Rebuild breadcrumb chip widgets.
-    - Method `_remove_refinement_step` (Line 17511) — D-12: Remove chip at index and all subsequent, re-execute with feedback.
-    - Method `_toggle_all_terms_filter` (Line 17519) — Toggle 'Only results with all terms' post-filter and re-render results.
-    - Method `_apply_all_terms_filter_and_rerender` (Line 17525) — Re-render results table applying the all-terms filter.
-    - Method `_clear_refinement_chain` (Line 17551) — D-11: Remove entire chain, return to unrestricted search.
-    - Method `_update_search_within_btn` (Line 17567) — D-01: Show/hide search within button based on result availability.
-    - Method `_undo_zero_result_refine` (Line 17580) — D-14a: Recover from zero-result refinement -- replay chain to restore previous results.
-    - Method `_launch_enrichment_workers` (Line 17594) — Launch domain, PGP badge, printed badge, and measurement enrichment workers.
-    - Method `_open_results_filter_dialog` (Line 17669)
-    - Method `_update_results_filter_indicators` (Line 17714)
-    - Method `_results_filter_text_for_row` (Line 17718)
-    - Method `_apply_local_filter` (Line 17734) — Apply LOCAL three-state filter per D-10 / D-10 P1.
-    - Method `_apply_local_optout_filter` (Line 17759) — Phase 96 D-F1: drop LOCAL hits whose canonical filepath is in
-    - Method `_reapply_filters_for_optout_change` (Line 17799) — Phase 96 D-F1: re-run both cascade joinpoints after the user
-    - Method `_local_filter_state_index` (Line 17824) — Return the index of ``value`` in ``states``, or 0 if unknown.
-    - Method `_text_position_from_index` (Line 17837) — Map a combo index to its text-position option, or None if out of range.
-    - Method `_toggle_local_filter_search` (Line 17847) — Cycle the LOCAL filter state for the Search surface (D-10 / D-39).
-    - Method `_toggle_local_filter_composition` (Line 17856) — Cycle the LOCAL filter state for the Composition surface (D-10 / D-39).
-    - Method `_toggle_local_filter_parallels` (Line 17865) — Cycle the LOCAL filter state for the Parallels surface (D-10 / D-39).
-    - Method `_update_local_filter_btn_search` (Line 17874) — Update label on the Search surface LOCAL filter button.
-    - Method `_update_local_filter_btn_composition` (Line 17886) — Update label on the Composition surface LOCAL filter button.
-    - Method `_update_local_filter_btn_parallels` (Line 17898) — Update label on the Parallels surface LOCAL filter button.
-    - Method `_update_local_filter_visibility_search` (Line 17910) — Show/hide the Search LOCAL filter button based on LOCAL hits presence.
-    - Method `_update_local_filter_visibility_comp` (Line 17922) — Show/hide the Composition LOCAL filter button based on LOCAL hits presence.
-    - Method `_update_local_filter_visibility_parallels` (Line 17930) — Show/hide the Parallels LOCAL filter button based on LOCAL hits presence.
-    - Method `_show_local_filter_chip` (Line 17938) — Show or hide the no-op chip for the given surface.
-    - Method `_apply_results_table_filters` (Line 17951)
-    - Method `_on_pgp_badges_loaded` (Line 18094) — Handle PGP badge worker results - update the PGP + scholarly-transcription
-    - Method `_on_printed_badges_loaded` (Line 18119) — Handle Printed badge worker results - update Printed column for all rows.
-    - Method `_on_pgp_tags_loaded` (Line 18135) — Handle PGP tags worker results - populate tag dropdown with categorized Hebrew translations.
-    - Method `_emit_pgp_tag_search_telemetry` (Line 18157) — Emit desktop_search_executed for a PGP-tags search run (Phase 114 USAGE-03).
-    - Method `_execute_tag_search` (Line 18201) — Execute a search by PGP tag from the dropdown.
-    - Method `_on_tag_search_results` (Line 18245) — Handle tag search results - display in results table.
-    - Method `_search_by_pgp_tag` (Line 18347) — Entry point for searching by PGP tag (from browse/result dialog links).
-    - Method `_open_comp_filter_dialog` (Line 18361)
-    - Method `_update_comp_filter_indicators` (Line 18399)
-    - Method `_apply_comp_tree_filters` (Line 18407)
-    - Method `_comp_data_matches_filters` (Line 18483)
-    - Method `_text_matches_filter` (Line 18525)
-    - Method `start_metadata_loading` (Line 18535)
-    - Method `on_meta_progress` (Line 18592)
-    - Method `on_meta_finished` (Line 18632)
-    - Method `_format_metadata_status` (Line 18641)
-    - Method `_create_action_button` (Line 18649)
-    - Method `_is_item_in_non_recent_list` (Line 18666)
-    - Method `_set_add_to_list_button_label` (Line 18673)
-    - Method `_update_browse_add_to_list_button` (Line 18678)
-    - Method `_update_search_row_list_indicator` (Line 18688)
-    - Method `_update_search_action_stars` (Line 18710)
-    - Method `on_table_cell_entered` (Line 18716)
-    - Method `on_lists_table_cell_entered` (Line 18733)
-    - Method `eventFilter` (Line 18749)
-    - Method `_collect_sorted_results` (Line 18833)
-    - Method `_extract_fl_id` (Line 18848)
-    - Method `show_full_text` (Line 18878)
-    - Method `show_full_text_for_result` (Line 18899)
-    - Method `open_result_in_browse_from_table` (Line 18928)
-    - Method `on_search_select_all_toggled` (Line 18944) — Handle Select All checkbox toggle (skips hidden/excluded rows).
-    - Method `on_search_result_item_changed` (Line 18957) — Handle individual checkbox changes in search results.
-    - Method `_update_search_export_label` (Line 18989)
-    - Method `search_add_selected_to_list` (Line 19010) — Add selected search results to a list.
-    - Method `search_add_row_to_list` (Line 19037) — Add a single search result row to a list.
-    - Method `_collect_selected_comp_pages` (Line 19053)
-    - Method `comp_add_selected_to_list` (Line 19084) — Add selected composition results to a list.
-    - Method `open_result_in_browse` (Line 19109)
-    - Method `_lookup_local_filepath` (Line 19192) — Phase 95 D-28 — look up the canonical filepath for a LOCAL sys_id.
-    - Method `_prime_local_filepath_cache` (Line 19217) — v7.16 BUG-6: batch-load canonical filepaths for all LOCAL hits in
-    - Method `_get_local_pages_for_sys_id` (Line 19239) — Return sorted [(p_num, text), ...] for all indexed pages of a LOCAL sys_id.
-    - Method `_get_local_full_text_for_sys_id` (Line 19286) — Category 3: aggregate all pages of a LOCAL sys_id into a single text.
-    - Method `_open_local_browse` (Line 19311) — Phase 95 D-27 + Phase 96 NEW-2 view-mode dispatch.
-    - Method `_render_view_all_batch` (Line 19517) — Phase 97 U-04 — re-render the accumulated page list via apply_line_numbered_text.
-    - Method `_append_next_view_all_batch` (Line 19556) — Phase 97 U-04 — schedule the next 50-page batch via QTimer.singleShot(0, ...).
-    - Method `_on_browse_open_file_clicked` (Line 19574) — Phase 95 D-28 — launch OS default app for the current LOCAL file.
-    - Method `_on_browse_open_file_location_clicked` (Line 19585) — v7.16: reveal the current LOCAL file in the OS file manager.
-    - Method `_is_browsing_local` (Line 19597) — Return True when the Browse panel currently shows a LOCAL file.
-    - Method `_browse_prev_next` (Line 19608) — Unified prev/next handler for Browse panel.
-    - Method `_show_local_browse_controls` (Line 19619) — Phase 96 NEW-2: update Browse-panel controls for LOCAL vs Genizah mode.
-    - Method `_open_local_browse_page` (Line 19652) — Phase 96 NEW-2: render ONE LOCAL page at a time in the Browse panel.
-    - Method `_on_local_browse_nav` (Line 19837) — Phase 96 NEW-2: prev/next click handler for LOCAL Browse nav.
-    - Method `_toggle_local_browse_view_mode` (Line 19874) — Phase 96 NEW-2: flip View-All ↔ Per-Page and re-render.
-    - Method `send_result_to_composition` (Line 19899)
-    - Method `_sanitize_for_excel` (Line 19931) — Cleans text to prevent Excel XML corruption.
-    - Method `_add_docx_highlighted_runs` (Line 19938)
-    - Method `_set_paragraph_rtl` (Line 19949)
-    - Method `_set_table_rtl` (Line 19962)
-    - Method `_set_table_width_pct` (Line 19972)
-    - Method `export_results` (Line 19983) — Export results handling specific formats directly.
-    - Method `export_comp_report` (Line 20406)
-    - Method `open_filter_dialog` (Line 21442)
-    - Method `_get_filter_text` (Line 21481) — Get combined filter text from enabled sources.
-    - Method `_update_list_filter_cache` (Line 21489) — Cache the set of system IDs for the currently selected lists to optimize filtering.
-    - Method `open_list_filter_dialog` (Line 21510)
-    - Method `toggle_list_filter` (Line 21528)
-    - Method `load_comp_file` (Line 21547)
-    - Method `open_exclude_dialog` (Line 21552)
-    - Method `set_excluded_entries` (Line 21577)
-    - Method `_normalize_shelfmark` (Line 21598) — Normalize shelfmarks using the canonical function from genizah_core.
-    - Method `_rerender_with_exclusions` (Line 21602) — Hide/show table rows based on current exclusion state (Approach C).
-    - Method `_update_exclusion_display` (Line 21630) — Update exclusion status labels with per-source breakdown (D-07).
-    - Method `_remove_exclusion_source` (Line 21648) — Remove a single exclusion source by source_id (D-06 per-source clear).
-    - Method `_ensure_shelf_map` (Line 21656) — Build a mapping from normalized shelfmark to sys_id for quick lookups.
-    - Method `_get_meta_for_header` (Line 21678) — Return (sys_id, p_num, shelfmark, title) preferring metadata bank for shelfmarks.
-    - Method `_comp_item_is_local` (Line 21696) — Phase 110 UAT (Issue 1): True iff a composition item is a LOCAL hit.
-    - Method `_comp_local_display_fields` (Line 21722) — Phase 110 UAT (Issue 1): compute (shelfmark, library_display) for a
-    - Method `_prime_comp_local_filepath_cache` (Line 21754) — Phase 110 UAT (Issue 1): batch-prime _local_filepath_cache for the
-    - Method `_item_matches_exclusion` (Line 21791)
-    - Method `_apply_manual_exclusions` (Line 21817)
-    - Method `toggle_composition` (Line 21842)
-    - Method `cancel_composition` (Line 21871) — Cancel composition search gracefully (called by Escape shortcut).
-    - Method `reset_comp_ui` (Line 21879)
-    - Method `_reset_composition` (Line 21887) — Clear all composition search state and start fresh.
-    - Method `_emit_comp_search_telemetry` (Line 22003) — Emit desktop_search_executed for a composition search run (Phase 114 USAGE-03).
-    - Method `run_composition` (Line 22038) — Main entry point for Composition Search.
-    - Method `on_comp_display_mode_changed` (Line 22236)
-    - Method `run_recursive_composition` (Line 22255)
-    - Method `on_comp_status_update` (Line 22289)
-    - Method `on_comp_progress` (Line 22294)
-    - Method `on_comp_error` (Line 22324) — Handle errors during composition search.
-    - Method `on_comp_scan_finished` (Line 22329)
-    - Method `start_grouping` (Line 22420)
-    - Method `on_grouping_error` (Line 22448)
-    - Method `on_comp_finished` (Line 22460)
-    - Method `_collect_comp_items` (Line 22501)
-    - Method `on_comp_header_clicked` (Line 22512)
-    - Method `_current_comp_sort_mode` (Line 22541)
-    - Method `_get_comp_item_meta` (Line 22544)
-    - Method `_comp_sort_key` (Line 22562)
-    - Method `_sort_comp_items` (Line 22578)
-    - Method `_build_comp_preview_label` (Line 22583)
-    - Method `_set_comp_tree_text` (Line 22589)
-    - Method `_format_score_with_boundary` (Line 22593) — Format score string with boundary indicator if applicable.
-    - Method `_get_boundary_tooltip` (Line 22604) — Get tooltip text for boundary match indicator.
-    - Method `_process_snippet_queue` (Line 22614)
-    - Method `_update_comp_tree_tooltip` (Line 22635)
-    - Method `_refresh_comp_tree_tooltips` (Line 22662)
-    - Method `_apply_comp_node_previews` (Line 22674)
-    - Method `_clear_comp_node_previews` (Line 22689)
-    - Method `_set_comp_node_previews` (Line 22695)
-    - Method `display_comp_results` (Line 22731)
-    - Method `_get_filter_reason` (Line 23174) — Get human-readable filter reason for a composition result item.
-    - Method `_make_node_checkable` (Line 23199) — Make a tree node checkable.
-    - Method `_apply_comp_printed_badge` (Line 23204) — Set dedicated Printed column on composition tree node if manuscript is printed material.
-    - Method `_add_manuscript_node` (Line 23213) — Add a manuscript/part node to the tree. Used for lazy/batched loading.
-    - Method `_add_single_node_to_tree` (Line 23346) — Dedicated helper to add one row to the tree.
-    - Method `_start_batched_tree_load` (Line 23406) — Start loading items into tree in batches to prevent UI freeze.
-    - Method `_process_tree_batch` (Line 23415) — Process one batch of items and schedule next batch.
-    - Method `_trigger_lazy_metadata_fetch` (Line 23441) — Starts background fetching for items that are currently displayed but missing data.
-    - Method `on_comp_tree_item_changed` (Line 23455)
-    - Method `on_comp_header_toggled` (Line 23486) — Toggle all root items in the composition tree.
-    - Method `_set_check_state_recursive` (Line 23501)
-    - Method `_update_comp_export_label` (Line 23507)
-    - Method `_collect_checked_comp_items_struct` (Line 23516) — Collect checked items maintaining the structure (Main, Appendix, etc.)
-    - Method `on_comp_tree_item_expanded` (Line 23659)
-    - Method `on_comp_tree_item_collapsed` (Line 23686)
-    - Method `_sync_parent_check_state` (Line 23690)
-    - Method `_collect_checked_comp_page_uids` (Line 23708)
-    - Method `_collect_all_comp_page_uids` (Line 23738)
-    - Method `_update_recursive_button_state` (Line 23767)
-    - Method `_has_comp_results` (Line 23778)
-    - Method `show_comp_detail` (Line 23785)
-    - Method `_refresh_comp_tree_metadata` (Line 23875)
-    - Method `_fmt_item_legacy` (Line 23899)
-    - Method `_format_comp_entry` (Line 23919)
-    - Method `_fetch_metadata_with_dialog` (Line 23935)
-    - Method `_resolve_meta_labels` (Line 23986)
-    - Method `_update_part_state_for_sid` (Line 23999) — Refresh Part context (Neubauer) for the given system ID.
-    - Method `browse_load` (Line 24013)
-    - Method `_browse_load_part` (Line 24184) — Load a Codicological Part (Neubauer) for browsing.
-    - Method `browse_navigate` (Line 24319)
-    - Method `browse_render_page` (Line 24365)
-    - Method `browse_open_catalog` (Line 24724)
-    - Method `_browse_open_external_link` (Line 24729)
-    - Method `_on_browse_thumb_resolved` (Line 24736)
-    - Method `start_browse_download` (Line 24742)
-    - Method `on_browse_img_loaded` (Line 24758)
-    - Method `on_browse_img_failed` (Line 24768)
-    - Method `cancel_browse_image_thread` (Line 24772)
-    - Method `_cleanup_browse_inflight` (Line 24787) — Remove finished browse thread from in-flight list.
-    - Method `fetch_browse_thumbnail` (Line 24795)
-    - Method `check_updates_auto` (Line 24815) — Run update checker silently at startup.
-    - Method `check_updates_manual` (Line 24826) — Run update checker with UI feedback.
-    - Method `on_update_result` (Line 24836)
-    - Method `on_update_error` (Line 24869)
-    - Method `_on_sidecar_updates` (Line 24877) — Handle sidecar update availability notification.
-    - Method `_start_sidecar_download` (Line 24901) — Download sidecar updates sequentially.
-    - Method `_reset_sidecar_connections` (Line 24915) — Close all sidecar DB connections so files can be replaced.
-    - Method `_download_next_sidecar` (Line 24927) — Download the next sidecar in the queue.
-    - Method `_on_sidecar_download_finished` (Line 24945) — Handle completion of a single sidecar download.
-    - Method `on_update_dismissed` (Line 24953) — Save dismissed version to config.
-    - Method `on_whats_new_dismissed` (Line 24957) — Save that user has seen What's New for this version.
-    - Method `show_whats_new_dialog` (Line 24961) — Show detailed What's New dialog.
-    - Method `start_in_app_update` (Line 24968) — Start the in-app update process with progress dialog.
-    - Method `run_indexing` (Line 24981)
-    - Method `on_index_progress` (Line 25032)
-    - Method `on_index_finished` (Line 25037)
-    - Method `on_index_error` (Line 25043)
-    - Method `_on_history_menu_hovered` (Line 25070) — Highlight the active QWidgetAction container on hover/keyboard navigation.
-    - Method `_show_search_history_menu` (Line 25086) — Show the search history dropdown below the query input.
-    - Method `_show_comp_history_menu` (Line 25094) — Show the composition history dropdown below the title input.
-    - Method `_refresh_search_history` (Line 25101) — Rebuild the search history menu with per-item delete buttons.
-    - Method `_refresh_comp_history` (Line 25115) — Rebuild the composition history menu with per-item delete buttons.
-    - Method `_build_filter_summary` (Line 25130) — Build a compact filter summary string like [כולל: תנ״ך, תוספתא. 1000-1300].
-    - Method `_add_history_menu_item` (Line 25185) — Add a single history entry to a menu with a delete button.
-    - Method `_on_history_item_clicked` (Line 25245) — Restore state when a history menu item is clicked.
-    - Method `_delete_history_item` (Line 25257) — Delete a single history entry and refresh the menu.
-    - Method `_restore_regular_search_from_state` (Line 25272) — Apply a history entry and re-run the regular search.
-    - Method `_restore_comp_search_from_state` (Line 25340) — Apply a history entry and re-run the composition search.
-    - Method `_add_regular_search_to_history` (Line 25417) — Save the current regular search to history.
-    - Method `_add_comp_search_to_history` (Line 25455) — Save the current composition search to history.
-    - Method `_clear_search_history` (Line 25492) — Clear all entries for a search type after confirmation.
-    - Method `_apply_persistent_session_preferences` (Line 25511) — Apply lightweight preferences that must survive even when full
-    - Method `_save_session` (Line 25569) — Save current search state to disk for session persistence.
-    - Method `_schedule_session_save` (Line 25701) — Schedule a debounced session save (500ms).
-    - Method `_restore_session` (Line 25709) — Restore search state from saved session on startup.
-    - Method `closeEvent` (Line 26130)
-    - Method `_add_single_comp_node` (Line 26252) — Adds a node to the composition tree with parent/child logic.
-    - Method `_on_comp_item_expanded` (Line 26347)
-    - Method `_on_comp_item_collapsed` (Line 26352)
-    - Method `on_comp_item_double_clicked` (Line 26371) — Smart navigation that restores full context (Next/Prev, Source Text).
-    - Method `navigate_manuscript` (Line 26514) — Navigate to prev/next manuscript by file order, crossing Part boundaries.
-    - Method `_update_part_image_for_folio` (Line 26570) — Update image viewer to show the current folio's images within a Part.
-- **Function** `resource_path` (Line 26617) — Get absolute path to resource, works for dev and for PyInstaller
+- **Function** `space_scroll_action` (Line 135) — Pure decision for desktop results-table Space-scroll.
+- **Function** `paused_seconds` (Line 168) — Seconds spent parked, INCLUDING a pause that is still in progress.
+- **Function** `effective_elapsed` (Line 184) — Working seconds elapsed: monotonic span minus parked time, never negative.
+- **Class** `_PauseCtx` (Line 201) — Pause UI state for ONE operation (the search tab, or the composition tab).
+    - Method `__init__` (Line 213)
+    - Method `reset_for_run` (Line 223)
+    - Method `elapsed` (Line 232) — Working-time elapsed for this operation, excluding parked time.
+    - Method `accepts_ack` (Line 239) — Whether a queued pause acknowledgement belongs to the live pause.
+- **Function** `_aggregate_local_pages_with_separators` (Line 260) — Phase 96 NEW-2 D-14: aggregate page texts with labeled separators.
+- **Function** `_setup_crash_handler` (Line 296)
+- **Class** `LabPanel` (Line 332)
+    - Method `__init__` (Line 333)
+    - Method `set_engine` (Line 346)
+    - Method `enable_controls` (Line 353)
+    - Method `init_ui` (Line 356)
+    - Method `refresh_values` (Line 465)
+    - Method `on_change` (Line 481)
+    - Method `open_scoring` (Line 496)
+    - Method `_mark_rebuild_required` (Line 501)
+    - Method `run_rebuild` (Line 509)
+    - Method `on_rebuild_progress` (Line 541)
+    - Method `on_rebuild_error` (Line 544)
+    - Method `on_rebuild_finished` (Line 549)
+- **Function** `log_tls_relaxation_notice` (Line 560) — Log once that TLS verification is intentionally disabled for thumbnail fetches.
+- **Function** `_get_catalog_filter_sets` (Line 578) — Return ``(pgp_link_sys_ids, edition_sys_ids)`` (both sets).
+- **Function** `reset_catalog_filter_sets` (Line 604) — Invalidate the cached catalog availability sets so the next filtered query
+- **Class** `_CatalogRefreshWorker` (Line 612) — Background worker for catalog browse DB queries (authors/works/results).
+    - Method `__init__` (Line 621)
+    - Method `run` (Line 650)
+- **Class** `_CatalogFacetWorker` (Line 697) — Background worker that computes per-library facet counts for the catalog dialog.
+    - Method `__init__` (Line 711)
+    - Method `run` (Line 730)
+- **Function** `_format_list_star` (Line 762)
+- **Function** `_build_search_results_xlsx_bytes` (Line 778) — Build the 4-sheet workbook bytes for desktop xlsx search-results export.
+- **Function** `_local_page_label` (Line 1194) — D-02 page label for a LOCAL result. ``chunk_locator`` is used VERBATIM
+- **Function** `_build_export_data_row` (Line 1208) — Build one 7-column data_rows entry for export_results.
+- **Function** `_csv_extra_cols` (Line 1246) — Return the extra (Filepath, Page) pair for LOCAL rows in a mixed CSV.
+- **Function** `_local_parent_folder` (Line 1263) — Parent-folder name from a LOCAL filepath, separator-agnostic.
+- **Function** `_format_txt_local_block` (Line 1277) — Return the TXT block string for a LOCAL result (Phase 103 D-09).
+- **Function** `_format_txt_genizah_block` (Line 1316) — Return the TXT block string for a Genizah result.
+- **Function** `_show_ok_notice` (Line 1341) — QMessageBox.information/.warning (`kind` is 'information' or
+- **Function** `_report_failed_relaunch` (Line 1355) — The language restart could not start the new copy (relaunch_if_requested's
+- **Function** `_telemetry_result_bucket` (Line 1365) — Coarse result-count bucket for Phase 114 telemetry (D-07/D-08).
+- **Class** `GenizahGUI` (Line 1380) — Main application window orchestrating search, browsing, and indexing.
+    - Method `__init__` (Line 1419)
+    - Method `_report_lists_load_problem` (Line 1629) — Tell the user when lists.pkl could not be read at startup.
+    - Method `_watch_lists_saves` (Line 1690) — Hear about lists.pkl saves that fail, whichever thread ran them.
+    - Method `_on_lists_save_state` (Line 1711) — A lists.pkl save failed (saved False) or landed again (saved True).
+    - Method `_lists_file_path` (Line 1744)
+    - Method `_lists_not_saved_line` (Line 1747) — The status-bar line shown while saves do not reach lists.pkl.
+    - Method `start_background_init` (Line 1755)
+    - Method `on_startup_finished` (Line 1764)
+    - Method `_sync_telemetry_identity` (Line 1905) — Reconcile PostHog identity against the live Supabase session.
+    - Method `_run_startup_telemetry_coordinator` (Line 1930) — Single boot/opt-in sequence: consent → identity-sync → session_start.
+    - Method `_telemetry_ready` (Line 1989) — Producer gate: True only after the coordinator's session_start branch ran.
+    - Method `_emit_feature_opened` (Line 2001) — Centralized desktop_feature_opened producer (D-03 / D-04 / REVIEWS MEDIUM-9).
+    - Method `_setup_active_ping` (Line 2034) — Wire daily active-user heartbeat (D-16 / USAGE-04).
+    - Method `_on_app_state_changed` (Line 2057) — Focus/resume handler — fires heartbeat on app activation.
+    - Method `_maybe_emit_active_ping` (Line 2077) — Emit desktop_active_ping at most once per UTC day, active-only (USAGE-04 / D-16).
+    - Method `_maybe_flush_perf_summary` (Line 2114) — Periodically flush the per-session perf accumulator (Phase 115 D-04/D-05/KQ-4).
+    - Method `_check_shelfmark_completer_ready` (Line 2144)
+    - Method `setup_shelfmark_completer` (Line 2152) — Initialize the shelfmark autocomplete with data from csv_bank and Parts.
+    - Method `init_ui` (Line 2208)
+    - Method `_update_corner_login_state` (Line 2392) — Update the corner login button based on login state (and Sync lists now,
+    - Method `_set_lists_sync_now_enabled` (Line 2406)
+    - Method `_set_active_tab` (Line 2414) — Set the active tab programmatically without emitting telemetry.
+    - Method `_on_tab_changed` (Line 2431) — Handle tab change events.
+    - Method `_corner_login_clicked` (Line 2485) — Handle corner login button click.
+    - Method `_show_login_dialog` (Line 2492)
+    - Method `_show_register_dialog` (Line 2505)
+    - Method `_do_logout` (Line 2516) — Sign out. Returns at once: the last list upload runs on the runner, and the
+    - Method `_finish_logout` (Line 2567) — The second half of a sign-out; runs once per sign-out.
+    - Method `_logout_notice_paragraphs` (Line 2632) — What the sign-out notice says about the lists, beyond "You have been logged out.".
+    - Method `_lists_sync_account` (Line 2681) — The signed-in account's UUID, or None.
+    - Method `_enable_lists_cloud_sync` (Line 2702) — Turn list sync on for the signed-in account, then offer the sync choice.
+    - Method `_on_lists_preview` (Line 2756) — The preview of the account's lists arrived: offer the sync choice if needed.
+    - Method `_sync_dialog_allowed` (Line 2813) — Whether a list-sync question (the sync choice, the website-removal prompt)
+    - Method `_offer_lists_sync_dialog` (Line 2824) — Show the sync choice now if the screen is free, else hold it and look again.
+    - Method `_recheck_held_lists_dialog` (Line 2838)
+    - Method `_drop_held_lists_dialog` (Line 2856)
+    - Method `_show_lists_sync_choice` (Line 2866) — The sync choice. Closed without an action (Skip), uploads continue: one now.
+    - Method `_sync_error_text` (Line 2872) — A failed sync `result`'s message, in the interface language.
+    - Method `_too_long_notes_line` (Line 2889) — The line about notes too long to update in the account. While lists.pkl
+    - Method `_sync_note_lines` (Line 2897) — Lines about notes to add to a sync result message, success or failure.
+    - Method `_show_lists_sync_dialog` (Line 2924) — Show dialog to let user choose how to sync lists. Returns its exec() result:
+    - Method `_lists_sync_runner` (Line 3023) — The window's one ListsSyncRunner (desktop/lists_sync_runner.py), made on first use.
+    - Method `_close_lists_sync_progress` (Line 3037) — Close a list-sync progress dialog without it cancelling its job:
+    - Method `_lists_sync_status` (Line 3052) — A list-sync line on the window's status bar (seen from every tab).
+    - Method `_do_sync_action` (Line 3059) — Run the chosen sync action on the list-sync worker, behind a progress
+    - Method `_on_lists_sync_progress` (Line 3083) — The runner's progress for one job: 'start' (a queued job's turn came),
+    - Method `_on_lists_sync_done` (Line 3101) — A sync-dialog action ended (UI thread): say how it went.
+    - Method `_on_lists_auto_done` (Line 3193) — An automatic upload ended (UI thread): the website-removal prompt for
+    - Method `_offer_web_removals` (Line 3217) — Ask about entries the website removed from a list (desktop/lists_web_removals_dialog.py).
+    - Method `_recheck_web_removal_offer` (Line 3265)
+    - Method `_stop_web_removal_offer` (Line 3268)
+    - Method `_web_removal_entry` (Line 3278) — (item_id, list_id, shelfmark text, list name) for one row of the prompt.
+    - Method `_show_discoveries_dialog` (Line 3295)
+    - Method `_show_create_discovery_dialog` (Line 3303)
+    - Method `_show_all_corrections_dialog` (Line 3328)
+    - Method `_show_my_corrections_dialog` (Line 3332)
+    - Method `_show_my_comments_dialog` (Line 3339)
+    - Method `_browse_toggle_edit_mode` (Line 3352) — Toggle edit mode for inline corrections.
+    - Method `_browse_on_text_changed` (Line 3383) — Handle text changes in edit mode.
+    - Method `_browse_cancel_edit` (Line 3415) — Cancel edit mode and restore original text.
+    - Method `_browse_exit_edit_mode` (Line 3434) — Exit edit mode without restoring text (after successful submit).
+    - Method `_browse_save_correction` (Line 3449) — Save the inline correction.
+    - Method `_browse_change_version` (Line 3592) — Change between text versions.
+    - Method `_browse_load_version` (Line 3608) — Load and display a specific version.
+    - Method `_browse_markers_are_ours` (Line 3698) — Are the asterisks in ``text`` search markers, or the page's own?
+    - Method `_browse_mark_search_hits` (Line 3726) — Re-derive the `*...*` search-hit markers from `browse_highlight_pattern`.
+    - Method `_browse_original_display_text` (Line 3743) — The V0.8 text to re-render, WITH its search-hit markers when we have them.
+    - Method `_browse_display_version_text` (Line 3766) — Display version text in the browse text area.
+    - Method `_displayed_folio_label_for_pgp` (Line 3790) — Folio label ('1r','2v',…) of the image at the current browse page.
+    - Method `_displayed_page_for_pgp` (Line 3810) — (_browse_folio_images, 1-based displayed page, total pages).
+    - Method `_displayed_fgp_image_number_for_pgp` (Line 3827) — FGP image number (fgp_image_number_id) of the image at the current page.
+    - Method `_populate_pgp_combo` (Line 3841) — Build combo items with PGP editions and translations grouped.
+    - Method `_browse_full_htr_text` (Line 4005) — Whole-manuscript HTR (V0.8) text — all folios concatenated — for the
+    - Method `_auto_select_pgp_edition` (Line 4022) — Select the combo item matching the shared default-source policy.
+    - Method `_check_document_community_status` (Line 4088) — Check if document has comments and load available versions.
+    - Method `_browse_add_comment` (Line 4264) — Open comment dialog for current document.
+    - Method `_browse_view_corrections` (Line 4289) — View corrections for current document.
+    - Method `_browse_view_comments` (Line 4312) — View comments for current document.
+    - Method `_browse_view_joins` (Line 4333) — View joined fragments for current document.
+    - Method `_browse_view_visual_similarity` (Line 4376) — REROUTED (Phase 109, D-10): open the Join Workbench with the Visual source auto-loaded.
+    - Method `_enrich_vs_suggestions` (Line 4401) — Enrich raw VS suggestions with shelfmark, library_code, domain from csv_bank/fjms.
+    - Method `_on_vs_fetch_complete` (Line 4426)
+    - Method `_show_vs_dialog` (Line 4436) — Create and show the enriched Visual Similarity workbench dialog.
+    - Method `_vs_navigate_to` (Line 4890) — Navigate browse to a VS partner manuscript.
+    - Method `_vs_open_joins_with_partner` (Line 4910) — Open JoinsDialog with fragment A (original) and fragment B (partner) pre-filled.
+    - Method `_vs_add_to_puzzle` (Line 4932) — Add a VS partner to the Fragment Puzzle.
+    - Method `_vs_get_partners` (Line 4945) — Get VS partner sys_ids from local DB, cache, or server (synchronous).
+    - Method `_search_in_visual_suggestions` (Line 4972) — Restrict search to visual similarity partner pool ('Search in VS' action).
+    - Method `_browse_visual_suggestions` (Line 5006) — Show VS partner pool as a result set by running a wildcard search restricted to partners.
+    - Method `_clear_vs_restriction` (Line 5036) — Clear the visual similarity search restriction.
+    - Method `_update_vs_breadcrumb` (Line 5045) — Show or hide the VS restriction breadcrumb in the search area.
+    - Method `_update_joins_dropdown` (Line 5074) — Update the joins dropdown menu with connected fragments.
+    - Method `_on_joins_menu_show` (Line 5303) — Called when joins menu is about to show - trigger sync and update.
+    - Method `_navigate_to_joined_fragment` (Line 5314) — Navigate to a joined fragment in browse tab.
+    - Method `_show_results_context_menu` (Line 5322) — Show context menu for search results with community options.
+    - Method `_context_view_document` (Line 5456) — Navigate to browse tab for this document.
+    - Method `_context_submit_correction` (Line 5463) — Open correction dialog from context menu.
+    - Method `_context_add_comment` (Line 5475) — Open comment dialog from context menu.
+    - Method `_context_view_corrections` (Line 5487) — View corrections from context menu.
+    - Method `_context_view_comments` (Line 5498) — View comments from context menu.
+    - Method `_context_share_discovery` (Line 5507) — Share discovery from context menu.
+    - Method `toggle_language` (Line 5522)
+    - Method `create_search_tab` (Line 5573)
+    - Method `set_results_loading` (Line 6311) — Toggle the search results placeholder while components initialize.
+    - Method `create_composition_tab` (Line 6317)
+    - Method `create_browse_tab` (Line 6881)
+    - Method `browse_toggle_lists_panel` (Line 7538) — Toggle the browse lists side panel.
+    - Method `browse_set_lists_panel_visible` (Line 7542) — Show or hide the browse lists side panel.
+    - Method `browse_refresh_lists_panel` (Line 7577) — Refresh the lists tree and items list in the browse panel.
+    - Method `browse_on_list_selected` (Line 7614) — Handle selection of a list in the browse lists panel.
+    - Method `browse_on_list_item_clicked` (Line 7664) — Open a list item in the browse tab using FL/Image ID lookup.
+    - Method `_browse_append_printed_badge` (Line 7709) — Append printed material badge to browse info label text if applicable.
+    - Method `_start_browse_enrichment` (Line 7729) — Centralized enrichment launch — disconnects stale worker, bumps generation counter,
+    - Method `_build_nli_iiif_url_for_page` (Line 7792) — Build a direct NLI IIIF URL for (sys_id, page_idx).
+    - Method `_is_cambridge_display` (Line 7859) — Return True iff display_meta looks like a CUDL-Cambridge source.
+    - Method `_resolve_cambridge_page_or_fallback` (Line 7881) — Compute (display_meta, idx) for a Cambridge CUDL page using
+    - Method `_switch_browse_viewer_to_nli_for_page` (Line 7957) — Flip the browse viewer to NLI and jump to a positional page.
+    - Method `_restore_browse_viewer_to_ext` (Line 8005) — Restore the browse viewer to CUDL after an auto-fallback.
+    - Method `_resolve_cambridge_navigation_index` (Line 8046) — Side-aware index lookup for prev/next navigation on CUDL.
+    - Method `on_browse_enriched_loaded` (Line 8098)
+    - Method `_on_browse_pgp_loaded` (Line 8471) — Handle PGP sources loaded from background thread.
+    - Method `_on_browse_pgp_error` (Line 8555) — Handle PGP source fetch error -- silently fall back to existing behavior.
+    - Method `_build_pgp_extended_info_html` (Line 8564) — Build HTML for PGP metadata section in extended info panels.
+    - Method `_build_fjms_domain_html` (Line 8662) — Build HTML for FJMS domain classifications in extended info.
+    - Method `_build_fjms_catalog_html` (Line 8705) — Build HTML for FJMS catalog metadata in extended info.
+    - Method `_build_catalog_refs_html` (Line 8791) — Build HTML for FIST catalog cross-references in extended info.
+    - Method `_build_secondary_metadata_html` (Line 8812) — Build HTML for secondary metadata (source names, collection, storage).
+    - Method `_build_browse_enriched_html` (Line 8852) — Build HTML for KTI/Oxford/Cambridge enrichment data in Browse extended info.
+    - Method `_browse_toggle_extended_info` (Line 9074) — Toggle browse tab extended info panel visibility.
+    - Method `_show_fjms_bibliography_dialog` (Line 9081) — Open the FJMS bibliography dialog.
+    - Method `_show_nli_bibliography_dialog` (Line 9094) — Open the NLI bibliography dialog.
+    - Method `_show_fjms_catalog_dialog` (Line 9107) — Open the FJMS catalog records dialog from Browse tab (lazy fetch).
+    - Method `_show_browse_measurements_dialog` (Line 9136) — Open measurements dialog from Browse tab (lazy fetch on first click).
+    - Method `_on_browse_ext_link_clicked` (Line 9159) — Handle clicks on links in browse tab extended info.
+    - Method `_search_toggle_translations` (Line 9189) — Toggle show_translations from search tab toolbar button.
+    - Method `_refresh_search_titles` (Line 9209) — Refresh title column in search results to reflect translation state.
+    - Method `_browse_toggle_translations` (Line 9222) — Toggle show_translations from browse tab toolbar button.
+    - Method `_refresh_browse_title` (Line 9245) — Refresh the browse info label to reflect current show_translations state.
+    - Method `_handle_toggle_trans` (Line 9256) — Toggle translated/original text by rebuilding the PGP HTML section.
+    - Method `_refresh_browse_extended_info` (Line 9276) — Refresh the browse extended info panel (after toggling show_translations).
+    - Method `_start_field_translation` (Line 9320) — Start an on-demand field translation via Dicta API.
+    - Method `_get_field_original_text` (Line 9367) — Extract the original English text for a field key from stored metadata.
+    - Method `_on_field_translated` (Line 9411) — Handle completed field translation — refresh the relevant panel.
+    - Method `_navigate_to_catalog_browse` (Line 9437) — Navigate to the catalog browse tab with the specified filter pre-set.
+    - Method `_apply_pending_catalog_nav` (Line 9475) — Apply a pending domain selection after async tree load completes.
+    - Method `_catalog_select_domain_in_tree` (Line 9490) — Select a domain in the catalog browse domain tree by its English key.
+    - Method `_browse_display_pgp_text` (Line 9508) — Display PGP edition/translation text with proper directionality.
+    - Method `_browse_refresh_pgp_for_page` (Line 9533) — Re-fetch PGP/FGP sources for current page (called on page change within same manuscript).
+    - Method `_on_browse_link_clicked` (Line 9565) — Handle clicks on internal links in browse text (View All and Reading Desk modes).
+    - Method `_browse_enter_reading_desk` (Line 9621) — Enter reading desk mode with the given fragments.
+    - Method `_browse_rd_enrich_entry` (Line 9729) — Ensure meta_mgr.nli_cache[sys_id] has image metadata for the reading desk.
+    - Method `_browse_rd_on_sources_loaded` (Line 9790) — Handle PGP sources loaded from ReadingDeskWorker.
+    - Method `_browse_exit_reading_desk` (Line 9806) — Exit reading desk mode and restore normal browse view.
+    - Method `_browse_add_to_view` (Line 9861) — Handle 'Add to View' button click -- enter reading desk or add a manuscript.
+    - Method `_browse_add_to_puzzle` (Line 9933) — Add current browse manuscript to the puzzle canvas.
+    - Method `_browse_open_join_workbench` (Line 9954) — Browse tab entry point for the Join Workbench. D-03 #2.
+    - Method `_browse_rd_add_entry` (Line 9975) — Add a single manuscript entry to the reading desk (duplicate-safe).
+    - Method `_browse_rd_add_by_shelfmark` (Line 10040) — Add a manuscript to the reading desk by shelfmark (toolbar input).
+    - Method `_browse_rd_add_from_list` (Line 10088) — Show the browse lists panel so items can be added to reading desk.
+    - Method `_browse_open_joins_in_reading_desk` (Line 10092) — Open all joined fragments in the reading desk.
+    - Method `_browse_open_pgp_joins_in_reading_desk` (Line 10176) — Open PGP multi-fragment joined document in reading desk.
+    - Method `_browse_rd_render` (Line 10203) — Render reading desk: stacked texts in text pane, stacked images in viewer pane.
+    - Method `_browse_rd_render_images` (Line 10332) — Render stacked images in the viewer pane (right side of browse splitter).
+    - Method `_browse_rd_disconnect_sync` (Line 10471) — Disconnect sync scroll handlers without affecting other signal connections.
+    - Method `_browse_rd_setup_sync_scroll` (Line 10488) — Set up proportional scroll synchronization between text and image panes.
+    - Method `_browse_rd_restore_normal_view` (Line 10536) — Hide reading desk image scroll and restore normal viewer.
+    - Method `_browse_rd_remove_entry` (Line 10548) — Remove a fragment entry from the reading desk and re-render or exit.
+    - Method `_browse_rd_show_version_dialog` (Line 10558) — Show a dialog to select PGP version source for a specific fragment.
+    - Method `toggle_browse_view_all` (Line 10615)
+    - Method `on_browse_page_combo_changed` (Line 10631)
+    - Method `_on_browse_volume_changed` (Line 10648) — Handle volume selector change — switch to a different IE's pages and images.
+    - Method `_refresh_browse_images_for_volume` (Line 10665) — Launch lightweight manifest-only worker for volume switch (no full enrichment).
+    - Method `_on_volume_manifest_loaded` (Line 10691) — Handle volume manifest fetch result — update image viewer for the active volume.
+    - Method `toggle_browse_image` (Line 10779)
+    - Method `_set_browse_image_pane_visible` (Line 10783) — Phase 95 D-27 helper — programmatic equivalent of toggle_browse_image.
+    - Method `browse_search_parallels` (Line 10795)
+    - Method `browse_add_to_list` (Line 10828) — Add current manuscript to a list.
+    - Method `_set_last_browse_field` (Line 10842)
+    - Method `browse_load_page` (Line 10845) — Load single page text and sync viewer.
+    - Method `_apply_browse_highlights` (Line 10858)
+    - Method `browse_load_all` (Line 10877) — Load all pages into the text browser for continuous scrolling.
+    - Method `browse_save_full` (Line 11055)
+    - Method `create_catalog_browse_tab` (Line 11113) — Create the 'Browse by Identification' tab with domain tree, author/work search, and results table.
+    - Method `_catalog_refresh` (Line 11470) — Main refresh: re-fetch results with current filters + pagination, update UI.
+    - Method `_catalog_update_text_summary` (Line 11583) — Update the human-readable text filter summary label.
+    - Method `_catalog_refresh_authors` (Line 11601) — Fetch authors scoped to current domain, update author list widget.
+    - Method `_catalog_filter_authors` (Line 11610) — Filter author list widget based on current text input.
+    - Method `_catalog_refresh_works` (Line 11634) — Fetch works scoped to current domain + author, update works list widget.
+    - Method `_catalog_filter_works` (Line 11646) — Filter works list widget based on current text input.
+    - Method `_catalog_on_domain_select` (Line 11672) — Handle domain tree item click.
+    - Method `_catalog_start_async_refresh` (Line 11685) — Run catalog browse refresh in a background thread (never blocks UI).
+    - Method `_catalog_on_async_refresh_done` (Line 11721) — Handle results from background refresh thread.
+    - Method `_catalog_on_author_select` (Line 11803) — Handle author list item click.
+    - Method `_catalog_on_work_select` (Line 11816) — Handle work list item click.
+    - Method `_catalog_on_date_changed` (Line 11827) — Handle date From/To input change.
+    - Method `_catalog_on_undated_changed` (Line 11842) — Handle include-undated checkbox toggle.
+    - Method `_catalog_set_century` (Line 11849) — Set date range to a single century and refresh.
+    - Method `_catalog_set_century_range` (Line 11856) — Set date range spanning multiple centuries and refresh.
+    - Method `_catalog_clear_date` (Line 11863) — Clear date filter state and UI.
+    - Method `_catalog_add_text_term` (Line 11872) — Add the current text input as a filter term with the selected mode.
+    - Method `_catalog_remove_text_term` (Line 11890) — Remove a text filter term and refresh.
+    - Method `_catalog_render_text_chips` (Line 11903) — Re-render the inline text filter chips below the input in the sidebar.
+    - Method `_catalog_update_avail_filter_btns` (Line 11925) — Set the PGP / scholarly-transcription filter button labels + colors
+    - Method `_catalog_cycle_pgp_filter` (Line 11949) — Cycle the PGP availability filter: all -> has_pgp -> no_pgp -> all.
+    - Method `_catalog_cycle_editions_filter` (Line 11957) — Cycle the scholarly-transcription filter: all -> has_edition -> no_edition -> all.
+    - Method `_open_catalog_library_dialog` (Line 11965) — Open LibraryFilterDialog (GAP-G) and apply the selection (dual-mode, DMF-07).
+    - Method `_catalog_update_library_filter_btn` (Line 12027) — Update the library filter button label + colour to reflect the selection.
+    - Method `_catalog_remove_filter` (Line 12071) — Remove a specific filter (or all) and refresh.
+    - Method `_resolve_catalog_author_display` (Line 12144) — Resolve author value to display name from cached authors list.
+    - Method `_resolve_catalog_work_display` (Line 12154) — Resolve work value to display name from cached works list.
+    - Method `_catalog_update_chips` (Line 12164) — Update the active filter chips bar.
+    - Method `_catalog_build_browse_filters` (Line 12284) — Build pre_search_filters dict from all active catalog browse filters.
+    - Method `_catalog_search_in_results` (Line 12305) — Navigate to search tab with browse filters as pre-search filters.
+    - Method `_catalog_parallels_in_results` (Line 12349) — Navigate to composition tab with browse filters as pre-search filters.
+    - Method `_catalog_view_result` (Line 12391) — Double-click result row: open ResultDialog with prev/next navigation.
+    - Method `_catalog_view_result_by_row` (Line 12395) — Open ResultDialog for the catalog browse result at the given row.
+    - Method `_catalog_browse_manuscript_by_row` (Line 12423) — Navigate to Browse by Shelfmark tab for the given row.
+    - Method `_catalog_on_cell_entered` (Line 12434) — Handle mouse hover on catalog results table rows for action button visibility.
+    - Method `_catalog_next_page` (Line 12452) — Go to next page of results.
+    - Method `_catalog_prev_page` (Line 12457) — Go to previous page of results.
+    - Method `_catalog_populate_tree` (Line 12465) — Start async population of the domain tree. Never blocks main thread.
+    - Method `_catalog_load_tree_from_cache` (Line 12482) — Load tree data from already-cached service (runs on main thread, instant).
+    - Method `_catalog_render_tree` (Line 12498) — Render tree from pre-fetched data (runs on main thread via signal).
+    - Method `create_lists_tab` (Line 12557) — Create the Personal Lists tab for managing starred manuscripts.
+    - Method `lists_toggle_preview` (Line 12875) — Toggle the preview panel visibility.
+    - Method `_normalize_fl_id` (Line 12879)
+    - Method `_format_image_display` (Line 12883)
+    - Method `_get_list_display_name` (Line 12886)
+    - Method `_get_list_display_color` (Line 12894)
+    - Method `lists_set_preview_visible` (Line 12904) — Show/hide preview panel with a slim collapsed bar.
+    - Method `lists_refresh_all` (Line 12953) — Refresh the lists sidebar and current items view.
+    - Method `_lists_auto_sync` (Line 12960) — Ask for an upload after a list change (if list sync is on).
+    - Method `lists_refresh_sidebar` (Line 12976) — Refresh the lists tree in the sidebar.
+    - Method `lists_handle_tree_reorder` (Line 13064) — Apply drag-and-drop changes to list/project order and assignment.
+    - Method `lists_refresh_items` (Line 13103) — Refresh the items table for the current list.
+    - Method `_get_recent_items_deduped` (Line 13225) — Return Recently Viewed items in view order, with true duplicates collapsed.
+    - Method `lists_on_list_selected` (Line 13259) — Handle list selection in the sidebar.
+    - Method `lists_on_item_clicked` (Line 13269) — Handle item click in the table.
+    - Method `lists_on_item_checkbox_changed` (Line 13282) — Handle checkbox state change.
+    - Method `lists_update_selection_label` (Line 13288) — Update the selection count label.
+    - Method `lists_on_select_all_toggled` (Line 13302) — Toggle all checkboxes in the list table.
+    - Method `lists_sync_select_all_checkbox` (Line 13316) — Sync 'Select All' checkbox state with row selections.
+    - Method `lists_get_selected_item_ids` (Line 13340) — Get list of selected item ids.
+    - Method `lists_show_item_details` (Line 13351) — Show details for a specific item.
+    - Method `_lists_load_preview` (Line 13427) — Load text and image preview for an item.
+    - Method `_lists_load_preview_image` (Line 13461) — Load image for preview panel.
+    - Method `_lists_start_preview_download` (Line 13482) — Download and display preview image for lists panel.
+    - Method `_lists_on_preview_image_loaded` (Line 13502) — Handle preview image loaded for lists panel.
+    - Method `_lists_on_preview_image_failed` (Line 13515) — Handle preview image load failure for lists panel.
+    - Method `_lists_cancel_preview_image_thread` (Line 13522)
+    - Method `lists_clear_details` (Line 13528) — Clear the details panel and preview.
+    - Method `lists_save_item_details` (Line 13554) — Save changes to the current item.
+    - Method `lists_create_new_list` (Line 13563) — Create a new list.
+    - Method `lists_create_new_project` (Line 13572) — Create a new project.
+    - Method `lists_edit_current_list` (Line 13581) — Edit the current list name/color.
+    - Method `lists_delete_current_list` (Line 13596) — Delete the current list.
+    - Method `lists_duplicate_selected_list` (Line 13618) — Duplicate the current list.
+    - Method `lists_merge_lists` (Line 13627) — Show dialog to merge lists.
+    - Method `lists_cleanup_duplicates` (Line 13663) — Clean up duplicate lists created by sync bugs.
+    - Method `_show_duplicate_conflict_dialog` (Line 13715) — Show dialog for user to resolve a duplicate list conflict.
+    - Method `lists_show_trash` (Line 13774) — Show dialog with deleted lists (trash).
+    - Method `_trash_restore` (Line 13836) — Restore selected list from trash.
+    - Method `_trash_delete_permanently` (Line 13851) — Permanently delete selected list from trash.
+    - Method `_trash_empty` (Line 13872) — Empty all trash.
+    - Method `lists_move_selected_items` (Line 13887) — Move selected items to another list.
+    - Method `lists_add_tag_to_selected` (Line 13917) — Add a tag to selected items.
+    - Method `lists_add_tag_to_item` (Line 13932) — Add a tag to a specific item.
+    - Method `lists_remove_selected_items` (Line 13944) — Remove selected items from current list.
+    - Method `lists_remove_item_by_id` (Line 13965) — Remove a specific item from current list.
+    - Method `lists_quick_view_item` (Line 13974) — Quick view the current item.
+    - Method `lists_quick_view_by_id` (Line 13979) — Open quick view dialog for an item.
+    - Method `lists_browse_item` (Line 14023) — Browse the current item in the Browse tab.
+    - Method `lists_browse_by_id` (Line 14028) — Open an item in the Browse tab.
+    - Method `_open_document_result_dialog` (Line 14044) — Open ResultDialog for a document by shelfmark or sys_id.
+    - Method `_browse_document_by_shelfmark` (Line 14098) — Browse a document by shelfmark in the Browse tab.
+    - Method `lists_copy_item_info` (Line 14105) — Copy current item info to clipboard.
+    - Method `_lists_add_to_puzzle` (Line 14110) — Add a list item to the puzzle canvas.
+    - Method `lists_copy_info_by_id` (Line 14123) — Copy item info to clipboard with format options.
+    - Method `_do_copy_info` (Line 14141) — Actually copy the info to clipboard.
+    - Method `lists_export_current_list` (Line 14180) — Export the current list.
+    - Method `lists_import_list` (Line 14204) — Import a list from file.
+    - Method `lists_show_list_context_menu` (Line 14238) — Show context menu for list items in sidebar.
+    - Method `_rename_list` (Line 14354) — Rename a specific list.
+    - Method `_delete_list` (Line 14369) — Delete a specific list.
+    - Method `_duplicate_list` (Line 14392) — Duplicate a specific list.
+    - Method `_export_list` (Line 14401) — Export a specific list (opens format menu).
+    - Method `_export_list_format` (Line 14405) — Export a specific list in the given format.
+    - Method `_format_item_text` (Line 14439) — Format a single item for text export.
+    - Method `_export_as_text` (Line 14466) — Export list as plain text.
+    - Method `_export_as_json` (Line 14483) — Export list as JSON.
+    - Method `_export_as_excel` (Line 14505) — Export list as Excel file.
+    - Method `_export_as_word` (Line 14548) — Export list as Word document.
+    - Method `_save_text_to_file` (Line 14599) — Save text to file.
+    - Method `_copy_to_clipboard` (Line 14613) — Copy text to clipboard.
+    - Method `_send_by_email` (Line 14619) — Robust Email: Copies text to clipboard and opens empty email draft.
+    - Method `lists_apply_filter` (Line 14641) — Apply filter to items table.
+    - Method `show_add_to_list_menu` (Line 14647) — Show menu for adding items to a list.
+    - Method `create_community_tab` (Line 14717) — Create the Community tab with panels for discoveries, corrections, and comments.
+    - Method `_refresh_community_panels` (Line 14942) — Refresh all community panels and update UI state.
+    - Method `_update_community_header` (Line 14996) — Update the community header with user info.
+    - Method `_refresh_discoveries_panel` (Line 15008) — Refresh the discoveries list panel.
+    - Method `_filter_discoveries` (Line 15065) — Filter discoveries list by selected type.
+    - Method `_populate_discoveries_list` (Line 15093) — Populate discoveries list from data.
+    - Method `_refresh_corrections_panel` (Line 15135) — Refresh the corrections list panels.
+    - Method `_populate_my_corrections_list` (Line 15182) — Populate my corrections list from data (only latest per document).
+    - Method `_populate_all_corrections_list` (Line 15217) — Populate all corrections list from data (only latest per user per document).
+    - Method `_refresh_comments_panel` (Line 15253) — Refresh the comments list panels (My Comments + All Comments).
+    - Method `_populate_comments_list` (Line 15310) — Populate comments list from data.
+    - Method `_discoveries_context_menu` (Line 15354) — Show context menu for discoveries list.
+    - Method `_edit_discovery_from_list` (Line 15404) — Open edit dialog for discovery from context menu.
+    - Method `_delete_discovery_from_list` (Line 15410) — Delete discovery from context menu.
+    - Method `_toggle_pin_discovery` (Line 15426) — Toggle pin status from context menu.
+    - Method `_toggle_hide_discovery` (Line 15434) — Toggle hide status from context menu.
+    - Method `_corrections_context_menu` (Line 15445) — Show context menu for corrections list.
+    - Method `_show_correction_details` (Line 15468) — Show correction details dialog.
+    - Method `_comments_context_menu` (Line 15491) — Show context menu for comments list.
+    - Method `_on_discovery_clicked` (Line 15509) — Handle discovery item double-click.
+    - Method `_on_correction_clicked` (Line 15516) — Handle correction item double-click - open ResultDialog.
+    - Method `_on_comment_clicked` (Line 15531) — Handle comment item double-click - open ResultDialog.
+    - Method `_refresh_joins_panel` (Line 15543) — Refresh the joins list panels (My Joins + All Joins).
+    - Method `_populate_joins_list` (Line 15632) — Populate joins list from data.
+    - Method `_populate_puzzles_list` (Line 15665) — Populate puzzle list from published joins data.
+    - Method `_on_puzzle_clicked` (Line 15688) — Handle double-click on a published puzzle — fork and open.
+    - Method `_joins_context_menu` (Line 15702) — Show context menu for joins list.
+    - Method `_on_join_clicked` (Line 15747) — Handle join item double-click - open Fragment A.
+    - Method `_open_join_fragment` (Line 15755) — Open a fragment from a join - navigate to browse tab.
+    - Method `_copy_join_shelfmarks` (Line 15766) — Copy join shelfmarks to clipboard.
+    - Method `_delete_join_from_list` (Line 15772) — Delete a join from the community panel.
+    - Method `_show_joins_feed_dialog` (Line 15791) — Show the full joins feed dialog.
+    - Method `_open_puzzle_window` (Line 15804) — Open the puzzle canvas window (or bring existing one to front).
+    - Method `_show_result_dialog` (Line 15814) — Open the Manuscript Viewer (ResultDialog) as an independent,
+    - Method `_on_result_dialog_finished` (Line 15878) — Release the viewer once it has closed (any path: X, Esc, done()).
+    - Method `_close_result_dialog` (Line 15887) — Close the open Manuscript Viewer, if any. Called at shutdown;
+    - Method `add_to_puzzle` (Line 15901) — Add a fragment to the puzzle canvas. Opens puzzle window if needed.
+    - Method `open_join_workbench` (Line 15936) — Open the Join Lab (no anchor required). Restores last session state if available.
+    - Method `open_joins_workbench` (Line 15978) — Open (or re-anchor) the Join Workbench. D-01 modeless; single reusable instance.
+    - Method `open_anchor_in_puzzle` (Line 16020) — Public: add a fragment to the Fragment Puzzle canvas (Join Workbench path). SC#5.
+    - Method `open_anchors_in_puzzle` (Line 16024) — Public: add multiple fragments to the Fragment Puzzle canvas.
+    - Method `open_anchor_as_join` (Line 16038) — Public: open JoinsDialog with anchor as Fragment A; scholar enters B freely.
+    - Method `_main_window_floor` (Line 16081) — The main window's minimum size: 800x520, but never more than the
+    - Method `showEvent` (Line 16095)
+    - Method `_fill_sections_menu` (Line 16107) — The All sections menu: one entry per tab, the current one checked.
+    - Method `resizeEvent` (Line 16122)
+    - Method `_open_settings_dialog` (Line 16128) — Open the settings dialog.
+    - Method `apply_settings` (Line 16147) — OK path for the Settings dialog (DESK-01 thin named API / SP-4 boundary).
+    - Method `cancel_settings` (Line 16156) — Cancel path for the Settings dialog (DESK-01 thin named API / SP-4).
+    - Method `_on_language_combo_changed` (Line 16164) — Handle language combo box change — close settings dialog first to
+    - Method `_citation_lang` (Line 16172) — The reader's language, in the form the shared credit module wants.
+    - Method `_credit_version_info` (Line 16182) — Translate a version-combo item into the shared module's `version_info`.
+    - Method `_browse_page_citation` (Line 16293) — How to cite the manuscript page on the Browse tab, or None.
+    - Method `_sync_browse_cite_button` (Line 16377) — Enable "Cite this page" exactly when there is a page worth citing.
+    - Method `_browse_web_url` (Line 16406) — The genizahsearch.com address of the Browse page on screen, or None.
+    - Method `_browse_open_on_web` (Line 16413)
+    - Method `_browse_copy_web_link` (Line 16420)
+    - Method `_software_clause` (Line 16428) — "Dicta Genizah Search Pro V<version>" -- what this app IS.
+    - Method `_site_citation_text` (Line 16438) — How to cite the APPLICATION as a whole -- names it, its version, MiDRASH.
+    - Method `_citation_stamp` (Line 16451) — Today, ISO, for an "accessed" clause. Stamped when a citation is COPIED.
+    - Method `_create_citation_bar` (Line 16456) — The persistent citation bar at the bottom of the main window.
+    - Method `_copy_citation_text` (Line 16552)
+    - Method `copy_page_citation` (Line 16557) — Cite the manuscript page on screen, crediting whoever transcribed it.
+    - Method `copy_site_citation` (Line 16578) — Cite the site as a whole -- Dicta, the address, and MiDRASH.
+    - Method `_show_citation_reminder` (Line 16583) — Show a one-time citation reminder dialog on first launch.
+    - Method `_maybe_show_first_run_prompt` (Line 16616) — Gate for the one-time first-run consent dialog.
+    - Method `_maybe_show_telemetry_reask` (Line 16660) — Startup gate for the non-modal telemetry re-ask bar. Never blocks.
+    - Method `on_telemetry_reask_enable` (Line 16680) — User clicked Enable on the re-ask bar — the sole implicit opt-in path.
+    - Method `on_telemetry_reask_learn_more` (Line 16695) — Open the full bilingual privacy disclosure (same as first-run Learn more).
+    - Method `on_telemetry_reask_never` (Line 16703) — User clicked Don't ask again — persist a hard, permanent opt-out.
+    - Method `on_telemetry_reask_dismissed` (Line 16712) — User dismissed the bar with ✕ — ignored this time (count already recorded).
+    - Method `open_help_center` (Line 16720) — Open the bundled Help.html with optional anchor scrolling and fallback content.
+    - Method `get_search_help_text` (Line 16733)
+    - Method `get_comp_help_text` (Line 16737)
+    - Method `get_browse_help_text` (Line 16741)
+    - Method `get_settings_help_text` (Line 16745)
+    - Method `_build_help_fallback_html` (Line 16749)
+    - Method `_sanitize_filename` (Line 16770)
+    - Method `_get_default_save_folder` (Line 16775) — Get the default folder for saving reports. Checks last used location first.
+    - Method `_get_unique_filepath` (Line 16816) — If file exists, add (1), (2), etc. until we find a unique name.
+    - Method `_save_last_folder` (Line 16829) — Remember the folder where user saved a file.
+    - Method `_default_report_path` (Line 16835)
+    - Method `_get_credit_header` (Line 16848)
+    - Method `_show_export_saved_dialog` (Line 16869) — EXPUX-01: 'export complete' dialog with Open File / Open Folder.
+    - Method `_get_lab_config_block` (Line 16901)
+    - Method `open_search_settings` (Line 16915) — Open the Search Settings dialog for variant configuration.
+    - Method `_on_search_mode_changed` (Line 16928) — Show/hide variant controls and swap query/tag input based on selected mode.
+    - Method `_on_comp_mode_changed` (Line 16951) — Show/hide variant slider for composition based on selected mode.
+    - Method `_on_boundary_mode_changed` (Line 16958) — Update UI based on boundary mode selection.
+    - Method `_on_boundary_delimiter_changed` (Line 16983) — Save delimiter setting and update stats when delimiter changes.
+    - Method `_update_boundary_stats` (Line 16995) — Update the boundary statistics label based on current text and settings.
+    - Method `_open_boundary_advanced_dialog` (Line 17035) — Open dialog for advanced boundary search settings.
+    - Method `_set_variant_preset` (Line 17092) — Set variant level from preset button.
+    - Method `_get_current_variant_pairs_count` (Line 17116) — Get the current variant pairs count (from preset or slider).
+    - Method `_sync_variant_sliders` (Line 17125) — Keep variant sliders synchronized between search and composition tabs.
+    - Method `_on_query_text_changed` (Line 17151) — Handle live text changes: detect shortcut prefixes and update variant preview.
+    - Method `_update_variant_count_preview` (Line 17174) — Update the variant count label based on current query and slider value.
+    - Method `_comp_passage_preference_fields` (Line 17240) — The method and its three policy axes, as the session stores them.
+    - Method `_comp_chunk_preference` (Line 17284) — The user's OWN value for a forced chunk control.
+    - Method `_start_passage_load` (Line 17310) — Open (and if necessary recover) the letter-level index, off the
+    - Method `_on_passage_loaded` (Line 17328)
+    - Method `_honour_deferred_comp_method` (Line 17355) — Re-apply a letter-level selection that was demoted for "not built".
+    - Method `_maybe_offer_passage_build` (Line 17399) — Offer to build the letter-level index when there is none, once per
+    - Method `_passage_release_seam` (Line 17474) — Called ON THE WORKER THREAD. Hops to the UI thread, releases
+    - Method `_on_passage_release_requested` (Line 17503) — UI thread. The one place `_state` is mutated for a build.
+    - Method `_start_passage_build_worker` (Line 17517)
+    - Method `_on_passage_build_progress` (Line 17554)
+    - Method `_finish_passage_build` (Line 17573)
+    - Method `_on_passage_build_finished` (Line 17586)
+    - Method `_on_passage_build_cancelled` (Line 17641)
+    - Method `_on_passage_build_error` (Line 17647)
+    - Method `run_passage_index_build` (Line 17656) — Build the letter-level index from the transcriptions already on
+    - Method `_restore_comp_passage_preferences` (Line 17748) — Preference half of Task 8. Restores the method and the three
+    - Method `_restored_provenance_is_valid` (Line 17888) — Provenance half of Task 8. True when a saved RESULT snapshot may
+    - Method `_passage_snapshot_must_wait` (Line 17910) — True when a saved letter-level result set cannot be judged YET.
+    - Method `_display_restored_comp_snapshot` (Line 17926) — Re-display a saved composition result set, re-establishing the
+    - Method `_comp_passage_axis` (Line 17965) — The selected value of one policy axis, falling back to its own
+    - Method `_comp_axis_label` (Line 17979) — The label the control itself shows for one policy value, so a
+    - Method `_comp_export_settings_lines` (Line 17993) — The "Search Settings" block of an exported report.
+    - Method `_passage_scan_in_flight` (Line 18046) — True only while a PASSAGE scan is running. Grouping is
+    - Method `_passage_batch_in_flight` (Line 18055) — True while a MULTI-WITNESS passage batch is running.
+    - Method `_refuse_stop_during_passage_scan` (Line 18069) — The one guarded stop helper. `PassageSearcher` has no mid-search
+    - Method `_on_witness_progress` (Line 18106) — "Witness 3/17: Ashkenaz" while a batch runs.
+    - Method `_open_add_witness_dialog` (Line 18122) — Paste one witness, or a whole file split on blank lines.
+    - Method `_report_witness_additions` (Line 18191) — Say what was refused, and why, in ONE message per reason.
+    - Method `_revive_stale_witnesses` (Line 18219)
+    - Method `_remove_stale_witnesses` (Line 18225)
+    - Method `_search_pending_witnesses` (Line 18230) — Dispatch the pending witnesses through the ordinary search path.
+    - Method `_promote_checked_comp` (Line 18252) — Add the checked manuscripts as witnesses and search them.
+    - Method `_checked_comp_sys_ids` (Line 18272) — The sys_ids of the CHECKED result rows, in display order.
+    - Method `_promote_sys_ids` (Line 18296) — Turn manuscripts into witnesses and search them.
+    - Method `_auto_expand_settings` (Line 18360) — ``(rounds, top_k)`` for auto-expand, readable at any time.
+    - Method `_run_auto_expand` (Line 18385)
+    - Method `_advance_auto_expand` (Line 18395) — One round: promote the best K manuscripts and search them.
+    - Method `_stop_auto_expand` (Line 18446)
+    - Method `_build_witness_button` (Line 18454) — One button in the letter-level options row; everything else lives
+    - Method `_set_witness_panel_visible` (Line 18497) — Letter-level only. Joins the same contract as the policy
+    - Method `_accent_amber_pair` (Line 18510) — The (background, text) an amber accent paints, for the CURRENT
+    - Method `_witness_button_accent` (Line 18537) — The Witnesses button's accent, built from the LIVE palette.
+    - Method `_text_position_accent` (Line 18552) — The Text Position selector's accent, for a non-default position.
+    - Method `_update_witness_affordance` (Line 18572) — Point at the Witnesses button once, then never again.
+    - Method `_open_witness_dialog` (Line 18599) — The witness list, its actions and auto-expand -- all here.
+    - Method `_witness_dialog_is_open` (Line 18752)
+    - Method `_refresh_witness_panel` (Line 18756) — Update the button caption, and the dialog too if it is open.
+    - Method `_witness_edits_are_locked` (Line 18829) — True while a run owns the witness list.
+    - Method `_witness_status_item` (Line 18839)
+    - Method `_selected_witness_ids` (Line 18857)
+    - Method `_remove_selected_witnesses` (Line 18868)
+    - Method `_remove_all_witnesses` (Line 18888) — Clear the list in one action.
+    - Method `_rehydrate_witness_texts` (Line 18910) — Re-fetch the text of restored MANUSCRIPT witnesses, before dispatch.
+    - Method `_load_witness_files` (Line 18982) — Add witnesses from one or more files on disk.
+    - Method `_after_witness_removal` (Line 19038) — Shared tail for every removal: re-fuse, redraw, persist, and say
+    - Method `_witness_notify` (Line 19084) — One message, shown wherever the user is looking.
+    - Method `_retry_failed_witnesses` (Line 19099) — Re-queue every failed witness.
+    - Method `_apply_comp_witness_cell` (Line 19117) — "{n} of {m} witnesses" on a manuscript row, tooltipped with which.
+    - Method `_comp_witness_total` (Line 19143) — How many witnesses produced the rows CURRENTLY on screen.
+    - Method `_comp_witness_state` (Line 19151) — The window's `WitnessSet`, created on first use.
+    - Method `_comp_seed_text` (Line 19164) — What is in the box RIGHT NOW.
+    - Method `_comp_has_witnesses` (Line 19174)
+    - Method `_comp_witness_roster` (Line 19177) — `[(witness_id, label)]` in fusion order, the seed first.
+    - Method `_comp_witness_dispatch_list` (Line 19189) — `[(witness_id, label, text)]` for the witnesses to SEARCH now.
+    - Method `_comp_witness_cache_key` (Line 19216) — Everything a cached witness row depends on, as one comparable value.
+    - Method `_comp_witness_prior_rows` (Line 19241) — The rows of witnesses searched in an EARLIER round.
+    - Method `_absorb_witness_result` (Line 19251) — Fold a finished batch's per-witness rows back into the WitnessSet.
+    - Method `_clear_passage_dropped_warning` (Line 19284)
+    - Method `_show_passage_dropped_warning` (Line 19290) — `dropped_text_lookup_failures` counts rows the searcher matched
+    - Method `_method_help_text` (Line 19305)
+    - Method `_composition_tab_is_current` (Line 19324) — Whether the user can actually SEE the composition tab right now.
+    - Method `_announcement_allowed` (Line 19349) — Whether this announcement may still be shown, decided ONCE per
+    - Method `_mark_announcement_seen` (Line 19371) — Record that it has now been shown. Idempotent within a launch --
+    - Method `_retire_announcement` (Line 19384) — The user has USED the feature, so stop pointing at it -- now, not
+    - Method `_update_comp_method_affordance` (Line 19395) — Point at the new option while it is worth pointing at: chunk is
+    - Method `_apply_default_comp_method` (Line 19421) — Letter-level search is the DEFAULT once an index exists.
+    - Method `_update_comp_method_help` (Line 19463)
+    - Method `_comp_method` (Line 19468) — The selected method, defaulting to chunk. Reads the widget so a
+    - Method `_passage_disabled_reason_now` (Line 19476) — The ONE choke point (Task 4). Gathers the live state the pure
+    - Method `_passage_reason_text` (Line 19507) — Reason KEY -> translated sentence. The pure function returns keys
+    - Method `_show_passage_reason` (Line 19531) — Persistent inline label, never a modal: this fires on silent
+    - Method `_set_boundary_row_visible` (Line 19548) — Show or hide the whole paragraph row. Letter-level search has no
+    - Method `_set_passage_options_visible` (Line 19572)
+    - Method `_apply_passage_mode_ui` (Line 19583) — Force-set and disable the chunk knobs a letter-level search does
+    - Method `_refresh_comp_method_enabled` (Line 19694) — Never a blind setEnabled(True): the combo is frozen for the whole
+    - Method `_revert_comp_method_to_chunk` (Line 19707) — Snap the selection back without re-entering this handler.
+    - Method `_on_comp_method_changed` (Line 19720)
+    - Method `_revalidate_comp_method` (Line 19761) — Re-run the gate after something else changed (scope, Lab, build
+    - Method `update_lab_ui_state` (Line 19778) — Disable standard controls when Lab Mode is active.
+    - Method `on_deep_scan_toggled_search` (Line 19804)
+    - Method `on_deep_scan_toggled_comp` (Line 19810)
+    - Method `on_lab_mode_toggled_search` (Line 19816)
+    - Method `on_lab_mode_toggled_comp` (Line 19832)
+    - Method `_open_domain_filter_dialog` (Line 19852) — Open the domain filter dialog for post-search dynamic filtering.
+    - Method `_update_domain_filter_label` (Line 19874) — Update the domain filter label badge to show exclusion state.
+    - Method `_domain_display_name` (Line 19889) — Get display name for a domain (Hebrew if UI is Hebrew, else English).
+    - Method `_apply_domain_exclusions` (Line 19899) — Apply domain exclusions through the one results visibility pass.
+    - Method `_open_measurement_filter_dialog` (Line 19913) — Open a dialog to filter results by physical measurements.
+    - Method `_open_pre_search_filter_dialog` (Line 20010) — Open the pre-search filter dialog.
+    - Method `_update_filter_chip_bar` (Line 20026) — Update both search and composition chip bars to reflect active filters.
+    - Method `_add_filter_chip` (Line 20148) — Add a removable chip button to the filter chip bar layout.
+    - Method `_remove_filter` (Line 20162) — Remove a single filter and recompute restrict_sys_ids.
+    - Method `_on_filter_recompute_finished` (Line 20197) — Handle recomputed filter set after chip removal.
+    - Method `_on_restore_filter_finished` (Line 20210) — Handle filter recompute after session/history restore.
+    - Method `_exclude_word_search_result` (Line 20225) — Exclude a manuscript -- every row of it -- from the search results.
+    - Method `_on_domain_enrichment_loaded` (Line 20245) — Handle async domain enrichment results from DomainEnrichmentWorker.
+    - Method `_navigate_to_search_with_domain` (Line 20306) — Navigate to search tab with domain context (exclusions cleared).
+    - Method `_collect_comp_domain_data` (Line 20315) — Collect domain data for composition results.
+    - Method `_open_comp_domain_filter_dialog` (Line 20400) — Open the domain filter dialog for composition results.
+    - Method `_update_comp_domain_filter_label` (Line 20429) — Update the composition domain filter label.
+    - Method `_apply_comp_domain_exclusions` (Line 20444) — Apply domain exclusions by hiding/showing composition tree items.
+    - Method `_open_query_builder` (Line 20454) — Open the tabular query builder dialog.
+    - Method `_on_corpus_scope_changed` (Line 20484) — Phase 95 smoke-fix (item 2): persist the corpus scope selection via session JSON.
+    - Method `_search_run_corpus` (Line 20493) — The corpus scope of the run that just finished -- recorded by
+    - Method `_set_local_scope_strip_visible` (Line 20504)
+    - Method `_local_scope_strip_colors` (Line 20512) — Light orange, bright enough to read as a notice and not as
+    - Method `_style_local_scope_strip` (Line 20521) — Apply the theme's colours. Same lightness probe the rest of the
+    - Method `_update_local_scope_strip` (Line 20544) — Show the hint only for a LOCAL-scope run that COMPLETED and found
+    - Method `_search_genizah_instead` (Line 20557) — One click: scope -> Genizah, same query, run again. Goes through
+    - Method `_on_comp_corpus_scope_changed` (Line 20569) — Phase 110 (COMP-LOC-01): persist the composition corpus scope. Mirrors
+    - Method `_deliver_unless_discarded` (Line 20586) — Pass a search worker's signal to `slot` unless New discarded its run.
+    - Method `_discardable` (Line 20602) — `slot` for a worker signal, bound to the New generation current
+    - Method `_drain_previous_worker` (Line 20608) — Refuse to rebind a worker slot while the old worker is still alive.
+    - Method `toggle_search` (Line 20644)
+    - Method `start_search` (Line 20653)
+    - Method `_emit_search_telemetry` (Line 20840) — Emit desktop_search_executed for a regular search run (Phase 114 USAGE-03).
+    - Method `_on_perf_signal` (Line 20876) — UI-thread slot for all four search thread perf_signal emissions (Phase 115 PERF-01).
+    - Method `_pause_worker_for` (Line 20907) — The live worker a pause context is tracking, or None.
+    - Method `_apply_pause_state` (Line 20913) — Single owner of every Pause/Resume widget mutation.
+    - Method `_pause_elapsed_str` (Line 20967)
+    - Method `_paint_pause_status` (Line 20971) — Write the paused/pausing wording onto whichever surface owns this run.
+    - Method `_on_pause_clicked` (Line 20988) — Pause <-> Resume. The click owns 'pausing'/'running'; only an accepted
+    - Method `_on_pause_ack` (Line 21036) — Queued acknowledgement from a worker that has actually parked.
+    - Method `_on_search_phase` (Line 21051) — A search entered a new phase whose progress is not comparable to the last.
+    - Method `stop_search` (Line 21072)
+    - Method `reset_ui` (Line 21089)
+    - Method `_update_search_elapsed` (Line 21106) — Tick every 1s to keep elapsed time updating during search.
+    - Method `on_error` (Line 21122)
+    - Method `_reset_search` (Line 21124) — Clear all search state and start fresh.
+    - Method `_on_search_progress` (Line 21241)
+    - Method `render_asterisks_to_html` (Line 21252)
+    - Method `check_scroll_load` (Line 21257)
+    - Method `_install_load_more_button` (Line 21265) — The Search tab's "Load more results" button. Returns the layout
+    - Method `_results_rows_fit` (Line 21296) — True when the visible rows fit in the results table as it is
+    - Method `_load_more_remaining` (Line 21321) — How many results "Load more results" reaches, or 0 when it must
+    - Method `_all_terms_view_active` (Line 21337) — True while "Only results with all terms" narrows the table.
+    - Method `_update_load_more_button` (Line 21349) — Show "Load more results" exactly when _load_more_remaining says
+    - Method `_on_load_more_clicked` (Line 21362)
+    - Method `load_next_batch` (Line 21368)
+    - Method `_notify_search_complete` (Line 21572) — Flash taskbar icon if app is not focused when search completes.
+    - Method `on_search_finished` (Line 21609)
+    - Method `_replay_refinement_chain` (Line 21800) — D-13: Re-execute chain to rebuild restrict sets. Shows 'Re-evaluating...' feedback.
+    - Method `_replay_for_restore` (Line 21818) — Replay the refinement chain during session restore, OFF the UI thread.
+    - Method `_on_replay_for_restore_finished` (Line 21842) — Apply the restrict set rebuilt by the off-thread chain replay.
+    - Method `_on_replay_for_restore_error` (Line 21852) — Replay failed -- clear the chain rather than leave stale state.
+    - Method `_search_status_or_blank` (Line 21862) — What the replay leaves in the status label once it is done: the
+    - Method `_enter_refine_mode` (Line 21871) — D-02, D-03: Activate refine mode on desktop search bar.
+    - Method `_exit_refine_mode` (Line 21914) — D-02a: Cancel refine mode without search.
+    - Method `_update_refinement_strip` (Line 21920) — D-04, D-05, D-06, D-07, D-10: Rebuild breadcrumb chip widgets.
+    - Method `_remove_refinement_step` (Line 22004) — D-12: Remove chip at index and all subsequent, re-execute with feedback.
+    - Method `_toggle_all_terms_filter` (Line 22012) — Toggle 'Only results with all terms' post-filter and re-render results.
+    - Method `_apply_all_terms_filter_and_rerender` (Line 22018) — Re-render results table applying the all-terms filter.
+    - Method `_clear_refinement_chain` (Line 22049) — D-11: Remove entire chain, return to unrestricted search.
+    - Method `_update_search_within_btn` (Line 22065) — D-01: Show/hide search within button based on result availability.
+    - Method `_undo_zero_result_refine` (Line 22078) — D-14a: Recover from zero-result refinement -- replay chain to restore previous results.
+    - Method `_launch_enrichment_workers` (Line 22092) — Launch domain, PGP badge, printed badge, and measurement enrichment workers.
+    - Method `_open_results_filter_dialog` (Line 22167)
+    - Method `_update_results_filter_indicators` (Line 22212)
+    - Method `_results_filter_text_for_row` (Line 22216)
+    - Method `_apply_local_filter` (Line 22232) — Apply LOCAL three-state filter per D-10 / D-10 P1.
+    - Method `_apply_local_optout_filter` (Line 22257) — Phase 96 D-F1: drop LOCAL hits whose canonical filepath is in
+    - Method `_reapply_filters_for_optout_change` (Line 22297) — Phase 96 D-F1: re-run both cascade joinpoints after the user
+    - Method `_local_filter_state_index` (Line 22322) — Return the index of ``value`` in ``states``, or 0 if unknown.
+    - Method `_text_position_from_index` (Line 22335) — Map a combo index to its text-position option, or None if out of range.
+    - Method `_toggle_local_filter_search` (Line 22345) — Cycle the LOCAL filter state for the Search surface (D-10 / D-39).
+    - Method `_toggle_local_filter_composition` (Line 22354) — Cycle the LOCAL filter state for the Composition surface (D-10 / D-39).
+    - Method `_toggle_local_filter_parallels` (Line 22363) — Cycle the LOCAL filter state for the Parallels surface (D-10 / D-39).
+    - Method `_update_local_filter_btn_search` (Line 22372) — Update label on the Search surface LOCAL filter button.
+    - Method `_update_local_filter_btn_composition` (Line 22384) — Update label on the Composition surface LOCAL filter button.
+    - Method `_update_local_filter_btn_parallels` (Line 22396) — Update label on the Parallels surface LOCAL filter button.
+    - Method `_update_local_filter_visibility_search` (Line 22408) — Show/hide the Search LOCAL filter button based on LOCAL hits presence.
+    - Method `_update_local_filter_visibility_comp` (Line 22420) — Show/hide the Composition LOCAL filter button based on LOCAL hits presence.
+    - Method `_update_local_filter_visibility_parallels` (Line 22428) — Show/hide the Parallels LOCAL filter button based on LOCAL hits presence.
+    - Method `_show_local_filter_chip` (Line 22436) — Show or hide the no-op chip for the given surface.
+    - Method `_row_is_excluded` (Line 22449) — Is this results row's manuscript excluded on the Search surface?
+    - Method `_search_excluded_note` (Line 22461) — ' (N excluded)' for the rows the last visibility pass hid by
+    - Method `_search_status_summary` (Line 22467) — The Search results status line, from the table as it is now.
+    - Method `_with_search_summary` (Line 22491) — `message`, followed by the results summary when any row is hidden,
+    - Method `_apply_results_table_filters` (Line 22504) — Recompute the visibility of every Search results row.
+    - Method `_result_page_num` (Line 22670) — The 1-based page a results row is showing, or None.
+    - Method `_pgp_url_for_row` (Line 22691) — The PGP url THIS row should open.
+    - Method `_make_pgp_badge_item` (Line 22721) — Build the PGP cell for one row, as a link when the url is known.
+    - Method `_write_pgp_badge_cell` (Line 22752) — Write (or clear) the PGP cell of one results row.
+    - Method `_pgp_url_for_cell` (Line 22757) — The PGP url a results row links to, or None when it is not a link.
+    - Method `_on_results_cell_clicked` (Line 22762) — A single click on a linked PGP badge opens the PGP document page.
+    - Method `_on_results_double_clicked` (Line 22775) — Double-click opens the result -- except on a linked PGP badge.
+    - Method `_on_pgp_badges_loaded` (Line 22788) — Handle PGP badge worker results - update the PGP + scholarly-transcription
+    - Method `_on_printed_badges_loaded` (Line 22813) — Handle Printed badge worker results - update Printed column for all rows.
+    - Method `_on_pgp_tags_loaded` (Line 22829) — Handle PGP tags worker results - populate tag dropdown with categorized Hebrew translations.
+    - Method `_emit_pgp_tag_search_telemetry` (Line 22851) — Emit desktop_search_executed for a PGP-tags search run (Phase 114 USAGE-03).
+    - Method `_execute_tag_search` (Line 22895) — Execute a search by PGP tag from the dropdown.
+    - Method `_on_tag_search_results` (Line 22944) — Handle tag search results - display in results table.
+    - Method `_search_by_pgp_tag` (Line 23076) — Entry point for searching by PGP tag (from browse/result dialog links).
+    - Method `_open_comp_filter_dialog` (Line 23090)
+    - Method `_update_comp_filter_indicators` (Line 23128)
+    - Method `_comp_ms_display` (Line 23142) — Display fields of a composition manuscript/part row: shelfmark, library
+    - Method `_comp_shelf_cells` (Line 23183) — The Shelfmark cell text of a manuscript/part row and of each of its page
+    - Method `_comp_shelf_cells_uncached` (Line 23201)
+    - Method `_comp_ms_sys_id` (Line 23235)
+    - Method `_comp_filter_population` (Line 23241) — Every composition item the tree can show, drawn or not.
+    - Method `_comp_filter_state` (Line 23248) — The current tree filters, frozen, plus the host lookups the rule needs.
+    - Method `_apply_comp_tree_filters` (Line 23353) — Hide/show composition tree rows by the shared rule (comp_view_filter).
+    - Method `_comp_filter_summary` (Line 23409) — One line naming the active result-list filters, for the Manuscript Viewer.
+    - Method `_comp_data_matches_filters` (Line 23444)
+    - Method `_text_matches_filter` (Line 23486)
+    - Method `start_metadata_loading` (Line 23496)
+    - Method `on_meta_progress` (Line 23554)
+    - Method `on_meta_finished` (Line 23594)
+    - Method `_format_metadata_status` (Line 23607)
+    - Method `_create_action_button` (Line 23615)
+    - Method `_is_item_in_non_recent_list` (Line 23632)
+    - Method `_set_add_to_list_button_label` (Line 23639)
+    - Method `_update_browse_add_to_list_button` (Line 23644)
+    - Method `_update_search_row_list_indicator` (Line 23654)
+    - Method `_update_search_action_stars` (Line 23676)
+    - Method `on_table_cell_entered` (Line 23682)
+    - Method `on_lists_table_cell_entered` (Line 23707)
+    - Method `eventFilter` (Line 23723)
+    - Method `_collect_sorted_results` (Line 23817)
+    - Method `_extract_fl_id` (Line 23833)
+    - Method `show_full_text` (Line 23863)
+    - Method `show_full_text_for_result` (Line 23884)
+    - Method `open_result_in_browse_from_table` (Line 23913)
+    - Method `on_search_select_all_toggled` (Line 23929) — Handle Select All checkbox toggle (skips hidden/excluded rows).
+    - Method `on_search_result_item_changed` (Line 23942) — Handle individual checkbox changes in search results.
+    - Method `_update_search_export_label` (Line 23974)
+    - Method `search_add_selected_to_list` (Line 23995) — Add selected search results to a list.
+    - Method `search_add_row_to_list` (Line 24022) — Add a single search result row to a list.
+    - Method `_collect_selected_comp_pages` (Line 24038)
+    - Method `comp_add_selected_to_list` (Line 24069) — Add selected composition results to a list.
+    - Method `open_result_in_browse` (Line 24094)
+    - Method `_lookup_local_filepath` (Line 24177) — Phase 95 D-28 — look up the canonical filepath for a LOCAL sys_id.
+    - Method `_prime_local_filepath_cache` (Line 24202) — v7.16 BUG-6: batch-load canonical filepaths for all LOCAL hits in
+    - Method `_get_local_pages_for_sys_id` (Line 24224) — Return sorted [(p_num, text), ...] for all indexed pages of a LOCAL sys_id.
+    - Method `_get_local_full_text_for_sys_id` (Line 24271) — Category 3: aggregate all pages of a LOCAL sys_id into a single text.
+    - Method `_open_local_browse` (Line 24296) — Phase 95 D-27 + Phase 96 NEW-2 view-mode dispatch.
+    - Method `_render_view_all_batch` (Line 24503) — Phase 97 U-04 — re-render the accumulated page list via apply_line_numbered_text.
+    - Method `_append_next_view_all_batch` (Line 24542) — Phase 97 U-04 — schedule the next 50-page batch via QTimer.singleShot(0, ...).
+    - Method `_on_browse_open_file_clicked` (Line 24560) — Phase 95 D-28 — launch OS default app for the current LOCAL file.
+    - Method `_on_browse_open_file_location_clicked` (Line 24571) — v7.16: reveal the current LOCAL file in the OS file manager.
+    - Method `_is_browsing_local` (Line 24583) — Return True when the Browse panel currently shows a LOCAL file.
+    - Method `_browse_prev_next` (Line 24594) — Unified prev/next handler for Browse panel.
+    - Method `_show_local_browse_controls` (Line 24605) — Phase 96 NEW-2: update Browse-panel controls for LOCAL vs Genizah mode.
+    - Method `_open_local_browse_page` (Line 24638) — Phase 96 NEW-2: render ONE LOCAL page at a time in the Browse panel.
+    - Method `_on_local_browse_nav` (Line 24829) — Phase 96 NEW-2: prev/next click handler for LOCAL Browse nav.
+    - Method `_toggle_local_browse_view_mode` (Line 24866) — Phase 96 NEW-2: flip View-All ↔ Per-Page and re-render.
+    - Method `send_result_to_composition` (Line 24891)
+    - Method `_sanitize_for_excel` (Line 24923) — Cleans text to prevent Excel XML corruption.
+    - Method `_add_docx_highlighted_runs` (Line 24930)
+    - Method `_set_paragraph_rtl` (Line 24941)
+    - Method `_set_table_rtl` (Line 24954)
+    - Method `_set_table_width_pct` (Line 24964)
+    - Method `export_results` (Line 24975) — Export results handling specific formats directly.
+    - Method `export_comp_report` (Line 25402)
+    - Method `open_filter_dialog` (Line 26467)
+    - Method `_get_filter_text` (Line 26506) — Get combined filter text from enabled sources.
+    - Method `_update_list_filter_cache` (Line 26514) — Cache the set of system IDs for the currently selected lists to optimize filtering.
+    - Method `open_list_filter_dialog` (Line 26535)
+    - Method `toggle_list_filter` (Line 26553)
+    - Method `load_comp_file` (Line 26572)
+    - Method `_excl_get` (Line 26603) — One field of one surface's exclusion list.
+    - Method `_excl_set` (Line 26607)
+    - Method `_clear_exclusions` (Line 26610) — Empty ONE surface's exclusion list, leaving the other alone.
+    - Method `_comp_snapshot_has_own_exclusions` (Line 26619) — Does this composition snapshot carry its OWN exclusion list?
+    - Method `open_exclude_dialog` (Line 26634) — Edit ONE surface's exclusion list.
+    - Method `set_excluded_entries` (Line 26672) — Replace one surface's exclusion list from newline-separated text.
+    - Method `_normalize_shelfmark` (Line 26701) — Normalize shelfmarks using the canonical function from genizah_core.
+    - Method `_rerender_with_exclusions` (Line 26705) — Re-apply the Search tab's Exclude Manuscripts list to the table.
+    - Method `_update_exclusion_display` (Line 26719) — Update ONE surface's exclusion status label (D-07 breakdown).
+    - Method `_remove_exclusion_source` (Line 26752) — Remove a single exclusion source by source_id (D-06 per-source clear).
+    - Method `_ensure_shelf_map` (Line 26763) — Build a mapping from normalized shelfmark to sys_id for quick lookups.
+    - Method `_get_meta_for_header` (Line 26785) — Return (sys_id, p_num, shelfmark, title) preferring metadata bank for shelfmarks.
+    - Method `_comp_item_is_local` (Line 26803) — Phase 110 UAT (Issue 1): True iff a composition item is a LOCAL hit.
+    - Method `_comp_local_display_fields` (Line 26829) — Phase 110 UAT (Issue 1): compute (shelfmark, library_display) for a
+    - Method `_prime_comp_local_filepath_cache` (Line 26861) — Phase 110 UAT (Issue 1): batch-prime _local_filepath_cache for the
+    - Method `_item_matches_exclusion` (Line 26898)
+    - Method `_apply_manual_exclusions` (Line 26927)
+    - Method `toggle_composition` (Line 26953)
+    - Method `cancel_composition` (Line 27003) — Cancel composition search gracefully (called by Escape shortcut).
+    - Method `reset_comp_ui` (Line 27018)
+    - Method `_reset_is_pending` (Line 27030) — True while a New pressed during the CURRENT composition run's
+    - Method `_retry_pending_reset` (Line 27042) — Poll until the cancelled witness batch has actually finished, then
+    - Method `_reset_composition` (Line 27074) — Clear all composition search state and start fresh.
+    - Method `_emit_comp_search_telemetry` (Line 27256) — Emit desktop_search_executed for a composition search run (Phase 114 USAGE-03).
+    - Method `run_composition` (Line 27294) — Main entry point for Composition Search.
+    - Method `on_comp_display_mode_changed` (Line 27652)
+    - Method `run_recursive_composition` (Line 27671)
+    - Method `on_comp_status_update` (Line 27715)
+    - Method `on_comp_progress` (Line 27720)
+    - Method `on_comp_error` (Line 27750) — Handle errors during composition search.
+    - Method `on_comp_scan_finished` (Line 27771)
+    - Method `start_grouping` (Line 27958)
+    - Method `on_grouping_error` (Line 28001)
+    - Method `on_comp_finished` (Line 28014)
+    - Method `_collect_comp_items` (Line 28056)
+    - Method `_comp_sort_mode_for_column` (Line 28074)
+    - Method `_configure_comp_tree_header` (Line 28083) — Configure the LIVE composition header.
+    - Method `on_comp_header_clicked` (Line 28128)
+    - Method `_current_comp_sort_mode` (Line 28159) — The sort mode, validated.
+    - Method `_get_comp_item_meta` (Line 28171)
+    - Method `_comp_sort_key` (Line 28189)
+    - Method `_sort_comp_items` (Line 28216)
+    - Method `_build_comp_preview_label` (Line 28221)
+    - Method `_set_comp_tree_text` (Line 28227)
+    - Method `_format_score_with_boundary` (Line 28231) — Format score string with boundary indicator if applicable.
+    - Method `_get_boundary_tooltip` (Line 28242) — Get tooltip text for boundary match indicator.
+    - Method `_process_snippet_queue` (Line 28252)
+    - Method `_update_comp_tree_tooltip` (Line 28273)
+    - Method `_refresh_comp_tree_tooltips` (Line 28300)
+    - Method `_apply_comp_node_previews` (Line 28312)
+    - Method `_clear_comp_node_previews` (Line 28327)
+    - Method `_set_comp_node_previews` (Line 28333)
+    - Method `_comp_preview_source_text` (Line 28359) — The source-context text exactly as the tree previews it (hits wrapped in
+    - Method `display_comp_results` (Line 28377)
+    - Method `_get_filter_reason` (Line 28857) — Get human-readable filter reason for a composition result item.
+    - Method `_make_node_checkable` (Line 28882) — Make a tree node checkable.
+    - Method `_apply_comp_printed_badge` (Line 28887) — Set dedicated Printed column on composition tree node if manuscript is printed material.
+    - Method `_add_manuscript_node` (Line 28896) — Add a manuscript/part node to the tree. Used for lazy/batched loading.
+    - Method `_comp_flat_marker_map` (Line 29024) — Rows the flat view must mark: {id(item): (item, kind, reason)}.
+    - Method `_comp_flat_root_label` (Line 29039) — 'All Results (N)', plus how many of them are filtered or excluded.
+    - Method `_apply_comp_flat_marker` (Line 29053) — Mark a flat-view row that belongs to the Filtered or Excluded group.
+    - Method `_add_single_node_to_tree` (Line 29070) — Dedicated helper to add one row to the tree.
+    - Method `_start_batched_tree_load` (Line 29130) — Start loading items into tree in batches to prevent UI freeze.
+    - Method `_batch_parent_is_alive` (Line 29149) — False once Qt has deleted the parent item under us.
+    - Method `_finish_batched_tree_load` (Line 29159) — Release the queue and hand the tree back to the user.
+    - Method `_process_tree_batch` (Line 29168) — Process one batch of items and schedule next batch.
+    - Method `_trigger_lazy_metadata_fetch` (Line 29209) — Starts background fetching for items that are currently displayed but missing data.
+    - Method `on_comp_tree_item_changed` (Line 29223)
+    - Method `on_comp_header_toggled` (Line 29254) — Toggle all root items in the composition tree.
+    - Method `_set_check_state_recursive` (Line 29269)
+    - Method `_update_comp_export_label` (Line 29275)
+    - Method `_collect_checked_comp_items_struct` (Line 29284) — Collect checked items maintaining the structure (Main, Appendix, etc.)
+    - Method `on_comp_tree_item_expanded` (Line 29427)
+    - Method `on_comp_tree_item_collapsed` (Line 29460)
+    - Method `_sync_parent_check_state` (Line 29464)
+    - Method `_collect_checked_comp_page_uids` (Line 29482)
+    - Method `_collect_all_comp_page_uids` (Line 29512)
+    - Method `_update_recursive_button_state` (Line 29541)
+    - Method `_has_comp_results` (Line 29557)
+    - Method `show_comp_detail` (Line 29564)
+    - Method `_refresh_comp_tree_metadata` (Line 29654)
+    - Method `_fmt_item_legacy` (Line 29678)
+    - Method `_format_comp_entry` (Line 29698)
+    - Method `_fetch_metadata_with_dialog` (Line 29714)
+    - Method `_resolve_meta_labels` (Line 29770)
+    - Method `_update_part_state_for_sid` (Line 29783) — Refresh Part context (Neubauer) for the given system ID.
+    - Method `browse_load` (Line 29797)
+    - Method `_browse_load_part` (Line 29970) — Load a Codicological Part (Neubauer) for browsing.
+    - Method `browse_navigate` (Line 30107)
+    - Method `browse_render_page` (Line 30154)
+    - Method `browse_open_catalog` (Line 30526)
+    - Method `browse_open_pgp` (Line 30531) — Open the current manuscript's Princeton Geniza Project page.
+    - Method `_update_browse_pgp_button` (Line 30536) — Show the browse PGP button only while a PGP url is actually known.
+    - Method `_browse_open_external_link` (Line 30548)
+    - Method `_on_browse_thumb_resolved` (Line 30555)
+    - Method `start_browse_download` (Line 30561)
+    - Method `on_browse_img_loaded` (Line 30577)
+    - Method `on_browse_img_failed` (Line 30587)
+    - Method `cancel_browse_image_thread` (Line 30591)
+    - Method `_cleanup_browse_inflight` (Line 30606) — Remove finished browse thread from in-flight list.
+    - Method `fetch_browse_thumbnail` (Line 30614)
+    - Method `check_updates_auto` (Line 30634) — Run update checker silently at startup.
+    - Method `check_updates_manual` (Line 30645) — Run update checker with UI feedback.
+    - Method `on_update_result` (Line 30655)
+    - Method `on_update_error` (Line 30688)
+    - Method `_on_sidecar_updates` (Line 30696) — Handle sidecar update availability notification.
+    - Method `_start_sidecar_download` (Line 30720) — Download sidecar updates sequentially.
+    - Method `_reset_sidecar_connections` (Line 30734) — Close all sidecar DB connections so files can be replaced.
+    - Method `_download_next_sidecar` (Line 30746) — Download the next sidecar in the queue.
+    - Method `_on_sidecar_download_finished` (Line 30764) — Handle completion of a single sidecar download.
+    - Method `on_update_dismissed` (Line 30772) — Save dismissed version to config.
+    - Method `on_whats_new_dismissed` (Line 30776) — Save that user has seen What's New for this version.
+    - Method `show_whats_new_dialog` (Line 30780) — Show detailed What's New dialog.
+    - Method `start_in_app_update` (Line 30787) — Start the in-app update process with progress dialog.
+    - Method `run_indexing` (Line 30800)
+    - Method `on_index_progress` (Line 30851)
+    - Method `on_index_finished` (Line 30856)
+    - Method `on_index_error` (Line 30862)
+    - Method `_on_history_menu_hovered` (Line 30889) — Highlight the active QWidgetAction container on hover/keyboard navigation.
+    - Method `_show_search_history_menu` (Line 30905) — Show the search history dropdown below the query input.
+    - Method `_show_comp_history_menu` (Line 30913) — Show the composition history dropdown below the title input.
+    - Method `_refresh_search_history` (Line 30920) — Rebuild the search history menu with per-item delete buttons.
+    - Method `_refresh_comp_history` (Line 30934) — Rebuild the composition history menu with per-item delete buttons.
+    - Method `_build_filter_summary` (Line 30949) — Build a compact filter summary string like [כולל: תנ״ך, תוספתא. 1000-1300].
+    - Method `_history_query_with_witnesses` (Line 31014) — The witness count on a history line, rendered NOW.
+    - Method `_add_history_menu_item` (Line 31049) — Add a single history entry to a menu with a delete button.
+    - Method `_on_history_item_clicked` (Line 31110) — Restore state when a history menu item is clicked.
+    - Method `_delete_history_item` (Line 31122) — Delete a single history entry and refresh the menu.
+    - Method `_restore_regular_search_from_state` (Line 31137) — Apply a history entry and re-run the regular search.
+    - Method `_restore_comp_search_from_state` (Line 31211) — Apply a history entry and re-run the composition search.
+    - Method `_add_regular_search_to_history` (Line 31305) — Save the current regular search to history.
+    - Method `_add_comp_search_to_history` (Line 31343) — Save the current composition search to history.
+    - Method `_clear_search_history` (Line 31422) — Clear all entries for a search type after confirmation.
+    - Method `_apply_persistent_session_preferences` (Line 31441) — Apply lightweight preferences that must survive even when full
+    - Method `_save_session` (Line 31550) — Save current search state to disk for session persistence.
+    - Method `_schedule_session_save` (Line 31719) — Schedule a debounced session save (500ms).
+    - Method `_restore_session_then_lists_sync` (Line 31727) — Startup: restore the session (its questions are modal, so they are
+    - Method `_start_restored_lists_sync` (Line 31736) — A sign-in restored from the last session syncs as an explicit one does:
+    - Method `_restore_session` (Line 31752) — Restore search state from saved session on startup.
+    - Method `_passage_workers_busy` (Line 32212)
+    - Method `_defer_close_for_passage` (Line 32227) — Returns True when the close was deferred. Uses a QTimer to
+    - Method `_retry_pending_close` (Line 32256)
+    - Method `closeEvent` (Line 32266)
+    - Method `_add_single_comp_node` (Line 32417) — Adds a node to the composition tree with parent/child logic.
+    - Method `_on_comp_item_expanded` (Line 32512)
+    - Method `_on_comp_item_collapsed` (Line 32517)
+    - Method `_comp_viewer_entry` (Line 32545) — One Manuscript Viewer entry for a hit page, tagged with its category.
+    - Method `on_comp_item_double_clicked` (Line 32580) — Open the Manuscript Viewer on the clicked result, with the WHOLE result list
+    - Method `navigate_manuscript` (Line 32632) — Navigate to prev/next manuscript by file order, crossing Part boundaries.
+    - Method `_update_part_image_for_folio` (Line 32696) — Update image viewer to show the current folio's images within a Part.
+- **Function** `resource_path` (Line 32743) — Get absolute path to resource, works for dev and for PyInstaller
 
 ## genizah_core.py
 
@@ -732,95 +927,98 @@ desktop.Y.X` identity holds via the facades.
 
 ## desktop/supabase_corrections_client.py
 
-- **Class** `User` (Line 87)
-- **Class** `Correction` (Line 102)
-- **Class** `Comment` (Line 127)
-- **Class** `Discovery` (Line 147)
-- **Class** `FragmentJoin` (Line 176)
-- **Class** `JoinedFragmentDetail` (Line 193)
-- **Class** `ConnectedFragments` (Line 204)
-- **Class** `DiscoveryResponse` (Line 216)
-- **Class** `FeedItem` (Line 228)
-- **Function** `_map_join_type` (Line 266)
-- **Class** `SupabaseCorrectionsClient` (Line 274)
-    - Method `__init__` (Line 282)
-    - Method `_get_client` (Line 305)
-    - Method `_load_credentials` (Line 322)
-    - Method `_save_credentials` (Line 359)
-    - Method `save_login_credentials` (Line 398)
-    - Method `get_saved_login_credentials` (Line 431)
-    - Method `clear_saved_login_credentials` (Line 463)
-    - Method `_load_cache` (Line 489)
-    - Method `_save_cache` (Line 502)
-    - Method `get_cached_data` (Line 510)
-    - Method `set_cached_data` (Line 515)
-    - Method `clear_cache` (Line 520)
-    - Method `is_server_available` (Line 529)
-    - Method `reset_offline_status` (Line 557)
-    - Method `is_logged_in` (Line 564)
-    - Method `login` (Line 575)
-    - Method `register` (Line 615)
-    - Method `logout` (Line 664)
-    - Method `request_password_reset` (Line 680)
-    - Method `_load_user_profile` (Line 706)
-    - Method `get_current_user` (Line 741)
-    - Method `create_correction` (Line 763)
-    - Method `get_correction` (Line 812)
-    - Method `get_corrections_for_document` (Line 828)
-    - Method `get_my_corrections` (Line 873)
-    - Method `get_all_corrections` (Line 923)
-    - Method `vote_correction` (Line 983)
-    - Method `_parse_correction` (Line 1012)
-    - Method `create_comment` (Line 1033)
-    - Method `get_document_comments` (Line 1070)
-    - Method `get_comments_for_document` (Line 1093)
-    - Method `get_my_comments` (Line 1097)
-    - Method `_parse_comment` (Line 1117)
-    - Method `create_discovery` (Line 1135)
-    - Method `get_discovery` (Line 1179)
-    - Method `get_discoveries` (Line 1205)
-    - Method `vote_discovery` (Line 1261)
-    - Method `_parse_discovery` (Line 1296)
-    - Method `create_join` (Line 1324)
-    - Method `get_connected_fragments` (Line 1365)
-    - Method `get_connected_fragments_quick` (Line 1422)
-    - Method `get_connected_fragments_by_id` (Line 1426)
-    - Method `search_joins` (Line 1467)
-    - Method `get_my_joins` (Line 1502)
-    - Method `_parse_join` (Line 1536)
-    - Method `_resolve_join_authors` (Line 1552)
-    - Method `publish_puzzle_join` (Line 1585)
-    - Method `unpublish_puzzle_join` (Line 1604)
-    - Method `check_is_published` (Line 1616)
-    - Method `get_published_puzzle_joins` (Line 1628)
-    - Method `get_published_joins_for_fragment` (Line 1640)
-    - Method `fork_puzzle_join` (Line 1652)
-    - Method `get_feed` (Line 1668)
-    - Method `get_correction_stats` (Line 1748)
-    - Method `get_discovery_stats` (Line 1765)
-    - Method `submit_correction` (Line 1794)
-    - Method `get_all_comments` (Line 1809)
-    - Method `update_discovery` (Line 1828)
-    - Method `delete_discovery` (Line 1860)
-    - Method `add_discovery_response` (Line 1872)
-    - Method `get_discovery_responses` (Line 1883)
-    - Method `mark_discovery_answered` (Line 1888)
-    - Method `get_pending_corrections` (Line 1901)
-    - Method `review_correction` (Line 1905)
-    - Method `get_document_stats` (Line 1939)
-    - Method `get_corrected_text` (Line 1956)
-    - Method `get_page_versions` (Line 1962)
-    - Method `get_version_content` (Line 1967)
-    - Method `record_document_view` (Line 1971)
-    - Method `get_leaderboard` (Line 1975)
-    - Method `get_join_by_id` (Line 1998)
-    - Method `delete_join` (Line 2014)
-    - Method `update_join` (Line 2026)
-    - Method `react_to_comment` (Line 2052)
-    - Method `pin_discovery` (Line 2057)
-    - Method `hide_discovery` (Line 2069)
-    - Method `unhide_discovery` (Line 2073)
-- **Function** `get_supabase_corrections_client` (Line 2093)
+- **Function** `_sanitize_ilike_pattern` (Line 73) — Sanitize a user string for interpolation into a PostgREST `.ilike` pattern.
+- **Class** `User` (Line 96) — User data class
+- **Class** `Correction` (Line 111) — Correction data class
+- **Class** `Comment` (Line 136) — Comment data class
+- **Class** `Discovery` (Line 156) — Discovery/Question data class
+- **Class** `FragmentJoin` (Line 185) — Fragment join data class
+- **Class** `JoinedFragmentDetail` (Line 202) — A fragment in the connected component with relationship info
+- **Class** `ConnectedFragments` (Line 213) — Connected fragments response
+- **Class** `DiscoveryResponse` (Line 225) — Response to a discovery
+- **Class** `FeedItem` (Line 237) — Activity feed item
+- **Function** `_map_join_type` (Line 275) — Map UI join type value to DB CHECK constraint value.
+- **Class** `SupabaseCorrectionsClient` (Line 283) — Supabase-based client for corrections, comments, discoveries, and joins.
+    - Method `__init__` (Line 291) — Initialize the Supabase corrections client.
+    - Method `_get_client` (Line 314) — Get or create Supabase client.
+    - Method `_load_credentials` (Line 331) — Load saved Supabase session from disk.
+    - Method `_save_credentials` (Line 368) — Save Supabase session to disk.
+    - Method `save_login_credentials` (Line 407) — Save login credentials securely using keyring.
+    - Method `get_saved_login_credentials` (Line 440) — Get saved login credentials.
+    - Method `clear_saved_login_credentials` (Line 472) — Clear saved login credentials.
+    - Method `_load_cache` (Line 498) — Load cached community data from disk.
+    - Method `_save_cache` (Line 511) — Save community data cache to disk.
+    - Method `get_cached_data` (Line 519) — Get cached data if available.
+    - Method `set_cached_data` (Line 524) — Set cache data and save to disk.
+    - Method `clear_cache` (Line 529) — Clear the community data cache.
+    - Method `is_server_available` (Line 538) — Check if Supabase is reachable.
+    - Method `reset_offline_status` (Line 566) — Reset offline status to force a fresh connectivity check.
+    - Method `is_logged_in` (Line 573) — Check if user is logged in.
+    - Method `login` (Line 584) — Login with email and password.
+    - Method `register` (Line 624) — Register a new user.
+    - Method `logout` (Line 677) — Log out and forget the saved session.
+    - Method `_forget_saved_session` (Line 706)
+    - Method `_revoke_session` (Line 714)
+    - Method `request_password_reset` (Line 720) — Request a password reset email.
+    - Method `_load_user_profile` (Line 746) — Load user profile from Supabase.
+    - Method `get_current_user` (Line 781) — Get current logged-in user.
+    - Method `create_correction` (Line 803) — Create a new correction.
+    - Method `get_correction` (Line 866) — Get a specific correction.
+    - Method `get_corrections_for_document` (Line 882) — Get all corrections for a document.
+    - Method `get_my_corrections` (Line 930) — Get current user's corrections.
+    - Method `get_all_corrections` (Line 980) — Get all corrections.
+    - Method `vote_correction` (Line 1042) — Vote on a correction (+1 or -1).
+    - Method `_parse_correction` (Line 1071) — Parse correction data into Correction object.
+    - Method `create_comment` (Line 1092) — Create a new comment.
+    - Method `get_document_comments` (Line 1140) — Get comments for a document.
+    - Method `get_comments_for_document` (Line 1167) — Alias for get_document_comments.
+    - Method `get_my_comments` (Line 1171) — Get current user's comments.
+    - Method `_parse_comment` (Line 1191) — Parse comment data into Comment object.
+    - Method `create_discovery` (Line 1209) — Create a new discovery/question.
+    - Method `get_discovery` (Line 1253) — Get a single discovery.
+    - Method `get_discoveries` (Line 1279) — Get list of discoveries.
+    - Method `vote_discovery` (Line 1335) — Vote on a discovery ('up', 'down', or 'none').
+    - Method `_parse_discovery` (Line 1370) — Parse discovery data into Discovery object.
+    - Method `create_join` (Line 1398) — Create a join between two fragments.
+    - Method `get_connected_fragments` (Line 1439) — Get all fragments connected to the given shelfmark.
+    - Method `get_connected_fragments_quick` (Line 1505) — Get connected fragments with a short timeout.
+    - Method `get_connected_fragments_by_id` (Line 1509) — Get all fragments connected to the given document_id.
+    - Method `search_joins` (Line 1550) — Search joins by shelfmark pattern or filters. Returns (joins, total).
+    - Method `get_my_joins` (Line 1587) — Get current user's joins. Returns (joins, total).
+    - Method `_parse_join` (Line 1623) — Parse join data into FragmentJoin object.
+    - Method `_resolve_join_authors` (Line 1639) — Batch-resolve user_ids to full names via profiles table.
+    - Method `publish_puzzle_join` (Line 1672) — Publish a puzzle join document to community.
+    - Method `unpublish_puzzle_join` (Line 1691) — Unpublish a puzzle join.
+    - Method `check_is_published` (Line 1703) — Check if a join document is currently published.
+    - Method `get_published_puzzle_joins` (Line 1715) — Get published puzzle joins for feed display.
+    - Method `get_published_joins_for_fragment` (Line 1727) — Get published puzzle joins containing a specific fragment.
+    - Method `fork_puzzle_join` (Line 1739) — Fork a published puzzle join to local workspace.
+    - Method `get_feed` (Line 1755) — Get activity feed - combines discoveries, corrections, comments, joins.
+    - Method `get_correction_stats` (Line 1835) — Get correction statistics.
+    - Method `get_discovery_stats` (Line 1852) — Get discovery statistics matching web stat card keys.
+    - Method `submit_correction` (Line 1881) — Submit a draft correction for review.
+    - Method `get_all_comments` (Line 1896) — Get all public comments.
+    - Method `update_discovery` (Line 1915) — Update a discovery.
+    - Method `delete_discovery` (Line 1947) — Delete (hide) a discovery.
+    - Method `add_discovery_response` (Line 1959) — Add a response to a discovery (as a comment).
+    - Method `get_discovery_responses` (Line 1970) — Get responses for a discovery.
+    - Method `mark_discovery_answered` (Line 1975) — Mark a question as answered.
+    - Method `get_pending_corrections` (Line 1988) — Get pending corrections for review.
+    - Method `review_correction` (Line 1992) — Review a correction.
+    - Method `get_document_stats` (Line 2026) — Get statistics for a document.
+    - Method `get_corrected_text` (Line 2043) — Apply all approved corrections to document text.
+    - Method `get_page_versions` (Line 2049) — Fetch all versions for a document page.
+    - Method `get_version_content` (Line 2054) — Fetch content for a specific version.
+    - Method `record_document_view` (Line 2058) — Record a document view for statistics.
+    - Method `get_leaderboard` (Line 2062) — Get top users by reputation.
+    - Method `get_join_by_id` (Line 2085) — Get a specific join by ID.
+    - Method `delete_join` (Line 2101) — Delete a join.
+    - Method `update_join` (Line 2113) — Update a join's metadata.
+    - Method `react_to_comment` (Line 2139) — Add/toggle reaction to a comment.
+    - Method `pin_discovery` (Line 2144) — Pin or unpin a discovery.
+    - Method `hide_discovery` (Line 2156) — Hide a discovery.
+    - Method `unhide_discovery` (Line 2160) — Unhide a discovery.
+- **Function** `get_supabase_corrections_client` (Line 2180) — Get or create the Supabase corrections client singleton.
 
 ## desktop/gui_threads.py
 
@@ -1710,163 +1908,264 @@ moved out of `genizah_core.py` (→ `shared/*`) and `genizah_app.py` (→ `deskt
 
 - **Function** `_tr` (Line 31) — Translate text if current language is Hebrew.
 - **Function** `_worth_retrying_at_startup` (Line 44) — Any failed read of lists.pkl is retried at startup, except a file that is gone.
-- **Class** `ListsManager` (Line 49) — Manages personal lists (starred/saved manuscripts) with tags and notes.
-    - Method `__init__` (Line 113) — Initialize the lists manager.
-    - Method `_get_default_data` (Line 119) — Return the default data structure.
-    - Method `_backup_paths` (Line 150)
-    - Method `_read_store` (Line 153) — Unpickle one copy of the store and fill in the fields newer builds expect.
-    - Method `load` (Line 188) — Load lists from file, falling back to .bak1, .bak2, .bak3 in that order.
-    - Method `_rotate_backups` (Line 226) — Make a copy of lists.pkl the new .bak1: .bak2 -> .bak3, .bak1 -> .bak2.
-    - Method `_keep_unreadable_locked` (Line 256) — Copy the lists.pkl that load() could not read to lists.pkl.unreadable-<time>.
-    - Method `keep_unreadable_copy` (Line 269) — After a load that could not read lists.pkl, copy it aside now.
-    - Method `save` (Line 289) — Save lists to file. Returns True when lists.pkl was written.
-    - Method `_tell` (Line 326) — Call a save hook, if one is set; what it raises is logged, not passed on.
-    - Method `write_snapshot` (Line 335) — Write the in-memory store to lists.pkl.<label>, atomically.
-    - Method `clear_all` (Line 351) — Clear all lists and reset to default state. Used after migration.
-    - Method `enable_cloud_sync` (Line 358) — Enable cloud sync for the given user (call after login).
-    - Method `disable_cloud_sync` (Line 377) — Disable cloud sync (call on logout).
-    - Method `sync_from_cloud` (Line 386) — Pull lists from cloud and merge with local data.
-    - Method `is_sync_available` (Line 397) — Check if cloud sync is available (user logged in, network ok).
-    - Property `_last_sync` (Line 409) — Get timestamp of last sync (for debouncing).
-    - Method `sync_to_cloud` (Line 418) — Push local lists to cloud.
-    - Method `differing_notes_count` (Line 429) — Entries in a list whose note or tags differ from the account's copy and were left as they are.
-    - Method `get_cloud_lists_preview` (Line 442) — Get preview of cloud lists without syncing (for dialog display).
-    - Method `get_local_lists_summary` (Line 453) — Get summary of local lists for dialog display.
-    - Method `get_all_lists` (Line 469) — Get all lists sorted alphabetically (system lists have special handling).
-    - Method `get_deleted_lists` (Line 498) — Get soft-deleted lists (trash view).
-    - Method `_get_list_item_count` (Line 512) — Get the number of items in a list.
-    - Method `create_list` (Line 523) — Create a new list. Returns the list ID.
-    - Method `update_list` (Line 550) — Update list properties.
-    - Method `update_list_project` (Line 574) — Assign a list to a project (or clear project).
-    - Method `create_project` (Line 590) — Create a new project. Returns the project ID.
-    - Method `get_projects` (Line 618) — Get projects sorted by name.
-    - Method `update_project` (Line 632) — Update a project's properties.
-    - Method `delete_project` (Line 642) — Delete a project and optionally its lists.
-    - Method `_get_next_project_color` (Line 665)
-    - Method `apply_list_layout` (Line 677) — Apply list ordering and project assignments in one save.
-    - Method `delete_list` (Line 701) — Soft-delete a list (move to trash).
-    - Method `restore_list` (Line 736) — Restore a soft-deleted list from trash.
-    - Method `permanently_delete_list` (Line 749) — Permanently delete a list (no recovery).
-    - Method `empty_trash` (Line 753) — Permanently delete all soft-deleted lists.
-    - Method `duplicate_list` (Line 762) — Duplicate a list with all its items.
-    - Method `merge_lists` (Line 784) — Merge source list into target list.
-    - Method `find_duplicate_lists` (Line 806) — Find all duplicate lists (same name) and return info for resolution.
-    - Method `merge_duplicate_group` (Line 859) — Merge a group of duplicate lists into one.
-    - Method `auto_merge_duplicate_group` (Line 910) — Automatically merge a duplicate group using heuristics.
-    - Method `restore_project_hierarchy` (Line 932) — Restore project hierarchy for orphaned lists by color matching.
-    - Method `_build_item_id` (Line 961)
-    - Method `add_item` (Line 968) — Add an item to a list. Returns True if added, False if already exists.
-    - Method `add_items_bulk` (Line 1012) — Add multiple items to a list at once.
-    - Method `update_item` (Line 1065) — Update an item's properties.
-    - Method `remove_item_from_list` (Line 1093) — Remove an item from a specific list.
-    - Method `move_items_to_list` (Line 1111) — Move items from one list to another.
-    - Method `get_items_in_list` (Line 1126) — Get all items in a list with their metadata.
-    - Method `get_item` (Line 1151) — Get a single item's data.
-    - Method `is_item_in_any_list` (Line 1161) — Check if an item is in any list (excluding recent).
-    - Method `get_item_lists` (Line 1165) — Get list of lists an item belongs to.
-    - Method `add_to_recent` (Line 1173) — Add an item to the recently viewed list.
-    - Method `get_all_tags` (Line 1217) — Get all tags for autocomplete.
-    - Method `add_tag_to_items` (Line 1221) — Add a tag to multiple items.
-    - Method `export_list` (Line 1241) — Export a list to a dictionary suitable for JSON serialization.
-    - Method `import_list` (Line 1279) — Import a list from exported data. Returns (list_id, imported_count, unidentified_count).
-    - Method `shelfmark_sort_key` (Line 1327) — Sort key for shelfmarks that handles dots correctly.
-    - Method `get_items_sorted` (Line 1345) — Get items in a list, sorted by the specified field.
-    - Method `get_item_copy_text` (Line 1370) — Generate text for copying item info.
+- **Function** `_item_records` (Line 58)
+- **Function** `_pop_record` (Line 65)
+- **Function** `_queue_record` (Line 73) — An explicit removal of a remembered row: the next upload deletes it, by id and list.
+- **Function** `_identity` (Line 91)
+- **Function** `_queue_cloud_delete` (Line 96) — The entry left list_id for good: its row there, and any row on its way there, are to be deleted.
+- **Function** `_forget_item` (Line 114) — The entry is deleted: every row still remembered for it is to be deleted.
+- **Function** `_restore_cloud_row` (Line 132) — The entry is back in list_id before its removal (or move) from there was sent: undone.
+- **Function** `_mark_pending_move` (Line 180) — The entry moved from from_list to to_list: its row there goes with it, whatever to_list holds.
+- **Function** `_mark_unsent` (Line 204) — A list was changed here in what an upload sends for it: its name ('list_name_unsent'), or
+- **Function** `_keep_web_removal` (Line 224) — Keep an entry the website removed: forget its tombstone, so the next upload inserts it again.
+- **Class** `ListsManager` (Line 232) — Manages personal lists (starred/saved manuscripts) with tags and notes.
+    - Method `__init__` (Line 303) — Initialize the lists manager.
+    - Method `_get_default_data` (Line 309) — Return the default data structure.
+    - Method `_backup_paths` (Line 340)
+    - Method `_read_store` (Line 343) — Unpickle one copy of the store and fill in the fields newer builds expect.
+    - Method `load` (Line 378) — Load lists from file, falling back to .bak1, .bak2, .bak3 in that order.
+    - Method `_rotate_backups` (Line 416) — Make a copy of lists.pkl the new .bak1: .bak2 -> .bak3, .bak1 -> .bak2.
+    - Method `_keep_unreadable_locked` (Line 446) — Copy the lists.pkl that load() could not read to lists.pkl.unreadable-<time>.
+    - Method `keep_unreadable_copy` (Line 459) — After a load that could not read lists.pkl, copy it aside now.
+    - Method `save` (Line 479) — Save lists to file. Returns True when lists.pkl was written.
+    - Method `_tell` (Line 516) — Call a save hook, if one is set; what it raises is logged, not passed on.
+    - Method `write_snapshot` (Line 525) — Write the in-memory store (or payload, its pickled bytes) to lists.pkl.<label>, atomically.
+    - Method `saves_failing` (Line 541) — True while saves do not reach lists.pkl (see save()): the lists live in memory only.
+    - Method `clear_all` (Line 545) — Clear all lists and reset to default state. Used after migration.
+    - Method `enable_cloud_sync` (Line 552) — Enable cloud sync for the given user (call after login).
+    - Method `disable_cloud_sync` (Line 571) — Disable cloud sync (call on logout).
+    - Method `sync_from_cloud` (Line 580) — Pull lists from cloud and merge with local data.
+    - Method `is_sync_available` (Line 591) — Check if cloud sync is available (user logged in, network ok).
+    - Property `_last_sync` (Line 603) — Get timestamp of last sync (for debouncing).
+    - Method `sync_to_cloud` (Line 612) — Push local lists to cloud (keywords as ListsCloudSync.sync_to_cloud: data=, should_stop=, ...).
+    - Method `fetch_cloud_state` (Line 623) — The network half of a download (ListsCloudSync.fetch_cloud_state): reads nothing local.
+    - Method `apply_cloud_state` (Line 633) — The local half of a download, on this thread (ListsCloudSync.apply_cloud_state).
+    - Method `cloud_user` (Line 643) — The account list sync is set up for, or None.
+    - Method `remembered_row_ids` (Line 651) — The rows a download confirms, taken from the store on the thread that owns it.
+    - Method `begin_upload` (Line 668) — Snapshot lists.pkl.pre-upload and open the journal. Returns (copy, base), two copies of the store.
+    - Method `withdrawn_now` (Line 681) — The memberships removed since the upload began: (item id, list id). The engine's withdrawn().
+    - Method `_close_journal` (Line 687)
+    - Method `finish_upload` (Line 693) — Install an upload's copy, whatever the upload's end (success, failure, stop, error).
+    - Method `_began_as` (Line 702) — What the install needs of the store an upload began from.
+    - Method `abandon_upload` (Line 706) — The app closes while an upload runs: install what it reported, as finish_upload would.
+    - Method `_install_upload` (Line 740)
+    - Method `_replay` (Line 754) — The bookkeeping of every edit made during the upload, again, in order, on its copy.
+    - Method `_keep_user_deletes` (Line 759) — The deletes queued during the upload that its copy lacks: kept, unless the upload gave that
+    - Method `_install` (Line 774) — The copy's cloud identity into the live store; nothing else is touched. Returns whether it changed.
+    - Method `_book` (Line 825) — Apply a bookkeeping helper to the live store, and journal it while an upload runs on a copy.
+    - Method `_back_in_list` (Line 832) — An entry went into a list: if it left that list since the last upload, it gets its rows back.
+    - Method `pending_web_removals` (Line 838) — [(item id, list id)] of entries the website removed that are still in that list here.
+    - Method `resolve_web_removals` (Line 849) — Apply the prompt's answers {(item id, list id): 'remove' | 'keep'}. Returns (removed, kept).
+    - Method `differing_notes_count` (Line 875) — Entries in a list whose note or tags differ from the account's copy and were left as they are.
+    - Method `get_cloud_lists_preview` (Line 888) — Get preview of cloud lists without syncing (for dialog display); should_stop= as the engine's.
+    - Method `get_local_lists_summary` (Line 899) — Get summary of local lists for dialog display.
+    - Method `get_all_lists` (Line 915) — Get all lists sorted alphabetically (system lists have special handling).
+    - Method `get_deleted_lists` (Line 944) — Get soft-deleted lists (trash view).
+    - Method `_get_list_item_count` (Line 958) — Get the number of items in a list.
+    - Method `create_list` (Line 969) — Create a new list. Returns the list ID.
+    - Method `update_list` (Line 996) — Update list properties.
+    - Method `update_list_project` (Line 1022) — Assign a list to a project (or clear project).
+    - Method `create_project` (Line 1040) — Create a new project. Returns the project ID.
+    - Method `get_projects` (Line 1068) — Get projects sorted by name.
+    - Method `update_project` (Line 1082) — Update a project's properties.
+    - Method `delete_project` (Line 1092) — Delete a project and optionally its lists.
+    - Method `_get_next_project_color` (Line 1116)
+    - Method `apply_list_layout` (Line 1128) — Apply list ordering and project assignments in one save.
+    - Method `delete_list` (Line 1157) — Soft-delete a list (move to trash).
+    - Method `restore_list` (Line 1196) — Restore a soft-deleted list from trash.
+    - Method `permanently_delete_list` (Line 1210) — Permanently delete a list (no recovery).
+    - Method `empty_trash` (Line 1214) — Permanently delete all soft-deleted lists.
+    - Method `duplicate_list` (Line 1223) — Duplicate a list with all its items.
+    - Method `merge_lists` (Line 1245) — Merge source list into target list.
+    - Method `find_duplicate_lists` (Line 1268) — Find all duplicate lists (same name) and return info for resolution.
+    - Method `merge_duplicate_group` (Line 1321) — Merge a group of duplicate lists into one.
+    - Method `auto_merge_duplicate_group` (Line 1378) — Automatically merge a duplicate group using heuristics.
+    - Method `restore_project_hierarchy` (Line 1400) — Restore project hierarchy for orphaned lists by color matching.
+    - Method `_build_item_id` (Line 1430)
+    - Method `add_item` (Line 1437) — Add an item to a list. Returns True if added, False if already exists.
+    - Method `add_items_bulk` (Line 1482) — Add multiple items to a list at once.
+    - Method `update_item` (Line 1539) — Update an item's properties.
+    - Method `remove_item_from_list` (Line 1567) — Remove an item from a specific list.
+    - Method `move_items_to_list` (Line 1587) — Move items from one list to another (their cloud rows follow at the next upload).
+    - Method `get_items_in_list` (Line 1604) — Get all items in a list with their metadata.
+    - Method `get_item` (Line 1629) — Get a single item's data.
+    - Method `is_item_in_any_list` (Line 1639) — Check if an item is in any list (excluding recent).
+    - Method `get_item_lists` (Line 1643) — Get list of lists an item belongs to.
+    - Method `add_to_recent` (Line 1651) — Add an item to the recently viewed list.
+    - Method `get_all_tags` (Line 1695) — Get all tags for autocomplete.
+    - Method `add_tag_to_items` (Line 1699) — Add a tag to multiple items.
+    - Method `export_list` (Line 1719) — Export a list to a dictionary suitable for JSON serialization.
+    - Method `import_list` (Line 1757) — Import a list from exported data. Returns (list_id, imported_count, unidentified_count).
+    - Method `shelfmark_sort_key` (Line 1805) — Sort key for shelfmarks that handles dots correctly.
+    - Method `get_items_sorted` (Line 1823) — Get items in a list, sorted by the specified field.
+    - Method `get_item_copy_text` (Line 1848) — Generate text for copying item info.
 
 ## shared/lists_sync.py
 
-- **Function** `_norm` (Line 88)
-- **Function** `_id_key` (Line 95)
-- **Function** `_after` (Line 99) — One page of a keyset read (ListsCloudSync._paged): the rows after row id `after`.
-- **Function** `_item_identity` (Line 109) — (sys_id, fl_id, page) of a local item: its fields, else the ::fl:: / ::img:: parts of its key.
-- **Function** `_row_identity` (Line 122)
-- **Function** `_same_entry` (Line 128) — True only when two identities are certainly one entry.
-- **Function** `_clean` (Line 154)
-- **Function** `_has_lines` (Line 158) — small is empty, equal to big, or a run of complete lines of big (never a raw substring).
-- **Function** `_separators` (Line 165) — The line kept notes are joined with, in English and in Hebrew (a note may hold either).
-- **Function** `_blocks` (Line 176) — The texts a kept note is made of: the parts between its marker lines.
-- **Function** `_holds` (Line 184) — big already contains small: as complete lines, or every text small was kept from.
-- **Function** `_same_text` (Line 193) — Equal, or each holds the other: the same notes kept in another order.
-- **Function** `_keep_both` (Line 198) — Both texts: the desktop's, a marker line, then what the cloud's text adds to it.
-- **Function** `_fold_notes` (Line 215)
-- **Function** `_union` (Line 222)
-- **Function** `_tagset` (Line 230)
-- **Function** `_tags_filter_literal` (Line 234) — list_items.tags is jsonb: the cs/cd filters take JSON text, never the text[] literal {a,b}.
-- **Function** `count_differing_notes` (Line 239) — Entries whose note or tags differ from the account's copy and were left as they are.
-- **Function** `_records` (Line 269)
-- **Function** `_live_record` (Line 273)
-- **Function** `_orphans` (Line 280) — Records for local lists the item is no longer in (a Move, a removal, a merged list).
-- **Function** `_orphan_ids` (Line 287)
-- **Function** `_base_of` (Line 291) — A copy of the record naming this row (for its note/tag bases), or None.
-- **Function** `_drop_record` (Line 299)
-- **Function** `_drop_left_tombstones` (Line 307)
-- **Function** `_remember` (Line 315) — The only writer of a record. note/tags: the cloud values the local copy is known to include.
-- **Function** `_is_missing_column` (Line 351)
-- **Function** `_is_url_too_long` (Line 359)
-- **Function** `_insert_rolled_back` (Line 363) — True when an insert error proves nothing was written, so retrying rows one by one is safe.
-- **Function** `_session_user` (Line 383) — The user id of the client's current session, or None (no session, or no way to tell).
-- **Class** `_Pass` (Line 393) — Everything one sync pass learns; never kept on the sync object.
-    - Method `__init__` (Line 396)
-    - Method `check` (Line 414) — Called before every request.
-    - Method `records_naming` (Line 417) — Which records name each row: built at the pass's first record, then kept by _remember.
-    - Method `prove_auth` (Line 431)
-- **Function** `_list_order` (Line 437)
-- **Function** `_syncable_list` (Line 445)
-- **Function** `_match_rows` (Line 453) — Pair cloud rows of one list with local items. Returns {row_id: item_id}.
-- **Class** `ListsCloudSync` (Line 521) — Handles synchronization between local ListsManager and Supabase.
-    - Method `__init__` (Line 543) — Initialize the sync manager.
-    - Property `_sync_in_progress` (Line 553)
-    - Method `set_client` (Line 556) — Set an external authenticated client (from corrections system).
-    - Method `_get_client` (Line 561) — Get Supabase client - preferring the authenticated external client.
-    - Method `set_user` (Line 578) — Set the current user ID (UUID from Supabase auth).
-    - Method `clear_user` (Line 582) — Clear user ID (on logout).
-    - Method `is_sync_available` (Line 586) — Check if cloud sync is available.
-    - Method `get_cloud_lists_preview` (Line 601) — Get a preview of cloud lists without syncing.
-    - Method `_backup_local_data` (Line 648) — Snapshot the local lists before a sync. Returns True if the snapshot was written.
-    - Method `_guard` (Line 674) — Records belong to one account: drop another account's, then claim the store for this one.
-    - Method `_paged` (Line 686) — Read every row of a query, a page at a time by row id. Returns (rows, complete).
-    - Method `_fetch_list_rows` (Line 729)
-    - Method `_read_user_lists` (Line 754)
-    - Method `_confirm` (Line 759) — Where are these remembered rows now? Fills pass_.where, pass_.absent and pass_.locate_ok.
-    - Method `_may_tombstone` (Line 794) — May this remembered row be taken as removed on the website?
-    - Method `_tombstone` (Line 808)
-    - Method `_repair_shared_cloud_rows` (Line 820) — Items that hold the same cloud row: fold certain duplicates (download), split the rest.
-    - Method `sync_to_cloud` (Line 875) — Push local lists and items to Supabase.
-    - Method `_upload_result` (Line 906)
-    - Method `_upload` (Line 912)
-    - Method `_push_projects_and_lists` (Line 960) — Projects and lists as before, except that a cloud list has at most one local owner.
-    - Method `_push_list_items` (Line 1137) — The item half of an upload, for the given (local list, cloud list) pairs.
-    - Method `_hold_conflicts` (Line 1195) — Entries whose note (or tags) differ on one of their rows and may not be replaced there.
-    - Method `_write_list` (Line 1232)
-    - Method `_write_unmatched` (Line 1248) — A membership that no row of its list's read paired with.
-    - Method `_orphan_choice` (Line 1289) — The orphan whose row this membership takes (moved or adopted): (rank, key, record), or None.
-    - Method `_move_orphan` (Line 1318) — Move (or adopt) a row this item left in a list it is no longer in.
-    - Method `_orphan_gone` (Line 1373)
-    - Method `_reread` (Line 1381)
-    - Method `_changes` (Line 1391) — What an upload may change on a paired row.
-    - Method `_write_matched` (Line 1445) — A row paired with this membership; only what changed, conditional on what was read.
-    - Method `_send_rest` (Line 1474) — After a note/tag change could not be made: send the row's other changed fields alone.
-    - Method `_agreed_bases` (Line 1483) — Bases when a note/tag write did not happen: equal values are agreed, the rest unchanged.
-    - Method `_patch` (Line 1493) — One PATCH of a row, filtered by id, list and the note/tags it replaces.
-    - Method `_insert_rows` (Line 1541) — One batch per list; returned rows are recorded by identity, never by position.
-    - Method `_insert_one` (Line 1602)
-    - Method `sync_from_cloud` (Line 1619) — Pull lists and items from Supabase and merge with local data.
-    - Method `_fetch_cloud_state` (Line 1686) — Everything a download needs from the cloud; reads nothing local and writes nothing.
-    - Method `_apply_projects` (Line 1707) — Cloud projects mapped to local ones by name, as before.
-    - Method `_cloud_deleted_at` (Line 1744)
-    - Method `_map_lists` (Line 1761) — Each local list's own cloud list, and the same-name cloud lists read for it.
-    - Method `_apply_cloud_state` (Line 1900) — The local half of a download: map lists, fold rows into items, reconcile notes once per item.
-    - Method `_walk_list` (Line 2013) — The rows of one local list's own and same-name cloud lists: pair, fold or create.
-    - Method `_plan_list` (Line 2064)
-    - Method `_new_item` (Line 2161) — An unmatched row that is no local entry's: a new item at a free key.
-    - Method `_judge_unseen` (Line 2192) — A remembered row of this membership that no read or confirmation paired with it.
-    - Method `_sweep_unowned` (Line 2208) — Memberships whose local list has no cloud list of its own in this pass (deleted there, or none yet).
-    - Method `_reconcile` (Line 2231) — Every cloud value that reached this entry in this pass, applied at once, in row-id order.
-    - Method `sync_list_to_cloud` (Line 2287) — Push a specific list and its items to cloud.
-    - Method `sync_item_to_cloud` (Line 2348) — Push one membership (an item in one list) to cloud, as an upload would.
-    - Method `delete_list_from_cloud` (Line 2402) — Delete a list from cloud (cascade deletes items).
-    - Method `delete_item_from_cloud` (Line 2426) — Delete the one cloud row remembered for this item in this list; nothing else.
-- **Function** `get_lists_sync` (Line 2457) — Get or create the lists sync singleton.
+- **Function** `_held_state` (Line 84) — The parts of a list's own state its LIST_STATE_UNSENT mark holds back (a set of LIST_STATE_FIELDS).
+- **Function** `_norm` (Line 104)
+- **Function** `_id_key` (Line 111)
+- **Function** `_after` (Line 115) — One page of a keyset read (ListsCloudSync._paged): the rows after row id `after`.
+- **Function** `_item_identity` (Line 125) — (sys_id, fl_id, page) of a local item: its fields, else the ::fl:: / ::img:: parts of its key.
+- **Function** `_row_identity` (Line 138)
+- **Function** `_same_entry` (Line 144) — True only when two identities are certainly one entry.
+- **Function** `_clean` (Line 170)
+- **Function** `_has_lines` (Line 174) — small is empty, equal to big, or a run of complete lines of big (never a raw substring).
+- **Function** `_separators` (Line 181) — The line kept notes are joined with, in English and in Hebrew (a note may hold either).
+- **Function** `_blocks` (Line 192) — The texts a kept note is made of: the parts between its marker lines.
+- **Function** `_holds` (Line 200) — big already contains small: as complete lines, or every text small was kept from.
+- **Function** `_same_text` (Line 209) — Equal, or each holds the other: the same notes kept in another order.
+- **Function** `_keep_both` (Line 214) — Both texts: the desktop's, a marker line, then what the cloud's text adds to it.
+- **Function** `_fold_notes` (Line 231)
+- **Function** `_union` (Line 238)
+- **Function** `_tagset` (Line 246)
+- **Function** `_tags_filter_literal` (Line 250) — list_items.tags is jsonb: the cs/cd filters take JSON text, never the text[] literal {a,b}.
+- **Function** `count_differing_notes` (Line 255) — Entries whose note or tags differ from the account's copy and were left as they are.
+- **Function** `remembered_ids` (Line 284) — The rows a download confirms: every non-gone record's, while the store is this account's.
+- **Function** `_records` (Line 299)
+- **Function** `_is_move_key` (Line 303)
+- **Function** `_live_record` (Line 307)
+- **Function** `_orphans` (Line 314) — Records for local lists the item is no longer in (a Move, a removal, a merged list).
+- **Function** `_orphan_ids` (Line 321)
+- **Function** `_base_of` (Line 325) — A copy of the record naming this row (for its note/tag bases), or None.
+- **Function** `_drop_record` (Line 333)
+- **Function** `_drop_left_tombstones` (Line 341)
+- **Function** `rows_index` (Line 349) — Which records name each row: {row id: [(item, list key)]}, for record_row.
+- **Function** `record_row` (Line 359) — The only writer of a record. note/tags: the cloud values the local copy is known to include.
+- **Function** `_remember` (Line 409) — record_row for a pass, which also tells the pass's on_recorded (an upload on a copy).
+- **Function** `_set_field` (Line 420) — The one writer, in an upload, of a list's or project's cloud_id or a list's unsent marks.
+- **Function** `apply_account_guard` (Line 441) — Records belong to one account: drop another account's, then claim the store for this one.
+- **Function** `_is_missing_column` (Line 461)
+- **Function** `_is_url_too_long` (Line 469)
+- **Function** `_insert_rolled_back` (Line 473) — True when an insert error proves nothing was written, so retrying rows one by one is safe.
+- **Function** `_session_user` (Line 493) — The user id of the client's current session, or None (no session, or no way to tell).
+- **Class** `_Stopped` (Line 503) — should_stop() said so before a request. Not an Exception: no handler of a failed request takes it.
+- **Class** `_Pass` (Line 507) — Everything one sync pass learns; never kept on the sync object.
+    - Method `__init__` (Line 510)
+    - Method `check` (Line 533) — Called before every request: raises _Stopped once should_stop() is true.
+    - Method `withdrawn_now` (Line 538) — The memberships the user removed while this pass ran (read right before a write is sent).
+    - Method `records_naming` (Line 548) — Which records name each row: built at the pass's first record, then kept by record_row.
+    - Method `prove_auth` (Line 558)
+- **Function** `_list_order` (Line 564)
+- **Function** `_syncable_list` (Line 572)
+- **Function** `_match_rows` (Line 580) — Pair cloud rows of one list with local items. Returns {row_id: item_id}.
+- **Class** `ListsCloudSync` (Line 648) — Handles synchronization between local ListsManager and Supabase.
+    - Method `__init__` (Line 673) — Initialize the sync manager.
+    - Property `_sync_in_progress` (Line 683)
+    - Method `set_client` (Line 686) — Set an external authenticated client (from corrections system).
+    - Method `_get_client` (Line 691) — Get Supabase client - preferring the authenticated external client.
+    - Method `set_user` (Line 708) — Set the current user ID (UUID from Supabase auth).
+    - Method `clear_user` (Line 712) — Clear user ID (on logout), and the client: no request can go out on the signed-out account's.
+    - Method `is_sync_available` (Line 717) — Check if cloud sync is available.
+    - Method `get_cloud_lists_preview` (Line 732) — Get a preview of cloud lists without syncing.
+    - Method `_backup_local_data` (Line 787) — Snapshot the local lists before a sync. Returns True if the snapshot was written.
+    - Method `_guard` (Line 813) — Records belong to one account: drop another account's, then claim the store for this one.
+    - Method `_paged` (Line 817) — Read every row of a query, a page at a time by row id. Returns (rows, complete).
+    - Method `_fetch_list_rows` (Line 860)
+    - Method `_read_user_lists` (Line 885)
+    - Method `_read_projects` (Line 890) — Every cloud project of the account, in keyset pages as the lists are: (rows, complete).
+    - Method `_confirm` (Line 896) — Where are these remembered rows now? Fills pass_.where, pass_.absent and pass_.locate_ok.
+    - Method `_may_tombstone` (Line 931) — May this remembered row be taken as removed on the website?
+    - Method `_tombstone` (Line 945)
+    - Method `_repair_shared_cloud_rows` (Line 957) — Items that hold the same cloud row: fold certain duplicates (download), split the rest.
+    - Method `sync_to_cloud` (Line 1012) — Push local lists and items to Supabase.
+    - Method `_upload_result` (Line 1059)
+    - Method `_upload` (Line 1065)
+    - Method `_not_uploaded` (Line 1125)
+    - Method `_push_projects_and_lists` (Line 1132) — Projects and lists as before, except that a cloud list has at most one local owner.
+    - Method `_push_list_items` (Line 1330) — The item half of an upload, for the given (local list, cloud list) pairs.
+    - Method `_tell_progress` (Line 1412) — progress['tell'](done, total), or (done, total, what) for a step that is not a list.
+    - Method `_hold_conflicts` (Line 1425) — Entries whose note (or tags) differ on one of their rows and may not be replaced there.
+    - Method `_write_list` (Line 1462)
+    - Method `_write_unmatched` (Line 1478) — A membership that no row of its list's read paired with.
+    - Method `_orphan_choice` (Line 1519) — The orphan whose row this membership takes (moved or adopted): (rank, key, record), or None.
+    - Method `_move_orphan` (Line 1553) — Move (or adopt) a row this item left in a list it is no longer in.
+    - Method `_orphan_gone` (Line 1614)
+    - Method `_reread` (Line 1622)
+    - Method `_changes` (Line 1632) — What an upload may change on a paired row.
+    - Method `_write_matched` (Line 1686) — A row paired with this membership; only what changed, conditional on what was read.
+    - Method `_send_rest` (Line 1715) — After a note/tag change could not be made: send the row's other changed fields alone.
+    - Method `_agreed_bases` (Line 1724) — Bases when a note/tag write did not happen: equal values are agreed, the rest unchanged.
+    - Method `_patch` (Line 1734) — One PATCH of a row, filtered by id, list and the note/tags it replaces.
+    - Method `_insert_rows` (Line 1782) — One batch per list; returned rows are recorded by identity, never by position.
+    - Method `_insert_one` (Line 1855)
+    - Method `_pending` (Line 1873) — This account's pending removals (another account's wait for it).
+    - Method `_suppressed` (Line 1878) — {cloud list id: the rows there this account waits to delete} (a download leaves them out).
+    - Method `_has_deletes` (Line 1885)
+    - Method `_send_deletes` (Line 1889) — Explicit removals, then the moved rows whose destination has its own row.
+    - Method `_unqueue` (Line 1904)
+    - Method `_send_explicit` (Line 1908) — One explicit removal: DELETE by id and the list this computer last knew, no other condition.
+    - Method `_settle_moved_row` (Line 1945) — A moved row no membership took in Phase 2: gone, redundant, or waiting for its list.
+    - Method `_delete_row` (Line 1990) — One DELETE of a row, by id and list, and with cond=(note, tags) only as it was read.
+    - Method `sync_from_cloud` (Line 2023) — Pull lists and items from Supabase and merge with local data: the fetch and the
+    - Method `_download_result` (Line 2052)
+    - Method `_fetch_failed` (Line 2056) — A download whose fetch did not complete: nothing local was read or changed.
+    - Method `fetch_cloud_state` (Line 2067) — The network half of a download: reads the cloud, reads and writes nothing local.
+    - Method `_fetch` (Line 2084)
+    - Method `apply_cloud_state` (Line 2106) — The local half of a download, from fetch_cloud_state's state: snapshot, merge, save.
+    - Method `_apply` (Line 2119)
+    - Method `_fetch_cloud_state` (Line 2141) — Everything a download needs from the cloud; reads nothing local and writes nothing.
+    - Method `_apply_projects` (Line 2162) — Cloud projects mapped to local ones by name, as before.
+    - Method `_cloud_deleted_at` (Line 2199)
+    - Method `_map_lists` (Line 2216) — Each local list's own cloud list, and the same-name cloud lists read for it.
+    - Method `_apply_cloud_state` (Line 2364) — The local half of a download: map lists, fold rows into items, reconcile notes once per item.
+    - Method `_walk_list` (Line 2482) — The rows of one local list's own and same-name cloud lists: pair, fold or create.
+    - Method `_plan_list` (Line 2533)
+    - Method `_new_item` (Line 2636) — An unmatched row that is no local entry's: a new item at a free key.
+    - Method `_judge_unseen` (Line 2667) — A remembered row of this membership that no read or confirmation paired with it.
+    - Method `_sweep_unowned` (Line 2683) — Memberships whose local list has no cloud list of its own in this pass (deleted there, or none yet).
+    - Method `_reconcile` (Line 2706) — Every cloud value that reached this entry in this pass, applied at once, in row-id order.
+    - Method `sync_list_to_cloud` (Line 2762) — Push a specific list and its items to cloud.
+    - Method `sync_item_to_cloud` (Line 2823) — Push one membership (an item in one list) to cloud, as an upload would.
+    - Method `delete_list_from_cloud` (Line 2877) — Delete a list from cloud (cascade deletes items).
+    - Method `delete_item_from_cloud` (Line 2901) — Delete the one cloud row remembered for this item in this list; nothing else.
+- **Function** `get_lists_sync` (Line 2932) — Get or create the lists sync singleton.
+
+## desktop/lists_sync_runner.py
+
+- **Function** `sync_dialog_allowed` (Line 41) — Whether a list-sync question (the sync choice, the website-removal prompt) may open now.
+- **Class** `SyncJob` (Line 50) — One queued or running sync. on_done(outcome) is called once, whatever its end.
+    - Method `__init__` (Line 59)
+    - Method `past_deadline` (Line 77)
+- **Class** `ListsSyncRunner` (Line 81) — The one owner of every list sync of the desktop window (see the module docstring).
+    - Method `__init__` (Line 84)
+    - Property `busy` (Line 107)
+    - Property `unsent` (Line 111) — Changes not known to be in the account: edits made since the last upload's copy,
+    - Property `closed` (Line 120)
+    - Method `invalidate_auth` (Line 123) — A sign-out or a new sign-in: what runs or waits now is stale (it stops, and is not shown).
+    - Method `allow_auto` (Line 127)
+    - Method `mark_dirty` (Line 131) — Edits were made that no upload has taken yet (while list sync was off).
+    - Method `request_auto` (Line 136) — A list changed: upload it now, or once after what runs or waits.
+    - Method `run` (Line 148) — Queue a sync ('preview', 'download', 'upload', 'merge'). Returns its job, or None once closed.
+    - Method `begin_logout` (Line 160) — No more automatic uploads; one last upload if one is needed, within budget_s.
+    - Method `cancel` (Line 184) — Stop a job: a waiting one completes at once; a running one stops before its next request
+    - Method `shutdown` (Line 195) — The window closes: install what the upload already did, complete every job, stop. Never blocks.
+    - Method `_new_job` (Line 240)
+    - Method `_should_stop` (Line 248)
+    - Method `_stale` (Line 251) — Checked on the UI thread before a result is used: an old sign-in, or past the sign-out's deadline.
+    - Method `_logout_needs_upload` (Line 260)
+    - Method `_start` (Line 264)
+    - Method `_start_upload` (Line 294)
+    - Method `_spawn` (Line 319)
+    - Method `_progress_cb` (Line 333)
+    - Method `_poll` (Line 340)
+    - Method `_drain` (Line 346)
+    - Method `_value` (Line 375)
+    - Method `_after` (Line 381)
+    - Method `_upload_after_download` (Line 435) — A Download sends nothing: when changes made here are still not in the account,
+    - Method `_complete` (Line 441) — The one end of every job: once, whatever the exit.
+    - Method `_deliver` (Line 474)
+    - Method `_tell_progress` (Line 482)
+    - Method `_call` (Line 487)
+
+## desktop/lists_web_removals_dialog.py
+
+- **Class** `WebRemovalsDialog` (Line 34) — One row per entry, each with its own choice; Decide later by default.
+    - Method `__init__` (Line 37)
+    - Method `_decide_all` (Line 91)
+    - Method `_apply` (Line 96)
+    - Method `choices` (Line 102) — The decided rows; nothing when the prompt was closed without Apply.
+- **Function** `ask_about_web_removals` (Line 107)
 
 ## shared/browse_map_utils.py
 
@@ -2162,11 +2461,12 @@ moved out of `genizah_core.py` (→ `shared/*`) and `genizah_app.py` (→ `deskt
 
 ## desktop/single_instance.py
 
-- **Function** `restarted_from` (Line 44) — The pid named by ``--restarted-from=<pid>`` in argv, or None.
-- **Function** `restart_argv` (Line 56) — The command line that relaunches this app, naming ``pid`` as the copy to wait for.
-- **Function** `acquire_instance_lock` (Line 62) — Return (lock, other_copy_running).
-- **Function** `request_restart` (Line 93) — Relaunch the app once its event loop has ended (see relaunch_if_requested).
-- **Function** `relaunch_if_requested` (Line 99) — Start the new copy if request_restart() was called. Returns True if one was started.
+- **Function** `restarted_from` (Line 49) — The pid named by ``--restarted-from=<pid>`` in argv, or None.
+- **Function** `restart_argv` (Line 61) — The command line that relaunches this app, naming ``pid`` as the copy to wait for.
+- **Function** `acquire_instance_lock` (Line 67) — Return (lock, other_copy_running).
+- **Function** `relaunch_looks_possible` (Line 98) — True when what the relaunch would run is there: the interpreter (or the
+- **Function** `request_restart` (Line 122) — Relaunch the app once its event loop has ended (see relaunch_if_requested).
+- **Function** `relaunch_if_requested` (Line 128) — Start the new copy if request_restart() was called. Returns True if one was started.
 
 ## Phase 145 — Passage-Matching Parallels Search (web beta)
 

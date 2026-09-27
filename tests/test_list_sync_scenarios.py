@@ -6,10 +6,11 @@ and the invariants; this file runs them. A failure prints the seed's shrunk op
 list as a literal: paste it into REGRESSION_CASES below, with one line saying
 what it shows, so it replays on every run.
 
-Before a pull request that touches shared/lists_sync.py, also run the long
-versions locally (see the harness's docstring):
+Before a pull request that touches shared/lists_sync.py or the list bookkeeping of
+shared/lists_manager.py, also run the long versions locally (see the harness's docstring):
     python tests/list_sync_scenarios.py --seeds 0-19999 --steps 60 --jobs 8
     python tests/list_sync_scenarios.py --seeds 0-1999 --steps 200 --jobs 8
+    python tests/list_sync_scenarios.py --seeds 0-4999 --steps 60 --jobs 8 --mix removals
 """
 import os
 import sys
@@ -20,6 +21,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import list_sync_scenarios as S  # noqa: E402
+from shared import lists_manager, lists_sync  # noqa: E402
 
 CI_SEEDS = range(0, 500)
 CI_STEPS = 60
@@ -433,6 +435,77 @@ REGRESSION_CASES = [
       ('sync', 'A', 'up', (16, 'web_rename', (55051, 45246, 18077, 44677, 53706))), ('sync', 'B', 'down', None),
       ('web', (17606, 7480, 16584, 41056, 488)), ('desk', 'B', (11609, 785, 17263, 59630, 46007)),
       ('web', (3160, 4457, 48390, 13222, 18737)), ('web', (56600, 41045, 44484, 10634, 40926))]),
+    # Found while the removal and move bookkeeping was built (each broke an invariant on a draft of it):
+    ('an entry removed and put back in its list before the upload had its website row deleted anyway',
+     120, {'has_page': True, 'max_rows': None, 'p_inject': 0.25, 'past_end_raises': False, 'page_lag': False,
+           'upgrade': 16},
+     [('web_rename', (14827, 61000, 63433, 17129, 49772)), ('web', (54526, 53118, 26151, 58583, 58947)),
+      ('desk', 'B', (34175, 3531, 60565, 24386, 62474)), ('desk', 'B', (31084, 51660, 14927, 23076, 30633)),
+      ('desk', 'B', (25664, 28079, 42234, 9953, 29651)), ('desk', 'B', (50292, 34407, 38763, 51718, 22469)),
+      ('prompt', 'A', (23372, 20370, 7308, 10748, 22544)), ('sync', 'A', 'up', None),
+      ('signout', 'A', (10084, 14675, 4349, 19941, 59303)), ('sync', 'B', 'up', None), ('sync', 'B', 'down', None),
+      ('account', 'A', 'u1'), ('desk', 'B', (30846, 49404, 49354, 38515, 13172)),
+      ('desk', 'B', (59368, 27585, 56925, 25093, 44822)), ('desk', 'B', (42762, 47257, 64866, 5527, 61812)),
+      ('ui', 'A', (False, False, False, False, False)), ('sync', 'B', 'up', None),
+      ('desk', 'B', (44319, 20064, 27060, 1547, 14077)), ('desk', 'B', (65437, 24045, 26616, 6519, 32016)),
+      ('sync', 'B', 'merge', (9, 'web_between_pages', (6270, 47403, 40720, 47306, 52881)))]),
+    ("an entry made again under its key as another folio was given the old folio's row",
+     9996, {'has_page': False, 'max_rows': None, 'p_inject': 0.25, 'past_end_raises': True, 'page_lag': True,
+            'upgrade': 0},
+     [('desk', 'A', (50268, 61828, 41248, 18906, 49789)), ('sync', 'A', 'merge', None),
+      ('desk', 'A', (47187, 28556, 60435, 65450, 22881)), ('desk', 'A', (57985, 22842, 55747, 63472, 13151))]),
+    ('a Download left out, in every list, the row of a removal that another computer had moved elsewhere, '
+     'so a second Merge changed things again',
+     1891, {'has_page': True, 'max_rows': None, 'p_inject': 0.25, 'past_end_raises': False, 'page_lag': False,
+            'upgrade': 0},
+     [('web', (2143, 6835, 53508, 51695, 61086)),
+      ('sync', 'B', 'merge', (20, 'raise_before', (23668, 12895, 9027, 15409, 29035))), ('sync', 'A', 'merge', None),
+      ('desk', 'B', (19455, 23741, 35183, 63124, 62585)), ('desk', 'A', (52372, 17606, 25692, 55483, 47890)),
+      ('sync', 'A', 'merge', (18, 'web_between_pages', (56983, 49584, 40143, 59860, 18179))),
+      ('sync', 'B', 'merge', None)]),
+    ('a removal was dropped with no request on one answer that its row was gone (an anonymous confirmation)',
+     2436, {'has_page': False, 'max_rows': None, 'p_inject': 0.25, 'past_end_raises': False, 'page_lag': True,
+            'upgrade': 0},
+     [('sync', 'B', 'up', (24, 'web', (38589, 14530, 60581, 38022, 21325))), ('account', 'B', 'u2'),
+      ('sync', 'B', 'up', None), ('web_rename', (21173, 5581, 14243, 20869, 49604)),
+      ('desk', 'A', (30235, 32122, 3220, 53872, 61052)), ('account', 'B', 'u1'),
+      ('sync', 'A', 'up', (8, 'other_desktop_pass', (49653, 17635, 46062, 53137, 44847))),
+      ('web', (14765, 6640, 59774, 47558, 5235)), ('web', (19778, 3490, 49269, 26173, 64430)),
+      ('web', (43930, 2182, 5526, 556, 20693)), ('web', (54546, 46861, 44369, 34365, 9088)),
+      ('sync', 'B', 'down', (10, 'raise_before', (61451, 41910, 26109, 45929, 6639))),
+      ('desk', 'B', (57657, 34987, 60376, 37021, 40470)), ('sync', 'B', 'up', None),
+      ('web', (23747, 48526, 10489, 2596, 23996)), ('sync', 'B', 'down', (3, 'web', (50847, 10781, 52581, 25079, 62163))),
+      ('desk', 'B', (27195, 37191, 48054, 11022, 47866)),
+      ('sync', 'B', 'up', (9, 'anon', (24255, 23779, 40875, 25636, 62219)))]),
+    ('an entry a website row brought back into the list it was removed from kept its own row from its delete',
+     192, {'has_page': True, 'max_rows': 2, 'p_inject': 0.25, 'past_end_raises': True, 'page_lag': False, 'upgrade': 0},
+     [('web', (33742, 10070, 44440, 7846, 46101)), ('desk', 'A', (13022, 36920, 1937, 59778, 21436)),
+      ('sync', 'A', 'merge', None), ('web', (20638, 61960, 50282, 30658, 29751)), ('sync', 'B', 'merge', None),
+      ('desk', 'B', (48768, 64485, 52301, 11592, 39817)), ('web', (35064, 24523, 37250, 34264, 61015)),
+      ('offline', 'B', 3), ('desk', 'B', (7875, 2138, 7321, 10218, 58145)),
+      ('sync', 'B', 'up', (27, 'session_lost', (29171, 7294, 41456, 52898, 26978))), ('sync', 'B', 'down', None),
+      ('sync', 'B', 'down', (19, 'url_too_long', (25787, 31129, 59333, 41534, 36669))), ('sync', 'B', 'down', None)]),
+    # Found when the removal bookkeeping met keyset paging (each a false alarm of the harness, fixed there):
+    ('a Download re-added an entry from a row the read returned before the website removed it; '
+     'invariant 12 knew only the rows left at the fetch end, and took it for a row pending deletion',
+     7122, {'has_page': False, 'max_rows': 3, 'p_inject': 0.25, 'past_end_raises': False, 'page_lag': False,
+            'upgrade': 0},
+     [('sync', 'B', 'down', None), ('sync', 'A', 'merge', None), ('desk_rename', 'B', (15779, 60344, 58173, 45098, 35243)),
+      ('sync', 'B', 'up', None), ('desk', 'B', (13880, 11486, 46248, 28784, 10069)),
+      ('desk', 'A', (48240, 15491, 32374, 18742, 62142)),
+      ('sync', 'A', 'up', (3, 'web_between_pages', (41123, 15432, 37000, 52105, 5910))),
+      ('sync', 'B', 'merge', (19, 'url_too_long', (38591, 44793, 17009, 13657, 59586))),
+      ('desk', 'B', (23643, 29272, 40634, 43535, 47978)),
+      ('sync', 'B', 'down', (3, 'web_between_pages', (21122, 12616, 20403, 19325, 31685)))]),
+    ("the website changed another account's list: its row failed row-level security and its note counted "
+     "as user text (web_churn_same_count while a desktop was signed in as u2)",
+     275, {'has_page': True, 'max_rows': 3, 'p_inject': 0.25, 'past_end_raises': True, 'page_lag': True, 'upgrade': 0},
+     [('web', (63844, 44652, 32803, 13644, 51256)), ('sync', 'B', 'up', None), ('web', (53857, 62860, 23032, 49597, 25974)),
+      ('desk', 'A', (300, 1704, 23845, 50946, 64078)), ('web', (4446, 44625, 46327, 37484, 34015)),
+      ('sync', 'A', 'up', None), ('desk', 'B', (38005, 1776, 24230, 28559, 35739)),
+      ('sync', 'B', 'merge', (15, 'session_lost', (33862, 23541, 58771, 49829, 39740))), ('account', 'B', 'u2'),
+      ('sync', 'B', 'merge', None), ('account', 'A', 'u2'),
+      ('sync', 'A', 'up', (14, 'web_churn_same_count', (60798, 6497, 36620, 45908, 543)))]),
 ]
 
 
@@ -464,6 +537,30 @@ def test_the_harness_catches_the_pre_2b_defects(inv):
             if (lambda v: v is not None and v.inv == inv)(S.run_seed(seed, 60, 'fixture',
                                                                      frozenset({inv, 'crash'}))[0])]
     assert hits, f'invariant {inv} never fired on the pre-2b engine in seeds 0-49'
+
+
+# One rule of the removal bookkeeping reverted at a time, under the op mix that weights what it
+# is for (list_sync_scenarios.gen_removal_mix: a removal during an upload, right after an insert or a
+# move was answered; a Download after a removal; an entry put back in the list it left). On seeds
+# 0-49 of that mix each of these fired in 26-41 seeds (2026-09-27); the rule they pin, and what fires:
+REVERTED_RULES = {
+    # finish_upload installs the copy without replaying the edits made meanwhile
+    'no-replay': ((lists_manager.ListsManager, '_replay', lambda self, copy, journal: None), {14, 3, 11}),
+    # a Download pairs, folds and re-adds rows waiting for their delete
+    'no-download-suppression': ((lists_sync.ListsCloudSync, '_suppressed', lambda self, pass_, store: {}), {12}),
+    # an entry put back in its list before its delete went does not get its website row back
+    'put-back-keeps-no-row': ((lists_manager, '_restore_cloud_row', lambda state, item_id, list_id, ident: None),
+                              {11}),
+}
+
+
+@pytest.mark.parametrize('rule', sorted(REVERTED_RULES))
+def test_the_gate_catches_each_reverted_removal_rule(rule, monkeypatch):
+    (owner, name, stand_in), invariants = REVERTED_RULES[rule]
+    monkeypatch.setattr(owner, name, stand_in)
+    found = S.run_many(list(range(50)), 60, 'current', mix='removals')
+    fired = {inv for _, inv, _, _ in found}
+    assert fired & invariants, f'with {rule}, no seed of 0-49 broke {sorted(invariants)} (fired: {sorted(fired)})'
 
 
 # ---- the fake behaves like PostgREST where the engine depends on it

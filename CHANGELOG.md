@@ -29,11 +29,90 @@ Reaches users with the next desktop installer (together with the desktop section
 - **Quitting with unsaved puzzle work asks first, before anything is stopped**: Cancel leaves a running
   search, a multi-witness batch and a pending language restart untouched.
 
+### Desktop: list sync in the background, removals that reach your account (2026-09-27)
+
+Ships in the same desktop installer as the two desktop sections below it, "list sync keeps every
+list's entries, pages and notes" and "saved work stays saved". It needs the migration that section
+names: removals use the DELETE permission its second verify query checks.
+
+- **List syncs no longer freeze the window.** Download, Upload, Merge and the check of your
+  account at log-in now run in the background, as the automatic uploads do, and every list sync
+  runs one at a time. A sync asked for while another runs waits its turn ("Waiting for the list
+  sync that is already running..."), and the progress dialog has Cancel. A cancelled Download
+  changes nothing on this computer; a stopped upload keeps what it sent and says the rest has not
+  reached your account yet.
+- **Every list edit is uploaded.** Each change to your lists (an entry added, removed, moved or
+  edited; a list renamed, recoloured, moved to a project or to the Trash) is followed by one
+  upload, and edits made while it runs go up with the next one. Before, an edit made within two
+  seconds of an automatic upload, or while one ran, waited for a later edit to be uploaded, and
+  several kinds of edit never asked for an upload at all. Skip in the sync choice now says what it
+  does: nothing is downloaded, and your lists still upload after each change until you log out or
+  close the program (it promised a way to sync later from Settings, which does not exist).
+- **"Sync lists now"** on the Lists tab, under Trash, opens the Download / Upload / Merge choice
+  whenever you are logged in, even when the lists look in sync. Before, the only way back to it
+  was to log out and in again. A Download sends nothing, so when this computer still holds
+  changes that are not in your account, one upload now follows it.
+- **Logging out and closing don't wait.** Logout returns at once: the last upload runs in the
+  background, and the log-out finishes when it ends or after 10 seconds. The log-out notice says
+  that list changes did not upload only when some were known not to be in your account (it names
+  the lists when it knows them), and mentions notes that still differ from your account or are too
+  long for it. Logging out here ends this computer's session only; the website and your other
+  computers stay logged in. Closing the program during a sync or a log-out no longer waits on the
+  server; what did not upload stays on this computer for the next log-in.
+- **A log-in saved from the last session syncs from startup.** After a restart the app checks
+  your account, offers the sync choice when the lists differ, and uploads your edits, as after an
+  explicit log-in. If that check fails, one status-bar line says so and list sync stays on. Before, lists
+  edited after a restart stayed off the website until you logged out and in again.
+- **Removals and moves made on this computer reach your account.** Removing an entry from a list,
+  deleting a list for good and emptying the Trash now delete the entry's row in your account at
+  the next upload. A removal that cannot be sent (offline, or a failed request) is kept, across
+  restarts too, and sent later, and a Download never brings back an entry waiting for its removal.
+  Moving an entry, and Clean up duplicate lists, move its row, with its note, to the list it went
+  to. Only rows this computer has recorded are deleted, and a row another computer moved to
+  another list is left there. Before, a removal stayed on this computer and the next Download put
+  the entry back.
+- **Putting an entry back keeps the website's copy.** Adding an entry back to the list it was
+  removed from, before the removal was sent, cancels the removal: the row in your account stays,
+  with any note added to it there.
+- **Entries removed on the website are offered, never removed silently.** After a sync, a prompt
+  ("Entries removed on the website") lists each entry removed from a list on genizahsearch.com,
+  with its shelfmark, page and list, and a choice per entry: "Decide later" (the default), "Remove
+  from this computer too", or "Keep it (and add it back on the website)"; two buttons choose for
+  every entry at once. Closing the prompt decides nothing, and until you choose, the entry stays on
+  this computer and is not uploaded again. An automatic sync offers each entry once a session; a
+  Download, Upload or Merge you choose offers every one still waiting. The prompt waits while
+  another dialog is open, during a log-out, and while the lists cannot be saved.
+- **A colour, project or Trash change made here is kept until it uploads.** As a rename already
+  was, a list's colour, project or Trash state changed on this computer since its last upload is
+  kept by a Download, which still takes the website's value of the parts not changed here. Before,
+  a Download that ran after an upload could put back the old colour, project or Trash state, and
+  the next upload then sent that old value to the website.
+- **Projects are read in full.** Your account's projects are read page by page, as the lists
+  are. Under a server row cap, every upload lost track of the projects past the first page and
+  created a second copy of each on the website.
+- **Each step shows in the progress dialog:** "Syncing lists..." when a waiting sync's turn comes,
+  "Downloading list N of M..." and "Uploading list N of M...", and "Removing entries from your
+  account..." while removals are sent. The sync choice's list summary ("N items", "... and N
+  more") is now in Hebrew too. While your lists cannot be saved on this computer, no sync message
+  says a change is saved or kept here, and the status line and every sync result end by saying
+  that the lists are not being saved.
+- **Two known edge cases.** Putting an entry back in the few seconds its removal is being sent
+  still deletes the website's copy, with any note added to it there; the entry itself stays in the
+  list on this computer and is uploaded again. Starting the app offline with a saved log-in shows
+  you logged out until the next start online; the saved log-in is kept.
+- Internal: the scenario gate (`tests/list_sync_scenarios.py`) now also covers removals, moves and
+  uploads on a copy of the store. Its desktops sync as the new runner does (an upload on a copy
+  while the user edits, a Download fetched and then applied), with new steps (the website-removal
+  prompt, putting an entry back, log-out, a close or a kill during an upload, offline passes) and
+  four more invariants, fourteen in all. `--mix removals` weights the steps toward removals, moves
+  and put-backs, and the suite checks that the gate fails when any of three removal rules is
+  reverted.
+
 ### Desktop: list sync keeps every list's entries, pages and notes (2026-09-27)
 
 Reaches users with the next desktop installer. That installer carries this change, "saved work
-stays saved" below and the second half of the list-sync repair together: the three ship in one
-installer, not separately. **Before it ships, the owner applies
+stays saved" below and the second half of the list-sync repair (above) together: the three ship
+in one installer, not separately. **Before it ships, the owner applies
 `migrations/add_list_item_page_column.sql`** in the Supabase SQL Editor and runs the file's two
 verify queries: the first must show `page | text` and `tags | jsonb` (the desktop's tag checks are
 written for a jsonb column; if `tags` is not jsonb, do not release), the second SELECT, INSERT,
@@ -63,13 +142,14 @@ UPDATE and DELETE for `authenticated`.
   next Download and its uploads no longer rename the list back -- unless the list was renamed on
   this computer since an upload last sent its name; then this computer's name stands and is
   uploaded. A list renamed on this computer now also shows its new name in the English interface.
-- **One list sync at a time.** A sync that starts while another runs (for example the sign-out
-  upload during an automatic upload) stops at once with "Sync already in progress" instead of
-  running alongside it.
+- **One list sync at a time.** Two syncs (for example the log-out upload and an automatic upload)
+  no longer run alongside each other: a sync asked for while another runs waits its turn (see "list
+  sync in the background" above).
 - **Long lists are read in full.** Rows are read page by page, so a list with more rows than one
   server response holds (1,000 by default) is no longer read short.
-- **An entry removed on the website is not uploaded again.** It stays on this computer; a sync
-  removes nothing from any list, here or in your account.
+- **An entry removed on the website is not uploaded again.** It stays on this computer until you
+  choose, in the prompt described above, to remove it here too or keep it (a sync never removes it
+  from this computer on its own).
 - **The sync result says what it left.** After a Download, Upload or Merge, successful or not, the
   message adds how many notes now hold both versions, how many entries had their tags combined, how
   many notes differ and were left as they are, and how many notes were too long to update safely

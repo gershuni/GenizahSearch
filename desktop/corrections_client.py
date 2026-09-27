@@ -545,8 +545,9 @@ class CorrectionsClient:
         except Exception as e:
             return False, str(e)
 
-    def logout(self):
-        """Logout and clear credentials"""
+    def logout(self, revoke='wait'):
+        """Logout and clear credentials. Local only, so revoke (the Supabase
+        client's choice of waiting for the server) changes nothing here."""
         self.access_token = None
         self.refresh_token = None
         self.current_user = None

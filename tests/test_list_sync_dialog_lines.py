@@ -9,13 +9,15 @@ in -- gets one line under the dialog's message -- on success AND on failure, for
 three buttons: an upload in which one item failed and one note was too long must still
 say so. A result without these counts shows exactly today's message.
 
-D1 drives GenizahGUI._do_sync_action -- the dialog's buttons -- with Qt faked out, the
-way tests/test_personal_state_atomic_writes.py does, on a stand-in window that has only
-`lists_mgr` and `_sync_error_text`. D2 checks the five new strings have Hebrew that starts
+D1 hands GenizahGUI._on_lists_sync_done -- where the dialog's buttons' jobs end, on the
+UI thread -- the results the list-sync runner gives it, with the message box faked out
+(tests/test_personal_state_atomic_writes.py drives the same buttons through the runner).
+D2 checks the five new strings have Hebrew that starts
 with a Hebrew letter, and that the Hebrew of the kept-both line says what the English
 says. D3 checks Help.html no longer claims that list sync is "disabled
 entirely if every item in a list is local" and says what is true instead.
 """
+import ast
 import re
 import types
 from pathlib import Path
@@ -36,7 +38,92 @@ MERGED = ("Notes that differed between this computer and your account: {}. "
 TOO_LONG = ("Notes too long to update safely in your account: {}. "
             "They were not changed there and are kept on this computer.")
 TAGS = "Tags that differed between this computer and your account: {}. The tags from both were kept."
-NEW_KEYS = (FROM_THE_CLOUD, DIFFERING, MERGED, TOO_LONG, TAGS)
+# The list sync off the UI thread: the Skip tooltip, progress, cancel and status lines,
+# the preview dialog's rows, the stop message, and the too-long line while saves fail.
+TOO_LONG_NOT_SAVED = "Notes too long to update safely in your account: {}. They were not changed there."
+SYNC_KEYS = (
+    "Don't download from your account now. Uploads continue: until you log out or close the "
+    "program, your lists are uploaded to your account after each change.",
+    "Checking the lists in your account...",
+    "Waiting for the list sync that is already running...",
+    "Downloading list {} of {}...",
+    "Uploading list {} of {}...",
+    "Removing entries from your account...",
+    "List sync cancelled. Nothing was changed on this computer.",
+    "Upload stopped. The rest of your changes are saved on this computer but have not reached "
+    "your account yet.",
+    "The cloud lists were downloaded, but the upload was stopped. The rest of your changes are "
+    "saved on this computer but have not reached your account yet.",
+    "Some notes differ from your account and were not uploaded. To keep both versions, use Sync "
+    "lists now, then Merge Both.",
+    "Sync stopped",
+    "{} ({} items)",
+    "... and {} more",
+    TOO_LONG_NOT_SAVED,
+    # Log-in at startup, log-out
+    "Could not reach your account to check the lists. List sync stays on; Sync lists now tries again.",
+    "Logging out...",
+    "These lists were not uploaded before you logged out: {}. Your changes to them are saved on "
+    "this computer and are uploaded after you next log in.",
+    "Your latest list changes were not uploaded before you logged out. They are saved on this "
+    "computer and are uploaded after you next log in.",
+    "List sync was not on in this session, so your list changes were not uploaded. They are saved "
+    "on this computer and are uploaded after you next log in.",
+    "Some notes differ from your account and were not uploaded. They are kept on this computer; "
+    "after you next log in, use Sync lists now, then Merge Both, to keep both versions.",
+    "Your lists cannot be saved on this computer at the moment ({} cannot be written). List changes "
+    "that did not reach your account before you logged out are lost if you close the program before "
+    "the file can be saved again.",
+    # Sync lists now, and the website-removal prompt
+    "Sync lists now",
+    "Download, upload or merge your lists with your account on genizahsearch.com",
+    "Log in to sync your lists with your account",
+    "Entries removed on the website",
+    "These entries were removed from your lists on genizahsearch.com. They are still on this "
+    "computer, and until you choose they stay here and are not uploaded again.",
+    "Decide later",
+    "Remove from this computer too",
+    "Keep it (and add it back on the website)",
+    "Remove all from this computer too",
+    "Keep all (and add them back on the website)",
+    "Choice",
+    "Removed from their lists on this computer: {}. To be added back on the website: {}.",
+    # the runner's error for a stage that returned no result
+    "Unknown error",
+)
+
+
+SIGN_IN_OR_OUT = re.compile(r"\bsign(?:ed|ing|s)?[ -]?(?:in|out)\b", re.IGNORECASE)
+
+
+def _desktop_texts():
+    """Every text the desktop passes to tr() as a literal (genizah_app.py and desktop/)."""
+    texts = set()
+    for path in [ROOT / "genizah_app.py", *sorted((ROOT / "desktop").rglob("*.py"))]:
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "tr"
+                    and node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)):
+                texts.add(node.args[0].value)
+    return texts
+
+
+def test_no_desktop_text_says_sign_in_or_sign_out():
+    """The corner button says Login and Logout, so the desktop's texts -- the list-sync ones among
+    them -- say log in and log out (the Hebrew has one verb for both)."""
+    texts = _desktop_texts()
+    assert "Logging out..." in texts and "Log in to sync your lists with your account" in texts
+    assert [t for t in texts | set(SYNC_KEYS) if SIGN_IN_OR_OUT.search(t)] == []
+
+
+def test_the_button_names_in_the_notes_lines_are_the_buttons_labels():
+    """"Sync lists now" and "Merge Both" in the hints are the two buttons' own labels,
+    in both languages."""
+    for key in SYNC_KEYS:
+        if "Sync lists now" in key and key != "Sync lists now":
+            assert "'" + TRANSLATIONS["Sync lists now"] + "'" in TRANSLATIONS[key], key
+        if "Merge Both" in key:
+            assert "'" + TRANSLATIONS["Merge Both"] + "'" in TRANSLATIONS[key], key
+NEW_KEYS = (FROM_THE_CLOUD, DIFFERING, MERGED, TOO_LONG, TAGS) + SYNC_KEYS
 
 DOWNLOADED = "Downloaded {lists} lists and {items} items from cloud."
 UPLOADED = "Uploaded {lists} lists and {items} items to cloud."
@@ -72,36 +159,43 @@ def _tr(text):
     return genizah_core.tr(text)
 
 
+class _Progress:
+    def __init__(self):
+        self.canceled = types.SimpleNamespace(connect=lambda slot: None, disconnect=lambda *a: None)
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+    def __getattr__(self, name):
+        return lambda *args: None
+
+
 def _run(genizah_app, monkeypatch, action, download=None, upload=None):
-    """Press one of the dialog's buttons; return the message boxes shown and the calls made."""
-    shown, calls = [], []
+    """What the dialog shows when one of its buttons' jobs ends.
 
-    class _Progress:
-        def __init__(self, *args):
-            pass
-
-        def __getattr__(self, name):
-            return lambda *args: None
-
-    monkeypatch.setattr(genizah_app, "QProgressDialog", _Progress)
-    monkeypatch.setattr(genizah_app, "QApplication", types.SimpleNamespace(processEvents=lambda: None))
-    monkeypatch.setattr(genizah_app, "QMessageBox", types.SimpleNamespace(
-        information=lambda parent, title, text: shown.append(("information", text)),
-        warning=lambda parent, title, text: shown.append(("warning", text)),
-        critical=lambda parent, title, text: shown.append(("critical", text))))
-
-    def sync_from_cloud():
+    The runner hands GenizahGUI._on_lists_sync_done each half's result: a Merge's
+    upload half only after a download that succeeded. Returns the message boxes shown
+    and the halves the job ran."""
+    shown = []
+    monkeypatch.setattr(genizah_app, "_show_ok_notice",
+                        lambda parent, kind, title, text: shown.append((kind, text)))
+    host = genizah_app.GenizahGUI.__new__(genizah_app.GenizahGUI)
+    host.lists_mgr = types.SimpleNamespace(saves_failing=lambda: False, LISTS_FILE="lists.pkl")
+    host._app_shutting_down = False
+    host.lists_tree = None
+    host.lists_refresh_all = lambda: None
+    host._offer_web_removals = lambda manual=False: None
+    outcome, calls = {"cancelled": False}, []
+    if action in ("download", "merge"):
         calls.append("download")
-        return dict(download)
-
-    def sync_to_cloud():
+        outcome["download"] = dict(download)
+    if action == "upload" or (action == "merge" and download.get("success")):
         calls.append("upload")
-        return dict(upload)
-
-    mgr = types.SimpleNamespace(sync_from_cloud=sync_from_cloud, sync_to_cloud=sync_to_cloud)
-    host = types.SimpleNamespace(lists_mgr=mgr,
-                                 _sync_error_text=genizah_app.GenizahGUI._sync_error_text)
-    genizah_app.GenizahGUI._do_sync_action(host, types.SimpleNamespace(accept=lambda: None), action)
+        outcome["upload"] = dict(upload)
+    progress = _Progress()
+    genizah_app.GenizahGUI._on_lists_sync_done(host, action, outcome, progress)
+    assert progress.closed
     return shown, calls
 
 
