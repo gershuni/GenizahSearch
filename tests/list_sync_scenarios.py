@@ -1054,6 +1054,12 @@ class World:
         if client.actor in self.desks and req.t == 'list_items' and req.op == 'update' \
                 and 'note' in (req.payload or {}):
             self._revived_row_written(req)
+        served = getattr(self, 'served', None)
+        if (served is not None and client is served[0].client and req.t == 'list_items' and req.op == 'select'
+                and req.answer is not None):
+            for r in req.answer.data or []:
+                if r.get('id') is not None:
+                    served[1][r['id']] = dict(r)
         if client.actor in self.desks and req.t == 'list_items':
             d = self.desks[client.actor]
             if req.op == 'insert' and self.ctx is not None and client is self.ctx.desk.client                     and req.answer is not None:
@@ -1192,13 +1198,15 @@ class World:
             # the skipped rows were never returned. A read paged by keyset on the row id
             # skips nothing either way.
             lid, rows, start, reach = self._between_pages(c, client, req)
+            lst = self.db.list_by_id(lid) if lid is not None else None
+            if lst is None or lst.get('user_id') != USER:
+                return None   # the website is USER's (web_lists): another account's list is not its to change
             t = reach if reach is not None else next(
                 (t for t in range(start, len(rows)) if self._unrecorded(c, client, lid, rows[t])), start)
             gone = rows[:max(1, min(t - start + 1, start))] if start else []
             for r in gone:
                 self.web_remove(r)
-            lst = self.db.list_by_id(lid) if lid is not None else None
-            if kind == 'web_churn_same_count' and lst is not None:
+            if kind == 'web_churn_same_count':
                 for n in range(len(gone)):
                     self.web_add(lst, sel[n:] + sel[:n])
             return None
@@ -1250,8 +1258,8 @@ class World:
         local = next((k for k, ld in data['lists'].items() if _eq(ld.get('cloud_id'), lid)), None)
         rows = [r for r in self.db.tables['list_items'] if _eq(r['list_id'], lid)]
         lst = self.db.list_by_id(lid)
-        if local is None or lst is None or len(rows) < self.db.max_rows:
-            return
+        if local is None or lst is None or lst.get('user_id') != USER or len(rows) < self.db.max_rows:
+            return   # (the website is USER's: it adds no row to another account's list)
         hp = self.db.has_page and not client.page_missing
         wanted = []
         for iid, it in data['items'].items():
@@ -2334,10 +2342,19 @@ class World:
         if not d.fetch_path():
             return d.sync.sync_from_cloud()
         user = d.user
-        state = d.sync.fetch_cloud_state(d.lm.remembered_row_ids(user))
+        before, self.served = getattr(self, 'served', None), (d, {})
+        try:
+            state = d.sync.fetch_cloud_state(d.lm.remembered_row_ids(user))
+        finally:
+            served, self.served = self.served[1], before
         if not state.get('success'):
             return {k: v for k, v in state.items() if k != 'pass'}
         rows_at_fetch = {r['id']: dict(r) for r in self.db.tables['list_items']}
+        # A row the fetch was answered with justifies what the apply adds from it, also when the
+        # website removed it before the fetch ended (a keyset read asks for a last, empty page,
+        # at which web_between_pages removes rows the read already returned).
+        for rid, r in served.items():
+            rows_at_fetch.setdefault(rid, r)
         c = self.ctx
         if c is not None and c.inject and c.inject[1] == 'between_stages' and not c.fired and c.desk is d:
             c.fired = True

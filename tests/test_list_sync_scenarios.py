@@ -485,6 +485,27 @@ REGRESSION_CASES = [
       ('offline', 'B', 3), ('desk', 'B', (7875, 2138, 7321, 10218, 58145)),
       ('sync', 'B', 'up', (27, 'session_lost', (29171, 7294, 41456, 52898, 26978))), ('sync', 'B', 'down', None),
       ('sync', 'B', 'down', (19, 'url_too_long', (25787, 31129, 59333, 41534, 36669))), ('sync', 'B', 'down', None)]),
+    # Found when the removal bookkeeping met keyset paging (each a false alarm of the harness, fixed there):
+    ('a Download re-added an entry from a row the read returned before the website removed it; '
+     'invariant 12 knew only the rows left at the fetch end, and took it for a row pending deletion',
+     7122, {'has_page': False, 'max_rows': 3, 'p_inject': 0.25, 'past_end_raises': False, 'page_lag': False,
+            'upgrade': 0},
+     [('sync', 'B', 'down', None), ('sync', 'A', 'merge', None), ('desk_rename', 'B', (15779, 60344, 58173, 45098, 35243)),
+      ('sync', 'B', 'up', None), ('desk', 'B', (13880, 11486, 46248, 28784, 10069)),
+      ('desk', 'A', (48240, 15491, 32374, 18742, 62142)),
+      ('sync', 'A', 'up', (3, 'web_between_pages', (41123, 15432, 37000, 52105, 5910))),
+      ('sync', 'B', 'merge', (19, 'url_too_long', (38591, 44793, 17009, 13657, 59586))),
+      ('desk', 'B', (23643, 29272, 40634, 43535, 47978)),
+      ('sync', 'B', 'down', (3, 'web_between_pages', (21122, 12616, 20403, 19325, 31685)))]),
+    ("the website changed another account's list: its row failed row-level security and its note counted "
+     "as user text (web_churn_same_count while a desktop was signed in as u2)",
+     275, {'has_page': True, 'max_rows': 3, 'p_inject': 0.25, 'past_end_raises': True, 'page_lag': True, 'upgrade': 0},
+     [('web', (63844, 44652, 32803, 13644, 51256)), ('sync', 'B', 'up', None), ('web', (53857, 62860, 23032, 49597, 25974)),
+      ('desk', 'A', (300, 1704, 23845, 50946, 64078)), ('web', (4446, 44625, 46327, 37484, 34015)),
+      ('sync', 'A', 'up', None), ('desk', 'B', (38005, 1776, 24230, 28559, 35739)),
+      ('sync', 'B', 'merge', (15, 'session_lost', (33862, 23541, 58771, 49829, 39740))), ('account', 'B', 'u2'),
+      ('sync', 'B', 'merge', None), ('account', 'A', 'u2'),
+      ('sync', 'A', 'up', (14, 'web_churn_same_count', (60798, 6497, 36620, 45908, 543)))]),
 ]
 
 
