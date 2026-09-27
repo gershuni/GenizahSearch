@@ -302,6 +302,59 @@ def test_a_manual_save_keeps_an_added_fragment_whose_image_then_fails(env):
     assert _tr("image not loaded") in env.win._fragments_label.text()
 
 
+def _image_arrives_during_the_prompt(env, load, answer, written):
+    """An answer to the leave prompt: the image lands while it is open and
+    the user takes longer than the autosave delay. What the open join holds
+    at that point is recorded in `written`."""
+    doc = env.win._current_doc_id
+
+    def _answer(title, text, buttons):
+        if len(env.asks) == 1:
+            load.deliver()
+            pwh.pump(3 * (pwh.DEBOUNCE_MS + pwh.AUTOSAVE_MS))
+            written.append(_sys_ids(env, doc))
+        return answer
+    return _answer
+
+
+@pytest.mark.parametrize("transition", ["new", "open_join", "quit"])
+@pytest.mark.parametrize("answer", [SB.Discard, SB.Cancel, SB.Save],
+                         ids=["discard", "cancel", "save"])
+def test_an_image_that_arrives_during_the_leave_prompt_is_not_autosaved_under_it(
+        env, monkeypatch, transition, answer):
+    """A saved join whose only unsaved work was a fragment still loading: its
+    image arrived while the leave prompt was open, the prompt's event loop
+    ran the autosave, and the join held the fragment before the user chose
+    Discard -- the clear that followed could not take it out again."""
+    doc_a = env.save(pwh.fragments(), title="A")
+    doc_b = _join_b(env)
+    env.open(doc_a)
+    env.win._refresh_docs_list()
+    load = _add_loading(env, pwh.fragments("99030")[0])
+    saves = env.record_saves(monkeypatch)
+    written = []
+    env.answer = _image_arrives_during_the_prompt(env, load, answer, written)
+    if transition == "quit":
+        assert env.win.confirm_quit() is (answer != SB.Cancel)
+    else:
+        _leave(env, transition, doc_b)
+    assert len(env.asks) == 1
+    assert written == [["990001", "990002"]], "the join was written while the prompt was open"
+    env.settle()
+    # The flush before the question may write the join as it was; only a
+    # write holding the new fragment is at issue.
+    holding_it = [keys for doc_id, keys, _thumb in saves
+                  if doc_id == doc_a and ("990301", "1r") in keys]
+    if answer == SB.Discard:
+        assert _sys_ids(env, doc_a) == ["990001", "990002"]
+        assert holding_it == []
+    else:
+        # Cancel: the autosave held back runs once the prompt is closed.
+        # Save: the Save writes it, once.
+        assert _sys_ids(env, doc_a) == ["990001", "990002", "990301"]
+        assert len(holding_it) == 1
+
+
 def test_new_writes_the_pending_autosave_first(env):
     """New set _current_doc_id = None while the save was still pending, so
     when the timer fired it returned without writing (~2 s of edits lost)."""

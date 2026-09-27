@@ -799,6 +799,7 @@ class PuzzleCanvasWindow(QMainWindow):
         self._load_waiting = set()         # keys the current join load still waits for
         self._load_summary = ''            # the status line naming images that failed to load
         self._prompts_open = 0             # open leave prompts and Save dialogs (is_prompting)
+        self._auto_save_held = False       # an autosave held back while one was open
         self._auto_save_timer = QTimer()
         self._auto_save_timer.setSingleShot(True)
         self._auto_save_timer.setInterval(1500)  # 1.5s debounce
@@ -2579,17 +2580,37 @@ class PuzzleCanvasWindow(QMainWindow):
                          QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard
                          | QMessageBox.StandardButton.Cancel)
             if reply == QMessageBox.StandardButton.Save:
-                return self._on_save_join()
-            return reply == QMessageBox.StandardButton.Discard
+                ok = self._on_save_join()
+            else:
+                ok = reply == QMessageBox.StandardButton.Discard
+            if ok:
+                # The canvas is left: what autosave held back meanwhile was
+                # just saved, or is discarded with it.
+                self._auto_save_held = False
+            return ok
 
     @contextmanager
     def _prompting(self):
-        """Counts one open leave prompt or Save dialog (see is_prompting)."""
+        """Counts one open leave prompt or Save dialog (see is_prompting).
+
+        Autosave is suspended while any is open: its event loop still
+        delivers images and timers, and a join written then would keep a
+        fragment the user is about to Discard. A change made meanwhile is
+        held and scheduled once the last one closes, unless the canvas is
+        being left (_confirm_leave_current)."""
+        if self._prompts_open == 0:
+            self._auto_save_held = (self._scene_change_debounce.isActive()
+                                    or self._auto_save_timer.isActive())
+            self._scene_change_debounce.stop()
+            self._auto_save_timer.stop()
         self._prompts_open += 1
         try:
             yield
         finally:
             self._prompts_open -= 1
+            if self._prompts_open == 0 and self._auto_save_held:
+                self._auto_save_held = False
+                self._schedule_auto_save()
 
     def is_prompting(self):
         """True while a leave prompt (New, opening another join, quitting)
@@ -2967,12 +2988,19 @@ class PuzzleCanvasWindow(QMainWindow):
     def _on_scene_changed(self, region_list):
         """Handle scene.changed signal -- debounce and trigger auto-save for saved documents."""
         if self._current_doc_id is not None and self._fragment_items:
+            if self._prompts_open:
+                self._auto_save_held = True   # see _prompting
+                return
             self._scene_change_debounce.start()
 
     def _schedule_auto_save(self):
         """Schedule a debounced auto-save (1.5s) of the open saved join. A
-        scratch pad has nothing to auto-save; leaving it asks instead."""
+        scratch pad has nothing to auto-save; leaving it asks instead. While
+        a leave prompt or the Save dialog is open it is held (_prompting)."""
         if self._current_doc_id is None:
+            return
+        if self._prompts_open:
+            self._auto_save_held = True
             return
         self._auto_save_timer.start()  # restarts if already running
 
