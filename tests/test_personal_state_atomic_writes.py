@@ -1400,6 +1400,9 @@ def _kept_both(note, marker):
 
 
 def test_a_merge_keeps_todays_note_in_the_pre_download_snapshot(synced, monkeypatch, genizah_app_module):
+    # The marker line is in the interface language; pin it, since an earlier test in the
+    # same process can leave the language set to Hebrew.
+    monkeypatch.setattr(genizah_core, "CURRENT_LANG", "en")
     shown = _run_sync_dialog_action(genizah_app_module, monkeypatch, synced.mgr, "merge")
 
     assert [kind for kind, _ in shown] == ["information"], shown
