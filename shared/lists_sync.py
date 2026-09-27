@@ -2014,13 +2014,24 @@ class ListsCloudSync:
                                or (loose and _item_identity(i, items[i])[:2] == theirs[:2])
                                for i in used if i in items)
 
-            def not_its_twin(row, used=used, n=3 if has_page else 2):
-                theirs = _row_identity(row, has_page)[:n]
-                return not any(_item_identity(i, items[i])[:n] == theirs for i in used if i in items)
+            def not_its_twin(row, used=used, n=3 if has_page else 2, loose=not has_page):
+                theirs = _row_identity(row, has_page)
+                for i in used:
+                    if i not in items:
+                        continue
+                    mine = _item_identity(i, items[i])
+                    if mine[:n] == theirs[:n]:
+                        return False
+                    if ((_same_entry(mine, theirs, has_page) or (loose and mine[:2] == theirs[:2]))
+                            and _holds(items[i].get('note'), row.get('note'))
+                            and _tagset(row.get('tags')) <= _tagset(items[i].get('tags'))):
+                        return False
+                return True
 
             # A same-name list's rows are never recorded: a row with the exact identity of an
-            # item already paired is not taken by another entry of this list; it folds into
-            # that item, as every later Download will fold it.
+            # item already paired, or a row that is the same entry as an item already paired
+            # holding its note and tags, is not taken by another entry of this list; it folds
+            # into that item, as every later Download will fold it.
             matched = _match_rows(rows, members, list_id, has_page, claimed, orphan_ids, used,
                                   content_ok=not_its_twin if cid != cloud_id else None)
             matched.update(_match_rows(rows, others, list_id, has_page, claimed, orphan_ids, used,
