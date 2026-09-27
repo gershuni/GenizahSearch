@@ -2532,9 +2532,18 @@ class GenizahGUI(QMainWindow):
             self.corner_login_btn.setText(tr("Signing out..."))
         except Exception as e:
             logger.debug(f"Sign-out: could not update the login button: {e}")
-        job = self._lists_sync_runner().begin_logout(
-            on_done=lambda outcome, t=token: self._finish_logout(outcome, token=t),
-            budget_s=self.LOGOUT_SYNC_BUDGET_S)
+        try:
+            job = self._lists_sync_runner().begin_logout(
+                on_done=lambda outcome, t=token: self._finish_logout(outcome, token=t),
+                budget_s=self.LOGOUT_SYNC_BUDGET_S)
+        except Exception:
+            # Without this the sign-out would wait forever on "Signing out...". It ends
+            # now, as one whose last upload did not run: the notice names unsent changes
+            # when the runner knows of some, as after a sign-out that needed no upload;
+            # with no runner at all it cannot know, and says so as a cut sign-out does.
+            logger.exception("Sign-out: the last list upload could not be started")
+            self._finish_logout({'skipped': True} if self._lists_sync is not None else None, token=token)
+            return
         if not (self._logout_pending and self._logout_generation == token):
             return  # it ended already
         self._logout_job = job

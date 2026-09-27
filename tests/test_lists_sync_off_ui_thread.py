@@ -618,6 +618,75 @@ def test_every_list_mutator_asks_for_an_upload_by_calling_them(gui, monkeypatch)
     assert host.list_ids[0] in host.lists_mgr.get_item("990000002")["lists"]
 
 
+class _MenuAction:
+    def __init__(self, text):
+        self.text, self._data = text, None
+
+    def setData(self, value):
+        self._data = value
+
+    def data(self):
+        return self._data
+
+
+def _menu_choosing(label):
+    """QMenu whose exec() returns the action labelled `label`."""
+    class Menu:
+        def __init__(self, *a):
+            self.actions = []
+
+        def addAction(self, text):
+            self.actions.append(_MenuAction(text))
+            return self.actions[-1]
+
+        def addMenu(self, text):
+            return Menu()
+
+        def addSeparator(self):
+            pass
+
+        def exec(self, pos):
+            return next(a for a in self.actions if a.text == label)
+    return Menu
+
+
+@pytest.mark.parametrize("branch", ["add-to-a-new-list", "project-rename", "project-delete-keep-lists",
+                                    "project-delete-with-lists"])
+def test_the_other_branches_of_the_list_menus_ask_for_an_upload(gui, monkeypatch, branch):
+    """The branches the test above does not take: 'New List...' in the add-to-list menu, and each
+    entry of a project's menu in the Lists tab."""
+    host = gui(list_names=("Local list", "In a project"))
+    _signed_in(host)
+    runner = host._lists_sync
+    lists = host.lists_mgr.data["lists"]
+    monkeypatch.setattr(genizah_app, "QInputDialog", types.SimpleNamespace(
+        getText=lambda *a, **k: ("Made from the menu", True)))
+    if branch == "add-to-a-new-list":
+        monkeypatch.setattr(genizah_app, "QMenu", _menu_choosing(tr("New List...")))
+        host.status_label = types.SimpleNamespace(setText=lambda text: None)
+        host.show_add_to_list_menu(["990000002"], source="search")
+        made, = [lid for lid, ld in lists.items() if ld.get("name") == "Made from the menu"]
+        assert made in host.lists_mgr.get_item("990000002")["lists"]
+    else:
+        project = host.lists_mgr.create_project("A project")
+        lists[host.list_ids[1]]["project_id"] = project
+        label = {"project-rename": "Rename Project", "project-delete-keep-lists": "Delete Project (Keep Lists)",
+                 "project-delete-with-lists": "Delete Project and Lists"}[branch]
+        monkeypatch.setattr(genizah_app, "QMenu", _menu_choosing(tr(label)))
+        node = types.SimpleNamespace(data=lambda col, role: None if role == Qt.ItemDataRole.UserRole else project)
+        host.lists_tree = types.SimpleNamespace(itemAt=lambda pos: node, mapToGlobal=lambda pos: pos)
+        host.lists_current_list_id = host.list_ids[0]
+        host.lists_show_list_context_menu(object())
+        projects = host.lists_mgr.data.get("projects", {})
+        if branch == "project-rename":
+            assert projects[project]["name"] == "Made from the menu"
+        elif branch == "project-delete-keep-lists":
+            assert project not in projects and lists[host.list_ids[1]].get("project_id") is None
+        else:
+            assert project not in projects and lists[host.list_ids[1]].get("deleted_at")   # in the Trash
+    assert runner.names() == ["request_auto"]
+
+
 # ---------------------------------------------------------------------------
 # Sign-in: the preview runs on the runner; the choice waits for a free screen
 # ---------------------------------------------------------------------------
@@ -836,11 +905,35 @@ def test_the_skip_tooltip_says_what_skip_does(gui, monkeypatch, lang):
     assert "Don't sync now - you can sync later from Settings" not in TRANSLATIONS
 
 
+@pytest.mark.parametrize("press", ["Skip", "close", "Download from Cloud", "Upload to Cloud", "Merge Both"])
+def test_the_sync_choice_uploads_once_unless_an_action_was_chosen(gui, monkeypatch, press):
+    """The real dialog: Skip or its close button returns falsy (one upload follows), an action
+    button accepts it (the action runs; no extra upload)."""
+    class Dialog(QDialog):
+        def exec(self):
+            if press == "close":
+                self.reject()                     # what the title bar's close button does
+            else:
+                button, = [b for b in self.findChildren(QPushButton) if b.text() == tr(press)]
+                button.click()
+            return self.result()
+
+    monkeypatch.setattr(genizah_app, "QDialog", Dialog)
+    host = gui()
+    del host._show_lists_sync_dialog                                   # the real one
+    runner = host._lists_sync
+    host._show_lists_sync_choice((host.lists_mgr.get_local_lists_summary(), _preview(2)["lists"], None))
+    action = {"Download from Cloud": "download", "Upload to Cloud": "upload", "Merge Both": "merge"}.get(press)
+    assert runner.names() == ([f"run:{action}"] if action else ["request_auto"])
+
+
 # ---------------------------------------------------------------------------
 # A sign-in restored at startup, and an offline start
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("restore", ["no-state", "never", "declined", "restored", "raises"])
+# The restore either returns (whichever of its paths: no saved state, 'never', declined, restored --
+# all one return to this code) or raises. Its own paths are the session-restore tests' to pin.
+@pytest.mark.parametrize("restore", ["returns", "raises"])
 def test_a_restored_sign_in_turns_sync_on_after_the_session_restore(gui, restore):
     host = gui()
     runner = host._lists_sync
@@ -991,6 +1084,70 @@ def test_an_earlier_sign_outs_timer_does_not_cut_a_later_one(gui):
     assert not host._logout_pending and len(host.notices) == 2
 
 
+def test_a_cut_sign_outs_job_that_ends_during_a_later_sign_out_leaves_it_alone(gui):
+    """The budget cuts a sign-out whose upload hangs in a request; its job ends only when that
+    request returns -- which can be during the next sign-out. Its end is the first sign-out's."""
+    host = gui()
+    _signed_in(host)
+    runner = host._lists_sync
+    host._do_logout()
+    first = runner.last("logout")
+    host._finish_logout(None, token=host._logout_generation)    # what the budget timer calls
+    assert not host._logout_pending and ("cancel", first) in runner.calls and len(host.notices) == 1
+
+    host.corrections_client.sign_in()
+    _signed_in(host)
+    host._do_logout()
+    second = runner.last("logout")
+    assert second is not first and host._logout_pending
+
+    runner.finish(first, {"cancelled": True, "upload": STOPPED_UPLOAD})   # the cut job ends only now
+    assert host._logout_pending, "the first sign-out's late job ended the second one"
+    assert ("cancel", second) not in runner.calls and len(host.notices) == 1
+
+    runner.finish(second, {"upload": {"success": True}})
+    assert not host._logout_pending and len(host.notices) == 2
+    assert host.notices[-1][0] == "information"
+
+
+@pytest.mark.parametrize("unsent", [False, True], ids=["nothing-unsent", "changes-unsent"])
+def test_a_sign_out_whose_last_upload_cannot_start_still_signs_out(gui, monkeypatch, unsent):
+    host = gui()
+    _signed_in(host)
+    runner = host._lists_sync
+    runner.unsent = unsent
+    logged = []
+    monkeypatch.setattr(genizah_app.logger, "exception", lambda msg, *a, **k: logged.append(msg % a if a else msg))
+
+    def begin_logout(on_done, budget_s):
+        runner.calls.append(("begin_logout", budget_s))
+        raise RuntimeError("the runner could not take the sign-out")
+    runner.begin_logout = begin_logout
+
+    host._do_logout()                                  # nothing escapes the button's handler
+
+    assert "Sign-out: the last list upload could not be started" in logged
+    assert not host._logout_pending and host._logout_timer is None
+    assert host.corner_login_btn.isEnabled() and host.corner_login_btn.text() == tr("Login")
+    assert host.corrections_client.logouts == [("background", threading.main_thread())]
+    assert not host.lists_mgr.is_sync_available()
+    assert _notice(host) == (("warning", [tr(P17)]) if unsent else ("information", []))
+    host.corrections_client.sign_in()                  # and the next sign-out is not blocked
+    _signed_in(host)
+    del runner.begin_logout
+    host._do_logout()
+    assert runner.names().count("begin_logout") == 2 and host._logout_pending
+
+
+def test_sign_out_resets_the_telemetry_identity(gui, monkeypatch):
+    from desktop import telemetry
+    resets = []
+    monkeypatch.setattr(telemetry, "reset_identity", lambda *a, **k: resets.append(a))
+    host = gui()
+    host._do_logout()                                  # list sync off: the sign-out ends at once
+    assert resets == [()]
+
+
 def _logout_cell(host, monkeypatch, cell):
     """Run a sign-out as `cell` describes; return the notice's kind and paragraphs."""
     state = {"differing": 0, "failing": False}
@@ -1028,8 +1185,9 @@ def _logout_cell(host, monkeypatch, cell):
         state["failing"] = True
         state["differing"] = 1
         outcome = {"upload": dict(failed, notes_too_long=1 if cell == "j-too-long" else 0)}
-    if cell == "g-sync-never-on":
-        host._lists_auto_sync()                      # a change while sync is off
+    if cell in ("g-sync-never-on", "g2-sync-never-on-nothing-changed"):
+        if cell == "g-sync-never-on":
+            host._lists_auto_sync()                  # a change while sync is off
         host._do_logout()
         return _notice(host)
     _signed_in(host)
@@ -1049,6 +1207,7 @@ LOGOUT_CELLS = {
     "e-too-long": [(TOO_LONG_KEPT, 1)],
     "f-earlier-conflict-membership-unchecked": [P32],
     "g-sync-never-on": [P18],
+    "g2-sync-never-on-nothing-changed": [],
     "h-orphan-with-a-website-edit": [P32],
     "i-a-removal-left-unsent": [P17],
     "i2-a-removal-left-unsent-with-lists": [P17],
@@ -1179,10 +1338,11 @@ def test_an_ordinary_sign_out_never_waits_for_the_network(gui, account, sync):
 
 def test_a_background_revoke_cannot_touch_a_later_sign_in(account):
     client = account.client
+    before = set(threading.enumerate())      # an earlier test's revoke thread may still be exiting
     client.logout(revoke="background")
     assert client._client is None and client.current_user is None
     assert not client.credentials_file.exists()
-    revoke = next(t for t in threading.enumerate() if t.name == "supabase-sign-out")
+    revoke, = [t for t in threading.enumerate() if t.name == "supabase-sign-out" and t not in before]
     assert revoke.daemon
 
     new = _Supabase(_Auth())                           # signed in again, as the same user
@@ -1578,3 +1738,111 @@ def test_no_sync_text_says_saved_while_lists_cannot_be_saved_removal_prompt_held
     assert len(asked) == 1
     _auto_done(host)
     assert len(asked) == 1, "offered more than once"
+
+
+# ---------------------------------------------------------------------------
+# The window's own ListsSyncRunner (desktop/lists_sync_runner.py), not a recording one
+# ---------------------------------------------------------------------------
+
+NOTES_DIFFER_HINT = ("Some notes differ from your account and were not uploaded. To keep both "
+                     "versions, use Sync lists now, then Merge Both.")
+UPLOAD_STOPPED = ("Upload stopped. The rest of your changes are saved on this computer but have not "
+                  "reached your account yet.")
+
+
+def _inline_runner(host):
+    """The real runner, every stage on this thread (the window's handlers run as they return)."""
+    from desktop.lists_sync_runner import ListsSyncRunner
+    host._lists_sync = ListsSyncRunner(host.lists_mgr, parent=host, on_auto_done=host._on_lists_auto_done,
+                                       inline=True)
+    return host._lists_sync
+
+
+def test_the_window_builds_its_runner_with_the_automatic_upload_handler(gui, monkeypatch):
+    """_lists_sync_runner() as the app calls it: a real runner, its drain timer owned by the window,
+    whose automatic upload ends in _on_lists_auto_done (the removal prompt and the notes hints)."""
+    from desktop.lists_sync_runner import ListsSyncRunner
+    host = gui()
+    host._lists_sync = None                          # nothing injected: the window makes its own
+    _signed_in(host)
+    uploads = []
+
+    def sync_to_cloud(data=None, **kw):              # the network half, on the runner's worker
+        uploads.append((data is not None and data is not host.lists_mgr.data,
+                        threading.current_thread() is not threading.main_thread()))
+        return {"success": True, "lists_pushed": 1, "items_pushed": 1, "notes_differing": 1,
+                "notes_too_long": 0}
+    monkeypatch.setattr(host.lists_mgr, "sync_to_cloud", sync_to_cloud)
+
+    host._lists_auto_sync()                          # a list change: the first use builds the runner
+    runner = host._lists_sync
+    try:
+        assert type(runner) is ListsSyncRunner
+        assert runner.on_auto_done == host._on_lists_auto_done
+        assert runner._timer is not None and runner._timer.parent() is host
+        end = time.monotonic() + 5
+        while status(host) != tr(NOTES_DIFFER_HINT) and time.monotonic() < end:
+            pump(0.05)
+        assert uploads == [(True, True)], "the upload did not run once, on a copy, off the UI thread"
+        assert status(host) == tr(NOTES_DIFFER_HINT), "the automatic upload's end never reached the window"
+    finally:
+        runner.shutdown()
+
+
+def test_a_manual_upload_the_sign_out_deadline_stops_says_upload_stopped(gui, monkeypatch):
+    """A sign-out while a manual upload runs holds it to the sign-out's deadline: it stops, not
+    cancelled ({'stopped', 'deadline'}), and the status bar says so -- not a sync error."""
+    host = gui()
+    _signed_in(host)
+    runner = _inline_runner(host)
+    host.LOGOUT_SYNC_BUDGET_S = 0.01
+    checks = []
+
+    def sync_to_cloud(data=None, should_stop=None, **kw):
+        host._do_logout()                            # the user signs out while it runs
+        time.sleep(0.05)                             # past the sign-out's deadline
+        checks.append(should_stop())                 # the engine asks before its next request
+        return {"success": False, "stopped": True, "error": "Sync stopped", "lists_pushed": 0,
+                "items_pushed": 0, "items_failed": 0, "lists_not_uploaded": ["Local list"]}
+    monkeypatch.setattr(host.lists_mgr, "sync_to_cloud", sync_to_cloud)
+
+    host._do_sync_action(DIALOG, "upload")
+
+    assert checks == [True]
+    assert status(host) == tr(UPLOAD_STOPPED)
+    assert _notice(host) == ("warning", [tr(P17)])   # the one notice is the sign-out's
+    assert not host._logout_pending and not runner.busy
+
+
+@pytest.mark.parametrize("action", ["download", "upload", "merge"])
+def test_a_sync_that_fails_before_its_first_half_says_why(gui, monkeypatch, action):
+    """A job whose start raises ends with an 'error' and no half: the notice gives that error."""
+    host = gui()
+    _signed_in(host)
+    _inline_runner(host)
+
+    def broken(*a, **k):
+        raise RuntimeError("the lists could not be read")
+    monkeypatch.setattr(host.lists_mgr, "begin_upload" if action == "upload" else "remembered_row_ids", broken)
+
+    host._do_sync_action(DIALOG, action)
+
+    assert host.notices == [("warning", tr("Sync Error"), "the lists could not be read")]
+
+
+def test_a_sign_out_whose_upload_could_not_start_says_the_changes_did_not_upload(gui, monkeypatch):
+    """The sign-out's own upload (nothing synced in the last minute) fails to start: the job
+    ends in an error while nothing is marked unsent, and the notice says string 17."""
+    host = gui()
+    _signed_in(host)
+    runner = _inline_runner(host)
+
+    def broken(*a, **k):
+        raise RuntimeError("no copy of the lists")
+    monkeypatch.setattr(host.lists_mgr, "begin_upload", broken)
+    assert not runner.unsent and runner._logout_needs_upload()
+
+    host._do_logout()
+
+    assert not host._logout_pending
+    assert _notice(host) == ("warning", [tr(P17)])
