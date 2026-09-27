@@ -170,10 +170,6 @@ first must show `page | text` and `tags | jsonb`, the second SELECT/INSERT/UPDAT
 reads it through `select('*')` and never writes it, so the web can deploy before or after the
 migration. Rollback:
 `alter table public.list_items drop column if exists page; notify pgrst, 'reload schema';`.
-`supabase_setup.sql` now also grants `projects`, `user_lists`, `list_items` and `recent_items` to
-`authenticated` (SELECT, INSERT, UPDATE, DELETE) and `service_role` (ALL), with USAGE, SELECT on their
-id sequences, so a new project's Data API reaches the list tables (RLS and policies unchanged; `anon`
-untouched).
 
 **How the desktop syncs rows (2026-09-27).** Each list membership has its own row, remembered per
 list on the computer (`cloud_rows`); rows are matched by list, `sys_id`, `fl_id` and `page`, each row

@@ -4,8 +4,7 @@ if it drifted. It must add one nullable TEXT column in one transaction, be safe 
 again, restate the table grants (CLAUDE.md, convention 6) without touching RLS or its
 policies, and carry the verify query the owner runs afterwards -- which must name `tags`,
 because the desktop's tag filters are written for a jsonb column. A fresh project built
-from supabase_setup.sql must get the same column, and the same grants on every list table
-it creates.
+from supabase_setup.sql must get the same column.
 """
 import re
 from pathlib import Path
@@ -115,37 +114,6 @@ def test_a_fresh_setup_creates_list_items_with_a_page_column():
                for m in re.finditer(r"^\s*(\w+)\s+([^\n]+)$", table.group(1), re.M)}
     assert columns.get("page") == "text", columns
     assert columns.get("tags", "").startswith("jsonb"), columns
-
-
-LIST_TABLES = ('projects', 'user_lists', 'list_items', 'recent_items')
-
-
-def test_a_fresh_setup_grants_every_list_table_to_both_api_roles():
-    # CLAUDE.md, convention 6: a public table the Data API reaches needs explicit grants
-    # as well as RLS; the setup file creates these four and must grant them as the
-    # migration does, sequences included, without touching anon.
-    statements = _statements(_sql(SETUP))
-    for table in LIST_TABLES:
-        created = next(n for n, s in enumerate(statements) if s.startswith(f"create table public.{table} "))
-        for grant in (f"grant select, insert, update, delete on table public.{table} to authenticated",
-                      f"grant all on table public.{table} to service_role"):
-            assert grant in statements, grant
-            assert statements.index(grant) > created, f"{grant} runs before the table exists"
-    blocks = [s for s in statements if s.startswith("do $$") and "pg_get_serial_sequence" in s]
-    assert len(blocks) == 1, blocks
-    for table in LIST_TABLES:
-        assert f"'public.{table}'" in blocks[0], table
-    assert "grant usage, select on sequence %s to authenticated, service_role" in blocks[0]
-    grants = [s for s in statements if s.startswith("grant") or "grant " in s and s.startswith("do $$")]
-    assert not any(re.search(r"\banon\b", s) for s in grants), grants
-
-
-def test_the_setup_grants_leave_rls_and_its_policies_as_they_were():
-    # The grants are additive: the policies still decide which rows each user reaches.
-    statements = _statements(_sql(SETUP))
-    assert not any(s.startswith("revoke") for s in statements), "the setup file revokes something"
-    for table in LIST_TABLES:
-        assert f"alter table {table} enable row level security" in statements, table
 
 
 def test_the_statement_splitter_can_fail():

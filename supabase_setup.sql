@@ -363,36 +363,6 @@ FOR SELECT TO public USING (true);
 CREATE POLICY "Document fragments are publicly viewable" ON document_fragments
 FOR SELECT TO public USING (true);
 
--- ============================================
--- DATA API GRANTS FOR THE LIST TABLES
--- ============================================
--- supabase-js / PostgREST reach a table only with table privileges as well as RLS,
--- and new projects no longer grant them by default (CLAUDE.md, convention 6). The
--- policies above still decide which rows each user reaches. anon is left as it is.
--- Same grants as migrations/add_list_item_page_column.sql gives list_items.
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.projects TO authenticated;
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.user_lists TO authenticated;
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.list_items TO authenticated;
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.recent_items TO authenticated;
-GRANT ALL ON TABLE public.projects TO service_role;
-GRANT ALL ON TABLE public.user_lists TO service_role;
-GRANT ALL ON TABLE public.list_items TO service_role;
-GRANT ALL ON TABLE public.recent_items TO service_role;
-
--- Their SERIAL ids: inserts need the sequences too.
-DO $$
-DECLARE
-    t TEXT;
-    seq TEXT;
-BEGIN
-    FOREACH t IN ARRAY ARRAY['public.projects', 'public.user_lists', 'public.list_items', 'public.recent_items'] LOOP
-        seq := pg_get_serial_sequence(t, 'id');
-        IF seq IS NOT NULL THEN
-            EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %s TO authenticated, service_role', seq);
-        END IF;
-    END LOOP;
-END $$;
-
 
 -- ============================================================================
 -- PART 3: FUNCTIONS AND TRIGGERS
