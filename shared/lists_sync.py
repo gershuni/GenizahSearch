@@ -1758,7 +1758,7 @@ class ListsCloudSync:
                 local_deleted_at = time.time()  # Fallback to now
         return local_deleted_at
 
-    def _map_lists(self, store, cloud_lists, cloud_project_to_local, result):
+    def _map_lists(self, store, cloud_lists, cloud_project_to_local, result, lists_complete=True):
         """Each local list's own cloud list, and the same-name cloud lists read for it.
 
         At most one local owner per cloud list. A list owns the cloud list whose id
@@ -1773,6 +1773,11 @@ class ListsCloudSync:
         unsent (LIST_STATE_UNSENT: it held no cloud id and its state differed): it
         keeps its own until an upload has sent it. A rename here never holds these
         back, and an unsent state never holds back a name.
+
+        When the read of the lists was not complete (lists_complete False), a list whose
+        cloud id the read did not return keeps that id and gets no cloud list this pass
+        (its own may lie past what was read); a list that holds no id still takes a
+        same-name one that was read, as the upload does.
         """
         local_lists = store.setdefault('lists', {})
         order = [lid for lid in _list_order(store) if _syncable_list(lid, local_lists[lid])]
@@ -1817,6 +1822,11 @@ class ListsCloudSync:
         pending = [lid for lid in order if lid not in own]
         pending.sort(key=lambda lid: 0 if local_lists[lid].get('cloud_id') is not None else 1)
         for lid in pending:
+            stored = local_lists[lid].get('cloud_id')
+            if stored is not None and not lists_complete:
+                logger.info("The cloud lists were not all read; list '%s' keeps cloud list %s and is not "
+                            "updated until the next download", local_lists[lid].get('name'), stored)
+                continue
             holding = {local_lists[x].get('cloud_id') for x in local_lists if x != lid}
             free = sorted((cid for cid, cl in cloud_by_id.items()
                            if candidate(cl, lid) and cid not in taken and cid not in holding), key=_id_key)
@@ -1903,7 +1913,7 @@ class ListsCloudSync:
             _drop_left_tombstones(items)
             return
 
-        own, same_name = self._map_lists(store, cloud_lists, cloud_project_to_local, result)
+        own, same_name = self._map_lists(store, cloud_lists, cloud_project_to_local, result, lists_complete)
         cloud_trashed = {cl['id']: bool(cl.get('deleted_at')) for cl in cloud_lists}
         has_page = bool(pass_.has_page)
         self._repair_shared_cloud_rows(store, merge=True, has_page=has_page)
@@ -2196,7 +2206,11 @@ class ListsCloudSync:
             result['unchecked'] += 1
 
     def _sweep_unowned(self, pass_, store, own, lists_complete, cloud_list_ids, result):
-        """Memberships whose local list has no cloud list of its own in this pass (deleted there, or none yet)."""
+        """Memberships whose local list has no cloud list of its own in this pass (deleted there, or none yet).
+
+        A list whose cloud id a read of the lists that was not complete did not return may still have
+        that cloud list: its memberships keep their records and count as unchecked.
+        """
         lists = store.get('lists') or {}
         for iid, it in list((store.get('items') or {}).items()):
             if is_local_sys_id(it.get('sys_id', iid)):
@@ -2207,6 +2221,9 @@ class ListsCloudSync:
                     continue
                 rec = _live_record(it, list_id)
                 if rec is None:
+                    continue
+                if not lists_complete and ld.get('cloud_id') is not None and ld['cloud_id'] not in cloud_list_ids:
+                    result['unchecked'] += 1   # its cloud list was not read: nothing is concluded this pass
                     continue
                 self._judge_unseen(pass_, iid, it, list_id, rec, None, False, lists_complete, cloud_list_ids,
                                    result)

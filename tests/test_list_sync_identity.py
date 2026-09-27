@@ -1997,6 +1997,40 @@ def test_a_new_list_whose_same_name_cloud_list_an_incomplete_read_missed_is_not_
     assert sorted(r['sys_id'] for r in c.rows(list_id=cl)) == ['990001', '990002'] and c.row(row)['note'] == 'n1'
 
 
+def test_a_download_keeps_a_list_whose_cloud_list_an_incomplete_read_missed(tmp_path):
+    """A download reads the list of lists short: the list's own cloud list lies past page 1, and page 1 holds
+    a same-name cloud list no local list holds (the decoy). The list keeps its cloud id, takes nothing from
+    the decoy, and keeps the record of its entry; nothing is concluded about it. A download that reads every
+    list then applies its own cloud list to it."""
+    c = Cloud(max_rows=1)
+    decoy = c.new_list('Z')                               # the lowest id: the only list the short read returns
+    c.add(decoy, '990005', fl_id='FLd', note='decoy')
+    a = make_desk(tmp_path, c)
+    lid = a.mgr.create_list('B')
+    a.mgr.add_item('990001', lid, note='n1', fl_id='FLa')
+    assert a.up()['success']                              # cloud list B made for it, above the decoy's id
+    own = cloud_id(a, lid)
+    key = '990001::fl::FLa'
+    rid = rec(a, key, lid)['id']
+    assert own > decoy
+    _rename_on_web(c, decoy, 'B')                         # the decoy now has the list's name
+    c.set(rid, note='n1, edited on the website')
+    c.rec.hook = _lists_read_ends_short
+    result = a.down()
+    c.rec.hook = None
+    assert result['success']
+    assert cloud_id(a, lid) == own, 'the list was moved onto the same-name decoy'
+    assert not [k for k, it in a.mgr.data['items'].items() if it['sys_id'] == '990005'], 'a decoy row was applied'
+    assert rec(a, key, lid) is not None and rec(a, key, lid)['id'] == rid, 'the entry lost its record'
+    assert item(a, key)['note'] == 'n1' and result['web_removed'] == []
+    result = a.down()
+    assert result['success'] and cloud_id(a, lid) == own
+    assert rec(a, key, lid)['id'] == rid and item(a, key)['note'] == 'n1, edited on the website'
+    # the decoy is a cloud list of this list's name that no local list holds: read for it, as by design
+    assert [lid in it['lists'] for it in a.mgr.data['items'].values() if it['sys_id'] == '990005'] == [True]
+    assert len([k for k, it in a.mgr.data['items'].items() if it['sys_id'] == '990001']) == 1
+
+
 # --------------------------------------------------------------------------- what the website stores on a row
 
 def test_an_upload_leaves_the_website_shelfmark_and_title_of_a_row_alone(tmp_path, cloud):
