@@ -290,7 +290,9 @@ def has_unsent_changes(store, user_id=None):
     and at each log-in, never per edit. True when any of:
     - a removal of this account waits for its delete (store['cloud_deletes']);
     - a list carries LIST_STATE_UNSENT or LIST_NAME_UNSENT, or a list or project has no
-      cloud id yet (the upload creates it);
+      cloud id yet (the upload creates it), or has one from another account: when the store
+      was last synced as another account, every list's and project's cloud id is that
+      account's, which the upload clears and replaces with one of this account's;
     - an entry is in a list whose entries the upload writes (synced, not in the Trash)
       with no record of its row for this account -- a row the website removed (a 'gone'
       record, waiting for the user's answer) is not re-sent, so it does not count;
@@ -304,6 +306,8 @@ def has_unsent_changes(store, user_id=None):
     """
     account = user_id if user_id is not None else store.get('cloud_account')
     lists = dict(store.get('lists') or {})
+    # the cloud ids were given by another account: not in this one
+    foreign = store.get('cloud_account') is not None and store.get('cloud_account') != account
 
     def written(lid):
         ld = lists.get(lid)
@@ -314,9 +318,9 @@ def has_unsent_changes(store, user_id=None):
         return True
     for lid, ld in lists.items():
         if isinstance(ld, dict) and _syncable_list(lid, ld) and (
-                ld.get(LIST_STATE_UNSENT) or ld.get(LIST_NAME_UNSENT) or ld.get('cloud_id') is None):
+                ld.get(LIST_STATE_UNSENT) or ld.get(LIST_NAME_UNSENT) or ld.get('cloud_id') is None or foreign):
             return True
-    if any(isinstance(pd, dict) and pd.get('cloud_id') is None
+    if any(isinstance(pd, dict) and (pd.get('cloud_id') is None or foreign)
            for pd in list((store.get('projects') or {}).values())):
         return True
     own = account is not None and store.get('cloud_account') == account   # its records are this account's

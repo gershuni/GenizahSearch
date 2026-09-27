@@ -394,6 +394,36 @@ def test_seeding_again_counts_a_change_made_since_the_runner_was_made(desk, clou
     assert r.unsent is True
 
 
+@pytest.mark.parametrize('who', ['another-account', 'another-account-with-a-project', 'the-same-account'])
+def test_an_empty_list_synced_under_one_account(desk, cloud, who, monkeypatch):
+    """Its cloud id is the account's it was synced under: after a restart, a log-in as another account
+    counts the list as unsent (the upload makes it in that account), the same account does not."""
+    desk.mgr.create_list('E')                             # no entries: only the list itself goes up
+    if who == 'another-account-with-a-project':
+        desk.mgr.create_project('P')
+    assert desk.up()['success']
+    e = R.reopen(desk)
+    monkeypatch.setattr(lists_sync, '_sync_instance', e.sync)
+    other = who != 'the-same-account'
+    if other:
+        R.sign_in(e, 'u2')
+    begins = []
+    real = e.mgr.begin_upload
+    monkeypatch.setattr(e.mgr, 'begin_upload', lambda: begins.append(1) or real())
+    r = ListsSyncRunner(e.mgr, inline=True)
+    assert e.mgr.has_unsent_changes(e.sync._user_id) is other and r.unsent is other
+    e.sync._last_sync = time.time()                       # synced a moment ago
+    assert r._logout_needs_upload() is other
+    done = []
+    r.run('download', on_done=done.append)
+    assert done[0]['download']['success'] and len(begins) == (1 if other else 0)
+    if other:
+        assert [cl['name'] for cl in cloud.db.tables['user_lists'] if cl['user_id'] == 'u2' and cl['name'] == 'E'] == ['E']
+        assert [p['name'] for p in cloud.db.tables['projects'] if p['user_id'] == 'u2'] == (
+            ['P'] if who == 'another-account-with-a-project' else [])
+        assert r.unsent is False and not e.mgr.has_unsent_changes('u2')
+
+
 def test_lists_that_cannot_be_read_for_it_count_as_unsent(desk, monkeypatch):
     def unreadable(user_id=None):
         raise RuntimeError('the lists could not be read')
