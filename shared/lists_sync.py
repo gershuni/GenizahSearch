@@ -227,16 +227,28 @@ def _tags_filter_literal(tags):
 
 
 def count_differing_notes(store):
-    """Current memberships whose record says the cloud's note or tags differ and were left as they are."""
+    """Entries whose note or tags differ from the account's copy and were left as they are.
+
+    One per local item (however many of its lists say so) with a current membership
+    whose record says the cloud's note or tags differed: the item is still in that
+    list, and the list is one a pass reaches -- it exists, is synced, and is not in
+    the Trash (restored, its entries count again).
+    """
     if not store.get('cloud_account'):
         return 0
-    n = 0
     # copies of the live store's dicts and lists: an auto-upload runs while the user edits
+    lists = dict(store.get('lists') or {})
+
+    def reached(key):
+        ld = lists.get(key)
+        return isinstance(ld, dict) and _syncable_list(key, ld) and not ld.get('deleted_at')
+
+    n = 0
     for item in list((store.get('items') or {}).values()):
-        lists = list(item.get('lists') or [])
-        for key, rec in _records(item):
-            if key in lists and not rec.get('gone') and rec.get('differs'):
-                n += 1
+        in_lists = list(item.get('lists') or [])
+        if any(key in in_lists and reached(key) and not rec.get('gone') and rec.get('differs')
+               for key, rec in _records(item)):
+            n += 1
     return n
 
 
@@ -386,6 +398,7 @@ class _Pass:
         self.claimed = set()     # row ids claimed in this pass
         self.held_notes = set()  # items with a row whose note differs and may not be replaced
         self.held_tags = set()
+        self.too_long = set()    # items a note or tag write of this pass was refused for (URL too long)
         self.named = None        # row id -> [(item, list key)] of the records naming it
 
     def check(self):
@@ -853,7 +866,10 @@ class ListsCloudSync:
         Returns:
             Dict with 'success', 'lists_pushed', 'items_pushed', 'items_failed',
             'notes_kept', 'notes_too_long', 'notes_differing', 'unchecked', 'waiting',
-            'web_removed', 'lists_not_uploaded', 'complete', 'error'
+            'web_removed', 'lists_not_uploaded', 'complete', 'error'.
+            notes_kept counts memberships (one per list whose row kept its differing
+            note or tags); notes_too_long and notes_differing count entries (what the
+            dialog shows).
         """
         if not self.is_sync_available():
             return {'success': False, 'error': 'Sync not available'}
@@ -922,6 +938,7 @@ class ListsCloudSync:
             for name in names[start:]:
                 if name not in result['lists_not_uploaded']:
                     result['lists_not_uploaded'].append(name)
+        result['notes_too_long'] = len(pass_.too_long)
         result['notes_differing'] = count_differing_notes(store)
         result['complete'] = bool(result['success'] and not result['unchecked'] and not result['waiting']
                                   and not result['lists_not_uploaded'])
@@ -1296,7 +1313,7 @@ class ListsCloudSync:
         change, note_c, tags_c, kept, bases = self._changes(pass_, iid, it, row, loc, base)
         status, sent = self._patch(pass_, rid, src, dict(change, list_id=cloud_id), note_c, tags_c)
         if status == 'too_long':
-            result['notes_too_long'] += 1
+            pass_.too_long.add(iid)
             bases = self._agreed_bases(it, loc[1], loc[2], base)
             status = self._send_rest(pass_, rid, src, sent)
         elif status == 'nomatch':
@@ -1402,7 +1419,7 @@ class ListsCloudSync:
         if change:
             status, sent = self._patch(pass_, rid, cloud_id, change, note_c, tags_c)
             if status == 'too_long':
-                result['notes_too_long'] += 1
+                pass_.too_long.add(iid)
                 bases = self._agreed_bases(it, c_note, c_tags, base_rec)
                 status = self._send_rest(pass_, rid, cloud_id, sent)
             elif status == 'nomatch':
@@ -1577,7 +1594,10 @@ class ListsCloudSync:
 
         Returns:
             Dict with 'success', 'lists_added', 'lists_updated', 'items_added',
-            'notes_merged', 'notes_differing', 'unchecked', 'web_removed', 'error'
+            'notes_merged', 'tags_merged', 'notes_differing', 'unchecked', 'web_removed', 'error'.
+            notes_merged, tags_merged and notes_differing count entries: notes_merged
+            those whose note now holds a text kept under a marker line, tags_merged
+            those whose tags were combined.
         """
         if not self.is_sync_available():
             return {'success': False, 'error': 'Sync not available'}
@@ -1597,6 +1617,7 @@ class ListsCloudSync:
                 'lists_updated': 0,
                 'items_added': 0,
                 'notes_merged': 0,
+                'tags_merged': 0,
                 'notes_differing': 0,
                 'unchecked': 0,
                 'web_removed': [],
@@ -2200,10 +2221,13 @@ class ListsCloudSync:
             tags = []
             for t in tparts:
                 tags = _union(tags, t)
-        merged_note = bool(new) and len(parts) >= 2 and note not in parts
-        merged_tags = bool(tnew) and len(tparts) >= 2 and all(_tagset(tags) != _tagset(t) for t in tparts)
-        if merged_note or merged_tags:
+        # a note merge wrote a marker line: the note is a new combination of the texts;
+        # combined tags are counted apart (they leave no marker)
+        if bool(new) and len(parts) >= 2 and note not in parts and note != x0:
             result['notes_merged'] += 1
+        if bool(tnew) and len(tparts) >= 2 and _tagset(tags) != xs \
+                and all(_tagset(tags) != _tagset(t) for t in tparts):
+            result['tags_merged'] += 1
         it['note'] = note
         it['tags'] = tags
 

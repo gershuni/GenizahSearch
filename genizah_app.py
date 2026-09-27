@@ -2581,16 +2581,21 @@ class GenizahGUI(QMainWindow):
     def _sync_note_lines(download=None, upload=None):
         """Lines about notes to add to a sync result message, success or failure.
 
-        One line per non-zero count: from a download result, the notes whose two
-        versions it kept (`notes_merged`); from an upload result, the notes left
-        different from the account (`notes_differing`) and those too long to update
-        there (`notes_too_long`). A result without these keys gives no lines.
+        One line per non-zero count, each a count of entries: from a download
+        result, the notes whose two versions it kept under a marker line
+        (`notes_merged`) and the entries whose tags it combined (`tags_merged`);
+        from an upload result, the notes left different from the account
+        (`notes_differing`) and those too long to update there (`notes_too_long`).
+        A result without these keys gives no lines.
         """
         lines = []
         merged = (download or {}).get('notes_merged', 0)
         if merged:
             lines.append(tr("Notes that differed between this computer and your account: {}. Both versions were kept; the account's text is under the line \"--- {} ---\".").format(
                 merged, tr("from the cloud")))
+        tags_merged = (download or {}).get('tags_merged', 0)
+        if tags_merged:
+            lines.append(tr("Tags that differed between this computer and your account: {}. The tags from both were kept.").format(tags_merged))
         differing = (upload or {}).get('notes_differing', 0)
         if differing:
             lines.append(tr("Notes that differ between this computer and your account: {}. They were left as they are; Merge Both keeps both versions.").format(differing))

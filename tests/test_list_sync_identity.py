@@ -686,12 +686,75 @@ def test_notes_kept_and_merged_are_counted(tmp_path, cloud):
     cloud.add(ck, '990001', fl_id='FLa', note='k text')
     cloud.add(cl, '990001', fl_id='FLa', note='l text')
     result = a.up()
-    assert result['notes_kept'] == 2 and result['notes_differing'] == 2      # per membership
-    assert a.mgr.differing_notes_count() == 2
+    assert result['notes_kept'] == 2                                          # per membership
+    assert result['notes_differing'] == 1 and a.mgr.differing_notes_count() == 1   # per entry
     result = a.down()
-    assert result['notes_merged'] == 1                                        # per entry
+    assert result['notes_merged'] == 1 and result['tags_merged'] == 0         # per entry
     assert item(a, '990001::fl::FLa')['note'] == 'local' + MARK + 'k text' + MARK + 'l text'
     assert result['notes_differing'] == 0 and a.mgr.differing_notes_count() == 0
+
+
+def test_a_note_too_long_to_update_counts_once_for_an_entry_in_two_lists(tmp_path, cloud):
+    a = make_desk(tmp_path, cloud)
+    k, l_ = a.mgr.create_list('K'), a.mgr.create_list('L')
+    key = '990001::fl::FLa'
+    long_note = 'y' * 9000
+    a.mgr.add_item('990001', k, note=long_note, fl_id='FLa')
+    a.mgr.add_item('990001', l_, fl_id='FLa')
+    assert a.up()['success']
+    a.mgr.update_item(key, note=long_note + '\nmore')
+    mark = cloud.rec.mark()
+    result = a.up()
+    assert len([r for r in mark(op='update') if 'note' in (r.payload or {})]) == 2   # both rows were tried
+    assert result['notes_too_long'] == 1 and result['items_failed'] == 0
+    assert [r['note'] for r in cloud.rows(sys_id='990001')] == [long_note, long_note]
+
+
+@pytest.mark.parametrize('what', ['tags-only', 'note-and-tags'])
+def test_a_download_counts_combined_tags_apart_from_notes_kept_under_a_marker(tmp_path, cloud, what):
+    # The dialog's note line promises a marker line in the note: a Download that only
+    # combined tags wrote none, so it counts in tags_merged alone.
+    a = make_desk(tmp_path, cloud)
+    lid = a.mgr.create_list('Mine')
+    a.mgr.add_item('990001', lid, note='same note', tags=['a'], fl_id='FLa')
+    cl = cloud.new_list('Mine')
+    cloud.add(cl, '990001', fl_id='FLa', note='same note' if what == 'tags-only' else 'theirs', tags=['b'])
+    result = a.down()
+    it = item(a, '990001::fl::FLa')
+    assert it['tags'] == ['a', 'b']
+    if what == 'tags-only':
+        assert it['note'] == 'same note'
+        assert (result['notes_merged'], result['tags_merged']) == (0, 1)
+    else:
+        assert it['note'] == 'same note' + MARK + 'theirs'
+        assert (result['notes_merged'], result['tags_merged']) == (1, 1)
+    again = a.down()
+    assert (again['notes_merged'], again['tags_merged']) == (0, 0)
+
+
+def test_a_differing_note_in_a_list_in_the_trash_is_not_counted_until_it_is_restored(tmp_path, cloud):
+    # No pass reaches the entries of a list in the Trash, so the count the dialog shows
+    # (and 'Merge Both' cannot clear) leaves them out; the difference is still known.
+    a = make_desk(tmp_path, cloud)
+    lid = a.mgr.create_list('L')
+    key = '990001::fl::FLa'
+    a.mgr.add_item('990001', lid, note='desk', fl_id='FLa')
+    assert a.up()['success']
+    cloud.set(row_in(cloud, a, key, lid), note='web')
+    a.mgr.update_item(key, note='desk 2')
+    assert a.up()['notes_differing'] == 1 and a.mgr.differing_notes_count() == 1
+    assert a.mgr.delete_list(lid) and a.mgr.data['lists'][lid].get('deleted_at')
+    assert a.mgr.differing_notes_count() == 0
+    assert a.up()['notes_differing'] == 0
+    down, up = merge(a)
+    assert down['notes_differing'] == 0 and up['notes_differing'] == 0
+    assert rec(a, key, lid).get('differs') is True
+    assert a.mgr.restore_list(lid)
+    assert a.mgr.differing_notes_count() == 1
+    assert a.up()['notes_differing'] == 1
+    down, up = merge(a)
+    assert down['notes_merged'] == 1 and up['notes_differing'] == 0
+    assert item(a, key)['note'] == 'desk 2' + MARK + 'web'
 
 
 # --------------------------------------------------------------------------- moves and removals here
@@ -1547,7 +1610,9 @@ def test_a_download_reconciles_every_source_of_an_entry_at_once(tmp_path, cloud,
     a.mgr.data['lists_order'] = [k, l_] if first == 'K-first' else [l_, k]
     result = a.down()
     expected = 'b' + MARK + 'c' if field == 'note' else ['b', 'c']
-    assert item(a, key)[field] == expected and result['notes_merged'] == 1
+    assert item(a, key)[field] == expected
+    # a combined note is kept under a marker line; combined tags are counted apart
+    assert (result['notes_merged'], result['tags_merged']) == ((1, 0) if field == 'note' else (0, 1))
     assert (rec(a, key, k)[field], rec(a, key, l_)[field]) == (val('b'), val('c'))
     mark = cloud.rec.mark()
     assert a.up()['success']

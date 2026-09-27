@@ -1817,7 +1817,7 @@ def _short(text):
 
 def _summary(r):
     keys = ('success', 'items_pushed', 'items_failed', 'items_added', 'notes_kept', 'notes_merged',
-            'notes_too_long', 'notes_differing', 'unchecked', 'waiting', 'complete')
+            'tags_merged', 'notes_too_long', 'notes_differing', 'unchecked', 'waiting', 'complete')
     parts = [f'{k}={r[k]}' for k in keys if k in r and r[k] not in (0, None, [])]
     if r.get('web_removed'):
         parts.append(f'web_removed={len(r["web_removed"])}')

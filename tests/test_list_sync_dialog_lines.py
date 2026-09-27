@@ -3,15 +3,17 @@
 
 A sync can leave a note different from the account (the upload no longer overwrites a
 cloud note it cannot prove is older), keep both versions of a note (a Download or Merge),
-or be unable to update a note too long for the request (the gateway refuses it). Each
-count gets one line under the dialog's message -- on success AND on failure, for all
+combine an entry's tags (a Download or Merge), or be unable to update a note too long for
+the request (the gateway refuses it). Each count -- of entries, not of the lists they are
+in -- gets one line under the dialog's message -- on success AND on failure, for all
 three buttons: an upload in which one item failed and one note was too long must still
 say so. A result without these counts shows exactly today's message.
 
 D1 drives GenizahGUI._do_sync_action -- the dialog's buttons -- with Qt faked out, the
 way tests/test_personal_state_atomic_writes.py does, on a stand-in window that has only
-`lists_mgr` and `_sync_error_text`. D2 checks the four new strings have Hebrew that starts
-with a Hebrew letter. D3 checks Help.html no longer claims that list sync is "disabled
+`lists_mgr` and `_sync_error_text`. D2 checks the five new strings have Hebrew that starts
+with a Hebrew letter, and that the Hebrew of the kept-both line says what the English
+says. D3 checks Help.html no longer claims that list sync is "disabled
 entirely if every item in a list is local" and says what is true instead.
 """
 import re
@@ -33,7 +35,8 @@ MERGED = ("Notes that differed between this computer and your account: {}. "
           "Both versions were kept; the account's text is under the line \"--- {} ---\".")
 TOO_LONG = ("Notes too long to update safely in your account: {}. "
             "They were not changed there and are kept on this computer.")
-NEW_KEYS = (FROM_THE_CLOUD, DIFFERING, MERGED, TOO_LONG)
+TAGS = "Tags that differed between this computer and your account: {}. The tags from both were kept."
+NEW_KEYS = (FROM_THE_CLOUD, DIFFERING, MERGED, TOO_LONG, TAGS)
 
 DOWNLOADED = "Downloaded {lists} lists and {items} items from cloud."
 UPLOADED = "Uploaded {lists} lists and {items} items to cloud."
@@ -114,6 +117,10 @@ def _too_long_line(n):
     return _tr(TOO_LONG).format(n)
 
 
+def _tags_line(n):
+    return _tr(TAGS).format(n)
+
+
 def _message(first, *lines):
     return "\n\n".join([first, *lines])
 
@@ -142,6 +149,21 @@ def test_download_success_reports_the_notes_it_kept_both_of(genizah_app, monkeyp
     assert "2" in shown[0][1].split("\n\n")[1]
     assert f"--- {_tr(FROM_THE_CLOUD)} ---" in shown[0][1]
     _check_language(shown[0][1], lang)
+
+
+def test_a_download_that_combined_tags_says_so_on_a_line_of_its_own(genizah_app, monkeypatch, lang):
+    # Combined tags leave no marker line in any note, so they are not counted as kept notes.
+    shown, _ = _run(genizah_app, monkeypatch, "download",
+                    download={"success": True, "lists_added": 0, "items_added": 0, "tags_merged": 3})
+    assert shown == [("information", _message(_tr(DOWNLOADED).format(lists=0, items=0), _tags_line(3)))]
+    assert f"--- {_tr(FROM_THE_CLOUD)} ---" not in shown[0][1]
+    _check_language(shown[0][1], lang)
+
+    shown, _ = _run(genizah_app, monkeypatch, "download",
+                    download={"success": True, "lists_added": 0, "items_added": 0,
+                              "notes_merged": 1, "tags_merged": 2})
+    assert shown == [("information", _message(
+        _tr(DOWNLOADED).format(lists=0, items=0), _merged_line(1), _tags_line(2)))]
 
 
 def test_download_failure_shows_the_error_and_any_note_line(genizah_app, monkeypatch, lang):
@@ -173,12 +195,13 @@ def test_a_partly_failed_upload_still_reports_its_notes(genizah_app, monkeypatch
 
 def test_merge_success_reports_both_halves(genizah_app, monkeypatch, lang):
     shown, calls = _run(genizah_app, monkeypatch, "merge",
-                        download={"success": True, "lists_added": 1, "notes_merged": 2},
+                        download={"success": True, "lists_added": 1, "notes_merged": 2, "tags_merged": 1},
                         upload={"success": True, "lists_pushed": 3,
                                 "notes_differing": 1, "notes_too_long": 1})
     assert calls == ["download", "upload"]
     assert shown == [("information", _message(
-        _tr(MERGED_OK).format(dl=1, ul=3), _merged_line(2), _differing_line(1), _too_long_line(1)))]
+        _tr(MERGED_OK).format(dl=1, ul=3), _merged_line(2), _tags_line(1), _differing_line(1),
+        _too_long_line(1)))]
     _check_language(shown[0][1], lang)
 
 
@@ -235,12 +258,13 @@ def test_the_note_lines_come_from_one_helper_that_ignores_missing_keys(genizah_a
     lines = genizah_app.GenizahGUI._sync_note_lines
     assert lines() == []
     assert lines(download={}, upload={}) == []
-    assert lines(download={"notes_merged": None}, upload={"notes_differing": None}) == []
+    assert lines(download={"notes_merged": None, "tags_merged": None}, upload={"notes_differing": None}) == []
     # A download result's upload-side keys are not read, and the reverse.
     assert lines(download={"notes_differing": 1, "notes_too_long": 1}) == []
-    assert lines(upload={"notes_merged": 1}) == []
-    assert lines(download={"notes_merged": 1}, upload={"notes_differing": 2, "notes_too_long": 3}) == [
-        _merged_line(1), _differing_line(2), _too_long_line(3)]
+    assert lines(upload={"notes_merged": 1, "tags_merged": 1}) == []
+    assert lines(download={"notes_merged": 1, "tags_merged": 4},
+                 upload={"notes_differing": 2, "notes_too_long": 3}) == [
+        _merged_line(1), _tags_line(4), _differing_line(2), _too_long_line(3)]
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +278,15 @@ def test_every_new_sync_string_has_hebrew_starting_with_a_hebrew_letter(key):
     assert _is_hebrew(_first_letter(hebrew)), f"the Hebrew does not start with a Hebrew letter: {hebrew!r}"
     assert hebrew.count("{}") == key.count("{}"), "placeholder count differs"
     hebrew.format(*range(key.count("{}")))  # formats without error
+
+
+def test_the_hebrew_of_the_kept_both_line_says_the_notes_differed():
+    # The English says the notes differed between this computer and the account (whichever
+    # side changed); the Hebrew once said they were changed on both sides.
+    hebrew = TRANSLATIONS[MERGED]
+    assert hebrew.startswith("הערות שהיו שונות בין המחשב הזה לחשבונך: {}."), hebrew
+    assert "גם במחשב הזה וגם בחשבונך" not in hebrew
+    assert "שתי הגרסאות נשמרו" in hebrew and '"--- {} ---"' in hebrew
 
 
 def test_the_first_letter_check_can_fail():

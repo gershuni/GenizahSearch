@@ -3645,7 +3645,9 @@ TRANSLATIONS.update({
     "Notes that differ between this computer and your account: {}. They were left as they are; Merge Both keeps both versions.":
         "הערות שונות בין המחשב הזה לחשבונך: {}. הן נשארו כפי שהן; 'מזג את שתיהן' ישמור את שתי הגרסאות.",
     "Notes that differed between this computer and your account: {}. Both versions were kept; the account's text is under the line \"--- {} ---\".":
-        "הערות ששונו גם במחשב הזה וגם בחשבונך: {}. שתי הגרסאות נשמרו; הנוסח מהחשבון מופיע מתחת לשורה \"--- {} ---\".",
+        "הערות שהיו שונות בין המחשב הזה לחשבונך: {}. שתי הגרסאות נשמרו; הנוסח מהחשבון מופיע מתחת לשורה \"--- {} ---\".",
+    "Tags that differed between this computer and your account: {}. The tags from both were kept.":
+        "תגיות שהיו שונות בין המחשב הזה לחשבונך: {}. התגיות משניהם נשמרו.",
     "Notes too long to update safely in your account: {}. They were not changed there and are kept on this computer.":
         "הערות ארוכות מכדי לעדכן אותן בבטחה בחשבונך: {}. הן לא שונו שם ונשמרות במחשב הזה.",
     # The label between a note's two versions after a Download or Merge: "--- from the cloud ---"
