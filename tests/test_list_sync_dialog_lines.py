@@ -17,6 +17,7 @@ with a Hebrew letter, and that the Hebrew of the kept-both line says what the En
 says. D3 checks Help.html no longer claims that list sync is "disabled
 entirely if every item in a list is local" and says what is true instead.
 """
+import ast
 import re
 import types
 from pathlib import Path
@@ -92,13 +93,26 @@ SYNC_KEYS = (
 )
 
 
-def test_no_new_list_sync_text_says_sign_in_or_sign_out():
-    """The corner button says Login and Logout, so the list-sync texts say log in and log out
-    (the Hebrew has one verb for both)."""
-    for key in SYNC_KEYS:
-        lowered = key.lower()
-        assert not any(word in lowered for word in ("sign in", "sign out", "signed out", "signing out",
-                                                    "signed in", "signing in")), key
+SIGN_IN_OR_OUT = re.compile(r"\bsign(?:ed|ing|s)?[ -]?(?:in|out)\b", re.IGNORECASE)
+
+
+def _desktop_texts():
+    """Every text the desktop passes to tr() as a literal (genizah_app.py and desktop/)."""
+    texts = set()
+    for path in [ROOT / "genizah_app.py", *sorted((ROOT / "desktop").rglob("*.py"))]:
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "tr"
+                    and node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)):
+                texts.add(node.args[0].value)
+    return texts
+
+
+def test_no_desktop_text_says_sign_in_or_sign_out():
+    """The corner button says Login and Logout, so the desktop's texts -- the list-sync ones among
+    them -- say log in and log out (the Hebrew has one verb for both)."""
+    texts = _desktop_texts()
+    assert "Logging out..." in texts and "Log in to sync your lists with your account" in texts
+    assert [t for t in texts | set(SYNC_KEYS) if SIGN_IN_OR_OUT.search(t)] == []
 
 
 def test_the_button_names_in_the_notes_lines_are_the_buttons_labels():
