@@ -949,6 +949,7 @@ class ListsCloudSync:
         client = pass_.client
         user_id = pass_.user_id
         # Fetch existing cloud projects to prevent duplicates
+        pass_.check()
         existing_projects_response = client.table('projects').select('id, name').eq(
             'user_id', user_id
         ).execute()
@@ -974,6 +975,7 @@ class ListsCloudSync:
                 'color': proj_data.get('color', '#4CAF50')
             }
 
+            pass_.check()
             if cloud_proj_id:
                 # Update existing cloud project
                 client.table('projects').update(proj_payload).eq(
@@ -1058,6 +1060,7 @@ class ListsCloudSync:
             if not list_data.get(LIST_NAME_UNSENT):
                 del update_payload['name'], update_payload['name_en']
 
+            pass_.check()
             if cloud_id:
                 # Update existing cloud list by stored cloud_id
                 sent = update_payload
@@ -1655,6 +1658,7 @@ class ListsCloudSync:
     def _fetch_cloud_state(self, pass_, remembered_ids):
         """Everything a download needs from the cloud; reads nothing local and writes nothing."""
         client = pass_.client
+        pass_.check()
         projects_response = client.table('projects').select('*').eq('user_id', pass_.user_id).execute()
         cloud_lists, lists_complete = self._read_user_lists(pass_, '*')
         rows_by_list = {}

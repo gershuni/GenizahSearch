@@ -1986,3 +1986,60 @@ def test_a_move_whose_row_cannot_be_read_again_is_not_taken_as_gone(tmp_path, cl
     result = a.up()
     assert result['success'] and mark(op='insert') == []
     assert cloud.row(rid)['list_id'] == cloud_id(a, l_) and cloud.row(rid)['note'] == 'website'
+
+
+# --------------------------------------------------------------------------- the pass's check before every request
+
+class _Stopped(Exception):
+    pass
+
+
+def _checks_and_requests(monkeypatch, cloud, stop_at=None):
+    """The pass's checks and A's requests, in order; the check raises at its stop_at-th call."""
+    events = []
+
+    def check(self):
+        events.append('check')
+        if stop_at is not None and events.count('check') >= stop_at:
+            raise _Stopped('stopped')
+    monkeypatch.setattr(lists_sync._Pass, 'check', check)
+    cloud.rec.hook = lambda client, req: events.append((req.t, req.op)) if client.actor == 'A' else None
+    return events
+
+
+def _desk_with_a_project(tmp_path, cloud):
+    a = make_desk(tmp_path, cloud)
+    lid = a.mgr.create_list('L')
+    assert a.mgr.update_list_project(lid, a.mgr.create_project('P'))
+    a.mgr.add_item('990001', lid, note='n', fl_id='FLa')
+    cloud.web.table('projects').insert({'user_id': 'u1', 'name': 'Q'}).execute()
+    cloud.add(cloud.new_list('M'), '990002', fl_id='FLb')
+    return a
+
+
+@pytest.mark.parametrize('direction', ['upload', 'download'])
+def test_every_request_of_a_pass_comes_right_after_its_check(tmp_path, cloud, monkeypatch, direction):
+    # 2b-2 makes _Pass.check() raise when the user presses Stop, so every request a pass
+    # makes -- the projects and lists ones too -- must come right after a check.
+    a = _desk_with_a_project(tmp_path, cloud)
+    events = _checks_and_requests(monkeypatch, cloud)
+    result = a.up() if direction == 'upload' else a.down()
+    cloud.rec.hook = None
+    assert result['success']
+    requests = [n for n, e in enumerate(events) if e != 'check']
+    assert all(n > 0 and events[n - 1] == 'check' for n in requests), events
+    assert {'projects', 'user_lists', 'list_items'} <= {events[n][0] for n in requests}
+
+
+@pytest.mark.parametrize('direction', ['upload', 'download'])
+def test_a_check_that_stops_the_pass_before_its_first_request_sends_nothing(tmp_path, cloud, monkeypatch,
+                                                                             direction):
+    a = _desk_with_a_project(tmp_path, cloud)
+    before = copy.deepcopy(a.mgr.data)
+    events = _checks_and_requests(monkeypatch, cloud, stop_at=1)
+    result = a.up() if direction == 'upload' else a.down()
+    cloud.rec.hook = None
+    assert result['success'] is False
+    assert events == ['check']
+    if direction == 'download':
+        assert a.mgr.data == before
