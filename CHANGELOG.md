@@ -6,6 +6,29 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ## [Unreleased]
 
+### Desktop: the Fragment Puzzle and the Joins Lab keep your work (2026-09-27)
+
+Reaches users with the next desktop installer (together with the desktop sections below).
+
+- **The Fragment Puzzle asks before it drops work.** New, opening another saved join (from the list,
+  from search results, Discoveries or community Joins) and quitting the app now ask to Save, Discard
+  or Cancel when the puzzle has unsaved work, with the buttons in the interface language. A Save
+  that did not happen (cancelled, blank title, or the write refused) no longer clears the canvas.
+  Pending autosaves are written first, including when the app quits (closing the window only hides
+  it). A failed autosave shows a red line that stays until the next save, and one message box.
+- **Fragments whose images could not be loaded stay in the join.** Opening a saved join while an
+  image cannot be downloaded (offline, a library server down) used to save the join back without
+  that fragment a moment later. Now such fragments are kept in every save and in Publish, the
+  Details list names them, and the rest of the join autosaves normally.
+- **Delete asks when several fragments are selected, and Ctrl+Z undoes the last delete.** The Delete
+  key acts only when the canvas has focus. Moving a fragment onto a folio of the same manuscript that
+  is already in the puzzle is refused with a message instead of silently losing track of one of them.
+- **The Joins Lab no longer crashes when you turn pages quickly**, and a slow earlier folio can no
+  longer replace the text or image of the folio you moved on to. A closed Lab still shows its images
+  when reopened. A running update check is never dropped, and it stays quiet while the app closes.
+- **Quitting with unsaved puzzle work asks first, before anything is stopped**: Cancel leaves a running
+  search, a multi-witness batch and a pending language restart untouched.
+
 ### Desktop: list sync keeps every list's entries, pages and notes (2026-09-27)
 
 Reaches users with the next desktop installer. That installer carries this change, "saved work

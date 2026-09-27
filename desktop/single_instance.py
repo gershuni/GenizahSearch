@@ -124,6 +124,18 @@ def request_restart():
     _restart_requested = True
 
 
+def cancel_restart():
+    """Forget a requested restart. Returns whether one was pending.
+
+    The close the restart was waiting for was cancelled (the user kept the
+    app open), so a later ordinary quit must not relaunch the app.
+    """
+    global _restart_requested
+    was_requested = _restart_requested
+    _restart_requested = False
+    return was_requested
+
+
 def relaunch_if_requested(popen=None, on_failure=None):
     """Start the new copy if request_restart() was called. Returns True if one was started.
 

@@ -49,7 +49,7 @@ if _CORE_IMPORT_ERROR:
         raise _CORE_IMPORT_ERROR
 from shared.search_engine import PHASE_LOCAL_SEARCH
 from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
-from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, PuzzleMetaLoaderThread, FilterCountWorker, RefinementReplayThread
+from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, FilterCountWorker, RefinementReplayThread, _keep_until_finished
 from desktop.widgets import (
     text_has_pattern_markers,
     ActionsHoverWidget, _format_add_to_list_label,
@@ -15446,7 +15446,7 @@ class GenizahGUI(QMainWindow):
         if fl_id:
             self._puzzle_window.add_fragment(sys_id, shelfmark, folio_label or '1r', fl_id)
         else:
-            # No fl_id provided -- need async resolution via PuzzleMetaLoaderThread
+            # No fl_id provided -- the folios are resolved in the background
             if sys_id in self._puzzle_window._folio_lists and self._puzzle_window._folio_lists[sys_id]:
                 images = self._puzzle_window._folio_lists[sys_id]
                 first = images[0]
@@ -15457,11 +15457,9 @@ class GenizahGUI(QMainWindow):
                     page_index=first.get('page_index', -1)
                 )
             else:
-                thread = PuzzleMetaLoaderThread(self.meta_mgr, sys_id, shelfmark)
-                thread.meta_ready.connect(self._puzzle_window._on_meta_resolved)
-                thread.meta_failed.connect(self._puzzle_window._on_meta_failed)
-                self._puzzle_window._meta_threads.append(thread)
-                thread.start()
+                # The puzzle window's own request: its result is dropped if
+                # the canvas is replaced before it arrives.
+                self._puzzle_window._start_meta_resolve(sys_id, shelfmark)
         self._puzzle_window.show()
         self._puzzle_window.raise_()
         self._puzzle_window.activateWindow()
@@ -30170,9 +30168,16 @@ class GenizahGUI(QMainWindow):
     
     def check_updates_auto(self):
         """Run update checker silently at startup."""
-        self.update_thread = UpdateCheckerThread(APP_VERSION, is_manual=False)
-        self.update_thread.finished_signal.connect(self.on_update_result)
-        self.update_thread.start()
+        # The corner version button is live from init_ui, but this runs only once
+        # startup has finished: a manual check clicked meanwhile may still be running.
+        # Replacing it would drop a running QThread (0xC0000409); it reports anyway.
+        old = getattr(self, 'update_thread', None)
+        if old is not None and old.isRunning():
+            logger.debug("check_updates_auto: a manual update check is already running")
+        else:
+            self.update_thread = UpdateCheckerThread(APP_VERSION, is_manual=False)
+            self.update_thread.finished_signal.connect(self.on_update_result)
+            self.update_thread.start()
 
         # Also check for sidecar data updates
         self.sidecar_update_thread = SidecarUpdateThread()
@@ -30181,6 +30186,19 @@ class GenizahGUI(QMainWindow):
 
     def check_updates_manual(self):
         """Run update checker with UI feedback."""
+        # Never drop a running check (0xC0000409). The corner version label is never
+        # disabled and one double-click emits clicked twice; the startup check may
+        # also still be out, in which case it is silenced and kept until it finishes.
+        old = getattr(self, 'update_thread', None)
+        if old is not None and old.isRunning():
+            if getattr(old, 'is_manual', False):
+                return  # a manual check is already out
+            for sig in (old.finished_signal, old.error_signal):
+                try:
+                    sig.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+            _keep_until_finished(old)
         self.btn_check_updates.setEnabled(False)
         self.btn_check_updates.setText(tr("Checking..."))
 
@@ -30294,6 +30312,11 @@ class GenizahGUI(QMainWindow):
 
         update = self._sidecar_download_queue.pop(0)
         target = os.path.join(self._sidecar_data_dir, update['subdir'], update['name'])
+        # Called from the previous download's finished_signal slot, while that QThread
+        # may still be running: keep it until it has finished rather than dropping it.
+        previous = getattr(self, '_current_sidecar_download', None)
+        if previous is not None:
+            _keep_until_finished(previous)
         self._current_sidecar_download = SidecarDownloadThread(update['url'], target, update['name'])
         self._current_sidecar_download.finished_signal.connect(self._on_sidecar_download_finished)
         self._current_sidecar_download.start()
@@ -31757,36 +31780,164 @@ class GenizahGUI(QMainWindow):
         event.ignore()
         if not getattr(self, '_close_pending', False):
             self._close_pending = True
-            self.status_label.setText(tr(
+            # Kept so a later cancelled close clears exactly this line.
+            self._closing_status_text = tr(
                 "Closing once the current work finishes \u2014 {}. A "
                 "letter-level search cannot be interrupted once it has "
                 "started, and is usually done within a few seconds."
-            ).format(", ".join(reasons)))
+            ).format(", ".join(reasons))
+            self.status_label.setText(self._closing_status_text)
         QTimer.singleShot(400, self._retry_pending_close)
         return True
 
     def _retry_pending_close(self):
-        if not getattr(self, '_close_pending', False):
+        # A close waits either committed and deferred for passage work
+        # (_close_pending), or short of its quit question because a
+        # question was open when it came (_close_waiting_for_prompt).
+        if not (getattr(self, '_close_pending', False)
+                or getattr(self, '_close_waiting_for_prompt', False)):
+            # The close attempt ended (it went ahead, or Cancel kept the app
+            # open): an answer kept for it no longer applies.
+            self._puzzle_quit_answered = False
             return
-        if self._passage_workers_busy():
+        # Also wait while a question is open: re-issued from inside that
+        # question's event loop, the close would ask the puzzle's quit
+        # question on top of it, or shut the app down under it.
+        if self._close_waits_for_a_prompt():
             QTimer.singleShot(400, self._retry_pending_close)
             return
-        # No tracked worker remains -- re-issue the close for real.
+        # A close that waited only for a question has not reached the puzzle
+        # question or the passage deferral yet (which stops a multi-witness
+        # batch at its next witness): re-issue it now, passage work or not.
+        if (self._passage_workers_busy()
+                and not getattr(self, '_close_waiting_for_prompt', False)):
+            QTimer.singleShot(400, self._retry_pending_close)
+            return
+        # Nothing to wait for -- re-issue the close for real.
+        self._close_waiting_for_prompt = False
         self._close_pending = False
         self.close()
+        if not (getattr(self, '_close_pending', False)
+                or getattr(self, '_close_waiting_for_prompt', False)):
+            self._puzzle_quit_answered = False
+
+    def _close_waits_for_a_prompt(self):
+        """True while a modal dialog, or a Fragment Puzzle leave prompt or
+        Save dialog, is open."""
+        if QApplication.activeModalWidget() is not None:
+            return True
+        win = getattr(self, '_puzzle_window', None)
+        if win is None or sip.isdeleted(win):
+            return False
+        try:
+            return bool(win.is_prompting())
+        except Exception:
+            logger.exception("closeEvent: asking the Fragment Puzzle for an open prompt failed")
+            return False
+
+    def _defer_close_for_prompt(self, event):
+        """Returns True when the close waits for an open question: a modal
+        dialog, or a Fragment Puzzle leave prompt or Save dialog running its
+        own event loop. Asked now, the puzzle's quit question would open on
+        top of it; the retry re-issues the close once it is answered.
+
+        Marked with its own flag, not _close_pending: the user has not
+        answered the quit question yet and may still Cancel, so workers that
+        finish meanwhile must install their results as usual."""
+        if not self._close_waits_for_a_prompt():
+            return False
+        event.ignore()
+        self._close_waiting_for_prompt = True
+        QTimer.singleShot(400, self._retry_pending_close)
+        return True
+
+    def _defer_close_for_puzzle(self, event):
+        """Returns True when the user chose to keep the app open because the
+        Fragment Puzzle holds unsaved work (Cancel at its quit prompt).
+
+        Asked here and not in the puzzle window's own closeEvent: closing
+        that window with X only hides it, a hidden window gets no closeEvent
+        when the app quits, and a child window that ignores its close during
+        a quit keeps the process alive. A failing check never keeps the app
+        from closing.
+
+        Asked before the close is deferred for passage work, so a close the
+        user then cancels has stopped nothing. Discard is kept for the rest
+        of this close attempt: the retry of a deferred close does not ask
+        again. After Save nothing is left unsaved, so the check on the retry
+        asks only about work left unsaved since."""
+        if getattr(self, '_puzzle_quit_answered', False):
+            return False
+        win = getattr(self, '_puzzle_window', None)
+        if win is None or sip.isdeleted(win):
+            return False
+        try:
+            ok = win.confirm_quit()
+            if ok:
+                # True with work still unsaved: the user chose Discard.
+                self._puzzle_quit_answered = bool(win._has_unsaved_work())
+        except Exception:
+            logger.exception("closeEvent: the Fragment Puzzle's unsaved-work check failed")
+            return False
+        if ok:
+            return False
+        event.ignore()
+        self._puzzle_quit_answered = False
+        # A close deferred for passage work (asked nothing then, as nothing
+        # was unsaved), or one that came while this question was open, must
+        # not come back through its retry and ask again.
+        self._close_pending = False
+        self._close_waiting_for_prompt = False
+        # The language restart was waiting for this close; a later ordinary
+        # quit must not relaunch the app.
+        from desktop.single_instance import cancel_restart
+        restart_cancelled = cancel_restart()
+        try:
+            if restart_cancelled and hasattr(self, 'lang_btn'):
+                # The new language is saved and applies at the next start;
+                # show what toggle_language shows when the restart is declined.
+                from genizah_core import load_language
+                self.lang_btn.setText("English" if load_language() == 'he' else "עברית")
+        except Exception:
+            logger.exception("closeEvent: resetting the language button failed")
+        try:
+            if self.status_label.text() == getattr(self, '_closing_status_text', None):
+                self.status_label.setText(tr("Ready."))
+        except Exception:
+            logger.exception("closeEvent: clearing the closing message failed")
+        return True
 
     def closeEvent(self, event):
+        # Any close, the first one included, that arrives while a question
+        # is open waits for its answer, so no quit question is stacked on it.
+        if self._defer_close_for_prompt(event):
+            return
+        # Unsaved Fragment Puzzle work is asked about first: before any
+        # shutdown step, so Cancel leaves a fully working app, and before the
+        # deferral for passage work below, which stops a multi-witness batch
+        # -- nothing may be stopped until the user has answered.
+        if self._defer_close_for_puzzle(event):
+            return
         # Phase 146: BEFORE any shutdown state is set. Deferring after
         # `_app_shutting_down = True` would leave a running app whose
         # telemetry and session-save paths are already disarmed.
         if self._defer_close_for_passage(event):
             return
+        # The close goes ahead, which ends this close attempt: a retry still
+        # queued must not re-issue it, and no answer is kept past it.
+        self._close_pending = False
+        self._puzzle_quit_answered = False
+        self._close_waiting_for_prompt = False
         # The Manuscript Viewer is an unparented top-level window
         # (2026-09-17), so it does not close with this one. Left open it
         # would keep the process alive (quitOnLastWindowClosed never fires)
         # and keep pointing, via _app, at a host whose shared workers are
         # about to be torn down. Close it before any shutdown state is set.
-        self._close_result_dialog()
+        # Guarded on its own: a failure here must not skip the shutdown steps below.
+        try:
+            self._close_result_dialog()
+        except Exception:
+            logger.exception("closeEvent: closing the Manuscript Viewer failed")
         # Phase 114 D-09/D-15: set shutdown flag first so Plan-02 search/comp emit
         # guards (REVIEWS HIGH-2) and session_end exactly-once guard both see it
         # before any subsequent teardown fires events.
@@ -31839,13 +31990,40 @@ class GenizahGUI(QMainWindow):
                 mlt.sweep_running_scan_runs()
         except Exception:
             pass
+        # Silence the update checks and a running data download: no update dialog
+        # or data prompt may open over a closing app, and none of these threads may
+        # be dropped while running. Nothing is waited for -- a kept QThread does not
+        # hold up the exit (see desktop.gui_threads._keep_until_finished). Each
+        # thread in its own guard, so one failure cannot skip the others.
+        for name in ('update_thread', 'sidecar_update_thread', '_current_sidecar_download'):
+            try:
+                t = getattr(self, name, None)
+                if t is None:
+                    continue
+                for sig in ('finished_signal', 'error_signal', 'update_available'):
+                    signal = getattr(t, sig, None)
+                    if signal is None:
+                        continue
+                    try:
+                        signal.disconnect()
+                    except (TypeError, RuntimeError):
+                        pass
+                if hasattr(t, 'cancel'):
+                    t.cancel()
+                _keep_until_finished(t)
+            except Exception:
+                logger.exception("closeEvent: silencing %s failed", name)
         # Save session state before closing
         logger.debug(
             "closeEvent: saving session after opt-out flush (scope=%s optouts=%d)",
             getattr(self, '_search_corpus_scope', 'genizah'),
             len(getattr(self, '_local_file_optouts', set())),
         )
-        self._save_session()
+        # Guarded on its own: an escaping failure must not skip the worker stops below.
+        try:
+            self._save_session()
+        except Exception:
+            logger.exception("closeEvent: saving the session failed")
         # Ensure worker threads are stopped before the window is destroyed
         try:
             if getattr(self, 'meta_loader', None) and self.meta_loader.isRunning():
