@@ -54,7 +54,7 @@ UPDATE and DELETE for `authenticated`.
 - Internal: `tests/list_sync_scenarios.py` is a seeded scenario gate (two desktops and the website
   on one stateful fake Supabase, random edits, syncs and injected failures, ten invariants checked
   after every step); `tests/test_list_sync_scenarios.py` runs 500 seeds of 60 steps in the suite.
-  `supabase_setup.sql` gains the `page` column and explicit Data API grants for the list tables.
+  `supabase_setup.sql` gains the `page` column.
 
 ### Web: /lists (2026-09-27)
 
