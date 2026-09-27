@@ -2718,7 +2718,8 @@ class GenizahGUI(QMainWindow):
             runner = self._lists_sync_runner()
             # A new sign-in makes every job of the last one stale; Sync lists now in a
             # session already syncing as this account must not stop an automatic upload.
-            if not (self.lists_mgr.is_sync_available() and self._lists_sync_user_id == user_uuid):
+            new_sign_in = not (self.lists_mgr.is_sync_available() and self._lists_sync_user_id == user_uuid)
+            if new_sign_in:
                 runner.invalidate_auth()
 
             # Pass the authenticated Supabase client for RLS to work
@@ -2730,6 +2731,9 @@ class GenizahGUI(QMainWindow):
             self.lists_mgr.enable_cloud_sync(user_uuid, supabase_client=supabase_client)
             self._lists_sync_user_id = user_uuid
             runner.allow_auto()
+            if new_sign_in:
+                # what lists.pkl holds that this account has not received counts as unsent
+                runner.seed_unsent()
             if self._lists_changed_while_sync_off:
                 # Changes made while signed out count as unsent: a sign-out uploads them.
                 self._lists_changed_while_sync_off = False

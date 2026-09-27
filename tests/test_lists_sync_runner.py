@@ -14,6 +14,7 @@ import itertools
 import os
 import sys
 import threading
+import time
 
 import pytest
 
@@ -224,7 +225,8 @@ def test_a_download_is_followed_by_one_upload_while_changes_are_unsent(desk, clo
     k = desk.mgr.create_list('K')
     desk.mgr.add_item('990001', k, note='n', fl_id='FLa')
     assert desk.up()['success']
-    desk.mgr.add_item('990002', k, fl_id='FLb')           # made while list sync was off
+    if cell != 'nothing-unsent':
+        desk.mgr.add_item('990002', k, fl_id='FLb')       # made while list sync was off
     autos = []
     r = ListsSyncRunner(desk.mgr, inline=True, on_auto_done=autos.append)
     if cell in ('changes-unsent', 'download-fails', 'cancelled', 'during-a-sign-out'):
@@ -256,10 +258,206 @@ def test_a_download_is_followed_by_one_upload_while_changes_are_unsent(desk, clo
     if cell in ('changes-unsent', 'last-upload-failed'):
         assert done[0]['download']['success'] and R.rec(desk, k, '990002::fl::FLb') is not None
         assert r.unsent is False
+    if cell == 'nothing-unsent':
+        assert r.unsent is False
     if cell == 'during-a-sign-out':
         r.allow_auto()                                    # the next log-in: its preview comes first
         r.run('preview')
         assert begins == [], 'an upload started before the log-in offered its sync choice'
+
+
+# --------------------------------------------------------------------------- what lists.pkl holds after a restart
+
+PENDING = ['removal', 'note-edit', 'tags-edit', 'new-entry', 'list-renamed', 'list-recoloured', 'move', 'new-list',
+           'move-into-a-list-that-has-it']
+NOTHING_TO_SEND = ['nothing', 'kept-note', 'website-removal', 'my-library', 'move-into-the-trash']
+LOCAL_ID = '970012345601234567'                           # My Library: never sent
+
+
+def _restart_with(desk, cloud, monkeypatch, cell):
+    """Synced lists, then `cell` changed with no runner (list sync off, or the program closed before
+    it uploaded), then a restart: lists.pkl read again by a new manager and sync. Returns the new
+    desk and a check that the change is in the account."""
+    mgr = desk.mgr
+    k, m = mgr.create_list('K'), mgr.create_list('M')
+    t = mgr.create_list('T')
+    mgr.add_item('990001', k, note='n', tags=['t'], fl_id='FLa')
+    mgr.add_item('990002', m, fl_id='FLb')
+    if cell == 'move-into-a-list-that-has-it':
+        mgr.add_item('990001', m, fl_id='FLa')
+    assert desk.up()['success']
+    r1, r2 = R.row_in(cloud, desk, k), R.row_in(cloud, desk, m, '990002::fl::FLb')
+    if cell == 'kept-note':                               # both sides changed it: kept for Merge Both
+        cloud.set(r1, note='n\nfrom the website')
+        mgr.update_item(R.KEY, note='n\nfrom here')
+        assert desk.up()['notes_kept'] == 1
+    elif cell == 'website-removal':                       # waits for the user's answer
+        cloud.delete_row(r2)
+        assert desk.up()['web_removed']
+    elif cell == 'move-into-the-trash':
+        mgr.delete_list(t)
+        assert desk.up()['success']
+    reached = None
+    if cell == 'removal':
+        mgr.remove_item_from_list('990002::fl::FLb', m)
+        reached = lambda: cloud.row(r2) is None                                        # noqa: E731
+    elif cell == 'note-edit':
+        mgr.update_item(R.KEY, note='edited offline')
+        reached = lambda: cloud.row(r1)['note'] == 'edited offline'                    # noqa: E731
+    elif cell == 'tags-edit':
+        mgr.update_item(R.KEY, tags=['t', 'u'])
+        reached = lambda: 'u' in (cloud.row(r1)['tags'] or [])                         # noqa: E731
+    elif cell == 'new-entry':
+        mgr.add_item('990003', k, fl_id='FLc')
+        reached = lambda: bool(cloud.rows(list_id=R.cloud_id(desk, k), sys_id='990003'))  # noqa: E731
+    elif cell == 'list-renamed':
+        mgr.update_list(k, name='K2')
+        reached = lambda: cloud.cloud_list(R.cloud_id(desk, k))['name'] == 'K2'        # noqa: E731
+    elif cell == 'list-recoloured':
+        mgr.update_list(k, color='#0000FF')
+        reached = lambda: cloud.cloud_list(R.cloud_id(desk, k))['color'] == '#0000FF'  # noqa: E731
+    elif cell == 'move':
+        mgr.move_items_to_list([R.KEY], k, m)
+        reached = lambda: cloud.row(r1)['list_id'] == R.cloud_id(desk, m)              # noqa: E731
+    elif cell == 'move-into-a-list-that-has-it':          # only the moved row is left to go: deleted
+        mgr.move_items_to_list([R.KEY], k, m)
+        reached = lambda: cloud.row(r1) is None                                        # noqa: E731
+    elif cell == 'new-list':
+        mgr.create_list('N')
+        reached = lambda: any(cl['name'] == 'N' for cl in cloud.db.tables['user_lists'])  # noqa: E731
+    elif cell == 'my-library':
+        mgr.add_item(LOCAL_ID, k)
+    elif cell == 'move-into-the-trash':
+        mgr.move_items_to_list([R.KEY], k, t)
+    e = R.reopen(desk)
+    monkeypatch.setattr(lists_sync, '_sync_instance', e.sync)
+    return e, reached
+
+
+@pytest.mark.parametrize('cell', PENDING + NOTHING_TO_SEND)
+def test_changes_saved_before_a_restart_count_as_unsent(desk, cloud, cell, monkeypatch):
+    """A runner made after a restart counts what lists.pkl holds for the account as unsent: a Download
+    is followed by one upload that sends it, and a log-out a moment after a sync still uploads.
+    What an upload would not send -- a note kept for Merge Both, a row the website removed, My
+    Library, a move into a list in the Trash -- does not count."""
+    e, reached = _restart_with(desk, cloud, monkeypatch, cell)
+    pending = cell in PENDING
+    assert e.mgr.has_unsent_changes('u1') is pending
+    begins = []
+    real = e.mgr.begin_upload
+    monkeypatch.setattr(e.mgr, 'begin_upload', lambda: begins.append(1) or real())
+    r = ListsSyncRunner(e.mgr, inline=True)
+    assert r.unsent is pending
+    e.sync._last_sync = time.time()                       # synced a moment ago
+    assert r._logout_needs_upload() is pending
+    done = []
+    r.run('download', on_done=done.append)
+    assert done[0]['download']['success']
+    assert len(begins) == (1 if pending else 0)
+    if pending:
+        assert reached(), 'the change saved before the restart did not reach the account'
+        assert r.unsent is False and not e.mgr.has_unsent_changes('u1')
+
+
+@pytest.mark.parametrize('cell', ['removal', 'note-edit'])
+def test_a_log_out_right_after_a_restart_and_a_download_still_uploads(desk, cloud, cell, monkeypatch):
+    """The Download that refreshes the last-sync time is followed by an upload that fails (offline
+    for a moment); a log-out within the minute still uploads what lists.pkl held."""
+    e, reached = _restart_with(desk, cloud, monkeypatch, cell)
+    r = ListsSyncRunner(e.mgr, inline=True)
+    real_apply = e.mgr.apply_cloud_state
+
+    def apply_then_go_offline(state):
+        applied = real_apply(state)
+        cloud.rec.hook = lambda client, req: 'raise_before' if client.actor == 'A' else None
+        return applied
+    monkeypatch.setattr(e.mgr, 'apply_cloud_state', apply_then_go_offline)
+    done = []
+    r.run('download', on_done=done.append)
+    cloud.rec.hook = None
+    assert done[0]['download']['success'] and not reached()
+    logout = []
+    r.begin_logout(logout.append, budget_s=10)
+    assert logout[0]['upload']['success'] and logout[0].get('skipped') is None
+    assert reached()
+
+
+def test_seeding_again_counts_a_change_made_since_the_runner_was_made(desk, cloud):
+    k = desk.mgr.create_list('K')
+    desk.mgr.add_item('990001', k, note='n', fl_id='FLa')
+    assert desk.up()['success']
+    r = ListsSyncRunner(desk.mgr, inline=True)
+    assert r.unsent is False
+    desk.mgr.remove_item_from_list(R.KEY, k)              # not through the runner (list sync was off)
+    assert r.unsent is False
+    r.seed_unsent()                                       # what the window asks at a log-in
+    assert r.unsent is True
+
+
+def test_lists_that_cannot_be_read_for_it_count_as_unsent(desk, monkeypatch):
+    def unreadable(user_id=None):
+        raise RuntimeError('the lists could not be read')
+    monkeypatch.setattr(desk.mgr, 'has_unsent_changes', unreadable)
+    assert ListsSyncRunner(desk.mgr, inline=True).unsent is True
+
+
+def test_only_this_accounts_pending_state_counts(desk, cloud):
+    k = desk.mgr.create_list('K')
+    desk.mgr.add_item('990001', k, note='n', fl_id='FLa')
+    assert desk.up()['success']
+    assert desk.mgr.has_unsent_changes('u1') is False
+    assert desk.mgr.has_unsent_changes() is False         # the account the store was last synced with
+    assert desk.mgr.has_unsent_changes('u2') is True      # another account has none of these rows
+    desk.mgr.remove_item_from_list(R.KEY, k)
+    assert desk.mgr.has_unsent_changes('u1') is True
+    for entry in desk.mgr.data['cloud_deletes'].values():
+        entry['account'] = 'u9'                           # another account's removal: it waits for that one
+    desk.mgr.data['items'].clear()
+    assert desk.mgr.has_unsent_changes('u1') is False
+
+
+# --------------------------------------------------------------------------- what an upload that succeeded left
+
+@pytest.mark.parametrize('left, unsent', [
+    ('unchecked', True), ('waiting', True), ('lists_not_uploaded', True),
+    ('notes_too_long', False), ('notes_differing', False), ('notes_kept', False), ('deferred', False)])
+def test_what_a_successful_upload_left_decides_whether_its_changes_stay_unsent(desk, monkeypatch, left, unsent):
+    """Left for the next upload (unchecked memberships, entries waiting for a Download, lists not
+    reached): still unsent, so a log-out a moment later uploads again. Left as it is on purpose (a
+    note too long for the account, notes kept for Merge Both, a move into the Trash): sent."""
+    desk.mgr.add_item('990001', desk.mgr.create_list('K'), note='n', fl_id='FLa')
+    value = ['K'] if left == 'lists_not_uploaded' else 1
+    monkeypatch.setattr(desk.sync, 'sync_to_cloud', lambda **kw: {
+        'success': True, 'lists_pushed': 1, 'items_pushed': 1, left: value, 'complete': not unsent})
+    r = ListsSyncRunner(desk.mgr, inline=True)
+    r.request_auto()
+    desk.sync._last_sync = time.time()                    # synced a moment ago
+    assert r.unsent is unsent and r._logout_needs_upload() is unsent
+
+
+@pytest.mark.parametrize('cell', ['a-failed-confirmation', 'a-note-too-long'])
+def test_a_real_upload_that_succeeded_is_judged_by_what_it_left(desk, cloud, cell):
+    k = desk.mgr.create_list('K')
+    note = R.S.LONG_FILLER if cell == 'a-note-too-long' else 'n'
+    desk.mgr.add_item('990001', k, note=note, fl_id='FLa')
+    assert desk.up()['success']
+    r = ListsSyncRunner(desk.mgr, inline=True)
+    if cell == 'a-failed-confirmation':
+        w = cloud.new_list('W')
+        cloud.set(R.row_in(cloud, desk, k), list_id=w)     # moved on the website: this upload must confirm it
+        cloud.rec.hook = lambda client, req: ('raise_before' if client.actor == 'A' and req.t == 'list_items'
+                                              and any(f[0] == 'in' for f in req.filters) else None)
+    else:
+        desk.mgr.update_item(R.KEY, note=note + ' and more')   # its PATCH filter is past the gateway's limit
+    done = []
+    r.run('upload', on_done=done.append)
+    cloud.rec.hook = None
+    up = done[0]['upload']
+    assert up['success'] is True
+    if cell == 'a-failed-confirmation':
+        assert up['unchecked'] and up['complete'] is False and r.unsent is True
+    else:
+        assert up['notes_too_long'] == 1 and up['complete'] is True and r.unsent is False
 
 
 def test_a_download_queued_behind_an_upload_keeps_the_list_state_changed_during_it(desk, cloud):

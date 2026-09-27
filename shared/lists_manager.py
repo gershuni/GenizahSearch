@@ -872,6 +872,13 @@ class ListsManager:
             self.save()
         return removed, kept
 
+    def has_unsent_changes(self, user_id=None):
+        """Whether lists.pkl holds a change the next upload of this account would send
+        (lists_sync.has_unsent_changes): asked once when the desktop's runner is made and
+        at each log-in, so changes saved before a restart are not taken as sent."""
+        from shared.lists_sync import has_unsent_changes
+        return has_unsent_changes(self.data, user_id)
+
     def differing_notes_count(self):
         """Entries in a list whose note or tags differ from the account's copy and were left as they are.
 

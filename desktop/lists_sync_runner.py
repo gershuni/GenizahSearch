@@ -33,6 +33,14 @@ import time
 logger = logging.getLogger(__name__)
 
 POLL_MS = 50
+# What an upload that succeeded can still leave for the next one to send: memberships it
+# could not check (a failed confirmation, a short read), entries waiting for a Download to
+# fold them, and lists it could not reach -- the counters the engine's 'complete' is made of.
+# After such an upload its changes stay unsent. What an upload leaves as it is on purpose --
+# a note too long for the account, notes that differ and wait for Merge Both, a move into a
+# list in the Trash -- does not keep them unsent: uploading again would not send it, and
+# each has its own line. (A failed item or removal makes the upload fail: unsent too.)
+RETRYABLE_LEFT = ('unchecked', 'waiting', 'lists_not_uploaded')
 # A sign-out uploads when something asked for an upload since the last one, or
 # when nothing was synced in the last minute.
 RECENT_SYNC_S = 60
@@ -100,6 +108,7 @@ class ListsSyncRunner:
             self._timer = QTimer(parent)
             self._timer.setInterval(POLL_MS)
             self._timer.timeout.connect(self._poll)
+        self.seed_unsent()
 
     # --- what the window calls (UI thread) -----------------------------------------
 
@@ -131,6 +140,22 @@ class ListsSyncRunner:
     def mark_dirty(self):
         """Edits were made that no upload has taken yet (while list sync was off)."""
         if not self._closed:
+            self._dirty = True
+
+    def seed_unsent(self):
+        """Changes saved in lists.pkl that no upload of this session took -- made while offline,
+        or left by an upload that did not finish before the program closed -- count as unsent
+        (ListsManager.has_unsent_changes). Asked when the runner is made and at each log-in,
+        never per edit. When the store cannot be read for it, they count as unsent."""
+        if self._closed:
+            return
+        try:
+            user = self._mgr.cloud_user()
+            if self._mgr.has_unsent_changes(user):
+                self._dirty = True
+        except Exception:
+            logger.warning("Could not tell whether the lists hold unsent changes; taking them as unsent",
+                           exc_info=True)
             self._dirty = True
 
     def request_auto(self):
@@ -419,8 +444,8 @@ class ListsSyncRunner:
             finally:
                 job.copy = job.base = None
                 job.recorded = []
-            # an upload that left lists for the next one did not send all it took
-            ok_now = bool(value.get('success')) and not value.get('lists_not_uploaded')
+            # an upload that left something for the next one to send did not send all it took
+            ok_now = bool(value.get('success')) and not any(value.get(k) for k in RETRYABLE_LEFT)
             self._last_upload_ok = ok_now
             if not ok_now:
                 self._dirty = True        # the rest still has to go up

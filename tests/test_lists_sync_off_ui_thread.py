@@ -131,6 +131,9 @@ class RecordingRunner:
         self.calls.append(("mark_dirty",))
         self.unsent = True
 
+    def seed_unsent(self):
+        self.calls.append(("seed_unsent",))
+
     def invalidate_auth(self):
         self.calls.append(("invalidate_auth",))
         self.auth_epoch += 1
@@ -151,8 +154,8 @@ class RecordingRunner:
 
 
 # What the window may use of the runner: every name RecordingRunner offers it but its test helpers.
-RUNNER_INTERFACE = ("run", "cancel", "request_auto", "allow_auto", "mark_dirty", "invalidate_auth",
-                    "begin_logout", "shutdown", "auth_epoch", "unsent", "busy", "closed")
+RUNNER_INTERFACE = ("run", "cancel", "request_auto", "allow_auto", "mark_dirty", "seed_unsent",
+                    "invalidate_auth", "begin_logout", "shutdown", "auth_epoch", "unsent", "busy", "closed")
 
 
 def test_the_recording_runner_is_the_real_ones_interface():
@@ -167,6 +170,7 @@ def test_the_recording_runner_is_the_real_ones_interface():
         if callable(mine) and callable(theirs):
             assert inspect.signature(mine).parameters.keys() == inspect.signature(theirs).parameters.keys(), name
     for name in ("saves_failing", "pending_web_removals", "resolve_web_removals", "differing_notes_count",
+                 "has_unsent_changes",
                  "begin_upload", "finish_upload", "abandon_upload", "withdrawn_now", "fetch_cloud_state",
                  "apply_cloud_state", "remembered_row_ids", "cloud_user"):
         assert callable(getattr(lm.ListsManager, name, None)), f"ListsManager has no {name}"
@@ -340,6 +344,12 @@ def _no_direct_sync(monkeypatch, host):
 def _signed_in(host):
     host.lists_mgr.enable_cloud_sync(USER, supabase_client=host.corrections_client._client)
     host._lists_sync_user_id = USER
+
+
+def _nothing_pending(monkeypatch, host):
+    """lists.pkl holds nothing the account has not received (the host's store was never uploaded,
+    so a real runner would count it all as unsent): what is unsent is only what the test says."""
+    monkeypatch.setattr(host.lists_mgr, "has_unsent_changes", lambda user_id=None: False)
 
 
 # ---------------------------------------------------------------------------
@@ -738,7 +748,7 @@ def test_a_sign_in_previews_on_the_runner_and_offers_the_choice(gui, monkeypatch
     host._enable_lists_cloud_sync()
 
     assert direct == [], "the preview ran on the UI thread"
-    assert runner.names() == ["invalidate_auth", "allow_auto", "run:preview"]
+    assert runner.names() == ["invalidate_auth", "allow_auto", "seed_unsent", "run:preview"]
     assert host.lists_mgr.is_sync_available() and host._lists_sync_user_id == USER
     busy = FakeProgress.made[-1]
     assert busy.label == tr("Checking the lists in your account...")
@@ -751,6 +761,20 @@ def test_a_sign_in_previews_on_the_runner_and_offers_the_choice(gui, monkeypatch
     (local_lists, cloud_lists, cloud_error), = host.dialogs
     assert [c["name"] for c in cloud_lists] == ["Cloud list 0", "Cloud list 1"]
     assert cloud_error is None
+
+
+def test_a_log_in_counts_what_lists_pkl_holds_as_unsent(gui):
+    """A log-in -- a new account, or the store changed since the runner was made -- asks the runner
+    to count what lists.pkl holds for it; Sync lists now in a session already syncing does not."""
+    host = gui()
+    runner = host._lists_sync
+    host._enable_lists_cloud_sync()                    # a log-in
+    names = runner.names()
+    assert "seed_unsent" in names and names.index("seed_unsent") > names.index("invalidate_auth")
+    assert host.lists_mgr.is_sync_available()
+    runner.calls.clear()
+    host._enable_lists_cloud_sync(always_offer=True)   # Sync lists now, the same account
+    assert "seed_unsent" not in runner.names() and "invalidate_auth" not in runner.names()
 
 
 def test_changes_made_while_signed_out_count_as_unsent_at_the_next_sign_in(gui):
@@ -1858,6 +1882,7 @@ def test_a_manual_upload_the_sign_out_deadline_stops_says_upload_stopped(gui, mo
     the lists it did not reach; an upload that took no changes leaves nothing to say."""
     host = gui()
     _signed_in(host)
+    _nothing_pending(monkeypatch, host)
     runner = _inline_runner(host)
     if changed:
         runner.mark_dirty()                          # a change no upload has taken yet
@@ -1904,6 +1929,7 @@ def test_a_sign_out_whose_upload_could_not_start_says_the_changes_did_not_upload
     upload: nothing synced in the last minute) it adds nothing."""
     host = gui()
     _signed_in(host)
+    _nothing_pending(monkeypatch, host)
     runner = _inline_runner(host)
     if unsent:
         runner.mark_dirty()
@@ -1948,6 +1974,7 @@ def test_a_download_chosen_at_log_in_uploads_the_changes_made_while_logged_out(g
     log-in: a Download chosen in the log-in's sync choice sends nothing, so one upload follows it."""
     host = gui()
     host._lists_sync = None
+    _nothing_pending(monkeypatch, host)
     uploads = []
     monkeypatch.setattr(host.lists_mgr, "get_cloud_lists_preview", lambda **kw: _preview(1))
     monkeypatch.setattr(host.lists_mgr, "fetch_cloud_state", lambda ids, **kw: {"success": True})

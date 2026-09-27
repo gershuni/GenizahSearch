@@ -281,6 +281,72 @@ def count_differing_notes(store):
     return n
 
 
+def has_unsent_changes(store, user_id=None):
+    """Whether the store holds a change the next upload of this account would send.
+
+    Read from the store alone (no network), so changes saved in lists.pkl -- made while
+    offline, or left by an upload that did not finish -- count as unsent after a restart.
+    One pass over the store: the desktop asks it once when its list-sync runner is made
+    and at each log-in, never per edit. True when any of:
+    - a removal of this account waits for its delete (store['cloud_deletes']);
+    - a list carries LIST_STATE_UNSENT or LIST_NAME_UNSENT, or a list or project has no
+      cloud id yet (the upload creates it);
+    - an entry is in a list whose entries the upload writes (synced, not in the Trash)
+      with no record of its row for this account -- a row the website removed (a 'gone'
+      record, waiting for the user's answer) is not re-sent, so it does not count;
+    - a record's note or tags differ from the entry's (what this computer last agreed
+      with the account), where the record knows them and did not keep a differing note
+      for Merge Both ('differs': the upload leaves those as they are);
+    - a moved row waits to follow its entry, into no list or into one the upload writes
+      (a move into a list in the Trash waits for Restore).
+    My Library entries never count: they are never sent. user_id None: the account the
+    store was last synced with.
+    """
+    account = user_id if user_id is not None else store.get('cloud_account')
+    lists = dict(store.get('lists') or {})
+
+    def written(lid):
+        ld = lists.get(lid)
+        return isinstance(ld, dict) and _syncable_list(lid, ld) and not ld.get('deleted_at')
+
+    if any(isinstance(entry, dict) and entry.get('account') == account
+           for entry in list((store.get('cloud_deletes') or {}).values())):
+        return True
+    for lid, ld in lists.items():
+        if isinstance(ld, dict) and _syncable_list(lid, ld) and (
+                ld.get(LIST_STATE_UNSENT) or ld.get(LIST_NAME_UNSENT) or ld.get('cloud_id') is None):
+            return True
+    if any(isinstance(pd, dict) and pd.get('cloud_id') is None
+           for pd in list((store.get('projects') or {}).values())):
+        return True
+    own = account is not None and store.get('cloud_account') == account   # its records are this account's
+    for iid, it in list((store.get('items') or {}).items()):
+        if not isinstance(it, dict) or is_local_sys_id(it.get('sys_id', iid)):
+            continue
+        in_lists = [lid for lid in list(it.get('lists') or []) if written(lid)]
+        if not own:
+            if in_lists:
+                return True
+            continue
+        recs = it.get('cloud_rows') if isinstance(it.get('cloud_rows'), dict) else {}
+        for lid in in_lists:
+            rec = recs.get(lid)
+            if isinstance(rec, dict) and rec.get('gone'):
+                continue
+            if _live_record(it, lid) is None:
+                return True
+            if rec.get('differs'):
+                continue
+            if 'note' in rec and not _same_text(it.get('note') or '', rec.get('note') or ''):
+                return True
+            if 'tags' in rec and _tagset(it.get('tags')) != _tagset(rec.get('tags')):
+                return True
+        for _, rec in _orphans(it):
+            if not rec.get('differs') and (rec.get('to') is None or written(rec.get('to'))):
+                return True
+    return False
+
+
 def remembered_ids(store, user_id):
     """The rows a download confirms: every non-gone record's, while the store is this account's."""
     if store.get('cloud_account') not in (None, user_id):
