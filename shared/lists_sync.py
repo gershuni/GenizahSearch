@@ -1957,7 +1957,6 @@ class ListsCloudSync:
             # another row of it: that row becomes an entry of its own.
             others = [c for c in cands if list_id not in (c[1].get('lists') or [])
                       and _live_record(c[1], list_id) is None]
-            matched = _match_rows(rows, members, list_id, has_page, claimed, orphan_ids, used)
 
             # A second row of an entry this list already holds folds into it (below)
             # rather than bringing another local item of that entry into the list.
@@ -1966,6 +1965,16 @@ class ListsCloudSync:
                 return not any(_same_entry(_item_identity(i, items[i]), theirs, has_page)
                                or (loose and _item_identity(i, items[i])[:2] == theirs[:2])
                                for i in used if i in items)
+
+            def not_its_twin(row, used=used, n=3 if has_page else 2):
+                theirs = _row_identity(row, has_page)[:n]
+                return not any(_item_identity(i, items[i])[:n] == theirs for i in used if i in items)
+
+            # A same-name list's rows are never recorded: a row with the exact identity of an
+            # item already paired is not taken by another entry of this list; it folds into
+            # that item, as every later Download will fold it.
+            matched = _match_rows(rows, members, list_id, has_page, claimed, orphan_ids, used,
+                                  content_ok=not_its_twin if cid != cloud_id else None)
             matched.update(_match_rows(rows, others, list_id, has_page, claimed, orphan_ids, used,
                                        content_ok=not_ours))
             matched_by_list[cid] = (rows, matched)

@@ -294,6 +294,17 @@ REGRESSION_CASES = [
        ('desk', 'B', (59100, 9899, 7812, 41298, 27725)), ('web', (40384, 28431, 58671, 48032, 14333)),
        ('sync', 'B', 'merge', None), ('web', (29195, 38339, 62332, 61373, 30470)),
        ('web', (44377, 7809, 28234, 34128, 3639)), ('sync', 'B', 'up', None)]),
+    ("a same-name list's row paired with another entry once its own entry held its own list's row",
+     1759, {'has_page': False, 'max_rows': 3, 'p_inject': 0.25, 'past_end_raises': True, 'page_lag': False, 'upgrade': 0},
+     [('sync', 'B', 'up', None), ('web', (1743, 45120, 59907, 57757, 43112)), ('sync', 'B', 'merge', None),
+       ('web', (4399, 6456, 49344, 27825, 33731)), ('web', (31442, 48524, 63549, 62723, 10789)),
+       ('web', (11169, 29338, 29409, 14747, 10864)), ('sync', 'A', 'merge', None),
+       ('desk', 'A', (34074, 16998, 63251, 15126, 144)), ('desk', 'A', (36024, 51149, 65235, 36621, 28877)),
+       ('sync', 'B', 'merge', None), ('sync', 'A', 'merge', None), ('web', (48529, 26015, 23232, 4284, 54610)),
+       ('web', (59548, 6490, 18225, 458, 21400)), ('desk', 'B', (43639, 49761, 9818, 14632, 168)),
+       ('desk', 'B', (53624, 46632, 4876, 38829, 44285)),
+       ('sync', 'B', 'up', (13, 'url_too_long', (19695, 63529, 10578, 32123, 9901))),
+       ('sync', 'A', 'merge', None)]),
 ]
 
 
