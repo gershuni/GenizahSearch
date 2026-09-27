@@ -426,6 +426,19 @@ class ListsManager:
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
+    def differing_notes_count(self):
+        """Entries in a list whose note or tags differ from the account's copy and were left as they are.
+
+        What the last sync that reached each of them found; it drops only when a
+        later sync resolves them (a Download or Merge keeps both), never because a
+        sync merely succeeded.
+        """
+        try:
+            from shared.lists_sync import count_differing_notes
+            return count_differing_notes(self.data)
+        except Exception:
+            return 0  # Cannot count; nothing is known to differ
+
     def get_cloud_lists_preview(self):
         """Get preview of cloud lists without syncing (for dialog display)."""
         try:

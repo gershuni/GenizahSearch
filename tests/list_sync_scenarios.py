@@ -161,7 +161,7 @@ def row_ident(r, has_page=True):
 
 
 def same_entry(a, b, has_page):
-    """Certainly one entry: the harness's own copy of the design's predicate (3.7)."""
+    """Certainly one entry: the harness's own copy of the design's predicate."""
     if a[0] != b[0]:
         return False
     if a[1] and b[1] and a[1] != b[1]:
@@ -651,7 +651,7 @@ class World:
 
     # ---- setup
     def _seed_the_cloud(self):
-        """A website list holding a My Library row that an older desktop uploaded (3.20)."""
+        """A website list holding a My Library row that an older desktop uploaded."""
         lst = self.web.table('user_lists').insert({'user_id': USER, 'name': NAMES[0], 'name_en': NAMES[0],
                                                    'color': '#FFD700', 'is_default': False,
                                                    'is_system': False}).execute().data[0]
@@ -1394,7 +1394,7 @@ class World:
             owned = {str(ld['cloud_id']): lid for lid, ld in lists.items() if ld.get('cloud_id') is not None}
             orphan_ids = {str(rec.get('id')) for iid, it in data['items'].items()
                           for k, rec in _records(it) if k not in it.get('lists', [])}
-            # A record keeps pairing a row with its item (3.7 step 1) after the user changed the
+            # A record keeps pairing a row with its item after the user changed the
             # item's folio, or after another computer filled the row's page: it was the same
             # entry as the row was inserted.
             recorded_for = collections.defaultdict(set)
