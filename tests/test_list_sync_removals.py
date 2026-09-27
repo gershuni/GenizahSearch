@@ -1466,6 +1466,90 @@ def test_an_uploads_progress_counts_its_lists_and_tells_the_deletes_apart(tmp_pa
     assert told[lists + 1:] == ([(0, 0, 'deletes')] if removal else [])
 
 
+@pytest.mark.parametrize('cell', ['no-list-of-that-name', 'a-list-of-that-name'])
+def test_a_download_as_another_account_forgets_the_first_accounts_list_ids(tmp_path, cloud, cell):
+    """Lists and a project synced as u1; u2 logs in and downloads; the program restarts. The u1 cloud
+    ids mean nothing under u2: the download drops them (pairing by name where u2 has such a list),
+    so after the restart the lists count as unsent, and the next upload makes each once under u2."""
+    a = make_desk(tmp_path, cloud)
+    k = a.mgr.create_list('K')                           # empty: only the list itself goes up
+    p = a.mgr.create_project('P')
+    a.mgr.update_list_project(k, p)
+    assert a.up()['success']
+    u1_k, u1_p = cloud_id(a, k), a.mgr.data['projects'][p]['cloud_id']
+    u2_k = cloud.new_list('K', user='u2') if cell == 'a-list-of-that-name' else None
+    sign_in(a, 'u2')
+    assert a.down()['success']
+    lists = a.mgr.data['lists']
+    assert lists[k].get('cloud_id') == u2_k              # paired by name, or no cloud id at all
+    assert lists['default'].get('cloud_id') is None and a.mgr.data['projects'][p].get('cloud_id') is None
+    e = reopen(a)                                        # a restart before any upload
+    assert e.mgr.has_unsent_changes('u2') is True
+    assert e.up()['success']
+
+    def of_u2(table, name):
+        return [row['id'] for row in cloud.db.tables[table] if row['user_id'] == 'u2' and row['name'] == name]
+    assert len(of_u2('user_lists', 'K')) == 1 and len(of_u2('user_lists', 'General')) == 1
+    assert of_u2('projects', 'P') == [e.mgr.data['projects'][p]['cloud_id']]
+    if u2_k is not None:
+        assert of_u2('user_lists', 'K') == [u2_k]
+    assert e.mgr.data['lists'][k]['cloud_id'] == of_u2('user_lists', 'K')[0]
+    assert cloud.cloud_list(e.mgr.data['lists'][k]['cloud_id'])['project_id'] == of_u2('projects', 'P')[0]
+    assert not e.mgr.has_unsent_changes('u2')
+    assert cloud.cloud_list(u1_k)['user_id'] == 'u1'     # the first account's lists are left alone
+    assert [row['id'] for row in cloud.db.tables['projects'] if row['user_id'] == 'u1'] == [u1_p]
+    assert e.up()['success'] and len(of_u2('user_lists', 'K')) == 1 and len(of_u2('projects', 'P')) == 1
+
+
+def test_the_account_guard_drops_the_other_accounts_ids_and_keeps_the_rest():
+    store = {'cloud_account': 'u1',
+             'lists': {'k': {'name': 'K', 'cloud_id': 7, lists_sync.LIST_NAME_UNSENT: True,
+                             lists_sync.LIST_STATE_UNSENT: ['color']}},
+             'projects': {'p': {'name': 'P', 'cloud_id': 8}},
+             'items': {KEY: {'lists': ['k'], 'cloud_rows': {'k': {'id': 9, 'list': 7}}}},
+             'cloud_deletes': {'5': {'id': 5, 'list': 7, 'account': 'u1'}}}
+    same = copy.deepcopy(store)
+    lists_sync.apply_account_guard(same, 'u1')
+    assert same == store                                 # the same account: nothing dropped
+    lists_sync.apply_account_guard(store, 'u2')
+    assert store['cloud_account'] == 'u2'
+    assert 'cloud_id' not in store['lists']['k'] and 'cloud_id' not in store['projects']['p']
+    assert 'cloud_rows' not in store['items'][KEY]
+    assert store['lists']['k'][lists_sync.LIST_NAME_UNSENT] is True    # its own name and state still stand
+    assert store['lists']['k'][lists_sync.LIST_STATE_UNSENT] == ['color']
+    assert store['cloud_deletes'] == {'5': {'id': 5, 'list': 7, 'account': 'u1'}}   # waits for u1
+
+
+def test_a_short_read_after_an_account_switch_makes_no_second_list(tmp_path):
+    """Synced as u1, uploaded as u2 while its read of u2's lists ends short before u2's own K: the
+    u1 ids are gone, no K and no General is made this pass, and the next complete upload pairs
+    K with u2's and makes General once."""
+    cloud = Cloud(max_rows=2)
+    a = make_desk(tmp_path, cloud)
+    k = a.mgr.create_list('K')
+    a.mgr.add_item('990001', k, note='n', fl_id='FLa')
+    assert a.up()['success']
+    web2 = [cloud.new_list(name, user='u2') for name in ('X', 'Y', 'K')]
+    sign_in(a, 'u2')
+
+    def repeat_the_first_page(client, req):
+        if client.actor == 'A' and req.t == 'user_lists' and req.op == 'select':
+            req.filters[:] = [f for f in req.filters if f[0] != 'gt']
+        return None
+    cloud.rec.hook = repeat_the_first_page
+    result = a.up()
+    cloud.rec.hook = None
+
+    def of_u2(name):
+        return [row['id'] for row in cloud.db.tables['user_lists'] if row['user_id'] == 'u2' and row['name'] == name]
+    assert of_u2('K') == [web2[2]] and of_u2('General') == []
+    assert {'K', 'General'} <= set(result['lists_not_uploaded']) and result['complete'] is False
+    assert a.mgr.data['lists'][k].get('cloud_id') is None and a.mgr.has_unsent_changes('u2')
+    assert a.up()['success']
+    assert of_u2('K') == [web2[2]] and len(of_u2('General')) == 1
+    assert cloud_id(a, k) == web2[2] and not a.mgr.has_unsent_changes('u2')
+
+
 def test_a_sign_out_drops_the_signed_out_accounts_client(tmp_path, cloud, monkeypatch):
     a = make_desk(tmp_path, cloud)
     monkeypatch.setattr(lists_sync, '_sync_instance', a.sync)     # the manager's own sync is this desk's

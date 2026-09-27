@@ -509,9 +509,14 @@ def _set_field(store, kind, local_id, key, value, report=None):
 
 
 def apply_account_guard(store, user_id):
-    """Records belong to one account: drop another account's, then claim the store for this one.
+    """Cloud ids belong to one account: drop another account's, then claim the store for this one.
 
-    Another account's pending removals stay: they are sent when that account syncs again.
+    Another account's are its entries' row records and its lists' and projects' cloud ids,
+    which name nothing under this account: the lists and projects then pair by name with this
+    account's, as lists never uploaded do, or are made there by the next upload -- and until
+    then they hold no cloud id, so they count as unsent (has_unsent_changes) after a restart.
+    A list's unsent name and state marks stay, as on a list never uploaded. Another account's
+    pending removals stay too, tagged with it: they are sent when that account syncs again.
     """
     account = store.get('cloud_account')
     if account is not None and account != user_id:
@@ -520,7 +525,13 @@ def apply_account_guard(store, user_id):
             dropped += len(_records(item))
             item.pop('cloud_rows', None)
             item.pop('cloud_id', None)
-        logger.info("Lists were last synced with another account: dropped %d cloud row record(s)", dropped)
+        ids = 0
+        for part in ('lists', 'projects'):
+            for data in list((store.get(part) or {}).values()):
+                if isinstance(data, dict) and data.pop('cloud_id', None) is not None:
+                    ids += 1
+        logger.info("Lists were last synced with another account: dropped %d cloud row record(s) and %d list "
+                    "and project cloud id(s)", dropped, ids)
     store['cloud_account'] = user_id
 
 
