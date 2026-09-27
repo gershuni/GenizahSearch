@@ -23,8 +23,9 @@ Invariants (after every step unless stated):
   3  nothing is deleted: no DELETE, no row vanishes during a sync, and a pass
      drops no local membership
   4  a row is named by one record; a desktop never inserts a row it should have
-     claimed, nor an entry it already inserted in the same step; the settle
-     reaches a fixed point
+     claimed, nor an entry it already inserted in the same step (unless that row
+     was recorded for one membership of the entry and this insert is for another
+     that has none); the settle reaches a fixed point
   5  a second identical successful sync changes nothing
   6  My Library (97...) sys_ids never reach the cloud or come back from it
   7  records carry their account
@@ -1025,6 +1026,7 @@ class World:
         target = p.get('list_id')
         if any(_eq(target, x) for x in c.anon_lists):
             return  # an anonymous read looks like an empty list; nothing tells the two apart
+        items = d.data.get('items', {})
         for r in self.db.visible('list_items', d.client.session_user):
             if not _eq(r['list_id'], target):
                 continue
@@ -1037,13 +1039,28 @@ class World:
             if not same_entry(e, row_ident(r, hp), hp):
                 continue
             if again:
-                self.pend(4, 'insert-again', f'{d.name} inserted {e} into cloud list {target} again in one step: '
-                                             f'row {r["id"]} {row_ident(r, hp)} is its own earlier insert')
+                # ... unless its answer came back and was recorded for one membership of the
+                # entry while another membership of it in this list still has no row: that
+                # one's own insert (a batch that wrote nothing, retried one row per request)
+                if not (any(self._names_row(it, r['id']) for it in items.values())
+                        and self._needs_a_row(d, target, e, hp)):
+                    self.pend(4, 'insert-again', f'{d.name} inserted {e} into cloud list {target} again in one '
+                                                 f'step: row {r["id"]} {row_ident(r, hp)} is its own earlier insert')
                 continue
             if any(self._names_row(it, r['id'], include_gone=True) for it in d.data.get('items', {}).values()):
                 continue
             self.pend(4, 'insert-unclaimed', f'{d.name} inserted {e} into cloud list {target}, which already held '
                                              f'row {r["id"]} {row_ident(r, hp)} that no record of {d.name} names')
+
+    @staticmethod
+    def _needs_a_row(d, target, e, hp):
+        """A membership of entry e in the local list that owns cloud list `target` holds no record."""
+        owners = {lid for lid, ld in d.data.get('lists', {}).items() if _eq(ld.get('cloud_id'), target)}
+        for iid, it in d.data.get('items', {}).items():
+            for lid in owners & set(it.get('lists') or []):
+                if not isinstance((it.get('cloud_rows') or {}).get(lid), dict) and same_entry(ident(iid, it), e, hp):
+                    return True
+        return False
 
     # ---- website actor (the writes of web/supabase_client.py and web/user_lists.py)
     def web_lists(self, live_only=True):

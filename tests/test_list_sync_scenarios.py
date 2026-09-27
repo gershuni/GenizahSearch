@@ -333,6 +333,12 @@ REGRESSION_CASES = [
      2742, {'has_page': True, 'max_rows': None, 'p_inject': 0.1, 'past_end_raises': False, 'page_lag': False, 'upgrade': 0},
      [('desk', 'A', (12985, 22937, 35201, 15278, 51992)), ('desk', 'A', (32485, 17432, 21126, 61327, 52528)),
       ('sync', 'A', 'merge', (5, 'api_error', (59488, 48933, 5041, 47272, 43114)))]),
+    ('a batch that wrote nothing was retried row by row, and the second entry of one folio was taken for a '
+     'duplicate of the first',
+     6389, {'has_page': False, 'max_rows': None, 'p_inject': 0.1, 'past_end_raises': False, 'page_lag': False,
+            'upgrade': 0},
+     [('desk', 'A', (52764, 28401, 39288, 37455, 28580)), ('desk', 'A', (30433, 41913, 11424, 58992, 35037)),
+      ('sync', 'A', 'up', (21, 'api_error', (47592, 53775, 51533, 19122, 37878)))]),
     # A list renamed on the website or on a desktop (each broke invariant 10 on the engine whose
     # upload renamed the website's list back):
     ('a Download left a list renamed on the website under its old name',
