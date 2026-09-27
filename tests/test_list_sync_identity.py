@@ -15,6 +15,7 @@ import pickle
 import random
 import sys
 import threading
+import time
 import types
 
 import pytest
@@ -1297,3 +1298,119 @@ def test_the_harness_and_the_engine_share_one_identity_predicate():
                         a, b = ('990001', fa, pa), ('990001', fb, pb)
                         assert S.same_entry(a, b, has_page) == lists_sync._same_entry(a, b, has_page), (a, b, has_page)
     assert not lists_sync._same_entry(('990001', None, None), ('990002', None, None), True)
+
+
+# --------------------------------------------------------------------------- an upload while the user edits the lists
+
+_ENGINE_CODE = {}
+
+
+def _is_engine(code):
+    known = _ENGINE_CODE.get(code)
+    if known is None:
+        known = _ENGINE_CODE[code] = (os.path.normcase(os.path.abspath(code.co_filename))
+                                      == os.path.normcase(os.path.abspath(lists_sync.__file__)))
+    return known
+
+
+def _edit_inside_every_engine_loop(edit):
+    """A trace function that calls edit() inside each loop of the sync engine, between two of its steps.
+
+    The auto-upload runs on the live store while the user edits it on another thread,
+    which may run at any step of a loop. Here every loop of the engine gets an edit the
+    first time it goes round, before its next step. Returns (tracer, the loops edited in).
+    """
+    last, done = {}, set()
+
+    def local(frame, event, arg):
+        if event == 'line':
+            prev = last.get(frame)
+            last[frame] = frame.f_lineno
+            where = (frame.f_code, frame.f_lineno)
+            if prev is not None and frame.f_lineno <= prev and where not in done:
+                done.add(where)
+                edit()
+        return local
+
+    def tracer(frame, event, arg):
+        return local if _is_engine(frame.f_code) else None
+    return tracer, done
+
+
+def _one_row_per_membership(c, d):
+    """Each membership of a list an upload writes has exactly one row in that list's cloud list."""
+    for key, it in d.mgr.data['items'].items():
+        for lid in it.get('lists', []):
+            ld = d.mgr.data['lists'][lid]
+            if lid == 'recent' or ld.get('is_system') or ld.get('deleted_at'):
+                continue
+            rows = [r for r in c.rows(list_id=ld.get('cloud_id'), sys_id=it['sys_id'])
+                    if r.get('fl_id') == it.get('fl_id')]
+            assert len(rows) == 1, (key, lid, rows)
+
+
+def test_an_upload_goes_through_when_the_user_edits_between_its_steps(tmp_path, cloud):
+    a = make_desk(tmp_path, cloud)
+    lids = [a.mgr.create_list(f'L{i}') for i in range(3)]
+    for n in range(12):
+        a.mgr.add_item(f'9900{n:02d}', lids[n % 3], note=f'n{n}', fl_id=f'FL{n}')
+    assert a.up()['success']
+    for n in range(12, 18):
+        a.mgr.add_item(f'9900{n:02d}', lids[n % 3], fl_id=f'FL{n}')        # entries to insert
+    a.mgr.move_items_to_list(['990000::fl::FL0'], lids[0], lids[1])        # a row to move
+    a.mgr.update_item('990001::fl::FL1', note='n1, edited')                # a note to write
+    made = []
+
+    def user_edit():                  # creating a list starts an auto-upload; the user goes on creating and adding
+        made.append(len(made))
+        lids.append(a.mgr.create_list(f'New {len(made)}'))
+        a.mgr.add_item(f'9950{len(made):02d}', lids[len(made) % len(lids)], note=f'added {len(made)}')
+    tracer, loops = _edit_inside_every_engine_loop(user_edit)
+    before = sys.gettrace()
+    sys.settrace(tracer)
+    try:
+        result = a.up()
+    finally:
+        sys.settrace(before)
+    assert len(loops) >= 10 and made           # the edits did come inside the engine's loops
+    assert result['success'], result.get('error')
+    assert result['items_failed'] == 0 and result['lists_not_uploaded'] == []
+    assert a.up()['success']                   # what the user added meanwhile goes up with the next upload
+    _one_row_per_membership(cloud, a)
+
+
+def test_an_auto_upload_racing_the_user_on_another_thread_succeeds(tmp_path, cloud, monkeypatch):
+    a = make_desk(tmp_path, cloud)
+    lids = [a.mgr.create_list(f'L{i}') for i in range(8)]
+    for n in range(3000):                      # entries in no list, which the upload still walks past
+        key = f'99{n:05d}'
+        a.mgr.data['items'][key] = {'sys_id': key, 'lists': [], 'note': '', 'tags': [], 'added': n, 'modified': n}
+    for n in range(80):
+        a.mgr.add_item(f'9910{n:02d}', lids[n % 8], note=f'n{n}', fl_id=f'FL{n}')
+    assert a.up()['success']
+    monkeypatch.setattr(a.mgr, 'save', lambda: True)       # the edits are about the store, not the file
+    cloud.rec.hook = lambda client, req: time.sleep(0.001) if client.actor == 'A' else None   # a request takes a moment
+    stop, added, results = threading.Event(), [], []
+
+    def user():
+        while not stop.is_set() and len(added) < 2000:
+            n = len(added)
+            a.mgr.add_item(f'9920{n:04d}', lids[n % 8], fl_id=f'U{n}')
+            added.append(n)
+            time.sleep(0.0003)
+    interval = sys.getswitchinterval()
+    other = threading.Thread(target=user, daemon=True)
+    sys.setswitchinterval(1e-5)
+    try:
+        other.start()
+        for _ in range(4):
+            results.append(a.up())
+    finally:
+        stop.set()
+        other.join(10)
+        sys.setswitchinterval(interval)
+        cloud.rec.hook = None
+    assert added and [r.get('error') for r in results] == [None] * 4
+    assert all(r['success'] for r in results)
+    assert a.up()['success']
+    _one_row_per_membership(cloud, a)

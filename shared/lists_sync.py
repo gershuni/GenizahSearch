@@ -223,8 +223,9 @@ def count_differing_notes(store):
     if not store.get('cloud_account'):
         return 0
     n = 0
-    for item in (store.get('items') or {}).values():
-        lists = item.get('lists') or []
+    # copies of the live store's dicts and lists: an auto-upload runs while the user edits
+    for item in list((store.get('items') or {}).values()):
+        lists = list(item.get('lists') or [])
         for key, rec in _records(item):
             if key in lists and not rec.get('gone') and rec.get('differs'):
                 n += 1
@@ -248,13 +249,13 @@ def _live_record(item, list_key):
 
 def _orphans(item):
     """Records for local lists the item is no longer in (a Move, a removal, a merged list)."""
-    lists = item.get('lists') or []
+    lists = list(item.get('lists') or [])
     return [(k, r) for k, r in _records(item)
             if k not in lists and not r.get('gone') and r.get('id') is not None]
 
 
 def _orphan_ids(items):
-    return {r['id'] for it in items.values() for _, r in _orphans(it)}
+    return {r['id'] for it in list(items.values()) for _, r in _orphans(it)}
 
 
 def _base_of(item, row_id):
@@ -274,8 +275,8 @@ def _drop_record(item, list_key):
 
 
 def _drop_left_tombstones(items):
-    for item in items.values():
-        lists = item.get('lists') or []
+    for item in list(items.values()):
+        lists = list(item.get('lists') or [])
         for key, rec in _records(item):
             if rec.get('gone') and key not in lists:
                 _drop_record(item, key)
@@ -288,10 +289,18 @@ def _remember(pass_, store, item, list_key, row_id, cloud_list_id, note=None, ta
         return
     # The row is this membership's now: another record naming it (this item's for another
     # list, or another item's that the row has left) is stale.
-    for other_item in (store.get('items') or {}).values():
-        for key, other in list(_records(other_item)):
-            if other.get('id') == row_id and not other.get('gone') and (other_item is not item or key != list_key):
-                _drop_record(other_item, key)
+    named = pass_.records_naming(store)
+    keep = []
+    for other_item, key in named.get(row_id, ()):
+        if other_item is item and key == list_key:
+            continue
+        other = (other_item.get('cloud_rows') or {}).get(key)
+        if not isinstance(other, dict) or other.get('id') != row_id:
+            continue                       # that record names another row by now
+        if other.get('gone'):
+            keep.append((other_item, key))
+        else:
+            _drop_record(other_item, key)
     rec = {'id': row_id, 'list': cloud_list_id}
     if note is not None:
         rec['note'] = note
@@ -300,6 +309,7 @@ def _remember(pass_, store, item, list_key, row_id, cloud_list_id, note=None, ta
     if differs:
         rec['differs'] = True
     item.setdefault('cloud_rows', {})[list_key] = rec
+    named[row_id] = keep + [(item, list_key)]
     if item.get('cloud_id') is not None and item.get('cloud_id') == row_id:
         item.pop('cloud_id', None)
 
@@ -368,9 +378,24 @@ class _Pass:
         self.claimed = set()     # row ids claimed in this pass
         self.held_notes = set()  # items with a row whose note differs and may not be replaced
         self.held_tags = set()
+        self.named = None        # row id -> [(item, list key)] of the records naming it
 
     def check(self):
         """Called before every request."""
+
+    def records_naming(self, store):
+        """Which records name each row: built at the pass's first record, then kept by _remember.
+
+        After it is built no record is made except by _remember; records dropped or
+        changed since are checked again where an entry is used.
+        """
+        if self.named is None:
+            self.named = collections.defaultdict(list)
+            for it in list((store.get('items') or {}).values()):
+                for key, rec in _records(it):
+                    if rec.get('id') is not None:
+                        self.named[rec['id']].append((it, key))
+        return self.named
 
     def prove_auth(self):
         after = _session_user(self.client)
@@ -380,9 +405,9 @@ class _Pass:
 
 def _list_order(store):
     lists = store.get('lists') or {}
-    order = [lid for lid in store.get('lists_order') or [] if lid in lists]
+    order = [lid for lid in list(store.get('lists_order') or []) if lid in lists]
     seen = set(order)
-    order += [lid for lid in lists if lid not in seen]
+    order += [lid for lid in list(lists) if lid not in seen]
     return order
 
 
@@ -620,7 +645,7 @@ class ListsCloudSync:
         account = store.get('cloud_account')
         if account is not None and account != pass_.user_id:
             dropped = 0
-            for item in (store.get('items') or {}).values():
+            for item in list((store.get('items') or {}).values()):
                 dropped += len(_records(item))
                 item.pop('cloud_rows', None)
                 item.pop('cloud_id', None)
@@ -765,7 +790,7 @@ class ListsCloudSync:
         """
         items = store.setdefault('items', {})
         holders = collections.defaultdict(set)
-        for iid, it in items.items():
+        for iid, it in list(items.items()):
             if it.get('cloud_id') is not None:
                 holders[it['cloud_id']].add(iid)
             for _, rec in _records(it):
@@ -856,11 +881,12 @@ class ListsCloudSync:
         pass_.session_before = session
         self._guard(store, pass_)
         result = self._upload_result()
-        lists = store.get('lists') or {}
+        lists = dict(store.get('lists') or {})
         # names of the lists an upload writes, in order: on an exception the one being
         # written and the ones after it are reported as not uploaded
         progress = {'lists': [lists[lid].get('name', 'Unnamed') for lid in _list_order(store)
-                              if _syncable_list(lid, lists[lid]) and (only_list is None or lid == only_list)],
+                              if lid in lists and _syncable_list(lid, lists[lid])
+                              and (only_list is None or lid == only_list)],
                     'writing': None}
         try:
             if only_list is None:
@@ -954,8 +980,8 @@ class ListsCloudSync:
             by_name[lst.get('name')].append(lst['id'])
         logger.debug(f"Found {len(cloud_lists)} existing cloud lists")
 
-        local_lists = store.get('lists', {})
-        order = [lid for lid in _list_order(store) if _syncable_list(lid, local_lists[lid])]
+        local_lists = dict(store.get('lists', {}))   # the lists as the pass began (their dicts are live)
+        order = [lid for lid in _list_order(store) if lid in local_lists and _syncable_list(lid, local_lists[lid])]
         # One local owner per cloud list: the first in the list order keeps a shared id.
         held = set()
         for list_id in order:
@@ -1067,7 +1093,8 @@ class ListsCloudSync:
                 members.append((iid, it))
             rows, complete = self._fetch_list_rows(pass_, cloud_id)
             matched = _match_rows(rows, members, list_id, bool(pass_.has_page), pass_.claimed, orphan_ids, set())
-            bases = {rid: _base_of(items[iid], rid) for rid, iid in matched.items()}
+            member_of = dict(members)
+            bases = {rid: _base_of(member_of[iid], rid) for rid, iid in matched.items()}
             plans.append({'list': list_id, 'cloud': cloud_id, 'members': members, 'complete': complete,
                           'matched': matched, 'bases': bases})
 
@@ -1083,7 +1110,7 @@ class ListsCloudSync:
                 ask.update(r['id'] for _, r in _orphans(it))
         self._confirm(pass_, ask)
         pass_.prove_auth()
-        owners = {ld.get('cloud_id'): lid for lid, ld in lists.items() if ld.get('cloud_id') is not None}
+        owners = {ld.get('cloud_id'): lid for lid, ld in list(lists.items()) if ld.get('cloud_id') is not None}
         self._hold_conflicts(pass_, plans, owners)
 
         names = [lists.get(p['list'], {}).get('name', 'Unnamed') for p in plans]
@@ -1796,7 +1823,7 @@ class ListsCloudSync:
         self._repair_shared_cloud_rows(store, merge=True, has_page=has_page)
         # A membership's record whose row is now in another list than the membership's own
         # (moved on another computer; a list remapped by name) is stale before any pairing.
-        for iid, it in items.items():
+        for iid, it in list(items.items()):
             for key in list(it.get('lists') or []):
                 rec = _live_record(it, key)
                 loc = pass_.where.get(rec['id']) if rec else None
@@ -1804,7 +1831,7 @@ class ListsCloudSync:
                     _drop_record(it, key)
         orphan_ids = _orphan_ids(items)
         orphan_of = {}
-        for iid, it in items.items():
+        for iid, it in list(items.items()):
             for key, rec in _orphans(it):
                 orphan_of[rec['id']] = (iid, key)
 
@@ -1819,7 +1846,7 @@ class ListsCloudSync:
         sources = collections.defaultdict(list)   # item id -> [(row id, note, tags, base, record)]
         pending_records = []                       # (item id, list key, row id, cloud list id)
         by_sys = collections.defaultdict(list)
-        for iid, it in items.items():
+        for iid, it in list(items.items()):
             by_sys[str(it.get('sys_id') or str(iid).split('::', 1)[0])].append(iid)
 
         for list_id in [lid for lid in _list_order(store) if lid in own]:
@@ -1953,7 +1980,7 @@ class ListsCloudSync:
                 rows.append(row)
             sys_ids = {str(r['sys_id']) for r in rows if r.get('sys_id') is not None}
             cands = [(iid, items[iid]) for sid in sys_ids for iid in by_sys.get(sid, ()) if iid in items]
-            cands += [(iid, it) for iid, it in items.items()
+            cands += [(iid, it) for iid, it in list(items.items())
                       if any(_base_of(it, r.get('id')) for r in rows if r.get('sys_id') is None)]
             seen = set()
             cands = [c for c in cands if not (c[0] in seen or seen.add(c[0]))]
