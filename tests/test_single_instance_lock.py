@@ -74,8 +74,8 @@ def test_a_second_copy_is_refused_until_the_first_is_gone(tmp_path):
 
 
 def test_a_relaunched_copy_waits_for_its_parent_and_for_no_one_else(tmp_path):
-    """The old copy can outlive its window by more than any fixed wait (an
-    upload in flight is joined at interpreter exit). The new copy names it on
+    """The old copy can outlive its window by more than any fixed wait (a slow
+    teardown on a busy machine). The new copy names it on
     its command line and waits for exactly that process; any other holder is
     refused after the normal wait."""
     from desktop import single_instance as si
@@ -142,8 +142,8 @@ def _seconds_until_refused(monkeypatch, lock_info, parent_pid):
 def test_the_default_waits_are_three_seconds_and_several_minutes_for_the_parent(monkeypatch):
     """__main__ passes neither wait, so these defaults are what users get: a
     launch waits 3 s for a copy that is closing; a relaunched copy waits for
-    the copy that relaunched it for minutes (an upload in flight can keep it
-    alive long after its window closed), but for no one else."""
+    the copy that relaunched it for minutes (its teardown can outlast any
+    short wait), but for no one else."""
     parent = 4242
     launch = _seconds_until_refused(monkeypatch, (True, parent, "host", "app"), parent_pid=None)
     assert launch == pytest.approx(3.0, abs=0.01)
@@ -518,9 +518,9 @@ def test_main_tells_the_user_when_the_relaunch_fails():
 
 
 def test_the_instance_lock_is_held_until_the_process_exits():
-    """Bound at module level in __main__ (so it lives until interpreter exit,
-    after the executor threads of an in-flight upload are joined) and never
-    released, rebound or deleted there."""
+    """Bound at module level in __main__ (so it lives until interpreter exit:
+    no second copy starts while this one tears down) and never released,
+    rebound or deleted there."""
     body = _main_block()
     lock = _lock_statement(body)
     lock_name = body[lock].targets[0].elts[0].id

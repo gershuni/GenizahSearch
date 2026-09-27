@@ -1387,8 +1387,9 @@ class GenizahGUI(QMainWindow):
     # has actually let go.
     _passage_release_requested = pyqtSignal(int)
     # (saved, reason) from ListsManager's save hooks, which run on whichever
-    # thread saved -- the auto-sync and logout-sync workers too. Connected
-    # queued, so the slot always runs on the UI thread. See _watch_lists_saves.
+    # thread saved. The window saves on the UI thread (list sync applies its
+    # results there too), but connected queued the slot runs on the UI thread
+    # whatever thread a save ran on. See _watch_lists_saves.
     _lists_save_state = pyqtSignal(bool, str)
 
     # List sync. Class defaults, so a window built without __init__ (tests)
@@ -1688,9 +1689,8 @@ class GenizahGUI(QMainWindow):
         .bak file) otherwise left edits on screen that never reached the disk.
         ListsManager is shared with the web server and knows nothing of Qt:
         its hooks only emit _lists_save_state, and the queued connection runs
-        _on_lists_save_state on the UI thread -- also when the save ran on the
-        auto-sync or logout-sync worker, and never in the middle of the
-        caller's own code.
+        _on_lists_save_state on the UI thread -- also for a save made on another
+        thread, and never in the middle of the caller's own code.
         """
         mgr = getattr(self, 'lists_mgr', None)
         if mgr is None:
@@ -1881,8 +1881,9 @@ class GenizahGUI(QMainWindow):
                 # Installs that already saw the citation: still show consent if not yet seen
                 QTimer.singleShot(500, self._maybe_show_first_run_prompt)
 
-            # Restore session state (deferred slightly so all widgets are settled)
-            QTimer.singleShot(200, self._restore_session)
+            # Restore session state (deferred slightly so all widgets are settled),
+            # then turn list sync on for a sign-in saved from the last session
+            QTimer.singleShot(200, self._restore_session_then_lists_sync)
 
             # Phase 114: startup telemetry coordinator — fires after session-restore (200ms)
             # and consent-dialog (500ms) timers have resolved.  Idempotent; best-effort.
@@ -2496,18 +2497,132 @@ class GenizahGUI(QMainWindow):
                 pass
 
     def _do_logout(self):
-        # Disable cloud sync before logout
-        self._disable_lists_cloud_sync()
-        self.corrections_client.logout()
-        # D-13: reset identity on logout (mirrors web posthog.reset())
+        """Sign out. Returns at once: the last list upload runs on the runner, and the
+        sign-out finishes (_finish_logout) when it ends or after LOGOUT_SYNC_BUDGET_S,
+        whichever comes first."""
+        if self._logout_pending:
+            return
+        self._logout_pending = True
+        self._logout_generation += 1
+        token = self._logout_generation
+        self._drop_held_lists_dialog()
+        if not (self.lists_mgr and self.lists_mgr.is_sync_available()):
+            self._finish_logout({'skipped': True, 'sync_off': True}, token=token)
+            return
         try:
+            self.corner_login_btn.setEnabled(False)
+            self.corner_login_btn.setText(tr("Signing out..."))
+        except Exception as e:
+            logger.debug(f"Sign-out: could not update the login button: {e}")
+        job = self._lists_sync_runner().begin_logout(
+            on_done=lambda outcome, t=token: self._finish_logout(outcome, token=t),
+            budget_s=self.LOGOUT_SYNC_BUDGET_S)
+        if self._logout_pending and self._logout_generation == token:
+            self._logout_job = job
+        QTimer.singleShot(int(self.LOGOUT_SYNC_BUDGET_S * 1000) + 500,
+                          lambda t=token: self._finish_logout(None, token=t))
+
+    def _finish_logout(self, outcome=None, silent=False, token=None):
+        """The second half of a sign-out; runs once per sign-out.
+
+        outcome is the logout job's, or None when the budget ran out first; token
+        is the sign-out it belongs to (an earlier sign-out's timer must not cut a
+        later one), None from closeEvent. silent: the window is closing -- the
+        account is forgotten here, nothing is shown, and what did not upload stays
+        in lists.pkl for the next sign-in. Nothing here waits on the network.
+        """
+        if not self._logout_pending:
+            return
+        if token is not None and token != self._logout_generation:
+            return
+        self._logout_pending = False
+        job, self._logout_job = self._logout_job, None
+        runner = self._lists_sync
+
+        def forget_sync():
+            self.lists_mgr.disable_cloud_sync()
+            self._lists_sync_user_id = None
+
+        def reset_telemetry():
+            # D-13: reset identity on logout (mirrors web posthog.reset())
             from desktop import telemetry
             telemetry.reset_identity()
+
+        steps = (
+            ("stopping the list-sync jobs of this account",
+             lambda: runner is not None and runner.invalidate_auth()),
+            ("cancelling the last upload", lambda: runner is not None and job is not None and runner.cancel(job)),
+            ("turning list sync off", lambda: self.lists_mgr is not None and forget_sync()),
+            ("signing out", lambda: self.corrections_client.logout(revoke='background')),
+            ("resetting the telemetry identity", reset_telemetry),
+        )
+        for what, step in steps:
+            try:
+                step()
+            except Exception:
+                logger.exception("Sign-out: %s failed", what)
+        if silent:
+            return
+        try:
+            self.corner_login_btn.setEnabled(True)
+            self._update_corner_login_state()  # no request: the new client has no session
         except Exception:
-            pass
-        self._update_corner_login_state()
-        self._refresh_community_panels()
-        QMessageBox.information(self, tr("Logged Out"), tr("You have been logged out."))
+            logger.exception("Sign-out: updating the login button failed")
+        try:
+            self._refresh_community_panels(cached_only=True)
+        except Exception:
+            logger.exception("Sign-out: refreshing the community panels failed")
+        try:
+            paragraphs = self._logout_notice_paragraphs(outcome)
+            _show_ok_notice(self, 'warning' if paragraphs else 'information', tr("Logged Out"),
+                            "\n\n".join([tr("You have been logged out."), *paragraphs]))
+        except Exception:
+            logger.exception("Sign-out: the notice could not be shown")
+
+    def _logout_notice_paragraphs(self, outcome):
+        """What the sign-out notice says about the lists, beyond "You have been logged out.".
+
+        A change that did not upload is named (the lists, when the upload knew them
+        and no removal is among what failed -- a removed entry's row is not always in
+        the list it was removed from), and so is a note that still differs from the
+        account's. While lists.pkl cannot be saved, none of that is kept here, so the
+        notice says instead that such changes are lost when the program closes.
+        """
+        mgr = self.lists_mgr
+        runner = self._lists_sync
+        upload = (outcome or {}).get('upload') or {}
+        failing = bool(mgr is not None and mgr.saves_failing())
+        unsent = None
+        if outcome is not None and outcome.get('sync_off'):
+            if self._lists_changed_while_sync_off:
+                unsent = tr("List sync was not on in this session, so your list changes were not "
+                            "uploaded. They are saved on this computer and are uploaded after you next sign in.")
+        elif (outcome is None or outcome.get('cancelled') or outcome.get('error') or upload.get('stopped')
+              or (upload and not upload.get('success')) or (runner is not None and runner.unsent)):
+            names = upload.get('lists_not_uploaded') or []
+            if names and not upload.get('removals_failed', 0):
+                unsent = tr("These lists were not uploaded before you signed out: {}. Your changes to them "
+                            "are saved on this computer and are uploaded after you next sign in.").format(
+                                ", ".join(names))
+            else:
+                unsent = tr("Your latest list changes were not uploaded before you signed out. They are "
+                            "saved on this computer and are uploaded after you next sign in.")
+        differing = mgr is not None and mgr.differing_notes_count() > 0
+        too_long = upload.get('notes_too_long', 0)
+        if failing:
+            paragraphs = [tr("Your lists cannot be saved on this computer at the moment ({} cannot be "
+                             "written). List changes that did not reach your account before you signed "
+                             "out are lost when you close the program.").format(
+                                 os.path.basename(self._lists_file_path()))]
+        else:
+            paragraphs = [p for p in (unsent,) if p]
+            if differing:
+                paragraphs.append(tr("Some notes differ from your account and were not uploaded. They are "
+                                     "kept on this computer; after you next sign in, use Sync lists now, "
+                                     "then Merge Both, to keep both versions."))
+        if too_long:
+            paragraphs.append(self._too_long_notes_line(too_long, failing))
+        return paragraphs
 
     def _lists_sync_account(self):
         """The signed-in account's UUID, or None."""
@@ -2530,13 +2645,15 @@ class GenizahGUI(QMainWindow):
                     logger.debug(f"Could not get UUID from session: {e}")
         return user_uuid
 
-    def _enable_lists_cloud_sync(self, always_offer=False):
+    def _enable_lists_cloud_sync(self, always_offer=False, restored=False):
         """Turn list sync on for the signed-in account, then offer the sync choice.
 
         The preview of the account's lists runs on the list-sync worker, behind a
         busy dialog shown only if it takes more than half a second; the choice is
         offered when it arrives (_on_lists_preview). always_offer: offer it even
-        when the lists look in sync (Sync lists now).
+        when the lists look in sync (Sync lists now). restored: the sign-in saved
+        from the last session, at startup -- no busy dialog, and a preview that
+        fails (offline) is a status-bar line, not a dialog; list sync stays on.
         """
         try:
             user_uuid = self._lists_sync_account()
@@ -2564,22 +2681,25 @@ class GenizahGUI(QMainWindow):
                 self._lists_changed_while_sync_off = False
                 runner.mark_dirty()
 
-            progress = QProgressDialog(tr("Checking the lists in your account..."), tr("Cancel"), 0, 0, self)
-            progress.setWindowTitle(tr("Sync"))
-            progress.setWindowModality(Qt.WindowModality.WindowModal)
-            progress.setMinimumDuration(500)
+            progress = None
+            if not restored:
+                progress = QProgressDialog(tr("Checking the lists in your account..."), tr("Cancel"), 0, 0, self)
+                progress.setWindowTitle(tr("Sync"))
+                progress.setWindowModality(Qt.WindowModality.WindowModal)
+                progress.setMinimumDuration(500)
             request = {'epoch': runner.auth_epoch, 'user': user_uuid}
             job = runner.run('preview', on_done=lambda outcome: self._on_lists_preview(
-                outcome, progress, always_offer, request))
+                outcome, progress, always_offer, request, restored))
             if job is None:  # the runner is closed: the window is closing
                 self._close_lists_sync_progress(progress)
                 return
             request['job'] = job
-            progress.canceled.connect(lambda: runner.cancel(job))
+            if progress is not None:
+                progress.canceled.connect(lambda: runner.cancel(job))
         except Exception as e:
             logger.exception("Cloud sync dialog error: %s", e)
 
-    def _on_lists_preview(self, outcome, progress, always_offer, request):
+    def _on_lists_preview(self, outcome, progress, always_offer, request, restored=False):
         """The preview of the account's lists arrived: offer the sync choice if needed."""
         try:
             self._close_lists_sync_progress(progress)
@@ -2592,6 +2712,12 @@ class GenizahGUI(QMainWindow):
                 return
             if not cloud_preview:
                 cloud_preview = {'success': False, 'error': outcome.get('error')}
+            if restored and not cloud_preview.get('success'):
+                # Offline at startup: say so and stay on; edits upload once it can.
+                self._lists_sync_status(tr("Could not check the lists in your account: {}. List sync "
+                                           "stays on; Sync lists now tries again.").format(
+                                               self._sync_error_text(cloud_preview)))
+                return
             logger.info(f"Cloud preview returned: {cloud_preview}")
             local_lists = self.lists_mgr.get_local_lists_summary()
             cloud_lists = cloud_preview.get('lists', []) if cloud_preview.get('success') else []
@@ -3019,30 +3145,6 @@ class GenizahGUI(QMainWindow):
                 self._lists_sync_status(" ".join(lines))
         except Exception as e:
             logger.exception("Automatic list upload result could not be handled: %s", e)
-
-    def _disable_lists_cloud_sync(self):
-        """Disable cloud sync on logout."""
-        try:
-            # Skip sync on logout if recently synced (auto-sync handles it)
-            import time
-            if hasattr(self.lists_mgr, '_last_sync') and self.lists_mgr._last_sync:
-                if time.time() - self.lists_mgr._last_sync < 60:  # Synced in last minute
-                    logger.debug("Skipping logout sync - recently synced")
-                    self.lists_mgr.disable_cloud_sync()
-                    return
-
-            # Quick sync with 10-second timeout
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(self.lists_mgr.sync_to_cloud)
-                try:
-                    future.result(timeout=10)
-                except concurrent.futures.TimeoutError:
-                    logger.debug("Logout sync timed out after 10s - continuing")
-
-            self.lists_mgr.disable_cloud_sync()
-        except Exception as e:
-            logger.debug(f"Cloud sync disable: {e}")
 
     def _show_discoveries_dialog(self):
         dialog = DiscoveriesDialog(
@@ -14684,21 +14786,27 @@ class GenizahGUI(QMainWindow):
 
         return panel
 
-    def _refresh_community_panels(self, use_cache_first=True):
+    def _refresh_community_panels(self, use_cache_first=True, cached_only=False):
         """Refresh all community panels and update UI state.
 
         Args:
             use_cache_first: If True, display cached data first for instant response,
                            then fetch fresh data in background.
+            cached_only: Show only cached data and make no request (after a
+                           sign-out, which must not wait on the network); fresh
+                           data comes with the next ordinary refresh.
         """
         logger.debug("_refresh_community_panels started")
 
-        # Quick connectivity check to avoid long timeouts when offline
-        server_available = self.corrections_client.is_server_available()
-        logger.debug("Server available: %s", server_available)
+        if cached_only:
+            skip_api_calls = True
+        else:
+            # Quick connectivity check to avoid long timeouts when offline
+            server_available = self.corrections_client.is_server_available()
+            logger.debug("Server available: %s", server_available)
 
-        # If offline, only use cached data - skip all API calls
-        skip_api_calls = not server_available
+            # If offline, only use cached data - skip all API calls
+            skip_api_calls = not server_available
 
         try:
             logger.debug("Calling _update_community_header...")
@@ -31463,6 +31571,31 @@ class GenizahGUI(QMainWindow):
             self._session_save_timer.timeout.connect(self._save_session)
         self._session_save_timer.start(500)
 
+    def _restore_session_then_lists_sync(self):
+        """Startup: restore the session (its questions are modal, so they are
+        answered first), then turn list sync on for a saved sign-in -- also when the
+        restore returns early or raises."""
+        try:
+            self._restore_session()
+        finally:
+            self._start_restored_lists_sync()
+
+    def _start_restored_lists_sync(self):
+        """A sign-in restored from the last session syncs as an explicit one does:
+        the preview, the sync choice when the lists differ (on a free screen), and
+        one upload. Offline, it is one status-bar line and sync stays on."""
+        try:
+            if getattr(self, '_app_shutting_down', False) or self._logout_pending:
+                return
+            # current_user is set without a request, only when the saved session was restored
+            if self.lists_mgr is None or not getattr(self.corrections_client, 'current_user', None):
+                return
+            if self.lists_mgr.is_sync_available():
+                return
+            self._enable_lists_cloud_sync(restored=True)
+        except Exception:
+            logger.exception("Could not turn list sync on for the restored sign-in")
+
     def _restore_session(self):
         """Restore search state from saved session on startup."""
         from shared.session_persistence import load_session_state
@@ -32050,6 +32183,24 @@ class GenizahGUI(QMainWindow):
         self._save_session()
         # Ensure worker threads are stopped before the window is destroyed
         try:
+            # A sign-out still waiting for its last list upload ends now (the saved
+            # sign-in is forgotten; what did not upload stays in lists.pkl), and the
+            # list-sync runner applies what its worker already reported, saves, and
+            # takes no more jobs. A worker still inside a request is a daemon thread
+            # that writes no file, so nothing waits for it. Each call on its own, so
+            # neither can skip the worker stops below.
+            try:
+                if self._logout_pending:
+                    self._finish_logout(silent=True)
+            except Exception:
+                logger.exception("closeEvent: finishing the pending sign-out failed")
+            finally:
+                try:
+                    if self._lists_sync is not None:
+                        self._lists_sync.shutdown()
+                except Exception:
+                    logger.exception("closeEvent: lists sync shutdown failed")
+
             if getattr(self, 'meta_loader', None) and self.meta_loader.isRunning():
                 self.meta_loader.request_cancel()
                 self.meta_loader.wait()
@@ -32607,8 +32758,8 @@ if __name__ == "__main__":
     # other window's edits. Taken after the headless self-tests above (the
     # packaging smoke runs them while the app may be open) and before any
     # window exists. _instance_lock is never released by hand: it lives until
-    # the process exits, because an upload still in flight after the window
-    # closes can save lists.pkl during teardown.
+    # the process exits, because no second copy may start while this one tears
+    # down.
     _instance_lock, _other_copy_running = acquire_instance_lock(
         Config.INDEX_DIR, parent_pid=restarted_from(sys.argv))
     if _other_copy_running:

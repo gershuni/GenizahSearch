@@ -3666,6 +3666,21 @@ TRANSLATIONS.update({
         "הרשימות מהענן הורדו, אבל ההעלאה נעצרה. שאר השינויים שמורים במחשב הזה, אבל עדיין לא הגיעו לחשבונך.",
     "Some notes differ from your account and were not uploaded. To keep both versions, use Sync lists now, then Merge Both.":
         "יש הערות ששונות מאלה שבחשבונך ולכן לא הועלו. כדי לשמור את שתי הגרסאות, לחץ על 'סנכרן רשימות עכשיו' ואז על 'מזג את שתיהן'.",
+    # A restored sign-in at startup whose preview failed (offline): status bar
+    "Could not check the lists in your account: {}. List sync stays on; Sync lists now tries again.":
+        "לא ניתן היה לבדוק את הרשימות בחשבונך: {}. סנכרון הרשימות נשאר פעיל; 'סנכרן רשימות עכשיו' ינסה שוב.",
+    # Sign-out: the corner button while it runs, and the notice's paragraphs
+    "Signing out...": "מתנתק...",
+    "These lists were not uploaded before you signed out: {}. Your changes to them are saved on this computer and are uploaded after you next sign in.":
+        "הרשימות האלה לא הועלו לפני שהתנתקת: {}. השינויים בהן שמורים במחשב הזה ויועלו אחרי שתתחבר שוב.",
+    "Your latest list changes were not uploaded before you signed out. They are saved on this computer and are uploaded after you next sign in.":
+        "השינויים האחרונים ברשימות לא הועלו לפני שהתנתקת. הם שמורים במחשב הזה ויועלו אחרי שתתחבר שוב.",
+    "List sync was not on in this session, so your list changes were not uploaded. They are saved on this computer and are uploaded after you next sign in.":
+        "סנכרון הרשימות לא פעל בהפעלה הזו, ולכן השינויים ברשימות לא הועלו. הם שמורים במחשב הזה ויועלו אחרי שתתחבר שוב.",
+    "Some notes differ from your account and were not uploaded. They are kept on this computer; after you next sign in, use Sync lists now, then Merge Both, to keep both versions.":
+        "יש הערות ששונות מאלה שבחשבונך ולכן לא הועלו. הן נשמרות במחשב הזה; אחרי שתתחבר שוב, לחץ על 'סנכרן רשימות עכשיו' ואז על 'מזג את שתיהן' כדי לשמור את שתי הגרסאות.",
+    "Your lists cannot be saved on this computer at the moment ({} cannot be written). List changes that did not reach your account before you signed out are lost when you close the program.":
+        "לא ניתן לשמור כרגע את הרשימות במחשב הזה (לא ניתן לכתוב את {}). שינויים ברשימות שלא הגיעו לחשבונך לפני שהתנתקת יאבדו כשתסגור את התוכנה.",
     # The sync choice dialog's list rows: "• <name> (<n> items)", and "... and <k> more"
     "{} ({} items)": "{} ({} פריטים)",
     "... and {} more": "ועוד {}...",

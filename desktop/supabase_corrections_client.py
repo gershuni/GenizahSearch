@@ -10,6 +10,7 @@ Part of Phase 5: Desktop App Supabase Migration
 """
 import json
 import logging
+import threading
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple, Any
 from dataclasses import dataclass, field
@@ -669,21 +670,52 @@ class SupabaseCorrectionsClient:
         except Exception as e:
             return False, f"Registration error: {str(e)}"
 
-    def logout(self):
-        """Logout and clear credentials."""
+    # A desktop sign-out ends this client's own session on the server, never the
+    # account's other sessions (the website's, another computer's).
+    SIGN_OUT_OPTIONS = {'scope': 'local'}
+
+    def logout(self, revoke: str = 'wait'):
+        """Log out and forget the saved session.
+
+        revoke='wait': ask the server to end this session, then forget it here.
+        revoke='background': return at once -- nothing waits on the network. The
+        client object is dropped and the credentials file deleted on this thread;
+        a daemon thread then asks the server to end the dropped object's session
+        only, so it cannot touch a sign-in made meanwhile (a new client object with
+        its own session). If the program exits first the request is simply not
+        made; the tokens are already gone from memory and disk.
+        """
+        if revoke == 'background':
+            old, self._client = self._client, None
+            self.current_user = None
+            self._forget_saved_session()
+            if old is not None:
+                threading.Thread(target=self._revoke_session, args=(old,),
+                                 name="supabase-sign-out", daemon=True).start()
+            return
         client = self._get_client()
         if client:
             try:
-                client.auth.sign_out()
+                client.auth.sign_out(self.SIGN_OUT_OPTIONS)
             except Exception:
                 pass
 
         self.current_user = None
+        self._forget_saved_session()
+
+    def _forget_saved_session(self):
         if self.credentials_file.exists():
             try:
                 self.credentials_file.unlink()
             except OSError:
                 pass
+
+    @classmethod
+    def _revoke_session(cls, client):
+        try:
+            client.auth.sign_out(cls.SIGN_OUT_OPTIONS)
+        except Exception as e:
+            logger.debug(f"The server could not end the signed-out session: {e}")
 
     def request_password_reset(self, email: str) -> Dict[str, Any]:
         """

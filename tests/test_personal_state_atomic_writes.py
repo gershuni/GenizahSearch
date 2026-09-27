@@ -434,7 +434,7 @@ def test_a_save_that_keeps_failing_says_so_each_time_from_any_thread(store, monk
     """After an ordinary start, a .bak1 another program holds makes the
     session's first save fail, and every save after it, since each one retries
     the rotation. The mutators ignore what save() returns, so the hook is the
-    only way the user hears of it -- also of the auto-sync worker's saves."""
+    only way the user hears of it -- also of a save made on another thread."""
     m = _session_ladder(store, 2)
     calls = _hooked(m)
     ui = threading.current_thread().name
@@ -675,7 +675,7 @@ def test_concurrent_saves_from_the_sync_thread_do_not_fail(store, lists_errors):
 
 
 def test_a_stalled_save_on_the_sync_thread_cannot_land_over_a_newer_one(store, monkeypatch):
-    """The save lock: the auto-sync worker takes its snapshot, then stalls; the
+    """The save lock: a save on another thread takes its snapshot, then stalls; the
     UI saves a newer state meanwhile. Without the lock the worker's older
     snapshot lands last and the newer edit is gone from disk."""
     m = lm.ListsManager(None)
@@ -1199,7 +1199,7 @@ def test_after_the_startup_notice_failing_saves_only_use_the_status_bar(
 @pytest.mark.gui
 def test_a_save_failing_on_a_worker_thread_is_reported_on_the_ui_thread(
         store, monkeypatch, genizah_app_module):
-    """Through the real signal: the auto-sync worker's failed save reaches the
+    """Through the real signal: a failed save on another thread reaches the
     window queued, and the warning runs on the UI thread, not the worker's."""
     import sys
     from PyQt6.QtWidgets import QApplication, QMainWindow

@@ -15,7 +15,9 @@ event loop. Personal state (lists.pkl, the index folder) is under tmp_path.
 GUI-marked (tests/conftest.py): run it on its own, with QT_QPA_PLATFORM=offscreen.
 """
 import ast
+import json
 import sys
+import threading
 import time
 import types
 from pathlib import Path
@@ -207,6 +209,27 @@ class Host(genizah_app.GenizahGUI):
         QMainWindow.__init__(self)
 
 
+class FakeAccount:
+    """The corrections client as the window uses it at sign-in and sign-out."""
+
+    def __init__(self):
+        self.sign_in()
+        self._client = object()
+        self.logouts = []
+
+    def sign_in(self):
+        self.current_user = types.SimpleNamespace(_uuid=USER, username="reader")
+        self.signed_in = True
+
+    def logout(self, revoke="wait"):
+        self.logouts.append((revoke, threading.current_thread()))
+        self.current_user = None
+        self.signed_in = False
+
+    def is_logged_in(self):
+        return self.signed_in
+
+
 @pytest.fixture
 def gui(monkeypatch):
     notices = []
@@ -222,6 +245,8 @@ def gui(monkeypatch):
     monkeypatch.setattr(genizah_app, "QApplication", types.SimpleNamespace(
         activeModalWidget=lambda: screen["modal"], instance=QApplication.instance,
         processEvents=QApplication.processEvents))
+    from desktop import telemetry
+    monkeypatch.setattr(telemetry, "reset_identity", lambda *a, **k: None)
     hosts = []
 
     def make(list_names=("Local list",)):
@@ -237,8 +262,10 @@ def gui(monkeypatch):
         host.lists_refresh_all = lambda: host.refreshed.append(True)
         host.lists_refresh_sidebar = lambda: None
         host.lists_refresh_items = lambda: None
-        host.corrections_client = types.SimpleNamespace(
-            current_user=types.SimpleNamespace(_uuid=USER, username="reader"), _client=object())
+        host.corrections_client = FakeAccount()
+        host.corner_login_btn = QPushButton()
+        host.panel_refreshes = []
+        host._refresh_community_panels = lambda **kw: host.panel_refreshes.append(kw)
         host._lists_sync = RecordingRunner()
         host.notices = notices
         host.screen = screen
@@ -801,3 +828,485 @@ def test_the_skip_tooltip_says_what_skip_does(gui, monkeypatch, lang):
         "Don't download from your account now. Uploads continue: until you sign out or close "
         "the program, your lists are uploaded to your account after each change.")
     assert "Don't sync now - you can sync later from Settings" not in TRANSLATIONS
+
+
+# ---------------------------------------------------------------------------
+# A sign-in restored at startup, and an offline start
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("restore", ["no-state", "never", "declined", "restored", "raises"])
+def test_a_restored_sign_in_turns_sync_on_after_the_session_restore(gui, restore):
+    host = gui()
+    runner = host._lists_sync
+    seen = []
+
+    def restore_session():  # the restore's questions are modal: they are answered in here
+        host._restoring_session = True
+        try:
+            seen.append(list(runner.names()))
+            if restore == "raises":
+                raise RuntimeError("the saved session could not be read")
+        finally:
+            host._restoring_session = False
+
+    host._restore_session = restore_session
+    if restore == "raises":
+        with pytest.raises(RuntimeError):
+            host._restore_session_then_lists_sync()
+    else:
+        host._restore_session_then_lists_sync()
+
+    assert seen == [[]], "list sync started before the session restore returned"
+    assert runner.names().count("run:preview") == 1
+    assert host.lists_mgr.is_sync_available()
+    assert FakeProgress.made == [], "a restored start showed the busy dialog"
+
+
+def test_a_restored_start_without_a_saved_sign_in_does_nothing(gui):
+    host = gui()
+    host.corrections_client.current_user = None
+    host._restore_session = lambda: None
+    host._restore_session_then_lists_sync()
+    assert host._lists_sync.calls == []
+    assert not host.lists_mgr.is_sync_available()
+
+
+def test_startup_schedules_the_restore_then_the_list_sync():
+    src = ast.unparse(next(f for f in _window_methods() if f.name == "on_startup_finished"))
+    assert "QTimer.singleShot(200, self._restore_session_then_lists_sync)" in src
+    assert "QTimer.singleShot(200, self._restore_session)" not in src
+
+
+def test_a_failed_preview_at_startup_shows_no_dialog(gui, lang):
+    host = gui()
+    host._restore_session = lambda: None
+    host._restore_session_then_lists_sync()
+    host._lists_sync.finish(host._lists_sync.last("preview"),
+                            {"preview": _preview(success=False, error="No Supabase client")})
+    expected = tr("Could not check the lists in your account: {}. List sync stays on; Sync lists "
+                  "now tries again.").format(tr("No Supabase client"))
+    assert status(host) == expected
+    assert host.dialogs == [] and host.notices == []
+    assert "request_auto" not in host._lists_sync.names()
+    assert host.lists_mgr.is_sync_available(), "an offline start turned list sync off"
+    if lang == "he":
+        assert _is_hebrew(_first_letter(expected))
+
+
+def test_a_restored_sign_in_offers_the_choice_only_once_the_window_is_shown(gui):
+    host = gui()
+    host.screen["visible"] = False
+    host._restore_session = lambda: None
+    host._restore_session_then_lists_sync()
+    host._lists_sync.finish(host._lists_sync.last("preview"), {"preview": _preview(2)})
+    pump(0.3)
+    assert host.dialogs == []
+    host.screen["visible"] = True
+    pump(0.3)
+    assert len(host.dialogs) == 1
+
+
+# ---------------------------------------------------------------------------
+# Sign-out: at once, this computer's session only, bounded, and truthful
+# ---------------------------------------------------------------------------
+
+LOGGED_OUT = "You have been logged out."
+P16 = ("These lists were not uploaded before you signed out: {}. Your changes to them are saved on "
+       "this computer and are uploaded after you next sign in.")
+P17 = ("Your latest list changes were not uploaded before you signed out. They are saved on this "
+       "computer and are uploaded after you next sign in.")
+P18 = ("List sync was not on in this session, so your list changes were not uploaded. They are saved "
+       "on this computer and are uploaded after you next sign in.")
+P32 = ("Some notes differ from your account and were not uploaded. They are kept on this computer; "
+       "after you next sign in, use Sync lists now, then Merge Both, to keep both versions.")
+P35 = ("Your lists cannot be saved on this computer at the moment ({} cannot be written). List "
+       "changes that did not reach your account before you signed out are lost when you close the program.")
+
+
+def _notice(host):
+    (kind, title, text), = host.notices
+    assert title == tr("Logged Out")
+    first, *paragraphs = text.split("\n\n")
+    assert first == tr(LOGGED_OUT)
+    return kind, paragraphs
+
+
+def test_sign_out_returns_at_once_and_ends_when_the_last_upload_does(gui):
+    host = gui()
+    _signed_in(host)
+    runner = host._lists_sync
+
+    host._do_logout()
+
+    assert host._logout_pending and host.corrections_client.logouts == []
+    assert host.corner_login_btn.text() == tr("Signing out...") and not host.corner_login_btn.isEnabled()
+    assert runner.calls[-1] == ("begin_logout", host.LOGOUT_SYNC_BUDGET_S) == ("begin_logout", 10)
+    host._do_logout()                               # a second click while it runs
+    assert runner.names().count("begin_logout") == 1
+
+    runner.finish(runner.last("logout"), {"upload": {"success": True}})
+    assert not host._logout_pending
+    assert host.corrections_client.logouts == [("background", threading.main_thread())]
+    assert "invalidate_auth" in runner.names() and not host.lists_mgr.is_sync_available()
+    assert host.corner_login_btn.isEnabled() and host.corner_login_btn.text() == tr("Login")
+    assert host.panel_refreshes == [{"cached_only": True}]
+    assert _notice(host) == ("information", [])
+
+
+def test_a_sign_out_that_cuts_a_running_upload_says_so(gui):
+    host = gui()
+    _signed_in(host)
+    host.LOGOUT_SYNC_BUDGET_S = 0.2
+    runner = host._lists_sync
+    host._do_logout()
+    job = runner.last("logout")
+    pump(1.2)                                   # the upload is stuck; the budget ends the sign-out
+    assert not host._logout_pending
+    assert ("cancel", job) in runner.calls
+    assert _notice(host) == ("warning", [tr(P17)])
+    runner.finish(job, {"cancelled": True, "upload": STOPPED_UPLOAD})   # it ends later
+    assert len(host.notices) == 1, "the late end of the cut upload showed a second notice"
+
+
+def test_an_earlier_sign_outs_timer_does_not_cut_a_later_one(gui):
+    host = gui()
+    _signed_in(host)
+    runner = host._lists_sync
+    host.LOGOUT_SYNC_BUDGET_S = 0.2              # its timer fires 0.7 s from now
+    host._do_logout()
+    runner.finish(runner.last("logout"), {"upload": {"success": True}})
+    host.corrections_client.sign_in()
+    _signed_in(host)
+    host.LOGOUT_SYNC_BUDGET_S = 5
+    host._do_logout()
+    pump(1.2)
+    assert host._logout_pending, "the first sign-out's timer ended the second one"
+    runner.finish(runner.last("logout"), {"upload": {"success": True}})
+    assert not host._logout_pending and len(host.notices) == 2
+
+
+def _logout_cell(host, monkeypatch, cell):
+    """Run a sign-out as `cell` describes; return the notice's kind and paragraphs."""
+    state = {"differing": 0, "failing": False}
+    monkeypatch.setattr(host.lists_mgr, "differing_notes_count", lambda: state["differing"])
+    monkeypatch.setattr(host.lists_mgr, "saves_failing", lambda: state["failing"])
+    runner = host._lists_sync
+    failed = {"success": False, "error": "Sync not available", "lists_not_uploaded": ["Local list"]}
+    outcome = {"upload": {"success": True}}
+    if cell in ("b-earlier-conflict-upload-fails", "c-earlier-conflict-budget-cut",
+                "f-earlier-conflict-membership-unchecked", "h-orphan-with-a-website-edit"):
+        state["differing"] = 1
+    if cell == "a-logout-upload-keeps-differing-notes":
+        state["differing"] = 2
+        outcome = {"upload": {"success": True, "notes_differing": 2}}
+    elif cell == "b-earlier-conflict-upload-fails":
+        outcome = {"upload": failed}
+    elif cell == "e-too-long":
+        outcome = {"upload": {"success": True, "notes_too_long": 1}}
+    elif cell == "f-earlier-conflict-membership-unchecked":
+        outcome = {"upload": {"success": True, "unchecked": 1, "complete": False}}
+    elif cell == "h-orphan-with-a-website-edit":
+        host._on_lists_auto_done({"upload": {"success": True, "notes_differing": 1}})
+        assert status(host) == tr("Some notes differ from your account and were not uploaded. To keep "
+                                  "both versions, use Sync lists now, then Merge Both.")
+    elif cell == "i-a-removal-left-unsent":
+        outcome = {"upload": {"success": False, "items_failed": 1, "removals_failed": 1,
+                              "lists_not_uploaded": [], "error": "Sync not available"}}
+    elif cell == "i2-a-removal-left-unsent-with-lists":
+        outcome = {"upload": dict(failed, removals_failed=1, items_failed=1)}
+    elif cell == "cancelled":
+        outcome = {"cancelled": True, "upload": STOPPED_UPLOAD}
+    elif cell == "unsent-after-an-earlier-failed-upload":
+        runner.unsent = True
+    elif cell in ("j-saves-failing", "j-too-long"):
+        state["failing"] = True
+        state["differing"] = 1
+        outcome = {"upload": dict(failed, notes_too_long=1 if cell == "j-too-long" else 0)}
+    if cell == "g-sync-never-on":
+        host._lists_auto_sync()                      # a change while sync is off
+        host._do_logout()
+        return _notice(host)
+    _signed_in(host)
+    host._do_logout()
+    if cell == "c-earlier-conflict-budget-cut":
+        host._finish_logout(None, token=host._logout_generation)   # what the budget timer calls
+    else:
+        runner.finish(runner.last("logout"), outcome)
+    return _notice(host)
+
+
+LOGOUT_CELLS = {
+    "a-logout-upload-keeps-differing-notes": [P32],
+    "b-earlier-conflict-upload-fails": [(P16, "Local list"), P32],
+    "c-earlier-conflict-budget-cut": [P17, P32],
+    "d-conflict-resolved-by-a-complete-upload": [],
+    "e-too-long": [(TOO_LONG_KEPT, 1)],
+    "f-earlier-conflict-membership-unchecked": [P32],
+    "g-sync-never-on": [P18],
+    "h-orphan-with-a-website-edit": [P32],
+    "i-a-removal-left-unsent": [P17],
+    "i2-a-removal-left-unsent-with-lists": [P17],
+    "cancelled": [P17],
+    "unsent-after-an-earlier-failed-upload": [P17],
+    "j-saves-failing": [(P35, "lists.pkl")],
+    "j-too-long": [(P35, "lists.pkl"), (TOO_LONG, 1)],
+}
+
+
+@pytest.mark.parametrize("cell", list(LOGOUT_CELLS))
+def test_sign_out_says_what_did_not_upload(gui, monkeypatch, lang, cell):
+    host = gui()
+    kind, paragraphs = _logout_cell(host, monkeypatch, cell)
+    expected = [tr(p[0]).format(p[1]) if isinstance(p, tuple) else tr(p) for p in LOGOUT_CELLS[cell]]
+    assert paragraphs == expected
+    assert kind == ("warning" if expected else "information")
+    if lang == "he":
+        assert all(_is_hebrew(_first_letter(p)) for p in paragraphs), paragraphs
+    if cell.startswith("j"):
+        joined = " ".join(paragraphs)
+        for kept in (P16, P17, P18, P32):
+            assert tr(kept).split("{}")[0] not in joined
+        assert tr(TOO_LONG_KEPT).format(1) not in joined
+
+
+# ---- the account's own client: nothing waits on the network --------------
+
+# Long enough to show that something waited on it; short enough that code which does
+# wait (the code before this change) still finishes the run.
+HANG_S = 3
+
+
+class _Auth:
+    """A supabase auth client whose sign_out and get_user can hang."""
+
+    def __init__(self, gate=None):
+        self.gate = gate
+        self.calls = []
+
+    def sign_out(self, options=None):
+        self.calls.append(("sign_out", options, threading.current_thread()))
+        if self.gate is not None:
+            self.gate.wait(HANG_S)
+
+    def get_user(self, jwt=None):
+        self.calls.append(("get_user", jwt, threading.current_thread()))
+        if self.gate is not None:
+            self.gate.wait(HANG_S)
+        return None
+
+    def get_session(self):
+        return None
+
+
+class _Supabase:
+    def __init__(self, auth):
+        self.auth = auth
+
+
+@pytest.fixture
+def account(tmp_path, monkeypatch):
+    """The real SupabaseCorrectionsClient, signed in on a client object whose requests hang,
+    with every community request a recorded hang too."""
+    from desktop import supabase_corrections_client as scc
+    gate = threading.Event()
+    made = []
+    monkeypatch.setattr(scc, "SUPABASE_AVAILABLE", True)
+    monkeypatch.setattr(scc, "SUPABASE_ANON_KEY", "test-key")
+    monkeypatch.setattr(scc, "create_client", lambda *a, **k: made.append(_Supabase(_Auth())) or made[-1],
+                        raising=False)
+    client = scc.SupabaseCorrectionsClient(config_path=tmp_path / "corrections")
+    old = _Supabase(_Auth(gate))
+    client._client = old
+    client.current_user = scc.User(id=1, email="r@example.org", username="reader", _uuid=USER)
+    client.credentials_file.write_text(json.dumps({"access_token": "a", "refresh_token": "r"}))
+    network = []
+    for name in ("is_server_available", "get_discoveries", "get_all_corrections", "get_all_comments",
+                 "search_joins", "get_published_puzzle_joins"):
+        def hang(*a, _n=name, **k):
+            network.append(_n)
+            gate.wait(HANG_S)
+            return ([], 0)
+        monkeypatch.setattr(client, name, hang)
+    yield types.SimpleNamespace(client=client, old=old, made=made, network=network, gate=gate)
+    gate.set()
+
+
+@pytest.mark.parametrize("sync", ["sync-off", "sync-on"])
+def test_an_ordinary_sign_out_never_waits_for_the_network(gui, account, sync):
+    host = gui()
+    host.corrections_client = account.client
+    del host._refresh_community_panels                      # the real, cache-only one
+    host.community_tab = host.create_community_tab()
+    timings = [0.0]
+    finish = getattr(host, "_finish_logout", None)
+
+    def timed_finish(*a, **k):
+        t0 = time.monotonic()
+        try:
+            return finish(*a, **k)
+        finally:
+            timings.append(time.monotonic() - t0)
+
+    if finish is not None:
+        host._finish_logout = timed_finish
+    if sync == "sync-on":
+        _signed_in(host)
+        host.LOGOUT_SYNC_BUDGET_S = 0.2
+    t0 = time.monotonic()
+    host._do_logout()
+    returned_after = time.monotonic() - t0
+    assert returned_after < 1.0, f"sign-out held the UI thread for {returned_after:.1f}s"
+    if sync == "sync-on":
+        assert host._logout_pending
+        pump(1.0)                                       # the budget timer ends it
+        assert len(timings) == 2
+
+    assert max(timings) < 1.0, f"the sign-out's second half took {max(timings):.1f}s"
+    assert not host._logout_pending
+    assert account.network == [], f"the sign-out made requests on the UI thread: {account.network}"
+    assert [c[0] for c in account.old.auth.calls if c[2] is threading.main_thread()] == [], \
+        "the old session was revoked (or read) on the UI thread"
+    assert not account.client.credentials_file.exists()
+    assert account.client.current_user is None
+    assert len(host.notices) == 1
+
+
+def test_a_background_revoke_cannot_touch_a_later_sign_in(account):
+    client = account.client
+    client.logout(revoke="background")
+    assert client._client is None and client.current_user is None
+    assert not client.credentials_file.exists()
+    revoke = next(t for t in threading.enumerate() if t.name == "supabase-sign-out")
+    assert revoke.daemon
+
+    new = _Supabase(_Auth())                           # signed in again, as the same user
+    user = types.SimpleNamespace(_uuid=USER, username="reader")
+    client._client, client.current_user = new, user
+    account.gate.set()
+    revoke.join(5)
+
+    assert [(c[0], c[1]) for c in account.old.auth.calls] == [("sign_out", {"scope": "local"})]
+    assert account.old.auth.calls[0][2] is revoke
+    assert new.auth.calls == [], "the revoke reached the later sign-in's client"
+    assert client._client is new and client.current_user is user
+
+
+def test_the_other_sign_out_path_also_ends_this_session_only(account):
+    account.gate.set()
+    account.client.logout()
+    assert [(c[0], c[1]) for c in account.old.auth.calls] == [("sign_out", {"scope": "local"})]
+    assert account.client.current_user is None and not account.client.credentials_file.exists()
+
+
+def test_the_rest_client_accepts_the_same_sign_out():
+    from desktop.corrections_client import CorrectionsClient
+    import inspect
+    assert "revoke" in inspect.signature(CorrectionsClient.logout).parameters
+
+
+# ---------------------------------------------------------------------------
+# Close
+# ---------------------------------------------------------------------------
+
+class _Loader:
+    def __init__(self):
+        self.calls = []
+
+    def isRunning(self):
+        return True
+
+    def request_cancel(self):
+        self.calls.append("request_cancel")
+
+    def wait(self, *a):
+        self.calls.append("wait")
+        return True
+
+
+def _closing_host(host):
+    host._defer_close_for_passage = lambda event: False
+    host._close_result_dialog = lambda: None
+    host._save_session = lambda: None
+    host.cancel_browse_image_thread = lambda: None
+    host.meta_loader = _Loader()
+    return host
+
+
+def _close(host):
+    from PyQt6.QtGui import QCloseEvent
+    event = QCloseEvent()
+    event.ignore()
+    t0 = time.monotonic()
+    host.closeEvent(event)
+    return time.monotonic() - t0, event
+
+
+def test_closing_during_a_sign_out_whose_revoke_hangs_returns_promptly(gui, account):
+    host = _closing_host(gui())
+    host.corrections_client = account.client
+    _signed_in(host)
+    host._do_logout()
+    assert host._logout_pending
+
+    took, event = _close(host)
+
+    assert took < 1.0, f"closeEvent took {took:.1f}s"
+    assert not host._logout_pending
+    assert not account.client.credentials_file.exists(), "the saved sign-in survived the close"
+    assert host._lists_sync.names()[-1] == "shutdown"
+    assert host.notices == [], "the close showed the sign-out notice"
+    assert host.meta_loader.calls == ["request_cancel", "wait"] and event.isAccepted()
+
+
+def test_a_failing_sign_out_at_close_still_stops_the_list_sync(gui):
+    host = _closing_host(gui())
+    _signed_in(host)
+    host._do_logout()
+
+    def broken(**kw):
+        raise ValueError("the sign-out broke")
+
+    host._finish_logout = broken
+    took, event = _close(host)
+    assert "shutdown" in host._lists_sync.names()
+    assert host._lists_sync.run("upload") is None, "the runner took a job after the close"
+    assert host.meta_loader.calls == ["request_cancel", "wait"] and event.isAccepted()
+
+
+def test_a_failing_list_sync_shutdown_skips_nothing_after_it(gui):
+    host = _closing_host(gui())
+
+    def broken():
+        host._lists_sync.calls.append(("shutdown",))
+        raise ValueError("the runner broke")
+
+    host._lists_sync.shutdown = broken
+    took, event = _close(host)                      # nothing escapes
+    assert host._lists_sync.names() == ["shutdown"]
+    assert host.meta_loader.calls == ["request_cancel", "wait"], "the worker stops were skipped"
+    assert event.isAccepted(), "the window's own closeEvent was not reached"
+
+
+# ---------------------------------------------------------------------------
+# No text promises what does not happen
+# ---------------------------------------------------------------------------
+
+def test_no_false_promise_text_remains():
+    app = (ROOT / "genizah_app.py").read_text(encoding="utf-8")
+    for phrase in ("sync later from Settings", "uploaded when you sign out", "sync later"):
+        assert phrase not in app, phrase
+        assert not any(phrase in k or phrase in str(v) for k, v in TRANSLATIONS.items()), phrase
+    kept_alive = {
+        "desktop/single_instance.py": ("upload still in flight", "keep it alive"),
+        "genizah_app.py": ("auto-sync and logout-sync workers", "auto-sync or logout-sync worker",
+                           "upload still in flight", "_disable_lists_cloud_sync"),
+        "tests/test_single_instance_lock.py": ("upload in flight", "in-flight upload"),
+    }
+    for rel, phrases in kept_alive.items():
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        for phrase in phrases:
+            assert phrase not in text, f"{rel} still says {phrase!r}"
+    tree = ast.parse((ROOT / "tests/test_personal_state_atomic_writes.py").read_text(encoding="utf-8"))
+    docs = [ast.get_docstring(n) or "" for n in ast.walk(tree)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Module))]
+    assert not any("the auto-sync worker" in d for d in docs)

@@ -15,8 +15,9 @@ Windows refuses to delete a file its holder keeps open.
 The language-change restart relaunches only after this process has left its
 event loop -- after closeEvent and its session save -- and names this process
 on the new command line (``--restarted-from=<pid>``). The new copy waits up to
-PARENT_WAIT_MS (ten minutes) for that process to exit -- an upload still in
-flight can keep it alive for a while -- instead of calling it "already open"
+PARENT_WAIT_MS (ten minutes) for that process to exit -- its teardown (the
+session save, the search workers it stops) can take longer than a fixed wait
+on a slow or busy machine -- instead of calling it "already open"
 after the usual LAUNCH_WAIT_MS. If it is still running after that, the new copy
 reports it as the copy already open. Because nothing can keep this copy open
 by then, the restart is only requested when relaunch_looks_possible() says the
