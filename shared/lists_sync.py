@@ -1107,8 +1107,11 @@ class ListsCloudSync:
             for iid, it in plan['members']:
                 rows = []
                 rid = next((r for r, i in plan['matched'].items() if i == iid), None)
+                raw = (it.get('cloud_rows') or {}).get(plan['list'])
                 if rid is not None:
                     rows.append((rid, plan['bases'].get(rid)))
+                elif isinstance(raw, dict) and raw.get('gone'):
+                    pass                # removed on the website: nothing is written for it
                 else:
                     rec = _live_record(it, plan['list'])
                     if rec is not None and pass_.where.get(rec['id'], (None,))[0] == plan['cloud']:
