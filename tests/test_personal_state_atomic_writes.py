@@ -1381,7 +1381,7 @@ def _run_sync_dialog_action(genizah_app, monkeypatch, mgr, action, outcomes=None
 
     The action runs through the list-sync runner inline (every stage on this thread,
     on_done before run() returns); `outcomes` collects what it handed the window."""
-    from lists_sync_contract import add_missing_manager_reads, inline_runner
+    from desktop.lists_sync_runner import ListsSyncRunner
     shown = []
 
     class _Progress:
@@ -1391,13 +1391,12 @@ def _run_sync_dialog_action(genizah_app, monkeypatch, mgr, action, outcomes=None
         def __getattr__(self, name):
             return lambda *args: None
 
-    add_missing_manager_reads(monkeypatch)
     monkeypatch.setattr(genizah_app, "QProgressDialog", _Progress)
     monkeypatch.setattr(genizah_app, "_show_ok_notice",
                         lambda parent, kind, title, text: shown.append((kind, text)))
     host = genizah_app.GenizahGUI.__new__(genizah_app.GenizahGUI)
     host.lists_mgr = mgr
-    host._lists_sync = inline_runner(mgr)
+    host._lists_sync = ListsSyncRunner(mgr, inline=True)
     host._app_shutting_down = False
     host.lists_tree = None
     host.lists_refresh_all = lambda: None

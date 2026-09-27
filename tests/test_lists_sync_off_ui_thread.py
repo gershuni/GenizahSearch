@@ -33,7 +33,7 @@ from shared import lists_manager as lm
 from shared import lists_sync
 from shared.genizah_translations import TRANSLATIONS
 
-from lists_sync_contract import add_missing_manager_reads, runner_module
+from desktop.lists_sync_runner import ListsSyncRunner
 
 APP = QApplication.instance() or QApplication([])
 ROOT = Path(__file__).resolve().parents[1]
@@ -71,8 +71,6 @@ def personal_state(tmp_path, monkeypatch):
     monkeypatch.setattr(lists_sync, "SUPABASE_AVAILABLE", True)
     monkeypatch.setattr(lists_sync, "SUPABASE_ANON_KEY", "test-key")
     monkeypatch.setattr(lists_sync, "_sync_instance", None)
-    runner_module(monkeypatch)
-    add_missing_manager_reads(monkeypatch)
     return tmp_path
 
 
@@ -87,7 +85,10 @@ def lang(request, monkeypatch):
 # ---------------------------------------------------------------------------
 
 class RecordingRunner:
-    """ListsSyncRunner as the window sees it; each job ends when the test calls finish()."""
+    """ListsSyncRunner as the window sees it; each job ends when the test calls finish().
+
+    What it offers the window is ListsSyncRunner's own interface (test_the_recording_runner_is_the_real_ones_interface):
+    a name the window uses that the real runner lost could not hide behind it."""
 
     def __init__(self):
         self.calls = []
@@ -147,6 +148,28 @@ class RecordingRunner:
     def shutdown(self):
         self.calls.append(("shutdown",))
         self.closed = True
+
+
+# What the window may use of the runner: every name RecordingRunner offers it but its test helpers.
+RUNNER_INTERFACE = ("run", "cancel", "request_auto", "allow_auto", "mark_dirty", "invalidate_auth",
+                    "begin_logout", "shutdown", "auth_epoch", "unsent", "busy", "closed")
+
+
+def test_the_recording_runner_is_the_real_ones_interface():
+    import inspect
+    helpers = {"calls", "jobs", "names", "finish", "last"}
+    offered = {n for n in set(vars(RecordingRunner())) | set(vars(RecordingRunner)) if not n.startswith("_")}
+    assert offered - helpers == set(RUNNER_INTERFACE)
+    real = ListsSyncRunner(lm.ListsManager(None), inline=True)
+    for name in RUNNER_INTERFACE:
+        assert hasattr(real, name), f"ListsSyncRunner has no {name}"
+        mine, theirs = getattr(RecordingRunner, name, None), getattr(ListsSyncRunner, name, None)
+        if callable(mine) and callable(theirs):
+            assert inspect.signature(mine).parameters.keys() == inspect.signature(theirs).parameters.keys(), name
+    for name in ("saves_failing", "pending_web_removals", "resolve_web_removals", "differing_notes_count",
+                 "begin_upload", "finish_upload", "abandon_upload", "withdrawn_now", "fetch_cloud_state",
+                 "apply_cloud_state", "remembered_row_ids", "cloud_user"):
+        assert callable(getattr(lm.ListsManager, name, None)), f"ListsManager has no {name}"
 
 
 class _Signal:
@@ -1792,7 +1815,6 @@ UPLOAD_STOPPED = ("Upload stopped. The rest of your changes are saved on this co
 
 def _inline_runner(host):
     """The real runner, every stage on this thread (the window's handlers run as they return)."""
-    from desktop.lists_sync_runner import ListsSyncRunner
     host._lists_sync = ListsSyncRunner(host.lists_mgr, parent=host, on_auto_done=host._on_lists_auto_done,
                                        inline=True)
     return host._lists_sync
@@ -1801,7 +1823,6 @@ def _inline_runner(host):
 def test_the_window_builds_its_runner_with_the_automatic_upload_handler(gui, monkeypatch):
     """_lists_sync_runner() as the app calls it: a real runner, its drain timer owned by the window,
     whose automatic upload ends in _on_lists_auto_done (the removal prompt and the notes hints)."""
-    from desktop.lists_sync_runner import ListsSyncRunner
     host = gui()
     host._lists_sync = None                          # nothing injected: the window makes its own
     _signed_in(host)
@@ -1971,7 +1992,6 @@ def _engine_host(gui, tmp_path, monkeypatch):
     its 50 ms timer), with the scenario gate's PostgREST stand-in as the account."""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import test_list_sync_removals as R
-    from desktop.lists_sync_runner import ListsSyncRunner
     cloud = R.Cloud()
     desk = R.make_desk(tmp_path, cloud)
     monkeypatch.setattr(lists_sync, "_sync_instance", desk.sync)
