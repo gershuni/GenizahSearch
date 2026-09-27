@@ -797,6 +797,199 @@ def test_a_list_renamed_while_an_upload_runs_keeps_its_new_name(tmp_path, cloud,
     assert a.down()['success'] and a.mgr.data['lists'][k]['name'] == 'K second'
 
 
+def test_a_rename_undone_during_an_upload_still_holds_back_the_websites_name(tmp_path, cloud):
+    """A -> B -> A while an upload runs, and the website renamed the list to W before it: in serial
+    order the renames come after the upload, so the name is still this computer's to send. The
+    next Download keeps A, and the upload after it writes A."""
+    a = make_desk(tmp_path, cloud)
+    k = a.mgr.create_list('A')
+    a.mgr.add_item('990001', k, note='n', fl_id='FLa')
+    assert a.up()['success']
+    c_k = cloud_id(a, k)
+    cloud.web.table('user_lists').update({'name': 'W', 'name_en': 'W'}).eq('id', c_k).execute()
+
+    def rename_and_back():
+        a.mgr.update_list(k, name='B')
+        a.mgr.update_list(k, name='A')
+    edit_during(cloud, rename_and_back)
+    assert a.up()['success']
+    assert cloud.cloud_list(c_k)['name'] == 'W'        # its copy was not renamed: it sent no name
+    assert a.mgr.data['lists'][k].get(lists_sync.LIST_NAME_UNSENT)
+    assert saved(a)['lists'][k].get(lists_sync.LIST_NAME_UNSENT)
+    assert a.down()['success'] and a.mgr.data['lists'][k]['name'] == 'A'
+    assert a.up()['success'] and cloud.cloud_list(c_k)['name'] == 'A'
+    assert not a.mgr.data['lists'][k].get(lists_sync.LIST_NAME_UNSENT)
+
+
+# --------------------------------------------------------------------------- a list's own state changed here
+
+STATE_EDITS = ['colour', 'project', 'trash', 'restore', 'layout']
+
+
+def _state(ld):
+    return ld.get('color'), ld.get('project_id'), bool(ld.get('deleted_at'))
+
+
+@pytest.mark.parametrize('when', ['before-a-download', 'during-an-upload'])
+@pytest.mark.parametrize('edit', STATE_EDITS)
+def test_a_list_state_changed_here_stands_until_an_upload_sends_it(tmp_path, cloud, edit, when):
+    """A list's colour, project and Trash state follow the rule for its name: a Download keeps the
+    value this computer gave it until an upload has sent it -- also when it was changed while an
+    upload ran on a copy (that upload sent the value from before) -- and then takes the website's."""
+    a = make_desk(tmp_path, cloud)
+    k = a.mgr.create_list('K', color='#FF0000')
+    p = a.mgr.create_project('P')
+    a.mgr.add_item('990001', k, note='n', fl_id='FLa')
+    if edit == 'restore':
+        a.mgr.delete_list(k)
+    assert a.up()['success']
+    c_k = cloud_id(a, k)
+
+    def lst():
+        return a.mgr.data['lists'][k]
+
+    def change():
+        if edit == 'colour':
+            a.mgr.update_list(k, color='#0000FF')
+        elif edit == 'project':
+            a.mgr.update_list_project(k, p)
+        elif edit == 'trash':
+            a.mgr.delete_list(k)
+        elif edit == 'restore':
+            a.mgr.restore_list(k)
+        else:                                          # dragged into the project in the sidebar
+            a.mgr.apply_list_layout({k: p}, list(a.mgr.data['lists_order']), [p])
+    before = _state(lst())
+    if when == 'during-an-upload':
+        a.mgr.add_item('990002', k, fl_id='FLb')       # something for the upload to write
+        edit_during(cloud, change)
+        assert a.up()['success']
+    else:
+        change()
+    mine = _state(lst())
+    assert mine != before
+    assert lst().get(lists_sync.LIST_STATE_UNSENT)
+    assert saved(a)['lists'][k].get(lists_sync.LIST_STATE_UNSENT)
+    assert a.down()['success']
+    assert _state(lst()) == mine, 'a Download took back a list state changed on this computer'
+    assert a.up()['success'] and not lst().get(lists_sync.LIST_STATE_UNSENT)
+    cl = cloud.cloud_list(c_k)
+    assert (cl['color'], bool(cl.get('deleted_at'))) == (mine[0], mine[2])
+    assert (cl.get('project_id') == a.mgr.data['projects'][p]['cloud_id']) == (mine[1] == p)
+    cloud.web.table('user_lists').update({'color': '#00FF00'}).eq('id', c_k).execute()
+    assert a.down()['success'] and lst()['color'] == '#00FF00', 'once sent, the website\'s change was not taken'
+
+
+def test_every_list_state_change_here_is_marked():
+    """Each ListsManager method that changes an existing list's colour, project or Trash state marks
+    that part unsent (journaled, so a change during an upload is marked again on its copy)."""
+    tree = ast.parse((REPO / 'shared' / 'lists_manager.py').read_text(encoding='utf-8'))
+    cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'ListsManager')
+    parts = {'color': 'color', 'project_id': 'project', 'deleted_at': 'trash'}
+    changing = {}
+    for fn in cls.body:
+        if not isinstance(fn, ast.FunctionDef) or fn.name == '_read_store':   # defaults filled in at load
+            continue
+        keys = {t.slice.value for node in ast.walk(fn) if isinstance(node, (ast.Assign, ast.Delete))
+                for t in node.targets
+                if isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Constant) and t.slice.value in parts}
+        if keys:
+            marked = {n.args[3].value for n in ast.walk(fn)
+                      if isinstance(n, ast.Call) and ast.unparse(n.func) == 'self._book' and len(n.args) == 4
+                      and isinstance(n.args[0], ast.Constant) and n.args[0].value == '_mark_unsent'
+                      and isinstance(n.args[3], ast.Constant)}
+            changing[fn.name] = ({parts[k] for k in keys}, marked)
+    assert set(changing) >= {'update_list', 'update_list_project', 'delete_project', 'apply_list_layout',
+                             'delete_list', 'restore_list', 'merge_duplicate_group', 'restore_project_hierarchy'}
+    for name, (changed, marked) in changing.items():
+        assert changed <= marked, f'ListsManager.{name} changes {sorted(changed - marked)} without marking it unsent'
+    assert set().union(*(m for _, m in changing.values())) <= set(lists_sync.LIST_STATE_FIELDS)
+
+
+def test_a_state_part_changed_here_holds_back_only_that_part(tmp_path, cloud):
+    """The Trash here, a colour on the website: the Download takes the colour and keeps the Trash."""
+    a = make_desk(tmp_path, cloud)
+    k = a.mgr.create_list('K', color='#FF0000')
+    a.mgr.add_item('990001', k, note='n', fl_id='FLa')
+    assert a.up()['success']
+    c_k = cloud_id(a, k)
+    a.mgr.delete_list(k)
+    cloud.web.table('user_lists').update({'color': '#00FF00'}).eq('id', c_k).execute()
+    assert a.down()['success']
+    ld = a.mgr.data['lists'][k]
+    assert ld.get('deleted_at') and ld['color'] == '#00FF00'
+    assert ld[lists_sync.LIST_STATE_UNSENT] == ['trash']
+    assert a.up()['success']
+    cl = cloud.cloud_list(c_k)
+    assert cl.get('deleted_at') and cl['color'] == '#00FF00'
+
+
+# --------------------------------------------------------------------------- the projects, read in full
+
+def _projects_with_a_list_each(a, n):
+    out = {}
+    for i in range(n):
+        pid = a.mgr.create_project(f'P{i}')
+        lid = a.mgr.create_list(f'L{i}')
+        a.mgr.update_list_project(lid, pid)
+        out[pid] = lid
+    return out
+
+
+def test_the_projects_are_read_in_pages_under_a_row_cap(tmp_path):
+    """The server answers at most 2 rows per request: every upload still sees every project (none
+    loses its cloud id, none is made twice), and a download maps every list to its project."""
+    cloud = Cloud(max_rows=2)
+    a = make_desk(tmp_path, cloud)
+    _projects_with_a_list_each(a, 5)
+    ids = None
+    for _ in range(3):
+        assert a.up()['success']
+        now = {pid: pd.get('cloud_id') for pid, pd in a.mgr.data['projects'].items()}
+        assert None not in now.values() and (ids is None or now == ids)
+        ids = now
+        assert sorted(p['name'] for p in cloud.db.tables['projects']) == [f'P{i}' for i in range(5)]
+    b = make_desk(tmp_path, cloud, 'B')
+    assert b.down()['success']
+    projects = b.mgr.data['projects']
+    got = {ld['name']: projects.get(ld.get('project_id'), {}).get('name')
+           for ld in b.mgr.data['lists'].values() if ld.get('name', '').startswith('L')}
+    assert got == {f'L{i}': f'P{i}' for i in range(5)}
+
+
+def test_a_short_read_of_the_projects_drops_no_cloud_id_and_creates_no_project(tmp_path):
+    """A read of the projects that ends short (a page whose ids do not rise): the projects it did not
+    see keep their cloud ids, a new one is not created, and no list's project is changed on the
+    website for it -- all wait for an upload that reads every project."""
+    cloud = Cloud(max_rows=2)
+    a = make_desk(tmp_path, cloud)
+    lists = _projects_with_a_list_each(a, 4)
+    assert a.up()['success']
+    ids = {pid: pd['cloud_id'] for pid, pd in a.mgr.data['projects'].items()}
+    web_project = {cloud_id(a, lid): cloud.cloud_list(cloud_id(a, lid))['project_id'] for lid in lists.values()}
+    new = a.mgr.create_project('P4')
+    l4 = a.mgr.create_list('L4')
+    a.mgr.update_list_project(l4, new)
+
+    def repeat_the_first_page(client, req):
+        if client.actor == 'A' and req.t == 'projects' and req.op == 'select':
+            req.filters[:] = [f for f in req.filters if f[0] != 'gt']
+        return None
+    cloud.rec.hook = repeat_the_first_page
+    result = a.up()
+    cloud.rec.hook = None
+    assert {pid: a.mgr.data['projects'][pid].get('cloud_id') for pid in ids} == ids
+    assert sorted(p['name'] for p in cloud.db.tables['projects']) == [f'P{i}' for i in range(4)]
+    assert {cid: cloud.cloud_list(cid)['project_id'] for cid in web_project} == web_project
+    assert 'L4' in result['lists_not_uploaded'] and result['complete'] is False
+    assert a.mgr.data['lists'][l4].get(lists_sync.LIST_STATE_UNSENT)     # its project is still to be sent
+    assert a.up()['success']                           # a read that reaches the end
+    p4 = a.mgr.data['projects'][new]['cloud_id']
+    assert sorted(p['name'] for p in cloud.db.tables['projects']) == [f'P{i}' for i in range(5)]
+    assert cloud.cloud_list(cloud_id(a, l4))['project_id'] == p4
+    assert not a.mgr.data['lists'][l4].get(lists_sync.LIST_STATE_UNSENT)
+
+
 def _stale_repair_then_remove(a, cloud):
     """Two local lists held one cloud list: the upload gives L its own, and E is removed from L meanwhile."""
     c101 = cloud.new_list('K')

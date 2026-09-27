@@ -262,6 +262,34 @@ def test_a_download_is_followed_by_one_upload_while_changes_are_unsent(desk, clo
         assert begins == [], 'an upload started before the log-in offered its sync choice'
 
 
+def test_a_download_queued_behind_an_upload_keeps_the_list_state_changed_during_it(desk, cloud):
+    """The runner's order: a Download queued while an upload runs goes before the follow-up upload
+    that carries the edits made meanwhile. It keeps them (colour, Trash), and that upload sends them."""
+    k, t = desk.mgr.create_list('K', color='#FF0000'), desk.mgr.create_list('T')
+    desk.mgr.add_item('990001', k, note='n', fl_id='FLa')
+    assert desk.up()['success']
+    desk.mgr.add_item('990002', k, fl_id='FLb')
+    gate = Gate(cloud, lambda req: req.t == 'list_items' and req.op == 'insert')
+    r = threaded(desk.mgr)
+    started = []
+    real_start = r._start
+    r._start = lambda job: started.append(job.kind) or real_start(job)
+    r.request_auto()
+    assert gate.reached.wait(10)
+    desk.mgr.update_list(k, color='#0000FF')              # edits during the upload
+    desk.mgr.delete_list(t)
+    r.request_auto()                                      # folded into a follow-up upload
+    done = []
+    r.run('download', on_done=done.append)
+    gate.release.set()
+    assert drain_until(r, lambda: not r.busy and not r._auto_wanted)
+    assert started == ['auto', 'download', 'auto'] and done[0]['download']['success']
+    lists = desk.mgr.data['lists']
+    assert lists[k]['color'] == '#0000FF' and lists[t].get('deleted_at')
+    assert cloud.cloud_list(R.cloud_id(desk, k))['color'] == '#0000FF'
+    assert cloud.cloud_list(R.cloud_id(desk, t)).get('deleted_at')
+
+
 # --------------------------------------------------------------------------- what the progress dialog is told
 
 def test_a_queued_merge_is_told_its_turn_and_each_half(desk, cloud):

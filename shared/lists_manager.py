@@ -201,6 +201,26 @@ def _mark_pending_move(state, item_id, from_list, to_list):
         item.setdefault('cloud_rows', {})['~' + str(rec['id'])] = moved
 
 
+def _mark_unsent(state, list_id, key, part=None):
+    """A list was changed here in what an upload sends for it: its name ('list_name_unsent'), or
+    a part of its own state ('list_state_unsent', part 'color', 'project' or 'trash') --
+    lists_sync.LIST_NAME_UNSENT and LIST_STATE_UNSENT. The mark stays until an upload has sent
+    it, and until then a Download keeps this computer's value of what it names. Journaled
+    (ListsManager._book), so a change made while an upload runs on a copy is marked again on the
+    copy when it is installed: that upload sent the value from before.
+    """
+    lst = (state.get('lists') or {}).get(list_id)
+    if not isinstance(lst, dict):
+        return
+    if part is None:
+        lst[key] = True
+        return
+    mark = lst.get(key)
+    if mark and not isinstance(mark, (list, tuple, set, frozenset)):
+        return                               # already holds back every part
+    lst[key] = sorted(set(mark or ()) | {part})
+
+
 def _keep_web_removal(state, item_id, list_id):
     """Keep an entry the website removed: forget its tombstone, so the next upload inserts it again."""
     item, recs = _item_records(state, item_id)
@@ -770,9 +790,10 @@ class ListsManager:
             theirs = copied_lists.get(lid)
             if not isinstance(theirs, dict):
                 continue
+            # a list renamed, recoloured, moved to a project or to or from the Trash while the
+            # upload ran was marked again on the copy by the replay (_mark_unsent): what the
+            # upload sent was the value from before
             for key in ('cloud_id', 'list_state_unsent', 'list_name_unsent'):
-                if key == 'list_name_unsent' and ld.get(key) and ld.get('name') != theirs.get('name'):
-                    continue     # renamed here while the upload ran: that name is still to be sent
                 if key in theirs:
                     ld[key] = theirs[key]
                 else:
@@ -989,8 +1010,10 @@ class ListsManager:
                 lst['name_en'] = name
             # lists_sync.LIST_NAME_UNSENT: the next upload sends the new name, and a
             # Download before it keeps it instead of taking the cloud list's name.
-            lst['list_name_unsent'] = True
+            self._book('_mark_unsent', list_id, 'list_name_unsent')
         if color is not None:
+            if color != lst.get('color'):
+                self._book('_mark_unsent', list_id, 'list_state_unsent', 'color')
             lst['color'] = color
 
         self.save()
@@ -1008,6 +1031,8 @@ class ListsManager:
         if project_id and project_id not in self.data.get('projects', {}):
             return False
 
+        if lst.get('project_id') != project_id:
+            self._book('_mark_unsent', list_id, 'list_state_unsent', 'project')
         lst['project_id'] = project_id
         self.save()
         return True
@@ -1077,9 +1102,10 @@ class ListsManager:
             for list_id in list_ids:
                 self.delete_list(list_id)
         else:
-            for list_data in self.data.get('lists', {}).values():
+            for list_id, list_data in self.data.get('lists', {}).items():
                 if list_data.get('project_id') == project_id:
                     list_data['project_id'] = None
+                    self._book('_mark_unsent', list_id, 'list_state_unsent', 'project')
 
         del self.data['projects'][project_id]
         if project_id in self.data.get('projects_order', []):
@@ -1107,6 +1133,7 @@ class ListsManager:
                 continue
             if project_id and project_id not in self.data.get('projects', {}):
                 continue
+            before = (lst.get('project_id'), lst.get('color'))
             lst['project_id'] = project_id
             if project_id:
                 project = self.data.get('projects', {}).get(project_id, {})
@@ -1116,6 +1143,10 @@ class ListsManager:
                 default_color = self.data.get('lists', {}).get('default', {}).get('color')
                 if default_color:
                     lst['color'] = default_color
+            if lst.get('project_id') != before[0]:
+                self._book('_mark_unsent', list_id, 'list_state_unsent', 'project')
+            if lst.get('color') != before[1]:
+                self._book('_mark_unsent', list_id, 'list_state_unsent', 'color')
 
         self.data['lists_order'] = [list_id for list_id in list_order if list_id in self.data['lists']]
         self.data['projects_order'] = [
@@ -1157,6 +1188,7 @@ class ListsManager:
             # Soft delete - set deleted_at timestamp
             import time
             lst['deleted_at'] = time.time()
+            self._book('_mark_unsent', list_id, 'list_state_unsent', 'trash')
 
         self.save()
         return True
@@ -1171,6 +1203,7 @@ class ListsManager:
             return False  # Not deleted
 
         del lst['deleted_at']
+        self._book('_mark_unsent', list_id, 'list_state_unsent', 'trash')
         self.save()
         return True
 
@@ -1296,6 +1329,8 @@ class ListsManager:
         list_name = keeper_data.get('name', '')
 
         if target_project_id is not None:
+            if keeper_data.get('project_id') != (target_project_id or None):
+                self._book('_mark_unsent', keep_id, 'list_state_unsent', 'project')
             keeper_data['project_id'] = target_project_id if target_project_id else None
 
         for dup_id in duplicate_ids:
@@ -1381,6 +1416,7 @@ class ListsManager:
             list_color = list_data.get('color')
             if list_color and list_color in color_to_project:
                 list_data['project_id'] = color_to_project[list_color]
+                self._book('_mark_unsent', list_id, 'list_state_unsent', 'project')
                 result['restored_count'] += 1
                 LOGGER.info(f"Restored project for list '{list_data.get('name')}' by color match")
 

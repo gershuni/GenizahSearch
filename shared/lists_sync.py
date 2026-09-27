@@ -68,13 +68,27 @@ IDENTITY_FIELDS = {
 }
 # The list a row is in when reading it again failed: equal to no list id.
 UNKNOWN_LIST = object()
-# On a local list that took its cloud list in a download while holding no cloud id,
-# and whose own state (Trash, colour, project) differs from that cloud list's: the
-# local state stands until an upload has sent it (a download before then must not
-# import the cloud's), so both orders of the first Download and Upload end alike.
-# It says nothing about the name: a download still takes a website rename, and an
-# upload sends no name for it.
+# On a list whose own state (Trash, colour, project) was changed on this computer
+# (ListsManager marks each such change), or that took its cloud list in a download
+# while holding no cloud id and whose state differs from that cloud list's: the local
+# value stands until an upload has sent it -- a download before then keeps it rather
+# than importing the cloud's, as for a rename (LIST_NAME_UNSENT) -- so both orders of
+# a Download and an Upload end alike. Its value names the parts held back (a list of
+# LIST_STATE_FIELDS), or True for all three (the mark before it named them); the cloud's
+# value of every other part is still taken. It says nothing about the name: a download
+# still takes a website rename unless LIST_NAME_UNSENT holds it back.
 LIST_STATE_UNSENT = 'list_state_unsent'
+LIST_STATE_FIELDS = ('color', 'project', 'trash')
+
+
+def _held_state(list_data):
+    """The parts of a list's own state its LIST_STATE_UNSENT mark holds back (a set of LIST_STATE_FIELDS)."""
+    mark = list_data.get(LIST_STATE_UNSENT)
+    if not mark:
+        return set()
+    if isinstance(mark, (list, tuple, set, frozenset)):
+        return set(mark) & set(LIST_STATE_FIELDS)
+    return set(LIST_STATE_FIELDS)
 # On a list renamed on this computer (ListsManager.update_list sets it, and nothing
 # else does) until an upload's write of that name returned the row: the new name
 # stands over the cloud list's at a download, and only an upload of such a list
@@ -873,6 +887,12 @@ class ListsCloudSync:
         return self._paged(pass_, lambda after: _after(client.table('user_lists').select(cols)
                                                        .eq('user_id', pass_.user_id), after))
 
+    def _read_projects(self, pass_, cols):
+        """Every cloud project of the account, in keyset pages as the lists are: (rows, complete)."""
+        client = pass_.client
+        return self._paged(pass_, lambda after: _after(client.table('projects').select(cols)
+                                                       .eq('user_id', pass_.user_id), after))
+
     def _confirm(self, pass_, ids):
         """Where are these remembered rows now? Fills pass_.where, pass_.absent and pass_.locate_ok."""
         ask = sorted({i for i in ids if i is not None and i not in pass_.where}, key=_id_key)
@@ -1113,27 +1133,39 @@ class ListsCloudSync:
         """Projects and lists as before, except that a cloud list has at most one local owner."""
         client = pass_.client
         user_id = pass_.user_id
-        # Fetch existing cloud projects to prevent duplicates
-        pass_.check()
-        existing_projects_response = client.table('projects').select('id, name').eq(
-            'user_id', user_id
-        ).execute()
-        existing_cloud_projects = {proj['name']: proj['id'] for proj in (existing_projects_response.data or [])}
-        valid_project_ids = {proj['id'] for proj in (existing_projects_response.data or [])}
+        # Existing cloud projects, read in full (to prevent duplicates)
+        cloud_projects, projects_complete = self._read_projects(pass_, 'id, name')
+        existing_cloud_projects = {proj['name']: proj['id'] for proj in cloud_projects}
+        valid_project_ids = {proj['id'] for proj in cloud_projects}
 
         # Push projects first (so we have cloud IDs for list references)
         local_projects = store.get('projects', {})
         local_project_to_cloud = {}
+        # Projects a read that did not reach the end left unmatched: kept as they are this pass
+        # (no cloud id dropped, none created), and their lists' project is not sent
+        projects_waiting = set()
         report = pass_.report
 
         for proj_id, proj_data in list(local_projects.items()):
             cloud_proj_id = proj_data.get('cloud_id')
+            proj_name = proj_data.get('name', 'Unnamed')
             # Validate cloud_id still exists
             if cloud_proj_id and cloud_proj_id not in valid_project_ids:
+                if not projects_complete:
+                    # Not seen by a read that did not reach the end: it may still be there
+                    logger.info("The cloud projects were not all read; project '%s' (cloud project %s) waits "
+                                "for the next upload", proj_name, cloud_proj_id)
+                    projects_waiting.add(proj_id)
+                    continue
                 logger.debug(f"Clearing stale cloud_id {cloud_proj_id} for project '{proj_data.get('name')}'")
                 cloud_proj_id = None
                 _set_field(store, 'projects', proj_id, 'cloud_id', None, report)
-            proj_name = proj_data.get('name', 'Unnamed')
+            if not cloud_proj_id and proj_name not in existing_cloud_projects and not projects_complete:
+                # A cloud project of this name may lie past what the read returned: create none
+                logger.info("The cloud projects were not all read; project '%s' is not created in the cloud "
+                            "until the next upload", proj_name)
+                projects_waiting.add(proj_id)
+                continue
 
             proj_payload = {
                 'user_id': user_id,
@@ -1208,6 +1240,7 @@ class ListsCloudSync:
             # Map local project_id to cloud project_id
             local_proj_id = list_data.get('project_id')
             cloud_proj_id = local_project_to_cloud.get(local_proj_id) if local_proj_id else None
+            project_waits = local_proj_id in projects_waiting
 
             # Handle soft delete - convert local timestamp to ISO format for cloud
             local_deleted_at = list_data.get('deleted_at')
@@ -1232,6 +1265,9 @@ class ListsCloudSync:
             update_payload = dict(list_payload)
             if not list_data.get(LIST_NAME_UNSENT):
                 del update_payload['name'], update_payload['name_en']
+            if project_waits:
+                # its project could not be matched this pass: the cloud list keeps the project it has
+                del update_payload['project_id']
 
             pass_.check()
             if cloud_id:
@@ -1271,10 +1307,14 @@ class ListsCloudSync:
 
             if cloud_id and response.data:
                 # the row answered, so the list's state is in the cloud (a write the session
-                # could not see changed nothing, and the list's own state still stands)
-                _set_field(store, 'lists', list_id, LIST_STATE_UNSENT, None, report)
+                # could not see changed nothing, and the list's own state still stands) --
+                # unless its project waits for the next upload
+                if not project_waits:
+                    _set_field(store, 'lists', list_id, LIST_STATE_UNSENT, None, report)
                 if 'name' in sent and list_data.get('name') == sent['name']:
                     _set_field(store, 'lists', list_id, LIST_NAME_UNSENT, None, report)   # its rename is there too
+            if project_waits and list_name not in result['lists_not_uploaded']:
+                result['lists_not_uploaded'].append(list_name)     # its project has not reached the cloud
             result['lists_pushed'] += 1
 
             # Skip syncing items for deleted lists
@@ -2100,9 +2140,7 @@ class ListsCloudSync:
 
     def _fetch_cloud_state(self, pass_, remembered_ids, progress=None):
         """Everything a download needs from the cloud; reads nothing local and writes nothing."""
-        client = pass_.client
-        pass_.check()
-        projects_response = client.table('projects').select('*').eq('user_id', pass_.user_id).execute()
+        cloud_projects, projects_complete = self._read_projects(pass_, '*')
         cloud_lists, lists_complete = self._read_user_lists(pass_, '*')
         rows_by_list = {}
         # Lists in the Trash are read too: a local list that takes one as its own keeps
@@ -2115,7 +2153,8 @@ class ListsCloudSync:
             self._tell_progress({'tell': progress}, n + 1, len(read))
         self._confirm(pass_, remembered_ids)
         pass_.prove_auth()
-        return {'user_id': pass_.user_id, 'projects': projects_response.data or [], 'lists': cloud_lists,
+        return {'user_id': pass_.user_id, 'projects': cloud_projects, 'projects_complete': projects_complete,
+                'lists': cloud_lists,
                 'lists_complete': lists_complete, 'has_page': pass_.has_page, 'rows_by_list': rows_by_list,
                 'where': pass_.where, 'absent': pass_.absent, 'locate_ok': pass_.locate_ok,
                 'auth_ok': pass_.auth_ok}
@@ -2185,10 +2224,11 @@ class ListsCloudSync:
         is the default list), the lowest-id cloud list of its name no local list
         holds -- the upload makes the same choice -- and, under the same exception,
         that list's name (only the default list's can differ). Only the own cloud list sets
-        colour, project and the Trash state -- and not while the list's own state is
-        unsent (LIST_STATE_UNSENT: it held no cloud id and its state differed): it
-        keeps its own until an upload has sent it. A rename here never holds these
-        back, and an unsent state never holds back a name.
+        colour, project and the Trash state -- and not a part of it that is unsent
+        (LIST_STATE_UNSENT: changed on this computer; or all of it, when the list held no
+        cloud id and took the cloud list here): that part keeps its own value until an
+        upload has sent it, and stays marked only while it differs from the cloud list's.
+        A rename here never holds these back, and an unsent state never holds back a name.
 
         When the read of the lists was not complete (lists_complete False), a list whose
         cloud id the read did not return keeps that id and gets no cloud list this pass
@@ -2258,26 +2298,34 @@ class ListsCloudSync:
             cloud_project_id = cloud_list.get('project_id')
             local_project_id = cloud_project_to_local.get(cloud_project_id) if cloud_project_id else None
             local_deleted_at = self._cloud_deleted_at(cloud_list)
-            if lid in had_own_id and not ld.get(LIST_STATE_UNSENT):
-                if cloud_list.get('color'):
-                    ld['color'] = cloud_list['color']
-                # Update project assignment if changed
-                if local_project_id:
-                    ld['project_id'] = local_project_id
-                # Sync deleted_at status
+            differs = set()
+            if bool(ld.get('deleted_at')) != bool(local_deleted_at):
+                differs.add('trash')
+            if cloud_list.get('color') and cloud_list['color'] != ld.get('color'):
+                differs.add('color')
+            if ((local_project_id and local_project_id != ld.get('project_id'))
+                    or (not cloud_project_id and ld.get('project_id'))):
+                differs.add('project')
+            # a list that took its cloud list here keeps all of its own state; a list that
+            # held that cloud list keeps the parts changed here since the last upload
+            held = _held_state(ld) if lid in had_own_id else set(LIST_STATE_FIELDS)
+            if 'color' not in held and cloud_list.get('color'):
+                ld['color'] = cloud_list['color']
+            # Update project assignment if changed
+            if 'project' not in held and local_project_id:
+                ld['project_id'] = local_project_id
+            # Sync deleted_at status
+            if 'trash' not in held or not differs & {'trash'}:
                 if local_deleted_at:
-                    ld['deleted_at'] = local_deleted_at
+                    ld['deleted_at'] = local_deleted_at   # (in the Trash on both sides: the cloud's time)
                 elif 'deleted_at' in ld:
                     # Cloud restored the list - remove local deleted_at
                     del ld['deleted_at']
-            elif (bool(ld.get('deleted_at')) != bool(local_deleted_at)
-                  or (cloud_list.get('color') and cloud_list['color'] != ld.get('color'))
-                  or (local_project_id and local_project_id != ld.get('project_id'))):
-                ld[LIST_STATE_UNSENT] = True    # its own state goes up with the next upload
+            still = held & differs
+            if still:
+                ld[LIST_STATE_UNSENT] = sorted(still)    # these parts go up with the next upload
             else:
                 ld.pop(LIST_STATE_UNSENT, None)
-                if local_deleted_at:
-                    ld['deleted_at'] = local_deleted_at   # in the Trash on both sides: the cloud's time
             result['lists_updated'] += 1
 
         same_name = collections.defaultdict(list)
