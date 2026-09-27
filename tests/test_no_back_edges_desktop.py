@@ -71,6 +71,8 @@ DESKTOP_MODULES = [
     "desktop/widgets/overflow_row.py",
     # 2026-09-25: one running copy per data folder.
     "desktop/single_instance.py",
+    # 2026-09-27: the list syncs, one at a time, off the UI thread.
+    "desktop/lists_sync_runner.py",
 ]
 
 # Compound statement types whose bodies run at import time
