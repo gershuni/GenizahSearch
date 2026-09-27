@@ -319,6 +319,20 @@ REGRESSION_CASES = [
        ('desk', 'A', (50484, 28212, 27224, 46768, 831)), ('sync', 'A', 'merge', None),
        ('desk', 'A', (27475, 57382, 63336, 27993, 44092)), ('desk', 'A', (24812, 39164, 6256, 12267, 63018)),
        ('sync', 'A', 'up', (7, 'session_lost', (4663, 62412, 12373, 24980, 56077)))]),
+    # A batch insert that commits and then fails: nothing of it may be inserted again in that pass
+    # (each case broke invariant 4 on an engine that retried such a batch one row at a time).
+    ('a batch whose answer was lost after it committed was inserted again, row by row',
+     1883, {'has_page': True, 'max_rows': None, 'p_inject': 0.1, 'past_end_raises': True, 'page_lag': False, 'upgrade': 0},
+     [('desk', 'B', (8581, 64748, 56079, 18071, 56577)), ('desk', 'B', (48110, 40511, 3201, 16852, 30760)),
+      ('sync', 'B', 'up', (2, 'raise_after', (22182, 41880, 27129, 44716, 14111)))]),
+    ('a batch answered with a gateway 504 after it committed was inserted again',
+     3329, {'has_page': True, 'max_rows': 3, 'p_inject': 0.25, 'past_end_raises': True, 'page_lag': False, 'upgrade': 0},
+     [('desk', 'B', (41318, 41771, 42592, 24779, 60326)), ('desk', 'B', (46694, 33531, 848, 478, 7086)),
+      ('sync', 'B', 'up', (10, 'api_error', (33674, 34131, 22158, 4860, 16634)))]),
+    ('a batch answered with PGRST111 after it committed was inserted again',
+     2742, {'has_page': True, 'max_rows': None, 'p_inject': 0.1, 'past_end_raises': False, 'page_lag': False, 'upgrade': 0},
+     [('desk', 'A', (12985, 22937, 35201, 15278, 51992)), ('desk', 'A', (32485, 17432, 21126, 61327, 52528)),
+      ('sync', 'A', 'merge', (5, 'api_error', (59488, 48933, 5041, 47272, 43114)))]),
 ]
 
 

@@ -23,7 +23,8 @@ Invariants (after every step unless stated):
   3  nothing is deleted: no DELETE, no row vanishes during a sync, and a pass
      drops no local membership
   4  a row is named by one record; a desktop never inserts a row it should have
-     claimed; the settle reaches a fixed point
+     claimed, nor an entry it already inserted in the same step; the settle
+     reaches a fixed point
   5  a second identical successful sync changes nothing
   6  My Library (97...) sys_ids never reach the cloud or come back from it
   7  records carry their account
@@ -76,7 +77,9 @@ INJECTIONS = ('raise_before', 'raise_after', 'api_error', 'anon', 'session_lost'
               'web_between_pages', 'web_between_pages', 'web_between_pages', 'web_between_pages')
 # Result errors of a pass that returned before touching anything.
 EARLY_ERRORS = ('Sync not available', 'Sync already in progress', 'No Supabase client')
-IDENTITY_FIELDS = {'store': ('cloud_account',), 'projects': ('cloud_id',), 'lists': ('cloud_id',),
+# The only keys of a store an upload may change: the design's list, fixed here rather than
+# read from the engine under test (a list's unsent-state flag is cleared once it is sent).
+IDENTITY_FIELDS = {'store': ('cloud_account',), 'projects': ('cloud_id',), 'lists': ('cloud_id', 'list_state_unsent'),
                    'items': ('cloud_id', 'cloud_rows')}
 ALL_CHECKS = frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9, 'R', 'crash'})
 
@@ -174,6 +177,15 @@ def same_entry(a, b, has_page):
     if has_page and a[2] and a[2] == b[2]:
         return True
     return bool(has_page and not a[1] and not b[1] and not a[2] and not b[2])
+
+
+def web_shelfmark(sys_id):
+    """The catalogue shelfmark the website stores with a row it adds."""
+    return f'T-S {sys_id[-3:]}.{int(sys_id[-1]) + 1}'
+
+
+def web_title(sys_id):
+    return f'Fragment {sys_id}'
 
 
 def compatible(a, b):
@@ -738,6 +750,11 @@ class World:
                 if req.t == 'list_items' and req.op == 'select' and req.rng and req.rng[0] > 0:
                     c.fired = True
                     return self._fire(c, client, req)
+            elif c.inject[1] in ('raise_after', 'api_error') and c.inject[2][1] % 3 == 0:
+                # a third of these hit the step's first batch insert: it commits, then the answer fails
+                if req.t == 'list_items' and req.op == 'insert' and isinstance(req.payload, list):
+                    c.fired = True
+                    return self._fire(c, client, req)
             elif c.req_count == c.inject[0]:
                 c.fired = True
                 return self._fire(c, client, req)
@@ -940,9 +957,19 @@ class World:
         if any(_eq(target, x) for x in c.anon_lists):
             return  # an anonymous read looks like an empty list; nothing tells the two apart
         for r in self.db.visible('list_items', d.client.session_user):
-            if not _eq(r['list_id'], target) or not _eq(c.start_rows.get(r['id']), target):
+            if not _eq(r['list_id'], target):
+                continue
+            # a row this desktop inserted earlier in this step (a batch that committed
+            # although its response was lost): inserting the entry again duplicates it
+            ghost = r.get('_ghost')
+            again = r['id'] not in c.start_rows and ghost is not None and ghost[0] == d.name
+            if not again and not _eq(c.start_rows.get(r['id']), target):
                 continue
             if not same_entry(e, row_ident(r, hp), hp):
+                continue
+            if again:
+                self.pend(4, 'insert-again', f'{d.name} inserted {e} into cloud list {target} again in one step: '
+                                             f'row {r["id"]} {row_ident(r, hp)} is its own earlier insert')
                 continue
             if any(self._names_row(it, r['id'], include_gone=True) for it in d.data.get('items', {}).values()):
                 continue
@@ -976,8 +1003,10 @@ class World:
             note = self.fresh('n') if sel[4] % 2 else ''
             if note:
                 self.live_n.add(note)
-            self.web.table('list_items').insert({'list_id': lst['id'], 'sys_id': sys_id, 'shelfmark': None,
-                                                 'title': None, 'fl_id': fl, 'note': note, 'tags': []}).execute()
+            # the website writes the catalogue's shelfmark and title (web/user_lists.py add_item)
+            self.web.table('list_items').insert({'list_id': lst['id'], 'sys_id': sys_id,
+                                                 'shelfmark': web_shelfmark(sys_id), 'title': web_title(sys_id),
+                                                 'fl_id': fl, 'note': note, 'tags': []}).execute()
             self.trace.append(f'web: add ({sys_id},{fl}) note={note!r} to cloud list {lst["id"]} {lst["name"]}')
         elif kind == 2 and rows:                         # note edit: replace or append
             r = rows[sel[1] % len(rows)]
@@ -1234,8 +1263,7 @@ class World:
         reached = res.get('error') not in EARLY_ERRORS
         if self.checking:
             if direction == 'up' and not edited and d.data is not None:
-                fields = getattr(d.engine, 'IDENTITY_FIELDS', IDENTITY_FIELDS)
-                a, b = _without_identity(store0, fields), _without_identity(d.data, fields)
+                a, b = _without_identity(store0), _without_identity(d.data)
                 if a != b:
                     self.pend('R', 'upload-changed-store', f'{d.name}: an upload changed more than the cloud '
                                                            f'identity fields: {_diff_store(a, b)}')

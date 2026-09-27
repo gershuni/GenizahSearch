@@ -71,9 +71,10 @@ class Cloud:
         return row['id']
 
     def add(self, list_id, sys_id, fl_id=None, note='', tags=None, page=None):
-        """A row as the website adds it (and, with page=, as a desktop wrote it)."""
-        row = self.web.table('list_items').insert({'list_id': list_id, 'sys_id': sys_id, 'shelfmark': None,
-                                                   'title': None, 'fl_id': fl_id, 'note': note,
+        """A row as the website adds it, with the catalogue's shelfmark and title (with page=, as a desktop wrote it)."""
+        row = self.web.table('list_items').insert({'list_id': list_id, 'sys_id': sys_id,
+                                                   'shelfmark': S.web_shelfmark(sys_id), 'title': S.web_title(sys_id),
+                                                   'fl_id': fl_id, 'note': note,
                                                    'tags': tags or []}).execute().data[0]
         if page is not None:
             self.row(row['id'])['page'] = page
@@ -122,6 +123,14 @@ def rec(d, key, list_id):
 
 def cloud_id(d, list_id):
     return d.mgr.data['lists'][list_id]['cloud_id']
+
+
+def row_in(c, d, key, list_id):
+    """The id of the cloud row of an entry in a list, found in the cloud (not through a record)."""
+    it = item(d, key)
+    fl = it.get('fl_id')
+    return next(r['id'] for r in c.rows(list_id=cloud_id(d, list_id), sys_id=it['sys_id'])
+                if r.get('fl_id') == fl)
 
 
 def saved(d):
@@ -355,7 +364,7 @@ def _recorded(tmp_path, c, note='n', sys_id='990001', fl='FLa'):
     a.mgr.add_item(sys_id, lid, note=note, fl_id=fl)
     assert a.up()['success']
     key = f'{sys_id}::fl::{fl}'
-    return a, lid, key, rec(a, key, lid)['id']
+    return a, lid, key, row_in(c, a, key, lid)
 
 
 @pytest.mark.parametrize('direction', ['upload', 'download'])
@@ -419,12 +428,12 @@ def test_removal_is_never_concluded_from_an_incomplete_read(tmp_path, cell, dire
     assert a.up()['success']
     keys = sorted(k for k, it in a.mgr.data['items'].items() if lid in it['lists'])
     first = keys[0]
-    rid = rec(a, first, lid)['id']
+    rid = row_in(c, a, first, lid)
     old_cloud = cloud_id(a, lid)
     if cell in ('confirmation-capped', 'found-in-another-list'):
         moved_to = c.new_list('Elsewhere')
         for k in (keys if cell == 'confirmation-capped' else [first]):
-            c.row(rec(a, k, lid)['id'])['list_id'] = moved_to      # another computer moved the rows
+            c.row(row_in(c, a, k, lid))['list_id'] = moved_to      # another computer moved the rows
         if cell == 'confirmation-capped':
             c.web.table('user_lists').delete().eq('id', old_cloud).execute()
     else:
@@ -697,7 +706,7 @@ def test_moving_into_a_list_that_already_holds_the_entry_leaves_the_old_row_and_
     a.mgr.add_item('990001', k, note='base', fl_id='FLa')
     a.mgr.add_item('990001', l_, fl_id='FLa')
     assert a.up()['success']
-    rk, rl = rec(a, key, k)['id'], rec(a, key, l_)['id']
+    rk, rl = row_in(cloud, a, key, k), row_in(cloud, a, key, l_)
     a.mgr.update_item(key, note='local')
     cloud.set(rk, note='k web')
     cloud.set(rl, note='l web')
@@ -739,7 +748,7 @@ def test_a_merge_into_a_trashed_list_moves_the_row_after_restore(tmp_path, cloud
         k = make_k()
         l_ = make_l()
     assert (cloud_id(a, l_) < cloud_id(a, k)) == (order == 'kept-id-lower')
-    l_cloud, k_cloud, rid = cloud_id(a, l_), cloud_id(a, k), rec(a, key, k)['id']
+    l_cloud, k_cloud, rid = cloud_id(a, l_), cloud_id(a, k), row_in(cloud, a, key, k)
     a.mgr.merge_duplicate_group(l_, [k])      # keeps the trashed list, as Fix Duplicates may
     mark = cloud.rec.mark()
     assert a.up()['success']
@@ -797,7 +806,7 @@ def test_moves_end_with_one_row_in_the_final_list(tmp_path, cloud, cell):
     key = '990001::fl::FLa'
     a.mgr.add_item('990001', k, fl_id='FLa')
     assert a.up()['success']
-    k_cloud, rid = cloud_id(a, k), rec(a, key, k)['id']
+    k_cloud, rid = cloud_id(a, k), row_in(cloud, a, key, k)
     mark = cloud.rec.mark()
     if cell == 'chained-before-upload':
         a.mgr.move_items_to_list([key], k, l_)
@@ -831,7 +840,7 @@ def test_a_website_edit_between_read_and_write_is_not_overwritten(tmp_path, clou
     tags = [str(n) for n in range(300)] if cell == 'long-tags' else []
     a.mgr.add_item('990001', lid, note=note, tags=tags, fl_id='FLa')
     assert a.up()['success']
-    rid = rec(a, key, lid)['id']
+    rid = row_in(cloud, a, key, lid)
     record_before = copy.deepcopy(rec(a, key, lid))
     if cell == 'long-tags':
         a.mgr.update_item(key, tags=tags + ['new'])
@@ -904,8 +913,7 @@ def test_the_account_is_recorded_before_the_first_record(tmp_path, cloud, cell, 
         mark = cloud.rec.mark()
         result = a.up()
         assert result == {'success': False, 'error': 'Sync not available'}
-        assert [r for r in cloud.rec.reqs[len(cloud.rec.reqs) - 0:]] == [] and mark() == [] \
-            and mark(table='user_lists') == [] and mark(table='projects') == []
+        assert mark() == [] and mark(table='user_lists') == [] and mark(table='projects') == []
         assert not any(it.get('cloud_rows') for it in a.mgr.data['items'].values())
         return
     if cell == 'write-fails-after-records':
@@ -951,7 +959,7 @@ def test_a_download_applies_a_remembered_row_that_only_the_confirmation_found(tm
     assert a.up()['success']
     rows = c.rows(list_id=cloud_id(a, lid))
     target, victim = rows[50], rows[5]
-    key = next(k for k, it in a.mgr.data['items'].items() if rec(a, k, lid)['id'] == target['id'])
+    key = next(k for k, it in a.mgr.data['items'].items() if it['sys_id'] == target['sys_id'])
     c.set(target['id'], note='website')
     if cell == 'both-changed':
         a.mgr.update_item(key, note='mine')
@@ -1067,7 +1075,7 @@ def test_a_download_after_a_lost_move_response_applies_the_website_edit(tmp_path
     key = '990001::fl::FLa'
     a.mgr.add_item('990001', k, note='a', fl_id='FLa')
     assert a.up()['success']
-    rid = rec(a, key, k)['id']
+    rid = row_in(cloud, a, key, k)
     a.mgr.move_items_to_list([key], k, l_)
 
     def lose_the_response(client, req):
@@ -1131,7 +1139,7 @@ def test_identity_is_never_bent_to_pair_a_row(tmp_path, cloud, cell):
         lid = a.mgr.create_list('A')
         a.mgr.add_item('990001', lid, fl_id='FLa', img='1')
         assert a.up()['success']
-        rid = rec(a, '990001::img::1', lid)['id']
+        rid = row_in(cloud, a, '990001::img::1', lid)
         a.mgr.add_item('990001', 'default', fl_id='FLb', img='1')     # add_item overwrites fl_id on an existing key
         mark = cloud.rec.mark()
         assert a.up()['success']
@@ -1200,7 +1208,7 @@ def test_a_record_for_a_list_that_is_no_longer_its_own_is_dropped(tmp_path, clou
         key = '990001::fl::FLa'
         a.mgr.add_item('990001', lid, fl_id='FLa')
         assert a.up()['success']
-        five, rid = cloud_id(a, lid), rec(a, key, lid)['id']
+        five, rid = cloud_id(a, lid), row_in(cloud, a, key, lid)
         cloud.web.table('user_lists').update({'name': 'Renamed'}).eq('id', five).execute()
         cloud.delete_row(rid)
         nine = cloud.new_list('L')
@@ -1254,7 +1262,7 @@ def test_a_download_reconciles_every_source_of_an_entry_at_once(tmp_path, cloud,
     a.mgr.add_item('990001', l_, fl_id='FLa')
     a.mgr.update_item(key, **{field: val('b')})
     assert a.up()['success']
-    rk, rl = rec(a, key, k)['id'], rec(a, key, l_)['id']
+    rk, rl = row_in(cloud, a, key, k), row_in(cloud, a, key, l_)
     a.mgr.update_item(key, **{field: val('a')})
 
     def fail_l(client, req):
@@ -1414,3 +1422,235 @@ def test_an_auto_upload_racing_the_user_on_another_thread_succeeds(tmp_path, clo
     assert all(r['success'] for r in results)
     assert a.up()['success']
     _one_row_per_membership(cloud, a)
+
+
+# --------------------------------------------------------------------------- a batch that commits and then fails
+
+@pytest.mark.parametrize('cell', ['read-timeout', 'gateway-504', 'pgrst111-after-commit'])
+def test_a_batch_that_committed_before_its_error_is_not_inserted_again(tmp_path, cell):
+    c = Cloud()
+    a = make_desk(tmp_path, c)
+    lid = a.mgr.create_list('L')
+    for sys_id in ('990001', '990002', '990003'):
+        a.mgr.add_item(sys_id, lid, img='1')
+    error = {'read-timeout': 'raise_after', 'gateway-504': 'api_504', 'pgrst111-after-commit': 'api_pgrst111'}[cell]
+
+    def commit_then_fail(client, req):
+        if client.actor == 'A' and req.t == 'list_items' and req.op == 'insert' and isinstance(req.payload, list):
+            c.rec.hook = None
+            return error                   # the rows are written; the answer is an error
+        return None
+    c.rec.hook = commit_then_fail
+    mark = c.rec.mark()
+    result = a.up()
+    assert len(mark(op='insert')) == 1, 'rows of a batch that may have been written were inserted again'
+    assert result['success'] is False and result['items_failed'] == 3 and result['items_pushed'] == 0
+    assert result['lists_not_uploaded'] == ['L'] and result['complete'] is False
+    assert sorted(r['sys_id'] for r in c.rows()) == ['990001', '990002', '990003']
+    mark = c.rec.mark()
+    result = a.up()
+    assert result['success'] and result['complete'] and mark(op='insert') == []
+    assert sorted(r['sys_id'] for r in c.rows()) == ['990001', '990002', '990003']   # one row per entry
+    assert {rec(a, f'{s}::img::1', lid)['id'] for s in ('990001', '990002', '990003')} == \
+        {r['id'] for r in c.rows()}
+
+
+# --------------------------------------------------------------------------- a remembered row a racing read skipped
+
+def test_a_recorded_row_a_racing_read_skipped_is_found_and_written(tmp_path):
+    c = Cloud(max_rows=1)                      # the server answers one row a request
+    a = make_desk(tmp_path, c)
+    lid = a.mgr.create_list('L')
+    for n in range(3):
+        a.mgr.add_item(f'99000{n}', lid, note=f'n{n}', fl_id='FLa')
+    key = '990001::fl::FLa'
+    a.mgr.update_item(key, shelfmark_override='My shelfmark')
+    assert a.up()['success']
+    first, skipped = row_in(c, a, '990000::fl::FLa', lid), row_in(c, a, key, lid)
+    assert first < skipped
+    a.mgr.update_item(key, note='n1, edited here')
+
+    def delete_after_page_one(client, req):
+        if client.actor == 'A' and _is_list_read(req) and req.rng and req.rng[0] > 0:
+            c.rec.hook = None
+            c.delete_row(first)                # page 2 now starts past this entry's row
+    c.rec.hook = delete_after_page_one
+    mark = c.rec.mark()
+    result = a.up()
+    assert mark(op='insert') == []
+    (patch,) = mark(op='update')               # the confirmation found the row where it was recorded
+    assert patch.payload == {'note': 'n1, edited here'}
+    assert ('eq', 'id', skipped) in patch.filters and ('eq', 'note', 'n1') in patch.filters
+    assert c.row(skipped)['note'] == 'n1, edited here'
+    assert result['success'] and result['web_removed'] == []
+    # the removed row was read on page 1 before it went: its membership was paired, not unchecked
+    assert result['unchecked'] == 0
+    assert rec(a, key, lid)['id'] == skipped and rec(a, key, lid)['note'] == 'n1, edited here'
+
+
+# --------------------------------------------------------------------------- what the website stores on a row
+
+def test_an_upload_leaves_the_website_shelfmark_and_title_of_a_row_alone(tmp_path, cloud):
+    a = make_desk(tmp_path, cloud)
+    lid = a.mgr.create_list('L')
+    rid = cloud.add(cloud.new_list('L'), '990001', fl_id='FLa', note='web')   # with the catalogue's shelfmark
+    assert a.down()['success']
+    (key,) = [k for k, it in a.mgr.data['items'].items() if it['sys_id'] == '990001']
+    assert not item(a, key).get('shelfmark_override') and lid in item(a, key)['lists']
+    a.mgr.update_item(key, note='web\nand mine')
+    mark = cloud.rec.mark()
+    assert a.up()['success']
+    (patch,) = mark(op='update')
+    assert patch.payload == {'note': 'web\nand mine'}
+    row = cloud.row(rid)
+    assert row['shelfmark'] == S.web_shelfmark('990001') and row['title'] == S.web_title('990001')
+
+
+# --------------------------------------------------------------------------- moves, duplicates and sessions
+
+def test_a_move_whose_answer_was_lost_moves_on_from_where_the_row_is(tmp_path, cloud):
+    a = make_desk(tmp_path, cloud)
+    k, l_, n = a.mgr.create_list('K'), a.mgr.create_list('L'), a.mgr.create_list('N')
+    key = '990001::fl::FLa'
+    a.mgr.add_item('990001', k, fl_id='FLa')
+    assert a.up()['success']
+    rid = row_in(cloud, a, key, k)
+    a.mgr.move_items_to_list([key], k, l_)
+
+    def lose_the_answer(client, req):
+        if client.actor == 'A' and req.t == 'list_items' and req.op == 'update':
+            cloud.rec.hook = None
+            return 'raise_after'
+        return None
+    cloud.rec.hook = lose_the_answer
+    assert a.up()['success'] is False
+    assert cloud.row(rid)['list_id'] == cloud_id(a, l_)         # the move was made
+    a.mgr.move_items_to_list([key], l_, n)
+    mark = cloud.rec.mark()
+    result = a.up()
+    assert result['success'] and result['items_failed'] == 0
+    (move,) = mark(op='update')
+    assert move.payload == {'list_id': cloud_id(a, n)}
+    assert ('eq', 'id', rid) in move.filters and ('eq', 'list_id', cloud_id(a, l_)) in move.filters
+    assert mark(op='insert') == []
+    assert [(r['id'], r['list_id']) for r in cloud.rows(sys_id='990001')] == [(rid, cloud_id(a, n))]
+
+
+def test_two_items_of_one_entry_sharing_an_old_cloud_id_wait_for_a_download(tmp_path, cloud):
+    # A store from before per-membership records: the same folio under two keys, both
+    # holding the one cloud id of its row. Only a Download may fold them into one item.
+    a = make_desk(tmp_path, cloud)
+    lid = a.mgr.create_list('L')
+    cl = cloud.new_list('L')
+    rid = cloud.add(cl, '990001', fl_id='FLa', note='one')
+    a.mgr.data['lists'][lid]['cloud_id'] = cl
+    for key, note, img, when in (('990001::img::1', 'one', '1', 1), ('990001::fl::FLa', 'two', None, 2)):
+        a.mgr.data['items'][key] = {'sys_id': '990001', 'lists': [lid], 'note': note, 'tags': [], 'source': '',
+                                    'fl_id': 'FLa', 'img': img, 'shelfmark_override': None, 'cloud_id': rid,
+                                    'added': when, 'modified': when}
+    notes = {k: it['note'] for k, it in a.mgr.data['items'].items()}
+    mark = cloud.rec.mark()
+    result = a.up()
+    assert {k: it['note'] for k, it in a.mgr.data['items'].items()} == notes    # the upload folds nothing
+    assert cloud.row(rid)['note'] == 'one'     # and neither item's note replaced the row's
+    assert result.get('waiting') == 1 and mark(op='insert') == []
+    assert result['success'] and result['complete'] is False
+    assert a.down()['success']
+    (kept,) = [it for it in a.mgr.data['items'].values() if it['sys_id'] == '990001']
+    assert kept['note'] == 'two' + MARK + 'one' and kept['lists'] == [lid]
+
+
+def test_a_download_refuses_a_session_of_another_user(tmp_path, cloud):
+    a = make_desk(tmp_path, cloud)
+    lid = a.mgr.create_list('L')
+    a.mgr.add_item('990001', lid, note='n', fl_id='FLa')
+    cloud.add(cloud.new_list('L'), '990002', fl_id='FLb', note='web')
+    a.client.session_user = 'u2'               # lists sync was set up for u1
+    state = copy.deepcopy(a.mgr.data)
+    mark = cloud.rec.mark()
+    result = a.down()
+    assert result == {'success': False, 'error': 'Sync not available'}
+    assert mark(op='select') == [] and mark(table='user_lists') == [] and mark(table='projects') == []
+    assert a.mgr.data == state
+
+
+def test_a_same_name_list_in_the_website_trash_adds_no_entries(tmp_path, cloud):
+    a = make_desk(tmp_path, cloud)
+    lid = a.mgr.create_list('Foo')
+    a.mgr.add_item('990001', lid, fl_id='FLa')
+    assert a.up()['success']
+    own = cloud_id(a, lid)
+    trashed = cloud.new_list('Foo', deleted_at='2026-09-27T00:00:00+00:00')
+    cloud.add(trashed, '990002', fl_id='FLb', note='in the Trash')
+    result = a.down()
+    assert result['success'] and result['items_added'] == 0
+    assert not [k for k, it in a.mgr.data['items'].items() if it['sys_id'] == '990002']
+    assert cloud_id(a, lid) == own and not a.mgr.data['lists'][lid].get('deleted_at')
+
+
+# --------------------------------------------------------------------------- what the store keeps about a membership
+
+def test_a_differing_note_of_a_list_the_entry_left_is_not_counted(tmp_path, cloud):
+    a = make_desk(tmp_path, cloud)
+    k, m = a.mgr.create_list('K'), a.mgr.create_list('M')
+    key = '990001::fl::FLa'
+    a.mgr.add_item('990001', k, note='mine', fl_id='FLa')
+    a.mgr.add_item('990001', m, fl_id='FLa')
+    cloud.add(cloud.new_list('K'), '990001', fl_id='FLa', note='theirs in K')
+    cloud.add(cloud.new_list('M'), '990001', fl_id='FLa', note='mine')
+    result = a.up()
+    assert result['notes_differing'] == 1 and a.mgr.differing_notes_count() == 1
+    a.mgr.remove_item_from_list(key, k)        # the entry stays in M
+    assert a.mgr.differing_notes_count() == 0
+    assert a.up()['notes_differing'] == 0
+
+
+def test_an_upload_forgets_a_removal_once_the_entry_left_that_list(tmp_path, cloud):
+    a = make_desk(tmp_path, cloud)
+    lid, m = a.mgr.create_list('L'), a.mgr.create_list('M')
+    key = '990001::fl::FLa'
+    a.mgr.add_item('990001', lid, note='n', fl_id='FLa')
+    a.mgr.add_item('990001', m, fl_id='FLa')
+    assert a.up()['success']
+    cloud.delete_row(row_in(cloud, a, key, lid))
+    result = a.up()
+    assert result['web_removed'] == [(key, lid)] and rec(a, key, lid)['gone'] is True
+    a.mgr.remove_item_from_list(key, lid)
+    assert a.up()['success']
+    assert rec(a, key, lid) is None and rec(a, key, m)['id'] == row_in(cloud, a, key, m)
+
+
+def test_a_move_whose_row_cannot_be_read_again_is_not_taken_as_gone(tmp_path, cloud):
+    a = make_desk(tmp_path, cloud)
+    k, l_ = a.mgr.create_list('K'), a.mgr.create_list('L')
+    key = '990001::fl::FLa'
+    a.mgr.add_item('990001', k, note='n', fl_id='FLa')
+    assert a.up()['success']
+    rid = row_in(cloud, a, key, k)
+    a.mgr.move_items_to_list([key], k, l_)
+    a.mgr.update_item(key, note='n, and more')
+    moved = []
+
+    def website_edits_then_the_read_fails(client, req):
+        if client.actor != 'A' or req.t != 'list_items':
+            return None
+        if req.op == 'update' and 'list_id' in (req.payload or {}) and not moved:
+            moved.append(req)
+            cloud.set(rid, note='website')     # the conditional move matches no row
+            return None
+        if moved and req.op == 'select' and ('eq', 'id', rid) in req.filters:
+            cloud.rec.hook = None
+            return 'raise_before'              # and reading the row again fails
+        return None
+    cloud.rec.hook = website_edits_then_the_read_fails
+    mark = cloud.rec.mark()
+    result = a.up()
+    cloud.rec.hook = None
+    assert moved and mark(op='insert') == []
+    assert result['success'] is False and result['items_failed'] == 1
+    assert cloud.row(rid)['list_id'] == cloud_id(a, k) and cloud.row(rid)['note'] == 'website'
+    assert rec(a, key, k)['id'] == rid         # the row is still the one to move
+    mark = cloud.rec.mark()
+    result = a.up()
+    assert result['success'] and mark(op='insert') == []
+    assert cloud.row(rid)['list_id'] == cloud_id(a, l_) and cloud.row(rid)['note'] == 'website'
