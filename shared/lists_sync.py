@@ -1229,6 +1229,11 @@ class ListsCloudSync:
         rid = rec['id']
         pass_.claimed.add(rid)
         loc = pass_.where.get(rid)
+        if loc is None and rec.get('list') == cloud_id:
+            # recorded in this list's own cloud list but not located in this pass: nothing
+            # to move it from; it is adopted once a read finds it there
+            result['unchecked'] += 1
+            return True
         if rank == 0:                                            # adopt: the row is already in this list
             base = dict(rec)
             _drop_record(it, key)

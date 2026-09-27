@@ -305,6 +305,20 @@ REGRESSION_CASES = [
        ('desk', 'B', (53624, 46632, 4876, 38829, 44285)),
        ('sync', 'B', 'up', (13, 'url_too_long', (19695, 63529, 10578, 32123, 9901))),
        ('sync', 'A', 'merge', None)]),
+    ("an orphan recorded in its list's own cloud list, not located, was moved from that list into it",
+     3770, {'has_page': True, 'max_rows': 2, 'p_inject': 0.25, 'past_end_raises': True, 'page_lag': False, 'upgrade': 16},
+     [('account', 'B', 'u2'), ('web', (23703, 21568, 52417, 63400, 60004)), ('account', 'B', 'u1'),
+       ('sync', 'A', 'up', (2, 'web_between_pages', (24208, 43805, 55308, 10215, 11964))),
+       ('web', (41479, 9485, 56, 6321, 29796)), ('sync', 'A', 'up', None),
+       ('long', 'A', (13226, 46167, 53301, 10121, 15779)), ('sync', 'A', 'down', None),
+       ('sync', 'A', 'down', None),
+       ('sync', 'A', 'up', (9, 'raise_before', (39375, 18163, 20239, 33018, 43671))),
+       ('web', (6840, 30101, 51372, 33417, 3976)), ('desk', 'B', (31170, 41479, 55716, 56723, 20624)),
+       ('sync', 'B', 'merge', (2, 'web_between_pages', (14481, 51768, 34496, 5590, 5920))),
+       ('sync', 'B', 'up', None), ('desk', 'A', (9425, 49673, 19231, 15782, 49429)),
+       ('desk', 'A', (50484, 28212, 27224, 46768, 831)), ('sync', 'A', 'merge', None),
+       ('desk', 'A', (27475, 57382, 63336, 27993, 44092)), ('desk', 'A', (24812, 39164, 6256, 12267, 63018)),
+       ('sync', 'A', 'up', (7, 'session_lost', (4663, 62412, 12373, 24980, 56077)))]),
 ]
 
 
