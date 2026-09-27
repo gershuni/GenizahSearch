@@ -46,6 +46,169 @@ def _worth_retrying_at_startup(exc):
     return not isinstance(exc, FileNotFoundError)
 
 
+# --- What a removal or a move here means for the cloud rows (no network) ---
+#
+# item['cloud_rows'][list id] is the website row this computer remembers for that
+# membership (shared/lists_sync.py records it). These helpers are the only code of
+# this module that changes cloud_rows or store['cloud_deletes']. Each takes the store
+# it acts on and reads nothing but cloud_rows and cloud_deletes, so the same call gives
+# the same result on the live store when the user edits and on an upload's copy when
+# ListsManager.finish_upload replays that edit there.
+
+def _item_records(state, item_id):
+    item = (state.get('items') or {}).get(item_id)
+    if not isinstance(item, dict):
+        return None, {}
+    return item, (item.get('cloud_rows') if isinstance(item.get('cloud_rows'), dict) else {})
+
+
+def _pop_record(item, key):
+    recs = item.get('cloud_rows')
+    if isinstance(recs, dict):
+        recs.pop(key, None)
+        if not recs:
+            item.pop('cloud_rows', None)
+
+
+def _queue_record(state, item_id, item, rec, from_list):
+    """An explicit removal of a remembered row: the next upload deletes it, by id and list.
+
+    The entry keeps what it needs to be undone ('item', the local list 'from', the
+    record 'rec'): putting the entry back in that list before the delete is sent gives
+    it the row back (_restore_cloud_row).
+    """
+    from shared.local_sys_id import is_local_sys_id  # noqa: PLC0415 - light, and only when a record exists
+    if not isinstance(rec, dict) or rec.get('gone') or rec.get('id') is None or rec.get('list') is None:
+        return
+    account = state.get('cloud_account')
+    if account is None or is_local_sys_id(item.get('sys_id', item_id)):
+        return
+    state.setdefault('cloud_deletes', {})[str(rec['id'])] = {
+        'id': rec['id'], 'list': rec['list'], 'account': account,
+        'item': item_id, 'ident': _identity(item_id, item), 'from': from_list, 'rec': dict(rec)}
+
+
+def _identity(item_id, item):
+    from shared.lists_sync import _item_identity  # noqa: PLC0415 - GUARD-01: no module-level engine import
+    return list(_item_identity(item_id, item))
+
+
+def _queue_cloud_delete(state, item_id, list_id):
+    """The entry left list_id for good: its row there, and any row on its way there, are to be deleted.
+
+    A row the website already removed (a 'gone' record) is only forgotten. A legacy
+    scalar cloud_id never queues anything.
+    """
+    item, recs = _item_records(state, item_id)
+    if item is None:
+        return
+    rec = recs.get(list_id)
+    _pop_record(item, list_id)
+    _queue_record(state, item_id, item, rec, list_id)
+    for key, moved in list(recs.items()):
+        if str(key).startswith('~') and isinstance(moved, dict) and moved.get('to') == list_id:
+            _pop_record(item, key)
+            _queue_record(state, item_id, item, moved, list_id)
+
+
+def _forget_item(state, item_id):
+    """The entry is deleted: every row still remembered for it is to be deleted.
+
+    The live store's caller then deletes the item. An upload's copy keeps it (with no
+    records): an entry made again under that key while the upload ran gets what the
+    copy holds for it at the install -- nothing, or the rows its return gave back.
+    """
+    item, recs = _item_records(state, item_id)
+    if item is None:
+        return
+    for key, rec in list(recs.items()):
+        _pop_record(item, key)
+        _queue_record(state, item_id, item, rec, rec.get('to') if str(key).startswith('~') else key)
+    for entry in (state.get('cloud_deletes') or {}).values():
+        if isinstance(entry, dict) and entry.get('item') == item_id:
+            entry['deleted'] = True     # an entry made again later holds none of this one's text
+
+
+def _restore_cloud_row(state, item_id, list_id, ident):
+    """The entry is back in list_id before its removal (or move) from there was sent: undone.
+
+    The rows queued when it left list_id are its own again, as they were remembered (a
+    moved row bound for that list is on its way there again), and a row still on its
+    way from list_id to another list stays list_id's -- so the website keeps them where
+    they are, with whatever was written on them there. ident: the entry's identity as
+    it is back (the caller's), so an entry made again as another folio or page, whose
+    row that is not, gets a new one.
+    """
+    item = (state.get('items') or {}).get(item_id)
+    if not isinstance(item, dict):
+        return
+    recs = item.get('cloud_rows') or {}
+    for key, moved in list(recs.items()):
+        if (str(key).startswith('~') and isinstance(moved, dict) and moved.get('from') == list_id
+                and not moved.get('gone') and list_id not in recs):
+            _pop_record(item, key)
+            item.setdefault('cloud_rows', {})[list_id] = {k: v for k, v in moved.items() if k not in ('to', 'from')}
+            recs = item.get('cloud_rows') or {}
+    pending = state.get('cloud_deletes')
+    if not pending:
+        return
+    ident = list(ident)
+    for key, entry in list(pending.items()):
+        if not (isinstance(entry, dict) and entry.get('item') == item_id and isinstance(entry.get('rec'), dict)
+                and entry.get('account') == state.get('cloud_account')
+                and list_id in (entry.get('from'), entry['rec'].get('from'))
+                and entry.get('ident') == ident):     # made again as another folio or page: a new row
+            continue
+        del pending[key]
+        rec = dict(entry['rec'])
+        if entry.get('deleted'):
+            # the entry was deleted and made again: nothing is known of what it holds of the
+            # row's note and tags, so they count as differing until a Download folds them in
+            rec = {k: v for k, v in rec.items() if k in ('id', 'list', 'to', 'from')}
+        if rec.get('from') == list_id or rec.get('to') is None:
+            slot = list_id
+            rec = {k: v for k, v in rec.items() if k not in ('to', 'from')}
+        else:
+            slot = '~' + str(rec['id'])
+        recs = item.setdefault('cloud_rows', {})
+        if slot not in recs:
+            recs[slot] = rec
+    if not pending:
+        state.pop('cloud_deletes', None)
+
+
+def _mark_pending_move(state, item_id, from_list, to_list):
+    """The entry moved from from_list to to_list: its row there goes with it, whatever to_list holds.
+
+    The row's record is kept under '~<row id>' with 'to' (the next upload moves the row
+    into to_list, or deletes it once to_list has its own row) and 'from' (the list it is
+    leaving: putting the entry back there keeps the row there); a row already on its way
+    to from_list is now on its way to to_list. A 'gone' record has nothing left to move.
+    """
+    if from_list == to_list:
+        return
+    item, recs = _item_records(state, item_id)
+    if item is None:
+        return
+    rec = recs.get(from_list)
+    _pop_record(item, from_list)
+    for key, moved in list(recs.items()):
+        if str(key).startswith('~') and isinstance(moved, dict) and moved.get('to') == from_list:
+            moved['to'] = to_list
+    if isinstance(rec, dict) and not rec.get('gone') and rec.get('id') is not None:
+        moved = dict(rec)
+        moved['to'], moved['from'] = to_list, from_list
+        item.setdefault('cloud_rows', {})['~' + str(rec['id'])] = moved
+
+
+def _keep_web_removal(state, item_id, list_id):
+    """Keep an entry the website removed: forget its tombstone, so the next upload inserts it again."""
+    item, recs = _item_records(state, item_id)
+    rec = recs.get(list_id)
+    if item is not None and isinstance(rec, dict) and rec.get('gone'):
+        _pop_record(item, list_id)
+
+
 class ListsManager:
     """
     Manages personal lists (starred/saved manuscripts) with tags and notes.
@@ -68,9 +231,16 @@ class ListsManager:
     # would be set aside and an older backup loaded in its place.
     LOAD_BUSY_BUDGET = 5.0
 
-    # Class-level: every instance writes the same LISTS_FILE, and the desktop
-    # saves from worker threads too (auto-sync and the logout sync).
+    # Class-level: every instance writes the same LISTS_FILE. The desktop saves on
+    # its UI thread only (its list syncs run on a copy and are installed there); the
+    # lock is for any other caller that saves from another thread.
     _save_lock = threading.Lock()
+    # While an upload runs on a copy of the store (begin_upload .. finish_upload or
+    # abandon_upload): the removal and move bookkeeping of every edit made meanwhile,
+    # replayed on the copy when it is installed. In memory only, for one upload.
+    _journal = None
+    _journal_store = None
+    _journal_lock = threading.Lock()
     # What the last load() found, for the desktop to report: 'ok', 'missing',
     # 'recovered' (lists.pkl was unreadable and a backup was loaded) or
     # 'failed' (nothing was readable; the lists start empty). Class-level
@@ -87,9 +257,9 @@ class ListsManager:
     # what save() returns, so without these a failing save is only a log line
     # while the lists on screen look saved. The desktop sets them on its
     # instance; the web server leaves them None. Called on whichever thread
-    # saved -- the desktop saves from worker threads too -- with _save_lock
-    # held, so the order they are called in is the order the saves ran: they
-    # must return at once and never save. What they raise is logged.
+    # saved (the desktop's UI thread) with _save_lock held, so the order they
+    # are called in is the order the saves ran: they must return at once and
+    # never save. What they raise is logged.
     on_save_failed = None
     on_save_recovered = None
     # True from a failed save -- or a failed copy of an unreadable lists.pkl,
@@ -332,8 +502,8 @@ class ListsManager:
         except Exception as e:
             LOGGER.error("A lists save hook failed: %s", e)
 
-    def write_snapshot(self, label):
-        """Write the in-memory store to lists.pkl.<label>, atomically.
+    def write_snapshot(self, label, payload=None):
+        """Write the in-memory store (or payload, its pickled bytes) to lists.pkl.<label>, atomically.
 
         The cloud sync takes one before each direction ('pre-download',
         'pre-upload'), so the state it started from can be recovered by hand.
@@ -342,11 +512,15 @@ class ListsManager:
         path = f"{self.LISTS_FILE}.{label}"
         with self._save_lock:
             try:
-                write_bytes_atomic(path, pickle.dumps(self.data))
+                write_bytes_atomic(path, pickle.dumps(self.data) if payload is None else payload)
                 return True
             except Exception as e:
                 LOGGER.error("Could not write the lists snapshot %s: %s", path, e)
                 return False
+
+    def saves_failing(self):
+        """True while saves do not reach lists.pkl (see save()): the lists live in memory only."""
+        return bool(self._saves_failing)
 
     def clear_all(self):
         """Clear all lists and reset to default state. Used after migration."""
@@ -415,16 +589,267 @@ class ListsManager:
         except Exception:
             return 0  # Count unavailable; return zero
 
-    def sync_to_cloud(self):
-        """Push local lists to cloud."""
+    def sync_to_cloud(self, **kw):
+        """Push local lists to cloud (keywords as ListsCloudSync.sync_to_cloud: data=, should_stop=, ...)."""
         try:
             from shared.lists_sync import get_lists_sync
             sync = get_lists_sync(self)
-            return sync.sync_to_cloud()
+            return sync.sync_to_cloud(**kw)
         except ImportError:
             return {'success': False, 'error': 'Cloud sync not available'}
         except Exception as e:
             return {'success': False, 'error': str(e)}
+
+    def fetch_cloud_state(self, remembered_ids, **kw):
+        """The network half of a download (ListsCloudSync.fetch_cloud_state): reads nothing local."""
+        try:
+            from shared.lists_sync import get_lists_sync
+            return get_lists_sync(self).fetch_cloud_state(remembered_ids, **kw)
+        except ImportError:
+            return {'success': False, 'error': 'Cloud sync not available'}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def apply_cloud_state(self, state):
+        """The local half of a download, on this thread (ListsCloudSync.apply_cloud_state)."""
+        try:
+            from shared.lists_sync import get_lists_sync
+            return get_lists_sync(self).apply_cloud_state(state)
+        except ImportError:
+            return {'success': False, 'error': 'Cloud sync not available'}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def cloud_user(self):
+        """The account list sync is set up for, or None."""
+        try:
+            from shared.lists_sync import get_lists_sync
+            return get_lists_sync(self)._user_id
+        except Exception:
+            return None
+
+    def remembered_row_ids(self, user_id):
+        """The rows a download confirms, taken from the store on the thread that owns it."""
+        from shared.lists_sync import remembered_ids
+        return remembered_ids(self.data, user_id)
+
+    # --- An upload on a copy of the store ---
+    #
+    # The desktop uploads from a copy so the user can edit meanwhile: begin_upload()
+    # hands it out, the engine writes the cloud identity into it, and finish_upload()
+    # installs that identity into the live store and then replays on top of it the
+    # removal and move bookkeeping of every edit made while the upload ran -- so every
+    # such edit counts as made after it. One difference from making the edits after
+    # the upload: a removal made during it keeps its delete even when the upload
+    # dropped the record the delete came from (a pending removal persists until the
+    # delete goes through). abandon_upload() is the same install for an upload whose
+    # result never came (the app closed), rebuilt from what it reported.
+
+    def begin_upload(self):
+        """Snapshot lists.pkl.pre-upload and open the journal. Returns (copy, base), two copies of the store."""
+        with self._save_lock:
+            payload = pickle.dumps(self.data)
+        if not self.write_snapshot('pre-upload', payload):
+            LOGGER.warning("Proceeding with the upload without its snapshot")
+        with self._journal_lock:
+            if self._journal is not None:
+                LOGGER.error("An upload began while another was still open; the earlier one is dropped")
+            self._journal = []
+            self._journal_store = self.data
+        return pickle.loads(payload), pickle.loads(payload)
+
+    def withdrawn_now(self):
+        """The memberships removed since the upload began: (item id, list id). The engine's withdrawn()."""
+        with self._journal_lock:
+            journal = list(self._journal or ())
+        return frozenset((args[0], args[1]) for name, args in journal if name == '_queue_cloud_delete')
+
+    def _close_journal(self):
+        with self._journal_lock:
+            journal, store = self._journal, self._journal_store
+            self._journal = self._journal_store = None
+        return journal, store
+
+    def finish_upload(self, copy, base, result=None):
+        """Install an upload's copy, whatever the upload's end (success, failure, stop, error).
+
+        Returns True when the live store's cloud identity changed (it is then saved).
+        """
+        journal, store = self._close_journal()
+        return self._install_upload(copy, self._began_as(base), journal, store)
+
+    @staticmethod
+    def _began_as(base):
+        """What the install needs of the store an upload began from."""
+        return {'cloud_account': base.get('cloud_account'), 'cloud_deletes': set(base.get('cloud_deletes') or {})}
+
+    def abandon_upload(self, base, recorded, user_id):
+        """The app closes while an upload runs: install what it reported, as finish_upload would.
+
+        recorded: every report the upload made, in order -- ('row', item id, list key,
+        row id, cloud list id, note, tags, differs) for each record it wrote, ('field',
+        'lists' | 'projects', local id, key, value) for each cloud-id write (value None:
+        removed). They are applied to base -- begin_upload's second copy, which this
+        consumes -- and the result is installed.
+        """
+        journal, store = self._close_journal()
+        if not recorded:
+            return False     # the live store is base plus the edits; content matching finds the rest
+        from shared.lists_sync import apply_account_guard, record_row, rows_index
+        began = self._began_as(base)
+        scratch = base
+        apply_account_guard(scratch, user_id)
+        named = rows_index(scratch)
+        items = scratch.get('items') or {}
+        for report in recorded:
+            if report[0] == 'row':
+                _, item_id, list_key, row_id, cloud_list_id, note, tags, differs = report
+                if item_id in items:
+                    record_row(scratch, user_id, item_id, list_key, row_id, cloud_list_id, note, tags, differs,
+                               named=named, item=items[item_id])
+            elif report[0] == 'field':
+                _, kind, local_id, key, value = report
+                target = (scratch.get(kind) or {}).get(local_id)
+                if isinstance(target, dict):
+                    if value is None:
+                        target.pop(key, None)
+                    else:
+                        target[key] = value
+        return self._install_upload(scratch, began, journal, store)
+
+    def _install_upload(self, copy, began, journal, store):
+        if store is not self.data:
+            LOGGER.warning("The lists were replaced while an upload ran; its result is not installed")
+            return False
+        if self.data.get('cloud_account') != began['cloud_account']:
+            LOGGER.error("The lists changed account while an upload ran; its result is not installed")
+            return False
+        self._replay(copy, journal or ())
+        self._keep_user_deletes(copy, began['cloud_deletes'])
+        changed = self._install(copy)
+        if changed:
+            self.save()
+        return changed
+
+    def _replay(self, copy, journal):
+        """The bookkeeping of every edit made during the upload, again, in order, on its copy."""
+        for name, args in journal:
+            globals()[name](copy, *args)
+
+    def _keep_user_deletes(self, copy, had):
+        """The deletes queued during the upload that its copy lacks: kept, unless the upload gave that
+        row to a membership (a record of the copy names it) or the replay queued it from the copy.
+
+        had: the keys of the pending deletes the upload began with.
+        """
+        mine = self.data.get('cloud_deletes') or {}
+        named = {str(rec.get('id')) for it in (copy.get('items') or {}).values()
+                 for rec in (it.get('cloud_rows') or {}).values()
+                 if isinstance(rec, dict) and not rec.get('gone') and rec.get('id') is not None}
+        for key, entry in mine.items():
+            if key in had or key in named or key in (copy.get('cloud_deletes') or {}):
+                continue
+            copy.setdefault('cloud_deletes', {})[key] = dict(entry)
+
+    def _install(self, copy):
+        """The copy's cloud identity into the live store; nothing else is touched. Returns whether it changed."""
+        live = self.data
+        before = pickle.dumps((live.get('cloud_account'), live.get('cloud_deletes'),
+                               {k: (v.get('cloud_id'), v.get('list_state_unsent'), v.get('list_name_unsent'))
+                                for k, v in (live.get('lists') or {}).items()},
+                               {k: v.get('cloud_id') for k, v in (live.get('projects') or {}).items()},
+                               {k: (v.get('cloud_id'), v.get('cloud_rows')) for k, v in (live.get('items') or {}).items()}))
+        # the copy is the upload's own and is dropped after this: its objects are taken as they are
+        for key in ('cloud_account', 'cloud_deletes'):
+            if key in copy and not (key == 'cloud_deletes' and not copy[key]):
+                live[key] = copy[key]
+            else:
+                live.pop(key, None)
+        copied_lists = copy.get('lists') or {}
+        for lid, ld in (live.get('lists') or {}).items():
+            theirs = copied_lists.get(lid)
+            if not isinstance(theirs, dict):
+                continue
+            for key in ('cloud_id', 'list_state_unsent', 'list_name_unsent'):
+                if key == 'list_name_unsent' and ld.get(key) and ld.get('name') != theirs.get('name'):
+                    continue     # renamed here while the upload ran: that name is still to be sent
+                if key in theirs:
+                    ld[key] = theirs[key]
+                else:
+                    ld.pop(key, None)
+        copied_projects = copy.get('projects') or {}
+        for pid, pd in (live.get('projects') or {}).items():
+            theirs = copied_projects.get(pid)
+            if not isinstance(theirs, dict):
+                continue
+            if 'cloud_id' in theirs:
+                pd['cloud_id'] = theirs['cloud_id']
+            else:
+                pd.pop('cloud_id', None)
+        copied_items = copy.get('items') or {}
+        for iid, it in (live.get('items') or {}).items():
+            theirs = copied_items.get(iid)
+            for key in ('cloud_id', 'cloud_rows'):
+                if isinstance(theirs, dict) and theirs.get(key):
+                    it[key] = theirs[key]
+                else:
+                    it.pop(key, None)       # made during the upload (or made again): no records yet
+        after = pickle.dumps((live.get('cloud_account'), live.get('cloud_deletes'),
+                              {k: (v.get('cloud_id'), v.get('list_state_unsent'), v.get('list_name_unsent'))
+                               for k, v in (live.get('lists') or {}).items()},
+                              {k: v.get('cloud_id') for k, v in (live.get('projects') or {}).items()},
+                              {k: (v.get('cloud_id'), v.get('cloud_rows')) for k, v in (live.get('items') or {}).items()}))
+        return after != before
+
+    def _book(self, helper, *args):
+        """Apply a bookkeeping helper to the live store, and journal it while an upload runs on a copy."""
+        globals()[helper](self.data, *args)
+        with self._journal_lock:
+            if self._journal is not None and self._journal_store is self.data:
+                self._journal.append((helper, args))
+
+    def _back_in_list(self, item_id, list_id):
+        """An entry went into a list: if it left that list since the last upload, it gets its rows back."""
+        item = self.data['items'].get(item_id)
+        if isinstance(item, dict):
+            self._book('_restore_cloud_row', item_id, list_id, _identity(item_id, item))
+
+    def pending_web_removals(self):
+        """[(item id, list id)] of entries the website removed that are still in that list here."""
+        out = []
+        for iid, it in (self.data.get('items') or {}).items():
+            recs = it.get('cloud_rows') or {}
+            for lid in it.get('lists') or []:
+                rec = recs.get(lid)
+                if isinstance(rec, dict) and rec.get('gone'):
+                    out.append((iid, lid))
+        return out
+
+    def resolve_web_removals(self, choices):
+        """Apply the prompt's answers {(item id, list id): 'remove' | 'keep'}. Returns (removed, kept).
+
+        Remove is an explicit removal (a website re-add found meanwhile is deleted too);
+        Keep forgets the tombstone, so the next upload inserts the entry again.
+        """
+        removed = kept = 0
+        items = self.data.get('items') or {}
+        for (iid, lid), choice in choices.items():
+            item = items.get(iid)
+            if not isinstance(item, dict) or lid not in (item.get('lists') or []):
+                continue
+            if choice == 'remove':
+                item['lists'].remove(lid)
+                self._book('_queue_cloud_delete', iid, lid)
+                if not item['lists']:
+                    self._book('_forget_item', iid)
+                    del items[iid]
+                removed += 1
+            elif choice == 'keep':
+                self._book('_keep_web_removal', iid, lid)
+                kept += 1
+        if removed or kept:
+            self.save()
+        return removed, kept
 
     def differing_notes_count(self):
         """Entries in a list whose note or tags differ from the account's copy and were left as they are.
@@ -439,12 +864,12 @@ class ListsManager:
         except Exception:
             return 0  # Cannot count; nothing is known to differ
 
-    def get_cloud_lists_preview(self):
-        """Get preview of cloud lists without syncing (for dialog display)."""
+    def get_cloud_lists_preview(self, **kw):
+        """Get preview of cloud lists without syncing (for dialog display); should_stop= as the engine's."""
         try:
             from shared.lists_sync import get_lists_sync
             sync = get_lists_sync(self)
-            return sync.get_cloud_lists_preview()
+            return sync.get_cloud_lists_preview(**kw)
         except ImportError:
             return {'success': False, 'lists': [], 'error': 'Cloud sync not available'}
         except Exception as e:
@@ -713,14 +1138,17 @@ class ListsManager:
             return False  # Cannot delete system lists
 
         if permanent:
-            # Permanent delete - remove list and orphaned items
+            # Permanent delete - remove list and orphaned items; their cloud rows go at
+            # the next upload (moving the list to the Trash keeps them)
             items_to_remove = []
             for sys_id, item in self.data['items'].items():
                 if list_id in item.get('lists', []):
                     item['lists'].remove(list_id)
+                    self._book('_queue_cloud_delete', sys_id, list_id)
                     if not item['lists']:
                         items_to_remove.append(sys_id)
             for sys_id in items_to_remove:
+                self._book('_forget_item', sys_id)
                 del self.data['items'][sys_id]
             del self.data['lists'][list_id]
             if list_id in self.data.get('lists_order', []):
@@ -795,6 +1223,7 @@ class ListsManager:
             if source_list_id in item.get('lists', []):
                 if target_list_id not in item['lists']:
                     item['lists'].append(target_list_id)
+                    self._back_in_list(sys_id, target_list_id)
 
         if delete_source:
             self.delete_list(source_list_id)
@@ -882,6 +1311,8 @@ class ListsManager:
                 for item_id, item in self.data.get('items', {}).items():
                     if dup_id in item.get('lists', []):
                         item['lists'].remove(dup_id)
+                        # Recently Viewed is never synced: the entry left a synced list for good
+                        self._book('_queue_cloud_delete', item_id, dup_id)
                         sys_id = item.get('sys_id', item_id)
                         if sys_id and sys_id not in recent_items:
                             recent_items.insert(0, sys_id)
@@ -892,8 +1323,10 @@ class ListsManager:
                 for item_id, item in self.data.get('items', {}).items():
                     if dup_id in item.get('lists', []):
                         item['lists'].remove(dup_id)
+                        self._book('_mark_pending_move', item_id, dup_id, keep_id)
                         if keep_id not in item['lists']:
                             item['lists'].append(keep_id)
+                            self._back_in_list(item_id, keep_id)
                             result['merged_items'] += 1
 
             if dup_id in self.data['lists']:
@@ -999,6 +1432,7 @@ class ListsManager:
                 'fl_id': fl_id,
                 'img': img
             }
+        self._back_in_list(item_id, list_id)   # back before its removal was sent?
 
         # Update all_tags
         if tags:
@@ -1034,7 +1468,8 @@ class ListsManager:
 
             if item_id in self.data['items']:
                 item = self.data['items'][item_id]
-                if list_id not in item.get('lists', []):
+                joined = list_id not in item.get('lists', [])
+                if joined:
                     item['lists'].append(list_id)
                     item['modified'] = time.time()
                     added += 1
@@ -1044,6 +1479,8 @@ class ListsManager:
                 if img not in (None, "") and item.get('img') != img:
                     item['img'] = img
                     item['modified'] = time.time()
+                if joined:
+                    self._back_in_list(item_id, list_id)
             else:
                 self.data['items'][item_id] = {
                     'sys_id': sys_id,
@@ -1057,6 +1494,7 @@ class ListsManager:
                     'fl_id': fl_id,
                     'img': img
                 }
+                self._back_in_list(item_id, list_id)
                 added += 1
 
         self.save()
@@ -1100,16 +1538,18 @@ class ListsManager:
             return False
 
         item['lists'].remove(list_id)
+        self._book('_queue_cloud_delete', item_id, list_id)   # its row there goes at the next upload
 
         # If item has no more lists, remove it entirely
         if not item['lists']:
+            self._book('_forget_item', item_id)
             del self.data['items'][item_id]
 
         self.save()
         return True
 
     def move_items_to_list(self, sys_ids, from_list_id, to_list_id):
-        """Move items from one list to another."""
+        """Move items from one list to another (their cloud rows follow at the next upload)."""
         import time
 
         for item_id in sys_ids:
@@ -1117,8 +1557,10 @@ class ListsManager:
                 item = self.data['items'][item_id]
                 if from_list_id in item.get('lists', []):
                     item['lists'].remove(from_list_id)
+                    self._book('_mark_pending_move', item_id, from_list_id, to_list_id)
                 if to_list_id not in item.get('lists', []):
                     item['lists'].append(to_list_id)
+                    self._back_in_list(item_id, to_list_id)
                 item['modified'] = time.time()
 
         self.save()

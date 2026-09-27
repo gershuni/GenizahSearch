@@ -819,12 +819,16 @@ def test_moving_into_a_list_that_already_holds_the_entry_leaves_the_old_row_and_
         a.mgr.merge_duplicate_group(l_, [k])
     mark = cloud.rec.mark()
     assert a.up()['success']
-    assert mark(op='delete') == []
+    assert mark(op='delete') == []             # K's row carries a website edit the entry lacks: it stays
     assert not [r for r in mark(op='update') if any(col == 'id' and v == rk for _, col, v in r.filters)]
     assert a.down()['success']
     assert item(a, key)['lists'] == [l_]
     assert item(a, key)['note'] == 'local' + MARK + 'k web' + MARK + 'l web'
     assert cloud.row(rk) is not None
+    mark = cloud.rec.mark()
+    assert a.up()['success']                   # the entry holds its text now: the redundant row goes
+    (gone,) = mark(op='delete')
+    assert ('eq', 'id', rk) in gone.filters and cloud.row(rk) is None and cloud.row(rl) is not None
 
 
 @pytest.mark.parametrize('order', ['kept-id-lower', 'kept-id-higher'])
@@ -867,39 +871,6 @@ def test_a_merge_into_a_trashed_list_moves_the_row_after_restore(tmp_path, cloud
     assert len(moves) == 1 and moves[0].payload == {'list_id': l_cloud}
     assert ('eq', 'id', rid) in moves[0].filters and ('eq', 'list_id', k_cloud) in moves[0].filters
     assert mark(op='insert') == [] and mark(op='delete') == []
-
-
-@pytest.mark.parametrize('cell', ['remove-one-of-two', 'remove-last', 'delete-list-permanently', 'empty-trash',
-                                  'move-then-remove'])
-def test_2b1_sends_no_delete_for_a_desktop_removal(tmp_path, cloud, cell):
-    a = make_desk(tmp_path, cloud)
-    k, l_, m = a.mgr.create_list('K'), a.mgr.create_list('L'), a.mgr.create_list('M')
-    key = '990001::fl::FLa'
-    a.mgr.add_item('990001', k, note='n', fl_id='FLa')
-    if cell in ('remove-one-of-two', 'move-then-remove'):
-        a.mgr.add_item('990001', l_, fl_id='FLa')
-    assert a.up()['success']
-    rows_before = {r['id'] for r in cloud.rows()}
-    assert len(rows_before) == len(item(a, key)['lists'])     # a row in each of its lists
-    if cell in ('remove-one-of-two', 'remove-last'):
-        a.mgr.remove_item_from_list(key, k)
-    elif cell == 'delete-list-permanently':
-        a.mgr.delete_list(k, permanent=True)
-    elif cell == 'empty-trash':
-        a.mgr.delete_list(k)
-        a.mgr.empty_trash()
-    else:
-        a.mgr.move_items_to_list([key], k, m)
-        a.mgr.remove_item_from_list(key, m)
-    mark = cloud.rec.mark()
-    assert a.up()['success']
-    assert mark(op='delete') == [] and {r['id'] for r in cloud.rows()} >= rows_before
-    assert a.down()['success']
-    lists_named = {ld['name']: lid for lid, ld in a.mgr.data['lists'].items()}
-    if cell in ('remove-one-of-two', 'move-then-remove'):
-        assert item(a, key)['lists'] == [l_]          # not re-added where it was removed
-    else:
-        assert lists_named['K'] in item(a, key)['lists']   # its row brings it back, as before
 
 
 @pytest.mark.parametrize('cell', ['chained-before-upload', 'moved-again-during-the-move'])
@@ -1188,7 +1159,8 @@ def test_a_download_after_a_lost_move_response_applies_the_website_edit(tmp_path
         return None
     cloud.rec.hook = lose_the_response
     assert a.up()['success'] is False
-    assert cloud.row(rid)['list_id'] == cloud_id(a, l_) and rec(a, key, k)['id'] == rid
+    moved = '~%s' % rid                        # a moved row's record, on its way to L
+    assert cloud.row(rid)['list_id'] == cloud_id(a, l_) and rec(a, key, moved)['id'] == rid
     cloud.set(rid, note='b')
     if cell == 'both-changed':
         a.mgr.update_item(key, note='c')
@@ -1196,7 +1168,7 @@ def test_a_download_after_a_lost_move_response_applies_the_website_edit(tmp_path
     assert a.down()['success']
     expected = 'b' if cell == 'cloud-only-changed' else 'c' + MARK + 'b'
     assert item(a, key)['note'] == expected and item(a, key)['lists'] == [l_]
-    assert set(a.mgr.data['items']) == items_before and rec(a, key, k)['note'] == 'b'
+    assert set(a.mgr.data['items']) == items_before and rec(a, key, moved)['note'] == 'b'
     mark = cloud.rec.mark()
     assert a.up()['success']
     assert rec(a, key, l_)['id'] == rid and rec(a, key, l_)['list'] == cloud_id(a, l_)
@@ -1652,22 +1624,27 @@ def test_a_download_reconciles_every_source_of_an_entry_at_once(tmp_path, cloud,
     assert rec(a, key, k)[field] == val('a') and rec(a, key, l_)[field] == val('b')
     cloud.set(rk, **{field: val('b')})          # pasted back onto K's row
     cloud.set(rl, **{field: val('c')})
+    k_key = k
     if shape == 'orphan-and-destination':
         a.mgr.move_items_to_list([key], k, l_)
+        k_key = '~%s' % rk                     # K's row, on its way to L
     a.mgr.data['lists_order'] = [k, l_] if first == 'K-first' else [l_, k]
     result = a.down()
     expected = 'b' + MARK + 'c' if field == 'note' else ['b', 'c']
     assert item(a, key)[field] == expected
     # a combined note is kept under a marker line; combined tags are counted apart
     assert (result['notes_merged'], result['tags_merged']) == ((1, 0) if field == 'note' else (0, 1))
-    assert (rec(a, key, k)[field], rec(a, key, l_)[field]) == (val('b'), val('c'))
+    assert (rec(a, key, k_key)[field], rec(a, key, l_)[field]) == (val('b'), val('c'))
     mark = cloud.rec.mark()
     assert a.up()['success']
     patched = {next(v for _, col, v in r.filters if col == 'id'): r for r in mark(op='update')}
     if shape == 'two-memberships':
         assert set(patched) == {rk, rl}
     else:
-        assert set(patched) == {rl} and cloud.row(rk)[field] == val('b')
+        # L has its own row, and the entry holds K's text now: K's row goes, only as it was read
+        (gone,) = mark(op='delete')
+        assert set(patched) == {rl} and cloud.row(rk) is None and ('eq', 'id', rk) in gone.filters
+        assert {col for _, col, _ in gone.filters} >= {'note', 'tags'}
     assert cloud.row(rl)[field] == expected
     mark = cloud.rec.mark()
     merge(a)
@@ -2192,7 +2169,7 @@ def test_a_move_whose_row_cannot_be_read_again_is_not_taken_as_gone(tmp_path, cl
     assert moved and mark(op='insert') == []
     assert result['success'] is False and result['items_failed'] == 1
     assert cloud.row(rid)['list_id'] == cloud_id(a, k) and cloud.row(rid)['note'] == 'website'
-    assert rec(a, key, k)['id'] == rid         # the row is still the one to move
+    assert rec(a, key, '~%s' % rid)['id'] == rid   # the row is still the one to move
     mark = cloud.rec.mark()
     result = a.up()
     assert result['success'] and mark(op='insert') == []

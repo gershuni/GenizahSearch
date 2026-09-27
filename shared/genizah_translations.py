@@ -3658,6 +3658,7 @@ TRANSLATIONS.update({
     "No Supabase client": "אין חיבור לשרת הענן",
     "Cloud sync not available": "הסנכרון לענן אינו זמין",
     "Unknown error": "שגיאה לא ידועה",
+    "Sync stopped": "הסנכרון נעצר",
     "Uploaded {} item(s), but {} failed to upload to the cloud.": "הועלו {} פריטים, אבל {} לא הועלו לענן.",
     # lists.pkl could not be read at startup (desktop notice)
     "Lists restored from a backup": "הרשימות שוחזרו מגיבוי",
