@@ -21,8 +21,9 @@ from shared.puzzle_model import PuzzleDocument, PuzzleFragment
 # Fix 1 — lists_sync false-success reporting
 # ---------------------------------------------------------------------------
 class _FakeResp:
-    def __init__(self, data):
+    def __init__(self, data, count=None):
         self.data = data
+        self.count = count  # rows the select's filters match (none: this cloud starts empty)
 
 
 class _FakeQuery:
@@ -49,6 +50,10 @@ class _FakeQuery:
     def eq(self, *a, **k):
         return self
 
+    # The sync pages its reads by row id (order + limit, gt after the first page)
+    # and filters conditional writes; this cloud holds nothing to filter.
+    order = limit = gt = in_ = is_ = contains = contained_by = eq
+
     def execute(self):
         return self._client._execute(self._table, self._op, self._payload)
 
@@ -68,14 +73,17 @@ class _FakeClient:
         return f"cloud-{self._counter}"
 
     def _execute(self, table, op, payload):
-        if op in ('select', 'update'):
+        if op == 'select':
+            return _FakeResp([], count=0)
+        if op == 'update':
             return _FakeResp([])
         if op == 'insert':
             if table == 'list_items' and self.fail_list_items_insert:
                 raise RuntimeError("simulated list_items insert failure (RLS denial)")
+            # PostgREST returns the full inserted rows
             if isinstance(payload, list):
-                return _FakeResp([{'id': self._next_id()} for _ in payload])
-            return _FakeResp([{'id': self._next_id()}])
+                return _FakeResp([dict(p, id=self._next_id()) for p in payload])
+            return _FakeResp([dict(payload, id=self._next_id())])
         return _FakeResp([])
 
 
@@ -119,23 +127,9 @@ class TestListsSyncCounting:
         assert result['items_failed'] == 1
         assert 'failed to upload' in (result.get('error') or '')
 
-    def test_update_matching_no_row_is_not_reported_as_success(self, monkeypatch):
-        # Item already has a (stale) cloud_id -> routed to the update path.
-        # The fake client's update returns data=[] (no row matched), which
-        # must NOT be counted as a successful push (Codex review MED).
-        class _ManagerWithCloudItem(_FakeListsManager):
-            def __init__(self):
-                super().__init__()
-                self.data['items'] = {
-                    'I1': {'sys_id': 'S1', 'cloud_id': 'stale-cloud-1',
-                           'lists': ['L1'], 'note': 'hi', 'tags': []}
-                }
-
-        sync = _make_sync(monkeypatch, manager=_ManagerWithCloudItem())
-        result = sync.sync_to_cloud()
-        assert result['success'] is False
-        assert result['items_pushed'] == 0
-        assert result['items_failed'] == 1
+    # "An update that matches no row is not counted" moved to
+    # tests/test_list_sync_identity.py: a legacy cloud_id is no longer used
+    # to find a row, so its premise -- a stale id routed to an update -- is gone.
 
 
 # ---------------------------------------------------------------------------

@@ -16,6 +16,7 @@ import errno
 import glob
 import hashlib
 import logging
+import json
 import os
 import pickle
 import shutil
@@ -1279,9 +1280,42 @@ class _FakeCloud:
 class _FakeQuery:
     def __init__(self, cloud, name):
         self.cloud, self.name, self.op, self.payload, self.filters = cloud, name, "select", None, []
+        self.window = None
 
-    def select(self, *args):
+    def select(self, *args, **kw):
         self.op = "select"
+        return self
+
+    # The sync pages its reads by row id (order + limit, gt after the first page) and
+    # makes every note and tag write conditional on the value it read (is_ / eq,
+    # contains + contained_by).
+    def order(self, column, **kw):
+        return self
+
+    def limit(self, n):
+        self.window = n
+        return self
+
+    def gt(self, column, value):
+        self.filters.append((column, lambda v, value=value: v > value))
+        return self
+
+    def in_(self, column, values):
+        self.filters.append((column, lambda v, values=list(values): v in values))
+        return self
+
+    def is_(self, column, value):
+        self.filters.append((column, lambda v: v is None))
+        return self
+
+    def contains(self, column, value):
+        want = set(json.loads(value))
+        self.filters.append((column, lambda v: v is not None and want <= set(v)))
+        return self
+
+    def contained_by(self, column, value):
+        want = set(json.loads(value))
+        self.filters.append((column, lambda v: v is not None and set(v) <= want))
         return self
 
     def insert(self, payload):
@@ -1293,17 +1327,20 @@ class _FakeQuery:
         return self
 
     def eq(self, column, value):
-        self.filters.append((column, value))
+        self.filters.append((column, lambda v, value=value: v == value))
         return self
 
     def execute(self):
         rows = self.cloud.tables[self.name]
-        matched = [r for r in rows if all(r.get(c) == v for c, v in self.filters)]
+        matched = [r for r in rows if all(test(r.get(c)) for c, test in self.filters)]
         if self.op == "select":
             if self.cloud.fail_next_read:
                 self.cloud.fail_next_read = False
                 raise ConnectionError("the network went away")
-            return types.SimpleNamespace(data=[dict(r) for r in matched])
+            page = sorted(matched, key=lambda r: r["id"])
+            if self.window is not None:
+                page = page[:self.window]
+            return types.SimpleNamespace(data=[dict(r) for r in page])
         self.cloud.writes.append((self.name, self.op, self.payload))
         if self.op == "insert":
             out = []
@@ -1362,14 +1399,23 @@ def _run_sync_dialog_action(genizah_app, monkeypatch, mgr, action):
     return shown
 
 
+def _kept_both(note, marker):
+    """Today's note first, the cloud's older note once, under the marker line."""
+    return note.startswith(TODAY) and note.count(OLD) == 1 and f"--- {marker} ---\n{OLD}" in note
+
+
 def test_a_merge_keeps_todays_note_in_the_pre_download_snapshot(synced, monkeypatch, genizah_app_module):
+    # The marker line is in the interface language; pin it, since an earlier test in the
+    # same process can leave the language set to Hebrew.
+    monkeypatch.setattr(genizah_core, "CURRENT_LANG", "en")
     shown = _run_sync_dialog_action(genizah_app_module, monkeypatch, synced.mgr, "merge")
 
     assert [kind for kind, _ in shown] == ["information"], shown
-    assert _note_in(synced.store) == OLD  # the download took the cloud's note
+    merged = _note_in(synced.store)
+    assert _kept_both(merged, "from the cloud"), merged  # the download kept both notes
     assert _note_in(f"{synced.store}.pre-download") == TODAY, \
         "the upload half of the Merge replaced the snapshot taken before the download"
-    assert _note_in(f"{synced.store}.pre-upload") == OLD
+    assert _note_in(f"{synced.store}.pre-upload") == merged
 
 
 def test_an_upload_alone_snapshots_before_it_and_leaves_the_download_snapshot(synced):
@@ -1425,9 +1471,20 @@ def test_a_merge_whose_download_fails_never_uploads(synced, monkeypatch, genizah
         assert shown[0][1] == genizah_core.TRANSLATIONS[lists_sync.DOWNLOAD_BACKUP_FAILED]
 
 
+@pytest.mark.parametrize("cloud_note", [OLD, TODAY], ids=["notes-differ", "notes-agree"])
 def test_a_merge_whose_upload_fails_says_so_in_the_interface_language(
-        synced, monkeypatch, genizah_app_module):
+        synced, monkeypatch, genizah_app_module, cloud_note):
+    """The failure text, then -- as after every Merge -- the download's note line.
+
+    When the cloud's note differs, the download keeps both and the message ends
+    with that line; when the two agree there is no line and the text is the bare
+    failure."""
     monkeypatch.setattr(genizah_core, "CURRENT_LANG", "he")
+    synced.cloud.tables["list_items"][0]["note"] = cloud_note
+    downloads = []
+    real_download = synced.mgr.sync_from_cloud
+    monkeypatch.setattr(synced.mgr, "sync_from_cloud",
+                        lambda: downloads.append(real_download()) or downloads[-1])
     monkeypatch.setattr(synced.mgr, "sync_to_cloud",
                         lambda: {"success": False, "error": "Sync already in progress"})
 
@@ -1436,10 +1493,24 @@ def test_a_merge_whose_upload_fails_says_so_in_the_interface_language(
     assert [kind for kind, _ in shown] == ["warning"]
     text = shown[0][1]
     assert _is_hebrew(text[0]), f"the upload error is not in the interface language: {text!r}"
-    assert text == genizah_core.tr("The cloud lists were downloaded, but the upload failed: {}").format(
-        genizah_core.TRANSLATIONS["Sync already in progress"]), (
-        f"the reason inside the message is not in the interface language: {text!r}")
-    assert _note_in(synced.store) == OLD  # the download half did land
+    expected = genizah_core.tr("The cloud lists were downloaded, but the upload failed: {}").format(
+        genizah_core.TRANSLATIONS["Sync already in progress"])
+    assert [d.get("success") for d in downloads] == [True], downloads
+    if cloud_note == OLD:
+        assert downloads[0].get("notes_merged") == 1, downloads
+        line = genizah_core.tr(
+            "Notes that differed between this computer and your account: {}. Both versions "
+            "were kept; the account's text is under the line \"--- {} ---\".").format(
+            1, genizah_core.tr("from the cloud"))
+        assert _is_hebrew(line[0]), line
+        expected = f"{expected}\n\n{line}"
+        # the download half did land: both notes kept, the marker in the interface language
+        assert _kept_both(_note_in(synced.store), genizah_core.tr("from the cloud"))
+    else:
+        assert not downloads[0].get("notes_merged"), downloads
+        assert _note_in(synced.store) == TODAY
+    assert text == expected, (
+        f"the message is not the failure text followed by the download's note line: {text!r}")
 
 
 @pytest.mark.parametrize("lang", ["en", "he"])

@@ -1,7 +1,7 @@
 # GenizahSearch Supabase Guide
 
 > Guide for working with Supabase in the GenizahSearch project
-> Last updated: 2026-05-14
+> Last updated: 2026-09-27
 
 ---
 
@@ -73,6 +73,8 @@ USING (auth.uid() = user_id);
 ```
 
 For public-read system tables, grant only the operations the app needs. For private/user-owned tables, grant role-level access broadly enough for the Data API to reach the table, then constrain rows with RLS policies.
+
+Since 2026-09-27 every tracked file that creates a `public` table carries its grants (`supabase_setup.sql` PART 2b, `migrations/add_pgp_documents_tables.sql`, `migrations/create_document_sources_table.sql`, `migrations/create_footnotes_table.sql`, and the two `scripts/create_*.sql` beta tables), so rebuilding the schema on a fresh project after 2026-10-30 yields reachable tables. Production was unaffected: its tables predate the change and keep their existing grants.
 
 ### Tables
 
@@ -158,9 +160,26 @@ Items in lists:
 | `shelfmark` | text | Manuscript shelfmark |
 | `title` | text | Manuscript title |
 | `fl_id` | text | Specific folio/page |
+| `page` | text | Page (image number) of the entry within the manuscript, as the desktop records it; NULL = no page (a folio via `fl_id`, or the whole manuscript). Added by `migrations/add_list_item_page_column.sql` (2026-09-27) |
 | `note` | text | User notes |
 | `tags` | jsonb | Tags array |
 | `added_at` | timestamp | When added |
+
+**Page column (2026-09-27).** Apply `migrations/add_list_item_page_column.sql` in the SQL Editor
+**before** releasing a desktop build that writes `page`; run its two verify queries afterwards (the
+first must show `page | text` and `tags | jsonb`, the second SELECT/INSERT/UPDATE/DELETE for
+`authenticated`). The desktop keeps working without the column (it checks on every sync) and the web
+reads it through `select('*')` and never writes it, so the web can deploy before or after the
+migration. Rollback:
+`alter table public.list_items drop column if exists page; notify pgrst, 'reload schema';`.
+
+**How the desktop syncs rows (2026-09-27).** Each list membership has its own row, remembered per
+list on the computer (`cloud_rows`); rows are matched by list, `sys_id`, `fl_id` and `page`, each row
+claimed once per pass, and every update is filtered by `id` **and** `list_id`. An upload never
+overwrites a cloud note or tag set that differs from what this computer last synced; a Download keeps
+both texts of a clashing note and combines the tags. My Library entries (`97...` sys_ids) are never uploaded or downloaded.
+Count any that earlier desktop versions may have uploaded with
+`select count(*) from public.list_items where sys_id like '97%';` (delete them the same way if wanted).
 
 ### corrections
 

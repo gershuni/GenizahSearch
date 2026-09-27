@@ -2577,6 +2577,33 @@ class GenizahGUI(QMainWindow):
                 return tr(UPLOAD_PARTLY_FAILED).format(pushed, failed)
         return tr(error)
 
+    @staticmethod
+    def _sync_note_lines(download=None, upload=None):
+        """Lines about notes to add to a sync result message, success or failure.
+
+        One line per non-zero count, each a count of entries: from a download
+        result, the notes whose two versions it kept under a marker line
+        (`notes_merged`) and the entries whose tags it combined (`tags_merged`);
+        from an upload result, the notes left different from the account
+        (`notes_differing`) and those too long to update there (`notes_too_long`).
+        A result without these keys gives no lines.
+        """
+        lines = []
+        merged = (download or {}).get('notes_merged', 0)
+        if merged:
+            lines.append(tr("Notes that differed between this computer and your account: {}. Both versions were kept; the account's text is under the line \"--- {} ---\".").format(
+                merged, tr("from the cloud")))
+        tags_merged = (download or {}).get('tags_merged', 0)
+        if tags_merged:
+            lines.append(tr("Tags that differed between this computer and your account: {}. The tags from both were kept.").format(tags_merged))
+        differing = (upload or {}).get('notes_differing', 0)
+        if differing:
+            lines.append(tr("Notes that differ between this computer and your account: {}. They were left as they are; Merge Both keeps both versions.").format(differing))
+        too_long = (upload or {}).get('notes_too_long', 0)
+        if too_long:
+            lines.append(tr("Notes too long to update safely in your account: {}. They were not changed there and are kept on this computer.").format(too_long))
+        return lines
+
     def _show_lists_sync_dialog(self, local_lists, cloud_lists, cloud_error=None):
         """Show dialog to let user choose how to sync lists."""
         dialog = QDialog(self)
@@ -2682,6 +2709,10 @@ class GenizahGUI(QMainWindow):
         progress.show()
         QApplication.processEvents()
 
+        def with_notes(text, download=None, upload=None):
+            # Every result message, success or failure, ends with the note lines.
+            return "\n\n".join([text, *GenizahGUI._sync_note_lines(download, upload)])
+
         try:
             if action == 'download':
                 # Download cloud lists to local (merge)
@@ -2691,12 +2722,13 @@ class GenizahGUI(QMainWindow):
                     items = result.get('items_added', 0)
                     QMessageBox.information(
                         self, tr("Sync Complete"),
-                        tr("Downloaded {lists} lists and {items} items from cloud.").format(
+                        with_notes(tr("Downloaded {lists} lists and {items} items from cloud.").format(
                             lists=added, items=items
-                        )
+                        ), download=result)
                     )
                 else:
-                    QMessageBox.warning(self, tr("Sync Error"), self._sync_error_text(result))
+                    QMessageBox.warning(self, tr("Sync Error"),
+                                        with_notes(self._sync_error_text(result), download=result))
 
             elif action == 'upload':
                 # Upload local lists to cloud
@@ -2706,12 +2738,13 @@ class GenizahGUI(QMainWindow):
                     items = result.get('items_pushed', 0)
                     QMessageBox.information(
                         self, tr("Sync Complete"),
-                        tr("Uploaded {lists} lists and {items} items to cloud.").format(
+                        with_notes(tr("Uploaded {lists} lists and {items} items to cloud.").format(
                             lists=pushed, items=items
-                        )
+                        ), upload=result)
                     )
                 else:
-                    QMessageBox.warning(self, tr("Sync Error"), self._sync_error_text(result))
+                    QMessageBox.warning(self, tr("Sync Error"),
+                                        with_notes(self._sync_error_text(result), upload=result))
 
             elif action == 'merge':
                 # Both directions
@@ -2721,22 +2754,24 @@ class GenizahGUI(QMainWindow):
                     # notes that were never merged in, so a Merge whose
                     # download failed stops before it.
                     QMessageBox.warning(self, tr("Sync Error"),
-                                        self._sync_error_text(download_result))
+                                        with_notes(self._sync_error_text(download_result),
+                                                   download=download_result))
                 else:
                     upload_result = self.lists_mgr.sync_to_cloud()
                     if upload_result.get('success'):
                         QMessageBox.information(
                             self, tr("Sync Complete"),
-                            tr("Lists merged successfully! Downloaded {dl} lists, uploaded {ul} lists.").format(
+                            with_notes(tr("Lists merged successfully! Downloaded {dl} lists, uploaded {ul} lists.").format(
                                 dl=download_result.get('lists_added', 0),
                                 ul=upload_result.get('lists_pushed', 0)
-                            )
+                            ), download=download_result, upload=upload_result)
                         )
                     else:
                         QMessageBox.warning(
                             self, tr("Sync Error"),
-                            tr("The cloud lists were downloaded, but the upload failed: {}").format(
-                                self._sync_error_text(upload_result)))
+                            with_notes(tr("The cloud lists were downloaded, but the upload failed: {}").format(
+                                self._sync_error_text(upload_result)),
+                                download=download_result, upload=upload_result))
 
             # Refresh the lists UI if it exists
             if hasattr(self, 'lists_tree'):

@@ -77,6 +77,16 @@ CREATE POLICY "Document fragments are publicly viewable" ON document_fragments
 FOR SELECT TO public USING (true);
 
 -- ============================================
+-- DATA API GRANTS
+-- ============================================
+-- Required from 2026-10-30: new public tables get no Data API access by default.
+-- Read-only for clients; the import scripts write with the service_role key.
+
+GRANT SELECT ON public.documents, public.document_fragments TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.documents, public.document_fragments TO service_role;
+GRANT USAGE, SELECT ON SEQUENCE public.document_fragments_id_seq TO service_role;
+
+-- ============================================
 -- COLUMN COMMENTS
 -- ============================================
 
