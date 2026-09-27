@@ -63,17 +63,22 @@ NOTE_MARK = "from the cloud"
 IDENTITY_FIELDS = {
     'store': ('cloud_account',),
     'projects': ('cloud_id',),
-    'lists': ('cloud_id', 'list_state_unsent'),
+    'lists': ('cloud_id', 'list_state_unsent', 'list_name_unsent'),
     'items': ('cloud_id', 'cloud_rows'),
 }
 # On a local list that took its cloud list in a download while holding no cloud id,
 # and whose own state (Trash, colour, project) differs from that cloud list's: the
 # local state stands until an upload has sent it (a download before then must not
 # import the cloud's), so both orders of the first Download and Upload end alike.
-# A rename on this computer sets it too (ListsManager.update_list): the new name
-# stands over the cloud list's until an upload has sent it, and only an upload of
-# such a list writes a name to an existing cloud list.
+# It says nothing about the name: a download still takes a website rename, and an
+# upload sends no name for it.
 LIST_STATE_UNSENT = 'list_state_unsent'
+# On a list renamed on this computer (ListsManager.update_list sets it, and nothing
+# else does) until an upload's write of that name returned the row: the new name
+# stands over the cloud list's at a download, and only an upload of such a list
+# writes a name to an existing cloud list. Colour, project and Trash state still
+# come from the cloud list at a download.
+LIST_NAME_UNSENT = 'list_name_unsent'
 
 
 # ---------------------------------------------------------------------------
@@ -1030,14 +1035,15 @@ class ListsCloudSync:
                 'deleted_at': cloud_deleted_at
             }
             # An existing cloud list gets this list's name only when it was renamed here
-            # since an upload last sent its state: another name there was given on the
-            # website (or by another computer), and this list takes it at its next Download.
+            # (LIST_NAME_UNSENT): another name there was given on the website (or by
+            # another computer), and this list takes it at its next Download.
             update_payload = dict(list_payload)
-            if not list_data.get(LIST_STATE_UNSENT):
+            if not list_data.get(LIST_NAME_UNSENT):
                 del update_payload['name'], update_payload['name_en']
 
             if cloud_id:
                 # Update existing cloud list by stored cloud_id
+                sent = update_payload
                 response = client.table('user_lists').update(update_payload).eq(
                     'id', cloud_id
                 ).execute()
@@ -1049,11 +1055,13 @@ class ListsCloudSync:
                     list_data['cloud_id'] = cloud_id
                     held.add(cloud_id)
                     logger.debug(f"Found existing cloud list '{list_name}' with ID {cloud_id}")
+                    sent = update_payload
                     response = client.table('user_lists').update(update_payload).eq(
                         'id', cloud_id
                     ).execute()
                 else:
                     # Create new cloud list (no free one of that name exists)
+                    sent = list_payload
                     response = client.table('user_lists').insert(list_payload).execute()
                     if response.data:
                         cloud_id = response.data[0]['id']
@@ -1064,6 +1072,8 @@ class ListsCloudSync:
                 # the row answered, so the list's state is in the cloud (a write the session
                 # could not see changed nothing, and the list's own state still stands)
                 list_data.pop(LIST_STATE_UNSENT, None)
+                if 'name' in sent and list_data.get('name') == sent['name']:
+                    list_data.pop(LIST_NAME_UNSENT, None)   # its rename is there too
             result['lists_pushed'] += 1
 
             # Skip syncing items for deleted lists
@@ -1700,13 +1710,16 @@ class ListsCloudSync:
 
         At most one local owner per cloud list. A list owns the cloud list whose id
         it holds, whatever either is called now: it takes the name the website gave
-        that list, unless it was renamed here since an upload last sent its state
-        (LIST_STATE_UNSENT) -- then its own name stands, for that upload to send. A
-        list that holds no id takes by name, as before ('General' is the default
-        list), the lowest-id cloud list of its name no local list holds -- the upload
-        makes the same choice. Only the own cloud list sets colour, project and the
-        Trash state -- and not while the list's own state is unsent (a list that held
-        no cloud id, or one renamed here): it keeps its own until an upload has sent it.
+        that list, unless it was renamed here since an upload's write of its name
+        returned the row (LIST_NAME_UNSENT) -- then its own name stands, for that
+        upload to send. A list that holds no id takes by name, as before ('General'
+        is the default list), the lowest-id cloud list of its name no local list
+        holds -- the upload makes the same choice -- and, under the same exception,
+        that list's name (only the default list's can differ). Only the own cloud list sets
+        colour, project and the Trash state -- and not while the list's own state is
+        unsent (LIST_STATE_UNSENT: it held no cloud id and its state differed): it
+        keeps its own until an upload has sent it. A rename here never holds these
+        back, and an unsent state never holds back a name.
         """
         local_lists = store.setdefault('lists', {})
         order = [lid for lid in _list_order(store) if _syncable_list(lid, local_lists[lid])]
@@ -1732,17 +1745,21 @@ class ListsCloudSync:
                 held[cid] = lid
         had_own_id = {lid for cid, lid in held.items()}
 
+        def take_name(ld, cid):
+            # the cloud list's name, unless this list was renamed here (LIST_NAME_UNSENT)
+            name = cloud_by_id[cid].get('name', '')
+            if ld.get('name') != name and not ld.get(LIST_NAME_UNSENT):
+                ld['name'] = name          # renamed on the website (or 'General' for the default list)
+                if 'name_en' in ld:
+                    ld['name_en'] = name
+
         own = {}
         for lid in order:
             ld = local_lists[lid]
             cid = ld.get('cloud_id')
             if cid in cloud_by_id and held.get(cid) == lid:
                 own[lid] = cid
-                name = cloud_by_id[cid].get('name', '')
-                if ld.get('name') != name and not ld.get(LIST_STATE_UNSENT):
-                    ld['name'] = name          # renamed on the website
-                    if 'name_en' in ld:
-                        ld['name_en'] = name
+                take_name(ld, cid)
         taken = set(own.values())
         pending = [lid for lid in order if lid not in own]
         pending.sort(key=lambda lid: 0 if local_lists[lid].get('cloud_id') is not None else 1)
@@ -1754,6 +1771,7 @@ class ListsCloudSync:
                 own[lid] = free[0]
                 taken.add(free[0])
                 local_lists[lid]['cloud_id'] = free[0]
+                take_name(local_lists[lid], free[0])
 
         for lid, cid in own.items():
             cloud_list = cloud_by_id[cid]
@@ -1775,8 +1793,7 @@ class ListsCloudSync:
                     del ld['deleted_at']
             elif (bool(ld.get('deleted_at')) != bool(local_deleted_at)
                   or (cloud_list.get('color') and cloud_list['color'] != ld.get('color'))
-                  or (local_project_id and local_project_id != ld.get('project_id'))
-                  or ld.get('name') != cloud_list.get('name', '')):
+                  or (local_project_id and local_project_id != ld.get('project_id'))):
                 ld[LIST_STATE_UNSENT] = True    # its own state goes up with the next upload
             else:
                 ld.pop(LIST_STATE_UNSENT, None)
@@ -2235,16 +2252,19 @@ class ListsCloudSync:
 
             if cloud_id:
                 # as the upload: another name in the cloud was given on the website (or by
-                # another computer) unless this list was renamed here since an upload last
-                # sent its state; the mark stays for that upload (project, Trash state)
-                if not list_data.get(LIST_STATE_UNSENT):
+                # another computer) unless this list was renamed here (LIST_NAME_UNSENT).
+                # LIST_STATE_UNSENT stays for the upload: this sends no project or Trash state.
+                if not list_data.get(LIST_NAME_UNSENT):
                     del list_payload['name'], list_payload['name_en']
-                client.table('user_lists').update(list_payload).eq('id', cloud_id).execute()
+                response = client.table('user_lists').update(list_payload).eq('id', cloud_id).execute()
             else:
                 response = client.table('user_lists').insert(list_payload).execute()
                 if response.data:
                     list_data['cloud_id'] = response.data[0]['id']
-                    self.lists_manager.save()
+            if response.data and 'name' in list_payload and list_data.get('name') == list_payload['name']:
+                list_data.pop(LIST_NAME_UNSENT, None)   # the row answered with the name sent
+            if response.data:
+                self.lists_manager.save()
 
             return True
 

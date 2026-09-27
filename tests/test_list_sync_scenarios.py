@@ -402,6 +402,20 @@ REGRESSION_CASES = [
      38, {'has_page': True, 'max_rows': None, 'p_inject': 0.1, 'past_end_raises': False, 'page_lag': False, 'upgrade': 0},
      [('sync', 'B', 'merge', None), ('desk_rename', 'B', (17863, 10066, 21035, 26839, 22811)),
       ('sync', 'B', 'down', None)]),
+    # Found once invariant 10 was checked against the harness's own record of desktop renames
+    # rather than the engine's mark (one mark stood for both a rename here and a colour kept
+    # at the first Download, and hid both of these):
+    ("a first Download that kept this computer's colour for a list held back a website rename of it",
+     1450, {'has_page': True, 'max_rows': None, 'p_inject': 0.25, 'past_end_raises': True, 'page_lag': False,
+            'upgrade': 0},
+     [('desk', 'A', (8323, 16275, 40837, 44815, 22096)), ('sync', 'A', 'down', None),
+      ('web_rename', (60212, 2094, 1510, 58662, 48072)), ('sync', 'A', 'down', None)]),
+    ("the default list took the website's General list at a Download and kept a name it had already sent",
+     177, {'has_page': True, 'max_rows': 2, 'p_inject': 0.1, 'past_end_raises': True, 'page_lag': False, 'upgrade': 0},
+     [('desk_rename', 'B', (1770, 38695, 16830, 18797, 14704)), ('sync', 'A', 'up', None),
+      ('web', (4119, 30172, 45192, 22056, 4696)), ('sync', 'B', 'up', None),
+      ('web', (29959, 55317, 45872, 18370, 53847)), ('web', (40291, 3555, 48530, 27660, 46256)),
+      ('sync', 'B', 'down', None)]),
     # Found once renames were generated: a website paste that put back the note a desktop last saw
     # on a row is replaced there by that desktop's edit (invariant 1 retires what the paste revived):
     ('a note pasted back onto a row was replaced there by the desktop edit that had replaced it',

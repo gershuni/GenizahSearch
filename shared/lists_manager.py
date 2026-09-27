@@ -562,9 +562,9 @@ class ListsManager:
                 # the English interface shows name_en when a list has one (the default
                 # list, lists a Download created); a name given here is the name in both
                 lst['name_en'] = name
-            # lists_sync.LIST_STATE_UNSENT: the next upload sends the new name, and a
+            # lists_sync.LIST_NAME_UNSENT: the next upload sends the new name, and a
             # Download before it keeps it instead of taking the cloud list's name.
-            lst['list_state_unsent'] = True
+            lst['list_name_unsent'] = True
         if color is not None:
             lst['color'] = color
 

@@ -1369,8 +1369,8 @@ def test_a_list_renamed_here_shows_its_new_name_in_either_interface(tmp_path, cl
 @pytest.mark.parametrize('marked', [False, True], ids=['renamed-on-the-website', 'renamed-here'])
 def test_the_single_list_upload_sends_a_name_only_for_a_list_renamed_here(tmp_path, cloud, marked):
     # sync_list_to_cloud's update path follows the upload's rule: a list with a cloud id
-    # sends its name only while it is marked as renamed here, and it leaves the mark (it
-    # sends neither the project nor the Trash state, so the next upload still sends them).
+    # sends its name only while it is marked as renamed here, and the write that returns
+    # the row clears that mark, so a later website rename is taken by the next Download.
     a = make_desk(tmp_path, cloud)
     lid = a.mgr.create_list('L')
     assert a.up()['success']
@@ -1378,17 +1378,91 @@ def test_the_single_list_upload_sends_a_name_only_for_a_list_renamed_here(tmp_pa
     _rename_on_web(cloud, five, 'Theirs')
     if marked:
         assert a.mgr.update_list(lid, name='Mine')
+        assert a.mgr.data['lists'][lid].get(lists_sync.LIST_NAME_UNSENT)
     mark = cloud.rec.mark()
     assert a.sync.sync_list_to_cloud(lid)
     (write,) = mark(table='user_lists', op='update')
     if marked:
         assert (write.payload['name'], write.payload['name_en']) == ('Mine', 'Mine')
         assert cloud.db.list_by_id(five)['name'] == 'Mine'
-        assert a.mgr.data['lists'][lid].get(lists_sync.LIST_STATE_UNSENT)
+        assert not a.mgr.data['lists'][lid].get(lists_sync.LIST_NAME_UNSENT)
+        assert not saved(a)['lists'][lid].get(lists_sync.LIST_NAME_UNSENT)
+        _rename_on_web(cloud, five, 'Later')
+        assert a.down()['success'] and a.mgr.data['lists'][lid]['name'] == 'Later'
     else:
         assert 'name' not in write.payload and 'name_en' not in write.payload
         assert cloud.db.list_by_id(five)['name'] == 'Theirs'
         assert a.down()['success'] and a.mgr.data['lists'][lid]['name'] == 'Theirs'
+
+
+def _web_list_change(c, cloud_list_id, change):
+    """A change the website makes to a list other than its name: the values it writes."""
+    if change == 'colour':
+        values = {'color': '#123456'}
+    elif change == 'trash':
+        values = {'deleted_at': '2026-09-27T10:00:00+00:00'}
+    else:
+        proj = c.web.table('projects').insert({'user_id': 'u1', 'name': 'P', 'color': '#111111'}).execute().data[0]
+        values = {'project_id': proj['id']}
+    c.web.table('user_lists').update(values).eq('id', cloud_list_id).execute()
+    return values
+
+
+@pytest.mark.parametrize('first', ['download-first', 'upload-first'])
+def test_a_first_download_that_kept_the_colour_here_still_takes_a_website_rename(tmp_path, cloud, first):
+    # The first Download pairs a list that held no cloud id with the website's list of its
+    # name, whose colour differs: the colour chosen here stands until an upload sends it.
+    # That is no rename here, so a later website rename is taken by the next Download, and
+    # no upload -- before that Download or after it -- writes the old name back.
+    a = make_desk(tmp_path, cloud)
+    lid = a.mgr.create_list('Foo')
+    colour = a.mgr.data['lists'][lid]['color']
+    five = cloud.new_list('Foo')
+    _web_list_change(cloud, five, 'colour')
+    assert colour != '#123456'
+    assert a.down()['success']
+    assert cloud_id(a, lid) == five and a.mgr.data['lists'][lid]['color'] == colour
+    _rename_on_web(cloud, five, 'Bar')
+    if first == 'upload-first':
+        mark = cloud.rec.mark()
+        assert a.up()['success']
+        assert _name_writes(mark) == [] and cloud.db.list_by_id(five)['name'] == 'Bar'
+    assert a.down()['success']
+    assert a.mgr.data['lists'][lid]['name'] == 'Bar'
+    mark = cloud.rec.mark()
+    assert a.up()['success']
+    assert _name_writes(mark) == []
+    row = cloud.db.list_by_id(five)
+    assert (row['name'], row['color']) == ('Bar', colour)
+    assert a.down()['success'] and a.mgr.data['lists'][lid]['name'] == 'Bar'
+
+
+@pytest.mark.parametrize('change', ['colour', 'trash', 'project'])
+def test_a_rename_here_does_not_hold_back_a_website_change_to_the_list(tmp_path, cloud, change):
+    # Renamed here, and on the website given another colour (or put in the Trash, or into a
+    # project) before this computer uploaded: the Download takes the website's change and
+    # keeps this computer's name; the upload sends that name and leaves the change as it is.
+    a = make_desk(tmp_path, cloud)
+    lid = a.mgr.create_list('Foo')
+    assert a.up()['success']
+    five = cloud_id(a, lid)
+    assert a.mgr.update_list(lid, name='Mine')
+    values = _web_list_change(cloud, five, change)
+    assert a.down()['success']
+    ld = a.mgr.data['lists'][lid]
+    assert ld['name'] == 'Mine'
+    if change == 'colour':
+        assert ld['color'] == '#123456'
+    elif change == 'trash':
+        assert ld.get('deleted_at')
+    else:
+        assert a.mgr.data['projects'][ld['project_id']]['cloud_id'] == values['project_id']
+    mark = cloud.rec.mark()
+    assert a.up()['success']
+    assert [r.payload['name'] for r in _name_writes(mark)] == ['Mine']
+    row = cloud.db.list_by_id(five)
+    assert row['name'] == 'Mine'
+    assert {k: row[k] for k in values} == values
 
 
 @pytest.mark.parametrize('cell', ['remapped-list-upload', 'remapped-list-download', 'two-local-lists-one-name'])
