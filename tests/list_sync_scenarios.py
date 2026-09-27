@@ -72,7 +72,8 @@ NAMES = ('L1', 'L2', 'L3')
 USER, OTHER_USER = 'u1', 'u2'
 LONG_FILLER = 'L' * 9000
 INJECTIONS = ('raise_before', 'raise_after', 'api_error', 'anon', 'session_lost', 'web', 'web',
-              'other_desktop_pass', 'same_desktop_edit', 'url_too_long')
+              'other_desktop_pass', 'same_desktop_edit', 'url_too_long',
+              'web_between_pages', 'web_between_pages', 'web_between_pages', 'web_between_pages')
 # Result errors of a pass that returned before touching anything.
 EARLY_ERRORS = ('Sync not available', 'Sync already in progress', 'No Supabase client')
 IDENTITY_FIELDS = {'store': ('cloud_account',), 'projects': ('cloud_id',), 'lists': ('cloud_id',),
@@ -732,7 +733,12 @@ class World:
         c = self.ctx
         if (c is not None and c.inject and c.counting and not c.fired and client is c.desk.client):
             c.req_count += 1
-            if c.req_count == c.inject[0]:
+            if c.inject[1] == 'web_between_pages':
+                # the first later page of any list's read in the step
+                if req.t == 'list_items' and req.op == 'select' and req.rng and req.rng[0] > 0:
+                    c.fired = True
+                    return self._fire(c, client, req)
+            elif c.req_count == c.inject[0]:
                 c.fired = True
                 return self._fire(c, client, req)
         return None
@@ -759,6 +765,28 @@ class World:
             return None
         if kind == 'web':
             self.web_op(sel)
+            return None
+        if kind == 'web_between_pages':
+            # The website removes rows the earlier pages returned, so the next page starts
+            # later and the read skips rows it never returned: preferably up to a row this
+            # desktop holds the entry of with no record (the one an insert would duplicate).
+            lid = next((val for k, col, val in req.filters if k == 'eq' and col == 'list_id'), None)
+            rows = sorted((r for r in self.db.tables['list_items'] if lid is not None and _eq(r['list_id'], lid)),
+                          key=lambda r: r['id'])
+            start = req.rng[0]
+            hp = self.db.has_page and not client.page_missing
+            data = c.desk.data
+            local = next((k for k, ld in data['lists'].items() if _eq(ld.get('cloud_id'), lid)), None)
+            named = {str(rec.get('id')) for it in data['items'].values() for _, rec in _records(it)}
+
+            def unrecorded(r):
+                return local is not None and str(r['id']) not in named and any(
+                    local in (it.get('lists') or []) and not (it.get('cloud_rows') or {}).get(local)
+                    and same_entry(ident(iid, it), row_ident(r, hp), hp) for iid, it in data['items'].items())
+
+            t = next((t for t in range(start, len(rows)) if unrecorded(rows[t])), start)
+            for r in rows[:max(1, min(t - start + 1, start))]:
+                self.web_remove(r)
             return None
         if kind == 'other_desktop_pass':
             other = self.desks['B' if c.desk.name == 'A' else 'A']
@@ -927,6 +955,15 @@ class World:
                 if lst['user_id'] == USER and not (live_only and lst.get('deleted_at'))
                 and lst['name'] != 'Recently Viewed']
 
+    def web_remove(self, r):
+        """delete_list_item: one row, by id."""
+        self.web.table('list_items').delete().eq('id', r['id']).execute()
+        self.unrevive({r['id']})
+        if self.ctx is not None:
+            self.ctx.web_deleted.add(r['id'])
+        self.trace.append(f'web: remove row {r["id"]} ({r["sys_id"]},{r.get("fl_id")})')
+        self.retire_if_lost()
+
     def web_op(self, sel):
         kind = sel[0] % 9
         rows = sorted((r for r in self.db.tables['list_items'] if self.db.owner('list_items', r) == USER),
@@ -965,13 +1002,7 @@ class World:
             self.web.table('list_items').update({'tags': cur}).eq('id', r['id']).execute()
             self.trace.append(f'web: row {r["id"]} tags -> {cur}')
         elif kind == 4 and rows:                         # remove one entry, by row id
-            r = rows[sel[1] % len(rows)]
-            self.web.table('list_items').delete().eq('id', r['id']).execute()
-            self.unrevive({r['id']})
-            if self.ctx is not None:
-                self.ctx.web_deleted.add(r['id'])
-            self.trace.append(f'web: remove row {r["id"]} ({r["sys_id"]},{r.get("fl_id")})')
-            self.retire_if_lost()
+            self.web_remove(rows[sel[1] % len(rows)])
         elif kind == 5 and wl:                           # a list to the Trash
             lst = wl[sel[1] % len(wl)]
             self.web.table('user_lists').update({'deleted_at': '2026-09-27T00:00:00+00:00'}).eq(
@@ -999,6 +1030,7 @@ class World:
                 self.ctx.web_deleted |= set(gone)
             self.trace.append(f'web: delete cloud list {lst["id"]} {lst["name"]} permanently')
             self.retire_if_lost()
+
         elif kind == 8 and len(rows) > 1:                # paste one row's note onto another
             src, dst = rows[sel[1] % len(rows)], rows[sel[2] % len(rows)]
             # a paste that leaves the note as it was is no write the desktops could see
