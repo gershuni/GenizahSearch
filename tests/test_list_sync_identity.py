@@ -1366,6 +1366,31 @@ def test_a_list_renamed_here_shows_its_new_name_in_either_interface(tmp_path, cl
     assert a.down()['success'] and shown(lid) == 'Mine'
 
 
+@pytest.mark.parametrize('marked', [False, True], ids=['renamed-on-the-website', 'renamed-here'])
+def test_the_single_list_upload_sends_a_name_only_for_a_list_renamed_here(tmp_path, cloud, marked):
+    # sync_list_to_cloud's update path follows the upload's rule: a list with a cloud id
+    # sends its name only while it is marked as renamed here, and it leaves the mark (it
+    # sends neither the project nor the Trash state, so the next upload still sends them).
+    a = make_desk(tmp_path, cloud)
+    lid = a.mgr.create_list('L')
+    assert a.up()['success']
+    five = cloud_id(a, lid)
+    _rename_on_web(cloud, five, 'Theirs')
+    if marked:
+        assert a.mgr.update_list(lid, name='Mine')
+    mark = cloud.rec.mark()
+    assert a.sync.sync_list_to_cloud(lid)
+    (write,) = mark(table='user_lists', op='update')
+    if marked:
+        assert (write.payload['name'], write.payload['name_en']) == ('Mine', 'Mine')
+        assert cloud.db.list_by_id(five)['name'] == 'Mine'
+        assert a.mgr.data['lists'][lid].get(lists_sync.LIST_STATE_UNSENT)
+    else:
+        assert 'name' not in write.payload and 'name_en' not in write.payload
+        assert cloud.db.list_by_id(five)['name'] == 'Theirs'
+        assert a.down()['success'] and a.mgr.data['lists'][lid]['name'] == 'Theirs'
+
+
 @pytest.mark.parametrize('cell', ['remapped-list-upload', 'remapped-list-download', 'two-local-lists-one-name'])
 def test_a_record_for_a_list_that_is_no_longer_its_own_is_dropped(tmp_path, cloud, cell):
     a = make_desk(tmp_path, cloud)

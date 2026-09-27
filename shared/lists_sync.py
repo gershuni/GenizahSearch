@@ -2232,6 +2232,11 @@ class ListsCloudSync:
             }
 
             if cloud_id:
+                # as the upload: another name in the cloud was given on the website (or by
+                # another computer) unless this list was renamed here since an upload last
+                # sent its state; the mark stays for that upload (project, Trash state)
+                if not list_data.get(LIST_STATE_UNSENT):
+                    del list_payload['name'], list_payload['name_en']
                 client.table('user_lists').update(list_payload).eq('id', cloud_id).execute()
             else:
                 response = client.table('user_lists').insert(list_payload).execute()
