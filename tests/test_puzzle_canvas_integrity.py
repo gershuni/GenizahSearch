@@ -1688,6 +1688,7 @@ def deferring_host(env, monkeypatch):
     yield host
     host.busy.clear()
     host._close_pending = False         # a retry still queued stops at its next run
+    host._close_waiting_for_prompt = False
 
 
 def _quit_asks(env):
@@ -1981,7 +1982,8 @@ def test_a_first_close_while_a_modal_dialog_is_open_waits_for_it(env, deferring_
     assert QApplication.activeModalWidget() is box
     env.answer = SB.Discard
     ev = h.close("user")
-    assert not ev.isAccepted() and env.asks == [] and h._close_pending
+    assert not ev.isAccepted() and env.asks == [] and h._close_waiting_for_prompt
+    assert not getattr(h, "_close_pending", False)      # nothing answered yet
     pwh.pump(600)
     assert env.asks == [] and h.shutdowns == []
     box.hide()
@@ -2019,6 +2021,63 @@ def test_a_close_that_waited_for_a_prompt_then_stops_the_batch_and_asks(env, def
     pwh.pump(600)
     assert h.shutdowns == ["retry"]
     assert len(_quit_asks(env)) == 1
+
+
+class _PastTheCloseCheck(BaseException):
+    """Raised by a stand-in just past on_comp_scan_finished's close check:
+    the scan's results are being shown."""
+
+
+@pytest.mark.parametrize("answer", [SB.Cancel, SB.Discard], ids=["cancel", "discard"])
+def test_work_that_finishes_while_a_first_close_waits_for_a_modal_is_kept(
+        env, deferring_host, monkeypatch, answer):
+    """A first close deferred only because a modal was open marked the close
+    pending before the quit question was asked. A composition scan, a
+    letter-level build or the index load finishing meanwhile took that for an
+    app on its way out and dropped its result -- lost for good when the user
+    then chose Cancel at the quit question."""
+    import genizah_app as ga
+    h = deferring_host
+    env.scratch_pad()
+    kept = []
+    # What the three callbacks touch up to, and just past, their close check.
+    h.is_comp_running = True
+    h.reset_comp_ui = lambda: None
+    h._stop_auto_expand = lambda _reason: kept.append("scan dropped")
+
+    def _show_scan():
+        kept.append("scan shown")
+        raise _PastTheCloseCheck()
+
+    h._refresh_comp_method_enabled = _show_scan
+    monkeypatch.setattr(ga.passage_lifecycle, "install_passage_state",
+                        lambda state: kept.append(state.live_dir))
+    for name in ("_finish_passage_build", "_honour_deferred_comp_method",
+                 "_apply_default_comp_method", "_revalidate_comp_method",
+                 "_maybe_offer_passage_build"):
+        setattr(h, name, lambda: None)
+    box = QDialog(env.host)
+    _HOSTS.append(box)
+    box.setWindowModality(Qt.WindowModality.ApplicationModal)
+    box.show()
+    pwh.pump()
+    ev = h.close("user")
+    assert not ev.isAccepted() and env.asks == []
+    try:
+        ga.GenizahGUI.on_comp_scan_finished(h, {"main": []})
+    except _PastTheCloseCheck:
+        pass
+    ga.GenizahGUI._on_passage_build_finished(
+        h, types.SimpleNamespace(index=object(), live_dir="built", status="installed"))
+    ga.GenizahGUI._on_passage_loaded(
+        h, types.SimpleNamespace(index=object(), live_dir="loaded", status="live_ok"))
+    assert kept == ["scan shown", "built", "loaded"], "work was dropped under the modal"
+    box.hide()
+    env.answer = answer
+    pwh.pump(600)                       # the close comes round and asks
+    assert len(_quit_asks(env)) == 1
+    assert h.shutdowns == ([] if answer == SB.Cancel else ["retry"])
+    assert kept == ["scan shown", "built", "loaded"]
 
 
 def test_quit_check_runs_before_any_shutdown_state():
