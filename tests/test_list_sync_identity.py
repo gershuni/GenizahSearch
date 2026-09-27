@@ -407,6 +407,12 @@ def _is_list_read(req):
                                                                 for k, col, _ in req.filters)
 
 
+def _is_later_page(req, table='list_items'):
+    """A select continuing a paged read: past offset 0, or after a row id (keyset)."""
+    return req.t == table and req.op == 'select' and (
+        bool(req.rng and req.rng[0] > 0) or any(k == 'gt' and col == 'id' for k, col, _ in req.filters))
+
+
 def _payloads(reqs):
     return [p for r in reqs for p in (r.payload if isinstance(r.payload, list) else [r.payload])]
 
@@ -1825,6 +1831,64 @@ def test_a_recorded_row_a_racing_read_skipped_is_found_and_written(tmp_path):
     # the removed row was read on page 1 before it went: its membership was paired, not unchecked
     assert result['unchecked'] == 0
     assert rec(a, key, lid)['id'] == skipped and rec(a, key, lid)['note'] == 'n1, edited here'
+
+
+# --------------------------------------------------------------------------- a read the website changes as it goes
+
+def test_a_row_a_same_count_change_would_skip_is_paired_not_inserted_again(tmp_path):
+    """Between two pages the website removes a row the first page returned and adds another: the count
+    holds. Paged by offset, the next page then starts one row late, the read collects as many ids as the
+    count and calls itself complete, and the upload inserts a second row for the entry this computer
+    added with no record of the website's row."""
+    c = Cloud(max_rows=1)                               # the server answers one row a request
+    cl = c.new_list('L')
+    first = c.add(cl, '990001', fl_id='FLa', note='n1')
+    a = make_desk(tmp_path, c)
+    assert a.down()['success']
+    lid = next(k for k, ld in a.mgr.data['lists'].items() if ld.get('cloud_id') == cl)
+    held = c.add(cl, '990002', fl_id='FLa', note='website')   # added on the website ...
+    a.mgr.add_item('990002', lid, note='mine', fl_id='FLa')    # ... and here, before either synced it
+    key = '990002::fl::FLa'
+    assert rec(a, key, lid) is None
+
+    def churn(client, req):
+        if client.actor == 'A' and _is_list_read(req) and _is_later_page(req):
+            c.rec.hook = None
+            c.delete_row(first)                         # a row page 1 returned goes ...
+            c.add(cl, '990003', fl_id='FLb')            # ... and a new one comes: the count holds
+    c.rec.hook = churn
+    mark = c.rec.mark()
+    result = a.up()
+    assert _payloads(mark(op='insert')) == [], 'the entry held here was inserted a second time'
+    assert [r['id'] for r in c.rows(list_id=cl, sys_id='990002')] == [held]
+    assert result['success'] and rec(a, key, lid)['id'] == held
+    assert 'website' in c.row(held)['note']
+
+
+def test_a_list_a_same_count_change_would_skip_keeps_its_cloud_list(tmp_path):
+    """The same change to the lists themselves: the website deletes a list the first page returned and
+    creates another. Paged by offset, the read skips the next list, the upload takes that list's id for
+    stale, and creates a second cloud list of its name holding a second row for each of its entries."""
+    c = Cloud(max_rows=1)
+    spare = c.new_list('Spare')
+    cl = c.new_list('B')
+    row = c.add(cl, '990001', fl_id='FLa', note='n1')
+    a = make_desk(tmp_path, c)
+    assert a.down()['success'] and a.up()['success']     # (the upload also sends the local default list)
+    lid = next(k for k, ld in a.mgr.data['lists'].items() if ld.get('cloud_id') == cl)
+
+    def churn(client, req):
+        if client.actor == 'A' and _is_later_page(req, 'user_lists'):
+            c.rec.hook = None
+            c.web.table('user_lists').delete().eq('id', spare).execute()   # a list page 1 returned goes ...
+            c.new_list('Other')                                           # ... and a new one comes
+    c.rec.hook = churn
+    mark = c.rec.mark()
+    result = a.up()
+    assert mark(table='user_lists', op='insert') == [], 'a second cloud list of the same name was created'
+    assert mark(op='insert') == []
+    assert cloud_id(a, lid) == cl and [r['id'] for r in c.rows(sys_id='990001')] == [row]
+    assert result['success']
 
 
 # --------------------------------------------------------------------------- what the website stores on a row

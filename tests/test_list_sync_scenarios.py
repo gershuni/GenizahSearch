@@ -488,6 +488,22 @@ def test_the_fake_counts_before_the_range_and_caps_every_page():
     assert len(resp.data) == 2 and resp.count is None
 
 
+def test_the_fake_pages_by_row_id_under_its_row_cap():
+    db, web, lst = _db(max_rows=2)
+    web.table('list_items').insert([{'list_id': lst['id'], 'sys_id': str(n)} for n in range(5)]).execute()
+    ids = sorted(r['id'] for r in db.tables['list_items'])
+
+    def page():
+        return web.table('list_items').select('id').eq('list_id', lst['id']).order('id').limit(1000)
+    assert [r['id'] for r in page().execute().data] == ids[:2]
+    assert [r['id'] for r in page().gt('id', ids[1]).execute().data] == ids[2:4]
+    assert [r['id'] for r in page().gt('id', str(ids[3])).execute().data] == ids[4:]   # the id sent as text
+    assert page().gt('id', ids[4]).execute().data == []
+    with pytest.raises(S.APIError) as e:
+        page().gt('id', 'x').execute()
+    assert e.value.code == '22P02'
+
+
 def test_the_fake_reads_tag_filters_as_jsonb():
     db, web, lst = _db()
     web.table('list_items').insert({'list_id': lst['id'], 'sys_id': '1', 'tags': ['a', 'ב"{,']}).execute()

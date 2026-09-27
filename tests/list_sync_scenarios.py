@@ -82,9 +82,11 @@ SHAPES = ((None, None), ('1', None), ('2', None), ('1', 'FLa'), ('2', 'FLb'), (N
 NAMES = ('L1', 'L2', 'L3')
 USER, OTHER_USER = 'u1', 'u2'
 LONG_FILLER = 'L' * 9000
+# Two of the four draws that were web_between_pages are web_churn_same_count, so every
+# other injection a seed draws is the one it drew before.
 INJECTIONS = ('raise_before', 'raise_after', 'api_error', 'anon', 'session_lost', 'web', 'web',
               'other_desktop_pass', 'same_desktop_edit', 'url_too_long',
-              'web_between_pages', 'web_between_pages', 'web_between_pages', 'web_between_pages',
+              'web_between_pages', 'web_between_pages', 'web_churn_same_count', 'web_churn_same_count',
               'web_rename')
 # Of the website ops a seed draws, the share that rename a list; of the desktop ops, the
 # share that do (drawn from a stream of their own, so the other ops keep their values).
@@ -243,6 +245,15 @@ def _eq(a, b):
     return a == b or str(a) == str(b)
 
 
+def _integer(val):
+    """A filter value on an integer column (the SERIAL ids), as PostgREST casts it: text that is no
+    integer is an error."""
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        raise APIError({'code': '22P02', 'message': f'invalid input syntax for type integer: "{val}"'})
+
+
 def _jsonb_array(val):
     if not isinstance(val, str):
         # postgrest-py turns a Python list into the text[] literal {a,b}: invalid JSON for jsonb
@@ -272,6 +283,10 @@ def match_row(row, filters):
         elif kind == 'is':
             if not (str(val).lower() == 'null' and v is None):
                 return False
+        elif kind == 'gt':
+            limit = _integer(val)
+            if v is None or not _integer(v) > limit:
+                return False
         elif kind in ('cs', 'cd'):
             want = _json_set(_jsonb_array(val))
             if v is None:
@@ -284,6 +299,18 @@ def match_row(row, filters):
         else:
             raise AssertionError(kind)
     return True
+
+
+def keyset_after(req):
+    """The id a keyset page starts after (its `gt` filter on id), or None."""
+    return next((val for kind, col, val in req.filters if kind == 'gt' and col == 'id'), None)
+
+
+def is_later_page(req):
+    """A list_items select that continues a paged read: an offset past 0 (the pre-2b and
+    offset engines) or a page after a row id (keyset)."""
+    return (req.t == 'list_items' and req.op == 'select'
+            and (bool(req.rng and req.rng[0] > 0) or keyset_after(req) is not None))
 
 
 def query_string_length(filters):
@@ -350,6 +377,9 @@ class FakeDB:
         return [r for r in self.tables[table] if self.owner(table, r) == user]
 
     def matching(self, table, filters, user):
+        for kind, _, val in filters:
+            if kind == 'gt':
+                _integer(val)   # PostgREST rejects the value before it looks at a row
         return [r for r in self.visible(table, user) if match_row(r, filters)]
 
 
@@ -414,6 +444,10 @@ class _Req:
         self.filters.append(('is', col, 'null' if val is None else val))
         return self
 
+    def gt(self, col, val):
+        self.filters.append(('gt', col, val))
+        return self
+
     def contains(self, col, val):
         self.filters.append(('cs', col, val))
         return self
@@ -454,6 +488,8 @@ class _Req:
             raise httpx.ReadTimeout('injected: the request never reached the database')
         if action == 'api_23502':
             raise APIError({'code': '23502', 'message': 'null value in column violates not-null constraint'})
+        if action == 'api_pgrst103':   # (directed tests only) a range error on a read that asked for none
+            raise APIError({'code': 'PGRST103', 'message': 'Requested range not satisfiable'})
         if self.op in ('update', 'delete'):
             limit = db.gateway_limit if c.url_limit is None else min(db.gateway_limit, c.url_limit)
             if query_string_length(self.filters) > limit:
@@ -670,6 +706,8 @@ class _Step:
         self.same_edit_removed = set()
         self.same_edit_fired = False
         self.anon_lists = set()  # lists whose read an injected anonymous request answered (empty, count 0)
+        self.phase = None        # the direction of the pass in progress: 'up' or 'down'
+        self.armed = False       # web_churn_same_count added its row before a read
         self.start_rows = {}
         self.pass_start_lists = {}
         self.pass_start_items = {}
@@ -796,9 +834,20 @@ class World:
             c.req_count += 1
             if c.inject[1] == 'web_between_pages':
                 # the first later page of any list's read in the step
-                if req.t == 'list_items' and req.op == 'select' and req.rng and req.rng[0] > 0:
+                if is_later_page(req):
                     c.fired = True
                     return self._fire(c, client, req)
+            elif c.inject[1] == 'web_churn_same_count':
+                # An upload's reads only (in a Merge the Download would pair the row and the upload
+                # then insert nothing). Just before an upload reads a list, the website may add a
+                # row for an entry this desktop holds there with no record; then, at the first
+                # later page from which the churn can take the read past such a row, it fires.
+                if c.phase == 'up' and req.t == 'list_items' and req.op == 'select':
+                    if not is_later_page(req):
+                        self._churn_arm(c, client, req)
+                    elif self._between_pages(c, client, req)[3] is not None:
+                        c.fired = True
+                        return self._fire(c, client, req)
             elif c.inject[1] in ('raise_after', 'api_error') and c.inject[2][1] % 3 == 0:
                 # a third of these hit the step's first batch insert: it commits, then the answer fails
                 if req.t == 'list_items' and req.op == 'insert' and isinstance(req.payload, list):
@@ -893,27 +942,25 @@ class World:
         if kind == 'web_rename':
             self.web_rename(sel)
             return None
-        if kind == 'web_between_pages':
-            # The website removes rows the earlier pages returned, so the next page starts
-            # later and the read skips rows it never returned: preferably up to a row this
-            # desktop holds the entry of with no record (the one an insert would duplicate).
-            lid = next((val for k, col, val in req.filters if k == 'eq' and col == 'list_id'), None)
-            rows = sorted((r for r in self.db.tables['list_items'] if lid is not None and _eq(r['list_id'], lid)),
-                          key=lambda r: r['id'])
-            start = req.rng[0]
-            hp = self.db.has_page and not client.page_missing
-            data = c.desk.data
-            local = next((k for k, ld in data['lists'].items() if _eq(ld.get('cloud_id'), lid)), None)
-            named = {str(rec.get('id')) for it in data['items'].values() for _, rec in _records(it)}
-
-            def unrecorded(r):
-                return local is not None and str(r['id']) not in named and any(
-                    local in (it.get('lists') or []) and not (it.get('cloud_rows') or {}).get(local)
-                    and same_entry(ident(iid, it), row_ident(r, hp), hp) for iid, it in data['items'].items())
-
-            t = next((t for t in range(start, len(rows)) if unrecorded(rows[t])), start)
-            for r in rows[:max(1, min(t - start + 1, start))]:
+        if kind in ('web_between_pages', 'web_churn_same_count'):
+            # The website removes rows the earlier pages returned. A read paged by offset then
+            # starts its next page later and skips rows it never returned: preferably up to a
+            # row this desktop holds the entry of with no record (the one an insert would
+            # duplicate). web_between_pages leaves the count lower, which such a read can
+            # notice; web_churn_same_count also adds one row per row removed (higher ids),
+            # so the count and the number of ids the read collects both come out right while
+            # the skipped rows were never returned. A read paged by keyset on the row id
+            # skips nothing either way.
+            lid, rows, start, reach = self._between_pages(c, client, req)
+            t = reach if reach is not None else next(
+                (t for t in range(start, len(rows)) if self._unrecorded(c, client, lid, rows[t])), start)
+            gone = rows[:max(1, min(t - start + 1, start))] if start else []
+            for r in gone:
                 self.web_remove(r)
+            lst = self.db.list_by_id(lid) if lid is not None else None
+            if kind == 'web_churn_same_count' and lst is not None:
+                for n in range(len(gone)):
+                    self.web_add(lst, sel[n:] + sel[:n])
             return None
         if kind == 'other_desktop_pass':
             other = self.desks['B' if c.desk.name == 'A' else 'A']
@@ -930,6 +977,71 @@ class World:
             c.same_edit_fired = True
             return None
         raise AssertionError(kind)
+
+    def _between_pages(self, c, client, req):
+        """(list id, the list's rows by id, how many of them the earlier pages covered, reach):
+        reach is the first row a removal of rows already returned can take an offset read past
+        (at most as many rows as were returned) that this desktop holds with no record, or None."""
+        lid = next((val for k, col, val in req.filters if k == 'eq' and col == 'list_id'), None)
+        rows = sorted((r for r in self.db.tables['list_items'] if lid is not None and _eq(r['list_id'], lid)),
+                      key=lambda r: r['id'])
+        after = keyset_after(req)
+        start = req.rng[0] if after is None else sum(1 for r in rows if r['id'] <= _integer(after))
+        reach = next((t for t in range(start, min(len(rows), 2 * start)) if self._unrecorded(c, client, lid, rows[t])),
+                     None)
+        return lid, rows, start, reach
+
+    def _churn_arm(self, c, client, req):
+        """(web_churn_same_count, once a step) Just before an upload reads a list past the server's
+        row cap: a row appears for an entry this desktop holds in that list with no record and no
+        row there -- the same entry added in two places before either synced: on the website, or,
+        with a page, on the other desktop. The row is there for the whole read, beyond its first
+        page, so the upload must pair it, not insert."""
+        lid = next((val for k, col, val in req.filters if k == 'eq' and col == 'list_id'), None)
+        if c.armed or lid is None or self.db.max_rows is None:
+            return
+        data = c.desk.data
+        local = next((k for k, ld in data['lists'].items() if _eq(ld.get('cloud_id'), lid)), None)
+        rows = [r for r in self.db.tables['list_items'] if _eq(r['list_id'], lid)]
+        lst = self.db.list_by_id(lid)
+        if local is None or lst is None or len(rows) < self.db.max_rows:
+            return
+        hp = self.db.has_page and not client.page_missing
+        wanted = []
+        for iid, it in data['items'].items():
+            e = ident(iid, it)
+            if (local in (it.get('lists') or []) and not (it.get('cloud_rows') or {}).get(local)
+                    and not e[0].startswith('97') and (e[2] is None or hp) and same_entry(e, e, hp)
+                    and not any(same_entry(e, row_ident(r, hp), hp) for r in rows)):
+                wanted.append(e)
+        if not wanted:
+            return
+        c.armed = True
+        sys_id, fl, page = sorted(wanted, key=repr)[c.inject[2][0] % len(wanted)]
+        new = self.web.table('list_items').insert({'list_id': lid, 'sys_id': sys_id, 'shelfmark': web_shelfmark(sys_id),
+                                                   'title': web_title(sys_id), 'fl_id': fl, 'note': '',
+                                                   'tags': []}).execute().data[0]
+        who = 'web'
+        if page is not None:   # the website writes no page: the other desktop's upload of the entry
+            who = 'B' if c.desk.name == 'A' else 'A'
+            row = next(r for r in self.db.tables['list_items'] if r['id'] == new['id'])
+            row['page'] = page   # (written in place: the lagging schema cache is the desktops' to meet)
+            row['_ghost'] = (who, sys_id, fl, page, True)
+        c.start_rows[new['id']] = lid   # there before the read began: a row the upload should claim
+        self.trace.append(f'    {who}: add ({sys_id},{fl},{page}) to cloud list {lid} {lst["name"]} before '
+                          f'{c.desk.name} reads it (row {new["id"]})')
+
+    def _unrecorded(self, c, client, lid, r):
+        """Row r is an entry this desktop holds in the list with no record, and no record names r."""
+        hp = self.db.has_page and not client.page_missing
+        data = c.desk.data
+        local = next((k for k, ld in data['lists'].items() if _eq(ld.get('cloud_id'), lid)), None)
+        if local is None:
+            return False
+        named = {str(rec.get('id')) for it in data['items'].values() for _, rec in _records(it)}
+        return str(r['id']) not in named and any(
+            local in (it.get('lists') or []) and not (it.get('cloud_rows') or {}).get(local)
+            and same_entry(ident(iid, it), row_ident(r, hp), hp) for iid, it in data['items'].items())
 
     def _check_request(self, d, client, req):
         pls = req.payloads()
@@ -1135,6 +1247,19 @@ class World:
         self.trace.append(f'web: remove row {r["id"]} ({r["sys_id"]},{r.get("fl_id")})')
         self.retire_if_lost()
 
+    def web_add(self, lst, sel):
+        """add_list_item: an entry into a cloud list (it may duplicate one already there)."""
+        sys_id = SYS[sel[2] % len(SYS)]
+        fl = (None, 'FLa', 'FLb')[sel[3] % 3]
+        note = self.fresh('n') if sel[4] % 2 else ''
+        if note:
+            self.live_n.add(note)
+        # the website writes the catalogue's shelfmark and title (web/user_lists.py add_item)
+        self.web.table('list_items').insert({'list_id': lst['id'], 'sys_id': sys_id,
+                                             'shelfmark': web_shelfmark(sys_id), 'title': web_title(sys_id),
+                                             'fl_id': fl, 'note': note, 'tags': []}).execute()
+        self.trace.append(f'web: add ({sys_id},{fl}) note={note!r} to cloud list {lst["id"]} {lst["name"]}')
+
     def web_rename(self, sel):
         """update_list: the website renames a live list, writing name and name_en (web/user_lists.py)."""
         wl = self.web_lists()
@@ -1155,17 +1280,7 @@ class World:
                       key=lambda r: r['id'])
         wl = self.web_lists()
         if kind in (0, 1) and wl:                        # add_list_item (may duplicate an entry)
-            lst = wl[sel[1] % len(wl)]
-            sys_id = SYS[sel[2] % len(SYS)]
-            fl = (None, 'FLa', 'FLb')[sel[3] % 3]
-            note = self.fresh('n') if sel[4] % 2 else ''
-            if note:
-                self.live_n.add(note)
-            # the website writes the catalogue's shelfmark and title (web/user_lists.py add_item)
-            self.web.table('list_items').insert({'list_id': lst['id'], 'sys_id': sys_id,
-                                                 'shelfmark': web_shelfmark(sys_id), 'title': web_title(sys_id),
-                                                 'fl_id': fl, 'note': note, 'tags': []}).execute()
-            self.trace.append(f'web: add ({sys_id},{fl}) note={note!r} to cloud list {lst["id"]} {lst["name"]}')
+            self.web_add(wl[sel[1] % len(wl)], sel)
         elif kind == 2 and rows:                         # note edit: replace or append
             r = rows[sel[1] % len(rows)]
             t = self.fresh('n')
@@ -1433,6 +1548,7 @@ class World:
         store0 = copy.deepcopy(d.data)
         c = self.ctx
         if c is not None:
+            c.phase = direction
             c.pass_start_lists = {iid: list(it.get('lists', [])) for iid, it in d.data['items'].items()}
             c.pass_start_items = copy.deepcopy(d.data['items'])
             edits_before = c.same_edit_fired
