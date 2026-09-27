@@ -1463,9 +1463,20 @@ def test_a_merge_whose_download_fails_never_uploads(synced, monkeypatch, genizah
         assert shown[0][1] == genizah_core.TRANSLATIONS[lists_sync.DOWNLOAD_BACKUP_FAILED]
 
 
+@pytest.mark.parametrize("cloud_note", [OLD, TODAY], ids=["notes-differ", "notes-agree"])
 def test_a_merge_whose_upload_fails_says_so_in_the_interface_language(
-        synced, monkeypatch, genizah_app_module):
+        synced, monkeypatch, genizah_app_module, cloud_note):
+    """The failure text, then -- as after every Merge -- the download's note line.
+
+    When the cloud's note differs, the download keeps both and the message ends
+    with that line; when the two agree there is no line and the text is the bare
+    failure."""
     monkeypatch.setattr(genizah_core, "CURRENT_LANG", "he")
+    synced.cloud.tables["list_items"][0]["note"] = cloud_note
+    downloads = []
+    real_download = synced.mgr.sync_from_cloud
+    monkeypatch.setattr(synced.mgr, "sync_from_cloud",
+                        lambda: downloads.append(real_download()) or downloads[-1])
     monkeypatch.setattr(synced.mgr, "sync_to_cloud",
                         lambda: {"success": False, "error": "Sync already in progress"})
 
@@ -1474,11 +1485,24 @@ def test_a_merge_whose_upload_fails_says_so_in_the_interface_language(
     assert [kind for kind, _ in shown] == ["warning"]
     text = shown[0][1]
     assert _is_hebrew(text[0]), f"the upload error is not in the interface language: {text!r}"
-    assert text == genizah_core.tr("The cloud lists were downloaded, but the upload failed: {}").format(
-        genizah_core.TRANSLATIONS["Sync already in progress"]), (
-        f"the reason inside the message is not in the interface language: {text!r}")
-    # the download half did land: both notes kept, the marker in the interface language
-    assert _kept_both(_note_in(synced.store), genizah_core.tr("from the cloud"))
+    expected = genizah_core.tr("The cloud lists were downloaded, but the upload failed: {}").format(
+        genizah_core.TRANSLATIONS["Sync already in progress"])
+    assert [d.get("success") for d in downloads] == [True], downloads
+    if cloud_note == OLD:
+        assert downloads[0].get("notes_merged") == 1, downloads
+        line = genizah_core.tr(
+            "Notes that differed between this computer and your account: {}. Both versions "
+            "were kept; the account's text is under the line \"--- {} ---\".").format(
+            1, genizah_core.tr("from the cloud"))
+        assert _is_hebrew(line[0]), line
+        expected = f"{expected}\n\n{line}"
+        # the download half did land: both notes kept, the marker in the interface language
+        assert _kept_both(_note_in(synced.store), genizah_core.tr("from the cloud"))
+    else:
+        assert not downloads[0].get("notes_merged"), downloads
+        assert _note_in(synced.store) == TODAY
+    assert text == expected, (
+        f"the message is not the failure text followed by the download's note line: {text!r}")
 
 
 @pytest.mark.parametrize("lang", ["en", "he"])
