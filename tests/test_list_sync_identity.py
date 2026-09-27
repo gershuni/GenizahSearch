@@ -387,11 +387,6 @@ def test_a_row_removed_on_the_website_is_recorded_not_uploaded_and_nothing_is_de
     assert mark(op='insert') == [] and mark(op='update') == [] and mark(op='delete') == []
 
 
-def _no_count(client, req):
-    if client.actor == 'A' and req.t == 'list_items' and req.op == 'select':
-        req.count = None
-
-
 def _raise_on(pred, action='raise_before'):
     def hook(client, req):
         return action if client.actor == 'A' and pred(req) else None
@@ -413,19 +408,29 @@ def _is_later_page(req, table='list_items'):
         bool(req.rng and req.rng[0] > 0) or any(k == 'gt' and col == 'id' for k, col, _ in req.filters))
 
 
+def _as_the_first_page(req):
+    """The server ignores what makes this request a later page and answers the first page again."""
+    req.filters[:] = [f for f in req.filters if not (f[0] == 'gt' and f[1] == 'id')]
+    req.rng = None
+
+
 def _payloads(reqs):
     return [p for r in reqs for p in (r.payload if isinstance(r.payload, list) else [r.payload])]
 
 
-CELLS = ['count-none', 'count-changes-between-pages', 'read-error', 'confirmation-error', 'confirmation-capped',
-         'found-in-another-list', 'anonymous-read', 'session-lost-mid-pass', 'range-past-end']
+# Reads are paged by row id (keyset), so a read is incomplete only when a page does not rise from the last
+# id -- 'filter-ignored' -- or when it fails. (Paged by offset they were also taken as incomplete when a
+# page carried no count or a different one, or a range ran past the end after rows went; a row the website
+# adds between pages now leaves the read complete: see the test after this one.)
+CELLS = ['filter-ignored', 'read-error', 'later-page-error', 'confirmation-error', 'confirmation-capped',
+         'found-in-another-list', 'anonymous-read', 'session-lost-mid-pass']
 
 
 @pytest.mark.parametrize('direction', ['upload', 'download'])
 @pytest.mark.parametrize('cell', CELLS)
 def test_removal_is_never_concluded_from_an_incomplete_read(tmp_path, cell, direction):
-    cap = {'count-changes-between-pages': 1, 'range-past-end': 1, 'confirmation-capped': 50}.get(cell)
-    c = Cloud(max_rows=cap, past_end_raises=cell == 'range-past-end')
+    cap = {'filter-ignored': 1, 'later-page-error': 1, 'confirmation-capped': 50}.get(cell)
+    c = Cloud(max_rows=cap)
     a = make_desk(tmp_path, c)
     lid = a.mgr.create_list('L')
     n = 80 if cell == 'confirmation-capped' else 3
@@ -444,27 +449,23 @@ def test_removal_is_never_concluded_from_an_incomplete_read(tmp_path, cell, dire
             c.web.table('user_lists').delete().eq('id', old_cloud).execute()
     else:
         c.delete_row(rid)
-    if cell in ('count-changes-between-pages', 'range-past-end'):
+    if cell in ('filter-ignored', 'later-page-error'):
         a.mgr.add_item('990009', lid, fl_id='FLz')    # a membership with no record: no insert this pass
     sync = a.up if direction == 'upload' else a.down
-    pages = []
 
-    def churn(client, req):
-        if client.actor == 'A' and _is_list_read(req) and any(v == old_cloud for _, _, v in req.filters):
-            pages.append(req.rng)
-            if req.rng and req.rng[0] > 0 and len(pages) == 2:
-                if cell == 'count-changes-between-pages':
-                    c.add(old_cloud, '990008', fl_id='FLq')
-                else:
-                    for r in c.rows(list_id=old_cloud)[:1]:
-                        c.delete_row(r['id'])
+    def later_page(client, req):
+        if client.actor == 'A' and _is_list_read(req) and any(v == old_cloud for _, _, v in req.filters) \
+                and _is_later_page(req):
+            if cell == 'later-page-error':
+                return 'api_pgrst103'   # an error on a later page fails the read; it does not end it short
+            _as_the_first_page(req)     # the server answers the first page again: the ids do not rise
         return None
 
     def lose(client, req):
         if client.actor == 'A' and _is_confirmation(req):
             client.session_user = None
 
-    hooks = {'count-none': _no_count, 'count-changes-between-pages': churn, 'range-past-end': churn,
+    hooks = {'filter-ignored': later_page, 'later-page-error': later_page,
              'read-error': _raise_on(_is_list_read), 'confirmation-error': _raise_on(_is_confirmation),
              'session-lost-mid-pass': lose}
     c.rec.hook = hooks.get(cell)
@@ -477,7 +478,7 @@ def test_removal_is_never_concluded_from_an_incomplete_read(tmp_path, cell, dire
     gone = [(k, key) for k, it in a.mgr.data['items'].items() for key, r in (it.get('cloud_rows') or {}).items()
             if r.get('gone')]
     assert gone == [] and result.get('web_removed', []) == []
-    if cell == 'read-error' or (cell == 'anonymous-read' and direction == 'upload'):
+    if cell in ('read-error', 'later-page-error') or (cell == 'anonymous-read' and direction == 'upload'):
         # a failed read fails the pass; so does the list step's insert without a session
         assert result['success'] is False and mark(op='insert') == []
         return
@@ -492,9 +493,42 @@ def test_removal_is_never_concluded_from_an_incomplete_read(tmp_path, cell, dire
         return
     assert result['unchecked'] >= 1
     assert not [p for p in _payloads(mark(op='insert')) if p.get('sys_id') == item(a, first)['sys_id']]
-    if cell in ('count-changes-between-pages', 'range-past-end'):
+    if cell == 'filter-ignored':
         assert result['success']
         assert not [p for p in _payloads(mark(op='insert')) if p.get('sys_id') == '990009']
+
+
+@pytest.mark.parametrize('direction', ['upload', 'download'])
+def test_a_row_the_website_adds_between_pages_is_read_and_the_read_is_complete(tmp_path, direction):
+    """A row added between two pages has an id above every row returned, so a later page returns it and the
+    read is complete. (Paged by offset, the count changed and the read was not complete.) A row removed on
+    the website before the read is recorded as removed, and an upload inserts a membership with no record
+    in the same pass."""
+    c = Cloud(max_rows=1)
+    a = make_desk(tmp_path, c)
+    lid = a.mgr.create_list('L')
+    for i in range(3):
+        a.mgr.add_item(f'99{i:04d}', lid, note=f'note {i}', fl_id='FLa')
+    assert a.up()['success']
+    first = sorted(k for k, it in a.mgr.data['items'].items() if lid in it['lists'])[0]
+    cl = cloud_id(a, lid)
+    c.delete_row(row_in(c, a, first, lid))
+    a.mgr.add_item('990009', lid, fl_id='FLz')           # a membership with no record
+
+    def add_between_pages(client, req):
+        if client.actor == 'A' and _is_list_read(req) and _is_later_page(req):
+            c.rec.hook = None
+            c.add(cl, '990008', fl_id='FLq', note='website')
+    c.rec.hook = add_between_pages
+    mark = c.rec.mark()
+    result = a.up() if direction == 'upload' else a.down()
+    assert result['success'] and result['web_removed'] == [(first, lid)]
+    if direction == 'upload':
+        assert [p['sys_id'] for p in _payloads(mark(op='insert'))] == ['990009']
+        assert result['unchecked'] == 0
+    else:
+        assert mark(op='insert') == []
+        assert [k for k, it in a.mgr.data['items'].items() if it['sys_id'] == '990008' and lid in it['lists']]
 
 
 @pytest.mark.parametrize('direction', ['upload', 'download', 'whole-cloud-empty'])
@@ -1032,14 +1066,14 @@ def test_a_download_applies_a_remembered_row_that_only_the_confirmation_found(tm
     c.set(target['id'], note='website')
     if cell == 'both-changed':
         a.mgr.update_item(key, note='mine')
-    pages = []
 
     def delete_between_pages(client, req):
-        if client.actor == 'A' and _is_list_read(req):
-            pages.append(req.rng)
-            if req.rng and req.rng[0] > 0:
-                c.rec.hook = None
-                c.delete_row(victim['id'])
+        if client.actor == 'A' and _is_list_read(req) and _is_later_page(req):
+            c.rec.hook = None
+            c.delete_row(victim['id'])
+            # and the server answers page 2 with the first page again: the read ends not complete, and
+            # position 50's row, which it never returned, is found by the confirmation
+            _as_the_first_page(req)
     c.rec.hook = delete_between_pages
     items_before = set(a.mgr.data['items'])
     result = a.down()
@@ -1064,9 +1098,9 @@ def test_a_differing_note_stays_known_until_a_pass_reaches_it(tmp_path):
     backup = copy.deepcopy(a.mgr.data)
 
     def skip_it(client, req):
-        if client.actor == 'A' and _is_list_read(req) and req.rng and req.rng[0] > 0:
-            c.delete_row(other)                           # the entry's row slips past the paging
-        if client.actor == 'A' and _is_confirmation(req):
+        if client.actor == 'A' and _is_list_read(req) and _is_later_page(req):
+            _as_the_first_page(req)     # page 2 comes back as page 1: the read never reaches the entry's row
+        if client.actor == 'A' and _is_confirmation(req):   # ... and the confirmation fails
             c.rec.hook = None
             return 'raise_before'
         return None
@@ -1800,9 +1834,15 @@ def test_a_batch_that_committed_before_its_error_is_not_inserted_again(tmp_path,
         {r['id'] for r in c.rows()}
 
 
-# --------------------------------------------------------------------------- a remembered row a racing read skipped
+# --------------------------------------------------------------------------- a remembered row while the read changes
 
-def test_a_recorded_row_a_racing_read_skipped_is_found_and_written(tmp_path):
+@pytest.mark.parametrize('cell', ['website-removes-a-read-row', 'read-ends-short'])
+def test_a_recorded_row_is_found_and_written_when_the_read_changes_under_it(tmp_path, cell):
+    """website-removes-a-read-row: after page 1 the website removes the row it returned. (Paged by offset,
+    page 2 then started past this entry's row, which the confirmation had to find; paged by row id, page 2
+    starts after the id page 1 returned and reads it.) read-ends-short: the server answers page 2 with page
+    1 again, so the read never returns this entry's row and the confirmation finds it where it was
+    recorded. Either way the write goes to that row, conditional on the note read."""
     c = Cloud(max_rows=1)                      # the server answers one row a request
     a = make_desk(tmp_path, c)
     lid = a.mgr.create_list('L')
@@ -1815,20 +1855,24 @@ def test_a_recorded_row_a_racing_read_skipped_is_found_and_written(tmp_path):
     assert first < skipped
     a.mgr.update_item(key, note='n1, edited here')
 
-    def delete_after_page_one(client, req):
-        if client.actor == 'A' and _is_list_read(req) and req.rng and req.rng[0] > 0:
+    def after_page_one(client, req):
+        if client.actor == 'A' and _is_list_read(req) and _is_later_page(req):
             c.rec.hook = None
-            c.delete_row(first)                # page 2 now starts past this entry's row
-    c.rec.hook = delete_after_page_one
+            if cell == 'website-removes-a-read-row':
+                c.delete_row(first)
+            else:
+                _as_the_first_page(req)
+    c.rec.hook = after_page_one
     mark = c.rec.mark()
     result = a.up()
     assert mark(op='insert') == []
-    (patch,) = mark(op='update')               # the confirmation found the row where it was recorded
+    (patch,) = mark(op='update')
     assert patch.payload == {'note': 'n1, edited here'}
     assert ('eq', 'id', skipped) in patch.filters and ('eq', 'note', 'n1') in patch.filters
     assert c.row(skipped)['note'] == 'n1, edited here'
     assert result['success'] and result['web_removed'] == []
-    # the removed row was read on page 1 before it went: its membership was paired, not unchecked
+    # (website-removes-a-read-row) the removed row was read on page 1 before it went: its membership was
+    # paired, not unchecked; (read-ends-short) the rows the read never returned were found where recorded
     assert result['unchecked'] == 0
     assert rec(a, key, lid)['id'] == skipped and rec(a, key, lid)['note'] == 'n1, edited here'
 

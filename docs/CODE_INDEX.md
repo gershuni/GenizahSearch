@@ -1743,95 +1743,96 @@ moved out of `genizah_core.py` (→ `shared/*`) and `genizah_app.py` (→ `deskt
 
 - **Function** `_norm` (Line 88)
 - **Function** `_id_key` (Line 95)
-- **Function** `_item_identity` (Line 99) — (sys_id, fl_id, page) of a local item: its fields, else the ::fl:: / ::img:: parts of its key.
-- **Function** `_row_identity` (Line 112)
-- **Function** `_same_entry` (Line 118) — True only when two identities are certainly one entry.
-- **Function** `_clean` (Line 144)
-- **Function** `_has_lines` (Line 148) — small is empty, equal to big, or a run of complete lines of big (never a raw substring).
-- **Function** `_separators` (Line 155) — The line kept notes are joined with, in English and in Hebrew (a note may hold either).
-- **Function** `_blocks` (Line 166) — The texts a kept note is made of: the parts between its marker lines.
-- **Function** `_holds` (Line 174) — big already contains small: as complete lines, or every text small was kept from.
-- **Function** `_same_text` (Line 183) — Equal, or each holds the other: the same notes kept in another order.
-- **Function** `_keep_both` (Line 188) — Both texts: the desktop's, a marker line, then what the cloud's text adds to it.
-- **Function** `_fold_notes` (Line 205)
-- **Function** `_union` (Line 212)
-- **Function** `_tagset` (Line 220)
-- **Function** `_tags_filter_literal` (Line 224) — list_items.tags is jsonb: the cs/cd filters take JSON text, never the text[] literal {a,b}.
-- **Function** `count_differing_notes` (Line 229) — Entries whose note or tags differ from the account's copy and were left as they are.
-- **Function** `_records` (Line 259)
-- **Function** `_live_record` (Line 263)
-- **Function** `_orphans` (Line 270) — Records for local lists the item is no longer in (a Move, a removal, a merged list).
-- **Function** `_orphan_ids` (Line 277)
-- **Function** `_base_of` (Line 281) — A copy of the record naming this row (for its note/tag bases), or None.
-- **Function** `_drop_record` (Line 289)
-- **Function** `_drop_left_tombstones` (Line 297)
-- **Function** `_remember` (Line 305) — The only writer of a record. note/tags: the cloud values the local copy is known to include.
-- **Function** `_is_missing_column` (Line 341)
-- **Function** `_is_url_too_long` (Line 349)
-- **Function** `_insert_rolled_back` (Line 353) — True when an insert error proves nothing was written, so retrying rows one by one is safe.
-- **Function** `_session_user` (Line 373) — The user id of the client's current session, or None (no session, or no way to tell).
-- **Class** `_Pass` (Line 383) — Everything one sync pass learns; never kept on the sync object.
-    - Method `__init__` (Line 386)
-    - Method `check` (Line 404) — Called before every request.
-    - Method `records_naming` (Line 407) — Which records name each row: built at the pass's first record, then kept by _remember.
-    - Method `prove_auth` (Line 421)
-- **Function** `_list_order` (Line 427)
-- **Function** `_syncable_list` (Line 435)
-- **Function** `_match_rows` (Line 443) — Pair cloud rows of one list with local items. Returns {row_id: item_id}.
-- **Class** `ListsCloudSync` (Line 511) — Handles synchronization between local ListsManager and Supabase.
-    - Method `__init__` (Line 533) — Initialize the sync manager.
-    - Property `_sync_in_progress` (Line 543)
-    - Method `set_client` (Line 546) — Set an external authenticated client (from corrections system).
-    - Method `_get_client` (Line 551) — Get Supabase client - preferring the authenticated external client.
-    - Method `set_user` (Line 568) — Set the current user ID (UUID from Supabase auth).
-    - Method `clear_user` (Line 572) — Clear user ID (on logout).
-    - Method `is_sync_available` (Line 576) — Check if cloud sync is available.
-    - Method `get_cloud_lists_preview` (Line 591) — Get a preview of cloud lists without syncing.
-    - Method `_backup_local_data` (Line 638) — Snapshot the local lists before a sync. Returns True if the snapshot was written.
-    - Method `_guard` (Line 664) — Records belong to one account: drop another account's, then claim the store for this one.
-    - Method `_paged` (Line 676) — Read every page of a query. Returns (rows, complete).
-    - Method `_fetch_list_rows` (Line 713)
-    - Method `_read_user_lists` (Line 739)
-    - Method `_confirm` (Line 745) — Where are these remembered rows now? Fills pass_.where, pass_.absent and pass_.locate_ok.
-    - Method `_may_tombstone` (Line 781) — May this remembered row be taken as removed on the website?
-    - Method `_tombstone` (Line 795)
-    - Method `_repair_shared_cloud_rows` (Line 807) — Items that hold the same cloud row: fold certain duplicates (download), split the rest.
-    - Method `sync_to_cloud` (Line 862) — Push local lists and items to Supabase.
-    - Method `_upload_result` (Line 893)
-    - Method `_upload` (Line 899)
-    - Method `_push_projects_and_lists` (Line 947) — Projects and lists as before, except that a cloud list has at most one local owner.
-    - Method `_push_list_items` (Line 1109) — The item half of an upload, for the given (local list, cloud list) pairs.
-    - Method `_hold_conflicts` (Line 1167) — Entries whose note (or tags) differ on one of their rows and may not be replaced there.
-    - Method `_write_list` (Line 1204)
-    - Method `_write_unmatched` (Line 1220) — A membership that no row of its list's read paired with.
-    - Method `_orphan_choice` (Line 1261) — The orphan whose row this membership takes (moved or adopted): (rank, key, record), or None.
-    - Method `_move_orphan` (Line 1290) — Move (or adopt) a row this item left in a list it is no longer in.
-    - Method `_orphan_gone` (Line 1345)
-    - Method `_reread` (Line 1353)
-    - Method `_changes` (Line 1363) — What an upload may change on a paired row.
-    - Method `_write_matched` (Line 1417) — A row paired with this membership; only what changed, conditional on what was read.
-    - Method `_send_rest` (Line 1446) — After a note/tag change could not be made: send the row's other changed fields alone.
-    - Method `_agreed_bases` (Line 1455) — Bases when a note/tag write did not happen: equal values are agreed, the rest unchanged.
-    - Method `_patch` (Line 1465) — One PATCH of a row, filtered by id, list and the note/tags it replaces.
-    - Method `_insert_rows` (Line 1513) — One batch per list; returned rows are recorded by identity, never by position.
-    - Method `_insert_one` (Line 1574)
-    - Method `sync_from_cloud` (Line 1591) — Pull lists and items from Supabase and merge with local data.
-    - Method `_fetch_cloud_state` (Line 1658) — Everything a download needs from the cloud; reads nothing local and writes nothing.
-    - Method `_apply_projects` (Line 1679) — Cloud projects mapped to local ones by name, as before.
-    - Method `_cloud_deleted_at` (Line 1716)
-    - Method `_map_lists` (Line 1733) — Each local list's own cloud list, and the same-name cloud lists read for it.
-    - Method `_apply_cloud_state` (Line 1862) — The local half of a download: map lists, fold rows into items, reconcile notes once per item.
-    - Method `_walk_list` (Line 1975) — The rows of one local list's own and same-name cloud lists: pair, fold or create.
-    - Method `_plan_list` (Line 2026)
-    - Method `_new_item` (Line 2123) — An unmatched row that is no local entry's: a new item at a free key.
-    - Method `_judge_unseen` (Line 2154) — A remembered row of this membership that no read or confirmation paired with it.
-    - Method `_sweep_unowned` (Line 2170) — Memberships whose local list has no cloud list of its own in this pass (deleted there, or none yet).
-    - Method `_reconcile` (Line 2186) — Every cloud value that reached this entry in this pass, applied at once, in row-id order.
-    - Method `sync_list_to_cloud` (Line 2242) — Push a specific list and its items to cloud.
-    - Method `sync_item_to_cloud` (Line 2303) — Push one membership (an item in one list) to cloud, as an upload would.
-    - Method `delete_list_from_cloud` (Line 2357) — Delete a list from cloud (cascade deletes items).
-    - Method `delete_item_from_cloud` (Line 2381) — Delete the one cloud row remembered for this item in this list; nothing else.
-- **Function** `get_lists_sync` (Line 2412) — Get or create the lists sync singleton.
+- **Function** `_after` (Line 99) — One page of a keyset read (ListsCloudSync._paged): the rows after row id `after`.
+- **Function** `_item_identity` (Line 109) — (sys_id, fl_id, page) of a local item: its fields, else the ::fl:: / ::img:: parts of its key.
+- **Function** `_row_identity` (Line 122)
+- **Function** `_same_entry` (Line 128) — True only when two identities are certainly one entry.
+- **Function** `_clean` (Line 154)
+- **Function** `_has_lines` (Line 158) — small is empty, equal to big, or a run of complete lines of big (never a raw substring).
+- **Function** `_separators` (Line 165) — The line kept notes are joined with, in English and in Hebrew (a note may hold either).
+- **Function** `_blocks` (Line 176) — The texts a kept note is made of: the parts between its marker lines.
+- **Function** `_holds` (Line 184) — big already contains small: as complete lines, or every text small was kept from.
+- **Function** `_same_text` (Line 193) — Equal, or each holds the other: the same notes kept in another order.
+- **Function** `_keep_both` (Line 198) — Both texts: the desktop's, a marker line, then what the cloud's text adds to it.
+- **Function** `_fold_notes` (Line 215)
+- **Function** `_union` (Line 222)
+- **Function** `_tagset` (Line 230)
+- **Function** `_tags_filter_literal` (Line 234) — list_items.tags is jsonb: the cs/cd filters take JSON text, never the text[] literal {a,b}.
+- **Function** `count_differing_notes` (Line 239) — Entries whose note or tags differ from the account's copy and were left as they are.
+- **Function** `_records` (Line 269)
+- **Function** `_live_record` (Line 273)
+- **Function** `_orphans` (Line 280) — Records for local lists the item is no longer in (a Move, a removal, a merged list).
+- **Function** `_orphan_ids` (Line 287)
+- **Function** `_base_of` (Line 291) — A copy of the record naming this row (for its note/tag bases), or None.
+- **Function** `_drop_record` (Line 299)
+- **Function** `_drop_left_tombstones` (Line 307)
+- **Function** `_remember` (Line 315) — The only writer of a record. note/tags: the cloud values the local copy is known to include.
+- **Function** `_is_missing_column` (Line 351)
+- **Function** `_is_url_too_long` (Line 359)
+- **Function** `_insert_rolled_back` (Line 363) — True when an insert error proves nothing was written, so retrying rows one by one is safe.
+- **Function** `_session_user` (Line 383) — The user id of the client's current session, or None (no session, or no way to tell).
+- **Class** `_Pass` (Line 393) — Everything one sync pass learns; never kept on the sync object.
+    - Method `__init__` (Line 396)
+    - Method `check` (Line 414) — Called before every request.
+    - Method `records_naming` (Line 417) — Which records name each row: built at the pass's first record, then kept by _remember.
+    - Method `prove_auth` (Line 431)
+- **Function** `_list_order` (Line 437)
+- **Function** `_syncable_list` (Line 445)
+- **Function** `_match_rows` (Line 453) — Pair cloud rows of one list with local items. Returns {row_id: item_id}.
+- **Class** `ListsCloudSync` (Line 521) — Handles synchronization between local ListsManager and Supabase.
+    - Method `__init__` (Line 543) — Initialize the sync manager.
+    - Property `_sync_in_progress` (Line 553)
+    - Method `set_client` (Line 556) — Set an external authenticated client (from corrections system).
+    - Method `_get_client` (Line 561) — Get Supabase client - preferring the authenticated external client.
+    - Method `set_user` (Line 578) — Set the current user ID (UUID from Supabase auth).
+    - Method `clear_user` (Line 582) — Clear user ID (on logout).
+    - Method `is_sync_available` (Line 586) — Check if cloud sync is available.
+    - Method `get_cloud_lists_preview` (Line 601) — Get a preview of cloud lists without syncing.
+    - Method `_backup_local_data` (Line 648) — Snapshot the local lists before a sync. Returns True if the snapshot was written.
+    - Method `_guard` (Line 674) — Records belong to one account: drop another account's, then claim the store for this one.
+    - Method `_paged` (Line 686) — Read every row of a query, a page at a time by row id. Returns (rows, complete).
+    - Method `_fetch_list_rows` (Line 729)
+    - Method `_read_user_lists` (Line 754)
+    - Method `_confirm` (Line 759) — Where are these remembered rows now? Fills pass_.where, pass_.absent and pass_.locate_ok.
+    - Method `_may_tombstone` (Line 794) — May this remembered row be taken as removed on the website?
+    - Method `_tombstone` (Line 808)
+    - Method `_repair_shared_cloud_rows` (Line 820) — Items that hold the same cloud row: fold certain duplicates (download), split the rest.
+    - Method `sync_to_cloud` (Line 875) — Push local lists and items to Supabase.
+    - Method `_upload_result` (Line 906)
+    - Method `_upload` (Line 912)
+    - Method `_push_projects_and_lists` (Line 960) — Projects and lists as before, except that a cloud list has at most one local owner.
+    - Method `_push_list_items` (Line 1122) — The item half of an upload, for the given (local list, cloud list) pairs.
+    - Method `_hold_conflicts` (Line 1180) — Entries whose note (or tags) differ on one of their rows and may not be replaced there.
+    - Method `_write_list` (Line 1217)
+    - Method `_write_unmatched` (Line 1233) — A membership that no row of its list's read paired with.
+    - Method `_orphan_choice` (Line 1274) — The orphan whose row this membership takes (moved or adopted): (rank, key, record), or None.
+    - Method `_move_orphan` (Line 1303) — Move (or adopt) a row this item left in a list it is no longer in.
+    - Method `_orphan_gone` (Line 1358)
+    - Method `_reread` (Line 1366)
+    - Method `_changes` (Line 1376) — What an upload may change on a paired row.
+    - Method `_write_matched` (Line 1430) — A row paired with this membership; only what changed, conditional on what was read.
+    - Method `_send_rest` (Line 1459) — After a note/tag change could not be made: send the row's other changed fields alone.
+    - Method `_agreed_bases` (Line 1468) — Bases when a note/tag write did not happen: equal values are agreed, the rest unchanged.
+    - Method `_patch` (Line 1478) — One PATCH of a row, filtered by id, list and the note/tags it replaces.
+    - Method `_insert_rows` (Line 1526) — One batch per list; returned rows are recorded by identity, never by position.
+    - Method `_insert_one` (Line 1587)
+    - Method `sync_from_cloud` (Line 1604) — Pull lists and items from Supabase and merge with local data.
+    - Method `_fetch_cloud_state` (Line 1671) — Everything a download needs from the cloud; reads nothing local and writes nothing.
+    - Method `_apply_projects` (Line 1692) — Cloud projects mapped to local ones by name, as before.
+    - Method `_cloud_deleted_at` (Line 1729)
+    - Method `_map_lists` (Line 1746) — Each local list's own cloud list, and the same-name cloud lists read for it.
+    - Method `_apply_cloud_state` (Line 1875) — The local half of a download: map lists, fold rows into items, reconcile notes once per item.
+    - Method `_walk_list` (Line 1988) — The rows of one local list's own and same-name cloud lists: pair, fold or create.
+    - Method `_plan_list` (Line 2039)
+    - Method `_new_item` (Line 2136) — An unmatched row that is no local entry's: a new item at a free key.
+    - Method `_judge_unseen` (Line 2167) — A remembered row of this membership that no read or confirmation paired with it.
+    - Method `_sweep_unowned` (Line 2183) — Memberships whose local list has no cloud list of its own in this pass (deleted there, or none yet).
+    - Method `_reconcile` (Line 2199) — Every cloud value that reached this entry in this pass, applied at once, in row-id order.
+    - Method `sync_list_to_cloud` (Line 2255) — Push a specific list and its items to cloud.
+    - Method `sync_item_to_cloud` (Line 2316) — Push one membership (an item in one list) to cloud, as an upload would.
+    - Method `delete_list_from_cloud` (Line 2370) — Delete a list from cloud (cascade deletes items).
+    - Method `delete_item_from_cloud` (Line 2394) — Delete the one cloud row remembered for this item in this list; nothing else.
+- **Function** `get_lists_sync` (Line 2425) — Get or create the lists sync singleton.
 
 ## shared/browse_map_utils.py
 

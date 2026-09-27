@@ -47,8 +47,8 @@ DOWNLOAD_BACKUP_FAILED = (
 # translation from the same two counts.
 UPLOAD_PARTLY_FAILED = "Uploaded {} item(s), but {} failed to upload to the cloud."
 
-# Rows are read in pages; the next page starts where the rows returned end,
-# because the server may cap a page below PAGE_SIZE.
+# Rows are read in pages by row id; the next page starts after the last id returned,
+# and only an empty page ends a read, because the server may cap a page below PAGE_SIZE.
 PAGE_SIZE = 1000
 ROW_COLUMNS = 'id, list_id, sys_id, fl_id, note, tags, shelfmark'
 # The confirmation reads a row's identity too, so a row it finds is written to as a read one is.
@@ -94,6 +94,16 @@ def _norm(value):
 
 def _id_key(value):
     return (0, value, '') if isinstance(value, int) else (1, 0, str(value))
+
+
+def _after(query, after):
+    """One page of a keyset read (ListsCloudSync._paged): the rows after row id `after`.
+
+    In id order and at most PAGE_SIZE rows; no id filter when `after` is None (the first page).
+    """
+    if after is not None:
+        query = query.gt('id', after)
+    return query.order('id').limit(PAGE_SIZE)
 
 
 def _item_identity(item_id, item):
@@ -674,49 +684,54 @@ class ListsCloudSync:
         store['cloud_account'] = pass_.user_id
 
     def _paged(self, pass_, build):
-        """Read every page of a query. Returns (rows, complete).
+        """Read every row of a query, a page at a time by row id. Returns (rows, complete).
 
-        complete: every page answered with the same non-None count, and the unique
-        ids collected equal it. A range past the end (PGRST103) on a later page ends
-        the read as not complete; any other error raises.
+        build(after) is the query ordered by id and limited to PAGE_SIZE rows, with
+        `.gt('id', after)` unless `after` is None (the first page) -- see _after. Each
+        next page starts after the last id the page before returned (keyset paging;
+        list_items.id and user_lists.id are SERIAL, supabase_setup.sql). The read ends
+        at the first EMPTY page: a short page is not the end, because the server may
+        answer fewer rows per request than PAGE_SIZE.
+
+        complete: the read reached an empty page. Such a read returned every row that
+        was there for the whole of it. A row added during the read has an id above
+        every id returned so far, so a later page returns it; a row removed during the
+        read may or may not be among those returned. No removal can move a later page
+        past a row it has not returned (an offset can, and then equal counts and an
+        equal number of ids prove nothing), so the read needs no count.
+
+        Not complete: a page whose ids do not rise from the last id (a row the read
+        already has, one before it, or rows out of order: the server did not apply
+        the filter or the order). The read ends there, without that page. Any error
+        raises.
+
+        The gap accepted: an id is taken from the sequence when a row is inserted, not
+        when its transaction commits. A row that took an id below one this read already
+        passed, and committed only after the read passed it, is not returned. Rows are
+        added by single-statement inserts (the website one row, a desktop a batch), so
+        that window is milliseconds. (A row moved into the list during the read keeps
+        its lower id and may be missed the same way -- as it would be, moved just after
+        the read.)
         """
-        rows, seen, counts, start = [], set(), [], 0
+        rows, after = [], None
         while True:
             pass_.check()
-            try:
-                resp = build(start).execute()
-            except APIError as e:
-                if start > 0 and str(getattr(e, 'code', '')) == 'PGRST103':
-                    return rows, False
-                raise
-            page = resp.data or []
-            count = getattr(resp, 'count', None)
-            counts.append(count)
-            new = 0
-            for row in page:
-                rid = row.get('id')
-                if rid not in seen:
-                    seen.add(rid)
-                    rows.append(row)
-                    new += 1
+            page = build(after).execute().data or []
             if not page:
-                break
-            if not new:
-                return rows, False   # the same rows again: the server ignored the range
-            start += len(page)
-            if count is not None and len(seen) >= count:
-                break
-        complete = (all(c is not None for c in counts) and len(set(counts)) == 1
-                    and len(seen) == counts[0])
-        return rows, complete
+                return rows, True
+            ids = [row.get('id') for row in page]
+            keys = ([] if after is None else [_id_key(after)]) + [_id_key(rid) for rid in ids]
+            if None in ids or any(a >= b for a, b in zip(keys, keys[1:])):
+                return rows, False   # ids that do not rise from the last one: see "Not complete"
+            rows.extend(page)
+            after = ids[-1]
 
     def _fetch_list_rows(self, pass_, cloud_list_id):
         client = pass_.client
 
         def reader(cols):
-            return lambda start: (client.table('list_items').select(cols, count='exact')
-                                  .eq('list_id', cloud_list_id).order('id')
-                                  .range(start, start + PAGE_SIZE - 1))
+            return lambda after: _after(client.table('list_items').select(cols)
+                                        .eq('list_id', cloud_list_id), after)
 
         if pass_.has_page is not False:
             try:
@@ -738,9 +753,8 @@ class ListsCloudSync:
 
     def _read_user_lists(self, pass_, cols):
         client = pass_.client
-        return self._paged(pass_, lambda start: (client.table('user_lists').select(cols, count='exact')
-                                                 .eq('user_id', pass_.user_id).order('id')
-                                                 .range(start, start + PAGE_SIZE - 1)))
+        return self._paged(pass_, lambda after: _after(client.table('user_lists').select(cols)
+                                                       .eq('user_id', pass_.user_id), after))
 
     def _confirm(self, pass_, ids):
         """Where are these remembered rows now? Fills pass_.where, pass_.absent and pass_.locate_ok."""
@@ -748,8 +762,7 @@ class ListsCloudSync:
         client = pass_.client
 
         def reader(chunk, cols):
-            return lambda start: (client.table('list_items').select(cols, count='exact').in_('id', chunk)
-                                  .order('id').range(start, start + PAGE_SIZE - 1))
+            return lambda after: _after(client.table('list_items').select(cols).in_('id', chunk), after)
 
         for n in range(0, len(ask), CONFIRM_CHUNK):
             chunk = ask[n:n + CONFIRM_CHUNK]

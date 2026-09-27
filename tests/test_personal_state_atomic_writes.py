@@ -1286,13 +1286,18 @@ class _FakeQuery:
         self.op = "select"
         return self
 
-    # The sync pages its reads (order + range, count='exact') and makes every note
-    # and tag write conditional on the value it read (is_ / eq, contains + contained_by).
+    # The sync pages its reads by row id (order + limit, gt after the first page) and
+    # makes every note and tag write conditional on the value it read (is_ / eq,
+    # contains + contained_by).
     def order(self, column, **kw):
         return self
 
-    def range(self, start, end):
-        self.window = (start, end)
+    def limit(self, n):
+        self.window = n
+        return self
+
+    def gt(self, column, value):
+        self.filters.append((column, lambda v, value=value: v > value))
         return self
 
     def in_(self, column, values):
@@ -1333,9 +1338,9 @@ class _FakeQuery:
                 self.cloud.fail_next_read = False
                 raise ConnectionError("the network went away")
             page = sorted(matched, key=lambda r: r["id"])
-            if self.window:
-                page = page[self.window[0]:self.window[1] + 1]
-            return types.SimpleNamespace(data=[dict(r) for r in page], count=len(matched))
+            if self.window is not None:
+                page = page[:self.window]
+            return types.SimpleNamespace(data=[dict(r) for r in page])
         self.cloud.writes.append((self.name, self.op, self.payload))
         if self.op == "insert":
             out = []

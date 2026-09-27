@@ -50,9 +50,9 @@ class _FakeQuery:
     def eq(self, *a, **k):
         return self
 
-    # The sync pages its reads (order + range, with count='exact') and filters
-    # conditional writes; this cloud holds nothing to filter.
-    order = range = in_ = is_ = contains = contained_by = eq
+    # The sync pages its reads by row id (order + limit, gt after the first page)
+    # and filters conditional writes; this cloud holds nothing to filter.
+    order = limit = gt = in_ = is_ = contains = contained_by = eq
 
     def execute(self):
         return self._client._execute(self._table, self._op, self._payload)
