@@ -1729,6 +1729,7 @@ class ListsCloudSync:
             result['lists_updated'] += 1
 
         same_name = collections.defaultdict(list)
+        holding = {local_lists[lid].get('cloud_id') for lid in order}
         for cid in sorted(cloud_by_id, key=_id_key):
             if cid in taken:
                 continue
@@ -1736,6 +1737,10 @@ class ListsCloudSync:
             first = next((lid for lid in order if candidate(cl, lid)), None)
             if first is not None:
                 same_name[first].append(cid)
+                continue
+            if cid in holding:
+                # Renamed on the website: the list that holds it keeps it (the next upload
+                # sends that list's name), so no second local list is made to own it.
                 continue
             # Create new local list
             import uuid

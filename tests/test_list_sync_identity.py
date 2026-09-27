@@ -333,7 +333,8 @@ def test_merging_a_duplicate_list_leaves_no_rows_behind(tmp_path, cloud):
     assert len(cloud.rows(list_id=cloud_id(a, keep))) == 1
 
 
-def test_a_list_over_one_page_is_read_in_full(tmp_path, cloud):
+def test_a_list_over_one_page_is_read_in_full(tmp_path):
+    cloud = Cloud(max_rows=1000)      # the server answers at most 1000 rows a request
     a = make_desk(tmp_path, cloud)
     cl = cloud.new_list('Big')
     cloud.web.table('list_items').insert([{'list_id': cl, 'sys_id': '990001', 'fl_id': f'FL{n}', 'note': '',
@@ -1169,6 +1170,25 @@ def test_a_kept_list_that_had_no_cloud_id_keeps_its_trash_state(tmp_path, state,
                        [(r['id'], r['name'], bool(r.get('deleted_at'))) for r in c.db.tables['user_lists']],
                        c.rows())
     assert ends['download-first'] == ends['upload-first']
+
+
+def test_a_list_renamed_on_the_website_keeps_one_local_owner(tmp_path, cloud):
+    # No local list has the new name: the list that holds the id keeps it, and the
+    # Download makes no second local list holding the same cloud list.
+    a = make_desk(tmp_path, cloud)
+    lid = a.mgr.create_list('L')
+    a.mgr.add_item('990001', lid, fl_id='FLa')
+    assert a.up()['success']
+    five = cloud_id(a, lid)
+    cloud.web.table('user_lists').update({'name': 'Renamed', 'name_en': 'Renamed'}).eq('id', five).execute()
+    assert a.down()['success']
+    assert [k for k, ld in a.mgr.data['lists'].items() if ld.get('cloud_id') == five] == [lid]
+    state = copy.deepcopy(a.mgr.data)
+    assert a.down()['success']
+    assert a.mgr.data == state                     # a second Download changes nothing
+    mark = cloud.rec.mark()
+    assert a.up()['success']
+    assert mark(op='insert') == [] and len(cloud.rows(list_id=five)) == 1
 
 
 @pytest.mark.parametrize('cell', ['remapped-list-upload', 'remapped-list-download', 'two-local-lists-one-name'])
