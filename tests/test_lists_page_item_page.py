@@ -285,6 +285,29 @@ def test_the_note_and_tag_edit_reach_the_row(page):
     assert 'positive' in _toasts(page.ui)
 
 
+@pytest.mark.parametrize('edit_tags', [False, True], ids=['note-only', 'tags-edited'])
+def test_a_note_only_save_leaves_a_tag_with_a_comma_alone(page, monkeypatch, edit_tags):
+    # The field shows the tags joined with ', ' and a save splits it on ','. A desktop tag
+    # may hold a comma, so the tags are sent only when the user changed the field.
+    row = dict(ROW, tags=['Cairo, 12th c.'])
+    monkeypatch.setattr(user_lists, 'get_list_items', lambda list_id, *, client=None: [dict(row)])
+    page.select(ORDINARY_LIST)
+    (edit,) = _button_clicks(page.ui, 'edit')
+    edit()
+    shown = page.ui.input.call_args.kwargs['value']
+    assert shown == 'Cairo, 12th c.'
+    page.ui.textarea.return_value.classes.return_value.props.return_value.value = 'new note'
+    tags_field = page.ui.input.return_value.classes.return_value.props.return_value
+    tags_field.value = shown + ', more' if edit_tags else shown     # the field as the user left it
+    _run(_labelled_button_click(page.ui, 'Save')())
+
+    if edit_tags:
+        assert page.cloud.updates == [(41, {'note': 'new note'}), (41, {'tags': ['Cairo', '12th c.', 'more']})]
+    else:
+        assert page.cloud.updates == [(41, {'note': 'new note'})]
+    assert 'negative' not in _toasts(page.ui) and 'positive' in _toasts(page.ui)
+
+
 def test_remove_reaches_the_row(page):
     page.select(ORDINARY_LIST)
     (remove,) = _button_clicks(page.ui, 'delete')

@@ -507,9 +507,10 @@ def create_lists_page():
                 value=item_data.get('note', '')
             ).classes('w-full mb-4').props('outlined rows=3')
 
+            tags_text = ', '.join(item_data.get('tags', []))
             tags_input = ui.input(
                 label=tr('Tags (comma-separated)'),
-                value=', '.join(item_data.get('tags', []))
+                value=tags_text
             ).classes('w-full mb-4').props('outlined')
 
             async def save_changes():
@@ -523,9 +524,10 @@ def create_lists_page():
                         if not noted:
                             return
 
-                    # Update tags
+                    # Update tags -- only when the field was changed: it splits on ',', so
+                    # re-reading an untouched field would split a tag holding a comma
                     new_tags = [t.strip() for t in tags_input.value.split(',') if t.strip()]
-                    if new_tags != item_data.get('tags', []):
+                    if tags_input.value != tags_text and new_tags != item_data.get('tags', []):
                         tagged = await _run_lists_write(
                             lambda: state.lists_mgr.update_item_tags(item_id, new_tags)
                         )
