@@ -41,12 +41,13 @@ TAGS = "Tags that differed between this computer and your account: {}. The tags 
 # the preview dialog's rows, the stop message, and the too-long line while saves fail.
 TOO_LONG_NOT_SAVED = "Notes too long to update safely in your account: {}. They were not changed there."
 SYNC_KEYS = (
-    "Don't download from your account now. Uploads continue: until you sign out or close the "
+    "Don't download from your account now. Uploads continue: until you log out or close the "
     "program, your lists are uploaded to your account after each change.",
     "Checking the lists in your account...",
     "Waiting for the list sync that is already running...",
     "Downloading list {} of {}...",
     "Uploading list {} of {}...",
+    "Removing entries from your account...",
     "List sync cancelled. Nothing was changed on this computer.",
     "Upload stopped. The rest of your changes are saved on this computer but have not reached "
     "your account yet.",
@@ -58,23 +59,24 @@ SYNC_KEYS = (
     "{} ({} items)",
     "... and {} more",
     TOO_LONG_NOT_SAVED,
-    # Sign-in at startup, sign-out
-    "Could not check the lists in your account: {}. List sync stays on; Sync lists now tries again.",
-    "Signing out...",
-    "These lists were not uploaded before you signed out: {}. Your changes to them are saved on "
-    "this computer and are uploaded after you next sign in.",
-    "Your latest list changes were not uploaded before you signed out. They are saved on this "
-    "computer and are uploaded after you next sign in.",
+    # Log-in at startup, log-out
+    "Could not reach your account to check the lists. List sync stays on; Sync lists now tries again.",
+    "Logging out...",
+    "These lists were not uploaded before you logged out: {}. Your changes to them are saved on "
+    "this computer and are uploaded after you next log in.",
+    "Your latest list changes were not uploaded before you logged out. They are saved on this "
+    "computer and are uploaded after you next log in.",
     "List sync was not on in this session, so your list changes were not uploaded. They are saved "
-    "on this computer and are uploaded after you next sign in.",
+    "on this computer and are uploaded after you next log in.",
     "Some notes differ from your account and were not uploaded. They are kept on this computer; "
-    "after you next sign in, use Sync lists now, then Merge Both, to keep both versions.",
+    "after you next log in, use Sync lists now, then Merge Both, to keep both versions.",
     "Your lists cannot be saved on this computer at the moment ({} cannot be written). List changes "
-    "that did not reach your account before you signed out are lost when you close the program.",
+    "that did not reach your account before you logged out are lost if you close the program before "
+    "the file can be saved again.",
     # Sync lists now, and the website-removal prompt
     "Sync lists now",
     "Download, upload or merge your lists with your account on genizahsearch.com",
-    "Sign in to sync your lists with your account",
+    "Log in to sync your lists with your account",
     "Entries removed on the website",
     "These entries were removed from your lists on genizahsearch.com. They are still on this "
     "computer, and until you choose they stay here and are not uploaded again.",
@@ -84,8 +86,19 @@ SYNC_KEYS = (
     "Remove all from this computer too",
     "Keep all (and add them back on the website)",
     "Choice",
-    "Removed from this computer: {}. To be added back on the website: {}.",
+    "Removed from their lists on this computer: {}. To be added back on the website: {}.",
+    # the runner's error for a stage that returned no result
+    "Unknown error",
 )
+
+
+def test_no_new_list_sync_text_says_sign_in_or_sign_out():
+    """The corner button says Login and Logout, so the list-sync texts say log in and log out
+    (the Hebrew has one verb for both)."""
+    for key in SYNC_KEYS:
+        lowered = key.lower()
+        assert not any(word in lowered for word in ("sign in", "sign out", "signed out", "signing out",
+                                                    "signed in", "signing in")), key
 
 
 def test_the_button_names_in_the_notes_lines_are_the_buttons_labels():

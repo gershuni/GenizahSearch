@@ -997,8 +997,9 @@ class ListsCloudSync:
         data: a copy of the store to upload from (the desktop's runner, which installs
         the copy's cloud identity itself: ListsManager.begin_upload/finish_upload); the
         live store otherwise, snapshotted first and saved after. should_stop() is asked
-        before every request; progress(done, total) counts the lists written and the
-        deletes; backfill_pages=False sends no update whose only change is the page;
+        before every request; progress(done, total) counts the lists whose entries are
+        written (0 of total as the upload begins), and progress(0, 0, 'deletes') says the
+        removals are being sent; backfill_pages=False sends no update whose only change is the page;
         withdrawn() names the memberships removed meanwhile, which are then neither
         inserted nor moved; on_recorded(report) hears of every record and cloud-id write.
 
@@ -1057,7 +1058,14 @@ class ListsCloudSync:
         progress = {'lists': [lists[lid].get('name', 'Unnamed') for lid in _list_order(store)
                               if lid in lists and _syncable_list(lid, lists[lid])
                               and (only_list is None or lid == only_list)],
-                    'writing': None, 'tell': on_progress}
+                    'writing': None, 'tell': on_progress, 'written': 0}
+        # what the progress counts: the lists whose entries this upload writes (a list in the
+        # Trash sends its own state only), each once; the deletes are a step of their own
+        progress['total'] = sum(1 for lid in _list_order(store)
+                                if lid in lists and _syncable_list(lid, lists[lid])
+                                and not lists[lid].get('deleted_at') and (only_list is None or lid == only_list))
+        if progress['total'] and only_item is None:
+            self._tell_progress(progress, 0, progress['total'])
         try:
             if only_list is None:
                 pushable, lists_complete, cloud_list_ids = self._push_projects_and_lists(pass_, store, result,
@@ -1342,7 +1350,6 @@ class ListsCloudSync:
         self._hold_conflicts(pass_, plans, owners)
 
         names = [lists.get(p['list'], {}).get('name', 'Unnamed') for p in plans]
-        steps = len(plans) + (1 if deletes else 0)
         for n, plan in enumerate(plans):
             if only_item is None:
                 progress['writing'] = progress['lists'].index(names[n]) if names[n] in progress['lists'] else None
@@ -1350,20 +1357,28 @@ class ListsCloudSync:
             self._write_list(pass_, store, plan, lists_complete, cloud_list_ids, owners, result)
             if result['items_failed'] > failed_before and names[n] not in result['lists_not_uploaded']:
                 result['lists_not_uploaded'].append(names[n])
-            self._tell_progress(progress, n + 1, steps)
+            if only_item is None:
+                progress['written'] = progress.get('written', 0) + 1
+                total = progress.get('total') or len(plans)
+                self._tell_progress(progress, min(progress['written'], total), total)
         progress['writing'] = None
         if deletes:
+            if only_item is None:
+                self._tell_progress(progress, 0, 0, 'deletes')    # a step of its own, not a list
             read = {plan['cloud']: plan['complete'] for plan in plans}
             self._send_deletes(pass_, store, result, read, lists_complete, cloud_list_ids)
-            self._tell_progress(progress, steps, steps)
 
     @staticmethod
-    def _tell_progress(progress, done, total):
+    def _tell_progress(progress, done, total, what=None):
+        """progress['tell'](done, total), or (done, total, what) for a step that is not a list."""
         tell = progress.get('tell')
         if tell is None:
             return
         try:
-            tell(done, total)
+            if what is None:
+                tell(done, total)
+            else:
+                tell(done, total, what)
         except Exception as e:
             logger.debug("Upload progress callback failed: %s", e)
 

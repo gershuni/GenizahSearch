@@ -1401,6 +1401,7 @@ class GenizahGUI(QMainWindow):
     _logout_generation = 0
     _logout_job = None
     _logout_timer = None
+    _logout_knew_unsent = False         # the runner held changes not yet uploaded as a sign-out began
     LOGOUT_SYNC_BUDGET_S = 10           # the longest a sign-out waits for its last list upload
     LISTS_DIALOG_RECHECK_MS = 500       # how often a held sync question looks for a free screen
     _held_lists_dialog = None
@@ -2408,7 +2409,7 @@ class GenizahGUI(QMainWindow):
             return
         button.setEnabled(bool(enabled))
         button.setToolTip(tr("Download, upload or merge your lists with your account on genizahsearch.com")
-                          if enabled else tr("Sign in to sync your lists with your account"))
+                          if enabled else tr("Log in to sync your lists with your account"))
 
     def _set_active_tab(self, target) -> None:
         """Set the active tab programmatically without emitting telemetry.
@@ -2524,12 +2525,19 @@ class GenizahGUI(QMainWindow):
         self._drop_held_lists_dialog()
         self._stop_web_removal_offer()
         self._set_lists_sync_now_enabled(False)
+        self._logout_knew_unsent = False
         if not (self.lists_mgr and self.lists_mgr.is_sync_available()):
             self._finish_logout({'skipped': True, 'sync_off': True}, token=token)
             return
+        # The notice may say that list changes did not upload only when the runner knew,
+        # as the sign-out began, of changes not yet in the account (an upload under way
+        # counts until it succeeds): a check upload that fails with nothing unsent is
+        # not a lost change.
+        runner = self._lists_sync
+        self._logout_knew_unsent = bool(runner is not None and runner.unsent)
         try:
             self.corner_login_btn.setEnabled(False)
-            self.corner_login_btn.setText(tr("Signing out..."))
+            self.corner_login_btn.setText(tr("Logging out..."))
         except Exception as e:
             logger.debug(f"Sign-out: could not update the login button: {e}")
         try:
@@ -2537,12 +2545,12 @@ class GenizahGUI(QMainWindow):
                 on_done=lambda outcome, t=token: self._finish_logout(outcome, token=t),
                 budget_s=self.LOGOUT_SYNC_BUDGET_S)
         except Exception:
-            # Without this the sign-out would wait forever on "Signing out...". It ends
-            # now, as one whose last upload did not run: the notice names unsent changes
-            # when the runner knows of some, as after a sign-out that needed no upload;
-            # with no runner at all it cannot know, and says so as a cut sign-out does.
+            # Without this the sign-out would wait forever on "Logging out...". It ends
+            # now, as one whose last upload could not start: the notice says the changes
+            # did not upload when the runner knew of some, and nothing when it did not
+            # (with no runner at all, nothing was unsent through it).
             logger.exception("Sign-out: the last list upload could not be started")
-            self._finish_logout({'skipped': True} if self._lists_sync is not None else None, token=token)
+            self._finish_logout({'error': 'not started'}, token=token)
             return
         if not (self._logout_pending and self._logout_generation == token):
             return  # it ended already
@@ -2624,43 +2632,47 @@ class GenizahGUI(QMainWindow):
     def _logout_notice_paragraphs(self, outcome):
         """What the sign-out notice says about the lists, beyond "You have been logged out.".
 
-        A change that did not upload is named (the lists, when the upload knew them
-        and no removal is among what failed -- a removed entry's row is not always in
-        the list it was removed from), and so is a note that still differs from the
-        account's. While lists.pkl cannot be saved, none of that is kept here, so the
-        notice says instead that such changes are lost when the program closes.
+        Changes that did not upload are mentioned only when the runner knew, as the
+        sign-out began, of changes not yet in the account (_logout_knew_unsent), and
+        then only when the sign-out's upload did not succeed or left lists for later.
+        They are named (the lists, when the upload knew them and no removal is among
+        what failed -- a removed entry's row is not always in the list it was removed
+        from). A note that still differs from the account's is mentioned too. While
+        lists.pkl cannot be saved, none of that is kept here, so the notice says
+        instead that such changes are lost if the program closes first.
         """
         mgr = self.lists_mgr
-        runner = self._lists_sync
         upload = (outcome or {}).get('upload') or {}
         failing = bool(mgr is not None and mgr.saves_failing())
         unsent = None
         if outcome is not None and outcome.get('sync_off'):
             if self._lists_changed_while_sync_off:
                 unsent = tr("List sync was not on in this session, so your list changes were not "
-                            "uploaded. They are saved on this computer and are uploaded after you next sign in.")
-        elif (outcome is None or outcome.get('cancelled') or outcome.get('error') or upload.get('stopped')
-              or (upload and not upload.get('success')) or (runner is not None and runner.unsent)):
+                            "uploaded. They are saved on this computer and are uploaded after you next log in.")
+        elif self._logout_knew_unsent:
             names = upload.get('lists_not_uploaded') or []
+            ended_short = (outcome is None or outcome.get('cancelled') or outcome.get('error')
+                           or upload.get('stopped') or (upload and not upload.get('success')))
             if names and not upload.get('removals_failed', 0):
-                unsent = tr("These lists were not uploaded before you signed out: {}. Your changes to them "
-                            "are saved on this computer and are uploaded after you next sign in.").format(
+                # also after an upload that succeeded but left these lists for the next one
+                unsent = tr("These lists were not uploaded before you logged out: {}. Your changes to them "
+                            "are saved on this computer and are uploaded after you next log in.").format(
                                 ", ".join(names))
-            else:
-                unsent = tr("Your latest list changes were not uploaded before you signed out. They are "
-                            "saved on this computer and are uploaded after you next sign in.")
+            elif ended_short:
+                unsent = tr("Your latest list changes were not uploaded before you logged out. They are "
+                            "saved on this computer and are uploaded after you next log in.")
         differing = mgr is not None and mgr.differing_notes_count() > 0
         too_long = upload.get('notes_too_long', 0)
         if failing:
             paragraphs = [tr("Your lists cannot be saved on this computer at the moment ({} cannot be "
-                             "written). List changes that did not reach your account before you signed "
-                             "out are lost when you close the program.").format(
+                             "written). List changes that did not reach your account before you logged "
+                             "out are lost if you close the program before the file can be saved again.").format(
                                  os.path.basename(self._lists_file_path()))]
         else:
             paragraphs = [p for p in (unsent,) if p]
             if differing:
                 paragraphs.append(tr("Some notes differ from your account and were not uploaded. They are "
-                                     "kept on this computer; after you next sign in, use Sync lists now, "
+                                     "kept on this computer; after you next log in, use Sync lists now, "
                                      "then Merge Both, to keep both versions."))
         if too_long:
             paragraphs.append(self._too_long_notes_line(too_long, failing))
@@ -2755,10 +2767,12 @@ class GenizahGUI(QMainWindow):
             if not cloud_preview:
                 cloud_preview = {'success': False, 'error': outcome.get('error')}
             if restored and not cloud_preview.get('success'):
-                # Offline at startup: say so and stay on; edits upload once it can.
-                self._lists_sync_status(tr("Could not check the lists in your account: {}. List sync "
-                                           "stays on; Sync lists now tries again.").format(
-                                               self._sync_error_text(cloud_preview)))
+                # Offline at startup: say so and stay on; edits upload once it can. The
+                # error itself goes to the log, not the status bar.
+                logger.warning("Restored log-in: the preview of the account's lists failed: %s",
+                               cloud_preview.get('error'))
+                self._lists_sync_status(tr("Could not reach your account to check the lists. List sync "
+                                           "stays on; Sync lists now tries again."))
                 return
             logger.info(f"Cloud preview returned: {cloud_preview}")
             local_lists = self.lists_mgr.get_local_lists_summary()
@@ -2997,7 +3011,7 @@ class GenizahGUI(QMainWindow):
 
         # Skip button
         skip_btn = QPushButton(tr("Skip"))
-        skip_btn.setToolTip(tr("Don't download from your account now. Uploads continue: until you sign out "
+        skip_btn.setToolTip(tr("Don't download from your account now. Uploads continue: until you log out "
                                "or close the program, your lists are uploaded to your account after each change."))
         skip_btn.clicked.connect(dialog.reject)
         btn_layout.addWidget(skip_btn)
@@ -3067,11 +3081,20 @@ class GenizahGUI(QMainWindow):
 
     @staticmethod
     def _on_lists_sync_progress(progress, stage, done, total):
-        if not total:
+        """The runner's progress for one job: 'start' (a queued job's turn came),
+        'download' and 'upload' (done of total lists), 'deletes' (the upload sends
+        the removals made here)."""
+        if stage == 'start':
+            text = tr("Syncing lists...")
+        elif stage == 'deletes':
+            text = tr("Removing entries from your account...")
+        elif not total:
             return
-        text = tr("Downloading list {} of {}...") if stage == 'download' else tr("Uploading list {} of {}...")
+        else:
+            text = (tr("Downloading list {} of {}...") if stage == 'download'
+                    else tr("Uploading list {} of {}...")).format(min(done + 1, total), total)
         try:
-            progress.setLabelText(text.format(min(done + 1, total), total))
+            progress.setLabelText(text)
         except RuntimeError:
             pass  # the dialog is gone
 
@@ -3234,8 +3257,8 @@ class GenizahGUI(QMainWindow):
             if removed or kept:
                 # A Remove can queue deletes too (a row on its way to that list).
                 self._lists_auto_sync()
-                self._lists_sync_status(tr("Removed from this computer: {}. To be added back on the "
-                                           "website: {}.").format(removed, kept))
+                self._lists_sync_status(tr("Removed from their lists on this computer: {}. To be added back "
+                                           "on the website: {}.").format(removed, kept))
         except Exception as e:
             logger.exception("The website-removal prompt failed: %s", e)
 

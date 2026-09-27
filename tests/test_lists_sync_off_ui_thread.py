@@ -355,13 +355,23 @@ def test_a_sync_asked_for_while_another_runs_says_it_waits(gui):
 
 
 def test_the_progress_dialog_counts_the_lists(gui, lang):
+    """A queued job's turn ('start'), each half's lists, and the removals' step of their own."""
     host = gui()
+    host._lists_sync.busy = True
     host._do_sync_action(DIALOG, "merge")
     job = host._lists_sync.jobs[-1]
+    job.on_progress("waiting", 0, 0)
+    job.on_progress("start", 0, 0)
     job.on_progress("download", 0, 3)
-    job.on_progress("upload", 2, 3)
-    assert FakeProgress.made[-1].labels[1:] == [tr("Downloading list {} of {}...").format(1, 3),
-                                               tr("Uploading list {} of {}...").format(3, 3)]
+    job.on_progress("upload", 0, 2)
+    job.on_progress("upload", 2, 2)
+    job.on_progress("deletes", 0, 0)
+    assert FakeProgress.made[-1].labels == [tr("Waiting for the list sync that is already running..."),
+                                            tr("Syncing lists..."),
+                                            tr("Downloading list {} of {}...").format(1, 3),
+                                            tr("Uploading list {} of {}...").format(1, 2),
+                                            tr("Uploading list {} of {}...").format(2, 2),
+                                            tr("Removing entries from your account...")]
     if lang == "he":
         assert all(_is_hebrew(_first_letter(t)) for t in FakeProgress.made[-1].labels)
 
@@ -900,7 +910,7 @@ def test_the_skip_tooltip_says_what_skip_does(gui, monkeypatch, lang):
     genizah_app.GenizahGUI._show_lists_sync_dialog(host, [{"name": "L", "item_count": 1}], [], None)
     skip, = [b for b in captured[0].findChildren(QPushButton) if b.text() == tr("Skip")]
     assert skip.toolTip() == tr(
-        "Don't download from your account now. Uploads continue: until you sign out or close "
+        "Don't download from your account now. Uploads continue: until you log out or close "
         "the program, your lists are uploaded to your account after each change.")
     assert "Don't sync now - you can sync later from Settings" not in TRANSLATIONS
 
@@ -928,7 +938,7 @@ def test_the_sync_choice_uploads_once_unless_an_action_was_chosen(gui, monkeypat
 
 
 # ---------------------------------------------------------------------------
-# A sign-in restored at startup, and an offline start
+# A log-in restored at startup, and one whose preview fails
 # ---------------------------------------------------------------------------
 
 # The restore either returns (whichever of its paths: no saved state, 'never', declined, restored --
@@ -976,18 +986,27 @@ def test_startup_schedules_the_restore_then_the_list_sync():
     assert "QTimer.singleShot(200, self._restore_session)" not in src
 
 
-def test_a_failed_preview_at_startup_shows_no_dialog(gui, lang):
+def test_a_failed_preview_at_startup_shows_no_dialog(gui, monkeypatch, lang):
+    """A log-in restored at startup (current_user set, as the saved session's restore sets it)
+    whose preview of the account's lists fails: one status-bar line without the error, which
+    goes to the log; no dialog, no upload asked for, and list sync stays on."""
     host = gui()
+    logged = []
+    monkeypatch.setattr(genizah_app.logger, "warning", lambda msg, *a, **k: logged.append(msg % a if a else msg))
     host._restore_session = lambda: None
     host._restore_session_then_lists_sync()
     host._lists_sync.finish(host._lists_sync.last("preview"),
                             {"preview": _preview(success=False, error="No Supabase client")})
-    expected = tr("Could not check the lists in your account: {}. List sync stays on; Sync lists "
-                  "now tries again.").format(tr("No Supabase client"))
+    expected = tr("Could not reach your account to check the lists. List sync stays on; Sync lists "
+                  "now tries again.")
     assert status(host) == expected
+    assert tr("No Supabase client") not in status(host)
+    assert any("No Supabase client" in line for line in logged), logged
     assert host.dialogs == [] and host.notices == []
     assert "request_auto" not in host._lists_sync.names()
-    assert host.lists_mgr.is_sync_available(), "an offline start turned list sync off"
+    assert host.lists_mgr.is_sync_available(), "a failed preview at startup turned list sync off"
+    assert "Could not check the lists in your account: {}. List sync stays on; Sync lists now tries again." \
+        not in TRANSLATIONS
     if lang == "he":
         assert _is_hebrew(_first_letter(expected))
 
@@ -1010,16 +1029,17 @@ def test_a_restored_sign_in_offers_the_choice_only_once_the_window_is_shown(gui)
 # ---------------------------------------------------------------------------
 
 LOGGED_OUT = "You have been logged out."
-P16 = ("These lists were not uploaded before you signed out: {}. Your changes to them are saved on "
-       "this computer and are uploaded after you next sign in.")
-P17 = ("Your latest list changes were not uploaded before you signed out. They are saved on this "
-       "computer and are uploaded after you next sign in.")
+P16 = ("These lists were not uploaded before you logged out: {}. Your changes to them are saved on "
+       "this computer and are uploaded after you next log in.")
+P17 = ("Your latest list changes were not uploaded before you logged out. They are saved on this "
+       "computer and are uploaded after you next log in.")
 P18 = ("List sync was not on in this session, so your list changes were not uploaded. They are saved "
-       "on this computer and are uploaded after you next sign in.")
+       "on this computer and are uploaded after you next log in.")
 P32 = ("Some notes differ from your account and were not uploaded. They are kept on this computer; "
-       "after you next sign in, use Sync lists now, then Merge Both, to keep both versions.")
+       "after you next log in, use Sync lists now, then Merge Both, to keep both versions.")
 P35 = ("Your lists cannot be saved on this computer at the moment ({} cannot be written). List "
-       "changes that did not reach your account before you signed out are lost when you close the program.")
+       "changes that did not reach your account before you logged out are lost if you close the "
+       "program before the file can be saved again.")
 
 
 def _notice(host):
@@ -1038,7 +1058,7 @@ def test_sign_out_returns_at_once_and_ends_when_the_last_upload_does(gui):
     host._do_logout()
 
     assert host._logout_pending and host.corrections_client.logouts == []
-    assert host.corner_login_btn.text() == tr("Signing out...") and not host.corner_login_btn.isEnabled()
+    assert host.corner_login_btn.text() == tr("Logging out...") and not host.corner_login_btn.isEnabled()
     assert runner.calls[-1] == ("begin_logout", host.LOGOUT_SYNC_BUDGET_S) == ("begin_logout", 10)
     host._do_logout()                               # a second click while it runs
     assert runner.names().count("begin_logout") == 1
@@ -1052,17 +1072,21 @@ def test_sign_out_returns_at_once_and_ends_when_the_last_upload_does(gui):
     assert _notice(host) == ("information", [])
 
 
-def test_a_sign_out_that_cuts_a_running_upload_says_so(gui):
+@pytest.mark.parametrize("unsent", [True, False], ids=["changes-unsent", "nothing-unsent"])
+def test_a_sign_out_that_cuts_a_running_upload_says_so(gui, unsent):
+    """The budget cuts the sign-out's upload: the notice says the changes did not upload only
+    when the runner knew of some as the sign-out began."""
     host = gui()
     _signed_in(host)
     host.LOGOUT_SYNC_BUDGET_S = 0.2
     runner = host._lists_sync
+    runner.unsent = unsent
     host._do_logout()
     job = runner.last("logout")
     pump(1.2)                                   # the upload is stuck; the budget ends the sign-out
     assert not host._logout_pending
     assert ("cancel", job) in runner.calls
-    assert _notice(host) == ("warning", [tr(P17)])
+    assert _notice(host) == (("warning", [tr(P17)]) if unsent else ("information", []))
     runner.finish(job, {"cancelled": True, "upload": STOPPED_UPLOAD})   # it ends later
     assert len(host.notices) == 1, "the late end of the cut upload showed a second notice"
 
@@ -1154,16 +1178,21 @@ def _logout_cell(host, monkeypatch, cell):
     monkeypatch.setattr(host.lists_mgr, "differing_notes_count", lambda: state["differing"])
     monkeypatch.setattr(host.lists_mgr, "saves_failing", lambda: state["failing"])
     runner = host._lists_sync
+    runner.unsent = cell in UNSENT_BEFORE
     failed = {"success": False, "error": "Sync not available", "lists_not_uploaded": ["Local list"]}
     outcome = {"upload": {"success": True}}
-    if cell in ("b-earlier-conflict-upload-fails", "c-earlier-conflict-budget-cut",
+    if cell in ("b-earlier-conflict-upload-fails", "b2-earlier-conflict-nothing-unsent-upload-fails",
+                "c-earlier-conflict-budget-cut", "c2-earlier-conflict-nothing-unsent-budget-cut",
                 "f-earlier-conflict-membership-unchecked", "h-orphan-with-a-website-edit"):
         state["differing"] = 1
     if cell == "a-logout-upload-keeps-differing-notes":
         state["differing"] = 2
         outcome = {"upload": {"success": True, "notes_differing": 2}}
-    elif cell == "b-earlier-conflict-upload-fails":
+    elif cell in ("b-earlier-conflict-upload-fails", "b2-earlier-conflict-nothing-unsent-upload-fails",
+                  "nothing-unsent-upload-fails"):
         outcome = {"upload": failed}
+    elif cell in ("unsent-upload-leaves-lists-for-later", "nothing-unsent-upload-leaves-lists-for-later"):
+        outcome = {"upload": {"success": True, "lists_not_uploaded": ["Local list"], "complete": False}}
     elif cell == "e-too-long":
         outcome = {"upload": {"success": True, "notes_too_long": 1}}
     elif cell == "f-earlier-conflict-membership-unchecked":
@@ -1177,10 +1206,8 @@ def _logout_cell(host, monkeypatch, cell):
                               "lists_not_uploaded": [], "error": "Sync not available"}}
     elif cell == "i2-a-removal-left-unsent-with-lists":
         outcome = {"upload": dict(failed, removals_failed=1, items_failed=1)}
-    elif cell == "cancelled":
+    elif cell in ("cancelled", "cancelled-nothing-unsent"):
         outcome = {"cancelled": True, "upload": STOPPED_UPLOAD}
-    elif cell == "unsent-after-an-earlier-failed-upload":
-        runner.unsent = True
     elif cell in ("j-saves-failing", "j-too-long"):
         state["failing"] = True
         state["differing"] = 1
@@ -1192,17 +1219,25 @@ def _logout_cell(host, monkeypatch, cell):
         return _notice(host)
     _signed_in(host)
     host._do_logout()
-    if cell == "c-earlier-conflict-budget-cut":
+    runner.unsent = False           # what the runner learns after the sign-out began changes nothing
+    if cell in ("c-earlier-conflict-budget-cut", "c2-earlier-conflict-nothing-unsent-budget-cut"):
         host._finish_logout(None, token=host._logout_generation)   # what the budget timer calls
     else:
         runner.finish(runner.last("logout"), outcome)
     return _notice(host)
 
 
+# The cells in which the runner knew, as the sign-out began, of changes not yet in the account
+# (runner.unsent): only then may the notice say that list changes did not upload.
+UNSENT_BEFORE = {"b-earlier-conflict-upload-fails", "c-earlier-conflict-budget-cut", "i-a-removal-left-unsent",
+                 "i2-a-removal-left-unsent-with-lists", "cancelled", "unsent-then-uploaded",
+                 "unsent-upload-leaves-lists-for-later", "j-saves-failing", "j-too-long"}
 LOGOUT_CELLS = {
     "a-logout-upload-keeps-differing-notes": [P32],
     "b-earlier-conflict-upload-fails": [(P16, "Local list"), P32],
+    "b2-earlier-conflict-nothing-unsent-upload-fails": [P32],
     "c-earlier-conflict-budget-cut": [P17, P32],
+    "c2-earlier-conflict-nothing-unsent-budget-cut": [P32],
     "d-conflict-resolved-by-a-complete-upload": [],
     "e-too-long": [(TOO_LONG_KEPT, 1)],
     "f-earlier-conflict-membership-unchecked": [P32],
@@ -1212,7 +1247,11 @@ LOGOUT_CELLS = {
     "i-a-removal-left-unsent": [P17],
     "i2-a-removal-left-unsent-with-lists": [P17],
     "cancelled": [P17],
-    "unsent-after-an-earlier-failed-upload": [P17],
+    "cancelled-nothing-unsent": [],
+    "nothing-unsent-upload-fails": [],
+    "unsent-then-uploaded": [],
+    "unsent-upload-leaves-lists-for-later": [(P16, "Local list")],
+    "nothing-unsent-upload-leaves-lists-for-later": [],
     "j-saves-failing": [(P35, "lists.pkl")],
     "j-too-long": [(P35, "lists.pkl"), (TOO_LONG, 1)],
 }
@@ -1495,7 +1534,7 @@ def test_sync_lists_now_is_enabled_only_when_signed_in_and_offers_the_choice_eve
     host.corrections_client.signed_in = False
     host._update_corner_login_state()
     assert not button.isEnabled()
-    assert button.toolTip() == tr("Sign in to sync your lists with your account")
+    assert button.toolTip() == tr("Log in to sync your lists with your account")
 
     host.corrections_client.sign_in()
     host._update_corner_login_state()
@@ -1514,7 +1553,7 @@ def test_sync_lists_now_is_enabled_only_when_signed_in_and_offers_the_choice_eve
     host._do_logout()
     assert not button.isEnabled(), "Sync lists now stayed enabled during the sign-out"
     host._lists_sync.finish(host._lists_sync.last("logout"), {"upload": {"success": True}})
-    assert not button.isEnabled() and button.toolTip() == tr("Sign in to sync your lists with your account")
+    assert not button.isEnabled() and button.toolTip() == tr("Log in to sync your lists with your account")
     if lang == "he":
         assert all(_is_hebrew(_first_letter(t)) for t in (button.text(), button.toolTip()))
 
@@ -1618,7 +1657,8 @@ def test_the_removal_prompt_lists_what_the_website_removed_and_applies_each_choi
                       ("990000002::img::3", list_id, f"990000002, {tr('Page')} 3", "Local list")]]
     assert resolved == [{pending[0]: "remove", pending[1]: "keep"}]
     assert host.refreshed and host._lists_sync.names().count("request_auto") == 1
-    assert status(host) == tr("Removed from this computer: {}. To be added back on the website: {}.").format(1, 1)
+    assert status(host) == tr("Removed from their lists on this computer: {}. To be added back on the "
+                              "website: {}.").format(1, 1)
     if lang == "he":
         assert _is_hebrew(_first_letter(status(host)))
 
@@ -1789,12 +1829,17 @@ def test_the_window_builds_its_runner_with_the_automatic_upload_handler(gui, mon
         runner.shutdown()
 
 
-def test_a_manual_upload_the_sign_out_deadline_stops_says_upload_stopped(gui, monkeypatch):
+@pytest.mark.parametrize("changed", [True, False], ids=["with-changes", "nothing-changed"])
+def test_a_manual_upload_the_sign_out_deadline_stops_says_upload_stopped(gui, monkeypatch, changed):
     """A sign-out while a manual upload runs holds it to the sign-out's deadline: it stops, not
-    cancelled ({'stopped', 'deadline'}), and the status bar says so -- not a sync error."""
+    cancelled ({'stopped', 'deadline'}), and the status bar says so -- not a sync error. The
+    changes that upload took count as unsent until it succeeds, so the sign-out notice names
+    the lists it did not reach; an upload that took no changes leaves nothing to say."""
     host = gui()
     _signed_in(host)
     runner = _inline_runner(host)
+    if changed:
+        runner.mark_dirty()                          # a change no upload has taken yet
     host.LOGOUT_SYNC_BUDGET_S = 0.01
     checks = []
 
@@ -1810,7 +1855,8 @@ def test_a_manual_upload_the_sign_out_deadline_stops_says_upload_stopped(gui, mo
 
     assert checks == [True]
     assert status(host) == tr(UPLOAD_STOPPED)
-    assert _notice(host) == ("warning", [tr(P17)])   # the one notice is the sign-out's
+    # the one notice is the sign-out's
+    assert _notice(host) == (("warning", [tr(P17)]) if changed else ("information", []))
     assert not host._logout_pending and not runner.busy
 
 
@@ -1830,19 +1876,71 @@ def test_a_sync_that_fails_before_its_first_half_says_why(gui, monkeypatch, acti
     assert host.notices == [("warning", tr("Sync Error"), "the lists could not be read")]
 
 
-def test_a_sign_out_whose_upload_could_not_start_says_the_changes_did_not_upload(gui, monkeypatch):
-    """The sign-out's own upload (nothing synced in the last minute) fails to start: the job
-    ends in an error while nothing is marked unsent, and the notice says string 17."""
+@pytest.mark.parametrize("unsent", [True, False], ids=["changes-unsent", "nothing-unsent"])
+def test_a_sign_out_whose_upload_could_not_start_says_the_changes_did_not_upload(gui, monkeypatch, unsent):
+    """The sign-out's own upload fails to start and the job ends in an error. With changes the
+    runner knew were unsent, the notice says they did not upload; with nothing unsent (a check
+    upload: nothing synced in the last minute) it adds nothing."""
     host = gui()
     _signed_in(host)
     runner = _inline_runner(host)
+    if unsent:
+        runner.mark_dirty()
 
     def broken(*a, **k):
         raise RuntimeError("no copy of the lists")
     monkeypatch.setattr(host.lists_mgr, "begin_upload", broken)
-    assert not runner.unsent and runner._logout_needs_upload()
+    assert runner.unsent is unsent and runner._logout_needs_upload()
 
     host._do_logout()
 
     assert not host._logout_pending
-    assert _notice(host) == ("warning", [tr(P17)])
+    assert _notice(host) == (("warning", [tr(P17)]) if unsent else ("information", []))
+
+
+def test_a_real_runner_tells_the_progress_dialog_each_step(gui, monkeypatch):
+    """The window's on_progress as the runner calls it: the job's turn, each list, and the removals."""
+    host = gui()
+    _signed_in(host)
+    _inline_runner(host)
+
+    def sync_to_cloud(data=None, progress=None, **kw):
+        progress(0, 2)
+        progress(1, 2)
+        progress(2, 2)
+        progress(0, 0, "deletes")
+        return {"success": True, "lists_pushed": 2, "items_pushed": 1}
+    monkeypatch.setattr(host.lists_mgr, "sync_to_cloud", sync_to_cloud)
+
+    host._do_sync_action(DIALOG, "upload")
+
+    assert FakeProgress.made[-1].labels == [tr("Syncing lists..."), tr("Syncing lists..."),
+                                            tr("Uploading list {} of {}...").format(1, 2),
+                                            tr("Uploading list {} of {}...").format(2, 2),
+                                            tr("Uploading list {} of {}...").format(2, 2),
+                                            tr("Removing entries from your account...")]
+
+
+@pytest.mark.parametrize("changed", [True, False], ids=["changed-while-logged-out", "nothing-changed"])
+def test_a_download_chosen_at_log_in_uploads_the_changes_made_while_logged_out(gui, monkeypatch, changed):
+    """The log-out texts promise that changes left on this computer are uploaded after the next
+    log-in: a Download chosen in the log-in's sync choice sends nothing, so one upload follows it."""
+    host = gui()
+    host._lists_sync = None
+    uploads = []
+    monkeypatch.setattr(host.lists_mgr, "get_cloud_lists_preview", lambda **kw: _preview(1))
+    monkeypatch.setattr(host.lists_mgr, "fetch_cloud_state", lambda ids, **kw: {"success": True})
+    monkeypatch.setattr(host.lists_mgr, "apply_cloud_state",
+                        lambda state: {"success": True, "lists_added": 1, "items_added": 0})
+    monkeypatch.setattr(host.lists_mgr, "sync_to_cloud",
+                        lambda data=None, **kw: uploads.append(data is not None) or {"success": True})
+    if changed:
+        host._lists_auto_sync()                      # a change while list sync is off
+    host._lists_sync = _inline_runner(host)
+    host._show_lists_sync_dialog = lambda *a: host._do_sync_action(DIALOG, "download") or 1
+
+    host._enable_lists_cloud_sync()                  # log in; the choice: Download
+
+    assert host.notices[-1][:2] == ("information", tr("Sync Complete"))
+    assert uploads == ([True] if changed else [])
+    assert host._lists_sync.unsent is False

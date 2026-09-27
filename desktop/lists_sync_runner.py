@@ -71,6 +71,7 @@ class SyncJob:
         self.outcome = {'kind': kind, 'cancelled': False}
         self.copy = self.base = None    # the upload stage: the store copy the worker writes, and what it began from
         self.recorded = []              # every report the upload made, whichever drain read it
+        self.took_changes = False       # its upload's copy held changes not yet in the account
         self.backfill = kind != 'logout'
 
     def past_deadline(self):
@@ -108,8 +109,12 @@ class ListsSyncRunner:
 
     @property
     def unsent(self):
-        """Edits made since the last upload's copy, or the last upload did not succeed."""
-        return self._dirty or not self._last_upload_ok
+        """Changes not known to be in the account: edits made since the last upload's copy,
+        the last upload did not succeed, or the upload running now took changes with it
+        (they count as sent once it succeeds)."""
+        job = self._job
+        return (self._dirty or not self._last_upload_ok
+                or bool(job is not None and job.copy is not None and job.took_changes))
 
     @property
     def closed(self):
@@ -259,6 +264,7 @@ class ListsSyncRunner:
     def _start(self, job):
         self._job = job
         job.started = True
+        self._tell_progress(job, 'start', 0, 0)
         if self._timer is not None and not self._timer.isActive():
             self._timer.start()
         try:
@@ -292,6 +298,7 @@ class ListsSyncRunner:
                 job.outcome['deadline'] = True
             self._complete(job)
             return
+        job.took_changes = self.unsent
         job.copy, job.base = self._mgr.begin_upload()
         job.recorded = []
         self._dirty = False        # edits from now on belong to the next upload
@@ -324,8 +331,10 @@ class ListsSyncRunner:
         threading.Thread(target=work, name=f"lists-sync-{job.kind}", daemon=True).start()
 
     def _progress_cb(self, job, stage):
-        def progress(done, total):
-            self._results.put(('progress', job, stage, done, total))
+        # the engine's progress(done, total, what): what 'deletes' is the upload's step
+        # that sends the removals made here, told as its own stage
+        def progress(done, total, what='lists'):
+            self._results.put(('progress', job, 'deletes' if what == 'deletes' else stage, done, total))
         return progress
 
     def _poll(self):
@@ -365,7 +374,7 @@ class ListsSyncRunner:
     @staticmethod
     def _value(ok, value):
         if ok:
-            return value if isinstance(value, dict) else {'success': False, 'error': 'no result'}
+            return value if isinstance(value, dict) else {'success': False, 'error': 'Unknown error'}
         logger.error("A list sync stage failed: %s", value)
         return {'success': False, 'error': str(value) or type(value).__name__}
 
@@ -386,11 +395,13 @@ class ListsSyncRunner:
                 self._complete(job)
             elif not value.get('success'):
                 job.outcome['download'] = {k: v for k, v in value.items() if k != 'pass'}
+                self._upload_after_download(job)
                 self._complete(job)
             else:
                 applied = self._mgr.apply_cloud_state(value)
                 job.outcome['download'] = applied
                 if job.kind != 'merge' or not applied.get('success'):
+                    self._upload_after_download(job)
                     self._complete(job)       # a Merge whose download failed never uploads
                 elif job.cancelled:
                     job.outcome['cancelled'] = True
@@ -408,7 +419,8 @@ class ListsSyncRunner:
             finally:
                 job.copy = job.base = None
                 job.recorded = []
-            ok_now = bool(value.get('success'))
+            # an upload that left lists for the next one did not send all it took
+            ok_now = bool(value.get('success')) and not value.get('lists_not_uploaded')
             self._last_upload_ok = ok_now
             if not ok_now:
                 self._dirty = True        # the rest still has to go up
@@ -419,6 +431,12 @@ class ListsSyncRunner:
                 if job.past_deadline():
                     job.outcome['deadline'] = True
             self._complete(job)
+
+    def _upload_after_download(self, job):
+        """A Download sends nothing: when changes made here are still not in the account,
+        one automatic upload follows it (what the log-out texts promise after the next log-in)."""
+        if job.kind == 'download' and self.unsent and self._auto_allowed and not self._closed:
+            self._auto_wanted = True
 
     def _complete(self, job, start_next=True, direct=False):
         """The one end of every job: once, whatever the exit."""

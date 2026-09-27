@@ -1240,14 +1240,37 @@ def test_no_removal_is_sent_once_the_pass_is_stopped(tmp_path, cloud):
     a.mgr.remove_item_from_list(KEY, k)
     stop = []
 
-    def progress(done, total):
-        if done == total - 1:                          # every list written; the deletes' step is next
+    def progress(done, total, what='lists'):
+        if what == 'deletes':                          # every list written; the deletes' step begins
             stop.append(done)
     mark = cloud.rec.mark()
     result = a.up(should_stop=lambda: bool(stop), progress=progress)
     assert stop and result['stopped'] is True and result['success'] is False
     assert mark(op='delete') == [] and str(rk) in pending(a) and cloud.row(rk) is not None
     assert a.up()['success'] and cloud.row(rk) is None and pending(a) == {}
+
+
+@pytest.mark.parametrize('removal', [True, False], ids=['with-a-removal', 'no-removal'])
+def test_an_uploads_progress_counts_its_lists_and_tells_the_deletes_apart(tmp_path, cloud, removal):
+    """From 0 of the lists whose entries it writes (a list in the Trash sends only its own state),
+    one step per list, and the removals as a step of their own -- never an extra list."""
+    a = make_desk(tmp_path, cloud)
+    k, l_, t = a.mgr.create_list('K'), a.mgr.create_list('L'), a.mgr.create_list('T')
+    a.mgr.add_item('990001', k, note='n', fl_id='FLa')
+    a.mgr.add_item('990002', l_, fl_id='FLb')
+    a.mgr.add_item('990003', t, fl_id='FLc')
+    assert a.up()['success']
+    a.mgr.delete_list(t)                               # to the Trash
+    if removal:
+        a.mgr.remove_item_from_list('990002::fl::FLb', l_)
+    told = []
+    result = a.up(progress=lambda *args: told.append(args))
+    assert result['success']
+    lists = len([lid for lid, ld in a.mgr.data['lists'].items()
+                 if lid != 'recent' and not ld.get('is_system') and not ld.get('deleted_at')])
+    assert lists == 3                                  # General, K and L
+    assert told[:lists + 1] == [(n, lists) for n in range(lists + 1)]
+    assert told[lists + 1:] == ([(0, 0, 'deletes')] if removal else [])
 
 
 def test_a_sign_out_drops_the_signed_out_accounts_client(tmp_path, cloud, monkeypatch):

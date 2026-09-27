@@ -175,6 +175,120 @@ def test_a_merge_uploads_only_after_its_download(desk, cloud, cell, monkeypatch)
         assert outcome['download']['error'] == lists_sync.DOWNLOAD_BACKUP_FAILED
 
 
+def test_a_stage_that_returns_no_result_ends_with_an_error_the_window_translates(desk, monkeypatch):
+    from shared.genizah_translations import TRANSLATIONS
+    monkeypatch.setattr(desk.mgr, 'get_cloud_lists_preview', lambda **kw: None)
+    r = ListsSyncRunner(desk.mgr, inline=True)
+    done = []
+    r.run('preview', on_done=done.append)
+    assert done[0]['preview'] == {'success': False, 'error': 'Unknown error'}
+    assert 'Unknown error' in TRANSLATIONS
+
+
+# --------------------------------------------------------------------------- what counts as not yet uploaded
+
+def test_an_upload_under_way_counts_its_changes_as_unsent_until_it_succeeds(desk, cloud):
+    k = desk.mgr.create_list('K')
+    desk.mgr.add_item('990001', k, note='n', fl_id='FLa')
+    r = threaded(desk.mgr)
+    gate = Gate(cloud, lambda req: req.t == 'list_items' and req.op == 'insert')
+    r.request_auto()                                      # a change: its upload takes it
+    assert gate.reached.wait(10)
+    assert r._dirty is False and r.unsent is True         # taken by the copy, not in the account yet
+    gate.release.set()
+    assert drain_until(r, lambda: not r.busy)
+    assert r.unsent is False
+    gate = Gate(cloud, lambda req: req.t == 'user_lists' and req.op == 'update')
+    r2 = threaded(desk.mgr)
+    r2.run('upload')                                      # a manual upload that took no change
+    assert gate.reached.wait(10)
+    assert r2.busy and r2.unsent is False
+    gate.release.set()
+    assert drain_until(r2, lambda: not r2.busy)
+
+
+def test_an_upload_that_leaves_lists_for_the_next_one_leaves_them_unsent(desk, monkeypatch):
+    desk.mgr.add_item('990001', desk.mgr.create_list('K'), note='n', fl_id='FLa')
+    monkeypatch.setattr(desk.sync, 'sync_to_cloud', lambda **kw: {
+        'success': True, 'lists_pushed': 1, 'items_pushed': 0, 'lists_not_uploaded': ['K'], 'complete': False})
+    r = ListsSyncRunner(desk.mgr, inline=True)
+    r.request_auto()
+    assert r.unsent is True and r._logout_needs_upload()
+
+
+@pytest.mark.parametrize('cell', ['changes-unsent', 'last-upload-failed', 'nothing-unsent', 'download-fails',
+                                  'cancelled', 'during-a-sign-out'])
+def test_a_download_is_followed_by_one_upload_while_changes_are_unsent(desk, cloud, cell, monkeypatch):
+    """A Download sends nothing: with changes this computer holds that are not in the account, one
+    automatic upload follows it (what the log-out texts promise after the next log-in)."""
+    k = desk.mgr.create_list('K')
+    desk.mgr.add_item('990001', k, note='n', fl_id='FLa')
+    assert desk.up()['success']
+    desk.mgr.add_item('990002', k, fl_id='FLb')           # made while list sync was off
+    autos = []
+    r = ListsSyncRunner(desk.mgr, inline=True, on_auto_done=autos.append)
+    if cell in ('changes-unsent', 'download-fails', 'cancelled', 'during-a-sign-out'):
+        r.mark_dirty()
+    elif cell == 'last-upload-failed':
+        r._last_upload_ok = False
+    if cell == 'download-fails':
+        cloud.rec.hook = lambda client, req: 'raise_before' if client.actor == 'A' and req.t == 'projects' else None
+    if cell == 'during-a-sign-out':
+        r.begin_logout(lambda outcome: None, budget_s=10)  # its own upload runs; no automatic one after
+        r.mark_dirty()
+    begins = []
+    real = desk.mgr.begin_upload
+    monkeypatch.setattr(desk.mgr, 'begin_upload', lambda: begins.append(1) or real())
+    done = []
+    if cell == 'cancelled':
+        r = threaded(desk.mgr, on_auto_done=autos.append)
+        r.mark_dirty()
+        job = r.run('download', on_done=done.append)
+        r.cancel(job)                                     # Cancel in the progress dialog
+        assert drain_until(r, lambda: not r.busy)
+        assert done[0]['cancelled'] is True and begins == [] and autos == []
+        return
+    r.run('download', on_done=done.append)
+    cloud.rec.hook = None
+    uploaded = cell in ('changes-unsent', 'last-upload-failed', 'download-fails')
+    assert len(begins) == (1 if uploaded else 0)
+    assert len(autos) == (1 if uploaded else 0)
+    if cell in ('changes-unsent', 'last-upload-failed'):
+        assert done[0]['download']['success'] and R.rec(desk, k, '990002::fl::FLb') is not None
+        assert r.unsent is False
+    if cell == 'during-a-sign-out':
+        r.allow_auto()                                    # the next log-in: its preview comes first
+        r.run('preview')
+        assert begins == [], 'an upload started before the log-in offered its sync choice'
+
+
+# --------------------------------------------------------------------------- what the progress dialog is told
+
+def test_a_queued_merge_is_told_its_turn_and_each_half(desk, cloud):
+    k, l_ = desk.mgr.create_list('K'), desk.mgr.create_list('L')
+    desk.mgr.add_item('990001', k, note='n', fl_id='FLa')
+    desk.mgr.add_item('990002', l_, fl_id='FLb')
+    assert desk.up()['success']
+    gate = Gate(cloud, lambda req: req.t == 'user_lists' and req.op == 'update')
+    r = threaded(desk.mgr)
+    r.run('upload')
+    assert gate.reached.wait(10)
+    desk.mgr.remove_item_from_list('990002::fl::FLb', l_)  # after that upload's copy: the Merge sends it
+    told = []
+    r.run('merge', on_progress=lambda *a: told.append(a))
+    assert told == [('waiting', 0, 0)]
+    gate.release.set()
+    assert drain_until(r, lambda: not r.busy)
+    stages = [t[0] for t in told]
+    assert stages[:2] == ['waiting', 'start']
+    first_up = stages.index('upload')
+    assert set(stages[2:first_up]) == {'download'} and 'download' not in stages[first_up:]
+    lists = 3                                             # General, K and L
+    assert told[first_up] == ('upload', 0, lists), 'the upload half did not say so as it began'
+    assert [t for t in told if t[0] == 'upload'] == [('upload', n, lists) for n in range(lists + 1)]
+    assert told[-1] == ('deletes', 0, 0)
+
+
 def test_a_preview_job_reads_the_cloud_lists(desk, cloud):
     cloud.add(cloud.new_list('Web'), '990001', fl_id='FLa')
     r = ListsSyncRunner(desk.mgr, inline=True)
