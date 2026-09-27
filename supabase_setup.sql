@@ -66,6 +66,7 @@ CREATE TABLE public.list_items (
     shelfmark TEXT,
     title TEXT,
     fl_id TEXT,
+    page TEXT,  -- page (image number) of the entry; NULL = a folio via fl_id, or the whole manuscript
     note TEXT,
     tags JSONB DEFAULT '[]',
     added_at TIMESTAMPTZ DEFAULT NOW()

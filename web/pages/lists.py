@@ -14,6 +14,7 @@ Features:
 """
 
 import logging
+import re
 
 from nicegui import ui
 from web.state import state
@@ -34,6 +35,47 @@ logger = logging.getLogger(__name__)
 # Phase 92.2 D-FANOUT-01 + Reviews MUST-FIX 1: sentinel distinguishes
 # 'caller did not pass counts' from 'counts intentionally None (legacy fallback)'.
 _COUNTS_UNSET = object()
+
+
+def _page_text(page) -> str:
+    """A list item's page as text: '' when it has none (rows from before the page column
+    have no 'page' key; entries for a folio or the whole manuscript hold NULL)."""
+    return '' if page is None else str(page).strip()
+
+
+def list_item_page_label(shelfmark, page):
+    """The shelfmark shown for a list item, with "Page N" when the item is one page.
+
+    The desktop records the page in its own column. The web's "Add page to list" writes
+    "<shelfmark> - Page N" into the shelfmark itself, in the interface language, and a
+    desktop may later fill the page column on that row too -- so a shelfmark that already
+    ends with that page is left as it is.
+    """
+    page = _page_text(page)
+    if not page:
+        return shelfmark
+    base = (shelfmark or '').rstrip()
+    if re.search(rf'(?:^|\W)(?:Page|עמוד|דף)\s+{re.escape(page)}$', base):
+        return shelfmark
+    label = f"{tr('Page')} {page}"
+    return f"{base} - {label}" if base else label
+
+
+def list_item_browse_url(sys_id, page) -> str:
+    """/browse link for a list item, opened at its page when the page is a number."""
+    url = f'/browse?sys_id={sys_id}'
+    page = _page_text(page)
+    if re.fullmatch(r'[0-9]+', page):
+        # /browse takes `page: int`; a page such as 'Unknown' opens the first page.
+        url += f'&page={page}'
+    return url
+
+
+def list_item_preview_page(page) -> int:
+    """The page a list item's text preview shows: its page when that is a number, else the
+    first page (the same rule as its Browse link)."""
+    page = _page_text(page)
+    return int(page) if re.fullmatch(r'[0-9]+', page) and int(page) > 0 else 1
 
 
 def _load_list_item_counts() -> Optional[Dict[int, int]]:
@@ -455,21 +497,16 @@ def create_lists_page():
         dialog.open()
 
     # --- Edit Item Dialog ---
-    def show_edit_item_dialog(item_id: str, item_data: dict):
-        """Show dialog to edit item notes and tags."""
+    def show_edit_item_dialog(item_id: str, item_data: dict, display_shelfmark: str):
+        """Show dialog to edit item notes and tags.
+
+        display_shelfmark is the heading of the item's card (library, the catalogue's
+        shelfmark when the row has none, and the page), so both name the item alike.
+        """
         with ui.dialog() as dialog, ui.card().classes('p-6 min-w-[500px]'):
             # Changed to H3
             h3(tr('Edit Item'), classes='text-xl font-bold mb-2')
 
-            shelfmark = item_data.get('shelfmark', 'Unknown')
-            # Get library name for display
-            sys_id = item_data.get('sys_id', item_id)
-            library_name = ''
-            if state.meta_mgr:
-                library_code = state.meta_mgr.get_library_for_id(sys_id)
-                if library_code:
-                    library_name = get_library_display(library_code, short=False, lang=get_language())
-            display_shelfmark = f"{library_name}, {shelfmark}" if library_name else shelfmark
             ui.label(f"{tr('Item')}: {display_shelfmark}").classes('text-sm mb-4').style('color: var(--text-secondary);')
 
             note_input = ui.textarea(
@@ -477,9 +514,10 @@ def create_lists_page():
                 value=item_data.get('note', '')
             ).classes('w-full mb-4').props('outlined rows=3')
 
+            tags_text = ', '.join(item_data.get('tags', []))
             tags_input = ui.input(
                 label=tr('Tags (comma-separated)'),
-                value=', '.join(item_data.get('tags', []))
+                value=tags_text
             ).classes('w-full mb-4').props('outlined')
 
             async def save_changes():
@@ -493,9 +531,10 @@ def create_lists_page():
                         if not noted:
                             return
 
-                    # Update tags
+                    # Update tags -- only when the field was changed: it splits on ',', so
+                    # re-reading an untouched field would split a tag holding a comma
                     new_tags = [t.strip() for t in tags_input.value.split(',') if t.strip()]
-                    if new_tags != item_data.get('tags', []):
+                    if tags_input.value != tags_text and new_tags != item_data.get('tags', []):
                         tagged = await _run_lists_write(
                             lambda: state.lists_mgr.update_item_tags(item_id, new_tags)
                         )
@@ -681,17 +720,24 @@ def create_lists_page():
 
             # Get items — use captured lists_mgr (not state.lists_mgr factory)
             items_list = lists_mgr.get_items_in_list_sync(list_id)
-            items_data = [(item.get('item_id'), item) for item in items_list]
+            is_recent = (
+                lists_mgr._is_recent_list(list_id)
+                if hasattr(lists_mgr, '_is_recent_list') else False
+            )
+            # The id the note/tag edit and Remove act on. An ordinary list's items are raw
+            # list_items rows, whose row id is 'id' (they have no 'item_id'); the edit and
+            # remove calls do int(item_id) and address that row. Only the recent list's
+            # formatted items carry 'item_id'.
+            items_data = [
+                (item.get('item_id') if is_recent else str(item.get('id')), item)
+                for item in items_list
+            ]
 
             # expected_count: prefer threaded counts dict over len(items_data) when available.
             # W3: the recent system list is never in the batched counts dict (its items live in
             # recent_items, not list_items), so trust the actually-loaded items_data for it rather
             # than the stale batched value.
             expected_count = len(items_data)
-            is_recent = (
-                lists_mgr._is_recent_list(list_id)
-                if hasattr(lists_mgr, '_is_recent_list') else False
-            )
             if counts is not None and not is_recent:
                 try:
                     expected_count = counts.get(int(list_id), len(items_data))
@@ -720,6 +766,7 @@ def create_lists_page():
                     note = item_data.get('note', '')
                     tags = item_data.get('tags', [])
                     fl_id = item_data.get('fl_id')
+                    page = item_data.get('page')
 
                     # Enrich metadata if needed
                     if not shelfmark or shelfmark == 'Unknown':
@@ -727,6 +774,7 @@ def create_lists_page():
                             shelf_temp, title_temp = state.meta_mgr.get_meta_for_id(sys_id)
                             shelfmark = shelf_temp or shelfmark
                             title = title or title_temp
+                    shelfmark = list_item_page_label(shelfmark, page)
 
                     # Get library name for display
                     library_name = ''
@@ -765,10 +813,10 @@ def create_lists_page():
 
                             # Actions
                             with ui.column().classes('gap-1'):
-                                # Browse button
+                                # Browse button (at the item's page, when it is one page)
                                 ui.button(
                                     icon='menu_book',
-                                    on_click=lambda sid=sys_id: ui.navigate.to(f'/browse?sys_id={sid}')
+                                    on_click=lambda url=list_item_browse_url(sys_id, page): ui.navigate.to(url)
                                 ).props('flat round dense').tooltip(tr('Browse'))
 
                                 # Open in Joins Lab button (Phase 120 D-19)
@@ -794,7 +842,9 @@ def create_lists_page():
                                 # Edit button
                                 ui.button(
                                     icon='edit',
-                                    on_click=lambda iid=item_id, idata=item_data: show_edit_item_dialog(iid, idata)
+                                    on_click=lambda iid=item_id, idata=item_data, shown=display_shelfmark: (
+                                        show_edit_item_dialog(iid, idata, shown)
+                                    )
                                 ).props('flat round dense').tooltip(tr('Edit'))
 
                                 # Remove button
@@ -809,8 +859,8 @@ def create_lists_page():
                             snippet_container = ui.column().classes('w-full')
                             is_expanded = {'value': False}
 
-                            def create_snippet_ui(container, sid, fid, expanded_state):
-                                """Create the snippet UI with lazy loading."""
+                            def create_snippet_ui(container, sid, fid, expanded_state, pnum=1):
+                                """Create the snippet UI with lazy loading (pnum: the item's page)."""
                                 container.clear()
                                 with container:
                                     # Try to get text snippet
@@ -819,7 +869,7 @@ def create_lists_page():
                                         from web.services import get_service
                                         service = get_service()
                                         if service.is_ready:
-                                            page_data = service.get_browse_page(sid, p_num=1)
+                                            page_data = service.get_browse_page(sid, p_num=pnum)
                                             if page_data and page_data.text:
                                                 text_snippet = page_data.text
                                     except Exception as e:
@@ -844,7 +894,7 @@ def create_lists_page():
                                             if len(text_snippet) > max_chars:
                                                 def toggle_expand():
                                                     expanded_state['value'] = not expanded_state['value']
-                                                    create_snippet_ui(container, sid, fid, expanded_state)
+                                                    create_snippet_ui(container, sid, fid, expanded_state, pnum)
 
                                                 with ui.row().classes('w-full justify-center mt-2'):
                                                     btn_text = tr('Show less') if expanded_state['value'] else tr('Show more')
@@ -862,15 +912,15 @@ def create_lists_page():
                             # Load snippet button (lazy load to avoid slow page)
                             load_btn_container = ui.row().classes('w-full')
                             with load_btn_container:
-                                def make_load_handler(container, sid, fid, expanded, btn_container):
+                                def make_load_handler(container, sid, fid, expanded, btn_container, pnum):
                                     def handler():
                                         btn_container.clear()
                                         with container:
                                             ui.spinner(size='sm').classes('mx-auto')
-                                        async def _deferred_snippet(c=container, s=sid, f=fid, e=expanded):
+                                        async def _deferred_snippet(c=container, s=sid, f=fid, e=expanded, p=pnum):
                                             await asyncio.sleep(0.1)
                                             try:
-                                                create_snippet_ui(c, s, f, e)
+                                                create_snippet_ui(c, s, f, e, p)
                                             except Exception:
                                                 pass  # UI element update optional; continue rendering
                                         asyncio.ensure_future(_deferred_snippet())
@@ -879,7 +929,8 @@ def create_lists_page():
                                 ui.button(
                                     tr('Show text preview'),
                                     icon='text_snippet',
-                                    on_click=make_load_handler(snippet_container, sys_id, fl_id, is_expanded, load_btn_container)
+                                    on_click=make_load_handler(snippet_container, sys_id, fl_id, is_expanded, load_btn_container,
+                                                               list_item_preview_page(page))
                                 ).props('flat dense size=sm').style('color: var(--text-tertiary);')
 
     async def remove_item_from_list(item_id: str, list_id: str):
