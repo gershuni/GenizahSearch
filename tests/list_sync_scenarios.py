@@ -270,6 +270,7 @@ class FakeDB:
         self.past_end_raises = past_end_raises
         self.page_lag = page_lag
         self.page_lag_writes = 1 if (page_lag and has_page) else 0
+        self.lagged = False  # a write failed on the lagging schema cache during this step
         self.gateway_limit = 8192
         self.tables = {'projects': [], 'user_lists': [], 'list_items': []}
         self._next = 100
@@ -448,6 +449,7 @@ class _Req:
         db = self.c.db
         if self.t == 'list_items' and 'page' in names and db.page_lag_writes > 0:
             db.page_lag_writes -= 1
+            db.lagged = True
             self._missing('page', write=True)
 
     def _run(self, user):
@@ -496,8 +498,9 @@ class _Req:
                 row['id'] = db.new_id()
                 if self.t == 'list_items':
                     row['added_at'] = db.clock
+                    # had_page: the column existed and this client had not found it missing
                     row['_ghost'] = (self.c.actor, row.get('sys_id'), norm(row.get('fl_id')),
-                                     norm(row.get('page')), db.has_page)
+                                     norm(row.get('page')), db.has_page and not self.c.page_missing)
                 new.append(row)
             rows.extend(new)
             out = [{k: v for k, v in r.items() if not k.startswith('_')} for r in new]
@@ -551,7 +554,7 @@ class Desk:
         self.lm = self._manager(None)
         self.engine = engine
         self.sync = self._sync(engine)
-        self.switched = False
+        self.reidentified = set()  # items whose fl_id a user op set or changed (add_item on an existing key)
 
     def _manager(self, data):
         desk = self
@@ -592,7 +595,6 @@ class Desk:
         self.user = user
         self.client.session_user = user
         self.sync.set_user(user)
-        self.switched = True
 
     @property
     def data(self):
@@ -615,8 +617,10 @@ class _Step:
         self.web_deleted = set()
         self.same_edit_removed = set()
         self.same_edit_fired = False
+        self.anon_lists = set()  # lists whose read an injected anonymous request answered (empty, count 0)
         self.start_rows = {}
         self.pass_start_lists = {}
+        self.pass_start_items = {}
 
 
 class World:
@@ -637,6 +641,9 @@ class World:
         self.desks = {'A': Desk(self, 'A', first), 'B': Desk(self, 'B', first)}
         self.tok = 0
         self.live_n, self.live_g = set(), set()
+        # retired note tokens a paste made live again, by the row they were pasted into: if that
+        # row goes, they are retired again (the older copies were already being replaced)
+        self.revived = {}
         self.ctx = None
         self.pending = []
         self.trace = []
@@ -657,6 +664,11 @@ class World:
         self.checking = True
         self.legacy_claims = self.engine is self.fixture
         self.live_n, self.live_g = self.copies()
+        # the rows as the old engine left them are the starting point of the identity checks
+        for r in self.db.tables['list_items']:
+            g = r.get('_ghost')
+            if g:
+                r['_ghost'] = (g[0], r.get('sys_id'), norm(r.get('fl_id')), norm(r.get('page')), g[4])
         self.trace.append(f'-- the engine under test takes over; {len(self.live_n)} note and '
                           f'{len(self.live_g)} tag tokens are live')
 
@@ -690,6 +702,12 @@ class World:
             notes |= toks(r.get('note'))
             tags |= tag_toks(r.get('tags'))
         return notes, tags
+
+    def unrevive(self, row_ids):
+        for t, rid in list(self.revived.items()):
+            if rid in row_ids:
+                self.live_n.discard(t)
+                del self.revived[t]
 
     def retire_if_lost(self):
         """After a removal: what is now in no copy was removed by the user (2b-1 propagates no removal)."""
@@ -725,6 +743,10 @@ class World:
     def _fire(self, c, client, req):
         kind, sel = c.inject[1], c.inject[2]
         self.trace.append(f'    injected {kind} at request {c.req_count} ({req.op} {req.t})')
+        if kind == 'anon' and req.t == 'list_items' and req.op == 'select':
+            for k, col, val in req.filters:
+                if k == 'eq' and col == 'list_id':
+                    c.anon_lists.add(val)
         if kind in ('raise_before', 'raise_after', 'anon'):
             return kind
         if kind == 'api_error':
@@ -836,11 +858,15 @@ class World:
                 owners[str(ld['cloud_id'])].add(lid)
         c = self.ctx
         lenient = c is not None and c.same_edit_fired
+        items = dict(d.data.get('items', {}))
+        if lenient:
+            for iid, it in c.pass_start_items.items():
+                items.setdefault(iid, it)   # an item the edit removed during the pass
         for r in rows:
             if _eq(r['list_id'], new):
                 continue
             ok = False
-            for iid, it in d.data.get('items', {}).items():
+            for iid, it in items.items():
                 if not self._names_row(it, r['id']):
                     continue
                 now = set(it.get('lists', []))
@@ -879,9 +905,12 @@ class World:
         c = self.ctx
         if c is None:
             return
-        hp = self.db.has_page
+        # once this pass found the column missing, the desktop compares as without it
+        hp = self.db.has_page and not d.client.page_missing
         e = (str(p.get('sys_id')), norm(p.get('fl_id')), norm(p.get('page')))
         target = p.get('list_id')
+        if any(_eq(target, x) for x in c.anon_lists):
+            return  # an anonymous read looks like an empty list; nothing tells the two apart
         for r in self.db.visible('list_items', d.client.session_user):
             if not _eq(r['list_id'], target) or not _eq(c.start_rows.get(r['id']), target):
                 continue
@@ -938,6 +967,7 @@ class World:
         elif kind == 4 and rows:                         # remove one entry, by row id
             r = rows[sel[1] % len(rows)]
             self.web.table('list_items').delete().eq('id', r['id']).execute()
+            self.unrevive({r['id']})
             if self.ctx is not None:
                 self.ctx.web_deleted.add(r['id'])
             self.trace.append(f'web: remove row {r["id"]} ({r["sys_id"]},{r.get("fl_id")})')
@@ -964,14 +994,18 @@ class World:
             lst = every[sel[2] % len(every)]
             gone = [r['id'] for r in rows if r['list_id'] == lst['id']]
             self.web.table('user_lists').delete().eq('id', lst['id']).execute()
+            self.unrevive(set(gone))
             if self.ctx is not None:
                 self.ctx.web_deleted |= set(gone)
             self.trace.append(f'web: delete cloud list {lst["id"]} {lst["name"]} permanently')
             self.retire_if_lost()
         elif kind == 8 and len(rows) > 1:                # paste one row's note onto another
             src, dst = rows[sel[1] % len(rows)], rows[sel[2] % len(rows)]
-            if src['id'] != dst['id']:
+            # a paste that leaves the note as it was is no write the desktops could see
+            if src['id'] != dst['id'] and (src.get('note') or '') != (dst.get('note') or ''):
                 old = dst.get('note')
+                for t in toks(src.get('note')) - self.live_n:
+                    self.revived[t] = dst['id']
                 self.live_n |= toks(src.get('note'))
                 self.live_n -= toks(old) - toks(src.get('note'))
                 self.web.table('list_items').update({'note': src.get('note') or ''}).eq('id', dst['id']).execute()
@@ -1000,6 +1034,8 @@ class World:
             tags = [self.fresh('g')] if sel[4] % 3 == 0 else []
             iid = lm._build_item_id(sys_id, img=img, fl_id=fl)
             existed = iid in data['items']
+            if existed and fl and norm(data['items'][iid].get('fl_id')) != fl:
+                d.reidentified.add(iid)
             lm.add_item(sys_id, lid, note=note, tags=tags, fl_id=fl, img=img)
             self.trace.append(f'{tag}: add {iid} (fl={fl}) note={note!r} tags={tags} to {lid}'
                               + (' [existing item]' if existed else ''))
@@ -1153,8 +1189,10 @@ class World:
         c = self.ctx
         if c is not None:
             c.pass_start_lists = {iid: list(it.get('lists', [])) for iid, it in d.data['items'].items()}
+            c.pass_start_items = copy.deepcopy(d.data['items'])
             edits_before = c.same_edit_fired
-        switched = d.switched
+        # a pass as another account than the one the store's records belong to
+        switched = d.data.get('cloud_account') not in (None, d.user)
         gone0 = {(iid, k) for iid, it in d.data.get('items', {}).items()
                  for k, rec in _records(it) if rec.get('gone')} if switched else None
         res = d.sync.sync_to_cloud() if direction == 'up' else d.sync.sync_from_cloud()
@@ -1164,7 +1202,8 @@ class World:
         reached = res.get('error') not in EARLY_ERRORS
         if self.checking:
             if direction == 'up' and not edited and d.data is not None:
-                a, b = _without_identity(store0), _without_identity(d.data)
+                fields = getattr(d.engine, 'IDENTITY_FIELDS', IDENTITY_FIELDS)
+                a, b = _without_identity(store0, fields), _without_identity(d.data, fields)
                 if a != b:
                     self.pend('R', 'upload-changed-store', f'{d.name}: an upload changed more than the cloud '
                                                            f'identity fields: {_diff_store(a, b)}')
@@ -1175,12 +1214,11 @@ class World:
                             bool(ld.get('deleted_at')) != bool(now.get('deleted_at')):
                         self.pend('R', 'trash-changed', f'{d.name}: a Download changed the Trash state of {lid}, '
                                                         f'which held no cloud id')
-            if direction == 'down':
+            if direction == 'down' and not edited:
                 for iid, it in d.data.get('items', {}).items():
                     if iid not in store0.get('items', {}) and str(it.get('sys_id') or '').startswith('97'):
                         self.pend(6, 'local-downloaded', f'{d.name}: a Download created My Library item {iid}')
         if reached and switched:
-            d.switched = False
             if self.checking:
                 self.flush(f'{d.name} {direction}')
                 self.check_account(d, f'{d.name} {direction} after an account switch', gone0)
@@ -1233,6 +1271,7 @@ class World:
         c = _Step(d, tuple(inj) if inj else None)
         c.start_rows = {r['id']: r['list_id'] for r in self.db.tables['list_items']}
         before_m = self.memberships(d)
+        self.db.lagged = False
         self.ctx = c
         c.counting = True
         try:
@@ -1260,7 +1299,8 @@ class World:
         for dd in self.desks.values():
             self.check_claims(dd, where)
             self.check_account(dd, where)
-        if not c.fired and all(r.get('success') for r in res):
+        # a pass that met the lagging schema cache writes the page on the next one, by design
+        if not c.fired and not self.db.lagged and all(r.get('success') for r in res):
             st = self.state()
             c2 = _Step(d, None)
             c2.start_rows = {r['id']: r['list_id'] for r in self.db.tables['list_items']}
@@ -1276,7 +1316,7 @@ class World:
             self.check_tokens(where + ' (repeated)')
 
     # ---- the settle
-    def settle(self, rounds=5):
+    def settle(self, rounds=10):
         if self.switch_at and not self.checking:
             self.switch_engine()
         for d in self.desks.values():
@@ -1354,6 +1394,20 @@ class World:
             owned = {str(ld['cloud_id']): lid for lid, ld in lists.items() if ld.get('cloud_id') is not None}
             orphan_ids = {str(rec.get('id')) for iid, it in data['items'].items()
                           for k, rec in _records(it) if k not in it.get('lists', [])}
+            # A record keeps pairing a row with its item (3.7 step 1) after the user changed the
+            # item's folio, or after another computer filled the row's page: it was the same
+            # entry as the row was inserted.
+            recorded_for = collections.defaultdict(set)
+            rows_by_id = {str(r['id']): r for r in self.db.tables['list_items']}
+            for iid, it in data['items'].items():
+                for k, rec in _records(it):
+                    if k not in it.get('lists', []) or rec.get('gone'):
+                        continue
+                    row = rows_by_id.get(str(rec.get('id')))
+                    ghost = row.get('_ghost') if row else None
+                    if iid in d.reidentified or (ghost and same_entry(
+                            ident(iid, it), (ghost[1], ghost[2], ghost[3]), bool(ghost[4]))):
+                        recorded_for[k].add(str(rec.get('id')))
 
             def local_name(cl):
                 return {'General': lists.get('default', {}).get('name')}.get(cl['name'], cl['name'])
@@ -1378,8 +1432,12 @@ class World:
                     if not _eq(r['list_id'], cl['id']) or str(r['sys_id']).startswith('97') \
                             or str(r['id']) in orphan_ids:
                         continue
-                    ri = row_ident(r, hp)
-                    ok = any(same_entry(m, ri, hp) if hp else (m[0], m[1]) == (ri[0], ri[1]) for m in members)
+                    ghost = r.get('_ghost')
+                    # a row written without the column has no page unless one was filled in since
+                    row_hp = hp and (ghost is None or ghost[4] or norm(r.get('page')) is not None)
+                    ri = row_ident(r, row_hp)
+                    ok = str(r['id']) in recorded_for[lid] or any(
+                        same_entry(m, ri, True) if row_hp else (m[0], m[1]) == (ri[0], ri[1]) for m in members)
                     if not ok:
                         self.viol(9, 'row-unreached', f'settle: {d.name}: row {r["id"]} {ri} of cloud list {cl["id"]} '
                                                       f'reaches no item of local list {lid} that is the same entry '
@@ -1402,13 +1460,13 @@ def _strip(data):
     return data
 
 
-def _without_identity(data):
+def _without_identity(data, fields=IDENTITY_FIELDS):
     out = copy.deepcopy(data)
-    for k in IDENTITY_FIELDS['store']:
+    for k in fields['store']:
         out.pop(k, None)
     for part in ('projects', 'lists', 'items'):
         for v in out.get(part, {}).values():
-            for k in IDENTITY_FIELDS[part]:
+            for k in fields[part]:
                 v.pop(k, None)
     return out
 
