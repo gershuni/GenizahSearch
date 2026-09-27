@@ -541,6 +541,66 @@ def test_a_sign_out_during_an_upload_that_fails_uploads_again(desk, cloud):
 
 # --------------------------------------------------------------------------- the close
 
+def test_a_close_completes_the_queued_jobs_too(desk, cloud):
+    """shutdown(): the running job and every queued one hear of the close, once each; none starts."""
+    desk.mgr.add_item('990001', desk.mgr.create_list('K'), note='n', fl_id='FLa')
+    gate = Gate(cloud, lambda req: req.t == 'list_items' and req.op == 'insert')
+    r = threaded(desk.mgr)
+    done = []
+    r.run('upload', on_done=lambda o: done.append(('running', o)))
+    assert gate.reached.wait(10)
+    r.run('download', on_done=lambda o: done.append(('queued-download', o)))
+    r.run('merge', on_done=lambda o: done.append(('queued-merge', o)))
+    r.shutdown()
+    gate.release.set()
+    closed = {'cancelled': True, 'shutdown': True}
+    assert [name for name, _ in done] == ['running', 'queued-download', 'queued-merge']
+    assert all({k: o[k] for k in closed} == closed for _, o in done)
+    assert r.busy is False and r.run('upload') is None
+
+
+@pytest.mark.parametrize('cell', ['download-past-the-sign-out-deadline', 'merge-upload-half-another-account',
+                                  'merge-upload-half-new-sign-in'])
+def test_a_late_result_from_before_a_sign_out_changes_nothing(desk, cloud, cell, monkeypatch):
+    """A download fetched in time but used past the sign-out's deadline is not applied; a Merge whose
+    sign-in ended while its download was applied never starts its upload."""
+    k = desk.mgr.create_list('K')
+    desk.mgr.add_item('990001', k, note='n', fl_id='FLa')
+    assert desk.up()['success']
+    cloud.add(R.cloud_id(desk, k), '990002', fl_id='FLb', note='web')
+    begins = []
+    real_begin = desk.mgr.begin_upload
+    monkeypatch.setattr(desk.mgr, 'begin_upload', lambda: begins.append(1) or real_begin())
+    r = threaded(desk.mgr)
+    done = []
+    if cell == 'download-past-the-sign-out-deadline':
+        r.run('download', on_done=done.append)
+        assert worker_ended(r)                            # fetched in time; its state waits in the queue
+        r.begin_logout(lambda outcome: None, budget_s=0.01)
+        threading.Event().wait(0.05)                      # the deadline passes before the UI thread reads it
+        before = set(desk.mgr.data['items'])
+        assert drain_until(r, lambda: bool(done))
+        assert done[0]['cancelled'] is True and done[0]['stale'] is True and 'download' not in done[0]
+        assert set(desk.mgr.data['items']) == before and '990002::fl::FLb' not in before
+        assert not os.path.exists(desk.mgr.LISTS_FILE + '.pre-download')
+        return
+    real_apply = desk.mgr.apply_cloud_state
+
+    def apply_then_the_sign_in_ends(state):
+        applied = real_apply(state)
+        if cell == 'merge-upload-half-another-account':
+            R.sign_in(desk, 'u2')                         # the same sign-in epoch, another account
+        else:
+            r.invalidate_auth()
+        return applied
+    monkeypatch.setattr(desk.mgr, 'apply_cloud_state', apply_then_the_sign_in_ends)
+    mark = cloud.rec.mark()
+    r.run('merge', on_done=done.append)
+    assert drain_until(r, lambda: bool(done))
+    assert done[0]['download']['success'] and done[0]['stale'] is True and 'upload' not in done[0]
+    assert begins == [] and mark(op='insert') == [] and mark(op='update') == []
+
+
 def test_a_close_installs_a_finished_upload_whose_result_was_not_drained_yet(desk, monkeypatch):
     k = desk.mgr.create_list('K')
     desk.mgr.add_item('990001', k, note='n', fl_id='FLa')

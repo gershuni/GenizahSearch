@@ -1944,3 +1944,254 @@ def test_a_download_chosen_at_log_in_uploads_the_changes_made_while_logged_out(g
     assert host.notices[-1][:2] == ("information", tr("Sync Complete"))
     assert uploads == ([True] if changed else [])
     assert host._lists_sync.unsent is False
+
+
+# ---------------------------------------------------------------------------
+# The real runner and engine behind the window: a close, a prompt answered during an upload
+# ---------------------------------------------------------------------------
+
+class _Held:
+    """Holds the desktop's first request that `pred` matches until released."""
+
+    def __init__(self, cloud, pred):
+        self.reached, self.release = threading.Event(), threading.Event()
+        self.pred, self.cloud = pred, cloud
+        cloud.rec.hook = self.hook
+
+    def hook(self, client, req):
+        if client.actor == "A" and self.pred(req):
+            self.cloud.rec.hook = None
+            self.reached.set()
+            self.release.wait(10)
+        return None
+
+
+def _engine_host(gui, tmp_path, monkeypatch):
+    """A window over a real ListsManager, ListsCloudSync and ListsSyncRunner (its worker threads and
+    its 50 ms timer), with the scenario gate's PostgREST stand-in as the account."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import test_list_sync_removals as R
+    from desktop.lists_sync_runner import ListsSyncRunner
+    cloud = R.Cloud()
+    desk = R.make_desk(tmp_path, cloud)
+    monkeypatch.setattr(lists_sync, "_sync_instance", desk.sync)
+    host = _closing_host(gui())
+    host.lists_mgr = desk.mgr
+    host._lists_sync_user_id = USER
+    host._lists_sync = ListsSyncRunner(desk.mgr, parent=host, on_auto_done=host._on_lists_auto_done)
+    return host, desk, cloud, R
+
+
+def _pump_until(done, timeout=10):
+    end = time.monotonic() + timeout
+    while not done() and time.monotonic() < end:
+        APP.processEvents()
+        time.sleep(0.01)
+    return done()
+
+
+@pytest.mark.parametrize("cell", ["upload-in-flight-with-a-removal", "move-completed-then-removed",
+                                  "upload-result-queued"])
+def test_closing_during_an_upload_keeps_what_it_did(gui, tmp_path, monkeypatch, cell):
+    """The window's closeEvent while its runner's upload is on a worker: what the upload already did
+    is installed and saved (from its result, or rebuilt from its reports), the edits made meanwhile
+    count as made after it, and nothing waits for the worker."""
+    host, desk, cloud, R = _engine_host(gui, tmp_path, monkeypatch)
+    mgr, runner = desk.mgr, host._lists_sync
+    lists = {n: mgr.create_list(n) for n in ("K", "L", "M", "Z")}
+    done = []
+    held = None
+    if cell == "upload-in-flight-with-a-removal":
+        mgr.add_item("990001", lists["L"], note="n", fl_id="FLa")      # E, new: the upload inserts it
+        mgr.add_item("990005", lists["Z"], fl_id="FLz")                # written after L: where it sticks
+        held = _Held(cloud, lambda req: req.t == "list_items" and req.op == "insert"
+                     and any(r.get("sys_id") == "990005" for r in
+                             (req.payload if isinstance(req.payload, list) else [req.payload])))
+        runner.run("upload", on_done=done.append)
+        assert held.reached.wait(10)
+        # E's row and its cloud list, made by the upload: reported, not installed yet
+        c_l = next(cl["id"] for cl in cloud.db.tables["user_lists"] if cl["name"] == "L")
+        (row,) = [r["id"] for r in cloud.rows(list_id=c_l, sys_id="990001")]
+        assert "cloud_id" not in mgr.data["lists"][lists["L"]]
+        mgr.remove_item_from_list(R.KEY, lists["L"])                   # E removed on the UI thread
+    elif cell == "move-completed-then-removed":
+        mgr.add_item("990001", lists["K"], note="n", fl_id="FLa")
+        mgr.add_item("990001", lists["M"], fl_id="FLa")
+        assert desk.up()["success"]
+        row = R.row_in(cloud, desk, lists["K"])
+        mgr.move_items_to_list([R.KEY], lists["K"], lists["L"])
+        mgr.add_item("990005", lists["Z"], fl_id="FLz")                # an insert after the move
+        held = _Held(cloud, lambda req: req.t == "list_items" and req.op == "insert")
+        job = runner.run("upload", on_done=done.append)
+        assert held.reached.wait(10)
+        assert _pump_until(lambda: any(rep[0] == "row" and rep[3] == row for rep in job.recorded)), \
+            "the 50 ms timer did not drain the move's report"
+        mgr.remove_item_from_list(R.KEY, lists["L"])                   # M survives
+    else:
+        mgr.add_item("990001", lists["K"], note="n", fl_id="FLa")
+        saved_at_end = []
+        runner.run("upload", on_done=lambda o: (saved_at_end.append(R.rec(desk, lists["K"]) is not None
+                                                                    and R.saved(desk)["items"][R.KEY]
+                                                                    .get("cloud_rows", {}).get(lists["K"])
+                                                                    is not None), done.append(o)))
+        end = time.monotonic() + 10
+        while not any(m[0] == "done" for m in list(runner._results.queue)) and time.monotonic() < end:
+            time.sleep(0.01)                                           # the worker ended; nothing drained it
+    took, event = _close(host)
+    try:
+        assert took < 1.0, f"closeEvent took {took:.1f}s"
+        assert event.isAccepted() and runner.closed
+        assert done and done[0].get("shutdown") is True
+        on_disk = R.saved(desk)
+        if cell == "upload-in-flight-with-a-removal":
+            assert on_disk["cloud_deletes"][str(row)]["account"] == USER
+            assert on_disk["cloud_deletes"][str(row)]["list"] == c_l
+        elif cell == "move-completed-then-removed":
+            assert on_disk["cloud_deletes"][str(row)]["list"] == R.cloud_id(desk, lists["L"])
+            assert cloud.row(row)["list_id"] == R.cloud_id(desk, lists["L"])
+        else:
+            assert saved_at_end == [True], "the job completed before its result was installed and saved"
+            assert on_disk["items"][R.KEY]["cloud_rows"][lists["K"]] == R.rec(desk, lists["K"])
+    finally:
+        if held is not None:
+            held.release.set()
+
+
+def test_a_choice_made_during_an_upload_survives_it(gui, removals, tmp_path, monkeypatch):
+    """The website-removal prompt answered while an automatic upload runs on its copy: Remove and
+    Keep each stand once that upload is installed, and the upload after it acts on them."""
+    host, desk, cloud, R = _engine_host(gui, tmp_path, monkeypatch)
+    mgr, runner = desk.mgr, host._lists_sync
+    k, z = mgr.create_list("K"), mgr.create_list("Z")
+    mgr.add_item("990001", k, note="n", fl_id="FLa")
+    mgr.add_item("990002", k, fl_id="FLb")
+    assert desk.up()["success"]
+    gone, kept = R.KEY, "990002::fl::FLb"
+    for key in (gone, kept):
+        cloud.delete_row(R.row_in(cloud, desk, k, key))
+    assert sorted(desk.up()["web_removed"]) == sorted([(gone, k), (kept, k)])
+    mgr.add_item("990005", z, fl_id="FLz")                             # something for the next upload
+    held = _Held(cloud, lambda req: req.t == "list_items" and req.op == "insert")
+    try:
+        host._lists_auto_sync()                                        # an automatic upload, held
+        assert held.reached.wait(10)
+        monkeypatch.setattr(removals, "ask_about_web_removals",
+                            lambda parent, entries: {(gone, k): "remove", (kept, k): "keep"})
+        host._offer_web_removals(manual=True)                          # answered while it runs
+        assert gone not in mgr.data["items"] and R.rec(desk, k, kept) is None
+    finally:
+        held.release.set()
+    assert _pump_until(lambda: not runner.busy and not runner._auto_wanted)
+    assert gone not in mgr.data["items"] and k in mgr.data["items"][kept]["lists"]
+    assert R.rec(desk, k, kept) is not None, "the entry kept here was not added back on the website"
+    web = {r["sys_id"] for r in cloud.rows(list_id=R.cloud_id(desk, k))}
+    assert web == {"990002"}, web
+    on_disk = R.saved(desk)
+    assert gone not in on_disk["items"] and on_disk["items"][kept]["cloud_rows"][k] == R.rec(desk, k, kept)
+    runner.shutdown()
+
+
+# The program itself: a window closed while its list-sync worker is stuck in a request.
+_STUCK_CLOSE = r"""
+import os, sys, threading
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+sys.path.insert(0, sys.argv[1])
+from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import QApplication, QMainWindow
+app = QApplication([])
+import genizah_app
+from desktop.lists_sync_runner import ListsSyncRunner
+
+inside = threading.Event()
+
+
+class StuckLists:
+    # The lists as the runner uses them, whose upload request never returns.
+    _last_sync = 0
+
+    def cloud_user(self):
+        return "u1"
+
+    def begin_upload(self):
+        return {}, {}
+
+    def withdrawn_now(self):
+        return frozenset()
+
+    def sync_to_cloud(self, **kw):
+        inside.set()
+        threading.Event().wait(600)
+        return {"success": True}
+
+    def finish_upload(self, *a):
+        return False
+
+    def abandon_upload(self, *a):
+        return False
+
+
+class Host(genizah_app.GenizahGUI):
+    def __init__(self):
+        QMainWindow.__init__(self)
+
+
+host = Host()
+host._defer_close_for_passage = lambda event: False
+host._close_result_dialog = lambda: None
+host._save_session = lambda: None
+host.cancel_browse_image_thread = lambda: None
+host.lists_mgr = StuckLists()
+host._lists_sync = ListsSyncRunner(host.lists_mgr, parent=host)
+host.show()
+host._lists_sync.run("upload")
+if not inside.wait(30):
+    print("the worker never started", flush=True)
+    sys.exit(3)
+
+
+def close():
+    host.close()
+    print("closed", flush=True)
+
+
+QTimer.singleShot(0, close)
+app.exec()
+"""
+
+
+def test_closing_during_a_sync_exits_promptly(tmp_path):
+    """The real closeEvent in its own process, with the list-sync worker stuck inside a request (a
+    daemon thread the close does not wait for): the process ends within 5 s of the window closing."""
+    import os
+    import subprocess
+    script = tmp_path / "stuck_close.py"
+    script.write_text(_STUCK_CLOSE, encoding="utf-8")
+    env = dict(os.environ, QT_QPA_PLATFORM="offscreen", PYTHONUTF8="1")
+    env.pop("PYTEST_CURRENT_TEST", None)
+    proc = subprocess.Popen([sys.executable, str(script), str(ROOT)], cwd=str(tmp_path), env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    lines = []
+    try:
+        closed_at = None
+        deadline = time.monotonic() + 180                  # a cold start imports the whole program
+        while time.monotonic() < deadline:
+            line = proc.stdout.readline()
+            if not line:
+                break
+            lines.append(line.rstrip())
+            if line.strip() == "closed":
+                closed_at = time.monotonic()
+                break
+        assert closed_at is not None, "the window never closed:\n" + "\n".join(lines[-30:])
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pytest.fail("the process was still running 5 s after its window closed")
+        took = time.monotonic() - closed_at
+        rest = proc.stdout.read()
+        assert proc.returncode == 0, f"exit code {proc.returncode}:\n{rest}"
+        assert took < 5, f"the process took {took:.1f}s to end after its window closed"
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
