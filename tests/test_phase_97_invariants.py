@@ -108,6 +108,17 @@ def test_cloud_write_gates_at_top():
         "(Phase 95 D-30 / Phase 97 D-NEW-7 invariant)"
     )
 
+    # Gate 5: lists_sync.py :: _push_list_items -- the item half of every upload
+    # (sync_to_cloud and sync_item_to_cloud) skips My Library (LOCAL) entries.
+    # tests/test_list_sync_identity.py drives the behaviour; this pins the gate's place.
+    push_fn = _find_function(tree, "_push_list_items")
+    assert push_fn is not None, "lists_sync.py: no function named '_push_list_items'"
+    push_body = ast.unparse(ast.Module(body=push_fn.body, type_ignores=[]))
+    assert "is_local_sys_id" in push_body, (
+        "lists_sync.py::_push_list_items: is_local_sys_id gate not found -- a My Library "
+        "entry in a list would be uploaded with its note and tags"
+    )
+
 
 # ---------------------------------------------------------------------------
 # (b) Web LIBRARY_CODES allowlist: all consumers guard against LOCAL
