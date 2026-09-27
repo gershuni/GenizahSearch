@@ -6,6 +6,73 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ## [Unreleased]
 
+### Desktop: list sync keeps every list's entries, pages and notes (2026-09-27)
+
+Reaches users with the next desktop installer. That installer carries this change, "saved work
+stays saved" below and the second half of the list-sync repair together: the three ship in one
+installer, not separately. **Before it ships, the owner applies
+`migrations/add_list_item_page_column.sql`** in the Supabase SQL Editor and runs the file's two
+verify queries: the first must show `page | text` and `tags | jsonb` (the desktop's tag checks are
+written for a jsonb column; if `tags` is not jsonb, do not release), the second SELECT, INSERT,
+UPDATE and DELETE for `authenticated`.
+
+- **An entry in two lists keeps both cloud copies.** Each list an entry is in now has its own row
+  in your account, and this computer remembers which row belongs to which list. Before, the entry
+  ended with one row, in whichever of its lists was uploaded last.
+- **Two pages or folios of one manuscript no longer overwrite each other.** Rows are matched by
+  manuscript, folio and page (the new `page` column), so uploading one page no longer replaces
+  another page's row, and a Download no longer drops one of them.
+- **An upload never overwrites a note that differs.** It replaces the note or tags in your account
+  only when this computer is the only side that changed them since the last sync, and only if the
+  account still holds the value it read. Otherwise both are left as they are and the sync result
+  says so. Lists restored from an older backup therefore no longer push their older notes over
+  newer ones in your account.
+- **Merge and Download keep both versions.** A note that differs becomes the note on this computer,
+  then a line `--- from the cloud ---` (`--- מהענן ---` in Hebrew), then the account's text; a
+  text the note already holds is not added again. The tags of both sides are combined.
+- **My Library entries are never sent with list sync.** Until now an upload could send a My
+  Library entry's internal id, its note and tags, and a shelfmark you typed for it; the document
+  itself and its text were not uploaded. Such entries are now neither uploaded nor downloaded; rows
+  that earlier versions uploaded stay in the account until removed (`docs/guides/SUPABASE_GUIDE.md`
+  gives the query that counts them). Help's line on local items and list sync now says what the
+  app does.
+- **A list renamed on the website keeps its new name.** The desktop takes the website's name at its
+  next Download and its uploads no longer rename the list back -- unless the list was renamed on
+  this computer since an upload last sent its name; then this computer's name stands and is
+  uploaded. A list renamed on this computer now also shows its new name in the English interface.
+- **One list sync at a time.** A sync that starts while another runs (for example the sign-out
+  upload during an automatic upload) stops at once with "Sync already in progress" instead of
+  running alongside it.
+- **Long lists are read in full.** Rows are read page by page, so a list with more rows than one
+  server response holds (1,000 by default) is no longer read short.
+- **An entry removed on the website is not uploaded again.** It stays on this computer; a sync
+  removes nothing from any list, here or in your account.
+- **The sync result says what it left.** After a Download, Upload or Merge, successful or not, the
+  message adds how many notes now hold both versions, how many entries had their tags combined, how
+  many notes differ and were left as they are, and how many notes were too long to update safely
+  in your account (they stay on this computer).
+- Internal: `tests/list_sync_scenarios.py` is a seeded scenario gate (two desktops and the website
+  on one stateful fake Supabase, random edits, syncs and injected failures, ten invariants checked
+  after every step); `tests/test_list_sync_scenarios.py` runs 500 seeds of 60 steps in the suite.
+  `supabase_setup.sql` gains the `page` column and explicit Data API grants for the list tables.
+
+### Web: /lists (2026-09-27)
+
+**Deploy order (owner-run).** Deploy this **with or after** the desktop installer above, not
+before: desktops older than that installer overwrite a note edited on the website at their next
+upload, and report an entry removed on the website as a failed upload on every sync. The read-only
+"Page N" display and Browse link may go earlier (they are safe before and after the migration).
+
+- **Editing an entry's note or tags and removing an entry now work.** For the entries of an
+  ordinary list the page passed no row id, so these changes never reached your account (since the
+  2026-09-25 hotfix the page said the change could not be saved; before it, nothing said so).
+- **An entry for one page shows "Page N"**, and its Browse button opens that page. Entries without
+  a page look as before, and a shelfmark that already ends with its page (as the website's own
+  "Add page to list" writes it) is not labelled twice.
+- **Saving a note no longer splits a tag that contains a comma:** the tag field is read back only
+  when you changed it.
+- The edit dialog names the entry as its card does (library, shelfmark, page).
+
 ### Desktop: saved work stays saved (2026-09-25)
 
 Reaches users with the next desktop installer.

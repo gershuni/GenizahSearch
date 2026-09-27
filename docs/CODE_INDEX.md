@@ -1674,68 +1674,164 @@ moved out of `genizah_core.py` (→ `shared/*`) and `genizah_app.py` (→ `deskt
 
 ## shared/lists_manager.py
 
-- **Function** `_tr` (Line 28) — Translate text if current language is Hebrew.
-- **Function** `_worth_retrying_at_startup` (Line 41) — Any failed read of lists.pkl is retried at startup, except a file that is gone.
-- **Class** `ListsManager` (Line 46) — Manages personal lists (starred/saved manuscripts) with tags and notes.
-    - Method `__init__` (Line 95) — Initialize the lists manager.
-    - Method `_get_default_data` (Line 101) — Return the default data structure.
-    - Method `_backup_paths` (Line 132)
-    - Method `_read_store` (Line 135) — Unpickle one copy of the store and fill in the fields newer builds expect.
-    - Method `load` (Line 170) — Load lists from file, falling back to .bak1, .bak2, .bak3 in that order.
-    - Method `_rotate_backups` (Line 207) — bak2 -> bak3, bak1 -> bak2, then copy lists.pkl -> bak1.
-    - Method `_keep_unreadable_locked` (Line 215) — Copy the lists.pkl that load() could not read to lists.pkl.unreadable-<time>.
-    - Method `keep_unreadable_copy` (Line 228) — After a load that could not read lists.pkl, copy it aside now.
-    - Method `save` (Line 247) — Save lists to file. Returns True when lists.pkl was written.
-    - Method `write_snapshot` (Line 276) — Write the in-memory store to lists.pkl.<label>, atomically.
-    - Method `clear_all` (Line 292) — Clear all lists and reset to default state. Used after migration.
-    - Method `enable_cloud_sync` (Line 299) — Enable cloud sync for the given user (call after login).
-    - Method `disable_cloud_sync` (Line 318) — Disable cloud sync (call on logout).
-    - Method `sync_from_cloud` (Line 327) — Pull lists from cloud and merge with local data.
-    - Method `is_sync_available` (Line 338) — Check if cloud sync is available (user logged in, network ok).
-    - Property `_last_sync` (Line 350) — Get timestamp of last sync (for debouncing).
-    - Method `sync_to_cloud` (Line 359) — Push local lists to cloud.
-    - Method `get_cloud_lists_preview` (Line 370) — Get preview of cloud lists without syncing (for dialog display).
-    - Method `get_local_lists_summary` (Line 381) — Get summary of local lists for dialog display.
-    - Method `get_all_lists` (Line 397) — Get all lists sorted alphabetically (system lists have special handling).
-    - Method `get_deleted_lists` (Line 426) — Get soft-deleted lists (trash view).
-    - Method `_get_list_item_count` (Line 440) — Get the number of items in a list.
-    - Method `create_list` (Line 451) — Create a new list. Returns the list ID.
-    - Method `update_list` (Line 478) — Update list properties.
-    - Method `update_list_project` (Line 495) — Assign a list to a project (or clear project).
-    - Method `create_project` (Line 511) — Create a new project. Returns the project ID.
-    - Method `get_projects` (Line 539) — Get projects sorted by name.
-    - Method `update_project` (Line 553) — Update a project's properties.
-    - Method `delete_project` (Line 563) — Delete a project and optionally its lists.
-    - Method `_get_next_project_color` (Line 586)
-    - Method `apply_list_layout` (Line 598) — Apply list ordering and project assignments in one save.
-    - Method `delete_list` (Line 622) — Soft-delete a list (move to trash).
-    - Method `restore_list` (Line 657) — Restore a soft-deleted list from trash.
-    - Method `permanently_delete_list` (Line 670) — Permanently delete a list (no recovery).
-    - Method `empty_trash` (Line 674) — Permanently delete all soft-deleted lists.
-    - Method `duplicate_list` (Line 683) — Duplicate a list with all its items.
-    - Method `merge_lists` (Line 705) — Merge source list into target list.
-    - Method `find_duplicate_lists` (Line 727) — Find all duplicate lists (same name) and return info for resolution.
-    - Method `merge_duplicate_group` (Line 780) — Merge a group of duplicate lists into one.
-    - Method `auto_merge_duplicate_group` (Line 831) — Automatically merge a duplicate group using heuristics.
-    - Method `restore_project_hierarchy` (Line 853) — Restore project hierarchy for orphaned lists by color matching.
-    - Method `_build_item_id` (Line 882)
-    - Method `add_item` (Line 889) — Add an item to a list. Returns True if added, False if already exists.
-    - Method `add_items_bulk` (Line 933) — Add multiple items to a list at once.
-    - Method `update_item` (Line 986) — Update an item's properties.
-    - Method `remove_item_from_list` (Line 1014) — Remove an item from a specific list.
-    - Method `move_items_to_list` (Line 1032) — Move items from one list to another.
-    - Method `get_items_in_list` (Line 1047) — Get all items in a list with their metadata.
-    - Method `get_item` (Line 1072) — Get a single item's data.
-    - Method `is_item_in_any_list` (Line 1082) — Check if an item is in any list (excluding recent).
-    - Method `get_item_lists` (Line 1086) — Get list of lists an item belongs to.
-    - Method `add_to_recent` (Line 1094) — Add an item to the recently viewed list.
-    - Method `get_all_tags` (Line 1138) — Get all tags for autocomplete.
-    - Method `add_tag_to_items` (Line 1142) — Add a tag to multiple items.
-    - Method `export_list` (Line 1162) — Export a list to a dictionary suitable for JSON serialization.
-    - Method `import_list` (Line 1200) — Import a list from exported data. Returns (list_id, imported_count, unidentified_count).
-    - Method `shelfmark_sort_key` (Line 1248) — Sort key for shelfmarks that handles dots correctly.
-    - Method `get_items_sorted` (Line 1266) — Get items in a list, sorted by the specified field.
-    - Method `get_item_copy_text` (Line 1291) — Generate text for copying item info.
+- **Function** `_tr` (Line 31) — Translate text if current language is Hebrew.
+- **Function** `_worth_retrying_at_startup` (Line 44) — Any failed read of lists.pkl is retried at startup, except a file that is gone.
+- **Class** `ListsManager` (Line 49) — Manages personal lists (starred/saved manuscripts) with tags and notes.
+    - Method `__init__` (Line 113) — Initialize the lists manager.
+    - Method `_get_default_data` (Line 119) — Return the default data structure.
+    - Method `_backup_paths` (Line 150)
+    - Method `_read_store` (Line 153) — Unpickle one copy of the store and fill in the fields newer builds expect.
+    - Method `load` (Line 188) — Load lists from file, falling back to .bak1, .bak2, .bak3 in that order.
+    - Method `_rotate_backups` (Line 226) — Make a copy of lists.pkl the new .bak1: .bak2 -> .bak3, .bak1 -> .bak2.
+    - Method `_keep_unreadable_locked` (Line 256) — Copy the lists.pkl that load() could not read to lists.pkl.unreadable-<time>.
+    - Method `keep_unreadable_copy` (Line 269) — After a load that could not read lists.pkl, copy it aside now.
+    - Method `save` (Line 289) — Save lists to file. Returns True when lists.pkl was written.
+    - Method `_tell` (Line 326) — Call a save hook, if one is set; what it raises is logged, not passed on.
+    - Method `write_snapshot` (Line 335) — Write the in-memory store to lists.pkl.<label>, atomically.
+    - Method `clear_all` (Line 351) — Clear all lists and reset to default state. Used after migration.
+    - Method `enable_cloud_sync` (Line 358) — Enable cloud sync for the given user (call after login).
+    - Method `disable_cloud_sync` (Line 377) — Disable cloud sync (call on logout).
+    - Method `sync_from_cloud` (Line 386) — Pull lists from cloud and merge with local data.
+    - Method `is_sync_available` (Line 397) — Check if cloud sync is available (user logged in, network ok).
+    - Property `_last_sync` (Line 409) — Get timestamp of last sync (for debouncing).
+    - Method `sync_to_cloud` (Line 418) — Push local lists to cloud.
+    - Method `differing_notes_count` (Line 429) — Entries in a list whose note or tags differ from the account's copy and were left as they are.
+    - Method `get_cloud_lists_preview` (Line 442) — Get preview of cloud lists without syncing (for dialog display).
+    - Method `get_local_lists_summary` (Line 453) — Get summary of local lists for dialog display.
+    - Method `get_all_lists` (Line 469) — Get all lists sorted alphabetically (system lists have special handling).
+    - Method `get_deleted_lists` (Line 498) — Get soft-deleted lists (trash view).
+    - Method `_get_list_item_count` (Line 512) — Get the number of items in a list.
+    - Method `create_list` (Line 523) — Create a new list. Returns the list ID.
+    - Method `update_list` (Line 550) — Update list properties.
+    - Method `update_list_project` (Line 574) — Assign a list to a project (or clear project).
+    - Method `create_project` (Line 590) — Create a new project. Returns the project ID.
+    - Method `get_projects` (Line 618) — Get projects sorted by name.
+    - Method `update_project` (Line 632) — Update a project's properties.
+    - Method `delete_project` (Line 642) — Delete a project and optionally its lists.
+    - Method `_get_next_project_color` (Line 665)
+    - Method `apply_list_layout` (Line 677) — Apply list ordering and project assignments in one save.
+    - Method `delete_list` (Line 701) — Soft-delete a list (move to trash).
+    - Method `restore_list` (Line 736) — Restore a soft-deleted list from trash.
+    - Method `permanently_delete_list` (Line 749) — Permanently delete a list (no recovery).
+    - Method `empty_trash` (Line 753) — Permanently delete all soft-deleted lists.
+    - Method `duplicate_list` (Line 762) — Duplicate a list with all its items.
+    - Method `merge_lists` (Line 784) — Merge source list into target list.
+    - Method `find_duplicate_lists` (Line 806) — Find all duplicate lists (same name) and return info for resolution.
+    - Method `merge_duplicate_group` (Line 859) — Merge a group of duplicate lists into one.
+    - Method `auto_merge_duplicate_group` (Line 910) — Automatically merge a duplicate group using heuristics.
+    - Method `restore_project_hierarchy` (Line 932) — Restore project hierarchy for orphaned lists by color matching.
+    - Method `_build_item_id` (Line 961)
+    - Method `add_item` (Line 968) — Add an item to a list. Returns True if added, False if already exists.
+    - Method `add_items_bulk` (Line 1012) — Add multiple items to a list at once.
+    - Method `update_item` (Line 1065) — Update an item's properties.
+    - Method `remove_item_from_list` (Line 1093) — Remove an item from a specific list.
+    - Method `move_items_to_list` (Line 1111) — Move items from one list to another.
+    - Method `get_items_in_list` (Line 1126) — Get all items in a list with their metadata.
+    - Method `get_item` (Line 1151) — Get a single item's data.
+    - Method `is_item_in_any_list` (Line 1161) — Check if an item is in any list (excluding recent).
+    - Method `get_item_lists` (Line 1165) — Get list of lists an item belongs to.
+    - Method `add_to_recent` (Line 1173) — Add an item to the recently viewed list.
+    - Method `get_all_tags` (Line 1217) — Get all tags for autocomplete.
+    - Method `add_tag_to_items` (Line 1221) — Add a tag to multiple items.
+    - Method `export_list` (Line 1241) — Export a list to a dictionary suitable for JSON serialization.
+    - Method `import_list` (Line 1279) — Import a list from exported data. Returns (list_id, imported_count, unidentified_count).
+    - Method `shelfmark_sort_key` (Line 1327) — Sort key for shelfmarks that handles dots correctly.
+    - Method `get_items_sorted` (Line 1345) — Get items in a list, sorted by the specified field.
+    - Method `get_item_copy_text` (Line 1370) — Generate text for copying item info.
+
+## shared/lists_sync.py
+
+- **Function** `_norm` (Line 88)
+- **Function** `_id_key` (Line 95)
+- **Function** `_item_identity` (Line 99) — (sys_id, fl_id, page) of a local item: its fields, else the ::fl:: / ::img:: parts of its key.
+- **Function** `_row_identity` (Line 112)
+- **Function** `_same_entry` (Line 118) — True only when two identities are certainly one entry.
+- **Function** `_clean` (Line 144)
+- **Function** `_has_lines` (Line 148) — small is empty, equal to big, or a run of complete lines of big (never a raw substring).
+- **Function** `_separators` (Line 155) — The line kept notes are joined with, in English and in Hebrew (a note may hold either).
+- **Function** `_blocks` (Line 166) — The texts a kept note is made of: the parts between its marker lines.
+- **Function** `_holds` (Line 174) — big already contains small: as complete lines, or every text small was kept from.
+- **Function** `_same_text` (Line 183) — Equal, or each holds the other: the same notes kept in another order.
+- **Function** `_keep_both` (Line 188) — Both texts: the desktop's, a marker line, then what the cloud's text adds to it.
+- **Function** `_fold_notes` (Line 205)
+- **Function** `_union` (Line 212)
+- **Function** `_tagset` (Line 220)
+- **Function** `_tags_filter_literal` (Line 224) — list_items.tags is jsonb: the cs/cd filters take JSON text, never the text[] literal {a,b}.
+- **Function** `count_differing_notes` (Line 229) — Entries whose note or tags differ from the account's copy and were left as they are.
+- **Function** `_records` (Line 259)
+- **Function** `_live_record` (Line 263)
+- **Function** `_orphans` (Line 270) — Records for local lists the item is no longer in (a Move, a removal, a merged list).
+- **Function** `_orphan_ids` (Line 277)
+- **Function** `_base_of` (Line 281) — A copy of the record naming this row (for its note/tag bases), or None.
+- **Function** `_drop_record` (Line 289)
+- **Function** `_drop_left_tombstones` (Line 297)
+- **Function** `_remember` (Line 305) — The only writer of a record. note/tags: the cloud values the local copy is known to include.
+- **Function** `_is_missing_column` (Line 341)
+- **Function** `_is_url_too_long` (Line 349)
+- **Function** `_insert_rolled_back` (Line 353) — True when an insert error proves nothing was written, so retrying rows one by one is safe.
+- **Function** `_session_user` (Line 373) — The user id of the client's current session, or None (no session, or no way to tell).
+- **Class** `_Pass` (Line 383) — Everything one sync pass learns; never kept on the sync object.
+    - Method `__init__` (Line 386)
+    - Method `check` (Line 404) — Called before every request.
+    - Method `records_naming` (Line 407) — Which records name each row: built at the pass's first record, then kept by _remember.
+    - Method `prove_auth` (Line 421)
+- **Function** `_list_order` (Line 427)
+- **Function** `_syncable_list` (Line 435)
+- **Function** `_match_rows` (Line 443) — Pair cloud rows of one list with local items. Returns {row_id: item_id}.
+- **Class** `ListsCloudSync` (Line 511) — Handles synchronization between local ListsManager and Supabase.
+    - Method `__init__` (Line 533) — Initialize the sync manager.
+    - Property `_sync_in_progress` (Line 543)
+    - Method `set_client` (Line 546) — Set an external authenticated client (from corrections system).
+    - Method `_get_client` (Line 551) — Get Supabase client - preferring the authenticated external client.
+    - Method `set_user` (Line 568) — Set the current user ID (UUID from Supabase auth).
+    - Method `clear_user` (Line 572) — Clear user ID (on logout).
+    - Method `is_sync_available` (Line 576) — Check if cloud sync is available.
+    - Method `get_cloud_lists_preview` (Line 591) — Get a preview of cloud lists without syncing.
+    - Method `_backup_local_data` (Line 638) — Snapshot the local lists before a sync. Returns True if the snapshot was written.
+    - Method `_guard` (Line 664) — Records belong to one account: drop another account's, then claim the store for this one.
+    - Method `_paged` (Line 676) — Read every page of a query. Returns (rows, complete).
+    - Method `_fetch_list_rows` (Line 713)
+    - Method `_read_user_lists` (Line 739)
+    - Method `_confirm` (Line 745) — Where are these remembered rows now? Fills pass_.where, pass_.absent and pass_.locate_ok.
+    - Method `_may_tombstone` (Line 781) — May this remembered row be taken as removed on the website?
+    - Method `_tombstone` (Line 795)
+    - Method `_repair_shared_cloud_rows` (Line 807) — Items that hold the same cloud row: fold certain duplicates (download), split the rest.
+    - Method `sync_to_cloud` (Line 862) — Push local lists and items to Supabase.
+    - Method `_upload_result` (Line 893)
+    - Method `_upload` (Line 899)
+    - Method `_push_projects_and_lists` (Line 947) — Projects and lists as before, except that a cloud list has at most one local owner.
+    - Method `_push_list_items` (Line 1109) — The item half of an upload, for the given (local list, cloud list) pairs.
+    - Method `_hold_conflicts` (Line 1167) — Entries whose note (or tags) differ on one of their rows and may not be replaced there.
+    - Method `_write_list` (Line 1204)
+    - Method `_write_unmatched` (Line 1220) — A membership that no row of its list's read paired with.
+    - Method `_orphan_choice` (Line 1261) — The orphan whose row this membership takes (moved or adopted): (rank, key, record), or None.
+    - Method `_move_orphan` (Line 1290) — Move (or adopt) a row this item left in a list it is no longer in.
+    - Method `_orphan_gone` (Line 1345)
+    - Method `_reread` (Line 1353)
+    - Method `_changes` (Line 1363) — What an upload may change on a paired row.
+    - Method `_write_matched` (Line 1417) — A row paired with this membership; only what changed, conditional on what was read.
+    - Method `_send_rest` (Line 1446) — After a note/tag change could not be made: send the row's other changed fields alone.
+    - Method `_agreed_bases` (Line 1455) — Bases when a note/tag write did not happen: equal values are agreed, the rest unchanged.
+    - Method `_patch` (Line 1465) — One PATCH of a row, filtered by id, list and the note/tags it replaces.
+    - Method `_insert_rows` (Line 1513) — One batch per list; returned rows are recorded by identity, never by position.
+    - Method `_insert_one` (Line 1574)
+    - Method `sync_from_cloud` (Line 1591) — Pull lists and items from Supabase and merge with local data.
+    - Method `_fetch_cloud_state` (Line 1658) — Everything a download needs from the cloud; reads nothing local and writes nothing.
+    - Method `_apply_projects` (Line 1679) — Cloud projects mapped to local ones by name, as before.
+    - Method `_cloud_deleted_at` (Line 1716)
+    - Method `_map_lists` (Line 1733) — Each local list's own cloud list, and the same-name cloud lists read for it.
+    - Method `_apply_cloud_state` (Line 1862) — The local half of a download: map lists, fold rows into items, reconcile notes once per item.
+    - Method `_walk_list` (Line 1975) — The rows of one local list's own and same-name cloud lists: pair, fold or create.
+    - Method `_plan_list` (Line 2026)
+    - Method `_new_item` (Line 2123) — An unmatched row that is no local entry's: a new item at a free key.
+    - Method `_judge_unseen` (Line 2154) — A remembered row of this membership that no read or confirmation paired with it.
+    - Method `_sweep_unowned` (Line 2170) — Memberships whose local list has no cloud list of its own in this pass (deleted there, or none yet).
+    - Method `_reconcile` (Line 2186) — Every cloud value that reached this entry in this pass, applied at once, in row-id order.
+    - Method `sync_list_to_cloud` (Line 2242) — Push a specific list and its items to cloud.
+    - Method `sync_item_to_cloud` (Line 2303) — Push one membership (an item in one list) to cloud, as an upload would.
+    - Method `delete_list_from_cloud` (Line 2357) — Delete a list from cloud (cascade deletes items).
+    - Method `delete_item_from_cloud` (Line 2381) — Delete the one cloud row remembered for this item in this list; nothing else.
+- **Function** `get_lists_sync` (Line 2412) — Get or create the lists sync singleton.
 
 ## shared/browse_map_utils.py
 
