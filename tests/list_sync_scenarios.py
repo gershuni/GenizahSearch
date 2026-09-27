@@ -17,18 +17,30 @@ printed as a literal for REGRESSION_CASES in tests/test_list_sync_scenarios.py.
 before per-membership records: tests/fixtures/lists_sync_816ccf7c.py.txt) or the
 path of a variant of lists_sync.py.
 
+A desktop syncs as its runner does (desktop/lists_sync_runner.py), when the
+ListsManager and the engine offer that path: an upload runs on a copy of the store
+(begin_upload, sync_to_cloud(data=copy), finish_upload) while the user may edit the
+live store, and a download fetches, then applies. The fixture engine, and a tree
+without that path, sync the live store directly.
+
 Invariants (after every step unless stated):
-  1  user text is never lost: every live note line and tag is in some copy
+  1  user text is never lost: every live note line and tag is in some copy (an
+     explicit removal's DELETE retires what it took; a conditional one retires nothing)
   2  a row changes list only by a desktop's orphan move; identities only fill
-  3  nothing is deleted: no DELETE, no row vanishes during a sync, and a pass
-     drops no local membership
-  4  a row is named by one record; a desktop never inserts a row it should have
-     claimed, nor an entry it already inserted in the same step (unless that row
-     was recorded for one membership of the entry and this insert is for another
-     that has none); the settle reaches a fixed point
+  3  nothing is deleted except explicit removals the user made or accepted: every
+     desktop DELETE is explicit (a pending removal of the pass's account, filtered by
+     id and its list alone, that a removal in the ledger of 11 explains) or redundant
+     (a moved row's, filtered by the note and tags it holds, which its entry holds);
+     no row vanishes during a step but by such a DELETE or the website; a pass drops
+     no local membership
+  4  a row is named by one record, and never by a record and a pending removal at
+     once; a desktop never inserts a row it should have claimed, nor an entry it
+     already inserted in the same step (unless that row was recorded for one
+     membership of the entry and this insert is for another that has none); the
+     settle reaches a fixed point
   5  a second identical successful sync changes nothing
   6  My Library (97...) sys_ids never reach the cloud or come back from it
-  7  records carry their account
+  7  records and pending removals carry their account; no DELETE for another account's
   8  at the settle every membership has a record naming a row of its own list
   9  at the settle every cloud row reaches a local item that is the same entry
  10  list names, against the harness's own record of desktop renames (never the
@@ -40,6 +52,20 @@ Invariants (after every step unless stated):
      a pending rename of that name; at the settle no rename is pending and every list
      has its cloud list's name -- so a website rename reaches every desktop and no name
      flips back
+ 11  removals reach the website: every explicit removal (remove, delete permanently,
+     empty the Trash, a prompt's Remove) is a ledger entry whose expected rows come from
+     nothing the sync's bookkeeping wrote -- the membership record just before it, the
+     harness's own map of moves, and the fake's log of what the upload running then
+     inserted or moved for that entry; at the settle none of them exists, except the
+     designed residuals (a request whose answer never came back, a killed upload, a row
+     another actor moved to another list, another account's, and an entry the user put
+     back in that list before its delete went)
+ 12  a Download never re-adds a membership only rows pending deletion justify
+ 13  the website-removal prompt is offered only when the harness's own written-out
+     gate allows it
+ 14  an edit made during an upload counts as made after it: the step replayed with the
+     edit right after the upload settles to the same website and desktops (steps in
+     which the design's one difference can delete a live row are excluded)
   R  rule checks on every request and around every pass (_check_request, _after_pass)
 
 Nothing here talks to a network or writes a file: saves and snapshots stay in
@@ -50,6 +76,7 @@ import collections
 import copy
 import importlib
 import importlib.util
+import inspect
 import json
 import logging
 import os
@@ -87,7 +114,14 @@ LONG_FILLER = 'L' * 9000
 INJECTIONS = ('raise_before', 'raise_after', 'api_error', 'anon', 'session_lost', 'web', 'web',
               'other_desktop_pass', 'same_desktop_edit', 'url_too_long',
               'web_between_pages', 'web_between_pages', 'web_churn_same_count', 'web_churn_same_count',
-              'web_rename')
+              'web_rename', 'between_stages')
+# Of the desktop edits a seed draws, the share that are instead one of the ops the
+# runner brings (drawn from a stream of their own), and their relative weights.
+RUNNER_OP_SHARE = 0.342
+RUNNER_OPS = (('prompt', 4.0), ('signout', 2.0), ('close', 1.0), ('kill', 0.5), ('offline', 1.0), ('ui', 2.0))
+# The window's state a desktop starts with: what the website-removal prompt waits on.
+UI_DEFAULT = {'visible': True, 'restoring': False, 'modal_open': False, 'logout_pending': False,
+              'close_pending': False}
 # Of the website ops a seed draws, the share that rename a list; of the desktop ops, the
 # share that do (drawn from a stream of their own, so the other ops keep their values).
 WEB_RENAME_SHARE = 0.125
@@ -96,8 +130,8 @@ DESK_RENAME_SHARE = 0.0625
 EARLY_ERRORS = ('Sync not available', 'Sync already in progress', 'No Supabase client')
 # The only keys of a store an upload may change: the design's list, fixed here rather than
 # read from the engine under test (a list's unsent-state and unsent-name flags are cleared
-# once they are sent).
-IDENTITY_FIELDS = {'store': ('cloud_account',), 'projects': ('cloud_id',),
+# once they are sent; a pending removal is sent or found gone).
+IDENTITY_FIELDS = {'store': ('cloud_account', 'cloud_deletes'), 'projects': ('cloud_id',),
                    'lists': ('cloud_id', 'list_state_unsent', 'list_name_unsent'),
                    'items': ('cloud_id', 'cloud_rows')}
 # The mark today's ListsManager.update_list puts on a renamed list. No check reads it; it
@@ -105,10 +139,43 @@ IDENTITY_FIELDS = {'store': ('cloud_account',), 'projects': ('cloud_id',),
 # such mark (so the upgrade starts from a store as v9.3.0 left it).
 RENAME_MARK = 'list_name_unsent'
 # Errors after which the request's answer never reaches the engine (the write may have landed).
-UNANSWERED = ('raise_after', 'api_pgrst111', 'api_504')
-ALL_CHECKS = frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 'R', 'crash'})
+UNANSWERED = ('raise_after', 'api_pgrst111', 'api_504', 'gone_after')
+ALL_CHECKS = frozenset({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 'R', 'crash'})
+# the same-desktop edit that removes the entry whose row the upload wrote last (the self-test mix)
+LAST_WRITE = ('last-write',)
+# desk_op kinds whose lost memberships are moves (into another list) and removals (the ledger of 11)
+MOVE_KINDS = (4, 8)
+REMOVAL_KINDS = (3, 9, 11)
 
 _NOWHERE = os.path.join(tempfile.gettempdir(), 'genizah-list-sync-scenarios-never-written')
+
+
+class _ProcessGone(BaseException):
+    """The program closed, or was killed, in the middle of a request (the engine catches only Exception)."""
+
+
+_SIGNATURES = {}
+
+
+def _takes(fn, name):
+    """Whether fn accepts the keyword `name` (the 2b-1 engine and the fixture take none of the runner's)."""
+    key = getattr(fn, '__func__', fn)
+    params = _SIGNATURES.get(key)
+    if params is None:
+        try:
+            params = _SIGNATURES[key] = frozenset(inspect.signature(fn).parameters)
+        except (TypeError, ValueError):
+            params = _SIGNATURES[key] = frozenset()
+    return name in params
+
+
+def _gate():
+    """The runner's dialog gate, when the tree has one (None otherwise)."""
+    try:
+        from desktop.lists_sync_runner import sync_dialog_allowed  # noqa: PLC0415 - optional, and Qt-bound
+    except Exception:
+        return None
+    return sync_dialog_allowed
 
 
 # --------------------------------------------------------------------------- engines
@@ -155,13 +222,32 @@ def _run_context(seed, engines):
     logging.disable(logging.CRITICAL)
     for m in engines:
         m.SUPABASE_AVAILABLE, m.SUPABASE_ANON_KEY = True, 'scenario-key'
+    _RUN['clock'], _RUN['urng'] = clock, urng
     try:
         yield
     finally:
+        _RUN.clear()
         time.time, uuid.uuid4 = real_time, real_uuid4
         logging.disable(prev_disable)
         for m, avail, key in saved:
             m.SUPABASE_AVAILABLE, m.SUPABASE_ANON_KEY = avail, key
+
+
+# the seeded clock and id stream of the run in progress, so a twin world can leave them as it found them
+_RUN = {}
+
+
+@contextmanager
+def _same_clock():
+    """Whatever runs inside leaves the seeded clock and ids where they were."""
+    clock, urng = _RUN.get('clock'), _RUN.get('urng')
+    state = (clock[0], urng.getstate()) if clock is not None else None
+    try:
+        yield
+    finally:
+        if state is not None:
+            clock[0] = state[0]
+            urng.setstate(state[1])
 
 
 # --------------------------------------------------------------------------- identity and tokens
@@ -415,6 +501,7 @@ class _Req:
         self.order_by = None
         self.rng = None
         self.limit_n = None
+        self.result = self.answer = None
 
     def select(self, cols='*', count=None, **kw):
         self.op, self.cols_sel, self.count = 'select', cols, count
@@ -486,6 +573,10 @@ class _Req:
         user = None if action == 'anon' else c.session_user
         if action == 'raise_before':
             raise httpx.ReadTimeout('injected: the request never reached the database')
+        if action == 'offline':
+            raise httpx.ConnectError('injected: no network')
+        if action == 'gone_before':
+            raise _ProcessGone('the program went away before this request was sent')
         if action == 'api_23502':
             raise APIError({'code': '23502', 'message': 'null value in column violates not-null constraint'})
         if action == 'api_pgrst103':   # (directed tests only) a range error on a read that asked for none
@@ -495,9 +586,14 @@ class _Req:
             if query_string_length(self.filters) > limit:
                 raise APIError({'code': 414, 'message': '<html>414 Request-URI Too Large</html>'})
         out = self._run(user)
+        self.result = out                                    # what the database did
+        if action == 'no_rows':                              # written, but the answer shows no row
+            out = types.SimpleNamespace(data=[], count=out.count)
         self.answer = None if action in UNANSWERED else out   # what the engine will be given
         if world is not None:
             world.after(c, self)
+        if action == 'gone_after':
+            raise _ProcessGone('the program went away before the answer came back')
         if action == 'raise_after':
             raise httpx.ReadTimeout('injected: the response was lost after the database applied it')
         if action == 'api_pgrst111':
@@ -633,6 +729,29 @@ class Desk:
         self.engine = engine
         self.sync = self._sync(engine)
         self.reidentified = set()  # items whose fl_id a user op set or changed (add_item on an existing key)
+        self._runner_state()
+
+    def _runner_state(self):
+        self.copy = None           # the store the running upload works on (the runner's copy), else None
+        self.upload_id = None      # the harness's number of the upload running on this desktop
+        self.reports = None        # what that upload reported (on_recorded)
+        self.signed_out = False
+        self.offline = 0           # passes left in which every request of this desktop fails
+        self.offline_now = False
+        self.gone = None           # {'at', 'count', 'applied', 'how'}: the program goes away at that request
+        self.ui = dict(UI_DEFAULT)
+        self.snap_ledger = []      # (len(world.ledger), this desktop's move map) when each snapshot was taken
+
+    @property
+    def pass_store(self):
+        """The store the pass in progress reads and writes: the runner's copy during an upload."""
+        return self.copy if self.copy is not None else self.lm.data
+
+    def copy_path(self):
+        return hasattr(self.lm, 'begin_upload') and _takes(self.sync.sync_to_cloud, 'data')
+
+    def fetch_path(self):
+        return hasattr(self.lm, 'remembered_row_ids') and hasattr(self.sync, 'fetch_cloud_state')
 
     def _manager(self, data):
         desk = self
@@ -645,12 +764,16 @@ class Desk:
                 desk.disk_renames = desk.renames()
                 return True
 
-            def write_snapshot(self, label):
-                desk.snaps.append(copy.deepcopy(self.data))
+            def write_snapshot(self, label, payload=None):
+                desk.snaps.append(copy.deepcopy(self.data) if payload is None else pickle.loads(payload))
                 snap_renames = desk.__dict__.setdefault('snap_renames', [])
                 snap_renames.append(desk.renames())
+                snap_ledger = desk.__dict__.setdefault('snap_ledger', [])
+                snap_ledger.append((len(getattr(desk.world, 'ledger', ())),
+                                    {k: v for k, v in getattr(desk.world, 'moves', {}).items() if k[0] == desk.name}))
                 del desk.snaps[:-12]
                 del snap_renames[:-12]
+                del snap_ledger[:-12]
                 return True
 
         lm = ScenarioListsManager(None)
@@ -673,16 +796,41 @@ class Desk:
         self.engine = engine
         self.sync = self._sync(engine)
 
+    def clone(self, world):
+        """This desktop in another world: its stores copied, its client and sync made anew."""
+        n = Desk.__new__(Desk)
+        skip = ('world', 'client', 'lm', 'engine', 'sync', 'copy', 'reports')
+        n.__dict__.update({k: copy.deepcopy(v) for k, v in self.__dict__.items() if k not in skip})
+        n.world, n.engine, n.copy, n.reports = world, self.engine, None, None
+        n.client = FakeClient(world.db, self.name, self.client.session_user)
+        n.client.page_missing, n.client.url_limit = self.client.page_missing, self.client.url_limit
+        n.lm = n._manager(copy.deepcopy(self.lm.data))
+        n.sync = n._sync(self.engine)
+        if self.signed_out:
+            n.sync.clear_user()
+        return n
+
     def restart(self):
         data = pickle.loads(self.disk) if self.disk is not None else None
         self.world.set_renames(self, self.disk_renames)
         self.lm = self._manager(data)
         self.sync = self._sync(self.engine)
+        self.copy = self.reports = self.upload_id = self.gone = None
+        self.offline_now = False
+        if self.signed_out:
+            self.sync.clear_user()   # the saved sign-in was removed at sign-out
 
     def sign_in(self, user):
         self.user = user
+        self.signed_out = False
         self.client.session_user = user
+        self.sync.set_client(self.client)   # a sign-out may have dropped the client
         self.sync.set_user(user)
+
+    def sign_out(self):
+        """The sign-out's end: list sync off (ListsManager.disable_cloud_sync, on this desktop's own sync)."""
+        self.sync.clear_user()
+        self.signed_out = True
 
     @property
     def data(self):
@@ -711,6 +859,13 @@ class _Step:
         self.start_rows = {}
         self.pass_start_lists = {}
         self.pass_start_items = {}
+        self.desk_deleted = set()     # rows a desktop's DELETE removed in this step
+        self.edit_in_upload = False   # the same-desktop edit ran while an upload worked on its copy
+        self.twin_excluded = False    # ... in an upload whose kept deletes may delete a live row (invariant 14)
+        self.after_insert = False     # the step's desktop had an insert answered
+        self.after_move = False       # ... or a move of a row to another list
+        self.defer_edit = False       # the twin world: hold the same-desktop edit until the upload is installed
+        self.deferred = None
 
 
 class World:
@@ -741,6 +896,20 @@ class World:
         # the note the desktop last saw, so the paste had put that back), they are retired again
         # (the older copies were already being replaced)
         self.revived = {}
+        # invariant 11: one entry per explicit removal a desktop made (see _ledger_after)
+        self.ledger = []
+        # the harness's own map of moves: (desk, row id) -> (item id, local list it is bound for)
+        self.moves = {}
+        # every insert of a list_items row and every change of a row's list, by a desktop (_log_rows)
+        self.row_log = []
+        self.killed = set()      # uploads whose process was killed
+        self.user_ops = 0        # user ops the ledger has seen (a removal's entries share its number)
+        self.upload_moves = []   # moves made while an upload ran: (desk, upload, item, identity, from, to)
+        self.explain_only = {}   # (desk, item) -> rows a removal's DELETE may take that it does not expect
+        self.forgot = {}         # desk -> length of the request log when a backup recovery made it forget
+        self.upload_seq = 0
+        self.cur_step = None
+        self.twins = 0           # steps invariant 14 replayed
         self.ctx = None
         self.pending = []
         self.trace = []
@@ -760,8 +929,10 @@ class World:
             d.use_engine(self.engine)
         self.checking = True
         self.renamed, self.named_inserts = {}, {}
+        self.ledger, self.moves, self.row_log = [], {}, []
         for d in self.desks.values():
             d.disk_renames, d.snap_renames = {}, [{} for _ in d.snaps]
+            d.snap_ledger = [(0, {}) for _ in d.snaps]
         self.legacy_claims = self.engine is self.fixture
         self.live_n, self.live_g = self.copies()
         # the rows as the old engine left them are the starting point of the identity checks
@@ -829,6 +1000,19 @@ class World:
         d = self.desks[client.actor]
         if self.checking:
             self._check_request(d, client, req)
+        if d.offline_now:
+            return 'offline'
+        g = d.gone
+        if g is not None and client is d.client:
+            g['count'] += 1
+            if g['at'] == 'write' and g.get('wrote') or g['at'] != 'write' and g['count'] >= g['at']:
+                d.gone = None
+                if g.get('edit') is not None and d.copy is not None:
+                    self.trace.append(f'    {d.name}: a user edit, then the program goes away')
+                    self._same_desk_edit(d, g['edit'])
+                self.trace.append(f'    {d.name}: the program goes away at request {g["count"]} ({req.op} {req.t}), '
+                                  + ('after' if g['applied'] else 'before') + ' it reached the database')
+                return 'gone_after' if g['applied'] else 'gone_before'
         c = self.ctx
         if (c is not None and c.inject and c.counting and not c.fired and client is c.desk.client):
             c.req_count += 1
@@ -853,6 +1037,11 @@ class World:
                 if req.t == 'list_items' and req.op == 'insert' and isinstance(req.payload, list):
                     c.fired = True
                     return self._fire(c, client, req)
+            elif c.inject[1] in ('edit_after_insert', 'edit_after_move'):
+                # the same-desktop edit, right after an insert (or a move) of the step's desktop was answered
+                if c.after_insert if c.inject[1] == 'edit_after_insert' else c.after_move:
+                    c.fired = True
+                    return self._fire(c, client, req)
             elif c.req_count == c.inject[0]:
                 c.fired = True
                 return self._fire(c, client, req)
@@ -865,7 +1054,58 @@ class World:
         if client.actor in self.desks and req.t == 'list_items' and req.op == 'update' \
                 and 'note' in (req.payload or {}):
             self._revived_row_written(req)
+        if client.actor in self.desks and req.t == 'list_items':
+            d = self.desks[client.actor]
+            if req.op == 'insert' and self.ctx is not None and client is self.ctx.desk.client                     and req.answer is not None:
+                self.ctx.after_insert = True
+            if req.op == 'update' and 'list_id' in (req.payload or {}) and self.ctx is not None                     and client is self.ctx.desk.client and req.answer is not None and req.answer.data:
+                self.ctx.after_move = True
+            wrote = req.op == 'insert' or (req.op == 'update' and 'list_id' in (req.payload or {}))
+            if wrote and d.gone is not None and client is d.client and req.answer is not None:
+                d.gone['wrote'] = True
+            if req.op == 'insert' or (req.op == 'update' and 'list_id' in (req.payload or {})):
+                self._log_rows(d, req)
+            elif req.op == 'delete':
+                self._deleted(d, req)
         return None
+
+    def _log_rows(self, d, req):
+        """The request log of invariant 11: rows a desktop inserted, or moved to another list."""
+        store = d.pass_store
+        rows = (req.result.data or []) if req.result is not None else []
+        target = req.payloads()[0].get('list_id') if req.op == 'insert' else req.payload['list_id']
+        local = next((lid for lid, ld in (store.get('lists') or {}).items() if _eq(ld.get('cloud_id'), target)), None)
+        for r in rows:
+            e = row_ident(r, 'page' in r and norm(r.get('page')) is not None)
+            twins = sum(1 for iid, it in (store.get('items') or {}).items() if _ident_matches(ident(iid, it), e))
+            self.row_log.append({'n': len(self.row_log), 'desk': d.name, 'upload': d.upload_id, 'step': self.cur_step,
+                                 'rid': r['id'],
+                                 'target': r.get('list_id', target), 'ident': e, 'kind': req.op,
+                                 'answered': req.answer is not None, 'local': local, 'ambiguous': twins > 1})
+
+    def _deleted(self, d, req):
+        rows = (req.result.data or []) if req.result is not None else []
+        gone = {r['id'] for r in rows}
+        if not gone:
+            return
+        if self.ctx is not None:
+            self.ctx.desk_deleted |= gone
+        self.unrevive(gone)
+        explicit = {col for kind, col, _ in req.filters} <= {'id', 'list_id'}
+        self.trace.append(f'    {d.name}: {"explicit" if explicit else "conditional"} DELETE of row(s) {sorted(gone)}')
+        if explicit:
+            # what the user removed goes with the row (a conditional delete takes only text its entry holds)
+            self.retire_if_lost()
+        elif d.copy is not None:
+            # the upload's copy of the entry held that text; if the user removed it from the entry (or the
+            # entry) meanwhile, that removal counts as made after the upload: its text goes with it
+            live = d.data.get('items') or {}
+            copies = [iid for iid, it in d.copy.get('items', {}).items() for k, r in _records(it)
+                      if str(k).startswith('~') and str(r.get('id')) in {str(g) for g in gone}]
+            if any(iid not in live or toks(live[iid].get('note')) != toks(d.copy['items'][iid].get('note'))
+                   or tag_toks(live[iid].get('tags')) != tag_toks(d.copy['items'][iid].get('tags'))
+                   for iid in copies):
+                self.retire_if_lost()
 
     def _revived_row_written(self, req):
         rid = next((val for kind, col, val in req.filters if kind == 'eq' and col == 'id'), None)
@@ -890,7 +1130,7 @@ class World:
                 self.named_inserts.setdefault(d.name, {})[cl['id']] = new
                 continue
             for key, nm in list(self.renamed.items()):
-                ld = d.data['lists'].get(key[1]) if key[0] == d.name else None
+                ld = d.pass_store['lists'].get(key[1]) if key[0] == d.name else None
                 if ld is not None and nm == new and _eq(ld.get('cloud_id'), cl['id']):
                     del self.renamed[key]
 
@@ -965,16 +1205,22 @@ class World:
         if kind == 'other_desktop_pass':
             other = self.desks['B' if c.desk.name == 'A' else 'A']
             direction = 'up' if sel[0] % 2 else 'down'
+            if other.signed_out:
+                return None
             other.client.page_missing = False
-            res = other.sync.sync_to_cloud() if direction == 'up' else other.sync.sync_from_cloud()
+            res = self.upload(other) if direction == 'up' else self.download(other)
             self.trace.append(f'    {other.name}: {direction} (while {c.desk.name} syncs) -> {_summary(res)}')
             return None
-        if kind == 'same_desktop_edit':
+        if kind in ('same_desktop_edit', 'edit_after_insert', 'edit_after_move'):
             d = c.desk
-            before = self.memberships(d)
-            self.desk_op(d, sel, during_pass=True)
-            c.same_edit_removed |= before - self.memberships(d)
-            c.same_edit_fired = True
+            # an answer to the website-removal prompt, for the entries it would list now
+            asked = self.pending_web_removals(d) if sel != LAST_WRITE and (sel[0] // 12) % 6 == 0 else []
+            if c.defer_edit and d.copy is not None:
+                # the twin world: made right after this upload is installed, as it was made here
+                c.deferred = (sel, asked, self.pin(d, sel))
+                return None
+            c.edit_in_upload = c.edit_in_upload or d.copy is not None
+            self._same_desk_edit(d, sel, asked)
             return None
         raise AssertionError(kind)
 
@@ -1000,7 +1246,7 @@ class World:
         lid = next((val for k, col, val in req.filters if k == 'eq' and col == 'list_id'), None)
         if c.armed or lid is None or self.db.max_rows is None:
             return
-        data = c.desk.data
+        data = c.desk.pass_store   # what the upload pairs against: the runner's copy while one runs
         local = next((k for k, ld in data['lists'].items() if _eq(ld.get('cloud_id'), lid)), None)
         rows = [r for r in self.db.tables['list_items'] if _eq(r['list_id'], lid)]
         lst = self.db.list_by_id(lid)
@@ -1034,7 +1280,7 @@ class World:
     def _unrecorded(self, c, client, lid, r):
         """Row r is an entry this desktop holds in the list with no record, and no record names r."""
         hp = self.db.has_page and not client.page_missing
-        data = c.desk.data
+        data = c.desk.pass_store
         local = next((k for k, ld in data['lists'].items() if _eq(ld.get('cloud_id'), lid)), None)
         if local is None:
             return False
@@ -1043,11 +1289,46 @@ class World:
             local in (it.get('lists') or []) and not (it.get('cloud_rows') or {}).get(local)
             and same_entry(ident(iid, it), row_ident(r, hp), hp) for iid, it in data['items'].items())
 
+    def _same_desk_edit(self, d, sel, asked=(), pinned=None):
+        c = self.ctx
+        before = self.memberships(d)
+        if asked:
+            self.prompt(d, sel, during_pass=True, only=asked)
+        elif sel == LAST_WRITE:
+            self.remove_last_write(d, pinned['remove'] if pinned else self.last_write(d))
+        else:
+            self.desk_op(d, sel, during_pass=True, pinned=pinned)
+        if c is not None:
+            c.same_edit_removed |= before - self.memberships(d)
+            c.same_edit_fired = True
+
+    def last_write(self, d):
+        """(item, list) of the entry whose row this desktop inserted or moved last, or None."""
+        x = next((x for x in reversed(self.row_log) if x['desk'] == d.name and x['answered'] and x['local']), None)
+        if x is None or x['local'] not in d.data['lists']:
+            return None
+        iid = next((i for i, it in sorted(d.data['items'].items()) if x['local'] in (it.get('lists') or [])
+                    and _ident_matches(ident(i, it), x['ident'])), None)
+        return None if iid is None else (iid, x['local'])
+
+    def remove_last_write(self, d, target):
+        """Remove, from its list, the entry whose row this desktop wrote last (the self-test mix)."""
+        if target is None or target[0] not in d.data['items']:
+            return
+        snap = self._ledger_before(d)
+        d.lm.remove_item_from_list(*target)
+        self._ledger_after(d, snap, 3)
+        self.trace.append(f'{d.name} (during its pass): remove {target[0]} from {target[1]} (its row was just written)')
+        self.retire_if_lost()
+
     def _check_request(self, d, client, req):
         pls = req.payloads()
         name = d.name
         if req.op == 'delete':
-            self.pend(3, 'delete', f'{name} sent a DELETE on {req.t} {req.filters}')
+            if req.t != 'list_items':
+                self.pend(3, 'delete', f'{name} sent a DELETE on {req.t} {req.filters}')
+            else:
+                self._check_delete(d, client, req)
         for p in pls:
             if str(p.get('sys_id') or '').startswith('97'):
                 self.pend(6, 'local-sent', f'{name} sent My Library sys_id {p.get("sys_id")} to {req.t}')
@@ -1071,6 +1352,61 @@ class World:
         elif req.op == 'update':
             self._check_update(d, client, req)
 
+    def _check_delete(self, d, client, req):
+        """Invariants 3 and 7: a desktop's DELETE of a row is explicit or redundant, and nothing else."""
+        flt = collections.defaultdict(list)
+        for kind, col, val in req.filters:
+            flt[(kind, col)].append(val)
+        ids, lsts = flt.get(('eq', 'id'), []), flt.get(('eq', 'list_id'), [])
+        if len(ids) != 1 or len(lsts) != 1:
+            self.pend(3, 'delete-filter', f'{d.name} DELETE not filtered by one id and one list_id: {req.filters}')
+            return
+        rid, lst = ids[0], lsts[0]
+        store = d.pass_store
+        if set(flt) == {('eq', 'id'), ('eq', 'list_id')}:
+            entry = (store.get('cloud_deletes') or {}).get(str(rid))
+            if not isinstance(entry, dict):
+                self.pend(3, 'delete-not-pending', f'{d.name} deleted row {rid} of cloud list {lst}, which is no '
+                                                   f'pending removal of its store')
+            elif entry.get('account') != d.user:
+                self.pend(7, 'delete-other-account', f'{d.name} signed in as {d.user} deleted row {rid}, a pending '
+                                                     f'removal of {entry.get("account")}')
+            elif not _eq(entry.get('list'), lst):
+                self.pend(3, 'delete-wrong-list', f'{d.name} deleted row {rid} filtered by cloud list {lst}, its '
+                                                  f'removal names {entry.get("list")}')
+            elif not self._explained(d, rid):
+                self.pend(3, 'delete-unexplained', f'{d.name} deleted row {rid}: no removal of the ledger explains it')
+            else:
+                self._check_o12(d, rid)
+            return
+        # redundant: a moved row whose destination has its own row, deleted only as it is
+        holder, moved = next(((it, r) for it in (store.get('items') or {}).values() for k, r in _records(it)
+                              if str(k).startswith('~') and _eq(r.get('id'), rid)), (None, None))
+        if holder is None:
+            self.pend(3, 'delete-conditional-not-moved', f'{d.name} deleted row {rid} conditionally, but no moved '
+                                                         f'row of its store has that id: {req.filters}')
+            return
+        if not (flt.get(('eq', 'note')) or flt.get(('is', 'note'))) or not (
+                (flt.get(('cs', 'tags')) and flt.get(('cd', 'tags'))) or flt.get(('is', 'tags'))):
+            self.pend(3, 'delete-conditional-filter', f'{d.name} deleted moved row {rid} without its note and tag '
+                                                      f'filters: {req.filters}')
+            return
+        row = next((r for r in self.db.tables['list_items'] if _eq(r['id'], rid)), None)
+        try:
+            hits = row is not None and match_row(row, req.filters)
+        except APIError:
+            hits = False
+        # the entry holds the text a user still has (invariant 1's live tokens) -- or the row is as
+        # this desktop last agreed on it, and what its user changed since is the entry's own edit
+        agreed = (moved.get('note') is not None and moved.get('tags') is not None
+                  and ((row or {}).get('note') or '') == (moved.get('note') or '')
+                  and _json_set((row or {}).get('tags') or []) == _json_set(moved.get('tags') or []))
+        if hits and not agreed and not ((toks(row.get('note')) & self.live_n) <= toks(holder.get('note'))
+                                        and (tag_toks(row.get('tags')) & self.live_g) <= tag_toks(holder.get('tags'))):
+            self.pend(3, 'delete-text-not-held', f'{d.name} deleted moved row {rid} holding note '
+                                                 f'{_short(row.get("note"))} tags {row.get("tags")}, which its entry '
+                                                 f'({_short(holder.get("note"))}, {holder.get("tags")}) lacks')
+
     def _check_name_write(self, d, client, req):
         """An upload writes a list name over another only for a list renamed on that desktop."""
         try:
@@ -1083,7 +1419,7 @@ class World:
                 continue
             if not any(_eq(ld.get('cloud_id'), cl['id']) and ld.get('name') == new
                        and self.renamed.get((d.name, lid)) == new
-                       for lid, ld in d.data.get('lists', {}).items()):
+                       for lid, ld in d.pass_store.get('lists', {}).items()):
                 self.pend(10, 'name-written-back', f'{d.name} wrote the name {new!r} over {cl["name"]!r} on cloud '
                                                    f'list {cl["id"]}, which no list renamed on {d.name} holds')
 
@@ -1138,12 +1474,12 @@ class World:
         if src is None or _eq(src, new):
             self.pend('R', 'move-filter', f'{d.name} sets list_id {new} without filtering on the source list')
         owners = collections.defaultdict(set)
-        for lid, ld in d.data.get('lists', {}).items():
+        for lid, ld in d.pass_store.get('lists', {}).items():
             if ld.get('cloud_id') is not None:
                 owners[str(ld['cloud_id'])].add(lid)
         c = self.ctx
-        lenient = c is not None and c.same_edit_fired
-        items = dict(d.data.get('items', {}))
+        lenient = c is not None and c.same_edit_fired and d.copy is None   # an edit of the store the pass reads
+        items = dict(d.pass_store.get('items', {}))
         if lenient:
             for iid, it in c.pass_start_items.items():
                 items.setdefault(iid, it)   # an item the edit removed during the pass
@@ -1160,7 +1496,11 @@ class World:
                 source = owners.get(str(r['list_id']), set())
                 in_dest = bool((now | then) & dest) if lenient else bool(now & dest)
                 in_src = bool(now & then & source) if lenient else bool(now & source)
-                if in_dest and not in_src:
+                # a moved row bound for the destination goes there even from a list the entry is in
+                # (another computer moved it into one): it waits for no other membership
+                bound = any(str(k).startswith('~') and _eq(rc.get('id'), r['id']) and rc.get('to') in dest
+                            for k, rc in _records(it))
+                if in_dest and (not in_src or bound):
                     ok = True
             if not ok:
                 self.pend(2, 'row-moved', f'{d.name} moved row {r["id"]} ({r["sys_id"]},{r.get("fl_id")}) from '
@@ -1196,7 +1536,7 @@ class World:
         target = p.get('list_id')
         if any(_eq(target, x) for x in c.anon_lists):
             return  # an anonymous read looks like an empty list; nothing tells the two apart
-        items = d.data.get('items', {})
+        items = d.pass_store.get('items', {})
         for r in self.db.visible('list_items', d.client.session_user):
             if not _eq(r['list_id'], target):
                 continue
@@ -1217,16 +1557,18 @@ class World:
                     self.pend(4, 'insert-again', f'{d.name} inserted {e} into cloud list {target} again in one '
                                                  f'step: row {r["id"]} {row_ident(r, hp)} is its own earlier insert')
                 continue
-            if any(self._names_row(it, r['id'], include_gone=True) for it in d.data.get('items', {}).values()):
+            if any(self._names_row(it, r['id'], include_gone=True) for it in d.pass_store.get('items', {}).values()):
                 continue
+            if str(r['id']) in (d.pass_store.get('cloud_deletes') or {}):
+                continue    # a removed entry's row, waiting for its delete: never paired again
             self.pend(4, 'insert-unclaimed', f'{d.name} inserted {e} into cloud list {target}, which already held '
                                              f'row {r["id"]} {row_ident(r, hp)} that no record of {d.name} names')
 
     @staticmethod
     def _needs_a_row(d, target, e, hp):
         """A membership of entry e in the local list that owns cloud list `target` holds no record."""
-        owners = {lid for lid, ld in d.data.get('lists', {}).items() if _eq(ld.get('cloud_id'), target)}
-        for iid, it in d.data.get('items', {}).items():
+        owners = {lid for lid, ld in d.pass_store.get('lists', {}).items() if _eq(ld.get('cloud_id'), target)}
+        for iid, it in d.pass_store.get('items', {}).items():
             for lid in owners & set(it.get('lists') or []):
                 if not isinstance((it.get('cloud_rows') or {}).get(lid), dict) and same_entry(ident(iid, it), e, hp):
                     return True
@@ -1346,11 +1688,331 @@ class World:
                 self.trace.append(f'web: paste the note of row {src["id"]} onto row {dst["id"]} '
                                   f'({_short(old)} -> {_short(src.get("note"))})')
 
+    # ---- the removal ledger (invariant 11) and the harness's own map of moves
+    def _ledger_before(self, d):
+        """What a user op starts from, read from the desktop's membership records (never a '~' record)."""
+        if not self.checking:
+            return None
+        data = d.data
+        recs = {}
+        for iid, it in data['items'].items():
+            for k, r in _records(it):
+                if not str(k).startswith('~') and not r.get('gone') and r.get('id') is not None:
+                    recs[(iid, k)] = (str(r['id']), r.get('list'))
+        idents = {iid: ident(iid, it) for iid, it in data['items'].items()}
+        return self._pairs(d), recs, idents, set(data['items']), data.get('cloud_account')
+
+    def _ledger_after(self, d, snap, kind, dest=None):
+        """Moves go into the move map; removals into the ledger; an entry put back is noted (O-12)."""
+        if snap is None or not self.checking:
+            return
+        self.user_ops += 1
+        members0, recs0, idents0, items0, account = snap
+        members1 = self._pairs(d)
+        lost = members0 - members1
+        where = {str(r['id']): r['list_id'] for r in self.db.tables['list_items']}
+        hp = self.db.has_page
+        if kind in MOVE_KINDS:
+            for iid, lid in sorted(lost):
+                to = dest(iid) if callable(dest) else dest
+                if to is None:
+                    continue
+                if d.upload_id is not None:
+                    # rows the running upload writes for this entry in the list it left follow it too:
+                    # mapped once that upload is installed (_map_upload_moves)
+                    self.upload_moves.append((d.name, d.upload_id, iid, idents0[iid], lid, to))
+                for key, val in list(self.moves.items()):
+                    if key[0] == d.name and val[:2] == (iid, lid):
+                        self.moves[key] = (iid, to, val[2], val[3]) + val[4:]
+                rec = recs0.get((iid, lid))
+                if rec is not None:       # (one already gone from the website still explains a DELETE)
+                    self.moves[(d.name, rec[0])] = (iid, to, rec[1], lid)
+        elif kind in REMOVAL_KINDS or kind == 'prompt':
+            for iid, lid in sorted(lost):
+                rows, came_from = self._moved_rows(d, iid, lid, where)
+                rec = recs0.get((iid, lid))
+                if rec is not None:
+                    rows[rec[0]] = rec[1]      # (one already gone from the website explains a DELETE)
+                twins = {i for i, l in members1 if l == lid and i != iid and i in idents0
+                         and _alike(idents0[i], idents0[iid], hp)}
+                self._ledger_add(d, iid, idents0[iid], lid, rows, account, twins, came_from)
+            for iid in sorted(items0 - set(d.data['items'])):
+                rows, came_from = self._moved_rows(d, iid, None, where)
+                rows.update({rec[0]: rec[1] for (i, _), rec in recs0.items() if i == iid})
+                self._ledger_add(d, iid, idents0[iid], None, rows, account, set(), came_from)
+        gained = members1 - members0
+        if gained:
+            now = d.data['items']
+            for e in self.ledger:
+                if e['desk'] != d.name or e['readded'] or e['cancelled']:
+                    continue
+                back = {l for i, l in gained if i in now and _alike(ident(i, now[i]), e['ident'], hp)}
+                if back and (e['list'] is None or e['list'] in back):
+                    e['readded'] = True
+                    self.trace.append(f'    ledger: {e["iid"]} is back in {e["list"]} before its removal was '
+                                      f'sent; the website row may stay')
+                    # O-12: the very entry, as it was, back in that list before its delete went (and no
+                    # upload running to send it): its rows are its own again, and no DELETE may take them
+                    if (e['list'] is not None and (e['iid'], e['list']) in gained and d.copy is None
+                            and ident(e['iid'], now[e['iid']]) == e['ident']
+                            and d.data.get('cloud_account') == e['account']):
+                        e['o12'] = set(e['rows']) | {str(x['rid']) for x in self._log_for(e) if x['answered']}
+                        for rid, src in e['came_from'].items():     # its moved rows are on their way again
+                            self.moves[(d.name, rid)] = (e['iid'], e['list'], e['rows'].get(rid), src)
+                # put back in the list a moved row was leaving: that row may stay there
+                e['kept'] |= {rid for rid, src in e['came_from'].items() if src in back}
+
+    def _map_upload_moves(self, d, upload_id, recorded=None):
+        """The moves made during that upload, over the rows it inserted or moved into the list left.
+
+        recorded: {(item, list left): the upload's record there}. A row the upload paired with no
+        request (a content match) is known only from that record, so it can explain a later DELETE
+        (the move map's 'explain only' rows) but is never a row a removal is expected to take.
+        """
+        if not self.checking:
+            return
+        moves = [m for m in self.upload_moves if m[0] == d.name and m[1] == upload_id]
+        self.upload_moves = [m for m in self.upload_moves if not (m[0] == d.name and m[1] == upload_id)]
+        for _, _, iid, idn, frm, to in moves:
+            for key, val in list(self.moves.items()):
+                if key[0] == d.name and val[:2] == (iid, frm):
+                    self.moves[key] = (iid, to, val[2], val[3]) + val[4:]
+            for x in self.row_log:
+                if x['desk'] == d.name and x['upload'] == upload_id and x['local'] == frm and x['answered']                         and not x['ambiguous'] and _ident_matches(idn, x['ident']):
+                    self.moves.setdefault((d.name, str(x['rid'])), (iid, to, x['target'], frm))
+            rec = (recorded or {}).get((iid, frm))
+            if isinstance(rec, dict) and not rec.get('gone') and rec.get('id') is not None:
+                self.moves.setdefault((d.name, str(rec['id'])), (iid, to, rec.get('list'), frm, 'explain only'))
+
+    def _prune_moves(self, d):
+        """A moved row leaves the map once a membership record of its entry names it: it arrived."""
+        items = d.data.get('items') or {}
+        for key, val in list(self.moves.items()):
+            if key[0] != d.name:
+                continue
+            it = items.get(val[0]) or {}
+            if any(not str(k).startswith('~') and not r.get('gone') and str(r.get('id')) == key[1]
+                   for k, r in _records(it)):
+                del self.moves[key]
+
+    def _moved_rows(self, d, iid, lid, where):
+        """Rows the move map holds for this item bound for that list (any list when lid is None); taken off it.
+
+        A row leaves the map once the website no longer has it or a membership record of the
+        item names it (it reached a list, or stayed in the one the entry was put back in).
+        Returns ({row id: cloud list it was in}, {row id: the local list it was leaving}).
+        """
+        it = d.data['items'].get(iid) or {}
+        named = {str(r.get('id')) for k, r in _records(it) if not str(k).startswith('~') and not r.get('gone')}
+        rows, came_from = {}, {}
+        for key, val in list(self.moves.items()):
+            miid, mlid, knew, src = val[:4]
+            if key[0] == d.name and miid == iid and (lid is None or mlid == lid):
+                del self.moves[key]
+                if key[1] in named:
+                    continue
+                if val[4:]:
+                    self.explain_only.setdefault((d.name, iid), set()).add(key[1])
+                else:
+                    rows[key[1]], came_from[key[1]] = knew, src
+        return rows, came_from
+
+    def _ledger_add(self, d, iid, idn, lid, rows, account, twins, came_from=None):
+        e = {'desk': d.name, 'iid': iid, 'ident': idn, 'list': lid, 'step': self.cur_step, 'account': account,
+             'upload': d.upload_id, 'upload_user': d.user, 'rows': rows,
+             'explains': set(self.explain_only.pop((d.name, iid), ())), 'readded': False,
+             'cancelled': False, 'twins': twins, 'came_from': dict(came_from or {}), 'kept': set(),
+             'op': self.user_ops, 'o12': set()}
+        self.ledger.append(e)
+
+    def _cancel_ledger_since(self, d, n, moves):
+        """A backup recovery: the removals made since that snapshot are undone with it, and the
+        moves pending then are pending again."""
+        for e in self.ledger[n:]:
+            if e['desk'] == d.name:
+                e['cancelled'] = True
+        for key in [k for k in self.moves if k[0] == d.name]:
+            del self.moves[key]
+        self.moves.update(moves)
+
+    @contextmanager
+    def _attributing(self, d):
+        """While an upload is installed: ids the replay of a removal queues explain that removal's DELETEs."""
+        names = [n for n in ('_queue_cloud_delete', '_forget_item') if callable(getattr(lm_mod, n, None))]
+        if not names or not self.checking:
+            yield
+            return
+        saved = {n: getattr(lm_mod, n) for n in names}
+
+        def wrap(name, fn):
+            def helper(state, item_id, *args, **kw):
+                before = set(state.get('cloud_deletes') or {})
+                out = fn(state, item_id, *args, **kw)
+                new = {str(k) for k in set(state.get('cloud_deletes') or {}) - before}
+                lid = args[0] if name == '_queue_cloud_delete' and args else None
+                for e in self.ledger:
+                    if new and e['desk'] == d.name and e['iid'] == item_id and (lid is None or e['list'] in (lid, None)):
+                        e['explains'] |= new
+                return out
+            return helper
+        for n in names:
+            setattr(lm_mod, n, wrap(n, saved[n]))
+        try:
+            yield
+        finally:
+            for n in names:
+                setattr(lm_mod, n, saved[n])
+
+    def _log_for(self, e):
+        """Rows the upload running at a removal inserted or moved for that entry (expected rows (b))."""
+        if e['upload'] is None:
+            return []
+        return [x for x in self.row_log if x['desk'] == e['desk'] and x['upload'] == e['upload']
+                and (e['list'] is None or x['local'] == e['list']) and not x['ambiguous']
+                and _ident_matches(e['ident'], x['ident'])]
+
+    def _check_o12(self, d, rid):
+        """Invariant 11, O-12: an entry put back in its list before its delete went keeps its website row."""
+        rid = str(rid)
+        for e in self.ledger:
+            if e['desk'] != d.name or e['cancelled'] or rid not in e['o12']:
+                continue
+            later = [x for x in self.ledger if x['desk'] == d.name and x['op'] > e['op'] and not x['cancelled']
+                     and (rid in x['rows'] or rid in x['explains']
+                          or any(str(y['rid']) == rid for y in self._log_for(x)))]
+            if not later:
+                self.pend(11, 'readd-deleted', f'{d.name} deleted row {rid} of {e["iid"]}, which was put back in '
+                                               f'{e["list"]} before its removal was sent')
+
+    def _explained(self, d, rid):
+        rid = str(rid)
+        for e in self.ledger:
+            if e['desk'] != d.name:
+                continue
+            if rid in e['rows'] or rid in e['explains'] or any(str(x['rid']) == rid for x in self._log_for(e)):
+                return True
+        return False
+
+    def check_removals(self):
+        """Invariant 11 at the settle: no row a removal expected to go is still on the website."""
+        rows = {str(r['id']): r for r in self.db.tables['list_items']}
+        moved_by = collections.defaultdict(list)
+        for x in self.row_log:
+            if x['kind'] == 'update':
+                moved_by[str(x['rid'])].append(x)
+        for e in self.ledger:
+            if e['cancelled'] or e['readded']:
+                continue
+            expected = {}
+            if e['account'] == USER:
+                expected.update(e['rows'])
+            if e['upload_user'] == USER:
+                for x in self._log_for(e):
+                    if x['answered'] and x['upload'] not in self.killed:
+                        expected.setdefault(str(x['rid']), x['target'])
+            d = self.desks[e['desk']]
+            for rid, knew in sorted(expected.items()):
+                row = rows.get(rid)
+                if row is None or rid in e['kept']:
+                    continue
+                if any((x['desk'] != e['desk'] or not x['answered'] or x['upload'] in self.killed
+                        or x['n'] < self.forgot.get(e['desk'], -1)) and not _eq(x['target'], knew)
+                       for x in moved_by.get(rid, ())):
+                    # moved to another list by another computer -- or by this one in a way it no longer
+                    # knows of: the move's answer was lost, its upload was killed, a backup came back
+                    continue
+                if e['twins'] and any(i in d.data['items'] and e['list'] in (d.data['items'][i].get('lists') or [])
+                                      and _eq(((d.data['items'][i].get('cloud_rows') or {}).get(e['list']) or {})
+                                              .get('id'), rid) for i in e['twins']):
+                    continue    # the same entry, still in that list, holds the row
+                self.viol(11, 'removal-lost', f'settle: {e["desk"]} removed {e["iid"]} from '
+                                              f'{e["list"] or "every list"} at step {e["step"]}, but row {rid} '
+                                              f'is still in cloud list {row["list_id"]}')
+
+    def readd(self, d):
+        """Put the entry this desktop removed last back in the list it left (the self-test mix)."""
+        e = next((x for x in reversed(self.ledger) if x['desk'] == d.name and x['list'] is not None
+                  and not x['cancelled'] and x['list'] in d.data['lists']), None)
+        if e is None:
+            return
+        sys_id, fl, page = e['ident']
+        iid = d.lm._build_item_id(sys_id, img=page, fl_id=fl)
+        if iid in d.data['items'] and fl and norm(d.data['items'][iid].get('fl_id')) != fl:
+            d.reidentified.add(iid)      # an item of that key already there takes this folio (as add_item does)
+        snap = self._ledger_before(d)
+        added = d.lm.add_item(sys_id, e['list'], fl_id=fl, img=page)
+        self._ledger_after(d, snap, 0)
+        self.trace.append(f'{d.name}: put {sys_id} (fl={fl} page={page}) back in {e["list"]} -> {added}')
+
+    # ---- the website-removal prompt
+    def pending_web_removals(self, d):
+        f = getattr(d.lm, 'pending_web_removals', None)
+        return sorted(f()) if f is not None else []
+
+    def prompt(self, d, sel, during_pass=False, only=None):
+        """Answer the website-removal prompt: every entry at once, or each on its own (Remove / Keep / later).
+
+        only: the entries the prompt listed when it was shown (an answer made later applies to those).
+        """
+        pend = self.pending_web_removals(d)
+        if only is not None:
+            pend = [p for p in pend if p in only]
+        if not pend:
+            return
+        mode = sel[1] % 4
+        choices = {}
+        for n, key in enumerate(pend):
+            ch = ('remove', 'keep')[mode] if mode < 2 else ('remove', 'keep', None)[(sel[2] // 3 ** (n % 9)) % 3]
+            if ch:
+                choices[tuple(key)] = ch
+        snap = self._ledger_before(d)
+        out = d.lm.resolve_web_removals(choices)
+        self._ledger_after(d, snap, 'prompt')
+        tag = f'{d.name}{" (during its pass)" if during_pass else ""}'
+        self.trace.append(f'{tag}: website-removal prompt {sorted(choices.items())} -> {out}')
+        self.retire_if_lost()
+
+    def _offer(self, d):
+        """Invariant 13: a sync end offers the prompt only as the harness's own gate says."""
+        gate = _gate()
+        if gate is None or not self.pending_web_removals(d):
+            return
+        f = d.ui
+        allowed = gate(f['visible'], f['restoring'], f['modal_open'], f['logout_pending'], f['close_pending'])
+        oracle = (f['visible'] and not f['restoring'] and not f['modal_open'] and not f['logout_pending']
+                  and not f['close_pending'])
+        if bool(allowed) != oracle:
+            self.viol(13, 'prompt-gate', f'{d.name}: the dialog gate said {allowed} with {f}')
+        if allowed:
+            self.trace.append(f'    {d.name}: the website-removal prompt is offered')
+
     # ---- desktop user ops
     def user_lists(self, d):
         return [lid for lid, lst in d.data['lists'].items() if lid != 'recent' and not lst.get('is_system')]
 
-    def desk_op(self, d, sel, during_pass=False):
+    def desk_op(self, d, sel, during_pass=False, pinned=None):
+        snap = self._ledger_before(d)
+        kind, dest = self._desk_op(d, sel, during_pass, pinned)
+        self._ledger_after(d, snap, kind, dest)
+
+    def pin(self, d, sel):
+        """What an edit decides from the cloud identity when it is made (the automatic duplicate
+        merge prefers a list with no cloud id), so the twin world can make the same edit later."""
+        if sel == LAST_WRITE:
+            return {'remove': self.last_write(d)}
+        if sel[0] % 12 != 8 or not sel[2] % 2:
+            return None
+        groups = [g for g in d.lm.find_duplicate_lists() if g['name'] not in ('General', 'Recently Viewed')]
+        if not groups:
+            return None
+        g = groups[sel[1] % len(groups)]
+        first = sorted(g['lists'], key=lambda x: (0 if x['project_id'] else 1, 0 if not x['has_cloud_id'] else 1,
+                                                  x['created']))[0]
+        return {'keep': first['id']}
+
+    def _desk_op(self, d, sel, during_pass=False, pinned=None):
+        """One user edit; returns (its kind, the list a move put the entries in -- or how to find it)."""
+        dest = None
         lm, data = d.lm, d.data
         kind = sel[0] % 12
         if during_pass and kind == 10:
@@ -1387,6 +2049,7 @@ class World:
             to = lists[sel[2] % len(lists)]
             if to != lid:
                 lm.move_items_to_list([iid], lid, to)
+                dest = to
                 self.trace.append(f'{tag}: move {iid} {lid} -> {to}')
         elif kind == 5 and data['items']:                # note edit: replace or append
             iid = sorted(data['items'])[sel[1] % len(data['items'])]
@@ -1417,13 +2080,21 @@ class World:
             groups = [g for g in lm.find_duplicate_lists() if g['name'] not in ('General', 'Recently Viewed')]
             if groups:
                 g = groups[sel[1] % len(groups)]
-                if sel[2] % 2:
+                if sel[2] % 2 and (pinned or {}).get('keep'):
+                    # the twin world: the same merge the automatic choice made when the edit was made
+                    keep = pinned['keep']
+                    lm.merge_duplicate_group(keep, [x['id'] for x in g['lists'] if x['id'] != keep])
+                    dest = keep
+                    self.trace.append(f'{tag}: clean up duplicates of {g["name"]} (auto, as made), keep {keep}')
+                elif sel[2] % 2:
                     r = lm.auto_merge_duplicate_group(g)
+                    dest = r.get('keep_id')
                     self.trace.append(f'{tag}: clean up duplicates of {g["name"]} (auto), keep {r.get("keep_id")}')
                 else:
                     ids = [x['id'] for x in g['lists']]
                     keep = ids[sel[3] % len(ids)]
                     lm.merge_duplicate_group(keep, [i for i in ids if i != keep])
+                    dest = keep
                     self.trace.append(f'{tag}: clean up duplicates of {g["name"]}, keep {keep}')
         elif kind == 9 and lists:                        # Trash / Restore / delete permanently
             lid = lists[sel[1] % len(lists)]
@@ -1442,6 +2113,9 @@ class World:
             k = sel[1] % len(d.snaps)
             lm.data = copy.deepcopy(d.snaps[k])
             self.set_renames(d, d.snap_renames[k])
+            if k < len(d.snap_ledger):
+                self._cancel_ledger_since(d, *d.snap_ledger[k])
+            self.forgot[d.name] = len(self.row_log)   # what it did since that snapshot, it no longer knows
             lm.save()
             self.trace.append(f'{tag}: restore lists.pkl from its snapshot #{k}')
             self.retire_if_lost()
@@ -1450,6 +2124,7 @@ class World:
             if n:
                 self.trace.append(f'{tag}: empty the Trash ({n} list(s))')
                 self.retire_if_lost()
+        return kind, dest
 
     def desk_rename(self, d, sel):
         """Rename a list on the desktop (ListsManager.update_list, as the list menu does)."""
@@ -1517,9 +2192,17 @@ class World:
                        if any(self._names_row(it, rid) for rid in twice)]
             self.viol(4, 'row-claimed-twice', f'{where}: {d.name} names rows {twice} more than once '
                                               f'(items {holders})')
+        pending = {str(e.get('id')) for e in (d.data.get('cloud_deletes') or {}).values() if isinstance(e, dict)}
+        both = sorted(pending & set(count))
+        if both:
+            self.viol(4, 'recorded-and-pending', f'{where}: {d.name} both records rows {both} and waits to delete '
+                                                 f'them')
 
     def check_account(self, d, where, before_gone=None):
         store = d.data
+        for key, e in (store.get('cloud_deletes') or {}).items():
+            if not isinstance(e, dict) or e.get('account') is None or str(e.get('id')) != str(key):
+                self.viol(7, 'pending-without-account', f'{where}: {d.name} waits to delete {key} as {e!r}')
         recs = [(iid, rec) for iid, it in store.get('items', {}).items() for _, rec in _records(it)]
         if not recs:
             return
@@ -1542,8 +2225,167 @@ class World:
                 self.viol(7, 'switch-tombstoned', f'{where}: the first pass of {d.name} after an account switch '
                                                   f'marked {sorted(new)} removed')
 
+    # ---- the desktop's runner, as the harness drives it (no Qt)
+    def upload(self, d, stop_at=None, backfill=True, gone=None):
+        """An upload as the runner makes one: on a copy of the store, installed when it ends.
+
+        stop_at: the pass is stopped at its n-th check (Cancel, or the sign-out's deadline).
+        gone: ('close' | 'kill', at, applied): the program goes away at that request of the
+        upload -- a close hands what the upload reported to abandon_upload and saves; a kill
+        restarts from the last save.
+        """
+        kw = {}
+        if stop_at is not None and _takes(d.sync.sync_to_cloud, 'should_stop'):
+            calls = [0]
+
+            def should_stop():
+                calls[0] += 1
+                return calls[0] >= stop_at
+            kw['should_stop'] = should_stop
+        if not backfill and _takes(d.sync.sync_to_cloud, 'backfill_pages'):
+            kw['backfill_pages'] = False
+        if not d.copy_path():
+            if gone is not None:
+                d.gone = {'at': gone[1], 'count': 0, 'applied': gone[2]}
+                try:
+                    return d.sync.sync_to_cloud(**kw)
+                except _ProcessGone:
+                    self._went_away(d, gone[0], None, None, None)
+                    return {'success': False, 'error': 'gone', 'gone': gone[0]}
+                finally:
+                    d.gone = None
+            return d.sync.sync_to_cloud(**kw)
+        lm, user = d.lm, d.user
+        cp, base = lm.begin_upload()
+        live0 = copy.deepcopy(lm.data) if self.checking else None
+        self.upload_seq += 1
+        d.copy, d.reports, d.upload_id = cp, [], self.upload_seq
+        c = self.ctx
+        edits0 = c.same_edit_fired if c is not None else False
+        if gone is not None:
+            d.gone = {'at': gone[1], 'count': 0, 'applied': gone[2], 'edit': gone[3] if len(gone) > 3 else None}
+        withheld = set()
+
+        def withdrawn():
+            gone = lm.withdrawn_now()
+            withheld.update(gone)
+            return gone
+        try:
+            res = d.sync.sync_to_cloud(data=cp, withdrawn=withdrawn, on_recorded=d.reports.append, **kw)
+        except _ProcessGone:
+            reports, upload_id = list(d.reports), d.upload_id
+            d.copy = d.reports = d.upload_id = d.gone = None
+            self._went_away(d, gone[0], base, reports, user, upload_id)
+            return {'success': False, 'error': 'gone', 'gone': gone[0]}
+        finally:
+            d.gone = None
+        d.copy = None
+        if c is not None:
+            # the upload held back a write for an entry removed meanwhile: with the removal made after
+            # it, that write goes out and is undone later -- the same end on one computer, not always
+            # with another one holding the row
+            skipped = any(iid in cp['items'] and lid in (cp['items'][iid].get('lists') or [])
+                          and not isinstance((cp['items'][iid].get('cloud_rows') or {}).get(lid), dict)
+                          for iid, lid in withheld)
+            c.twin_excluded = c.twin_excluded or skipped or _serial_differs(base, cp)
+        before_install = None
+        if self.checking:
+            edited = c is not None and c.same_edit_fired and not edits0
+            if not edited and _strip(copy.deepcopy(lm.data)) != _strip(live0):
+                self.pend('R', 'live-changed-during-upload', f'{d.name}: the live store changed while an upload ran '
+                                                             f'on its copy: {_diff_store(live0, lm.data)}')
+            before_install = copy.deepcopy(lm.data)
+        recorded = {(m[2], m[4]): ((cp['items'].get(m[2]) or {}).get('cloud_rows') or {}).get(m[4])
+                    for m in self.upload_moves if m[0] == d.name and m[1] == d.upload_id}
+        with self._attributing(d):
+            lm.finish_upload(cp, base, res)
+        self._map_upload_moves(d, d.upload_id, recorded)
+        if before_install is not None and _without_identity(lm.data) != _without_identity(before_install):
+            self.pend('R', 'install-changed-store', f'{d.name}: finish_upload changed more than the cloud identity '
+                                                    f'fields: {_diff_store(before_install, lm.data)}')
+        d.reports = d.upload_id = None
+        if c is not None and c.deferred is not None and c.desk is d:
+            (sel, asked, pinned), c.deferred = c.deferred, None
+            self.trace.append(f'    (twin) {d.name}: the held edit, right after the upload was installed')
+            self._same_desk_edit(d, sel, asked, pinned)
+        return res
+
+    def _went_away(self, d, how, base, reports, user, upload_id=None):
+        """A close (the runner's shutdown: abandon_upload with every report, then a save) or a kill."""
+        if how == 'close':
+            if base is not None:
+                before = copy.deepcopy(d.lm.data)
+                with self._attributing(d):
+                    d.lm.abandon_upload(base, reports, user)
+                if self.checking and _without_identity(d.lm.data) != _without_identity(before):
+                    self.pend('R', 'abandon-changed-store', f'{d.name}: abandon_upload changed more than the cloud '
+                                                            f'identity fields: {_diff_store(before, d.lm.data)}')
+            d.lm.save()
+            self.trace.append(f'    {d.name}: closed ({len(reports or ())} report(s) handed to abandon_upload); '
+                              f'restart')
+        else:
+            if upload_id is not None:
+                self.killed.add(upload_id)
+            self.trace.append(f'    {d.name}: killed; restart from the last save')
+        d.restart()
+
+    def download(self, d):
+        """A download as the runner makes one: fetched (network only), then applied on the UI thread."""
+        if not d.fetch_path():
+            return d.sync.sync_from_cloud()
+        user = d.user
+        state = d.sync.fetch_cloud_state(d.lm.remembered_row_ids(user))
+        if not state.get('success'):
+            return {k: v for k, v in state.items() if k != 'pass'}
+        rows_at_fetch = {r['id']: dict(r) for r in self.db.tables['list_items']}
+        c = self.ctx
+        if c is not None and c.inject and c.inject[1] == 'between_stages' and not c.fired and c.desk is d:
+            c.fired = True
+            self.trace.append(f'    {d.name}: a user edit between the Download\'s fetch and its apply')
+            sel = c.inject[2]
+            self._same_desk_edit(d, sel, self.pending_web_removals(d) if (sel[0] // 12) % 6 == 0 else [])
+        if d.user != user or d.signed_out:
+            return {'success': False, 'error': 'stale: the account changed before the apply'}
+        members0 = self._pairs(d)
+        pending0 = {str(e.get('id')): e.get('list') for e in (d.data.get('cloud_deletes') or {}).values()
+                    if isinstance(e, dict) and e.get('account') == user}
+        res = d.sync.apply_cloud_state(state)
+        if self.checking and res.get('success'):
+            self._check_no_pending_readd(d, members0, pending0, rows_at_fetch)
+        return res
+
+    @staticmethod
+    def _pairs(d):
+        return {(iid, lid) for iid, it in d.data.get('items', {}).items() for lid in it.get('lists') or []
+                if lid != 'recent'}
+
+    def _check_no_pending_readd(self, d, members0, pending, rows):
+        """Invariant 12: a membership the apply added has a row other than the ones pending deletion.
+
+        pending: {row id: the cloud list its removal names}. A pending row another computer moved
+        to another list is that list's by design (its move wins), so it counts as any other row there.
+        """
+        if not pending:
+            return
+        hp = self.db.has_page
+        data = d.data
+        for iid, lid in sorted(self._pairs(d) - members0):
+            it, ld = data['items'].get(iid), data['lists'].get(lid)
+            if it is None or ld is None:
+                continue
+            # its own cloud list and the same-name ones a Download reads for it ('General' for the default list)
+            cloud = {str(cl['id']) for cl in self.db.tables['user_lists']
+                     if cl['user_id'] == d.user and (_eq(cl['id'], ld.get('cloud_id')) or cl['name'] == ld.get('name')
+                                                     or (lid == 'default' and cl['name'] == 'General'))}
+            mine = ident(iid, it)
+            why = [r for r in rows.values() if str(r['list_id']) in cloud and not str(r['sys_id']).startswith('97')
+                   and _alike(mine, row_ident(r, hp and norm(r.get('page')) is not None), hp)]
+            if why and all(str(r['id']) in pending and _eq(pending[str(r['id'])], r['list_id']) for r in why):
+                self.pend(12, 'pending-re-added', f'{d.name}: a Download added {iid} to {lid} from row(s) '
+                                                  f'{sorted(r["id"] for r in why)}, pending deletion')
+
     # ---- one pass, with the checks that belong around it
-    def one_pass(self, d, direction):
+    def one_pass(self, d, direction, upload_kw=None):
         d.client.page_missing = False
         store0 = copy.deepcopy(d.data)
         c = self.ctx
@@ -1556,11 +2398,19 @@ class World:
         switched = d.data.get('cloud_account') not in (None, d.user)
         gone0 = {(iid, k) for iid, it in d.data.get('items', {}).items()
                  for k, rec in _records(it) if rec.get('gone')} if switched else None
-        res = d.sync.sync_to_cloud() if direction == 'up' else d.sync.sync_from_cloud()
+        d.offline_now = d.offline > 0
+        if d.offline_now:
+            d.offline -= 1
+        try:
+            res = self.upload(d, **(upload_kw or {})) if direction == 'up' else self.download(d)
+        finally:
+            d.offline_now = False
         if not isinstance(res, dict):
             raise Violation('crash', 'bad-result', f'{d.name} {direction} returned {res!r}')
         edited = c is not None and c.same_edit_fired and not edits_before
         reached = res.get('error') not in EARLY_ERRORS
+        if res.get('gone'):
+            return res            # the program went away: what came back is lists.pkl (checked by the step)
         if self.checking:
             if direction == 'up' and not edited and d.data is not None:
                 a, b = _without_identity(store0), _without_identity(d.data)
@@ -1586,6 +2436,12 @@ class World:
             if self.checking:
                 self.flush(f'{d.name} {direction}')
                 self.check_account(d, f'{d.name} {direction} after an account switch', gone0)
+        self._prune_moves(d)
+        if store0.get('cloud_account') is not None and d.data.get('cloud_account') != store0.get('cloud_account'):
+            # another account's records went, pending moves with them: that account's next
+            # Download brings the entry back where it was (a copy), by design
+            for key in [k for k in self.moves if k[0] == d.name]:
+                del self.moves[key]
         return res
 
     def _cloud_lists_of(self, user):
@@ -1655,6 +2511,7 @@ class World:
     def step(self, i, op):
         if self.switch_at and i == self.switch_at:
             self.switch_engine()
+        self.cur_step = i
         kind = op[0]
         where = f'step {i}'
         if kind == 'web':
@@ -1688,28 +2545,83 @@ class World:
             self.retire_if_lost()
             return
         if kind == 'account':
-            if d.user != op[2]:
+            if d.user != op[2] or d.signed_out:
                 d.sign_in(op[2])
                 self.trace.append(f'{d.name}: sign in as {op[2]}')
             return
+        if kind == 'offline':
+            d.offline = op[2]
+            self.trace.append(f'{d.name}: offline for its next {op[2]} pass(es)')
+            return
+        if kind == 'ui':
+            d.ui = dict(zip(sorted(UI_DEFAULT), op[2]))
+            self.trace.append(f'{d.name}: window {d.ui}')
+            return
+        if kind == 'prompt':
+            self.prompt(d, op[2])
+            self.prune_renames(d)
+            self.check_tokens(f'{where} {d.name} prompt')
+            return
+        if kind == 'readd':
+            self.readd(d)
+            self.check_tokens(f'{where} {d.name} re-add')
+            return
+        if kind == 'signout':
+            if not d.signed_out:
+                self._sync_step(i, d, 'up', None, signout=op[2])
+            return
+        if kind in ('close', 'kill'):
+            # op[3]: an edit made right before the program goes away (the self-test mix)
+            self._sync_step(i, d, 'up', None, gone=(kind, op[2]) + tuple(op[3:4]))
+            return
         assert kind == 'sync', op
-        direction, inj = op[2], op[3]
-        where = f'{where} {d.name} {direction}'
+        if d.signed_out:
+            self.trace.append(f'{d.name}: {op[2]} skipped (signed out)')
+            return
+        self._sync_step(i, d, op[2], op[3], op=op)
+
+    def _sync_step(self, i, d, direction, inj, gone=None, signout=None, op=None):
+        where = f'step {i} {d.name} ' + (gone[0] if gone else 'sign-out' if signout else direction)
+        pre = None
+        if (op is not None and inj and inj[1] in ('same_desktop_edit', 'edit_after_insert', 'edit_after_move')
+                and direction in ('up', 'merge')
+                and 14 in self.checks and self.checking and d.copy_path()
+                # a schema cache that still lags fails whichever page write comes first: order-dependent
+                and not (self.db.page_lag and self.db.page_lag_writes > 0)):
+            pre = (self._clone(), _RUN['clock'][0], _RUN['urng'].getstate()) if _RUN else None
         c = _Step(d, tuple(inj) if inj else None)
+        c.defer_edit = getattr(self, 'defer_edits', False)
         c.start_rows = {r['id']: r['list_id'] for r in self.db.tables['list_items']}
         before_m = self.memberships(d)
         self.db.lagged = False
         self.ctx = c
         c.counting = True
         try:
-            res = self.run_sync(d, direction)
+            if gone is not None:
+                how, sel = gone[:2]
+                edit = gone[2] if len(gone) > 2 else None
+                at = 'write' if edit == LAST_WRITE else sel[0] % 14 + 1    # right after a write, or at a request
+                res = [self.one_pass(d, 'up', upload_kw={'gone': (how, at, bool(sel[1] % 2), edit)})]
+                if not res[0].get('gone'):     # the upload ended first: the runner installed it, then the close
+                    if how == 'close':
+                        d.lm.save()
+                    d.restart()
+                    self.trace.append(f'    {d.name}: {how} after the upload ended; restart')
+            elif signout is not None:
+                stop_at = signout[0] % 20 + 1 if signout[1] % 3 == 0 else None
+                res = [self.one_pass(d, 'up', upload_kw={'stop_at': stop_at, 'backfill': False})]
+                d.sign_out()
+            else:
+                res = self.run_sync(d, direction)
         finally:
             c.counting = False
             self.ctx = None
-            d.client.session_user = d.user
+            d.client.session_user = None if d.signed_out else d.user
             d.client.url_limit = None
-        self.trace.append(f'{d.name}: {direction}' + (f' inject={inj[:2]} fired={c.fired}' if inj else '')
+        self.trace.append(f'{where}' + (f' inject={inj[:2]} fired={c.fired}' if inj else '')
                           + ' -> ' + '; '.join(_summary(r) for r in res))
+        if not d.signed_out:
+            self._offer(d)
         if not self.checking:
             self.pending = []
             return
@@ -1719,13 +2631,18 @@ class World:
         for (lid, idn) in sorted(before_m - c.same_edit_removed, key=repr):
             if lid in lists_now and not any(l2 == lid and compatible(idn, i2) for (l2, i2) in after_m):
                 self.viol(3, 'membership-dropped', f'{where}: entry {idn} left local list {lid} during a sync pass')
-        vanished = set(c.start_rows) - {r['id'] for r in self.db.tables['list_items']} - c.web_deleted
+        vanished = (set(c.start_rows) - {r['id'] for r in self.db.tables['list_items']} - c.web_deleted
+                    - c.desk_deleted)
         if vanished:
             self.viol(3, 'row-vanished', f'{where}: cloud rows {sorted(vanished)} disappeared during a sync pass')
         self.check_tokens(where)
         for dd in self.desks.values():
             self.check_claims(dd, where)
             self.check_account(dd, where)
+        if pre is not None and c.edit_in_upload and not c.twin_excluded:
+            self._check_twin(pre, i, op)
+        if op is None:
+            return
         # a pass that met the lagging schema cache writes the page on the next one, by design
         if not c.fired and not self.db.lagged and all(r.get('success') for r in res):
             st = self.state()
@@ -1746,8 +2663,10 @@ class World:
     def settle(self, rounds=10):
         if self.switch_at and not self.checking:
             self.switch_engine()
+        self.cur_step = 'settle'
         for d in self.desks.values():
-            if d.user != USER:
+            d.offline, d.gone = 0, None
+            if d.user != USER or d.signed_out:
                 d.sign_in(USER)
         prev = None
         for n in range(rounds):
@@ -1773,6 +2692,7 @@ class World:
                 self.check_reached(last)
                 self.check_faithful()
                 self.check_names_settled()
+                self.check_removals()
                 return
             prev = st
         self.viol(4, 'no-fixed-point', f'no fixed point after {rounds} settle rounds: {_diff(*self._one_more_round())}')
@@ -1782,6 +2702,47 @@ class World:
         for name, direction in (('A', 'up'), ('B', 'up'), ('A', 'down'), ('B', 'down')):
             self.one_pass(self.desks[name], direction)
         return a, self.state()
+
+    # ---- invariant 14: the serialized twin
+    def _clone(self):
+        """A world sharing nothing with this one but the engines, with no checks of its own."""
+        t = World.__new__(World)
+        world, self.db.world = self.db.world, None
+        try:
+            t.db = copy.deepcopy(self.db)
+        finally:
+            self.db.world = world
+        t.db.world = t
+        for k, v in self.__dict__.items():
+            if k not in ('desks', 'db', 'web', 'ctx', 'engine', 'fixture', 'trace', 'pending'):
+                setattr(t, k, copy.deepcopy(v))
+        t.engine, t.fixture, t.ctx, t.trace, t.pending = self.engine, self.fixture, None, [], []
+        t.checks = set()
+        t.web = FakeClient(t.db, 'web', USER)
+        t.desks = {n: d.clone(t) for n, d in self.desks.items()}
+        return t
+
+    def _check_twin(self, pre, i, op):
+        """The step with its same-desktop edit made right after the upload is installed settles alike."""
+        self.twins += 1
+        clock, urng = _RUN['clock'], _RUN['urng']
+        with _same_clock():
+            main = self._clone()
+            main.settle()
+            want = _projection(main)
+        twin, at, state = pre
+        with _same_clock():
+            clock[0] = at
+            urng.setstate(state)
+            twin.defer_edits = True
+            twin.step(i, op)
+            twin.defer_edits = False
+            twin.settle()
+            got = _projection(twin)
+        if got != want:
+            self.viol(14, 'not-serial', f'step {i}: with the edit made after the upload instead of during it, the '
+                                        f'settled state differs: {_projection_diff(want, got)}')
+        self.trace.append(f'    (the same step with the edit after the upload settles alike)')
 
     def check_reached(self, last):
         for name, d in self.desks.items():
@@ -1942,6 +2903,67 @@ def _summary(r):
     return ' '.join(parts)
 
 
+def _alike(a, b, has_page):
+    """Two identities a sync may pair with one row: equal, certainly one entry, or -- without the page
+    column -- the same folio (a page and the whole manuscript look alike there)."""
+    return a == b or same_entry(a, b, has_page) or (not has_page and a[:2] == b[:2])
+
+
+def _ident_matches(mine, theirs):
+    """A local entry's identity against a row's (a row written without the page column has no page)."""
+    return mine[0] == theirs[0] and mine[1] == theirs[1] and (theirs[2] is None or mine[2] == theirs[2])
+
+
+def _serial_differs(base, cp):
+    """Invariant 14's excluded uploads: those in which a delete the user queued meanwhile may, by design,
+    delete a row a serial order would keep -- decided from the store the upload started from and its copy."""
+    if base.get('cloud_account') != cp.get('cloud_account'):
+        return True                         # an account switch
+    held = collections.Counter(str(ld.get('cloud_id')) for lid, ld in (base.get('lists') or {}).items()
+                               if ld.get('cloud_id') is not None and lid != 'recent')
+    if any(n > 1 for n in held.values()):
+        return True                         # two local lists held one cloud list: the one-owner repair
+    named = collections.Counter()
+    for it in (base.get('items') or {}).values():
+        for rid in {str(r.get('id')) for _, r in _records(it) if not r.get('gone') and r.get('id') is not None}:
+            named[rid] += 1
+    return any(n > 1 for n in named.values())   # two entries named one row: the split
+
+
+def _note_lines(text):
+    return tuple(sorted(ln for ln in (text or '').replace('\r\n', '\n').split('\n')
+                        if ln.strip() and not ln.startswith('--- ')))
+
+
+def _projection(w):
+    """What invariant 14 compares: the website's entries and each desktop's, by name and identity."""
+    names = {str(cl['id']): cl['name'] for cl in w.db.tables['user_lists']}
+    rows = collections.Counter(
+        (names.get(str(r['list_id'])), str(r['sys_id']), norm(r.get('fl_id')), norm(r.get('page')),
+         _note_lines(r.get('note')), frozenset(_json_set(r.get('tags') or [])))
+        for r in w.db.tables['list_items'])
+    desks = {}
+    for n, d in w.desks.items():
+        data = d.data
+        desks[n] = collections.Counter(
+            ((data['lists'].get(lid) or {}).get('name'), ident(iid, it), _note_lines(it.get('note')),
+             frozenset(_json_set(it.get('tags') or [])))
+            for iid, it in data['items'].items() for lid in it.get('lists') or [] if lid != 'recent')
+    return rows, desks
+
+
+def _projection_diff(concurrent, serial):
+    if concurrent[0] != serial[0]:
+        return f'website: only with the edit during the upload {sorted((concurrent[0] - serial[0]).items(), key=repr)[:3]}' \
+               f', only with it after {sorted((serial[0] - concurrent[0]).items(), key=repr)[:3]}'
+    for n in concurrent[1]:
+        if concurrent[1][n] != serial[1][n]:
+            return f'desk {n}: only with the edit during the upload ' \
+                   f'{sorted((concurrent[1][n] - serial[1][n]).items(), key=repr)[:3]}, only with it after ' \
+                   f'{sorted((serial[1][n] - concurrent[1][n]).items(), key=repr)[:3]}'
+    return '?'
+
+
 # --------------------------------------------------------------------------- generation, runs, shrinking
 
 def cfg_for(seed):
@@ -1952,9 +2974,81 @@ def cfg_for(seed):
             'upgrade': rng.randrange(10, 21) if rng.random() < 0.2 else 0}
 
 
+def _runner_op(extra, desk, sel, i, back):
+    """One of the ops the runner brings, drawn from its own stream (None: keep the desktop edit)."""
+    total = sum(w for _, w in RUNNER_OPS)
+    x, acc = extra.random() * total, 0.0
+    for name, w in RUNNER_OPS:
+        acc += w
+        if x < acc:
+            break
+    if name == 'prompt':
+        return ('prompt', desk, sel)
+    if name == 'signout':
+        if desk in back:
+            return None
+        back[desk] = i + extra.randrange(2, 6)     # signed in again a few steps later
+        return ('signout', desk, sel)
+    if name in ('close', 'kill'):
+        return (name, desk, sel)
+    if name == 'offline':
+        return ('offline', desk, extra.randrange(1, 4))
+    # the window: each state that holds the prompt back, now and then
+    return ('ui', desk, tuple(bool(extra.random() < 0.8) if k == 'visible' else bool(extra.random() < 0.25)
+                              for k in sorted(UI_DEFAULT)))
+
+
+def _desk_sel(rng, kind):
+    """A desk_op selector for that kind (never one the same-desktop edit takes for a prompt answer)."""
+    k = rng.randrange(1, 5000)
+    while k % 6 == 0:
+        k += 1
+    return (kind + 12 * k,) + tuple(rng.randrange(1 << 16) for _ in range(4))
+
+
+def gen_removal_mix(seed, steps, cfg):
+    """The self-test's op mix: removals during uploads (right after an insert was answered), a close in
+    the middle of an upload, Downloads after removals, and entries put back in the list they left."""
+    rng = random.Random(seed * 7919 + 5)
+    ops = []
+    for _ in range(steps):
+        desk = rng.choice('AB')
+        r = rng.random()
+        if r < 0.24:
+            ops.append(('desk', desk, _desk_sel(rng, 0)))                    # add an entry
+        elif r < 0.30:
+            ops.append(('desk', desk, _desk_sel(rng, 7)))                    # a new list
+        elif r < 0.38:
+            ops.append(('desk', desk, _desk_sel(rng, 3)))                    # remove from one list
+        elif r < 0.42:
+            ops.append(('desk', desk, _desk_sel(rng, 4)))                    # move
+        elif r < 0.50:
+            ops.append(('readd', desk))
+        elif r < 0.70:
+            kind = rng.choice(('edit_after_insert', 'edit_after_insert', 'edit_after_move', 'same_desktop_edit'))
+            edit = LAST_WRITE if kind != 'same_desktop_edit' and rng.random() < 0.5 else                 _desk_sel(rng, rng.choice((3, 3, 4, 0)))
+            ops.append(('sync', desk, rng.choice(('up', 'up', 'merge')), (rng.randrange(1, 12), kind, edit)))
+        elif r < 0.82:
+            ops.append(('sync', desk, rng.choice(('down', 'merge')), None))
+        elif r < 0.90:
+            sel = tuple(rng.randrange(1 << 16) for _ in range(5))
+            how = rng.choice(('close', 'close', 'kill'))
+            x = rng.random()
+            ops.append((how, desk, sel, LAST_WRITE) if x < 0.4 else (how, desk, sel, _desk_sel(rng, 3)) if x < 0.7
+                       else (how, desk, sel))
+        elif r < 0.95:
+            ops.append(('web', tuple(rng.randrange(1 << 16) for _ in range(5))))
+        else:
+            ops.append(('sync', desk, 'up', None))
+    return ops
+
+
 def gen_ops(seed, steps, cfg):
+    if cfg.get('mix') == 'removals':
+        return gen_removal_mix(seed, steps, cfg)
     rng = random.Random(seed * 7919 + 1)
     renames = random.Random(seed * 7919 + 2)
+    extra = random.Random(seed * 7919 + 3)
     ops = []
     back = {}
     for i in range(steps):
@@ -1984,7 +3078,8 @@ def gen_ops(seed, steps, cfg):
             elif renames.random() < DESK_RENAME_SHARE:
                 ops.append(('desk_rename', desk, sel))
             else:
-                ops.append(('desk', desk, sel))
+                other = _runner_op(extra, desk, sel, i, back) if extra.random() < RUNNER_OP_SHARE else None
+                ops.append(other or ('desk', desk, sel))
         else:
             direction = rng.choice(['up', 'up', 'down', 'merge'])
             inj = None
@@ -2016,8 +3111,13 @@ def run_ops(seed, cfg, ops, engine='current', checks=ALL_CHECKS, settle=True):
             return None, w
 
 
-def run_seed(seed, steps=60, engine='current', checks=ALL_CHECKS):
-    cfg = cfg_for(seed)
+def mix_cfg(seed, mix=None):
+    """A seed's configuration; the self-test mix starts on the engine under test (no upgrade)."""
+    return dict(cfg_for(seed), mix=mix, upgrade=0) if mix else cfg_for(seed)
+
+
+def run_seed(seed, steps=60, engine='current', checks=ALL_CHECKS, mix=None):
+    cfg = mix_cfg(seed, mix)
     ops = gen_ops(seed, steps, cfg)
     v, _ = run_ops(seed, cfg, ops, engine, checks)
     return v, cfg, ops
@@ -2064,22 +3164,23 @@ def _parse_seeds(text):
 
 
 def _worker(args):
-    seeds, steps, engine, checks = args
+    seeds, steps, engine, checks = args[:4]
+    mix = args[4] if len(args) > 4 else None
     found = []
     for seed in seeds:
-        v, _, _ = run_seed(seed, steps, engine, checks)
+        v, _, _ = run_seed(seed, steps, engine, checks, mix)
         if v is not None:
             found.append((seed, v.inv, v.kind, str(v)))
     return len(seeds), found
 
 
-def run_many(seeds, steps=60, engine='current', checks=ALL_CHECKS, jobs=1):
+def run_many(seeds, steps=60, engine='current', checks=ALL_CHECKS, jobs=1, mix=None):
     """Every failing seed as (seed, inv, kind, message)."""
     if jobs <= 1:
-        return _worker((seeds, steps, engine, checks))[1]
+        return _worker((seeds, steps, engine, checks, mix))[1]
     import multiprocessing
     size = max(1, min(250, len(seeds) // (jobs * 4) or 1))
-    blocks = [(seeds[i:i + size], steps, engine, checks) for i in range(0, len(seeds), size)]
+    blocks = [(seeds[i:i + size], steps, engine, checks, mix) for i in range(0, len(seeds), size)]
     found = []
     with multiprocessing.get_context('spawn').Pool(jobs) as pool:
         for _, f in pool.imap_unordered(_worker, blocks):
@@ -2096,13 +3197,14 @@ def main(argv=None):
     ap.add_argument('--shrink', action='store_true', help='shrink and print the first failures of each invariant')
     ap.add_argument('--checks', default='', help='comma-separated invariants to check (default: all)')
     ap.add_argument('--show', type=int, default=2, help='failures to print per invariant')
+    ap.add_argument('--mix', default=None, help="'removals': the self-test's op mix (see gen_removal_mix)")
     a = ap.parse_args(argv)
     checks = ALL_CHECKS
     if a.checks:
         checks = frozenset(x if x in ('R', 'crash') else int(x) for x in a.checks.split(','))
     seeds = _parse_seeds(a.seeds)
     t0 = time.perf_counter()
-    found = run_many(seeds, a.steps, a.engine, checks, a.jobs)
+    found = run_many(seeds, a.steps, a.engine, checks, a.jobs, a.mix)
     dt = time.perf_counter() - t0
     by_inv = collections.defaultdict(list)
     for seed, inv, kind, msg in found:
@@ -2110,7 +3212,7 @@ def main(argv=None):
     for inv in sorted(by_inv, key=str):
         for seed, kind, msg in by_inv[inv][:a.show]:
             if a.shrink:
-                cfg = cfg_for(seed)
+                cfg = mix_cfg(seed, a.mix)
                 ops = gen_ops(seed, a.steps, cfg)
                 small, v, w = shrink(seed, cfg, ops, a.engine, checks)
                 print(report(seed, cfg, small, v, w))
