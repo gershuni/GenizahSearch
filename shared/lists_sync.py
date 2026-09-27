@@ -1038,12 +1038,19 @@ class ListsCloudSync:
         for list_id in order:
             list_data = local_lists[list_id]
             cloud_id = list_data.get('cloud_id')
-            # Validate cloud_id still exists (might be stale after cleanup)
+            list_name = list_data.get('name', 'Unnamed')
             if cloud_id and cloud_id not in cloud_list_ids:
-                logger.debug(f"Clearing stale cloud_id {cloud_id} for list '{list_data.get('name')}'")
+                if not lists_complete:
+                    # Not seen by a read that did not reach the end: the cloud list may still be
+                    # there. Keep the id and leave the list for a pass that reads every list.
+                    logger.info("The cloud lists were not all read; list '%s' (cloud list %s) waits for the "
+                                "next upload", list_name, cloud_id)
+                    result['lists_not_uploaded'].append(list_name)
+                    continue
+                # Gone from a complete read: deleted in the cloud
+                logger.debug(f"Clearing stale cloud_id {cloud_id} for list '{list_name}'")
                 cloud_id = None
                 list_data.pop('cloud_id', None)
-            list_name = list_data.get('name', 'Unnamed')
 
             # Map local project_id to cloud project_id
             local_proj_id = list_data.get('project_id')
@@ -1082,6 +1089,14 @@ class ListsCloudSync:
                 ).execute()
             else:
                 free = sorted((cid for cid in by_name.get(list_name, ()) if cid not in held), key=_id_key)
+                if not free and not lists_complete:
+                    # A cloud list of this name may lie past what the read returned: create none
+                    # this pass. (A free one that was read is safe to take: a read ends short only
+                    # after returning every list below the last id it reached.)
+                    logger.info("The cloud lists were not all read; list '%s' is not created in the cloud "
+                                "until the next upload", list_name)
+                    result['lists_not_uploaded'].append(list_name)
+                    continue
                 if free:
                     # The lowest same-name cloud list no local list holds (the download picks the same)
                     cloud_id = free[0]

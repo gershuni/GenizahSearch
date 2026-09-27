@@ -1935,6 +1935,68 @@ def test_a_list_a_same_count_change_would_skip_keeps_its_cloud_list(tmp_path):
     assert result['success']
 
 
+def _lists_read_ends_short(client, req):
+    """The server answers a later page of the list of lists with the first page again: the read is not complete."""
+    if client.actor == 'A' and _is_later_page(req, 'user_lists'):
+        _as_the_first_page(req)
+
+
+def test_a_list_whose_cloud_list_an_incomplete_read_missed_keeps_its_id(tmp_path):
+    """The list of lists is read short, and a list's cloud list lies past what was read. The upload keeps the
+    list's cloud id and leaves the list for the next pass; it creates no cloud list. A pass that reads every
+    list then writes to the one it holds."""
+    c = Cloud(max_rows=1)
+    c.new_list('Spare')                                  # the lowest id: the only list the short read returns
+    cl = c.new_list('B')
+    row = c.add(cl, '990001', fl_id='FLa', note='n1')
+    a = make_desk(tmp_path, c)
+    assert a.down()['success'] and a.up()['success']     # (the upload also sends the local default list)
+    lid = next(k for k, ld in a.mgr.data['lists'].items() if ld.get('cloud_id') == cl)
+    a.mgr.add_item('990002', lid, note='new here', fl_id='FLa')
+    c.rec.hook = _lists_read_ends_short
+    mark = c.rec.mark()
+    result = a.up()
+    c.rec.hook = None
+    assert mark(table='user_lists', op='insert') == [], 'a second cloud list was created'
+    assert cloud_id(a, lid) == cl
+    assert mark(op='insert') == [] and mark(op='update') == []
+    assert 'B' in result['lists_not_uploaded'] and result['complete'] is False
+    mark = c.rec.mark()
+    result = a.up()
+    assert result['success'] and result['lists_not_uploaded'] == []
+    assert mark(table='user_lists', op='insert') == [] and cloud_id(a, lid) == cl
+    assert [p['sys_id'] for p in _payloads(mark(op='insert'))] == ['990002']
+    assert [r['id'] for r in c.rows(sys_id='990001')] == [row]
+    assert sorted(lst['name'] for lst in c.db.tables['user_lists']) == ['B', 'General', 'Spare']
+
+
+def test_a_new_list_whose_same_name_cloud_list_an_incomplete_read_missed_is_not_created(tmp_path):
+    """A list made here, never uploaded, has a same-name cloud list past what a short read of the list of
+    lists returned. The upload does not create a cloud list for it (nor for the default list, whose cloud
+    list it cannot tell is missing); a pass that reads every list pairs it with the cloud list of its name."""
+    c = Cloud(max_rows=1)
+    c.new_list('Spare')
+    cl = c.new_list('C')
+    row = c.add(cl, '990001', fl_id='FLa', note='n1')
+    a = make_desk(tmp_path, c)
+    lid = a.mgr.create_list('C')
+    a.mgr.add_item('990002', lid, note='mine', fl_id='FLa')
+    c.rec.hook = _lists_read_ends_short
+    mark = c.rec.mark()
+    result = a.up()
+    c.rec.hook = None
+    assert mark(table='user_lists', op='insert') == [], 'a cloud list was created on a short read'
+    assert a.mgr.data['lists'][lid].get('cloud_id') is None and mark(op='insert') == []
+    assert 'C' in result['lists_not_uploaded'] and result['complete'] is False
+    mark = c.rec.mark()
+    result = a.up()
+    assert result['success'] and result['lists_not_uploaded'] == []
+    assert cloud_id(a, lid) == cl
+    assert [r.payload['name'] for r in mark(table='user_lists', op='insert')] == ['General']   # none existed
+    assert sorted(lst['name'] for lst in c.db.tables['user_lists']) == ['C', 'General', 'Spare']
+    assert sorted(r['sys_id'] for r in c.rows(list_id=cl)) == ['990001', '990002'] and c.row(row)['note'] == 'n1'
+
+
 # --------------------------------------------------------------------------- what the website stores on a row
 
 def test_an_upload_leaves_the_website_shelfmark_and_title_of_a_row_alone(tmp_path, cloud):
