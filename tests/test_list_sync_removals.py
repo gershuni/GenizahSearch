@@ -1441,8 +1441,6 @@ SYNC_ENTRY_POINTS = {'sync_to_cloud', 'sync_from_cloud', 'fetch_cloud_state', 'a
                      'delete_item_from_cloud'}
 
 
-@pytest.mark.xfail(strict=True, reason='the window still calls the sync directly; moved to the runner by the '
-                                       'desktop half of this change, which removes this marker')
 def test_only_the_runner_starts_a_list_sync():
     offenders = []
     files = [REPO / 'genizah_app.py'] + sorted((REPO / 'desktop').rglob('*.py'))

@@ -3705,7 +3705,6 @@ TRANSLATIONS.update({
     "from the cloud": "מהענן",
     # The sync layer's own messages (shared/lists_sync.py, shared/lists_manager.py)
     "Sync already in progress": "סנכרון כבר מתבצע",
-    "Sync stopped": "הסנכרון נעצר",
     "Sync not available": "הסנכרון אינו זמין",
     "No Supabase client": "אין חיבור לשרת הענן",
     "Cloud sync not available": "הסנכרון לענן אינו זמין",
