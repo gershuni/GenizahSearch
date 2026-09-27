@@ -101,6 +101,9 @@ _GUI_TEST_FILES = {
     # design; this file holds only what genuinely needs a live loop (thread
     # affinity, queued-vs-direct delivery, real wait() timing).
     "test_pause_integration_qt.py",
+    # The window's list syncs on the list-sync runner: real QMainWindow hosts,
+    # real QTimers holding a question until the screen is free, real dialogs.
+    "test_lists_sync_off_ui_thread.py",
 }
 
 

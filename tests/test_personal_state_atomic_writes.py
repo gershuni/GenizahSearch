@@ -1376,25 +1376,37 @@ def _note_in(path):
         return pickle.load(fh)["items"]["990001"]["note"]
 
 
-def _run_sync_dialog_action(genizah_app, monkeypatch, mgr, action):
-    """Drive GenizahGUI._do_sync_action -- the sync dialog's buttons -- with Qt faked out."""
+def _run_sync_dialog_action(genizah_app, monkeypatch, mgr, action, outcomes=None):
+    """Drive GenizahGUI._do_sync_action -- the sync dialog's buttons -- with Qt faked out.
+
+    The action runs through the list-sync runner inline (every stage on this thread,
+    on_done before run() returns); `outcomes` collects what it handed the window."""
+    from lists_sync_contract import add_missing_manager_reads, inline_runner
     shown = []
 
     class _Progress:
         def __init__(self, *args):
-            pass
+            self.canceled = types.SimpleNamespace(connect=lambda slot: None, disconnect=lambda *a: None)
 
         def __getattr__(self, name):
             return lambda *args: None
 
+    add_missing_manager_reads(monkeypatch)
     monkeypatch.setattr(genizah_app, "QProgressDialog", _Progress)
-    monkeypatch.setattr(genizah_app, "QApplication", types.SimpleNamespace(processEvents=lambda: None))
-    monkeypatch.setattr(genizah_app, "QMessageBox", types.SimpleNamespace(
-        information=lambda parent, title, text: shown.append(("information", text)),
-        warning=lambda parent, title, text: shown.append(("warning", text)),
-        critical=lambda parent, title, text: shown.append(("critical", text))))
-    host = types.SimpleNamespace(lists_mgr=mgr,
-                                 _sync_error_text=genizah_app.GenizahGUI._sync_error_text)
+    monkeypatch.setattr(genizah_app, "_show_ok_notice",
+                        lambda parent, kind, title, text: shown.append((kind, text)))
+    host = genizah_app.GenizahGUI.__new__(genizah_app.GenizahGUI)
+    host.lists_mgr = mgr
+    host._lists_sync = inline_runner(mgr)
+    host._app_shutting_down = False
+    host.lists_tree = None
+    host.lists_refresh_all = lambda: None
+    bar = _StatusBar()
+    host.statusBar = lambda: bar
+    if outcomes is not None:
+        report = genizah_app.GenizahGUI._on_lists_sync_done
+        host._on_lists_sync_done = lambda act, outcome, progress: (
+            outcomes.append(outcome), report(host, act, outcome, progress))
     genizah_app.GenizahGUI._do_sync_action(host, types.SimpleNamespace(accept=lambda: None), action)
     return shown
 
@@ -1481,14 +1493,12 @@ def test_a_merge_whose_upload_fails_says_so_in_the_interface_language(
     failure."""
     monkeypatch.setattr(genizah_core, "CURRENT_LANG", "he")
     synced.cloud.tables["list_items"][0]["note"] = cloud_note
-    downloads = []
-    real_download = synced.mgr.sync_from_cloud
-    monkeypatch.setattr(synced.mgr, "sync_from_cloud",
-                        lambda: downloads.append(real_download()) or downloads[-1])
     monkeypatch.setattr(synced.mgr, "sync_to_cloud",
-                        lambda: {"success": False, "error": "Sync already in progress"})
+                        lambda **kw: {"success": False, "error": "Sync already in progress"})
 
-    shown = _run_sync_dialog_action(genizah_app_module, monkeypatch, synced.mgr, "merge")
+    outcomes = []
+    shown = _run_sync_dialog_action(genizah_app_module, monkeypatch, synced.mgr, "merge", outcomes)
+    downloads = [o.get("download") for o in outcomes]
 
     assert [kind for kind, _ in shown] == ["warning"]
     text = shown[0][1]
@@ -1517,7 +1527,7 @@ def test_a_merge_whose_upload_fails_says_so_in_the_interface_language(
 def test_a_partial_upload_is_reported_in_the_interface_language_with_its_counts(
         synced, monkeypatch, genizah_app_module, lang):
     monkeypatch.setattr(genizah_core, "CURRENT_LANG", lang)
-    monkeypatch.setattr(synced.mgr, "sync_to_cloud", lambda: {
+    monkeypatch.setattr(synced.mgr, "sync_to_cloud", lambda **kw: {
         "success": False, "items_pushed": 3, "items_failed": 2,
         "error": lists_sync.UPLOAD_PARTLY_FAILED.format(3, 2)})
 
