@@ -107,13 +107,23 @@ def test_the_gate_needs_no_qt():
 
 # --------------------------------------------------------------------------- one job, its end
 
-def test_an_upload_job_installs_its_copy_and_completes_once(desk, cloud):
+def test_an_upload_job_installs_its_copy_and_completes_once(desk, cloud, monkeypatch):
     k = desk.mgr.create_list('K')
     desk.mgr.add_item('990001', k, note='n', fl_id='FLa')
     r = ListsSyncRunner(desk.mgr, inline=True)
+    seen = {}
+    real = desk.sync.sync_to_cloud
+
+    def spy(**kw):
+        seen.update(kw)
+        return real(**kw)
+    monkeypatch.setattr(desk.sync, 'sync_to_cloud', spy)
     done = []
     job = r.run('upload', on_done=done.append)
     assert len(done) == 1 and done[0]['upload']['success'] and job.done
+    # on a copy, told of the removals made meanwhile, reporting what it records
+    assert seen['data'] is not None and seen['data'] is not desk.mgr.data
+    assert seen['withdrawn'] == desk.mgr.withdrawn_now and callable(seen['on_recorded'])
     assert R.rec(desk, k)['id'] == R.row_in(cloud, desk, k)       # the copy's record is the store's now
     assert r.unsent is False and r.busy is False
     r.cancel(job)                                                 # a finished job is left alone
@@ -141,12 +151,16 @@ def test_a_failed_upload_leaves_its_changes_unsent_and_keeps_what_it_did(desk, c
     assert R.item(desk, '990002::fl::FLb').get('cloud_rows') is None
 
 
-@pytest.mark.parametrize('cell', ['ok', 'download-fails'])
-def test_a_merge_uploads_only_after_its_download(desk, cloud, cell):
+@pytest.mark.parametrize('cell', ['ok', 'download-fails', 'download-snapshot-fails'])
+def test_a_merge_uploads_only_after_its_download(desk, cloud, cell, monkeypatch):
     k = desk.mgr.create_list('K')
     desk.mgr.add_item('990001', k, note='n', fl_id='FLa')
-    if cell == 'download-fails':
+    if cell == 'download-fails':                          # the fetch fails
         cloud.rec.hook = lambda client, req: 'raise_before' if client.actor == 'A' and req.t == 'projects' else None
+    elif cell == 'download-snapshot-fails':               # the fetch succeeds; its apply stops at the snapshot
+        real = desk.mgr.write_snapshot
+        monkeypatch.setattr(desk.mgr, 'write_snapshot',
+                            lambda label, payload=None: label != 'pre-download' and real(label, payload))
     r = ListsSyncRunner(desk.mgr, inline=True)
     done = []
     mark = cloud.rec.mark()
@@ -157,6 +171,8 @@ def test_a_merge_uploads_only_after_its_download(desk, cloud, cell):
         assert outcome['download']['success'] and outcome['upload']['success'] and mark(op='insert')
     else:
         assert outcome['download']['success'] is False and 'upload' not in outcome and mark(op='insert') == []
+    if cell == 'download-snapshot-fails':
+        assert outcome['download']['error'] == lists_sync.DOWNLOAD_BACKUP_FAILED
 
 
 def test_a_preview_job_reads_the_cloud_lists(desk, cloud):
@@ -165,6 +181,17 @@ def test_a_preview_job_reads_the_cloud_lists(desk, cloud):
     done = []
     r.run('preview', on_done=done.append)
     assert done[0]['preview']['success'] and [x['name'] for x in done[0]['preview']['lists']] == ['Web']
+
+
+def test_a_preview_from_before_a_sign_out_is_not_delivered(desk, cloud):
+    cloud.add(cloud.new_list('Web'), '990001', fl_id='FLa')
+    r = threaded(desk.mgr)
+    done = []
+    r.run('preview', on_done=done.append)
+    assert worker_ended(r)                                # read; its answer waits in the queue
+    r.invalidate_auth()
+    assert drain_until(r, lambda: bool(done))
+    assert done == [{'kind': 'preview', 'cancelled': True, 'stale': True}]
 
 
 @pytest.mark.parametrize('step', ['start', 'apply', 'install'])
@@ -243,6 +270,23 @@ def test_a_download_whose_sign_in_ended_meanwhile_changes_nothing(desk, cloud, c
     assert not os.path.exists(desk.mgr.LISTS_FILE + '.pre-download')
 
 
+def test_a_download_cancelled_after_its_fetch_changes_nothing(desk, cloud):
+    k = desk.mgr.create_list('K')
+    desk.mgr.add_item('990001', k, note='n', fl_id='FLa')
+    assert desk.up()['success']
+    cloud.add(R.cloud_id(desk, k), '990002', fl_id='FLb', note='web')
+    r = threaded(desk.mgr)
+    done = []
+    job = r.run('download', on_done=done.append)
+    assert worker_ended(r)                                # its last request answered; the state waits in the queue
+    r.cancel(job)                                         # Cancel in the progress dialog, just then
+    before = set(desk.mgr.data['items'])
+    assert drain_until(r, lambda: bool(done))
+    assert done[0]['cancelled'] is True and 'download' not in done[0] and not done[0].get('stale')
+    assert set(desk.mgr.data['items']) == before and '990002::fl::FLb' not in before
+    assert not os.path.exists(desk.mgr.LISTS_FILE + '.pre-download')
+
+
 def test_a_stale_upload_is_still_installed(desk, cloud):
     k = desk.mgr.create_list('K')
     desk.mgr.add_item('990001', k, note='n', fl_id='FLa')
@@ -258,6 +302,48 @@ def test_a_stale_upload_is_still_installed(desk, cloud):
     assert done[0]['upload']['stopped'] is True
     assert R.rec(desk, k) is not None                     # what it did before it stopped is kept
     assert r.unsent is True
+
+
+@pytest.mark.parametrize('how', ['cancel', 'sign-out-deadline'])
+def test_a_running_upload_stops_at_cancel_or_the_sign_out_deadline_and_is_installed(desk, cloud, how):
+    k = desk.mgr.create_list('K')
+    desk.mgr.add_item('990001', k, note='n', fl_id='FLa')
+    desk.mgr.add_item('990002', desk.mgr.create_list('Z'), fl_id='FLz')
+    gate = Gate(cloud, lambda req: req.t == 'list_items' and req.op == 'insert')
+    r = threaded(desk.mgr)
+    done, logout = [], []
+    job = r.run('upload', on_done=done.append)
+    assert gate.reached.wait(10)
+    if how == 'cancel':
+        r.cancel(job)
+    else:
+        r.begin_logout(logout.append, budget_s=0.01)      # the running job is held to the same deadline
+        assert drain_until(r, job.past_deadline, timeout=2)
+    gate.release.set()                                    # K's insert goes; the stop comes before Z's
+    assert drain_until(r, lambda: bool(done) and (how == 'cancel' or bool(logout)))
+    assert done[0]['upload']['stopped'] is True and done[0]['cancelled'] is (how == 'cancel')
+    if how != 'cancel':
+        assert done[0]['deadline'] is True and logout[0]['deadline'] is True
+    assert R.rec(desk, k) is not None and R.item(desk, '990002::fl::FLz').get('cloud_rows') is None
+    assert r.unsent is True
+
+
+def test_an_automatic_upload_from_before_a_sign_out_reports_nothing(desk, cloud):
+    k = desk.mgr.create_list('K')
+    desk.mgr.add_item('990001', k, note='n', fl_id='FLa')
+    autos = []
+    r = threaded(desk.mgr, on_auto_done=autos.append)
+    r.request_auto()
+    assert drain_until(r, lambda: not r.busy) and len(autos) == 1   # an ordinary one is reported
+    desk.mgr.add_item('990002', k, fl_id='FLb')
+    desk.mgr.add_item('990003', desk.mgr.create_list('Z'), fl_id='FLz')
+    gate = Gate(cloud, lambda req: req.t == 'list_items' and req.op == 'insert')
+    r.request_auto()
+    assert gate.reached.wait(10)
+    r.invalidate_auth()
+    gate.release.set()
+    assert drain_until(r, lambda: not r.busy)
+    assert len(autos) == 1 and R.rec(desk, k, '990002::fl::FLb') is not None   # installed, not reported
 
 
 def test_a_sign_out_uploads_once_without_page_backfill_or_skips_when_nothing_is_left(desk, cloud, monkeypatch):
@@ -329,9 +415,11 @@ def test_a_close_installs_a_finished_upload_whose_result_was_not_drained_yet(des
     assert r.run('upload') is None and r.begin_logout(done.append, 10) is None
 
 
-def test_a_close_keeps_what_a_stuck_upload_reported_drained_or_not(desk, cloud):
-    """The report of a completed move, drained by an earlier timer tick; the worker then stuck in a request;
-    the entry removed from its new list on the UI thread; the close: the removal names the list the row is in."""
+@pytest.mark.parametrize('drained', [True, False], ids=['drained-by-a-timer-tick', 'left-in-the-queue'])
+def test_a_close_keeps_what_a_stuck_upload_reported_drained_or_not(desk, cloud, drained):
+    """The report of a completed move, drained by an earlier timer tick or still in the queue; the worker
+    then stuck in a request; the entry removed from its new list on the UI thread; the close: the removal
+    names the list the row is in."""
     k, l_, m, z = (desk.mgr.create_list(x) for x in ('K', 'L', 'M', 'Z'))
     desk.mgr.add_item('990001', k, note='n', fl_id='FLa')
     desk.mgr.add_item('990001', m, fl_id='FLa')
@@ -344,8 +432,11 @@ def test_a_close_keeps_what_a_stuck_upload_reported_drained_or_not(desk, cloud):
     done = []
     job = r.run('upload', on_done=done.append)
     assert gate.reached.wait(10)
-    r._poll()                                             # a timer tick drains the move's report
-    assert [rep for rep in job.recorded if rep[0] == 'row' and rep[3] == r101]
+    if drained:
+        r._poll()                                         # a timer tick drains the move's report
+        assert [rep for rep in job.recorded if rep[0] == 'row' and rep[3] == r101]
+    else:
+        assert job.recorded == [] and [m_ for m_ in list(r._results.queue) if m_[0] == 'recorded']
     desk.mgr.remove_item_from_list(KEY, l_)               # M survives
     r.shutdown()                                          # never waits for the worker
     assert done[0].get('shutdown') is True

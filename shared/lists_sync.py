@@ -66,8 +66,6 @@ IDENTITY_FIELDS = {
     'lists': ('cloud_id', 'list_state_unsent', 'list_name_unsent'),
     'items': ('cloud_id', 'cloud_rows'),
 }
-# The error of a pass stopped before its next request (Cancel, a sign-out's deadline, a close).
-SYNC_STOPPED = 'Sync stopped'
 # The list a row is in when reading it again failed: equal to no list id.
 UNKNOWN_LIST = object()
 # On a local list that took its cloud list in a download while holding no cloud id,

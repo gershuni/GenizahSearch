@@ -232,7 +232,7 @@ def test_a_desktop_removal_deletes_its_cloud_row(tmp_path, cloud, cell):
         assert a.mgr.resolve_web_removals({(KEY, k): 'remove'}) == (1, 0)
     mark = cloud.rec.mark()
     result = a.up()
-    assert result['success'] and result['removals_failed'] == 0
+    assert result['success'] and result['removals_failed'] == 0 and result['rows_deleted'] == len(gone)
     deletes = mark(op='delete')
     assert deleted_ids(deletes) == sorted(gone) and explicit(deletes)
     assert all(('eq', 'list_id', gone[rid]) in r.filters for rid, r in zip(deleted_ids(deletes), deletes))
@@ -363,7 +363,8 @@ R7_DEST = ['active-without-row', 'active-with-row', 'trashed', 'no-cloud-id']
 R7_FOLLOW = ['nothing', 'remove-destination-another-survives', 'remove-last', 'restore-destination',
              'delete-destination-permanently']
 R7_CELLS = [f'{d}-{f}' for d in R7_DEST for f in R7_FOLLOW] + [
-    'chained', 'moved-back', 'duplicate-merge', 'auto-duplicate-merge', 'trashed-another-membership-without-row']
+    'chained', 'moved-back', 'duplicate-merge', 'auto-duplicate-merge', 'trashed-another-membership-without-row',
+    'chained-remove-last', 'chained-remove-destination-another-survives']
 
 
 def _no_rows_for_list_insert(name):
@@ -383,6 +384,9 @@ def _moves_of(reqs, rid):
 @pytest.mark.parametrize('cell', R7_CELLS)
 def test_moves_keep_their_destination_with_the_row(tmp_path, cloud, cell):
     a = make_desk(tmp_path, cloud)
+    if cell.startswith('chained-remove-'):
+        _chained_moves_then_removed(a, cloud, cell)
+        return
     if cell in ('duplicate-merge', 'auto-duplicate-merge'):
         keep = a.mgr.create_list('Dup')                # the older one: the automatic merge keeps it
         dup = a.mgr.create_list('Dup')
@@ -486,6 +490,64 @@ def test_moves_keep_their_destination_with_the_row(tmp_path, cloud, cell):
     if removed:
         it = item(a)
         assert it is None or (l_ not in it['lists'] and k not in it['lists'])
+
+
+def _chained_moves_then_removed(a, cloud, cell):
+    """Moved K -> L -> N, then removed from N: the row, still in K's cloud list, is deleted there.
+
+    In '...-another-survives' the entry is also in M, which has no row of its own yet: the
+    moved row is not M's to take (it was bound for N), so M gets an insert.
+    """
+    k, l_, m, n = (a.mgr.create_list(x) for x in ('K', 'L', 'M', 'N'))
+    a.mgr.add_item('990001', k, note='n', fl_id='FLa')
+    assert a.up()['success']
+    rk, k_cloud = row_in(cloud, a, k), cloud_id(a, k)
+    survives = cell == 'chained-remove-destination-another-survives'
+    if survives:
+        a.mgr.add_item('990001', m, fl_id='FLa')
+    a.mgr.move_items_to_list([KEY], k, l_)
+    a.mgr.move_items_to_list([KEY], l_, n)
+    a.mgr.remove_item_from_list(KEY, n)
+    assert pending(a)[str(rk)]['list'] == k_cloud
+    mark = cloud.rec.mark()
+    assert a.up()['success']
+    deletes = mark(op='delete')
+    assert deleted_ids(deletes) == [rk] and explicit(deletes) and ('eq', 'list_id', k_cloud) in deletes[0].filters
+    assert _moves_of(mark(op='update'), rk) == [] and pending(a) == {}
+    if survives:
+        (ins,) = mark(op='insert')
+        assert ins.payload['list_id'] == cloud_id(a, m)
+        expect_rows = {row_in(cloud, a, m): cloud_id(a, m)}
+    else:
+        assert mark(op='insert') == []
+        expect_rows = {}
+    assert {r['id']: r['list_id'] for r in cloud.rows(sys_id='990001')} == expect_rows
+    assert a.down()['success']
+    assert (item(a) or {}).get('lists', []) == ([m] if survives else [])
+
+
+def test_a_moved_row_the_website_deleted_is_forgotten(tmp_path, cloud):
+    """A row waiting for its list (in the Trash) and then deleted on the website: nothing is left
+    waiting for it, and the list gets a row of its own once it is back."""
+    a = make_desk(tmp_path, cloud)
+    k, l_ = a.mgr.create_list('K'), a.mgr.create_list('L')
+    a.mgr.add_item('990001', k, note='n', fl_id='FLa')
+    assert a.up()['success']
+    rk = row_in(cloud, a, k)
+    a.mgr.delete_list(l_)
+    assert a.up()['success']
+    a.mgr.move_items_to_list([KEY], k, l_)
+    assert a.up()['deferred'] == 1
+    cloud.delete_row(rk)
+    mark = cloud.rec.mark()
+    result = a.up()
+    assert result['success'] and result['deferred'] == 0 and rec(a, '~%s' % rk) is None
+    assert mark(op='delete') == [] and mark(op='update') == [] and a.mgr.pending_web_removals() == []
+    a.mgr.restore_list(l_)
+    mark = cloud.rec.mark()
+    assert a.up()['success']
+    (ins,) = mark(op='insert')
+    assert ins.payload['list_id'] == cloud_id(a, l_) and rec(a, l_)['id'] != rk
 
 
 def test_an_entry_put_back_in_the_list_it_left_keeps_its_row_there(tmp_path, cloud):
@@ -708,6 +770,31 @@ def test_edits_made_during_an_upload_count_as_made_after_it(tmp_path, cloud, cel
     assert deleted_ids(mark(op='delete')) == [r201] and cloud.row(r201) is None
     assert a.down()['success']
     assert item(a) is None if cell == 'delete-item-during-insert' else item(a)['lists'] == [m]
+
+
+@pytest.mark.parametrize('cell', ['renamed-before-and-during', 'renamed-only-during'])
+def test_a_list_renamed_while_an_upload_runs_keeps_its_new_name(tmp_path, cloud, cell):
+    """The upload sends the name its copy had; the name given meanwhile is still to be sent, and a
+    Download before that keeps it rather than taking the website's back."""
+    a = make_desk(tmp_path, cloud)
+    k = a.mgr.create_list('K')
+    a.mgr.add_item('990001', k, note='n', fl_id='FLa')
+    assert a.up()['success']
+    c_k = cloud_id(a, k)
+    sent = 'K'
+    if cell == 'renamed-before-and-during':
+        a.mgr.update_list(k, name='K first')
+        sent = 'K first'
+    edit_during(cloud, lambda: a.mgr.update_list(k, name='K second'))
+    assert a.up()['success']
+    lst = a.mgr.data['lists'][k]
+    assert cloud.cloud_list(c_k)['name'] == sent
+    assert lst['name'] == 'K second' and lst.get(lists_sync.LIST_NAME_UNSENT)
+    assert saved(a)['lists'][k].get(lists_sync.LIST_NAME_UNSENT)
+    assert a.down()['success'] and a.mgr.data['lists'][k]['name'] == 'K second'
+    assert a.up()['success'] and cloud.cloud_list(c_k)['name'] == 'K second'
+    assert not a.mgr.data['lists'][k].get(lists_sync.LIST_NAME_UNSENT)
+    assert a.down()['success'] and a.mgr.data['lists'][k]['name'] == 'K second'
 
 
 def _stale_repair_then_remove(a, cloud):
@@ -953,7 +1040,8 @@ def _large_store_abandon(a):
     t0 = time.perf_counter()
     a.mgr.abandon_upload(base, reports, 'u1')
     took = time.perf_counter() - t0
-    assert took < 0.5, f'abandon_upload took {took:.2f}s'
+    # about 0.2 s here on an idle machine; a scan of the store per report takes minutes
+    assert took < 3.0, f'abandon_upload took {took:.2f}s'
     assert a.mgr.data['items']['9800007']['cloud_rows'][lid]['id'] == 200007
 
 
@@ -994,6 +1082,56 @@ def test_an_upload_skips_an_entry_removed_before_its_request(tmp_path, cloud, ce
         assert a.up()['success'] and cloud.row(r101) is None
 
 
+@pytest.mark.parametrize('cell', ['insert-one-by-one', 'orphan-move-after-a-re-read', 'orphan-move-after-a-too-long-note'])
+def test_an_upload_skips_an_entry_removed_before_a_retried_request(tmp_path, cloud, cell):
+    """A request the upload sends again (one by one after a refused batch; the move alone after its
+    note could not be sent) asks again which memberships were removed since."""
+    a = make_desk(tmp_path, cloud)
+    k, l_, m = a.mgr.create_list('K'), a.mgr.create_list('L'), a.mgr.create_list('M')
+    if cell == 'insert-one-by-one':
+        a.mgr.add_item('990001', m, note='n', fl_id='FLa')
+        assert a.up()['success']
+        a.mgr.add_item('990001', l_, fl_id='FLa')
+        a.mgr.add_item('990002', l_, note='o', fl_id='FLb')     # two new rows for L: one batch
+
+        def hook(client, req):
+            if client.actor == 'A' and req.t == 'list_items' and req.op == 'insert' and isinstance(req.payload, list):
+                cloud.rec.hook = None
+                a.mgr.remove_item_from_list(KEY, l_)           # M survives
+                return 'api_23502'                              # the batch is refused whole: then one by one
+            return None
+    else:
+        long = cell == 'orphan-move-after-a-too-long-note'
+        a.mgr.add_item('990001', k, note=S.LONG_FILLER if long else 'n', fl_id='FLa')
+        a.mgr.add_item('990001', m, fl_id='FLa')
+        assert a.up()['success']
+        rk, k_cloud = row_in(cloud, a, k), cloud_id(a, k)
+        a.mgr.update_item(KEY, note='changed here')             # the move carries the note, on the condition read
+        a.mgr.move_items_to_list([KEY], k, l_)
+
+        def hook(client, req):
+            if client.actor == 'A' and req.t == 'list_items' and req.op == 'update' and 'list_id' in (req.payload or {}):
+                cloud.rec.hook = None
+                if not long:
+                    cloud.set(rk, note='changed on the website')   # the condition no longer holds
+                a.mgr.remove_item_from_list(KEY, l_)           # M survives
+            return None
+    cloud.rec.hook = hook
+    mark = cloud.rec.mark()
+    result = a.up()
+    cloud.rec.hook = None
+    assert result['success'], result
+    if cell == 'insert-one-by-one':
+        singles = [r for r in mark(op='insert') if isinstance(r.payload, dict)]
+        assert [r.payload['sys_id'] for r in singles] == ['990002']
+        assert [r for r in cloud.rows(list_id=cloud_id(a, l_)) if r['sys_id'] == '990001'] == []
+        return
+    assert len(_moves_of(mark(op='update'), rk)) == 1 and cloud.row(rk)['list_id'] == k_cloud
+    assert pending(a)[str(rk)]['list'] == k_cloud
+    mark = cloud.rec.mark()
+    assert a.up()['success'] and deleted_ids(mark(op='delete')) == [rk] and cloud.row(rk) is None
+
+
 def _identity_of(store):
     out = {'store': {k: store.get(k) for k in lists_sync.IDENTITY_FIELDS['store']}}
     for part in ('projects', 'lists', 'items'):
@@ -1032,9 +1170,14 @@ def test_an_upload_on_a_copy_changes_only_identity_fields(tmp_path, cloud):
     s_ = a.mgr.create_list('S')
     a.mgr.data['lists'][s_].update({'cloud_id': c_new, 'color': '#123456', lists_sync.LIST_STATE_UNSENT: True})
     live_bytes = pickle.dumps(a.mgr.data)
+    snap, lists_pkl = pathlib.Path(a.mgr.LISTS_FILE + '.pre-upload'), pathlib.Path(a.mgr.LISTS_FILE)
     cp, base = a.mgr.begin_upload()
+    assert snap.read_bytes() == live_bytes             # the snapshot is begin_upload's, on the thread that owns the store
+    snap.unlink()
+    on_disk = lists_pkl.read_bytes()
     result = a.sync.sync_to_cloud(data=cp, withdrawn=a.mgr.withdrawn_now, on_recorded=lambda rep: None)
     assert result['success'] is not None
+    assert not snap.exists() and lists_pkl.read_bytes() == on_disk   # the worker writes no file
     assert pickle.dumps(a.mgr.data) == live_bytes      # the engine never touched the live store
     assert _without(cp) == _without(base)              # and changed only identity on its copy
     live_before = copy.deepcopy(a.mgr.data)
@@ -1077,12 +1220,42 @@ def test_a_stopped_pass_says_sync_stopped_in_either_language(tmp_path, cloud, mo
     assert result['stopped'] is True and result['success'] is False and result['error'] == 'Sync stopped'
     assert len(inserts) == 1 and rec(a, l1) is not None      # what it recorded before the stop is kept
     assert item(a, '990002::fl::FLb').get('cloud_rows') is None
+    # what a sign-out notice names: the list being written when it stopped, and those after it
+    assert 'L2' in result['lists_not_uploaded'] and 'L1' not in result['lists_not_uploaded']
     import genizah_core
     from genizah_app import GenizahGUI
     monkeypatch.setattr(genizah_core, 'CURRENT_LANG', 'he')
     assert GenizahGUI._sync_error_text(result) == 'הסנכרון נעצר'
     monkeypatch.setattr(genizah_core, 'CURRENT_LANG', 'en')
     assert GenizahGUI._sync_error_text(result) == 'Sync stopped'
+
+
+def test_no_removal_is_sent_once_the_pass_is_stopped(tmp_path, cloud):
+    a = make_desk(tmp_path, cloud)
+    k = a.mgr.create_list('K')
+    a.mgr.add_item('990001', k, note='n', fl_id='FLa')
+    a.mgr.add_item('990002', k, note='m', fl_id='FLb')
+    assert a.up()['success']
+    rk = row_in(cloud, a, k)
+    a.mgr.remove_item_from_list(KEY, k)
+    stop = []
+
+    def progress(done, total):
+        if done == total - 1:                          # every list written; the deletes' step is next
+            stop.append(done)
+    mark = cloud.rec.mark()
+    result = a.up(should_stop=lambda: bool(stop), progress=progress)
+    assert stop and result['stopped'] is True and result['success'] is False
+    assert mark(op='delete') == [] and str(rk) in pending(a) and cloud.row(rk) is not None
+    assert a.up()['success'] and cloud.row(rk) is None and pending(a) == {}
+
+
+def test_a_sign_out_drops_the_signed_out_accounts_client(tmp_path, cloud, monkeypatch):
+    a = make_desk(tmp_path, cloud)
+    monkeypatch.setattr(lists_sync, '_sync_instance', a.sync)     # the manager's own sync is this desk's
+    assert a.sync._get_client() is a.client
+    a.mgr.disable_cloud_sync()
+    assert a.sync._user_id is None and a.sync._external_client is None
 
 
 @pytest.mark.parametrize('cell', ['stale-fetch', 'cancelled-fetch', 'failed-snapshot'])
@@ -1211,11 +1384,14 @@ def test_every_list_mutation_that_leaves_a_list_does_its_bookkeeping(tmp_path, c
     assert a.mgr.resolve_web_removals({('990400::fl::J1', w): 'remove', ('990401::fl::J2', w): 'keep'}) == (1, 1)
     assert set(pending(a)) == before and item(a, '990400::fl::J1') is None
     assert rec(a, w, '990401::fl::J2') is None and w in item(a, '990401::fl::J2')['lists']
+    on_disk = saved(a)                                            # the answers are saved with the lists
+    assert '990400::fl::J1' not in on_disk['items']
+    assert (on_disk['items']['990401::fl::J2'].get('cloud_rows') or {}).get(w) is None
 
 
 # --------------------------------------------------------------------------- R17: a moved row whose destination has one
 
-@pytest.mark.parametrize('cell', ['held', 'website-edited', 'over-gateway-limit'])
+@pytest.mark.parametrize('cell', ['held', 'website-edited', 'over-gateway-limit', 'delete-raises'])
 def test_a_redundant_row_is_deleted_only_when_its_text_is_held(tmp_path, cloud, cell):
     a = make_desk(tmp_path, cloud)
     k, l_ = a.mgr.create_list('K'), a.mgr.create_list('L')
@@ -1227,8 +1403,16 @@ def test_a_redundant_row_is_deleted_only_when_its_text_is_held(tmp_path, cloud, 
     if cell == 'website-edited':
         cloud.set(rk, note='n\nedited on the website')
     a.mgr.move_items_to_list([KEY], k, l_)             # L already has its own row
+    if cell == 'delete-raises':
+        cloud.rec.hook = lambda client, req: 'raise_before' if client.actor == 'A' and req.op == 'delete' else None
     mark = cloud.rec.mark()
     result = a.up()
+    cloud.rec.hook = None
+    if cell == 'delete-raises':                        # tried again at the next upload, and this one is not a success
+        assert result['success'] is False and result['complete'] is False and result['items_failed'] == 1
+        assert cloud.row(rk) is not None and rec(a, '~%s' % rk)['to'] == l_
+        assert a.up()['success'] and cloud.row(rk) is None and rec(a, '~%s' % rk) is None
+        return
     assert result['success']
     deletes = mark(op='delete')
     if cell == 'held':
@@ -1276,17 +1460,33 @@ def test_only_the_runner_starts_a_list_sync():
 # --------------------------------------------------------------------------- R21: an entry put back before its removal went
 
 R21_CELLS = ['readd-before-upload', 'readd-during-upload', 'readd-after-a-failed-delete', 'readd-as-another-folio',
-             'readd-while-its-delete-is-sent', 'pending-row-moved-elsewhere']
+             'readd-while-its-delete-is-sent', 'pending-row-moved-elsewhere', 'readd-after-a-move',
+             'readd-under-another-account',
+             # the other ways an entry goes into a list (add_item is readd-before-upload's)
+             'readd-by-bulk-add', 'readd-by-bulk-add-to-a-listed-entry', 'readd-by-merge-lists',
+             'readd-by-duplicate-merge']
+# the entry is also in X from the start, so the removal from K leaves it in a list
+STILL_LISTED = ('readd-by-bulk-add-to-a-listed-entry', 'readd-by-merge-lists')
 
 
 @pytest.mark.parametrize('cell', R21_CELLS)
 def test_an_entry_put_back_before_its_removal_went_keeps_its_website_row(tmp_path, cloud, cell):
     a = make_desk(tmp_path, cloud)
+    if cell == 'readd-after-a-move':
+        _put_back_after_a_move(a, cloud)
+        return
+    if cell == 'readd-under-another-account':
+        _put_back_under_another_account(a, cloud)
+        return
     k, x, z = a.mgr.create_list('K'), a.mgr.create_list('X'), a.mgr.create_list('Z')
     key = '990001::img::1' if cell == 'readd-as-another-folio' else KEY
     a.mgr.add_item('990001', k, note='n', fl_id='FLa', img='1' if cell == 'readd-as-another-folio' else None)
+    if cell in STILL_LISTED:
+        a.mgr.add_item('990001', x, fl_id='FLa')
     assert a.up()['success']
     r101 = row_in(cloud, a, k, key)
+    if cell == 'readd-by-duplicate-merge':
+        a.mgr.add_item('990001', x, fl_id='FLa')       # X, merged into K below, holds no row of it
     if cell == 'pending-row-moved-elsewhere':
         b = make_desk(tmp_path, cloud, 'B')
         assert b.down()['success']
@@ -1305,7 +1505,7 @@ def test_an_entry_put_back_before_its_removal_went_keeps_its_website_row(tmp_pat
         edit_during(cloud, lambda: (a.mgr.remove_item_from_list(KEY, k), a.mgr.add_item('990001', k, fl_id='FLa')))
         assert a.up()['success']
     else:
-        a.mgr.remove_item_from_list(key, k)            # its only list: the entry is deleted
+        a.mgr.remove_item_from_list(key, k)            # unless it is in X too, the entry is deleted
         assert str(r101) in pending(a)
     if cell == 'readd-after-a-failed-delete':
         cloud.rec.hook = lambda client, req: 'raise_before' if client.actor == 'A' and req.op == 'delete' else None
@@ -1322,6 +1522,12 @@ def test_an_entry_put_back_before_its_removal_went_keeps_its_website_row(tmp_pat
         pass
     elif cell == 'readd-as-another-folio':
         a.mgr.add_item('990001', k, fl_id='FLb', img='1')      # the same key, another folio: not that row's entry
+    elif cell in ('readd-by-bulk-add', 'readd-by-bulk-add-to-a-listed-entry'):
+        assert a.mgr.add_items_bulk([{'sys_id': '990001', 'fl_id': 'FLa'}], k) == 1
+    elif cell == 'readd-by-merge-lists':
+        assert a.mgr.merge_lists(x, k, delete_source=False)
+    elif cell == 'readd-by-duplicate-merge':
+        assert a.mgr.merge_duplicate_group(k, [x])['merged_items'] == 1
     else:
         a.mgr.add_item('990001', k, fl_id='FLa')
     mark = cloud.rec.mark()
@@ -1335,6 +1541,55 @@ def test_an_entry_put_back_before_its_removal_went_keeps_its_website_row(tmp_pat
     mark = cloud.rec.mark()
     assert a.up()['success'] and mark(op='delete') == [] and mark(op='insert') == []
     assert a.mgr.pending_web_removals() == []
+
+
+def _put_back_after_a_move(a, cloud):
+    """Moved K -> L, removed from L (M survives), put back in L before the upload: the move stands.
+
+    The row is still in K's cloud list, on its way to L: it is moved there, as if the
+    removal never happened -- not recorded as L's own row, which would give L a second
+    row and bring the entry back to K at the next Download.
+    """
+    k, l_, m = (a.mgr.create_list(x) for x in ('K', 'L', 'M'))
+    a.mgr.add_item('990001', k, note='n', fl_id='FLa')
+    a.mgr.add_item('990001', m, fl_id='FLa')
+    assert a.up()['success']
+    rk, rm, k_cloud = row_in(cloud, a, k), row_in(cloud, a, m), cloud_id(a, k)
+    a.mgr.move_items_to_list([KEY], k, l_)
+    a.mgr.remove_item_from_list(KEY, l_)
+    assert str(rk) in pending(a)
+    a.mgr.add_item('990001', l_, fl_id='FLa')
+    assert pending(a) == {} and rec(a, '~%s' % rk)['to'] == l_ and rec(a, l_) is None
+    mark = cloud.rec.mark()
+    assert a.up()['success']
+    (move,) = _moves_of(mark(op='update'), rk)
+    assert move.payload == {'list_id': cloud_id(a, l_)} and ('eq', 'list_id', k_cloud) in move.filters
+    assert mark(op='insert') == [] and mark(op='delete') == []
+    assert {r['id']: r['list_id'] for r in cloud.rows(sys_id='990001')} == {rk: cloud_id(a, l_), rm: cloud_id(a, m)}
+    assert a.down()['success'] and sorted(item(a)['lists']) == sorted([l_, m])
+
+
+def _put_back_under_another_account(a, cloud):
+    """Removed as u1, put back after u2 signed in: u2 does not take u1's row, and u1's removal still goes."""
+    k = a.mgr.create_list('K')
+    a.mgr.add_item('990001', k, note='n', fl_id='FLa')
+    assert a.up()['success']
+    rk = row_in(cloud, a, k)
+    a.mgr.remove_item_from_list(KEY, k)               # as u1: the entry is deleted
+    sign_in(a, 'u2')
+    assert a.up()['success']                          # u2's first upload over this store
+    a.mgr.add_item('990001', k, note='n', fl_id='FLa')
+    assert pending(a)[str(rk)]['account'] == 'u1' and rec(a, k) is None
+    mark = cloud.rec.mark()
+    result = a.up()
+    assert result['success'] and result['web_removed'] == [] and a.mgr.pending_web_removals() == []
+    (ins,) = mark(op='insert')
+    assert ins.payload['list_id'] == cloud_id(a, k) and mark(op='delete') == []
+    assert rec(a, k)['id'] != rk and cloud.row(rk) is not None and pending(a)[str(rk)]['account'] == 'u1'
+    sign_in(a, 'u1')
+    mark = cloud.rec.mark()
+    assert a.up()['success']
+    assert deleted_ids(mark(op='delete')) == [rk] and cloud.row(rk) is None and pending(a) == {}
 
 
 def test_an_entry_made_again_with_another_note_does_not_overwrite_its_old_row(tmp_path, cloud):
