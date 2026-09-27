@@ -1169,9 +1169,16 @@ def test_a_download_after_a_lost_move_response_applies_the_website_edit(tmp_path
         assert rec(a, key, l_)['note'] == expected
 
 
-@pytest.mark.parametrize('cell', ['whole-row-beside-page', 'same-page-other-folio', 'same-page-one-folio-unknown',
-                                  'recorded-row-other-folio'])
-def test_identity_is_never_bent_to_pair_a_row(tmp_path, cloud, cell):
+# The cells about a page row need the page column; the two about folios hold with it and without it.
+T55_CELLS = [('whole-row-beside-page', True), ('same-page-other-folio', True), ('same-page-other-folio', False),
+             ('same-page-one-folio-unknown', True), ('recorded-row-other-folio', True),
+             ('recorded-row-other-folio', False)]
+
+
+@pytest.mark.parametrize('cell,has_page', T55_CELLS,
+                         ids=[f"{c}-{'page-column' if p else 'no-page-column'}" for c, p in T55_CELLS])
+def test_identity_is_never_bent_to_pair_a_row(tmp_path, cell, has_page):
+    cloud = Cloud(has_page=has_page)
     a = make_desk(tmp_path, cloud)
     if cell == 'whole-row-beside-page':
         a.mgr.add_item('990003', 'default', note='n1', img='2')
@@ -1188,7 +1195,7 @@ def test_identity_is_never_bent_to_pair_a_row(tmp_path, cloud, cell):
         lid = a.mgr.create_list('A')
         a.mgr.add_item('990001', lid, note='n1', fl_id='FL1', img='1')
         assert a.up()['success']
-        cloud.add(cloud_id(a, lid), '990001', fl_id='FL2', note='n2', page='1')
+        cloud.add(cloud_id(a, lid), '990001', fl_id='FL2', note='n2', page='1' if has_page else None)
         assert a.down()['success']
         assert item(a, '990001::fl::FL2')['note'] == 'n2' and item(a, '990001::img::1')['note'] == 'n1'
     elif cell == 'same-page-one-folio-unknown':
