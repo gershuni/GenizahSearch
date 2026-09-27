@@ -1336,6 +1336,36 @@ def test_a_website_rename_to_another_lists_name_leaves_two_lists_of_that_name(tm
     assert a.mgr.data == state and mark(op='insert') == [] and _name_writes(mark) == []
 
 
+@pytest.mark.parametrize('lang', ['en', 'he'])
+@pytest.mark.parametrize('which', ['default-list', 'downloaded-list'])
+def test_a_list_renamed_here_shows_its_new_name_in_either_interface(tmp_path, cloud, monkeypatch, which, lang):
+    # The English interface shows a list's name_en when it has one: the default list and
+    # every list a Download created have one. A rename made here must reach it, and the
+    # upload then sends the new name as both names (as the website's rename writes them).
+    import genizah_app
+    monkeypatch.setattr(genizah_app, 'CURRENT_LANG', lang)
+    a = make_desk(tmp_path, cloud)
+
+    def shown(lid):
+        return genizah_app.GenizahGUI._get_list_display_name(None, a.mgr.data['lists'][lid])
+
+    if which == 'default-list':
+        lid = 'default'
+        assert a.up()['success']
+    else:
+        five = cloud.new_list('Theirs')
+        assert a.down()['success']
+        (lid,) = [k for k, ld in a.mgr.data['lists'].items() if ld.get('cloud_id') == five]
+        assert shown(lid) == 'Theirs'
+    assert 'name_en' in a.mgr.data['lists'][lid]
+    assert a.mgr.update_list(lid, name='Mine')
+    assert shown(lid) == 'Mine'
+    mark = cloud.rec.mark()
+    assert a.up()['success']
+    assert [(r.payload['name'], r.payload['name_en']) for r in _name_writes(mark)] == [('Mine', 'Mine')]
+    assert a.down()['success'] and shown(lid) == 'Mine'
+
+
 @pytest.mark.parametrize('cell', ['remapped-list-upload', 'remapped-list-download', 'two-local-lists-one-name'])
 def test_a_record_for_a_list_that_is_no_longer_its_own_is_dropped(tmp_path, cloud, cell):
     a = make_desk(tmp_path, cloud)
