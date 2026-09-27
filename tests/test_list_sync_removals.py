@@ -1625,11 +1625,15 @@ def test_the_public_fetch_and_apply_keep_the_confirmation_only_rows(tmp_path, ce
     if cell == 'both-changed':
         a.mgr.update_item(key, note='mine')
 
-    def delete_between_pages(client, req):
-        if client.actor == 'A' and req.t == 'list_items' and req.op == 'select' and req.rng and req.rng[0] > 0:
+    def short_read(client, req):
+        # At the list's second page: the website removes a row the first page returned, and the
+        # server answers that page without its keyset filter (the first rows again). The read ends
+        # there, short, and the rows past its first page are located by the confirmation alone.
+        if client.actor == 'A' and S.is_later_page(req):
             c.rec.hook = None
             c.delete_row(victim['id'])
-    c.rec.hook = delete_between_pages
+            req.filters[:] = [f for f in req.filters if f[0] != 'gt']
+    c.rec.hook = short_read
     items_before = set(a.mgr.data['items'])
     state = a.sync.fetch_cloud_state(a.mgr.remembered_row_ids('u1'))
     assert state['success'] and state['pass'].confirmed_only
