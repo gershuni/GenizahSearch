@@ -3,10 +3,11 @@
 import math
 import os
 
+from contextlib import contextmanager
 from functools import partial
 
 from PyQt6.QtWidgets import (
-    QApplication, QComboBox, QCompleter, QDialog, QDockWidget,
+    QAbstractButton, QAbstractSlider, QApplication, QComboBox, QCompleter, QDialog, QDockWidget,
     QFileDialog, QGraphicsItem, QGraphicsPixmapItem, QGraphicsTextItem,
     QGraphicsScene, QGraphicsView, QGroupBox, QHBoxLayout, QInputDialog,
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu,
@@ -15,8 +16,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QRectF, QSize, QPointF, QTimer, pyqtSignal, QThread
 from PyQt6.QtGui import (
-    QAction, QBrush, QColor, QCursor, QIcon, QImage,
-    QPainter, QPainterPath, QPen, QPixmap, QTransform,
+    QAction, QBrush, QColor, QCursor, QIcon, QImage, QKeySequence,
+    QPainter, QPainterPath, QPen, QPixmap, QShortcut, QTransform,
 )
 from PyQt6 import sip
 
@@ -24,6 +25,60 @@ from genizah_core import get_logger, normalize_shelfmark, tr
 from desktop.gui_threads import PuzzleImageLoaderThread, PuzzleMetaLoaderThread
 
 logger = get_logger(__name__)
+
+
+# Standard buttons this module's prompts use, with the tr() key of each label.
+# The static QMessageBox.question/warning calls label their buttons in Qt's
+# own language, which is English in the Hebrew interface.
+_BUTTON_LABELS = (
+    (QMessageBox.StandardButton.Save, "Save"),
+    (QMessageBox.StandardButton.Discard, "Discard"),
+    (QMessageBox.StandardButton.Cancel, "Cancel"),
+    (QMessageBox.StandardButton.Yes, "Yes"),
+    (QMessageBox.StandardButton.No, "No"),
+    (QMessageBox.StandardButton.Ok, "OK"),
+)
+
+
+def _label_buttons(box):
+    for standard, key in _BUTTON_LABELS:
+        button = box.button(standard)
+        if button is not None:
+            button.setText(tr(key))
+
+
+def _ask(parent, title, text, buttons):
+    """QMessageBox.question with translated button labels.
+
+    Returns the StandardButton chosen. A box closed without a button (Esc,
+    the title-bar X) answers Cancel when the box has one, else No.
+    """
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Question)
+    box.setWindowTitle(title)
+    box.setText(text)
+    box.setStandardButtons(buttons)
+    _label_buttons(box)
+    box.exec()
+    clicked = box.clickedButton()
+    if clicked is None:
+        if buttons & QMessageBox.StandardButton.Cancel:
+            return QMessageBox.StandardButton.Cancel
+        return QMessageBox.StandardButton.No
+    return box.standardButton(clicked)
+
+
+def _notify(parent, kind, title, text):
+    """QMessageBox.information/.warning (`kind` is 'information' or
+    'warning') with its one button labelled tr("OK")."""
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Warning if kind == 'warning'
+                else QMessageBox.Icon.Information)
+    box.setWindowTitle(title)
+    box.setText(text)
+    box.setStandardButtons(QMessageBox.StandardButton.Ok)
+    _label_buttons(box)
+    box.exec()
 
 
 class PuzzleFragmentItem(QGraphicsPixmapItem):
@@ -717,12 +772,34 @@ class PuzzleCanvasWindow(QMainWindow):
         self._folio_lists = {}          # sys_id -> list of {'fl_id': str, 'label': str, ...}
         self._placeholder_items = {}    # (sys_id, folio_label) -> QGraphicsTextItem
         self._next_x = 50.0
+        # Image requests: the one request each pending key waits for, as
+        # (request number, loader keyword arguments). Holds the same keys as
+        # _pending_fragments. A result whose number is not the one stored
+        # for its key is stale (a cleared canvas, a superseded reload, a
+        # deleted or moved fragment) and is dropped. Never reset.
+        self._req_seq = 0
+        self._pending_req = {}
+        # Metadata requests carry the canvas generation they were made on;
+        # _clear_canvas bumps it, so a result for a replaced canvas is
+        # dropped. Never reset.
+        self._canvas_gen = 0
+        # The last Delete, for Ctrl+Z (one level): [(key, item, reload loader
+        # arguments or None)]. Cleared with the canvas.
+        self._undo_delete = None
 
         # Join document state
         self._current_doc_id = None        # None = scratch pad, str = saved document
-        self._has_unsaved_changes = False   # For scratch pad save prompt
-        self._loading_document = False     # True while async image loads are in progress (guards auto-save)
-        self._load_pending_count = 0       # Number of image loads still in flight during document load
+        self._last_save_failed = False     # The open saved join's last write failed
+        self._autosave_failure_notified = set()  # doc ids already shown the failure box
+        self._loading_document = False     # True while the open join's first images load
+        # Fragments of the open saved join that are not on the canvas (still
+        # loading, or their image failed). Every write keeps them.
+        self._unplaced = {}                # (sys_id, folio_label) -> PuzzleFragment
+        self._failed_keys = set()          # _unplaced keys whose image failed
+        self._load_waiting = set()         # keys the current join load still waits for
+        self._load_summary = ''            # the status line naming images that failed to load
+        self._prompts_open = 0             # open leave prompts and Save dialogs (is_prompting)
+        self._auto_save_held = False       # an autosave held back while one was open
         self._auto_save_timer = QTimer()
         self._auto_save_timer.setSingleShot(True)
         self._auto_save_timer.setInterval(1500)  # 1.5s debounce
@@ -980,6 +1057,17 @@ class PuzzleCanvasWindow(QMainWindow):
 
         # Status bar for messages
         self.statusBar().showMessage(tr("Ready"))
+        # Shown while the open join's last write failed. A permanent widget,
+        # not showMessage(..., 0): any later temporary message would erase
+        # that line when it times out. The 1 px minimum lets it shrink rather
+        # than raise the window's minimum width; the tooltip keeps the text.
+        failed_text = tr("Auto-save failed: the latest changes to this join are not saved.")
+        self._save_failed_label = QLabel(failed_text)
+        self._save_failed_label.setToolTip(failed_text)
+        self._save_failed_label.setStyleSheet("color: #c62828; font-weight: bold;")
+        self._save_failed_label.setMinimumWidth(1)
+        self._save_failed_label.setVisible(False)
+        self.statusBar().addPermanentWidget(self._save_failed_label)
 
         # --- Document side panel ---
         self._docs_dock = QDockWidget(tr("Saved Joins"), self)
@@ -1040,6 +1128,14 @@ class PuzzleCanvasWindow(QMainWindow):
         self._scene_change_debounce.setInterval(500)  # 500ms debounce to batch rapid changes
         self._scene_change_debounce.timeout.connect(self._schedule_auto_save)
 
+        # Ctrl+Z undoes the last Delete. A window shortcut, not a
+        # keyPressEvent branch: a non-editable QComboBox (the fragment combo)
+        # swallows Ctrl+Z before the window sees it. Text fields keep their
+        # own undo (they take the shortcut first).
+        self._undo_shortcut = QShortcut(QKeySequence(QKeySequence.StandardKey.Undo), self)
+        self._undo_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        self._undo_shortcut.activated.connect(self._on_undo_shortcut)
+
     # -- Public API --
 
     def add_fragment(self, sys_id, shelfmark, folio_label, fl_id,
@@ -1090,7 +1186,6 @@ class PuzzleCanvasWindow(QMainWindow):
             external_provider=external_provider,
             page_index=page_index,
         )
-        self._pending_fragments[item_key] = puzzle_frag
 
         # Placeholder on canvas
         placeholder = QGraphicsTextItem(f"{shelfmark}\n{tr('Loading...')}")
@@ -1103,12 +1198,65 @@ class PuzzleCanvasWindow(QMainWindow):
         thr = puzzle_frag.bg_removal_threshold
         is_cul = (lib_code == 'CUL') or (external_provider == 'cambridge') or (shelfmark and shelfmark.upper().startswith(('T-S', 'OR.', 'ADD.')))
         do_processed = (thr > 0) and not skip_bg
-        thread = PuzzleImageLoaderThread(fl_id, threshold=thr, processed=do_processed, is_cul=is_cul,
-                                         image_url=image_url)
-        thread.image_ready.connect(partial(self._on_image_loaded, item_key))
-        thread.load_failed.connect(self._on_image_failed)
+        self._start_image_load(item_key, puzzle_frag, threshold=thr, processed=do_processed,
+                               is_cul=is_cul, image_url=image_url)
+
+    def _start_image_load(self, item_key, pf, **loader_kwargs):
+        """Start the one image request `item_key` now waits for.
+
+        The only place a PuzzleImageLoaderThread is built or connected: its
+        results carry this request's number, so a result the key is no
+        longer waiting for is dropped (see _pending_req). The loader keyword
+        arguments are kept with the number so Undo can restart a request a
+        Delete made stale."""
+        self._req_seq += 1
+        req = self._req_seq
+        self._pending_fragments[item_key] = pf
+        self._pending_req[item_key] = (req, dict(loader_kwargs))
+        thread = PuzzleImageLoaderThread(pf.fl_id, **loader_kwargs)
+        thread.image_ready.connect(partial(self._on_image_loaded, item_key, req))
+        thread.load_failed.connect(partial(self._on_image_failed, item_key, req))
         self._loader_threads.append(thread)
         thread.start()
+        return req
+
+    def _drop_request(self, item_key):
+        """Forget the pending image request for `item_key`, if any: its result
+        will be dropped as stale. Returns that request's loader keyword
+        arguments, or None when the key had no request."""
+        self._pending_fragments.pop(item_key, None)
+        entry = self._pending_req.pop(item_key, None)
+        placeholder = self._placeholder_items.pop(item_key, None)
+        if placeholder is not None and placeholder.scene():
+            self.canvas_view.scene.removeItem(placeholder)
+        self._load_step_done(item_key)
+        return None if entry is None else dict(entry[1])
+
+    def _take_request(self, item_key, req):
+        """True when `req` is the request `item_key` waits for; it is then
+        no longer pending. False for a stale result."""
+        entry = self._pending_req.get(item_key)
+        if entry is None or entry[0] != req:
+            return False
+        del self._pending_req[item_key]
+        return True
+
+    def _load_step_done(self, item_key):
+        """One key of the open join's load has its answer. The load ends when
+        none is left: the canvas is fitted and failed images are named."""
+        self._load_waiting.discard(item_key)
+        if self._load_waiting or not self._loading_document:
+            return
+        self._loading_document = False
+        self._update_fragments_label()
+        self._fit_all_fragments()
+        logger.info("Document load complete: %d fragment image(s) not loaded",
+                    len(self._failed_keys))
+        if self._failed_keys:
+            self._load_summary = tr(
+                "Fragments whose images could not be loaded: {}. They stay in the join.").format(
+                    len(self._failed_keys))
+            self.statusBar().showMessage(self._load_summary, 10000)
 
     # -- Shelfmark input --
 
@@ -1141,13 +1289,22 @@ class PuzzleCanvasWindow(QMainWindow):
         else:
             # Async fl_id resolution via PuzzleMetaLoaderThread
             self.statusBar().showMessage(tr("Resolving images..."), 5000)
-            thread = PuzzleMetaLoaderThread(self.app.meta_mgr, sys_id, shelfmark)
-            thread.meta_ready.connect(self._on_meta_resolved)
-            thread.meta_failed.connect(self._on_meta_failed)
-            self._meta_threads.append(thread)
-            thread.start()
+            self._start_meta_resolve(sys_id, shelfmark)
 
         self.shelfmark_input.clear()
+
+    def _start_meta_resolve(self, sys_id, shelfmark):
+        """Resolve a manuscript's folios in the background, then add its first
+        folio -- to the canvas this was asked on. The result carries the
+        canvas generation, so if New or opening a join replaced the canvas
+        meanwhile it adds nothing. The one place a metadata request that
+        adds a fragment is started (GenizahGUI.add_to_puzzle calls it too)."""
+        gen = self._canvas_gen
+        thread = PuzzleMetaLoaderThread(self.app.meta_mgr, sys_id, shelfmark)
+        thread.meta_ready.connect(partial(self._on_meta_resolved, gen))
+        thread.meta_failed.connect(partial(self._on_meta_failed, gen))
+        self._meta_threads.append(thread)
+        thread.start()
 
     def _show_add_from_list(self):
         """Show picker to add fragments from a personal list."""
@@ -1302,9 +1459,12 @@ class PuzzleCanvasWindow(QMainWindow):
         btn_close.clicked.connect(dlg.close)
         dlg.show()
 
-    def _on_meta_resolved(self, sys_id, shelfmark, images_nli):
+    def _on_meta_resolved(self, gen, sys_id, shelfmark, images_nli):
         """Callback from PuzzleMetaLoaderThread -- cache folio list and add first folio."""
         if sip.isdeleted(self):
+            return
+        if gen != self._canvas_gen:
+            logger.debug("Puzzle: dropped folios of %s resolved for a replaced canvas", sys_id)
             return
         self._folio_lists[sys_id] = images_nli
         first = images_nli[0]
@@ -1316,9 +1476,12 @@ class PuzzleCanvasWindow(QMainWindow):
             tr("Added {} ({} folios)").format(shelfmark, len(images_nli)), 3000
         )
 
-    def _on_meta_failed(self, sys_id, error):
+    def _on_meta_failed(self, gen, sys_id, error):
         """Callback from PuzzleMetaLoaderThread -- show error."""
         if sip.isdeleted(self):
+            return
+        if gen != self._canvas_gen:
+            logger.debug("Puzzle: dropped a folio lookup failure of %s for a replaced canvas", sys_id)
             return
         self.statusBar().showMessage(
             tr("Failed to resolve images: {}").format(error), 5000
@@ -1326,10 +1489,12 @@ class PuzzleCanvasWindow(QMainWindow):
 
     # -- Image loading callbacks --
 
-    def _on_image_loaded(self, item_key, fl_id, image_bytes):
+    def _on_image_loaded(self, item_key, req, fl_id, image_bytes):
         """Called when PuzzleImageLoaderThread finishes -- create or update item."""
         if sip.isdeleted(self):
             return
+        if not self._take_request(item_key, req):
+            return  # stale: see _pending_req
 
         # Remove placeholder
         placeholder = self._placeholder_items.pop(item_key, None)
@@ -1345,18 +1510,15 @@ class PuzzleCanvasWindow(QMainWindow):
             existing.update_pixmap(pixmap)
             # Remove from pending if present
             self._pending_fragments.pop(item_key, None)
-            # Decrement loading counter for update path too
-            if self._loading_document:
-                self._load_pending_count -= 1
-                if self._load_pending_count <= 0:
-                    self._loading_document = False
-                    self._load_pending_count = 0
-                    logger.info("Document load complete: all fragments loaded")
+            self._unplaced.pop(item_key, None)
+            self._failed_keys.discard(item_key)
+            self._load_step_done(item_key)
             return
 
         # New fragment path
         puzzle_frag = self._pending_fragments.pop(item_key, None)
         if puzzle_frag is None:
+            self._load_step_done(item_key)
             return  # was deleted while loading
 
         img = QImage()
@@ -1378,6 +1540,8 @@ class PuzzleCanvasWindow(QMainWindow):
 
         self.canvas_view.scene.addItem(item)
         self._fragment_items[item_key] = item
+        self._unplaced.pop(item_key, None)
+        self._failed_keys.discard(item_key)
 
         # Advance placement position based on actual pixmap width
         self._next_x = puzzle_frag.x + pixmap.width() * puzzle_frag.scale + 50
@@ -1385,16 +1549,11 @@ class PuzzleCanvasWindow(QMainWindow):
         # Update fragment dropdown
         self._refresh_fragment_combo()
 
-        # Decrement loading counter and clear guard when all fragments are loaded
-        if self._loading_document:
-            self._load_pending_count -= 1
-            if self._load_pending_count <= 0:
-                self._loading_document = False
-                self._load_pending_count = 0
-                self._update_fragments_label()
-                self._fit_all_fragments()
-                logger.info("Document load complete: all fragments loaded")
-        else:
+        # A join load fits the canvas once, when its last image is in
+        # (_load_step_done).
+        was_loading = self._loading_document
+        self._load_step_done(item_key)
+        if not was_loading:
             # Single fragment add: fit the view so the WHOLE fragment is visible
             # by default (UAT). The scholar can re-zoom afterwards via the toolbar.
             self._fit_all_fragments()
@@ -1413,27 +1572,28 @@ class PuzzleCanvasWindow(QMainWindow):
         rect.adjust(-pad, -pad, pad, pad)
         self.canvas_view.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
 
-    def _on_image_failed(self, fl_id, error):
-        """Called when PuzzleImageLoaderThread fails."""
+    def _on_image_failed(self, item_key, req, fl_id, error):
+        """Called when PuzzleImageLoaderThread fails.
+
+        Matched by key, not by `fl_id`: an external fragment has no fl_id and
+        the thread reports its image URL instead. A fragment of the open join
+        that was never placed stays in the join (_unplaced); a failed reload
+        leaves the item on the canvas as it is."""
         if sip.isdeleted(self):
             return
-        # Find and remove placeholder for this fl_id
-        for key, pf in list(self._pending_fragments.items()):
-            if pf.fl_id == fl_id:
-                placeholder = self._placeholder_items.pop(key, None)
-                if placeholder and placeholder.scene():
-                    self.canvas_view.scene.removeItem(placeholder)
-                self._pending_fragments.pop(key, None)
-                break
+        if not self._take_request(item_key, req):
+            return  # stale: see _pending_req
+        placeholder = self._placeholder_items.pop(item_key, None)
+        if placeholder and placeholder.scene():
+            self.canvas_view.scene.removeItem(placeholder)
+        self._pending_fragments.pop(item_key, None)
+        if item_key in self._unplaced:
+            self._failed_keys.add(item_key)
+            self._update_fragments_label()   # it stays in the join: name it
         self.statusBar().showMessage(
             tr("Failed to load image: {}").format(error), 5000
         )
-        # Decrement loading counter for failed loads
-        if self._loading_document:
-            self._load_pending_count -= 1
-            if self._load_pending_count <= 0:
-                self._loading_document = False
-                self._load_pending_count = 0
+        self._load_step_done(item_key)
 
     # -- Selection tracking --
 
@@ -1527,6 +1687,7 @@ class PuzzleCanvasWindow(QMainWindow):
         if not selected:
             self.statusBar().showMessage(tr("No selection"), 2000)
             return
+        moves = []
         for item in selected:
             pf = item.puzzle_frag
             folio_list = self._folio_lists.get(pf.sys_id)
@@ -1553,26 +1714,76 @@ class PuzzleCanvasWindow(QMainWindow):
             if new_idx == current_idx:
                 continue
             new_entry = folio_list[new_idx]
-            # Re-key and fetch new image
-            old_key = (pf.sys_id, pf.folio_label)
             new_label = new_entry.get('label', pf.folio_label)
-            new_key = (pf.sys_id, new_label)
-            self._fragment_items[new_key] = self._fragment_items.pop(old_key, item)
-            pf.fl_id = new_entry.get('fl_id', '')
-            pf.image_url = new_entry.get('image_url', '')
-            pf.external_provider = new_entry.get('external_provider', pf.external_provider)
-            pf.page_index = new_entry.get('page_index', -1)
-            pf.folio_label = new_label
-            self._pending_fragments[new_key] = pf
-            thr = pf.bg_removal_threshold
-            thread = PuzzleImageLoaderThread(pf.fl_id, threshold=thr, processed=(thr > 0),
-                                             is_cul=self._has_blue_mat(pf),
-                                             image_url=pf.image_url)
-            thread.image_ready.connect(partial(self._on_image_loaded, new_key))
-            thread.load_failed.connect(self._on_image_failed)
-            self._loader_threads.append(thread)
-            thread.start()
+            moves.append((item, (pf.sys_id, pf.folio_label), (pf.sys_id, new_label), new_entry))
+        # Re-key and fetch the new images
+        self._rekey_items(moves, self._retarget_flipped)
         self._refresh_fragment_combo()
+
+    def _retarget_flipped(self, pf, new_entry):
+        """Point `pf` at the other side (the flip buttons); returns the
+        loader keyword arguments for its new image."""
+        pf.fl_id = new_entry.get('fl_id', '')
+        pf.image_url = new_entry.get('image_url', '')
+        pf.external_provider = new_entry.get('external_provider', pf.external_provider)
+        pf.page_index = new_entry.get('page_index', -1)
+        pf.folio_label = new_entry.get('label', pf.folio_label)
+        thr = pf.bg_removal_threshold
+        return dict(threshold=thr, processed=(thr > 0), is_cul=self._has_blue_mat(pf),
+                    image_url=pf.image_url)
+
+    def _retarget_navigated(self, pf, new_entry):
+        """Point `pf` at another folio (the < > buttons); returns the loader
+        keyword arguments for its new image."""
+        pf.fl_id = new_entry.get('fl_id', '')
+        pf.folio_label = new_entry.get('label', pf.folio_label)
+        return dict(threshold=pf.bg_removal_threshold, is_cul=self._has_blue_mat(pf))
+
+    def _rekey_items(self, moves, retarget):
+        """Move canvas items to other folios as one batch.
+
+        `moves` is [(item, old_key, new_key, new_entry)], computed without
+        changing anything. A move onto a key that another fragment holds (on
+        the canvas, loading, or not placed) or that an earlier move in the
+        batch takes is refused, and that fragment stays where it is -- which
+        can in turn refuse another move, so this repeats until stable. Every
+        accepted move vacates its old key before any new key is written, so
+        swapping recto and verso of one manuscript works. `retarget(pf,
+        new_entry)` updates the fragment and returns its loader arguments.
+        Returns the accepted moves."""
+        old_keys = {old_key for _item, old_key, _new_key, _entry in moves}
+        held = (set(self._fragment_items) | set(self._pending_req)
+                | set(self._unplaced)) - old_keys
+        accepted = list(moves)
+        refused = []
+        changed = True
+        while changed:
+            changed = False
+            taken = set()
+            keep = []
+            for move in accepted:
+                new_key = move[2]
+                if new_key in held or new_key in taken:
+                    refused.append(move)
+                    held.add(move[1])
+                    changed = True
+                else:
+                    taken.add(new_key)
+                    keep.append(move)
+            accepted = keep
+        for _item, _old_key, new_key, _entry in refused:
+            self.statusBar().showMessage(
+                tr("Folio {} of this manuscript is already in the puzzle.").format(new_key[1]),
+                4000)
+        for _item, old_key, _new_key, _entry in accepted:
+            self._fragment_items.pop(old_key, None)
+            if old_key in self._pending_req:
+                self._drop_request(old_key)  # a reload of the old folio is stale
+        for item, _old_key, new_key, new_entry in accepted:
+            self._fragment_items[new_key] = item
+            loader_kwargs = retarget(item.puzzle_frag, new_entry)
+            self._start_image_load(new_key, item.puzzle_frag, **loader_kwargs)
+        return accepted
 
     def _flip_entire_puzzle(self):
         """Flip ALL fragments -- shows the other side of the joined page.
@@ -1588,6 +1799,7 @@ class PuzzleCanvasWindow(QMainWindow):
             return
 
         # 1. Navigate each fragment to its recto/verso counterpart
+        moves = []
         for item in items:
             pf = item.puzzle_frag
             folio_list = self._folio_lists.get(pf.sys_id)
@@ -1609,24 +1821,9 @@ class PuzzleCanvasWindow(QMainWindow):
             if new_idx == current_idx:
                 continue
             new_entry = folio_list[new_idx]
-            old_key = (pf.sys_id, pf.folio_label)
             new_label = new_entry.get('label', pf.folio_label)
-            new_key = (pf.sys_id, new_label)
-            self._fragment_items[new_key] = self._fragment_items.pop(old_key, item)
-            pf.fl_id = new_entry.get('fl_id', '')
-            pf.image_url = new_entry.get('image_url', '')
-            pf.external_provider = new_entry.get('external_provider', pf.external_provider)
-            pf.page_index = new_entry.get('page_index', -1)
-            pf.folio_label = new_label
-            self._pending_fragments[new_key] = pf
-            thr = pf.bg_removal_threshold
-            thread = PuzzleImageLoaderThread(pf.fl_id, threshold=thr, processed=(thr > 0),
-                                             is_cul=self._has_blue_mat(pf),
-                                             image_url=pf.image_url)
-            thread.image_ready.connect(partial(self._on_image_loaded, new_key))
-            thread.load_failed.connect(self._on_image_failed)
-            self._loader_threads.append(thread)
-            thread.start()
+            moves.append((item, (pf.sys_id, pf.folio_label), (pf.sys_id, new_label), new_entry))
+        self._rekey_items(moves, self._retarget_flipped)
 
         # 2. Mirror layout horizontally: swap positions + negate rotations + toggle flip_h
         #    Use sceneBoundingRect for accurate bounds (accounts for rotation)
@@ -1747,15 +1944,8 @@ class PuzzleCanvasWindow(QMainWindow):
             pf = item.puzzle_frag
             pf.bg_removal_threshold = float(value)
             item_key = (pf.sys_id, pf.folio_label)
-            self._pending_fragments[item_key] = pf
-            thread = PuzzleImageLoaderThread(
-                pf.fl_id, threshold=float(value), processed=processed,
-                is_cul=self._has_blue_mat(pf)
-            )
-            thread.image_ready.connect(partial(self._on_image_loaded, item_key))
-            thread.load_failed.connect(self._on_image_failed)
-            self._loader_threads.append(thread)
-            thread.start()
+            self._start_image_load(item_key, pf, threshold=float(value), processed=processed,
+                                   is_cul=self._has_blue_mat(pf))
 
     def _nudge_scale(self, delta):
         """Increment/decrement scale by delta percent."""
@@ -1795,6 +1985,7 @@ class PuzzleCanvasWindow(QMainWindow):
 
     def _navigate_folio(self, direction):
         """Navigate folio prev/next for selected fragments."""
+        moves = []
         for item in self.canvas_view.get_selected_fragments():
             pf = item.puzzle_frag
             folio_list = self._folio_lists.get(pf.sys_id)
@@ -1823,27 +2014,12 @@ class PuzzleCanvasWindow(QMainWindow):
                 continue
 
             new_entry = folio_list[new_idx]
-            new_fl_id = new_entry.get('fl_id', '')
             new_label = new_entry.get('label', pf.folio_label)
+            moves.append((item, (pf.sys_id, pf.folio_label), (pf.sys_id, new_label), new_entry))
 
-            # Re-key the item
-            old_key = (pf.sys_id, pf.folio_label)
-            new_key = (pf.sys_id, new_label)
-            self._fragment_items[new_key] = self._fragment_items.pop(old_key, item)
-
-            # Update fragment data
-            pf.fl_id = new_fl_id
-            pf.folio_label = new_label
-
-            # Store in pending for update path in _on_image_loaded
-            self._pending_fragments[new_key] = pf
-
-            # Fetch new image
-            thread = PuzzleImageLoaderThread(new_fl_id, threshold=pf.bg_removal_threshold, is_cul=self._has_blue_mat(pf))
-            thread.image_ready.connect(partial(self._on_image_loaded, new_key))
-            thread.load_failed.connect(self._on_image_failed)
-            self._loader_threads.append(thread)
-            thread.start()
+        # Re-key the items and fetch their new images (the pending entry is the
+        # update path in _on_image_loaded)
+        self._rekey_items(moves, self._retarget_navigated)
         self._refresh_fragment_combo()
         self._schedule_auto_save()
 
@@ -1858,15 +2034,79 @@ class PuzzleCanvasWindow(QMainWindow):
         self._schedule_auto_save()
 
     def _delete_selected(self):
-        """Remove selected fragments from the canvas."""
-        for item in self.canvas_view.get_selected_fragments():
+        """Remove selected fragments from the canvas (the Delete key, the
+        trash button and the context menu). More than one asks first; the
+        last Delete can be undone with Ctrl+Z."""
+        selected = self.canvas_view.get_selected_fragments()
+        if not selected:
+            return
+        n = len(selected)
+        if n > 1 and _ask(self, tr("Delete fragments?"),
+                          tr("Remove {} fragments from the puzzle?").format(n),
+                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                          ) != QMessageBox.StandardButton.Yes:
+            return
+        snapshot = []
+        for item in selected:
             pf = item.puzzle_frag
             item_key = (pf.sys_id, pf.folio_label)
             self.canvas_view.scene.removeItem(item)
             self._fragment_items.pop(item_key, None)
-            self._pending_fragments.pop(item_key, None)
+            # An in-flight reload of it is stale; Undo restarts it.
+            reload_kwargs = self._drop_request(item_key)
+            # The Python reference keeps the item alive after removeItem.
+            snapshot.append((item_key, item, reload_kwargs))
+        self._undo_delete = snapshot
+        if n == 1:
+            message = tr("Fragment deleted. Press Ctrl+Z to undo.")
+        else:
+            message = tr("{} fragments deleted. Press Ctrl+Z to undo.").format(n)
+        self.statusBar().showMessage(message, 5000)
         self._refresh_fragment_combo()
+        self._update_fragments_label()
         self._schedule_auto_save()
+
+    def _undo_last_delete(self):
+        """Put back what the last Delete removed (one level)."""
+        snapshot, self._undo_delete = self._undo_delete, None
+        if not snapshot:
+            self.statusBar().showMessage(tr("Nothing to undo"), 2000)
+            return
+        scene = self.canvas_view.scene
+        scene.clearSelection()
+        for item_key, item, reload_kwargs in snapshot:
+            if item_key in self._fragment_items or item_key in self._pending_fragments:
+                continue  # the same page was added again since
+            item._crop_mode = False  # a Delete made in crop mode
+            scene.addItem(item)
+            self._fragment_items[item_key] = item
+            item.setSelected(True)
+            if reload_kwargs is not None:
+                # The Delete made the reload stale (a folio step or threshold
+                # change); without a fresh one the item would keep the old image.
+                self._start_image_load(item_key, item.puzzle_frag, **reload_kwargs)
+        self._refresh_fragment_combo()
+        self._update_fragments_label()
+        self._schedule_auto_save()
+
+    def _on_undo_shortcut(self):
+        if self._canvas_keys_have_focus():
+            self._undo_last_delete()
+
+    def _canvas_keys_have_focus(self):
+        """True when Delete and Ctrl+Z belong to the canvas: focus is on the
+        canvas, the fragment combo, a toolbar button or slider, or nowhere in
+        particular. A whitelist, so the Saved Joins list, the title and notes,
+        the shelfmark field and anything added later are left alone."""
+        fw = QApplication.focusWidget()
+        if fw is None or fw is self:
+            return True
+        view = self.canvas_view
+        if fw is view or view.isAncestorOf(fw) or fw is self.combo_fragments:
+            return True
+        central = self.centralWidget()
+        return (isinstance(fw, (QAbstractButton, QAbstractSlider))
+                and central is not None and central.isAncestorOf(fw))
 
     # -- Fragment combo --
 
@@ -2013,25 +2253,25 @@ class PuzzleCanvasWindow(QMainWindow):
         doc_id = item.data(Qt.ItemDataRole.UserRole)
         if not doc_id:
             return
-        if self._current_doc_id is None and self._has_unsaved_changes and self._fragment_items:
-            reply = QMessageBox.question(
-                self, tr("Save current work?"),
-                tr("Save current puzzle before loading?"),
-                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel
-            )
-            if reply == QMessageBox.StandardButton.Cancel:
-                return
-            if reply == QMessageBox.StandardButton.Save:
-                self._on_save_join()
         self._load_document(doc_id)
 
     def _load_document(self, doc_id):
-        """Load a PuzzleDocument onto the canvas, replacing current content."""
+        """Load a PuzzleDocument onto the canvas, replacing current content.
+
+        Every way of opening a join ends here (the Saved Joins list and the
+        "Open in Puzzle" paths of the main window and the community
+        dialogs), so this is where unsaved work is asked about. The question
+        comes before the read: the flush may write the join being re-opened.
+        """
+        if not self._confirm_leave_current(tr('Save current puzzle before loading?')):
+            # A join forked for this open is already saved; show it.
+            self._refresh_docs_list()
+            return
         from shared.puzzle_service import get_puzzle_service
         svc = get_puzzle_service()
         doc = svc.load_document(doc_id)
         if doc is None:
-            QMessageBox.warning(self, tr("Error"), tr("Could not load document"))
+            _notify(self, 'warning', tr("Error"), tr("Could not load document"))
             return
 
         # Clear canvas
@@ -2039,30 +2279,27 @@ class PuzzleCanvasWindow(QMainWindow):
 
         # Set state
         self._current_doc_id = doc.id
-        self._has_unsaved_changes = False
+        self._mark_saved()
 
-        # Set loading guard to prevent auto-save from overwriting
-        # a partially-loaded document
+        # Every fragment of the join is kept in every write until it is on
+        # the canvas, so an image that cannot be downloaded never drops it.
         self._loading_document = True
-        self._load_pending_count = len(doc.fragments)
-
-        # Add each fragment via the existing _pending_fragments + _on_image_loaded pipeline
         for frag in doc.fragments:
             item_key = (frag.sys_id, frag.folio_label)
-            self._pending_fragments[item_key] = frag
+            self._unplaced[item_key] = frag
+            self._load_waiting.add(item_key)
 
-            thread = PuzzleImageLoaderThread(
-                frag.fl_id,
+        # Add each fragment via the _pending_fragments + _on_image_loaded pipeline
+        for frag in doc.fragments:
+            item_key = (frag.sys_id, frag.folio_label)
+            self._start_image_load(
+                item_key, frag,
                 threshold=frag.bg_removal_threshold,
                 size=800,
                 processed=frag.processed,
                 is_cul=self._has_blue_mat(frag),
-                image_url=getattr(frag, 'image_url', '')
+                image_url=getattr(frag, 'image_url', ''),
             )
-            thread.image_ready.connect(partial(self._on_image_loaded, item_key))
-            thread.load_failed.connect(self._on_image_failed)
-            self._loader_threads.append(thread)
-            thread.start()
 
             # Rebuild folio lists for each unique sys_id
             if frag.sys_id not in self._folio_lists:
@@ -2071,7 +2308,6 @@ class PuzzleCanvasWindow(QMainWindow):
         # If doc has zero fragments, clear loading guard immediately
         if not doc.fragments:
             self._loading_document = False
-            self._load_pending_count = 0
 
         # Update details panel
         self._title_edit.setText(doc.title)
@@ -2096,19 +2332,22 @@ class PuzzleCanvasWindow(QMainWindow):
         self._folio_lists[sys_id] = images_nli
 
     def _on_save_join(self):
-        """Save current puzzle as a join document (new or update)."""
-        if not self._fragment_items:
-            QMessageBox.information(self, tr("Empty"), tr("Add fragments before saving"))
-            return
+        """Save the current puzzle as a join document (new or update).
 
+        Returns True only when the puzzle is in joins.db: the leave prompt's
+        Save clears or replaces the canvas only then."""
         from shared.puzzle_model import PuzzleDocument
-        from shared.puzzle_export import auto_suggest_title, generate_thumbnail
-        from shared.puzzle_image_service import get_puzzle_image_service
+        from shared.puzzle_export import auto_suggest_title
         from shared.puzzle_service import get_puzzle_service
 
-        fragments = self._build_fragments_list()
-
+        svc = get_puzzle_service()
         if self._current_doc_id is None:
+            # A fragment added whose image has not arrived is saved too: the
+            # leave prompt's Save is followed by a clear that drops its request.
+            fragments = self._fragments_to_store(with_pending=True)
+            if not fragments:
+                _notify(self, 'information', tr("Empty"), tr("Add fragments before saving"))
+                return False
             suggested = auto_suggest_title(fragments)
             # Custom save dialog with title + notes
             dlg = QDialog(self)
@@ -2133,39 +2372,78 @@ class PuzzleCanvasWindow(QMainWindow):
             btn_row.addWidget(btn_cancel)
             btn_row.addWidget(btn_save)
             layout.addLayout(btn_row)
-            if dlg.exec() != QDialog.DialogCode.Accepted:
-                return
+            with self._prompting():
+                accepted = dlg.exec() == QDialog.DialogCode.Accepted
+            if not accepted:
+                return False
             title = title_edit.text().strip()
             if not title:
-                return
+                return False
             doc = PuzzleDocument(title=title, notes=notes_edit.toPlainText(), fragments=fragments)
-        else:
-            svc = get_puzzle_service()
-            doc = svc.load_document(self._current_doc_id)
-            if doc is None:
-                doc = PuzzleDocument(id=self._current_doc_id, fragments=fragments)
-            doc.fragments = fragments
-            doc.title = self._title_edit.text() or doc.title
-            doc.notes = self._notes_edit.toPlainText()
-            import datetime
-            doc.updated_at = datetime.datetime.now().isoformat()
-
-        # Generate thumbnail
-        img_svc = get_puzzle_image_service()
-        thumb = generate_thumbnail(fragments, img_svc, thumb_size=150)
-
-        svc = get_puzzle_service()
-        doc_id = svc.save_document(doc, thumbnail_b64=thumb)
-        if doc_id:
+            doc_id = svc.save_document(doc, thumbnail_b64=self._thumbnail_for_save(fragments))
+            if not doc_id:
+                _notify(self, 'warning', tr("Error"),
+                        tr("The puzzle could not be saved. It is still on the canvas."))
+                return False
             self._current_doc_id = doc_id
-            self._has_unsaved_changes = False
-            self._details_group.setVisible(True)
-            self._title_edit.setText(doc.title)
-            self._notes_edit.setPlainText(doc.notes)
-            self._update_fragments_label()
-            self._refresh_docs_list()
-            self.setWindowTitle(f"{tr('Fragment Puzzle')} - {doc.title}")
-            self.statusBar().showMessage(tr("Saved"), 3000)
+            self._keep_stored_off_canvas(fragments)
+            outcome = 'fragments'
+        else:
+            if not self._fragments_to_store(with_pending=True):
+                # Every fragment was removed: only the title and notes can be
+                # written, and the stored join keeps its fragments.
+                with self._prompting():
+                    reply = _ask(self, tr("Save"),
+                                 tr("The canvas is empty. Save only the title and notes? "
+                                    "The saved join keeps its fragments."),
+                                 QMessageBox.StandardButton.Save
+                                 | QMessageBox.StandardButton.Cancel)
+                if reply != QMessageBox.StandardButton.Save:
+                    return False
+            try:
+                outcome = self._write_open_join(recreate=True, with_pending=True)
+            except Exception:
+                logger.exception("Saving the open join failed")
+                outcome = None
+            if outcome is None:
+                _notify(self, 'warning', tr("Error"),
+                        tr("The puzzle could not be saved. It is still on the canvas."))
+                return False
+            # Nothing ran between the write and here: the same fragments.
+            self._keep_stored_off_canvas(self._fragments_to_store(with_pending=True))
+            doc = svc.load_document(self._current_doc_id) or PuzzleDocument(
+                id=self._current_doc_id, title=self._title_edit.text(),
+                notes=self._notes_edit.toPlainText())
+
+        self._mark_saved()
+        self._details_group.setVisible(True)
+        self._set_details_fields(doc.title, doc.notes)
+        self._update_fragments_label()
+        self._refresh_docs_list()
+        self.setWindowTitle(f"{tr('Fragment Puzzle')} - {doc.title}")
+        self._show_saved_status(outcome, tr("Saved"), 3000)
+        return True
+
+    def _show_saved_status(self, outcome, text, timeout_ms):
+        """The one status line after a successful write, posted last: the
+        metadata-only explanation, or the caller's own line."""
+        if outcome == 'metadata':
+            self.statusBar().showMessage(
+                tr("The canvas is empty, so the saved join keeps its fragments. "
+                   "Title and notes were saved."), 5000)
+        else:
+            self.statusBar().showMessage(text, timeout_ms)
+
+    def _set_details_fields(self, title, notes):
+        """Set the Details title and notes without scheduling an autosave."""
+        for widget in (self._title_edit, self._notes_edit):
+            widget.blockSignals(True)
+        try:
+            self._title_edit.setText(title)
+            self._notes_edit.setPlainText(notes)
+        finally:
+            for widget in (self._title_edit, self._notes_edit):
+                widget.blockSignals(False)
 
     def _build_fragments_list(self):
         """Build list of PuzzleFragment from current canvas items."""
@@ -2190,21 +2468,165 @@ class PuzzleCanvasWindow(QMainWindow):
             fragments.append(pf)
         return fragments
 
+    def _fragments_to_store(self, with_pending=False):
+        """What a write of the open join contains: the canvas, plus, for a
+        saved join, its fragments that are not on the canvas (still loading,
+        or their image failed). An explicit Save passes `with_pending` to add
+        the fragments added since whose image has not arrived. Kept apart
+        from _build_fragments_list so the thumbnail and Export never try to
+        draw -- or download -- those."""
+        fragments = self._build_fragments_list()
+        if self._current_doc_id is not None:
+            fragments.extend(pf for key, pf in self._unplaced.items()
+                             if key not in self._fragment_items)
+        if with_pending:
+            fragments.extend(self._pending_additions().values())
+        return fragments
+
+    def _pending_additions(self):
+        """Fragments added to this canvas whose image has not arrived and that
+        no write holds yet, as {key: PuzzleFragment}. Clearing the canvas
+        drops their requests, so they are unsaved work."""
+        return {key: pf for key, pf in self._pending_fragments.items()
+                if key not in self._fragment_items and key not in self._unplaced}
+
+    def _keep_stored_off_canvas(self, stored):
+        """After an explicit Save wrote `stored`: a stored fragment that is
+        not on the canvas (its image is still loading, or failed while the
+        Save dialog was open) is a fragment of the saved join that is not
+        placed, so every later write keeps it."""
+        for pf in stored:
+            key = (pf.sys_id, pf.folio_label)
+            if key in self._fragment_items or key in self._unplaced:
+                continue
+            self._unplaced[key] = pf
+            if key not in self._pending_fragments:
+                self._failed_keys.add(key)
+
+    def _thumbnail_for_save(self, stored):
+        """The thumbnail to write with `stored`, or None to keep the stored
+        one: when the canvas is empty or does not show every stored
+        fragment, or when drawing it fails. A thumbnail is cosmetic and
+        never fails a save."""
+        canvas = self._build_fragments_list()
+        on_canvas = {id(pf) for pf in canvas}
+        if not canvas or any(id(pf) not in on_canvas for pf in stored):
+            return None
+        try:
+            from shared.puzzle_export import generate_thumbnail
+            from shared.puzzle_image_service import get_puzzle_image_service
+            return generate_thumbnail(canvas, get_puzzle_image_service(), thumb_size=150)
+        except Exception:
+            logger.exception("Puzzle thumbnail failed; the stored one is kept")
+            return None
+
+    def _write_open_join(self, recreate, with_pending=False):
+        """Write the open saved join. Returns None when nothing was written
+        (the write failed, or the row is gone and `recreate` is False),
+        'fragments', or 'metadata' when the store is empty and only the title
+        and notes were written (the stored fragments are kept). Posts no
+        status line: the caller posts exactly one. `with_pending`: see
+        _fragments_to_store."""
+        import datetime
+        from shared.puzzle_model import PuzzleDocument
+        from shared.puzzle_service import get_puzzle_service
+
+        svc = get_puzzle_service()
+        doc = svc.load_document(self._current_doc_id)
+        fragments = self._fragments_to_store(with_pending=with_pending)
+        if doc is None:
+            # Autosave does not bring back a join deleted elsewhere.
+            if not recreate or not fragments:
+                return None
+            doc = PuzzleDocument(id=self._current_doc_id)
+        if fragments:
+            doc.fragments = fragments
+            thumb = self._thumbnail_for_save(fragments)
+            outcome = 'fragments'
+        else:
+            thumb = None
+            outcome = 'metadata'
+        doc.title = self._title_edit.text() or doc.title
+        doc.notes = self._notes_edit.toPlainText()
+        doc.updated_at = datetime.datetime.now().isoformat()
+        if svc.save_document(doc, thumbnail_b64=thumb) is None:
+            return None
+        return outcome
+
+    def _has_unsaved_work(self):
+        """Work that leaving now would lose: a scratch pad with a fragment on
+        the canvas or a note, a saved join whose last write failed, and on
+        either a fragment added whose image has not arrived yet (leaving
+        drops its request, and no write holds it)."""
+        if self._pending_additions():
+            return True
+        if self._current_doc_id is None:
+            return bool(self._fragment_items) or bool(self._notes_edit.toPlainText().strip())
+        return self._last_save_failed
+
+    def _confirm_leave_current(self, question):
+        """Before the canvas is cleared or replaced: write a pending autosave,
+        then ask about work that would be lost. True when it is safe to go
+        on."""
+        self._flush_auto_save(notify=False)
+        if not self._has_unsaved_work():
+            return True
+        if self._current_doc_id is None or not self._last_save_failed:
+            text = question
+        else:
+            text = tr("The last changes to this join could not be saved.")
+        with self._prompting():
+            reply = _ask(self, tr("Save current work?"), text,
+                         QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard
+                         | QMessageBox.StandardButton.Cancel)
+            if reply == QMessageBox.StandardButton.Save:
+                ok = self._on_save_join()
+            else:
+                ok = reply == QMessageBox.StandardButton.Discard
+            if ok:
+                # The canvas is left: what autosave held back meanwhile was
+                # just saved, or is discarded with it.
+                self._auto_save_held = False
+            return ok
+
+    @contextmanager
+    def _prompting(self):
+        """Counts one open leave prompt or Save dialog (see is_prompting).
+
+        Autosave is suspended while any is open: its event loop still
+        delivers images and timers, and a join written then would keep a
+        fragment the user is about to Discard. A change made meanwhile is
+        held and scheduled once the last one closes, unless the canvas is
+        being left (_confirm_leave_current)."""
+        if self._prompts_open == 0:
+            self._auto_save_held = (self._scene_change_debounce.isActive()
+                                    or self._auto_save_timer.isActive())
+            self._scene_change_debounce.stop()
+            self._auto_save_timer.stop()
+        self._prompts_open += 1
+        try:
+            yield
+        finally:
+            self._prompts_open -= 1
+            if self._prompts_open == 0 and self._auto_save_held:
+                self._auto_save_held = False
+                self._schedule_auto_save()
+
+    def is_prompting(self):
+        """True while a leave prompt (New, opening another join, quitting)
+        or the Save dialog waits for an answer. A close of the main window
+        that was deferred for passage work waits for that answer rather than
+        asking its quit question on top of it."""
+        return self._prompts_open > 0
+
     def _on_new_puzzle(self):
         """Clear canvas to a fresh scratch pad."""
-        if self._current_doc_id is None and self._has_unsaved_changes and self._fragment_items:
-            reply = QMessageBox.question(
-                self, tr("Save current work?"),
-                tr("Save current puzzle before starting new?"),
-                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel
-            )
-            if reply == QMessageBox.StandardButton.Cancel:
-                return
-            if reply == QMessageBox.StandardButton.Save:
-                self._on_save_join()
+        if not self._confirm_leave_current(tr('Save current puzzle before starting new?')):
+            return
         self._clear_canvas()
         self._current_doc_id = None
-        self._has_unsaved_changes = False
+        self._mark_saved()
+        self._set_details_fields('', '')
         self._is_published = False
         self.btn_publish.setToolTip(tr("Publish to Community"))
         self.btn_publish.setStyleSheet("")
@@ -2213,6 +2635,7 @@ class PuzzleCanvasWindow(QMainWindow):
 
     def _clear_canvas(self):
         """Remove all fragments from canvas."""
+        self._undo_delete = None  # an undo never crosses into another puzzle
         scene = self.canvas_view.scene
         for key in list(self._fragment_items.keys()):
             item = self._fragment_items.pop(key, None)
@@ -2222,7 +2645,15 @@ class PuzzleCanvasWindow(QMainWindow):
             item = self._placeholder_items.pop(key, None)
             if item and item.scene():
                 scene.removeItem(item)
+        # Emptied, so every earlier request is stale (_pending_req).
         self._pending_fragments.clear()
+        self._pending_req.clear()
+        self._unplaced.clear()
+        self._failed_keys.clear()
+        self._load_waiting.clear()
+        self._loading_document = False
+        self._load_summary = ''
+        self._canvas_gen += 1
         self._folio_lists.clear()
         self._next_x = 50.0
         self._refresh_fragment_combo()
@@ -2363,8 +2794,8 @@ class PuzzleCanvasWindow(QMainWindow):
                 return
             self._run_publish_worker(unpublish=True)
         else:
-            # PUBLISH flow
-            if not self._fragment_items:
+            # PUBLISH flow (a join whose images all failed still has fragments)
+            if not self._fragments_to_store():
                 QMessageBox.warning(self, tr("No Fragments"), tr("Add fragments before publishing"))
                 return
             reply = QMessageBox.question(
@@ -2403,7 +2834,7 @@ class PuzzleCanvasWindow(QMainWindow):
                 self._publish_progress.close()
                 QMessageBox.warning(self, tr("Error"), tr("Could not load document"))
                 return
-            doc.fragments = self._build_fragments_list()
+            doc.fragments = self._fragments_to_store()
             if hasattr(self, '_title_edit'):
                 doc.title = self._title_edit.text() or doc.title
             if hasattr(self, '_notes_edit'):
@@ -2499,8 +2930,13 @@ class PuzzleCanvasWindow(QMainWindow):
             pass  # Not published or not logged in -- fine
         svc.delete_document(doc_id)
         if self._current_doc_id == doc_id:
+            # The canvas stays, as an unsaved scratch pad: New and quitting
+            # ask about it. Its images still loading keep loading.
             self._current_doc_id = None
-            self._has_unsaved_changes = False
+            self._unplaced.clear()
+            self._failed_keys.clear()
+            self._mark_saved()
+            self._set_details_fields('', '')
             self._is_published = False
             self._details_group.setVisible(False)
             self.setWindowTitle(tr("Fragment Puzzle"))
@@ -2508,6 +2944,7 @@ class PuzzleCanvasWindow(QMainWindow):
 
     def _rename_document(self, doc_id):
         """Rename a saved join document."""
+        import datetime
         from shared.puzzle_service import get_puzzle_service
         svc = get_puzzle_service()
         doc = svc.load_document(doc_id)
@@ -2517,16 +2954,24 @@ class PuzzleCanvasWindow(QMainWindow):
             self, tr("Rename"), tr("New title:"),
             QLineEdit.EchoMode.Normal, doc.title
         )
-        if ok and title.strip():
-            doc.title = title.strip()
-            import datetime
-            doc.updated_at = datetime.datetime.now().isoformat()
-            # Use thumbnail_b64=None to preserve existing thumbnail
-            svc.save_document(doc)
-            self._refresh_docs_list()
-            if self._current_doc_id == doc_id:
-                self._title_edit.setText(doc.title)
-                self.setWindowTitle(f"{tr('Fragment Puzzle')} - {doc.title}")
+        if not ok or not title.strip():
+            return
+        # Read again: an autosave can land while the dialog is open, and
+        # writing the copy read before it would undo that autosave.
+        fresh = svc.load_document(doc_id)
+        if fresh is None:
+            _notify(self, 'warning', tr("Error"), tr("The join could not be renamed."))
+            return
+        fresh.title = title.strip()
+        fresh.updated_at = datetime.datetime.now().isoformat()
+        # Use thumbnail_b64=None to preserve existing thumbnail
+        if svc.save_document(fresh) is None:
+            _notify(self, 'warning', tr("Error"), tr("The join could not be renamed."))
+            return
+        self._refresh_docs_list()
+        if self._current_doc_id == doc_id:
+            self._title_edit.setText(fresh.title)
+            self.setWindowTitle(f"{tr('Fragment Puzzle')} - {fresh.title}")
 
     def _on_title_changed(self):
         """Handle title edit finished -- auto-save if editing a saved document."""
@@ -2543,43 +2988,80 @@ class PuzzleCanvasWindow(QMainWindow):
     def _on_scene_changed(self, region_list):
         """Handle scene.changed signal -- debounce and trigger auto-save for saved documents."""
         if self._current_doc_id is not None and self._fragment_items:
+            if self._prompts_open:
+                self._auto_save_held = True   # see _prompting
+                return
             self._scene_change_debounce.start()
 
     def _schedule_auto_save(self):
-        """Schedule a debounced auto-save (1.5s)."""
+        """Schedule a debounced auto-save (1.5s) of the open saved join. A
+        scratch pad has nothing to auto-save; leaving it asks instead. While
+        a leave prompt or the Save dialog is open it is held (_prompting)."""
         if self._current_doc_id is None:
-            self._has_unsaved_changes = True
+            return
+        if self._prompts_open:
+            self._auto_save_held = True
             return
         self._auto_save_timer.start()  # restarts if already running
 
-    def _auto_save(self):
-        """Perform auto-save for the current document."""
+    def _auto_save(self, notify=True):
+        """Write the open saved join (the timer's slot). Returns False only
+        when a write was attempted and failed; that is reported through
+        _mark_save_failed (with the first-failure box when `notify`)."""
         if self._current_doc_id is None:
-            return
-        # Do NOT auto-save while document is still loading
-        if self._loading_document:
-            return
-
-        from shared.puzzle_service import get_puzzle_service
-        from shared.puzzle_export import generate_thumbnail
-        from shared.puzzle_image_service import get_puzzle_image_service
-
-        fragments = self._build_fragments_list()
-        svc = get_puzzle_service()
-        doc = svc.load_document(self._current_doc_id)
-        if doc is None:
-            return
-        doc.fragments = fragments
-        doc.title = self._title_edit.text() or doc.title
-        doc.notes = self._notes_edit.toPlainText()
-        import datetime
-        doc.updated_at = datetime.datetime.now().isoformat()
-        # Regenerate thumbnail
-        img_svc = get_puzzle_image_service()
-        thumb = generate_thumbnail(fragments, img_svc, thumb_size=150)
-        svc.save_document(doc, thumbnail_b64=thumb)
+            return True
+        try:
+            outcome = self._write_open_join(recreate=False)
+        except Exception:
+            logger.exception("Puzzle auto-save failed")
+            outcome = None
+        if outcome is None:
+            self._mark_save_failed(notify)
+            return False
+        self._mark_saved()
         self._refresh_docs_list()
-        self.statusBar().showMessage(tr("Auto-saved"), 1500)
+        if outcome == 'fragments' and self._load_summary \
+                and self.statusBar().currentMessage() == self._load_summary:
+            # The load's own autosave follows it at once; "Auto-saved" must
+            # not replace the line saying which images could not be shown.
+            return True
+        self._show_saved_status(outcome, tr("Auto-saved"), 1500)
+        return True
+
+    def _flush_auto_save(self, notify):
+        """Write a pending autosave now, before the canvas is cleared,
+        replaced or closed. Returns False when that write failed. `notify`
+        decides whether a failure shows the first-failure box: False where a
+        leave prompt follows and says the same, True where nothing follows."""
+        if not (self._scene_change_debounce.isActive() or self._auto_save_timer.isActive()):
+            return True
+        self._scene_change_debounce.stop()
+        self._auto_save_timer.stop()
+        try:
+            return self._auto_save(notify=notify)
+        except Exception:
+            logger.exception("Puzzle auto-save flush failed")
+            self._mark_save_failed(notify)
+            return False
+
+    def _mark_save_failed(self, notify):
+        """The open join's last write failed: keep saying so in the status
+        bar until a write succeeds, and show one box on the join's first
+        failure."""
+        self._last_save_failed = True
+        self._save_failed_label.setVisible(True)
+        doc_id = self._current_doc_id
+        if notify and doc_id is not None and doc_id not in self._autosave_failure_notified:
+            self._autosave_failure_notified.add(doc_id)
+            _notify(self, 'warning', tr("Auto-save failed"),
+                    tr("The latest changes to this join could not be saved. They are still on "
+                       "the canvas. Saving is tried again after your next change, and you will "
+                       "be asked before you leave this join."))
+
+    def _mark_saved(self):
+        """The open join is written (or was left): clear the failure state."""
+        self._last_save_failed = False
+        self._save_failed_label.setVisible(False)
 
     def _update_fragments_label(self):
         """Update the fragments read-only label in the details panel."""
@@ -2589,15 +3071,20 @@ class PuzzleCanvasWindow(QMainWindow):
             pf = item.puzzle_frag
             sm = pf.shelfmark or sys_id
             parts.append(f"{sm} ({folio_label})")
+        for key, pf in self._unplaced.items():
+            if key in self._failed_keys and key not in self._fragment_items:
+                sm = pf.shelfmark or key[0]
+                parts.append(f"{sm} ({key[1]}) -- {tr('image not loaded')}")
         self._fragments_label.setText('\n'.join(parts) if parts else tr("No fragments"))
-
     # -- Cleanup --
 
     def keyPressEvent(self, event):
         """Keyboard shortcuts for puzzle canvas.
 
         Esc         - Exit crop mode, or close window
-        Delete      - Delete selected fragments
+        Delete      - Delete selected fragments (canvas focus only, see
+                      _canvas_keys_have_focus)
+        Ctrl+Z      - Undo the last Delete (a window shortcut, see __init__)
         R / Shift+R - Rotate selected 1 deg CW / CCW
         F           - Flip recto/verso
         Ctrl+A      - Select all
@@ -2618,7 +3105,8 @@ class PuzzleCanvasWindow(QMainWindow):
             # Confirm crop
             self.btn_crop.setChecked(False)
         elif key == Qt.Key.Key_Delete:
-            self._delete_selected()
+            if self._canvas_keys_have_focus():
+                self._delete_selected()
         elif key == Qt.Key.Key_R:
             if mod & Qt.KeyboardModifier.ShiftModifier:
                 self._rotate_selected(-1)
@@ -2658,8 +3146,35 @@ class PuzzleCanvasWindow(QMainWindow):
         else:
             super().keyPressEvent(event)
 
+    def confirm_quit(self):
+        """Asked by GenizahGUI.closeEvent before the app quits: write a
+        pending autosave, then ask about work that would be lost, showing
+        this window first (closing it with X only hides it). True when the
+        app may quit."""
+        self._flush_auto_save(notify=False)
+        if not self._has_unsaved_work():
+            return True
+        if self.isMinimized():
+            self.showNormal()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        return self._confirm_leave_current(tr('Save current puzzle before quitting?'))
+
     def closeEvent(self, event):
-        """Wait for active loader threads before closing."""
+        """Write a pending autosave, wait for active loader threads, close.
+
+        Must never ignore the event: Qt also closes this window while the
+        application quits, and an ignored close there keeps the process
+        alive with no main window. Unsaved work is asked about before New,
+        before another join is opened, and by the main window's closeEvent
+        at quit -- not here. Closing with X only hides the window and no
+        prompt follows, so a failure of this flush shows the first-failure
+        box."""
+        try:
+            self._flush_auto_save(notify=True)
+        except Exception:
+            logger.exception("Puzzle: writing the pending autosave on close failed")
         if self._export_thread and self._export_thread.isRunning():
             self._export_thread.requestInterruption()
             self._export_thread.wait(3000)

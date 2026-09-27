@@ -1022,103 +1022,110 @@ desktop.Y.X` identity holds via the facades.
 
 ## desktop/gui_threads.py
 
-- **Function** `_prevent_sleep` (Line 15) — Prevent OS sleep while search is running (Windows only).
-- **Function** `_allow_sleep` (Line 26) — Re-allow OS sleep after search completes (Windows only).
-- **Class** `IndexerThread` (Line 35) — Build or refresh the index without blocking the UI.
-    - Method `__init__` (Line 41)
-    - Method `run` (Line 45)
-- **Class** `RefinementReplayThread` (Line 52) — Replay a refinement chain off the UI thread to rebuild restrict sets.
-    - Method `__init__` (Line 66)
-    - Method `run` (Line 72)
-- **Class** `PausableSearchMixin` (Line 82) — Cancel + pause plumbing shared by the four desktop search workers.
-    - Method `_init_pause_support` (Line 97)
-    - Method `pause` (Line 112)
-    - Method `resume` (Line 115)
-    - Method `is_pause_pending` (Line 118)
-    - Method `request_cancel` (Line 121) — The one stop entry point: set the flag AND un-park, atomically.
-    - Method `requestInterruption` (Line 132) — Route Qt's own interruption request into request_cancel().
-    - Method `_emit_pause_ack` (Line 144)
-    - Method `_should_abort` (Line 150)
-    - Method `_checkpoint` (Line 161) — Cooperative checkpoint: raises to cancel, blocks to pause.
-- **Class** `SearchThread` (Line 173) — Execute a search query asynchronously.
-    - Method `__init__` (Line 187)
-    - Method `run` (Line 197)
-- **Class** `LabSearchThread` (Line 241) — Execute a Lab Mode search query.
-    - Method `__init__` (Line 253)
+- **Function** `_keep_until_finished` (Line 25) — Hold ``worker`` until its QThread has finished, then let it go.
+- **Function** `_retire_worker` (Line 62) — Stop listening to a replaced worker and keep it until its QThread has finished.
+- **Function** `_prevent_sleep` (Line 88) — Prevent OS sleep while search is running (Windows only).
+- **Function** `_allow_sleep` (Line 99) — Re-allow OS sleep after search completes (Windows only).
+- **Class** `IndexerThread` (Line 108) — Build or refresh the index without blocking the UI.
+    - Method `__init__` (Line 114)
+    - Method `run` (Line 118)
+- **Class** `RefinementReplayThread` (Line 125) — Replay a refinement chain off the UI thread to rebuild restrict sets.
+    - Method `__init__` (Line 139)
+    - Method `run` (Line 145)
+- **Class** `PausableSearchMixin` (Line 155) — Cancel + pause plumbing shared by the four desktop search workers.
+    - Method `_init_pause_support` (Line 170)
+    - Method `pause` (Line 185)
+    - Method `resume` (Line 188)
+    - Method `is_pause_pending` (Line 191)
+    - Method `request_cancel` (Line 194) — The one stop entry point: set the flag AND un-park, atomically.
+    - Method `requestInterruption` (Line 205) — Route Qt's own interruption request into request_cancel().
+    - Method `_emit_pause_ack` (Line 217)
+    - Method `_should_abort` (Line 223)
+    - Method `_checkpoint` (Line 234) — Cooperative checkpoint: raises to cancel, blocks to pause.
+- **Class** `SearchThread` (Line 246) — Execute a search query asynchronously.
+    - Method `__init__` (Line 260)
     - Method `run` (Line 270)
-- **Class** `CompositionThread` (Line 315) — Scan compositions in background to keep UI responsive.
-    - Method `__init__` (Line 327)
-    - Method `run` (Line 352)
-- **Class** `LabCompositionThread` (Line 395) — Execute Lab Composition Search (Broad-to-Narrow).
-    - Method `__init__` (Line 407)
-    - Method `run` (Line 431)
-- **Class** `GroupingThread` (Line 483) — Group composition results while reporting progress to the UI.
-    - Method `__init__` (Line 492)
-    - Method `run` (Line 499)
-- **Class** `ShelfmarkLoaderThread` (Line 532) — Background thread to load metadata.
-    - Method `__init__` (Line 542)
-    - Method `request_cancel` (Line 547)
-    - Method `run` (Line 550)
-- **Class** `StartupThread` (Line 574) — Initialize heavy components in the background.
-    - Method `run` (Line 579)
-- **Class** `EnrichMetadataThread` (Line 594) — Fetch extended metadata (IIIF/MARC) in the background.
-    - Method `__init__` (Line 598)
-    - Method `run` (Line 604)
-- **Class** `VolumeManifestThread` (Line 614) — Lightweight manifest-only fetch for volume switches (no full enrichment).
-    - Method `__init__` (Line 618)
-    - Method `run` (Line 625)
-- **Class** `ExternalResourceThread` (Line 633) — Fetch external IIIF resources (e.g. Cambridge) in background.
-    - Method `__init__` (Line 637)
-    - Method `run` (Line 642)
-- **Class** `TranslateTextThread` (Line 652) — Translate a single text field via Dicta API in the background.
-    - Method `__init__` (Line 657)
-    - Method `run` (Line 663)
-- **Class** `UpdateCheckerThread` (Line 682) — Check for updates on GitHub.
-    - Method `__init__` (Line 689)
-    - Method `run` (Line 694)
-- **Class** `UpdateDownloaderThread` (Line 734) — Download update installer from GitHub Releases with progress reporting.
-    - Method `__init__` (Line 740)
-    - Method `cancel` (Line 746) — Request cancellation of the download.
+- **Class** `LabSearchThread` (Line 314) — Execute a Lab Mode search query.
+    - Method `__init__` (Line 326)
+    - Method `run` (Line 343)
+- **Class** `CompositionThread` (Line 388) — Scan compositions in background to keep UI responsive.
+    - Method `__init__` (Line 400)
+    - Method `run` (Line 425)
+- **Class** `MultiWitnessCompositionThread` (Line 468) — Search N witnesses of one work, one at a time, and rank-fuse them.
+    - Method `__init__` (Line 509)
+    - Method `_abort_if_generation_moved` (Line 542) — Void the batch if the index was replaced under it.
+    - Method `run` (Line 557)
+- **Class** `LabCompositionThread` (Line 714) — Execute Lab Composition Search (Broad-to-Narrow).
+    - Method `__init__` (Line 726)
     - Method `run` (Line 750)
-- **Class** `DomainEnrichmentWorker` (Line 808) — Batch-fetch FJMS domain classifications for search results in background.
-    - Method `__init__` (Line 816)
-    - Method `run` (Line 820)
-- **Class** `PGPSourceWorker` (Line 843) — Fetch PGP edition/translation sources for a fragment in the background.
-    - Method `__init__` (Line 852)
-    - Method `run` (Line 875)
-- **Class** `PGPBadgeWorker` (Line 950) — Batch check badge sets for the results table (SEED-022).
-    - Method `__init__` (Line 964)
-    - Method `run` (Line 968)
-- **Class** `PrintedBadgeWorker` (Line 986) — Batch check which sys_ids have FragmentMaterial=Printed for badge display.
-    - Method `__init__` (Line 990)
-    - Method `run` (Line 994)
-- **Class** `PGPTagsWorker` (Line 1008) — Fetch all distinct PGP tags for dropdown population.
-    - Method `__init__` (Line 1012)
-    - Method `run` (Line 1015)
-- **Class** `PGPTagSearchWorker` (Line 1025) — Search for fragments by PGP tag.
-    - Method `__init__` (Line 1029)
-    - Method `run` (Line 1033)
-- **Class** `ReadingDeskWorker` (Line 1043) — Batch load PGP sources for multiple fragments for the reading desk.
-    - Method `__init__` (Line 1052)
-    - Method `run` (Line 1056)
-- **Class** `SidecarUpdateThread` (Line 1079) — Check for sidecar data updates via GitHub release manifest.
-    - Method `run` (Line 1091)
-    - Method `_get_local_version` (Line 1141) — Get local sidecar version from the service singleton.
-    - Method `_is_newer` (Line 1155) — Compare SemVer strings. Returns True if remote > local.
-- **Class** `SidecarDownloadThread` (Line 1170) — Download a sidecar database update from GitHub Releases.
-    - Method `__init__` (Line 1176)
-    - Method `cancel` (Line 1183)
-    - Method `run` (Line 1186)
-- **Class** `PuzzleImageLoaderThread` (Line 1228) — Load and process a fragment image in the background via PuzzleImageService.
-    - Method `__init__` (Line 1233)
-    - Method `run` (Line 1243)
-- **Class** `PuzzleMetaLoaderThread` (Line 1260) — Resolve images_nli (with fl_ids) for a sys_id in the background.
-    - Method `__init__` (Line 1270)
-    - Method `run` (Line 1276)
-    - Method `_resolve_oxford_images` (Line 1330) — Try to resolve Oxford part images via shelfmark-based lookup.
-- **Class** `FilterCountWorker` (Line 1382) — Background worker to compute manuscript count for pre-search filters.
-    - Method `__init__` (Line 1386)
-    - Method `run` (Line 1396)
+- **Class** `GroupingThread` (Line 802) — Group composition results while reporting progress to the UI.
+    - Method `__init__` (Line 811)
+    - Method `run` (Line 818)
+- **Class** `ShelfmarkLoaderThread` (Line 851) — Background thread to load metadata.
+    - Method `__init__` (Line 861)
+    - Method `request_cancel` (Line 866)
+    - Method `run` (Line 869)
+- **Class** `StartupThread` (Line 893) — Initialize heavy components in the background.
+    - Method `run` (Line 898)
+- **Class** `EnrichMetadataThread` (Line 913) — Fetch extended metadata (IIIF/MARC) in the background.
+    - Method `__init__` (Line 917)
+    - Method `run` (Line 923)
+- **Class** `VolumeManifestThread` (Line 933) — Lightweight manifest-only fetch for volume switches (no full enrichment).
+    - Method `__init__` (Line 937)
+    - Method `run` (Line 944)
+- **Class** `ExternalResourceThread` (Line 952) — Fetch external IIIF resources (e.g. Cambridge) in background.
+    - Method `__init__` (Line 956)
+    - Method `run` (Line 961)
+- **Function** `few_shot_data_dir` (Line 969) — Absolute path of the repository's ``data/`` directory, which holds the few-shot prompts.
+- **Class** `TranslateTextThread` (Line 986) — Translate a single text field via Dicta API in the background.
+    - Method `__init__` (Line 991)
+    - Method `run` (Line 997)
+- **Class** `UpdateCheckerThread` (Line 1015) — Check for updates on GitHub.
+    - Method `__init__` (Line 1022)
+    - Method `run` (Line 1027)
+- **Class** `UpdateDownloaderThread` (Line 1067) — Download update installer from GitHub Releases with progress reporting.
+    - Method `__init__` (Line 1073)
+    - Method `cancel` (Line 1079) — Request cancellation of the download.
+    - Method `run` (Line 1083)
+- **Class** `DomainEnrichmentWorker` (Line 1141) — Batch-fetch FJMS domain classifications for search results in background.
+    - Method `__init__` (Line 1149)
+    - Method `run` (Line 1153)
+- **Class** `PGPSourceWorker` (Line 1176) — Fetch PGP edition/translation sources for a fragment in the background.
+    - Method `__init__` (Line 1185)
+    - Method `run` (Line 1208)
+- **Class** `PGPBadgeWorker` (Line 1283) — Batch check badge sets for the results table (SEED-022).
+    - Method `__init__` (Line 1308)
+    - Method `run` (Line 1312)
+- **Class** `PrintedBadgeWorker` (Line 1341) — Batch check which sys_ids have FragmentMaterial=Printed for badge display.
+    - Method `__init__` (Line 1345)
+    - Method `run` (Line 1349)
+- **Class** `PGPTagsWorker` (Line 1363) — Fetch all distinct PGP tags for dropdown population.
+    - Method `__init__` (Line 1367)
+    - Method `run` (Line 1370)
+- **Class** `PGPTagSearchWorker` (Line 1380) — Search for fragments by PGP tag.
+    - Method `__init__` (Line 1384)
+    - Method `run` (Line 1388)
+- **Class** `ReadingDeskWorker` (Line 1398) — Batch load PGP sources for multiple fragments for the reading desk.
+    - Method `__init__` (Line 1407)
+    - Method `run` (Line 1411)
+- **Class** `SidecarUpdateThread` (Line 1434) — Check for sidecar data updates via GitHub release manifest.
+    - Method `run` (Line 1446)
+    - Method `_get_local_version` (Line 1496) — Get local sidecar version from the service singleton.
+    - Method `_is_newer` (Line 1510) — Compare SemVer strings. Returns True if remote > local.
+- **Class** `SidecarDownloadThread` (Line 1525) — Download a sidecar database update from GitHub Releases.
+    - Method `__init__` (Line 1531)
+    - Method `cancel` (Line 1538)
+    - Method `run` (Line 1541)
+- **Class** `PuzzleImageLoaderThread` (Line 1583) — Load and process a fragment image in the background via PuzzleImageService.
+    - Method `__init__` (Line 1588)
+    - Method `run` (Line 1598)
+- **Class** `PuzzleMetaLoaderThread` (Line 1615) — Resolve images_nli (with fl_ids) for a sys_id in the background.
+    - Method `__init__` (Line 1625)
+    - Method `run` (Line 1631)
+    - Method `_resolve_oxford_images` (Line 1685) — Try to resolve Oxford part images via shelfmark-based lookup.
+- **Class** `FilterCountWorker` (Line 1737) — Background worker to compute manuscript count for pre-search filters.
+    - Method `__init__` (Line 1741)
+    - Method `run` (Line 1751)
 
 ## web/components/translate_button.py
 
@@ -1590,107 +1597,134 @@ Imported by `web/api.py` handlers `GET /api/export/json` (Line ~1920) and `GET /
 
 ## desktop/puzzle.py
 
-- **Class** `PuzzleFragmentItem` (Line 29) — A positioned fragment image on the puzzle canvas.
-    - Method `__init__` (Line 45)
-    - Method `_pixmap_rect` (Line 73) — The actual pixmap bounding rect (without handle margin).
-    - Method `_handle_points` (Line 77) — Return dict of handle_id -> QPointF center positions.
-    - Method `_hit_handle` (Line 88) — Return handle id under pos using wide border zones.
-    - Method `_apply_flip` (Line 133) — Apply horizontal/vertical flip via QTransform.
-    - Method `flip_horizontal` (Line 145)
-    - Method `flip_vertical` (Line 149)
-    - Method `_is_crop_mode` (Line 155) — Check if crop mode is active (set by PuzzleCanvasWindow).
-    - Method `mousePressEvent` (Line 159)
-    - Method `mouseMoveEvent` (Line 199)
-    - Method `mouseReleaseEvent` (Line 292)
-    - Method `hoverMoveEvent` (Line 335)
-    - Method `hoverLeaveEvent` (Line 351)
-    - Method `adjust_scale_from_wheel` (Line 357) — Resize fragment from a wheel delta (called by PuzzleCanvasView).
-    - Method `wheelEvent` (Line 365)
-    - Method `boundingRect` (Line 372) — Always include handle margin so Qt repaints handle areas on move.
-    - Method `paint` (Line 378)
-    - Method `update_pixmap` (Line 431) — Replace displayed image (e.g. folio nav or threshold change).
-    - Method `shape` (Line 458)
-- **Class** `PuzzleCanvasView` (Line 464) — A QGraphicsView hosting PuzzleFragmentItem instances.
-    - Method `__init__` (Line 470)
-    - Method `cycle_background` (Line 506) — Cycle to the next background mode.
-    - Method `set_checkerboard` (Line 512) — Legacy toggle -- switches between dark gray and checkerboard.
-    - Method `drawBackground` (Line 517)
-    - Method `mousePressEvent` (Line 553)
-    - Method `mouseMoveEvent` (Line 568)
-    - Method `mouseReleaseEvent` (Line 582)
-    - Method `wheelEvent` (Line 592)
-    - Method `get_fragment_items` (Line 615) — Return all PuzzleFragmentItem instances on the scene.
-    - Method `get_selected_fragments` (Line 619) — Return selected PuzzleFragmentItem instances.
-- **Class** `PuzzleExportThread` (Line 624) — Compose and save a puzzle PNG without blocking the desktop UI.
-    - Method `__init__` (Line 632)
-    - Method `run` (Line 639)
-- **Class** `PuzzlePublishThread` (Line 674) — Worker thread for publish/unpublish operations.
-    - Method `__init__` (Line 678)
-    - Method `run` (Line 685)
-- **Class** `PuzzleCanvasWindow` (Line 696) — Standalone puzzle workspace for assembling fragment images.
-    - Method `__init__` (Line 704)
-    - Method `add_fragment` (Line 1045) — Add a fragment to the puzzle canvas. Starts async image load.
-    - Method `_on_add_shelfmark` (Line 1115) — Handle shelfmark entry: resolve sys_id, then async fl_id resolution.
-    - Method `_show_add_from_list` (Line 1152) — Show picker to add fragments from a personal list.
-    - Method `_show_add_from_joins` (Line 1215) — Show connected fragments for the selected fragment and add them.
-    - Method `_on_meta_resolved` (Line 1305) — Callback from PuzzleMetaLoaderThread -- cache folio list and add first folio.
-    - Method `_on_meta_failed` (Line 1319) — Callback from PuzzleMetaLoaderThread -- show error.
-    - Method `_on_image_loaded` (Line 1329) — Called when PuzzleImageLoaderThread finishes -- create or update item.
-    - Method `_fit_all_fragments` (Line 1401) — Fit view to show all fragments with some padding.
-    - Method `_on_image_failed` (Line 1415) — Called when PuzzleImageLoaderThread fails.
-    - Method `_on_selection_changed` (Line 1439) — Update toolbar to reflect current selection.
-    - Method `_flip_selected_h` (Line 1480)
-    - Method `_flip_selected_v` (Line 1484)
-    - Method `_cycle_bg` (Line 1488) — Cycle to next background mode and show name in status bar.
-    - Method `_rotate_selected` (Line 1501) — Rotate selected fragments by given degrees.
-    - Method `_has_blue_mat` (Line 1509) — Check if a PuzzleFragment is likely from a library with blue conservation mat.
-    - Method `_flip_recto_verso` (Line 1523) — Flip selected fragment(s) to show recto/verso -- navigates to next/prev folio.
-    - Method `_flip_entire_puzzle` (Line 1576) — Flip ALL fragments -- shows the other side of the joined page.
-    - Method `_toggle_crop_mode` (Line 1656) — Enter/exit crop mode. In crop mode, drag edges of selected fragment to trim.
-    - Method `_crop_edge` (Line 1679) — Crop a specific edge from selected fragment.
-    - Method `_revert_crop` (Line 1712) — Revert selected fragments to original uncropped image.
-    - Method `_nudge_threshold` (Line 1735) — Increment/decrement threshold by delta, then apply.
-    - Method `_on_threshold_changed` (Line 1741) — Re-fetch images with new threshold for selected fragments.
-    - Method `_nudge_scale` (Line 1759) — Increment/decrement scale by delta percent.
-    - Method `_on_scale_changed` (Line 1764) — Update scale for selected fragments proportionally.
-    - Method `_navigate_folio` (Line 1795) — Navigate folio prev/next for selected fragments.
-    - Method `_change_z_order` (Line 1849) — Move selected fragment one layer up (+1) or down (-1).
-    - Method `_delete_selected` (Line 1859) — Remove selected fragments from the canvas.
-    - Method `_refresh_fragment_combo` (Line 1872) — Rebuild the fragment dropdown from current items.
-    - Method `_browse_selected_fragment` (Line 1883) — Open the selected fragment in the browse tab.
-    - Method `_on_fragment_combo_changed` (Line 1900) — Select the fragment chosen in the dropdown.
-    - Method `_on_canvas_context_menu` (Line 1912) — Show right-click context menu on fragment items.
-    - Method `_refresh_docs_list` (Line 1976) — Refresh the saved documents list in the side panel.
-    - Method `_on_doc_list_clicked` (Line 2010) — Load a document when clicked in the side panel.
-    - Method `_load_document` (Line 2027) — Load a PuzzleDocument onto the canvas, replacing current content.
-    - Method `_spawn_meta_loader` (Line 2083) — Spawn a PuzzleMetaLoaderThread to fetch folio lists for a sys_id.
-    - Method `_on_meta_ready_for_load` (Line 2091) — Handle meta_ready from folio list rebuild during document load.
-    - Method `_on_save_join` (Line 2097) — Save current puzzle as a join document (new or update).
-    - Method `_build_fragments_list` (Line 2169) — Build list of PuzzleFragment from current canvas items.
-    - Method `_on_new_puzzle` (Line 2192) — Clear canvas to a fresh scratch pad.
-    - Method `_clear_canvas` (Line 2213) — Remove all fragments from canvas.
-    - Method `_on_export_png` (Line 2229) — Export composite PNG in a background thread.
-    - Method `_cancel_export_thread` (Line 2297) — Request cancellation of the active export thread.
-    - Method `_on_export_progress` (Line 2304) — Update the desktop export progress dialog.
-    - Method `_clear_export_ui` (Line 2313) — Close and release the active export UI objects.
-    - Method `_on_export_finished` (Line 2325) — Handle successful export completion.
-    - Method `_on_export_cancelled` (Line 2330) — Handle user-cancelled export.
-    - Method `_on_export_error` (Line 2335) — Handle export failure.
-    - Method `_on_publish` (Line 2342) — Toggle publish/unpublish for current puzzle join.
-    - Method `_run_publish_worker` (Line 2378) — Run publish/unpublish on a worker thread to avoid freezing UI.
-    - Method `_on_publish_finished` (Line 2421) — Handle publish/unpublish completion on main thread.
-    - Method `_check_publish_state` (Line 2448) — Check if current doc is published and update button state.
-    - Method `_on_doc_context_menu` (Line 2464) — Show context menu on right-click in document list.
-    - Method `_delete_document` (Line 2479) — Delete a saved join document with confirmation.
-    - Method `_rename_document` (Line 2508) — Rename a saved join document.
-    - Method `_on_title_changed` (Line 2530) — Handle title edit finished -- auto-save if editing a saved document.
-    - Method `_on_notes_changed` (Line 2536) — Handle notes text changed -- auto-save if editing a saved document.
-    - Method `_on_scene_changed` (Line 2542) — Handle scene.changed signal -- debounce and trigger auto-save for saved documents.
-    - Method `_schedule_auto_save` (Line 2547) — Schedule a debounced auto-save (1.5s).
-    - Method `_auto_save` (Line 2554) — Perform auto-save for the current document.
-    - Method `_update_fragments_label` (Line 2583) — Update the fragments read-only label in the details panel.
-    - Method `keyPressEvent` (Line 2595) — Keyboard shortcuts for puzzle canvas.
-    - Method `closeEvent` (Line 2660) — Wait for active loader threads before closing.
+- **Function** `_label_buttons` (Line 43)
+- **Function** `_ask` (Line 50) — QMessageBox.question with translated button labels.
+- **Function** `_notify` (Line 71) — QMessageBox.information/.warning (`kind` is 'information' or
+- **Class** `PuzzleFragmentItem` (Line 84) — A positioned fragment image on the puzzle canvas.
+    - Method `__init__` (Line 100)
+    - Method `_pixmap_rect` (Line 128) — The actual pixmap bounding rect (without handle margin).
+    - Method `_handle_points` (Line 132) — Return dict of handle_id -> QPointF center positions.
+    - Method `_hit_handle` (Line 143) — Return handle id under pos using wide border zones.
+    - Method `_apply_flip` (Line 188) — Apply horizontal/vertical flip via QTransform.
+    - Method `flip_horizontal` (Line 200)
+    - Method `flip_vertical` (Line 204)
+    - Method `_is_crop_mode` (Line 210) — Check if crop mode is active (set by PuzzleCanvasWindow).
+    - Method `mousePressEvent` (Line 214)
+    - Method `mouseMoveEvent` (Line 254)
+    - Method `mouseReleaseEvent` (Line 347)
+    - Method `hoverMoveEvent` (Line 390)
+    - Method `hoverLeaveEvent` (Line 406)
+    - Method `adjust_scale_from_wheel` (Line 412) — Resize fragment from a wheel delta (called by PuzzleCanvasView).
+    - Method `wheelEvent` (Line 420)
+    - Method `boundingRect` (Line 427) — Always include handle margin so Qt repaints handle areas on move.
+    - Method `paint` (Line 433)
+    - Method `update_pixmap` (Line 486) — Replace displayed image (e.g. folio nav or threshold change).
+    - Method `shape` (Line 513)
+- **Class** `PuzzleCanvasView` (Line 519) — A QGraphicsView hosting PuzzleFragmentItem instances.
+    - Method `__init__` (Line 525)
+    - Method `cycle_background` (Line 561) — Cycle to the next background mode.
+    - Method `set_checkerboard` (Line 567) — Legacy toggle -- switches between dark gray and checkerboard.
+    - Method `drawBackground` (Line 572)
+    - Method `mousePressEvent` (Line 608)
+    - Method `mouseMoveEvent` (Line 623)
+    - Method `mouseReleaseEvent` (Line 637)
+    - Method `wheelEvent` (Line 647)
+    - Method `get_fragment_items` (Line 670) — Return all PuzzleFragmentItem instances on the scene.
+    - Method `get_selected_fragments` (Line 674) — Return selected PuzzleFragmentItem instances.
+- **Class** `PuzzleExportThread` (Line 679) — Compose and save a puzzle PNG without blocking the desktop UI.
+    - Method `__init__` (Line 687)
+    - Method `run` (Line 694)
+- **Class** `PuzzlePublishThread` (Line 729) — Worker thread for publish/unpublish operations.
+    - Method `__init__` (Line 733)
+    - Method `run` (Line 740)
+- **Class** `PuzzleCanvasWindow` (Line 751) — Standalone puzzle workspace for assembling fragment images.
+    - Method `__init__` (Line 759)
+    - Method `add_fragment` (Line 1140) — Add a fragment to the puzzle canvas. Starts async image load.
+    - Method `_start_image_load` (Line 1203) — Start the one image request `item_key` now waits for.
+    - Method `_drop_request` (Line 1222) — Forget the pending image request for `item_key`, if any: its result
+    - Method `_take_request` (Line 1234) — True when `req` is the request `item_key` waits for; it is then
+    - Method `_load_step_done` (Line 1243) — One key of the open join's load has its answer. The load ends when
+    - Method `_on_add_shelfmark` (Line 1262) — Handle shelfmark entry: resolve sys_id, then async fl_id resolution.
+    - Method `_start_meta_resolve` (Line 1295) — Resolve a manuscript's folios in the background, then add its first
+    - Method `_show_add_from_list` (Line 1308) — Show picker to add fragments from a personal list.
+    - Method `_show_add_from_joins` (Line 1371) — Show connected fragments for the selected fragment and add them.
+    - Method `_on_meta_resolved` (Line 1461) — Callback from PuzzleMetaLoaderThread -- cache folio list and add first folio.
+    - Method `_on_meta_failed` (Line 1478) — Callback from PuzzleMetaLoaderThread -- show error.
+    - Method `_on_image_loaded` (Line 1491) — Called when PuzzleImageLoaderThread finishes -- create or update item.
+    - Method `_fit_all_fragments` (Line 1560) — Fit view to show all fragments with some padding.
+    - Method `_on_image_failed` (Line 1574) — Called when PuzzleImageLoaderThread fails.
+    - Method `_on_selection_changed` (Line 1598) — Update toolbar to reflect current selection.
+    - Method `_flip_selected_h` (Line 1639)
+    - Method `_flip_selected_v` (Line 1643)
+    - Method `_cycle_bg` (Line 1647) — Cycle to next background mode and show name in status bar.
+    - Method `_rotate_selected` (Line 1660) — Rotate selected fragments by given degrees.
+    - Method `_has_blue_mat` (Line 1668) — Check if a PuzzleFragment is likely from a library with blue conservation mat.
+    - Method `_flip_recto_verso` (Line 1682) — Flip selected fragment(s) to show recto/verso -- navigates to next/prev folio.
+    - Method `_retarget_flipped` (Line 1721) — Point `pf` at the other side (the flip buttons); returns the
+    - Method `_retarget_navigated` (Line 1733) — Point `pf` at another folio (the < > buttons); returns the loader
+    - Method `_rekey_items` (Line 1740) — Move canvas items to other folios as one batch.
+    - Method `_flip_entire_puzzle` (Line 1786) — Flip ALL fragments -- shows the other side of the joined page.
+    - Method `_toggle_crop_mode` (Line 1852) — Enter/exit crop mode. In crop mode, drag edges of selected fragment to trim.
+    - Method `_crop_edge` (Line 1875) — Crop a specific edge from selected fragment.
+    - Method `_revert_crop` (Line 1908) — Revert selected fragments to original uncropped image.
+    - Method `_nudge_threshold` (Line 1931) — Increment/decrement threshold by delta, then apply.
+    - Method `_on_threshold_changed` (Line 1937) — Re-fetch images with new threshold for selected fragments.
+    - Method `_nudge_scale` (Line 1948) — Increment/decrement scale by delta percent.
+    - Method `_on_scale_changed` (Line 1953) — Update scale for selected fragments proportionally.
+    - Method `_navigate_folio` (Line 1984) — Navigate folio prev/next for selected fragments.
+    - Method `_change_z_order` (Line 2024) — Move selected fragment one layer up (+1) or down (-1).
+    - Method `_delete_selected` (Line 2034) — Remove selected fragments from the canvas (the Delete key, the
+    - Method `_undo_last_delete` (Line 2067) — Put back what the last Delete removed (one level).
+    - Method `_on_undo_shortcut` (Line 2090)
+    - Method `_canvas_keys_have_focus` (Line 2094) — True when Delete and Ctrl+Z belong to the canvas: focus is on the
+    - Method `_refresh_fragment_combo` (Line 2111) — Rebuild the fragment dropdown from current items.
+    - Method `_browse_selected_fragment` (Line 2122) — Open the selected fragment in the browse tab.
+    - Method `_on_fragment_combo_changed` (Line 2139) — Select the fragment chosen in the dropdown.
+    - Method `_on_canvas_context_menu` (Line 2151) — Show right-click context menu on fragment items.
+    - Method `_refresh_docs_list` (Line 2215) — Refresh the saved documents list in the side panel.
+    - Method `_on_doc_list_clicked` (Line 2249) — Load a document when clicked in the side panel.
+    - Method `_load_document` (Line 2256) — Load a PuzzleDocument onto the canvas, replacing current content.
+    - Method `_spawn_meta_loader` (Line 2318) — Spawn a PuzzleMetaLoaderThread to fetch folio lists for a sys_id.
+    - Method `_on_meta_ready_for_load` (Line 2326) — Handle meta_ready from folio list rebuild during document load.
+    - Method `_on_save_join` (Line 2332) — Save the current puzzle as a join document (new or update).
+    - Method `_show_saved_status` (Line 2420) — The one status line after a successful write, posted last: the
+    - Method `_set_details_fields` (Line 2430) — Set the Details title and notes without scheduling an autosave.
+    - Method `_build_fragments_list` (Line 2441) — Build list of PuzzleFragment from current canvas items.
+    - Method `_fragments_to_store` (Line 2464) — What a write of the open join contains: the canvas, plus, for a
+    - Method `_thumbnail_for_save` (Line 2475) — The thumbnail to write with `stored`, or None to keep the stored
+    - Method `_write_open_join` (Line 2492) — Write the open saved join. Returns None when nothing was written
+    - Method `_has_unsaved_work` (Line 2524) — Work that leaving now would lose: a scratch pad with a fragment on
+    - Method `_confirm_leave_current` (Line 2532) — Before the canvas is cleared or replaced: write a pending autosave,
+    - Method `_prompting` (Line 2552) — Counts one open leave prompt or Save dialog (see is_prompting).
+    - Method `is_prompting` (Line 2560) — True while a leave prompt (New, opening another join, quitting)
+    - Method `_on_new_puzzle` (Line 2567) — Clear canvas to a fresh scratch pad.
+    - Method `_clear_canvas` (Line 2581) — Remove all fragments from canvas.
+    - Method `_on_export_png` (Line 2606) — Export composite PNG in a background thread.
+    - Method `_cancel_export_thread` (Line 2674) — Request cancellation of the active export thread.
+    - Method `_on_export_progress` (Line 2681) — Update the desktop export progress dialog.
+    - Method `_clear_export_ui` (Line 2690) — Close and release the active export UI objects.
+    - Method `_on_export_finished` (Line 2702) — Handle successful export completion.
+    - Method `_on_export_cancelled` (Line 2707) — Handle user-cancelled export.
+    - Method `_on_export_error` (Line 2712) — Handle export failure.
+    - Method `_on_publish` (Line 2719) — Toggle publish/unpublish for current puzzle join.
+    - Method `_run_publish_worker` (Line 2755) — Run publish/unpublish on a worker thread to avoid freezing UI.
+    - Method `_on_publish_finished` (Line 2798) — Handle publish/unpublish completion on main thread.
+    - Method `_check_publish_state` (Line 2825) — Check if current doc is published and update button state.
+    - Method `_on_doc_context_menu` (Line 2841) — Show context menu on right-click in document list.
+    - Method `_delete_document` (Line 2856) — Delete a saved join document with confirmation.
+    - Method `_rename_document` (Line 2890) — Rename a saved join document.
+    - Method `_on_title_changed` (Line 2921) — Handle title edit finished -- auto-save if editing a saved document.
+    - Method `_on_notes_changed` (Line 2927) — Handle notes text changed -- auto-save if editing a saved document.
+    - Method `_on_scene_changed` (Line 2933) — Handle scene.changed signal -- debounce and trigger auto-save for saved documents.
+    - Method `_schedule_auto_save` (Line 2938) — Schedule a debounced auto-save (1.5s) of the open saved join. A
+    - Method `_auto_save` (Line 2945) — Write the open saved join (the timer's slot). Returns False only
+    - Method `_flush_auto_save` (Line 2969) — Write a pending autosave now, before the canvas is cleared,
+    - Method `_mark_save_failed` (Line 2985) — The open join's last write failed: keep saying so in the status
+    - Method `_mark_saved` (Line 2999) — The open join is written (or was left): clear the failure state.
+    - Method `_update_fragments_label` (Line 3004) — Update the fragments read-only label in the details panel.
+    - Method `keyPressEvent` (Line 3019) — Keyboard shortcuts for puzzle canvas.
+    - Method `confirm_quit` (Line 3087) — Asked by GenizahGUI.closeEvent before the app quits: write a
+    - Method `closeEvent` (Line 3102) — Write a pending autosave, wait for active loader threads, close.
 
 ## desktop/vs_cache.py
 

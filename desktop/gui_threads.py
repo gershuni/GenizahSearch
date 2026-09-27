@@ -5,12 +5,84 @@ import ctypes
 import os
 import platform
 import time
+import weakref
 import requests
 from PyQt6.QtCore import QThread, pyqtSignal
 from genizah_core import SearchEngine, Indexer, MetadataManager, VariantManager, get_logger
 from shared.pause_gate import PauseGate  # noqa: F401 — re-exported for callers/tests
 
 logger = get_logger(__name__)
+
+
+# Workers that were replaced or torn down while still running. A worker QThread has no
+# Qt parent, so dropping its last Python reference while run() executes destroys a
+# running QThread and aborts the process (Windows 0xC0000409). Each one is held here
+# until its finished() signal. Mutated in place only: desktop.join_workbench re-imports
+# this list by name.
+_ORPHANED_WORKERS: list = []
+
+
+def _keep_until_finished(worker) -> None:
+    """Hold ``worker`` until its QThread has finished, then let it go.
+
+    There is deliberately no quit step (no wait, no terminate() at aboutToQuit): on the
+    pinned PyQt6/sip a running QThread that is still referenced when the process exits
+    is not destroyed, and the process exits cleanly. Waiting would only delay the exit
+    and the single-instance relaunch; terminate() can kill a thread inside a lock and
+    hang the exit. tests/test_kept_qthreads_exit_cleanly.py pins the exit behaviour.
+
+    The release closure holds only a weak reference: a closure or default argument
+    holding the worker itself forms worker -> slot -> closure -> worker, which only the
+    cyclic GC frees, on whatever thread happens to trigger it. Released this way, the
+    last reference drops on the UI thread inside the queued finished() slot. Not the
+    worker's id() either: a worker handed over during its finish step is released at
+    once, yet its queued finished() is still delivered after it has been freed, and a
+    worker kept since then may have been given the same address.
+    """
+    if worker is None:
+        return
+    if any(w is worker for w in _ORPHANED_WORKERS):
+        return
+    ref = weakref.ref(worker)
+    _ORPHANED_WORKERS.append(worker)
+
+    def _release():
+        target = ref()
+        if target is not None:
+            _ORPHANED_WORKERS[:] = [w for w in _ORPHANED_WORKERS if w is not target]
+
+    try:
+        worker.finished.connect(_release)
+        if not worker.isRunning():
+            _release()
+    except (TypeError, RuntimeError):
+        _release()
+
+
+def _retire_worker(worker, *signal_names) -> None:
+    """Stop listening to a replaced worker and keep it until its QThread has finished.
+
+    cancel() only sets a flag (several workers ignore it), the worker has no Qt parent,
+    and dropping its last reference while run() executes destroys a running QThread
+    (0xC0000409). Each named signal is disconnected, so nothing the worker emits from
+    now on reaches the slot that replaced it. An emission queued before the disconnect
+    is not delivered either when PyQt6 connected the slot through a proxy -- a lambda or
+    an undecorated method, which is what every current caller connects (pinned by
+    tests/test_join_workbench_worker_lifetime_qt.py); a @pyqtSlot-decorated QObject
+    method still receives it.
+    """
+    if worker is None:
+        return
+    try:
+        worker.cancel()
+    except Exception:
+        pass
+    for name in signal_names:
+        try:
+            getattr(worker, name).disconnect()
+        except (TypeError, RuntimeError, AttributeError):
+            pass
+    _keep_until_finished(worker)
 
 
 def _prevent_sleep():

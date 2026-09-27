@@ -365,6 +365,48 @@ FOR SELECT TO public USING (true);
 
 
 -- ============================================================================
+-- PART 2b: DATA API GRANTS
+-- From 2026-10-30 Supabase no longer grants Data API access to new public
+-- tables automatically, so a table created by this file without these GRANTs
+-- is unreachable from supabase-js/PostgREST ("permission denied"). The grants
+-- only open the door; RLS above and add_privileged_column_guards.sql decide
+-- which rows and values each caller may touch.
+--   anon           read-only, and only on tables with a public SELECT policy
+--                  (no write policy matches anon: they all check auth.uid()).
+--   authenticated  full DML on community tables; the admin paths in both apps
+--                  run as authenticated too. Read-only on the PGP tables.
+--   service_role   everything (bypasses RLS; used by the import scripts).
+-- ============================================================================
+
+-- Community tables that anyone may read
+GRANT SELECT ON public.profiles, public.corrections, public.comments,
+    public.discoveries, public.fragment_joins,
+    public.correction_votes, public.discovery_votes
+    TO anon;
+
+-- Community tables (public-read and private, per-user)
+GRANT SELECT, INSERT, UPDATE, DELETE ON
+    public.profiles, public.projects, public.user_lists, public.list_items,
+    public.recent_items, public.corrections, public.comments,
+    public.discoveries, public.fragment_joins,
+    public.correction_votes, public.discovery_votes
+    TO authenticated, service_role;
+
+-- SERIAL ids: an INSERT through the API needs the sequence too
+GRANT USAGE, SELECT ON SEQUENCE
+    public.projects_id_seq, public.user_lists_id_seq, public.list_items_id_seq,
+    public.recent_items_id_seq, public.corrections_id_seq, public.comments_id_seq,
+    public.discoveries_id_seq, public.fragment_joins_id_seq,
+    public.correction_votes_id_seq, public.discovery_votes_id_seq
+    TO authenticated, service_role;
+
+-- PGP reference tables: public read; writes only via service_role imports
+GRANT SELECT ON public.documents, public.document_fragments TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.documents, public.document_fragments TO service_role;
+GRANT USAGE, SELECT ON SEQUENCE public.document_fragments_id_seq TO service_role;
+
+
+-- ============================================================================
 -- PART 3: FUNCTIONS AND TRIGGERS
 -- After this file, run migrations/add_privileged_column_guards.sql: its
 -- triggers are what stop a client changing role, reputation and the

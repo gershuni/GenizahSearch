@@ -3200,6 +3200,29 @@ TRANSLATIONS = {
     "Save current work?": "לשמור עבודה נוכחית?",
     "Save current puzzle before loading?": "לשמור פאזל נוכחי לפני טעינה?",
     "Save current puzzle before starting new?": "לשמור פאזל נוכחי לפני התחלת חדש?",
+    "Save current puzzle before quitting?": "לשמור פאזל נוכחי לפני היציאה?",
+    "Discard": "אל תשמור",
+    "The last changes to this join could not be saved.": "השינויים האחרונים בצירוף זה לא נשמרו.",
+    "The puzzle could not be saved. It is still on the canvas.": "לא ניתן היה לשמור את הפאזל. הוא עדיין על הקנבס.",
+    "Auto-save failed: the latest changes to this join are not saved.":
+        "השמירה האוטומטית נכשלה: השינויים האחרונים בצירוף זה לא נשמרו.",
+    "Auto-save failed": "השמירה האוטומטית נכשלה",
+    "The latest changes to this join could not be saved. They are still on the canvas. Saving is tried again after your next change, and you will be asked before you leave this join.":
+        "השינויים האחרונים בצירוף זה לא נשמרו. הם עדיין על הקנבס. השמירה תנוסה שוב אחרי השינוי הבא, ולפני שתעזבו את הצירוף תישאלו מה לעשות בהם.",
+    "The join could not be renamed.": "לא ניתן היה לשנות את שם הצירוף.",
+    "Fragments whose images could not be loaded: {}. They stay in the join.":
+        "קטעים שתמונותיהם לא נטענו: {}. הם נשארים בצירוף.",
+    "image not loaded": "התמונה לא נטענה",
+    "The canvas is empty, so the saved join keeps its fragments. Title and notes were saved.":
+        "הקנבס ריק, ולכן הצירוף השמור שומר על הקטעים שלו. הכותרת וההערות נשמרו.",
+    "The canvas is empty. Save only the title and notes? The saved join keeps its fragments.":
+        "הקנבס ריק. לשמור רק את הכותרת וההערות? הצירוף השמור ישמור על הקטעים שלו.",
+    "Folio {} of this manuscript is already in the puzzle.": "הדף {} של כתב יד זה כבר נמצא בפאזל.",
+    "Delete fragments?": "למחוק קטעים?",
+    "Remove {} fragments from the puzzle?": "להסיר {} קטעים מהפאזל?",
+    "Fragment deleted. Press Ctrl+Z to undo.": "הקטע נמחק. לחצו Ctrl+Z כדי לבטל.",
+    "{} fragments deleted. Press Ctrl+Z to undo.": "נמחקו {} קטעים. לחצו Ctrl+Z כדי לבטל.",
+    "Nothing to undo": "אין מה לבטל",
     "Save the puzzle before publishing": "שמרו את הפאזל לפני פרסום",
     "Save First": "שמירה תחילה",
     "No Fragments": "אין קטעים",

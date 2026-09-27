@@ -74,6 +74,8 @@ USING (auth.uid() = user_id);
 
 For public-read system tables, grant only the operations the app needs. For private/user-owned tables, grant role-level access broadly enough for the Data API to reach the table, then constrain rows with RLS policies.
 
+Since 2026-09-27 every tracked file that creates a `public` table carries its grants (`supabase_setup.sql` PART 2b, `migrations/add_pgp_documents_tables.sql`, `migrations/create_document_sources_table.sql`, `migrations/create_footnotes_table.sql`, and the two `scripts/create_*.sql` beta tables), so rebuilding the schema on a fresh project after 2026-10-30 yields reachable tables. Production was unaffected: its tables predate the change and keep their existing grants.
+
 ### Tables
 
 ```
