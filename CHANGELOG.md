@@ -4,7 +4,11 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [9.4.0] - 2026-09-28 — Data integrity
+
+A desktop release carrying the data-integrity work of the 2026-09-25 improvement sweep (saving,
+list sync, the Fragment Puzzle and the Joins Lab), with the web /lists fixes deployed alongside.
+The web hotfix and database hardening below went live on 2026-09-25.
 
 ### Desktop: the Fragment Puzzle and the Joins Lab keep your work (2026-09-27)
 

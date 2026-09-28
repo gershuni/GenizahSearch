@@ -157,8 +157,8 @@ class WhatsNewBar(QFrame):
         # one users notice on day one; everything else is "further improvements
         # and fixes", which is what the dialog is for.
         # v9.3.0: the owner's own sentence (2026-09-24).
-        self.lbl_msg.setText(tr(
-            "New: updated PGP data, a layout for small screens, interface improvements and bug fixes"))
+        # v9.4.0: the owner's own sentence (2026-09-28); the dialog says the rest.
+        self.lbl_msg.setText(tr("New: improvements to personal list sync, and more"))
         self.show()
 
     def on_learn_more(self):
@@ -291,15 +291,14 @@ class WhatsNewDialog(QDialog):
         layout.addWidget(title)
 
         is_heb = CURRENT_LANG == 'he'
-        # v9.3.0 (2026-09-24). Five bullets: PGP data, small screens, the viewer/Browse
-        # buttons, the Composition viewer filters, and the fixes. The letter-level
-        # restart fix is in the CHANGELOG and README only (owner).
+        # v9.4.0 (2026-09-28). Three bullets (owner: keep the first three of five):
+        # what list sync keeps, list sync in the background, and saved work. The
+        # Fragment Puzzle, log-out and "Post anonymously" items are in the CHANGELOG,
+        # README and GitHub release only.
         items = [
-            tr("Princeton Geniza Project data updated: 36,642 documents, and most fragments now link to their images."),
-            tr("Small screens and high zoom: buttons shrink to icons and then move to a \"More\" menu, results fit the window without scrolling sideways, and the viewer always opens on screen."),
-            tr("In the viewer and the Browse tab: open or copy a link to the page on genizahsearch.com, enlarge or shrink the text (A−/A+), and show or hide the transcription."),
-            tr("Composition Search: the viewer follows the result filters and shows each result's category."),
-            tr("Fixes: the Library and Shelfmark columns in the Excel export, filtered markers in the flat view, the other-side search in the Joins Lab, and Hebrew material names in Focus Search."),
+            tr("List sync keeps everything: an entry in two lists, and two pages of one manuscript, each keep their own copy in your account, and a note that differs is never overwritten; both versions are kept."),
+            tr("List sync runs in the background: every change uploads by itself, \"Sync lists now\" is on the Lists tab, and entries you remove here are removed from your account too. Entries removed on the website are shown to you and never removed silently."),
+            tr("Your work stays saved: lists, settings and language are saved safely and restored from a backup if a file is damaged; New keeps your Joins Lab work; excluded manuscripts stay hidden until New; only one copy of the program runs at a time."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)

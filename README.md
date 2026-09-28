@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 9.3.0
+# Dicta Genizah Search Pro 9.4.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,26 +8,28 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 9.3.0?
+## What's New in Version 9.4.0?
 
-**On the desktop** (installer 9.3.0):
+**On the desktop** (installer 9.4.0):
 
-- **Fresh Princeton Geniza Project data**: 36,642 documents, with linked images for 87% of
-  PGP fragments (was 57.5%)
-- **Fits small screens and 300% display scaling**: toolbars shrink to icons, then fold into a
-  "More" menu; results fit the window with no horizontal scroll; the viewer always opens on
-  screen
-- **Manuscript Viewer and Browse**: open or copy the page on genizahsearch.com, change the
-  text size (A−/A+), and show or hide the transcription
-- **The viewer follows your Composition filters** and shows each result's category
-- **Fixes**: Composition xlsx library/shelfmark columns, filtered markers in flat view, the
-  Joins Lab other-side search, Hebrew material names in Focus Search, and Composition Search
-  now remembers letter-level search after a restart
+- **List sync that keeps everything**: an entry in two lists, and two pages of one manuscript,
+  each keep their own copy in your account; a differing note is never overwritten (both versions
+  are kept)
+- **Sync in the background**: every list change uploads by itself, "Sync lists now" is on the
+  Lists tab, removals and moves reach your account, and entries removed on the website are
+  offered, never removed silently
+- **Saved work stays saved**: lists, settings and language are written safely with backup
+  recovery; New keeps the Joins Lab session; exclusions hold until New; one copy of the program
+  at a time
+- **Fragment Puzzle and Joins Lab**: the puzzle asks before dropping work and keeps fragments
+  whose images failed; Delete asks and Ctrl+Z undoes; no crash on quick Joins Lab page turns
+- **"Post anonymously" removed**: it was never saved; the website always showed the name
 
-**On the web**: the refreshed PGP data has been live since 2026-09-22.
+**On the web**: /lists notes, tags and Remove work again and show each entry's page (deployed
+with this installer).
 
 Earlier releases: [CHANGELOG.md](CHANGELOG.md). The README's previous What's New sections
-(8.1.0 to 9.2.1) are kept in [docs/archive/README_WHATS_NEW_ARCHIVE.md](docs/archive/README_WHATS_NEW_ARCHIVE.md).
+(8.1.0 to 9.3.0) are kept in [docs/archive/README_WHATS_NEW_ARCHIVE.md](docs/archive/README_WHATS_NEW_ARCHIVE.md).
 
 ---
 
@@ -101,7 +103,7 @@ Open the **GenizahSearch GPT** in ChatGPT from [genizahsearch.com/ai](https://ge
 
 ### Desktop Installation
 
-1. **Download:** the installer (`GenizahSearchPro_V9.3.0_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest)
+1. **Download:** the installer (`GenizahSearchPro_V9.4.0_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest)
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

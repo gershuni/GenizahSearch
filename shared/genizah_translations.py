@@ -5351,21 +5351,17 @@ TRANSLATIONS.update({
 })
 
 
-# v9.3.0 desktop What's New bar and dialog (2026-09-24). Hebrew: the owner's
+# v9.4.0 desktop What's New bar and dialog (2026-09-28). Hebrew: the owner's
 # own for the bar; the dialog bullets drafted for the release and approved.
 TRANSLATIONS.update({
-    "New: updated PGP data, a layout for small screens, interface improvements and bug fixes":
-        "חדש: נתוני PGP מעודכנים, תצוגה מותאמת לצגים קטנים, שיפורי ממשק ותיקוני באגים",
-    "Princeton Geniza Project data updated: 36,642 documents, and most fragments now link to their images.":
-        "נתוני פרויקט הגניזה של פרינסטון עודכנו: 36,642 מסמכים, ולרוב הקטעים יש כעת קישור לתמונות.",
-    "Small screens and high zoom: buttons shrink to icons and then move to a \"More\" menu, results fit the window without scrolling sideways, and the viewer always opens on screen.":
-        "מסכים קטנים והגדלה: הכפתורים מתכווצים לסמלים ואחר כך עוברים לתפריט „עוד\", התוצאות נכנסות לרוחב החלון בלי גלילה הצידה, והמציג נפתח תמיד בתוך המסך.",
-    "In the viewer and the Browse tab: open or copy a link to the page on genizahsearch.com, enlarge or shrink the text (A−/A+), and show or hide the transcription.":
-        "במציג ובלשונית העיון: פתיחת הדף באתר genizahsearch.com או העתקת קישור אליו, הגדלה והקטנה של הטקסט (A−/A+), והצגה או הסתרה של התעתיק.",
-    "Composition Search: the viewer follows the result filters and shows each result's category.":
-        "חיפוש חיבורים: המציג מכבד את סינוני התוצאות ומראה את הקטגוריה של כל תוצאה.",
-    "Fixes: the Library and Shelfmark columns in the Excel export, filtered markers in the flat view, the other-side search in the Joins Lab, and Hebrew material names in Focus Search.":
-        "תיקונים: עמודות הספרייה ומספר המדף בייצוא ל־Excel, סימון תוצאות מסוננות בתצוגה השטוחה, החיפוש בצד השני של הדף במעבדת הצירופים, ושמות החומרים בעברית ב„מקד חיפוש\".",
+    "New: improvements to personal list sync, and more":
+        "חדש: שיפורים בסנכרון רשימות אישיות ועוד.",
+    "List sync keeps everything: an entry in two lists, and two pages of one manuscript, each keep their own copy in your account, and a note that differs is never overwritten; both versions are kept.":
+        "סנכרון הרשימות שומר על הכול: פריט שנמצא בשתי רשימות, ושני עמודים של אותו כתב יד, נשמרים כל אחד בנפרד בחשבונך, והערה שונה לעולם אינה נדרסת – שתי הגרסאות נשמרות.",
+    "List sync runs in the background: every change uploads by itself, \"Sync lists now\" is on the Lists tab, and entries you remove here are removed from your account too. Entries removed on the website are shown to you and never removed silently.":
+        "הסנכרון פועל ברקע: כל שינוי עולה לחשבון מעצמו, „סנכרן רשימות עכשיו\" נמצא בלשונית הרשימות, ופריטים שהסרת כאן מוסרים גם מחשבונך. פריטים שהוסרו באתר מוצגים לך לבחירה, ולעולם אינם מוסרים בשקט.",
+    "Your work stays saved: lists, settings and language are saved safely and restored from a backup if a file is damaged; New keeps your Joins Lab work; excluded manuscripts stay hidden until New; only one copy of the program runs at a time.":
+        "העבודה שלך נשמרת: הרשימות, ההגדרות והשפה נשמרות בבטחה ומשוחזרות מגיבוי אם קובץ נפגע; „חדש\" שומר את העבודה במעבדת צירופים; כתבי יד שהוחרגו נשארים מוסתרים עד „חדש\"; ורק עותק אחד של התוכנה פועל בכל פעם.",
 })
 
 # Web What's New banner, v9.2.1 (2026-09-18): the GPT pilot went live.

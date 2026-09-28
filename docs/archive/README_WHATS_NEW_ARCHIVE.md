@@ -7,6 +7,24 @@ The authoritative release history is [CHANGELOG.md](../../CHANGELOG.md).
 
 ---
 
+## What's New in Version 9.3.0? (the README's own text, 2026-09-24 to 2026-09-28)
+
+**On the desktop** (installer 9.3.0):
+
+- **Fresh Princeton Geniza Project data**: 36,642 documents, with linked images for 87% of
+  PGP fragments (was 57.5%)
+- **Fits small screens and 300% display scaling**: toolbars shrink to icons, then fold into a
+  "More" menu; results fit the window with no horizontal scroll; the viewer always opens on
+  screen
+- **Manuscript Viewer and Browse**: open or copy the page on genizahsearch.com, change the
+  text size (A−/A+), and show or hide the transcription
+- **The viewer follows your Composition filters** and shows each result's category
+- **Fixes**: Composition xlsx library/shelfmark columns, filtered markers in flat view, the
+  Joins Lab other-side search, Hebrew material names in Focus Search, and Composition Search
+  now remembers letter-level search after a restart
+
+**On the web**: the refreshed PGP data has been live since 2026-09-22.
+
 ## What's New in Version 9.2.1? (the README's own text, 2026-09-18 to 2026-09-24)
 
 **On the web** (deployed 2026-09-17):
