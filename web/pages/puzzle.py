@@ -2064,11 +2064,13 @@ def _resolve_folios(sys_id: str) -> list:
 
 
 def _invalidate_and_refetch(fl_id: str, new_threshold: float):
-    """Invalidate the cached processed image and pre-fetch at a new threshold.
+    """Pre-fetch the processed image at a new threshold.
 
     Called when the user adjusts the background removal threshold slider.
-    Clears existing cached images for the given fl_id (all thresholds),
-    then triggers a new background removal at the specified threshold.
+    Every threshold has its own cache file, so nothing already cached is
+    removed: other thresholds, sizes and the original stay as they are, for
+    this visitor and everyone else. Only the new threshold's image is made
+    (if it is not cached yet).
 
     Args:
         fl_id: NLI folio leaf identifier.
@@ -2077,7 +2079,6 @@ def _invalidate_and_refetch(fl_id: str, new_threshold: float):
     try:
         from shared.puzzle_image_service import get_puzzle_image_service
         service = get_puzzle_image_service()
-        service.invalidate_cache(fl_id, threshold=None)
         # Pre-fetch at new threshold
         service.resolve_fragment_image(fl_id=fl_id, size=800, threshold=new_threshold, processed=True)
     except Exception as e:
