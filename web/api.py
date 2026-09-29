@@ -1820,16 +1820,31 @@ def init_api_routes(app_override=None):
 
     # === Puzzle Canvas API (Phase 49) ===
 
+    def _puzzle_image_response(image_bytes: bytes, browser_copy: bool) -> Response:
+        """An image answer. A browser's own copy is never marked shareable."""
+        content_type = 'image/png' if image_bytes[:4] == b'\x89PNG' else 'image/jpeg'
+        cache_control = "private, max-age=3600" if browser_copy else "public, max-age=3600"
+        return Response(content=image_bytes, media_type=content_type,
+                        headers={"Cache-Control": cache_control})
+
     @target_app.get('/api/puzzle_image')
-    def puzzle_image(fl_id: str, threshold: float = 30.0, size: int = 800,
+    def puzzle_image(request: Request, fl_id: str, threshold: float = 30.0, size: int = 800,
                      processed: bool = True, is_cul: bool = False):
         """Serve processed/original fragment image for puzzle canvas.
-        Tries server-side IIIF fetch (works on desktop/local dev).
+        Tries the shared cache, then the requesting browser's own uploads,
+        then a server-side IIIF fetch (works on desktop/local dev).
         Returns 404 if NLI blocks the server IP — the browser JS then
-        falls back to the localhost helper service for bg removal.
+        falls back to the extension / localhost helper service.
         """
-        from shared.puzzle_image_service import get_puzzle_image_service
+        from shared.puzzle_image_service import get_puzzle_image_service, normalize_request_params
+        from web.puzzle_image_access import browser_key_for_request
         service = get_puzzle_image_service()
+        size, threshold = normalize_request_params(size, threshold)
+        browser_key = browser_key_for_request(request)
+        cached = service.read_cached(fl_id, size, threshold, processed, is_cul,
+                                     browser_key=browser_key)
+        if cached is not None:
+            return _puzzle_image_response(*cached)
         image_bytes = service.resolve_fragment_image(
             fl_id=fl_id, size=size, threshold=threshold, processed=processed,
             is_cul=is_cul
@@ -1837,20 +1852,17 @@ def init_api_routes(app_override=None):
         if image_bytes is None:
             # Generate upload token so the browser extension can fetch + upload
             from web.puzzle_tokens import generate_upload_token
-            token = generate_upload_token(fl_id, threshold, is_cul)
+            token = generate_upload_token(fl_id, threshold, is_cul,
+                                          size=size, processed=processed)
             return Response(
                 content="Image not found", status_code=404,
                 headers={
                     "X-Puzzle-Upload-Token": token,
-                    "Access-Control-Expose-Headers": "X-Puzzle-Upload-Token"
+                    "Access-Control-Expose-Headers": "X-Puzzle-Upload-Token",
+                    "Cache-Control": "private, no-store",
                 }
             )
-        content_type = 'image/png' if image_bytes[:4] == b'\x89PNG' else 'image/jpeg'
-        return Response(
-            content=image_bytes,
-            media_type=content_type,
-            headers={"Cache-Control": "public, max-age=3600"}
-        )
+        return _puzzle_image_response(image_bytes, False)
 
     # In-memory rate limiter for puzzle upload endpoints
     _puzzle_rate_limits = {}  # IP -> (count, window_start_epoch)
@@ -1899,12 +1911,20 @@ def init_api_routes(app_override=None):
         """Process client-fetched image bytes with background removal.
         Fallback endpoint: client fetches IIIF image in the browser, POSTs
         raw bytes here for server-side bg removal + caching.
-        Requires a valid upload token from a prior GET /api/puzzle_image 404.
+        Requires a valid upload token from a prior GET /api/puzzle_image 404
+        for exactly the same image (fl_id, size, threshold, processed, is_cul).
+
+        Where the result is kept: a signed-in account's upload goes to the
+        shared cache (the account is recorded); a signed-out browser's is kept
+        for that browser only; with neither, nothing is kept.
         """
         import re as _re
-        from shared.puzzle_image_service import get_puzzle_image_service
+        from shared.puzzle_image_service import (
+            get_puzzle_image_service, normalize_request_params, STORED_SHARED,
+        )
         from shared.background_removal import remove_background
         from web.puzzle_tokens import verify_upload_token
+        from web.puzzle_image_access import browser_key_for_request, signed_in_user_id
         from PIL import Image as _PILImage
         import io as _io
 
@@ -1920,35 +1940,31 @@ def init_api_routes(app_override=None):
         if not fl_id or not _re.match(r'^[\d]+$', _re.sub(r'\D', '', fl_id)):
             return Response(content="Invalid fl_id", status_code=400)
 
-        # Verify upload token
-        upload_token = request.headers.get('X-Puzzle-Upload-Token', '')
-        if not verify_upload_token(upload_token, fl_id):
-            return Response(content="Invalid or expired upload token", status_code=403)
-
-        threshold = float(request.query_params.get('threshold', 30))
         is_cul = request.query_params.get('is_cul', 'false').lower() == 'true'
         processed = request.query_params.get('processed', 'true').lower() == 'true'
-        size = int(request.query_params.get('size', 800))
+        # Normalize BEFORE the token check, so the token is checked against
+        # the cache entry that would actually be written.
+        size, threshold = normalize_request_params(
+            request.query_params.get('size', 800),
+            request.query_params.get('threshold', 30),
+        )
 
-        # Clamp parameters to valid ranges
-        threshold = max(0, min(255, threshold))
-        # Validate size against known presets (400, 800, 1200, 2000)
-        valid_sizes = {400, 800, 1200, 2000}
-        if size not in valid_sizes:
-            size = min(valid_sizes, key=lambda s: abs(s - size))
-        size = max(100, min(2000, size))
+        # Verify upload token
+        upload_token = request.headers.get('X-Puzzle-Upload-Token', '')
+        if not verify_upload_token(upload_token, fl_id, size=size, threshold=threshold,
+                                   processed=processed, is_cul=is_cul):
+            return Response(content="Invalid or expired upload token", status_code=403)
 
-        # Check cache first
+        # Resolve who is uploading in the request context
+        user_id = signed_in_user_id()
+        browser_key = browser_key_for_request(request)
+
+        # Check cache first (shared, then this browser's own)
         service = get_puzzle_image_service()
-        cache_path = service.get_cache_path(fl_id, size, threshold, processed, is_cul)
-        if cache_path.exists():
-            try:
-                cached = cache_path.read_bytes()
-                content_type = 'image/png' if cached[:4] == b'\x89PNG' else 'image/jpeg'
-                return Response(content=cached, media_type=content_type,
-                                headers={"Cache-Control": "public, max-age=3600"})
-            except Exception:
-                pass  # Cache operation failed; continue without cached data
+        cached = service.read_cached(fl_id, size, threshold, processed, is_cul,
+                                     browser_key=browser_key)
+        if cached is not None:
+            return _puzzle_image_response(*cached)
 
         # Read and validate client-uploaded image bytes
         content_length = int(request.headers.get('content-length', 0))
@@ -1973,88 +1989,21 @@ def init_api_routes(app_override=None):
             return Response(content="Corrupt image data", status_code=400)  # Request processing failed; return error response
 
         if not processed:
-            # Cache original and return (validated as real image)
-            try:
-                cache_path.parent.mkdir(parents=True, exist_ok=True)
-                cache_path.write_bytes(raw_bytes)
-            except OSError:
-                pass
-            return Response(content=raw_bytes, media_type='image/jpeg',
-                            headers={"Cache-Control": "public, max-age=3600"})
-
-        # Apply background removal
-        try:
-            result_bytes = remove_background(raw_bytes, threshold=threshold, is_cul=is_cul)
-        except Exception:
-            result_bytes = raw_bytes  # Image processing failed; serve original bytes
-
-        # Cache result via versioned cache path
-        service.save_derivative_to_cache(fl_id, size, threshold, is_cul, result_bytes)
-
-        content_type = 'image/png' if result_bytes[:4] == b'\x89PNG' else 'image/jpeg'
-        return Response(content=result_bytes, media_type=content_type,
-                        headers={"Cache-Control": "public, max-age=3600"})
-
-    @target_app.post('/api/puzzle_upload_derivative')
-    async def puzzle_upload_derivative(request: Request):
-        """Accept pre-processed PNG bytes from desktop app or extension.
-        Saves directly to server cache without re-processing.
-        Requires valid upload token for cache poisoning prevention.
-        """
-        import re as _re
-        from shared.puzzle_image_service import get_puzzle_image_service
-        from web.puzzle_tokens import verify_upload_token
-        from PIL import Image as _PILImage
-        import io as _io
-
-        MAX_BODY_SIZE = 10 * 1024 * 1024  # 10 MB
-
-        # Rate limiting
-        rate_resp = _check_puzzle_rate_limit(request)
-        if rate_resp:
-            return rate_resp
-
-        fl_id = request.query_params.get('fl_id', '')
-        if not fl_id or not _re.match(r'^[\d]+$', _re.sub(r'\D', '', fl_id)):
-            return Response(content="Invalid fl_id", status_code=400)
-
-        # Verify upload token
-        upload_token = request.headers.get('X-Puzzle-Upload-Token', '')
-        if not verify_upload_token(upload_token, fl_id):
-            return Response(content="Invalid or expired upload token", status_code=403)
-
-        threshold = float(request.query_params.get('threshold', 30.0))
-        is_cul = request.query_params.get('is_cul', 'false').lower() == 'true'
-        size = int(request.query_params.get('size', 800))
-
-        # Read body
-        content_length = int(request.headers.get('content-length', 0))
-        if content_length > MAX_BODY_SIZE:
-            return Response(content="Image too large", status_code=413)
-
-        png_bytes = await request.body()
-        if not png_bytes or len(png_bytes) > MAX_BODY_SIZE:
-            return Response(content="No image data or too large", status_code=400)
-
-        # Validate PNG header
-        if png_bytes[:4] != b'\x89PNG':
-            return Response(content="Invalid PNG format", status_code=400)
-
-        # Verify Pillow can open it
-        try:
-            img = _PILImage.open(_io.BytesIO(png_bytes))
-            img.verify()
-        except Exception:
-            return Response(content="Corrupt image data", status_code=400)  # Request processing failed; return error response
-
-        # Save to cache
-        service = get_puzzle_image_service()
-        success = service.save_derivative_to_cache(fl_id, size, threshold, is_cul, png_bytes)
-        if success:
-            from starlette.responses import JSONResponse
-            return JSONResponse({"cached": True})
+            # Keep the original (validated as a real image) and return it
+            result_bytes = raw_bytes
         else:
-            return Response(content="Cache write failed", status_code=500)
+            # Apply background removal
+            try:
+                result_bytes = remove_background(raw_bytes, threshold=threshold, is_cul=is_cul)
+            except Exception:
+                result_bytes = raw_bytes  # Image processing failed; serve original bytes
+            if result_bytes[:4] != b'\x89PNG':
+                # Only a processed PNG belongs under a processed-image name.
+                return _puzzle_image_response(result_bytes, True)
+
+        stored = service.store_upload(fl_id, size, threshold, processed, is_cul, result_bytes,
+                                      user_id=user_id, browser_key=browser_key)
+        return _puzzle_image_response(result_bytes, stored != STORED_SHARED)
 
     def _fetch_provider_image(provider: str, sys_id: str, page: int):
         """Fetch raw image bytes from a library-specific IIIF source.
@@ -2290,7 +2239,8 @@ def init_api_routes(app_override=None):
             from starlette.responses import JSONResponse
             return JSONResponse({'error': 'no fragments'}, status_code=400)
 
-        img_svc = get_puzzle_image_service()
+        from web.puzzle_image_access import browser_key_for_request
+        img_svc = get_puzzle_image_service().for_browser(browser_key_for_request(request))
         result = compose_puzzle_export(fragments, img_svc, export_size=3000, margin=20)
         if result is None:
             from starlette.responses import JSONResponse
@@ -2302,7 +2252,8 @@ def init_api_routes(app_override=None):
         return Response(
             content=buf.getvalue(),
             media_type='image/png',
-            headers={'Content-Disposition': 'attachment; filename="puzzle_export.png"'}
+            headers={'Content-Disposition': 'attachment; filename="puzzle_export.png"',
+                     'Cache-Control': 'private, no-store'}
         )
 
     @target_app.get('/api/puzzle_thumbnail/{doc_id}')

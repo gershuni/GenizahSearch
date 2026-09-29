@@ -2224,6 +2224,10 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
     """
     # Add Fabric.js CDN and page-specific styles
     page_client = ui.context.client
+    # This browser's own uploaded images are used for its thumbnails, exports
+    # and publishing. Resolved here: worker threads have no page context.
+    from web.puzzle_image_access import browser_key_for_page
+    image_browser_key = browser_key_for_page()
     ui.add_head_html(FABRIC_JS_CDN)
     ui.add_head_html(PUZZLE_STYLES)
     ui.add_body_html(PUZZLE_CANVAS_JS)
@@ -2383,7 +2387,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         """Save document with thumbnail (runs in thread via io_bound)."""
         from shared.puzzle_export import generate_thumbnail
         from shared.puzzle_image_service import get_puzzle_image_service
-        img_svc = get_puzzle_image_service()
+        img_svc = get_puzzle_image_service().for_browser(image_browser_key)
         thumb = generate_thumbnail(fragments, img_svc, thumb_size=150)
         svc = get_puzzle_service(thread_safe=True)
         svc.save_document(doc, thumbnail_b64=thumb)
@@ -2700,7 +2704,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                     doc.title = title_input.value or doc.title
                     doc.notes = notes_input.value or ''
 
-                    img_svc = get_puzzle_image_service()
+                    img_svc = get_puzzle_image_service().for_browser(image_browser_key)
                     client = get_user_client()
                     published_id = await run.io_bound(publish_join, client, user_id, doc, img_svc)
                     doc_state['is_published'] = True
@@ -2744,7 +2748,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             from shared.puzzle_export import compose_puzzle_export, add_metadata_banner
             from shared.puzzle_image_service import get_puzzle_image_service
             import io
-            img_svc = get_puzzle_image_service()
+            img_svc = get_puzzle_image_service().for_browser(image_browser_key)
             result = compose_puzzle_export(fragments, img_svc, export_size=3000, margin=20)
             if result is None:
                 return None
