@@ -1838,6 +1838,9 @@ def init_api_routes(app_override=None):
         """
         from shared.puzzle_image_service import get_puzzle_image_service, normalize_request_params
         from web.puzzle_image_access import browser_key_for_request
+        if not _PUZZLE_FL_ID_RE.match(fl_id or ''):
+            return Response(content="Invalid fl_id", status_code=400,
+                            headers={"Cache-Control": "private, no-store"})
         service = get_puzzle_image_service()
         size, threshold = normalize_request_params(size, threshold)
         browser_key = browser_key_for_request(request)
@@ -1863,6 +1866,9 @@ def init_api_routes(app_override=None):
                 }
             )
         return _puzzle_image_response(image_bytes, False)
+
+    # NLI image ids as the puzzle names them: digits, optionally prefixed FL.
+    _PUZZLE_FL_ID_RE = re.compile(r'^(FL)?\d+$')
 
     # In-memory rate limiter for puzzle upload endpoints
     _puzzle_rate_limits = {}  # IP -> (count, window_start_epoch)
@@ -1918,7 +1924,6 @@ def init_api_routes(app_override=None):
         shared cache (the account is recorded); a signed-out browser's is kept
         for that browser only; with neither, nothing is kept.
         """
-        import re as _re
         from shared.puzzle_image_service import (
             get_puzzle_image_service, normalize_request_params, STORED_SHARED,
         )
@@ -1936,8 +1941,8 @@ def init_api_routes(app_override=None):
             return rate_resp
 
         fl_id = request.query_params.get('fl_id', '')
-        # Validate fl_id: must be digits only (NLI FL IDs are numeric)
-        if not fl_id or not _re.match(r'^[\d]+$', _re.sub(r'\D', '', fl_id)):
+        # Validate fl_id: an NLI FL ID (digits, optionally prefixed FL)
+        if not _PUZZLE_FL_ID_RE.match(fl_id):
             return Response(content="Invalid fl_id", status_code=400)
 
         is_cul = request.query_params.get('is_cul', 'false').lower() == 'true'
@@ -2035,9 +2040,12 @@ def init_api_routes(app_override=None):
         No HMAC token needed (same-origin only). BG removal uses the same HSV
         pipeline as NLI images (default threshold=30.0 for external libraries).
         """
-        from shared.puzzle_image_service import get_puzzle_image_service
+        from shared.puzzle_image_service import (
+            get_puzzle_image_service, normalize_request_params, _write_new_file,
+        )
         from shared.background_removal import remove_background
 
+        size, threshold = normalize_request_params(size, threshold)
         if not provider or not sys_id:
             return Response(content="Missing provider or sys_id", status_code=400)
 
@@ -2078,10 +2086,9 @@ def init_api_routes(app_override=None):
         else:
             result_bytes = raw_bytes
 
-        # Cache result
+        # Cache result (create only: an existing file is kept)
         try:
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_bytes(result_bytes)
+            _write_new_file(cache_path, result_bytes)
         except OSError:
             pass
 

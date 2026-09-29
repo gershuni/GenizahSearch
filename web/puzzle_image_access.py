@@ -9,6 +9,8 @@ uploads in one of two places:
 
 A browser is identified by its NiceGUI session id (``request.session['id']``,
 which is also ``app.storage.browser['id']`` on a page), prefixed ``'b:'``.
+A request that arrived without a session cookie has no browser key: the id
+the middleware mints for it would never be sent again.
 The account is ``GlobalAuthState.get_user_id()``.
 
 Resolve these in the request or page context, BEFORE any ``run.io_bound``:
@@ -23,6 +25,9 @@ logger = logging.getLogger(__name__)
 
 BROWSER_PREFIX = 'b:'
 
+# Starlette's SessionMiddleware cookie name (NiceGUI keeps the default).
+SESSION_COOKIE_NAME = 'session'
+
 
 def _browser_key_from_session_id(session_id: Any) -> Optional[str]:
     from web.session_hardening import is_canonical_session_id
@@ -32,7 +37,16 @@ def _browser_key_from_session_id(session_id: Any) -> Optional[str]:
 
 
 def browser_key_for_request(request) -> Optional[str]:
-    """The requesting browser's key, or None when it has no session."""
+    """The requesting browser's key, or None when it has no session.
+
+    Only a request that carried a session cookie has one: a request without
+    it is given a fresh id by the middleware, which no later request repeats.
+    """
+    try:
+        if not request.cookies.get(SESSION_COOKIE_NAME):
+            return None
+    except Exception:
+        return None
     try:
         session = request.session
     except (AssertionError, AttributeError):  # no session middleware

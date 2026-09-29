@@ -1,13 +1,15 @@
 # -*- coding: utf-8 -*-
-"""Fragment Puzzle page: the PNG export is sent straight to the browser.
+"""Fragment Puzzle page: exports, thumbnails and publishing use this browser's images.
 
 Drives the real /puzzle page with a NiceGUI User: one fragment is restored
-from the tab's saved canvas, the Export PNG button is clicked, and the
-download that reaches the browser is captured.
+from the tab's saved canvas, then the Export PNG, Save or Publish button is
+clicked and what reaches the browser (or the shared code) is captured.
 
 * The export arrives as the PNG bytes themselves (no file on disk, no URL).
 * The export draws this browser's own uploaded image when the shared cache
   has none.
+* Saving a join draws its thumbnail with this browser's images, and so does
+  publishing it.
 """
 from __future__ import annotations
 
@@ -162,5 +164,112 @@ def test_png_export_uses_this_browsers_own_image(image_service, downloads):
         src, _filename, _media_type = await _wait_for(downloads)
         assert isinstance(src, bytes)
         assert src[:4] == b'\x89PNG'
+
+    _run(driver)
+
+
+def _click_button(user, predicate):
+    with user._client:
+        buttons = [el for el in user._client.elements.values()
+                   if isinstance(el, ui.button) and predicate(el)]
+        assert len(buttons) == 1, len(buttons)
+        for listener in buttons[0]._event_listeners.values():
+            if listener.type == 'click':
+                events.handle_event(listener.handler, events.GenericEventArguments(
+                    sender=buttons[0], client=user._client, args=None))
+
+
+def _icon(name):
+    return lambda el: (el._props or {}).get('icon') == name
+
+
+def _text(label):
+    return lambda el: getattr(el, 'text', None) == label
+
+
+async def _wait_until(check, timeout=15.0):
+    deadline = asyncio.get_running_loop().time() + timeout
+    while not check():
+        if asyncio.get_running_loop().time() > deadline:
+            raise AssertionError('timed out')
+        await asyncio.sleep(0.1)
+
+
+@pytest.fixture
+def joins_service(tmp_path, monkeypatch):
+    import shared.puzzle_service as ps
+    service = ps.PuzzleService(db_path=str(tmp_path / 'joins.db'), thread_safe=True)
+    monkeypatch.setattr(ps, 'get_puzzle_service', lambda thread_safe=False: service)
+    return service
+
+
+@pytest.fixture
+def thumbnail_services(monkeypatch):
+    import shared.puzzle_export as pe
+    captured = []
+
+    def _capture(fragments, image_service, thumb_size=150):
+        captured.append(image_service)
+        return ''
+
+    monkeypatch.setattr(pe, 'generate_thumbnail', _capture)
+    return captured
+
+
+def _put_own_image(image_service, session_id, color):
+    own = image_service.get_browser_cache_path('b:' + session_id, FL, 800, 30.0, True, False)
+    own.parent.mkdir(parents=True, exist_ok=True)
+    data = _png(color)
+    own.write_bytes(data)
+    return data
+
+
+async def _save_join(user):
+    _click_button(user, _icon('save'))
+    await asyncio.sleep(0.3)
+    _click_button(user, _text('Save'))
+
+
+def test_saving_a_join_draws_its_thumbnail_with_this_browsers_images(
+        image_service, joins_service, thumbnail_services):
+    async def driver(user):
+        session_id = await _open_with_one_fragment(user)
+        own = _put_own_image(image_service, session_id, (30, 160, 60, 255))
+        await _save_join(user)
+        await _wait_until(lambda: thumbnail_services)
+        drawn = thumbnail_services[-1].resolve_fragment_image(FL, 800, 30.0, True, False)
+        assert drawn == own
+
+    _run(driver)
+
+
+def test_publishing_a_join_draws_it_with_this_browsers_images(
+        image_service, joins_service, thumbnail_services, monkeypatch):
+    import shared.puzzle_publish_service as pps
+    import web.supabase_client as supabase_client
+    from web.auth_state import GlobalAuthState
+    published = []
+
+    def _publish(client, user_id, doc, img_svc):
+        published.append(img_svc)
+        return 'published-join-1'
+
+    monkeypatch.setattr(pps, 'publish_join', _publish)
+    monkeypatch.setattr(supabase_client, 'get_user_client', lambda: object())
+
+    async def driver(user):
+        session_id = await _open_with_one_fragment(user)
+        own = _put_own_image(image_service, session_id, (90, 30, 160, 255))
+        await _save_join(user)
+        await _wait_until(lambda: thumbnail_services)
+        await asyncio.sleep(0.3)
+        monkeypatch.setattr(GlobalAuthState, 'is_logged_in', classmethod(lambda cls: True))
+        monkeypatch.setattr(GlobalAuthState, 'get_user_id', classmethod(lambda cls: 'account-x'))
+        _click_button(user, _icon('publish'))
+        await asyncio.sleep(0.3)
+        _click_button(user, _text('Publish'))
+        await _wait_until(lambda: published)
+        drawn = published[-1].resolve_fragment_image(FL, 800, 30.0, True, False)
+        assert drawn == own
 
     _run(driver)

@@ -23,10 +23,12 @@ The desktop app never passes a browser key, so it sees only the shared cache.
 """
 
 import hashlib
+import io
 import json
 import logging
 import os
 import re
+import tempfile
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -129,16 +131,80 @@ def normalize_request_params(size, threshold):
 def _write_new_file(path: Path, data: bytes) -> bool:
     """Create ``path`` with ``data``. Never replaces an existing file.
 
+    The bytes are written to a temporary file in the same directory first and
+    only then given the final name, so a reader never sees a half-written file
+    and a failed write leaves nothing under ``path``.
+
     Returns True if this call created the file, False if a file of that name
     already existed. Other OS errors propagate.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix='.partial-')
+    os.close(fd)
+    tmp = Path(tmp_name)
     try:
-        with open(path, 'xb') as fh:
+        with io.open(tmp, 'wb') as fh:
             fh.write(data)
-    except FileExistsError:
+        try:
+            # A hard link gives the final name atomically and fails if it exists.
+            os.link(tmp, path)
+            return True
+        except FileExistsError:
+            return False
+        except (OSError, NotImplementedError, AttributeError):
+            pass  # no hard links on this file system: fall through
+        created = False
+        try:
+            with io.open(path, 'xb') as fh:
+                created = True
+                fh.write(data)
+        except FileExistsError:
+            if not created:
+                return False
+            raise
+        except BaseException:
+            if created:
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+            raise
+        return True
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
+# Image hosts a direct image URL may point at: the libraries whose IIIF images
+# the puzzle shows (NLI, Cambridge, Manchester, Oxford, Princeton/JTS).
+DIRECT_IMAGE_HOST_SUFFIXES = (
+    'nli.org.il',
+    'cam.ac.uk',
+    'manchester.ac.uk',
+    'ox.ac.uk',
+    'princeton.edu',
+    'jtsa.edu',
+)
+
+
+def is_allowed_image_url(url: str) -> bool:
+    """True if ``url`` is an http(s) URL on one of the known library image hosts."""
+    try:
+        parsed = urlparse(str(url))
+        host = (parsed.hostname or '').lower().rstrip('.')
+        port = parsed.port
+    except ValueError:
         return False
-    return True
+    if parsed.scheme not in ('http', 'https') or not host:
+        return False
+    if parsed.username is not None or parsed.password is not None:
+        return False
+    if port is not None and port not in (80, 443):
+        return False
+    return any(host == suffix or host.endswith('.' + suffix)
+               for suffix in DIRECT_IMAGE_HOST_SUFFIXES)
 
 
 def _browser_dir_name(browser_key: str) -> str:
@@ -295,8 +361,16 @@ class PuzzleImageService:
         Returns:
             Image bytes (RGBA PNG if processed, JPEG if original), or None on failure.
         """
-        # Determine cache key — use fl_id for NLI, safe filename of URL for external
-        cache_id = fl_id if fl_id else _safe_filename(image_url[:120])
+        # Determine cache key: an image fetched from a direct URL is named after
+        # that URL, an NLI image after its fl_id. A URL-fetched image is never
+        # stored under an fl_id name.
+        if image_url:
+            if not is_allowed_image_url(image_url):
+                logger.warning("Direct image URL on an unknown host refused: %s", image_url[:80])
+                image_url = ''
+                if not fl_id:
+                    return None
+        cache_id = _safe_filename(image_url[:120]) if image_url else fl_id
         if not cache_id:
             return None
 
@@ -352,6 +426,9 @@ class PuzzleImageService:
             url = image_url  # Already a complete image URL
         else:
             url = f"{image_url}/full/{size},/0/default.jpg"
+        if not is_allowed_image_url(url):
+            logger.warning(f"Direct IIIF fetch refused (unknown host) for {image_url[:80]}")
+            return None
 
         # Phase 98 D-20: host-conditional breaker scoping. urlparse is evaluated
         # AFTER URL construction so a caller cannot smuggle a different host past
