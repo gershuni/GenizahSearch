@@ -279,7 +279,7 @@ def _redirect_location(resp) -> Optional[str]:
     return location if isinstance(location, str) and location else None
 
 
-def get_with_checked_redirects(url: str, *, allowed=None,
+def get_with_checked_redirects(url: str, *, allowed=None, session=None,
                                max_hops: int = MAX_REDIRECT_HOPS, **kwargs):
     """``requests.get`` that follows redirects one hop at a time.
 
@@ -287,7 +287,8 @@ def get_with_checked_redirects(url: str, *, allowed=None,
     ``allowed`` (default: ``is_allowed_image_url``) before it is requested;
     each request is made with ``allow_redirects=False``. Raises
     ``RedirectNotFollowed`` for a URL that does not pass, or after
-    ``max_hops`` redirects. Other keyword arguments go to ``requests.get``.
+    ``max_hops`` redirects. Other keyword arguments go to ``requests.get``
+    (or to ``session.get`` when a ``requests.Session`` is given).
     """
     allowed = allowed or is_allowed_image_url
     kwargs.pop('allow_redirects', None)
@@ -295,7 +296,8 @@ def get_with_checked_redirects(url: str, *, allowed=None,
     for _hop in range(max_hops + 1):
         if not allowed(current):
             raise RedirectNotFollowed(f"not an allowed image host: {current[:80]}")
-        resp = requests.get(current, allow_redirects=False, **kwargs)
+        getter = session.get if session is not None else requests.get
+        resp = getter(current, allow_redirects=False, **kwargs)
         location = _redirect_location(resp)
         if location is None:
             return resp
@@ -481,6 +483,18 @@ class PuzzleImageService:
         flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, 'O_BINARY', 0)
         try:
             with _manifest_lock:
+                # A line cut short by an earlier failed write must not swallow
+                # this record: start on a new line if the file does not end
+                # with one.
+                try:
+                    with open(manifest, 'rb') as existing:
+                        existing.seek(0, os.SEEK_END)
+                        if existing.tell() > 0:
+                            existing.seek(-1, os.SEEK_END)
+                            if existing.read(1) != b'\n':
+                                encoded = b'\n' + encoded
+                except FileNotFoundError:
+                    pass
                 fd = os.open(str(manifest), flags, 0o644)
                 try:
                     written = os.write(fd, encoded)

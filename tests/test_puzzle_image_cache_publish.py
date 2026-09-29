@@ -900,3 +900,92 @@ def test_the_provider_image_route_leaves_the_image_uncached_without_hard_links(
 ])
 def test_known_hosts_match_only_on_a_dot_boundary(pis, url, ok):
     assert pis.is_allowed_image_url(url) is ok
+
+
+def test_a_record_cut_off_mid_line_does_not_swallow_the_next_record(tmp_path, pis):
+    """If an earlier write left a partial line, the next upload's record still
+    starts on its own line and can be read."""
+    cache = tmp_path / 'puzzle'
+    service = pis.PuzzleImageService(cache_dir=cache)
+    cache.mkdir(parents=True, exist_ok=True)
+    (cache / pis.UPLOAD_MANIFEST_NAME).write_bytes(b'{"file": "earlier.png", "user')
+
+    stored = service.store_upload(FL, 800, 30.0, False, False, _jpeg((41, 42, 43)),
+                                  user_id='account-a')
+
+    assert stored == pis.STORED_SHARED
+    lines = (cache / pis.UPLOAD_MANIFEST_NAME).read_bytes().split(b'\n')
+    records = []
+    for raw in lines:
+        try:
+            records.append(json.loads(raw))
+        except ValueError:
+            pass
+    shared = service.get_cache_path(FL, 800, 30.0, False, False).name
+    assert [r['file'] for r in records if r.get('user_id') == 'account-a'] == [shared]
+
+
+@pytest.mark.parametrize('redirected', ['iiif', 'rosetta'])
+def test_the_nli_image_route_does_not_follow_a_redirect_off_the_library_hosts(
+        tmp_path, pis, monkeypatch, redirected):
+    from shared import nli_circuit_breaker
+    other_png = 'https://images.example.org/thumb.png'
+    routes = {
+        OTHER_FULL: _Resp(200, BIG_IMAGE),
+        other_png: _Resp(200, BIG_IMAGE, content_type='image/png'),
+    }
+    if redirected == 'iiif':
+        routes[NLI_2000] = _Resp(302, location=OTHER_FULL)
+        routes[ROSETTA_THUMB] = _Resp(404, b'', content_type='text/html')
+    else:
+        routes[NLI_2000] = _Resp(404, b'', content_type='text/html')
+        routes[ROSETTA_THUMB] = _Resp(302, location=other_png)
+    calls = []
+    monkeypatch.setattr(pis.requests, 'get', _fake_web(routes, calls))
+    client = _api_app(tmp_path, pis, monkeypatch)
+
+    got = client.get(f'/api/nli_image/FL{FL}')
+
+    assert got.status_code == 404
+    assert calls and all(flag is False for _, flag in calls)
+    assert not any('example.org' in url for url, _ in calls)
+    assert nli_circuit_breaker._state_snapshot()['consecutive_failures'] == 0
+
+
+@pytest.mark.parametrize('redirected', ['manifest', 'marc'])
+def test_the_fl_id_lookup_does_not_follow_a_redirect_off_the_library_hosts(
+        tmp_path, pis, monkeypatch, redirected):
+    import web.api as api_mod
+    from shared import nli_circuit_breaker
+    sys_id = '990000000000' + {'manifest': '991', 'marc': '992'}[redirected]
+    manifest_url = f'https://iiif.nli.org.il/IIIFv21/DOCID/PNX_MANUSCRIPTS{sys_id}-1/manifest'
+    marc_url = f'https://iiif.nli.org.il/IIIFv21/marc/bib/{sys_id}'
+    other = 'https://images.example.org/other.json'
+
+    class _Text(_Resp):
+        text = f'FL{FL}'
+
+        def json(self):
+            return {'sequences': [{'canvases': [{'images': [{'resource': {
+                'service': {'@id': f'https://iiif.nli.org.il/IIIFv21/FL{FL}'}}}]}]}]}
+
+    routes = {other: _Text(200, b'x', content_type='application/json')}
+    if redirected == 'manifest':
+        routes[manifest_url] = _Resp(302, location=other)
+        routes[marc_url] = _Resp(404, b'', content_type='text/html')
+    else:
+        routes[manifest_url] = _Resp(404, b'', content_type='text/html')
+        routes[marc_url] = _Resp(302, location=other)
+    calls = []
+    fake = _fake_web(routes, calls)
+    monkeypatch.setattr(api_mod._nli_session, 'get', lambda url, *a, **kw: fake(url, *a, **kw))
+    monkeypatch.setattr(api_mod, '_save_nli_persistent_cache', lambda *a, **kw: None)
+    client = _api_app(tmp_path, pis, monkeypatch)
+
+    got = client.get(f'/api/fl_ids/{sys_id}')
+
+    assert got.status_code == 200
+    assert calls and all(flag is False for _, flag in calls)
+    assert not any('example.org' in url for url, _ in calls)
+    assert FL not in got.text
+    assert nli_circuit_breaker._state_snapshot()['consecutive_failures'] == 0

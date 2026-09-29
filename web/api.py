@@ -12,6 +12,7 @@ import requests
 import requests.adapters
 
 from shared.nli_fetch import RedirectNotAllowed, nli_image_get
+from shared.puzzle_image_service import RedirectNotFollowed
 import re
 import os
 import threading
@@ -796,8 +797,11 @@ def init_api_routes(app_override=None):
         url = f"https://iiif.nli.org.il/IIIFv21/DOCID/PNX_MANUSCRIPTS{system_id}-{suffix}/manifest"
         try:
             # Phase 98 D-14: env-driven (connect, read) tuple replaces hard-coded timeout=15.
-            resp = _nli_session.get(
+            # Every redirect hop must stay on the library hosts.
+            from shared.puzzle_image_service import get_with_checked_redirects
+            resp = get_with_checked_redirects(
                 url,
+                session=_nli_session,
                 timeout=(NLI_CONNECT_TIMEOUT, NLI_IIIF_READ_TIMEOUT),
                 verify=True,
             )
@@ -844,6 +848,9 @@ def init_api_routes(app_override=None):
                 _nli_record_failure(failure_type='5xx', path='fetch_fl_ids_from_nli')
                 logger.warning(f"NLI {resp.status_code} for {cache_key}")
             # 404 / other 4xx / non-200 with no fl_ids → negative cache only, no breaker (D-07).
+        except RedirectNotFollowed as e:
+            # Not an NLI outage: no breaker failure.
+            logger.warning(f"NLI manifest redirect not followed for {cache_key}: {e}")
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
             logger.error(f"Failed to fetch FL IDs from IIIF manifest for {cache_key}: {e}")
             failure_type = 'timeout' if isinstance(e, requests.exceptions.Timeout) else 'connection_error'
@@ -858,8 +865,10 @@ def init_api_routes(app_override=None):
             try:
                 marc_url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"
                 # Phase 98 D-15: env-driven (connect, read) tuple replaces hard-coded timeout=10.
-                resp = _nli_session.get(
+                from shared.puzzle_image_service import get_with_checked_redirects
+                resp = get_with_checked_redirects(
                     marc_url,
+                    session=_nli_session,
                     timeout=(NLI_CONNECT_TIMEOUT, NLI_MARC_READ_TIMEOUT),
                     verify=True,
                 )
@@ -889,6 +898,8 @@ def init_api_routes(app_override=None):
                 elif 500 <= resp.status_code < 600:
                     _nli_record_failure(failure_type='5xx', path='fetch_fl_ids_from_nli')
                     logger.warning(f"NLI MARC {resp.status_code} for {system_id}")
+            except RedirectNotFollowed as e:
+                logger.warning(f"NLI MARC redirect not followed for {system_id}: {e}")
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                 logger.error(f"MARC fallback also failed for {system_id}: {e}")
                 failure_type = 'timeout' if isinstance(e, requests.exceptions.Timeout) else 'connection_error'
@@ -936,8 +947,9 @@ def init_api_routes(app_override=None):
         # Try IIIF first (works for valid FL IDs, returns real images)
         iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/2000,/0/default.jpg"
         try:
-            # Phase 98 D-16: bounded image timeout
-            resp = requests.get(
+            # Phase 98 D-16: bounded image timeout; every redirect hop checked.
+            from shared.puzzle_image_service import get_with_checked_redirects
+            resp = get_with_checked_redirects(
                 iiif_url,
                 headers=headers,
                 timeout=(NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT),
@@ -964,6 +976,8 @@ def init_api_routes(app_override=None):
                     resp.status_code, digits,
                 )
             # 404 / other → fall through to Rosetta
+        except RedirectNotFollowed as e:
+            logger.warning(f"IIIF redirect not followed for FL{digits}: {e}")
         except requests.exceptions.Timeout as e:
             logger.error(f"IIIF timeout for FL{digits}: {e}")
             _nli_record_failure(failure_type='timeout', path='nli_image')
@@ -980,8 +994,9 @@ def init_api_routes(app_override=None):
             return Response(content="Image not found", status_code=404)
         rosetta_url = f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=thumbnail&dps_pid=FL{digits}"
         try:
-            # Phase 98 D-16: bounded image timeout
-            resp = requests.get(
+            # Phase 98 D-16: bounded image timeout; every redirect hop checked.
+            from shared.puzzle_image_service import get_with_checked_redirects
+            resp = get_with_checked_redirects(
                 rosetta_url,
                 headers=headers,
                 timeout=(NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT),
@@ -1005,6 +1020,8 @@ def init_api_routes(app_override=None):
                     "NLI Rosetta non-success status %s for FL%s (returning 404)",
                     resp.status_code, digits,
                 )
+        except RedirectNotFollowed as e:
+            logger.warning(f"Rosetta redirect not followed for FL{digits}: {e}")
         except requests.exceptions.Timeout as e:
             logger.error(f"Rosetta timeout for FL{digits}: {e}")
             _nli_record_failure(failure_type='timeout', path='nli_image')
