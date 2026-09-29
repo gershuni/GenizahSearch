@@ -248,10 +248,18 @@ def _apply_user_auth_to_client(client: Client, access_token: str) -> None:
     upload path in the codebase:
       - PostgREST  -> `client.postgrest.auth(token)` (postgrest/base_client.py:37-54, local-only).
       - Functions  -> `client.functions.set_auth(token)` (supabase_functions/_sync/functions_client.py:111, local-only).
-      - Storage    -> direct header mutation; no supabase-py helper exists,
-                     but `client.storage.session.headers` is a writable
-                     httpx Headers dict. Authenticated uploads
-                     (shared/puzzle_publish_service.py:81, 152) use this.
+      - Storage    -> direct header mutation; no supabase-py helper exists.
+                     The token must go into the storage client's own header
+                     set (`client.storage._headers`): `from_()` hands it to
+                     every bucket, and storage3 sends it with each request,
+                     where it overrides the session's default headers. Setting
+                     only `client.storage.session.headers` (as this did until
+                     2026-09-29) left every upload and removal on the anon
+                     key, so Storage refused publishing (a row-level policy
+                     error). Authenticated uploads:
+                     shared/puzzle_publish_service.py publish_join /
+                     unpublish_join; tests/test_puzzle_publish_storage_auth.py
+                     checks the header that reaches the wire.
 
     Codex round-1 F1 catch (storage path completeness): Claude's original
     proposal of "PostgREST + functions covers everything" was false -- the
@@ -260,7 +268,9 @@ def _apply_user_auth_to_client(client: Client, access_token: str) -> None:
     bearer = f"Bearer {access_token}"
     client.postgrest.auth(access_token)
     client.functions.set_auth(access_token)
-    client.storage.session.headers["Authorization"] = bearer
+    storage = client.storage
+    storage._headers["Authorization"] = bearer
+    storage.session.headers["Authorization"] = bearer
 
 
 def _access_token_near_expiry(access_token: str, skew_sec: int = REFRESH_SKEW_SEC) -> bool:
