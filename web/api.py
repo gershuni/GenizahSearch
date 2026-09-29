@@ -1063,9 +1063,13 @@ def init_api_routes(app_override=None):
             if _nli_circuit_is_open():
                 return None
             iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}/full/{width},/0/default.jpg"
+            from shared.puzzle_image_service import (
+                RedirectNotFollowed, get_with_checked_redirects, is_allowed_image_url,
+            )
             try:
-                # Phase 98 D-17: bounded image timeout
-                resp = requests.get(
+                # Phase 98 D-17: bounded image timeout. Each redirect hop is
+                # checked against the library image hosts.
+                resp = get_with_checked_redirects(
                     iiif_url,
                     headers=headers,
                     timeout=(NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT),
@@ -1089,6 +1093,8 @@ def init_api_routes(app_override=None):
                 _nli_record_failure(failure_type='timeout', path='_fetch_nli_image_bytes')
             except requests.exceptions.ConnectionError:
                 _nli_record_failure(failure_type='connection_error', path='_fetch_nli_image_bytes')
+            except RedirectNotFollowed:
+                pass  # a redirect off the library image hosts; not an NLI outage
             except requests.exceptions.RequestException:
                 _nli_record_failure(failure_type='request_error', path='_fetch_nli_image_bytes')
 
@@ -1124,6 +1130,7 @@ def init_api_routes(app_override=None):
                     rosetta_thumb,
                     headers=headers,
                     timeout=(NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT),
+                    allowed_url=is_allowed_image_url,
                 )
                 ct2 = (r2.headers.get('Content-Type', '') or '').split(';', 1)[0].strip()
                 if r2.status_code == 200 and ct2.startswith('image/'):
@@ -1401,7 +1408,9 @@ def init_api_routes(app_override=None):
         }
 
         try:
-            resp = requests.get(img_url, headers=headers, timeout=30, verify=True)
+            # Each redirect hop is checked against the library image hosts.
+            from shared.puzzle_image_service import get_with_checked_redirects
+            resp = get_with_checked_redirects(img_url, headers=headers, timeout=30, verify=True)
             if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
                 content_type = resp.headers.get('Content-Type', 'image/jpeg')
                 extra_headers = {}
@@ -1468,7 +1477,9 @@ def init_api_routes(app_override=None):
         }
 
         try:
-            resp = requests.get(img_url, headers=headers, timeout=30, verify=True)
+            # Each redirect hop is checked against the library image hosts.
+            from shared.puzzle_image_service import get_with_checked_redirects
+            resp = get_with_checked_redirects(img_url, headers=headers, timeout=30, verify=True)
             if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
                 content_type = resp.headers.get('Content-Type', 'image/jpeg')
                 _manchester_image_cache.set(cache_key, (resp.content, content_type))
@@ -1524,7 +1535,9 @@ def init_api_routes(app_override=None):
         }
 
         try:
-            resp = requests.get(img_url, headers=headers, timeout=30, verify=True)
+            # Each redirect hop is checked against the library image hosts.
+            from shared.puzzle_image_service import get_with_checked_redirects
+            resp = get_with_checked_redirects(img_url, headers=headers, timeout=30, verify=True)
             if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
                 content_type = resp.headers.get('Content-Type', 'image/jpeg')
                 _jts_image_cache.set(cache_key, (resp.content, content_type))
@@ -1642,7 +1655,9 @@ def init_api_routes(app_override=None):
         }
 
         try:
-            resp = requests.get(img_url, headers=headers, timeout=30, verify=True)
+            # Each redirect hop is checked against the library image hosts.
+            from shared.puzzle_image_service import get_with_checked_redirects
+            resp = get_with_checked_redirects(img_url, headers=headers, timeout=30, verify=True)
             if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
                 content_type = resp.headers.get('Content-Type', 'image/jpeg')
                 # Cache the image
@@ -1850,7 +1865,7 @@ def init_api_routes(app_override=None):
             return _puzzle_image_response(*cached)
         image_bytes = service.resolve_fragment_image(
             fl_id=fl_id, size=size, threshold=threshold, processed=processed,
-            is_cul=is_cul
+            is_cul=is_cul, web=True,
         )
         if image_bytes is None:
             # Generate upload token so the browser extension can fetch + upload
@@ -2191,6 +2206,14 @@ def init_api_routes(app_override=None):
                      'Cache-Control': 'private, no-store'}
         )
 
+    def _proxy_url_allowed(candidate: str) -> bool:
+        """An http(s) URL whose host is one of ALLOWED_IMAGE_DOMAINS."""
+        try:
+            parsed = urlparse(candidate)
+        except ValueError:
+            return False
+        return parsed.scheme in ('http', 'https') and parsed.netloc in ALLOWED_IMAGE_DOMAINS
+
     @target_app.get('/api/proxy_image')
     def proxy_image(url: str):
         """
@@ -2230,7 +2253,12 @@ def init_api_routes(app_override=None):
             # retained for non-NLI hosts (Cambridge etc. have different latency
             # profiles and have not exhibited the threadpool-saturation pattern).
             timeout = (NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT) if is_nli_host else 15
-            resp = requests.get(url, headers=headers, timeout=timeout, verify=True)
+            # Each redirect hop must stay on the allowed image domains.
+            from shared.puzzle_image_service import get_with_checked_redirects
+            resp = get_with_checked_redirects(
+                url, allowed=_proxy_url_allowed,
+                headers=headers, timeout=timeout, verify=True,
+            )
             if resp.status_code == 200:
                 if is_nli_host:
                     _nli_record_success(path='proxy_image')

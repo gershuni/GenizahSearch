@@ -214,7 +214,7 @@ def test_a_url_image_is_cached_under_its_url_name(tmp_path, monkeypatch):
     monkeypatch.setattr(pis.requests, 'get', lambda url, **kwargs: _FakeResponse(body))
     url = 'https://images.lib.cam.ac.uk/iiif/MS-TS-00001-00001-000-00001.jp2'
 
-    got = service.resolve_fragment_image(FL, size=800, processed=False, image_url=url)
+    got = service.resolve_fragment_image(FL, size=800, processed=False, image_url=url, web=True)
 
     assert got == body
     assert not service.get_cache_path(FL, 800, 30.0, False, False).exists()
@@ -241,7 +241,8 @@ def test_only_known_library_image_hosts_are_fetched(tmp_path, monkeypatch, url):
 
     monkeypatch.setattr(pis.requests, 'get', _fake_get)
 
-    assert service.resolve_fragment_image('', size=800, processed=False, image_url=url) is None
+    assert service.resolve_fragment_image('', size=800, processed=False, image_url=url,
+                                          web=True) is None
     assert fetched == []
 
 

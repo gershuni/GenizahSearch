@@ -13,13 +13,28 @@ Cache location:
   - Development/other: {project_root}/cache/puzzle/
 
 Images a web browser uploads (``store_upload``):
-  - from a signed-in account: into the shared cache above, and one line is
-    appended to ``_uploads.jsonl`` in the cache directory recording the file,
-    the account id and the UTC time;
+  - from a signed-in account: one line recording the file name, the account
+    id, the UTC time and the SHA-256 of the bytes is appended to
+    ``_uploads.jsonl`` in the cache directory and flushed to disk; only then
+    is the file given its name in the shared cache above. If the line cannot
+    be written the image is not shared (it is kept for the uploading browser
+    only, when there is one). A line whose SHA-256 differs from the file of
+    that name records an upload that arrived after another copy was cached;
+    the earlier file was kept;
   - from a signed-out browser: into ``_browser/<hash of the browser key>/``,
     and only that browser is given them back (``browser_key=`` lookups).
 A lookup always tries the shared file first, then the requester's own.
-The desktop app never passes a browser key, so it sees only the shared cache.
+
+Web and desktop rules. The web app asks with ``web=True`` (or through
+``for_browser``): an image fetched from a direct URL is filed under that URL's
+name, only known library image hosts are fetched, every redirect is followed
+one hop at a time and each hop is checked against the same host list, and a
+file is written only by an atomic create-only step (never a direct write to
+the final name; where that step is not available the result is not cached).
+A call without ``web=True`` -- the desktop app, the local helper, scripts --
+keeps the behaviour the desktop had at v9.4.0: the fragment's fl_id names the
+file when there is one, any URL is fetched and redirects are followed as
+before, and the result is still cached when hard links are not available.
 """
 
 import hashlib
@@ -30,10 +45,11 @@ import os
 import re
 import tempfile
 import threading
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 
@@ -68,6 +84,14 @@ STORED_BROWSER = 'browser'
 STORED_NOWHERE = ''
 
 _manifest_lock = threading.Lock()
+
+# True while a web request is being resolved (see resolve_fragment_image's
+# ``web``). The fetch helpers read it, so their signatures stay as they were.
+_web_rules: ContextVar[bool] = ContextVar('puzzle_image_web_rules', default=False)
+
+# Redirects a web fetch follows, each hop checked (see get_with_checked_redirects).
+MAX_REDIRECT_HOPS = 5
+REDIRECT_STATUSES = (301, 302, 303, 307, 308)
 
 # Size presets (width in pixels)
 SIZE_PRESETS = {
@@ -128,53 +152,84 @@ def normalize_request_params(size, threshold):
     return size, threshold
 
 
-def _write_new_file(path: Path, data: bytes) -> bool:
+class CacheLinkUnavailable(OSError):
+    """The cache directory cannot give a file its name atomically (no hard links)."""
+
+
+class UploadNotRecorded(OSError):
+    """The shared-upload record line could not be written."""
+
+
+def _write_new_file(path: Path, data: bytes, *, before_publish=None,
+                    allow_direct: bool = False) -> bool:
     """Create ``path`` with ``data``. Never replaces an existing file.
 
-    The bytes are written to a temporary file in the same directory first and
-    only then given the final name, so a reader never sees a half-written file
-    and a failed write leaves nothing under ``path``.
+    The bytes are written to a temporary file in the same directory and
+    flushed to disk; the final name is then added with a hard link, which is
+    atomic and fails if the name exists. A reader therefore sees either no
+    file or the whole file, and a failed write leaves nothing under ``path``.
+
+    ``before_publish``, if given, is called after the bytes are on disk and
+    before the final name exists; if it raises, nothing is published and the
+    exception propagates.
 
     Returns True if this call created the file, False if a file of that name
-    already existed. Other OS errors propagate.
+    already existed (it is kept as is). When the file system has no hard
+    links: with ``allow_direct`` (the desktop's own cache) the file is created
+    directly under its name, as the desktop always did; otherwise
+    ``CacheLinkUnavailable`` is raised and the caller leaves the result
+    uncached. Other OS errors propagate.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        return False
     fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix='.partial-')
     os.close(fd)
     tmp = Path(tmp_name)
     try:
         with io.open(tmp, 'wb') as fh:
             fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        if before_publish is not None:
+            before_publish()
         try:
-            # A hard link gives the final name atomically and fails if it exists.
             os.link(tmp, path)
-            return True
         except FileExistsError:
             return False
-        except (OSError, NotImplementedError, AttributeError):
-            pass  # no hard links on this file system: fall through
-        created = False
-        try:
-            with io.open(path, 'xb') as fh:
-                created = True
-                fh.write(data)
-        except FileExistsError:
-            if not created:
+        except (OSError, NotImplementedError, AttributeError) as e:
+            if path.exists():
                 return False
-            raise
-        except BaseException:
-            if created:
-                try:
-                    path.unlink()
-                except OSError:
-                    pass
-            raise
+            if allow_direct:
+                return _create_directly(path, data)
+            raise CacheLinkUnavailable(f"no hard link for {path.name}: {e}") from e
         return True
     finally:
         try:
             tmp.unlink()
         except OSError:
             pass
+
+
+def _create_directly(path: Path, data: bytes) -> bool:
+    """Create ``path`` in place (exclusive create); the desktop's fallback."""
+    created = False
+    try:
+        with io.open(path, 'xb') as fh:
+            created = True
+            fh.write(data)
+    except FileExistsError:
+        if not created:
+            return False
+        raise
+    except BaseException:
+        if created:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+        raise
+    return True
 
 
 # Image hosts a direct image URL may point at: the libraries whose IIIF images
@@ -205,6 +260,57 @@ def is_allowed_image_url(url: str) -> bool:
         return False
     return any(host == suffix or host.endswith('.' + suffix)
                for suffix in DIRECT_IMAGE_HOST_SUFFIXES)
+
+
+class RedirectNotFollowed(requests.exceptions.RequestException):
+    """A redirect pointed off the allowed hosts, or there were too many."""
+
+
+def _redirect_location(resp) -> Optional[str]:
+    """The Location of a redirect response, or None if it is not a redirect."""
+    if getattr(resp, 'status_code', None) not in REDIRECT_STATUSES:
+        return None
+    headers = getattr(resp, 'headers', None) or {}
+    try:
+        location = headers.get('Location') or headers.get('location')
+    except Exception:
+        return None
+    return location if isinstance(location, str) and location else None
+
+
+def get_with_checked_redirects(url: str, *, allowed=None,
+                               max_hops: int = MAX_REDIRECT_HOPS, **kwargs):
+    """``requests.get`` that follows redirects one hop at a time.
+
+    Every URL -- the first one and each redirect target -- must pass
+    ``allowed`` (default: ``is_allowed_image_url``) before it is requested;
+    each request is made with ``allow_redirects=False``. Raises
+    ``RedirectNotFollowed`` for a URL that does not pass, or after
+    ``max_hops`` redirects. Other keyword arguments go to ``requests.get``.
+    """
+    allowed = allowed or is_allowed_image_url
+    kwargs.pop('allow_redirects', None)
+    current = str(url)
+    for _hop in range(max_hops + 1):
+        if not allowed(current):
+            raise RedirectNotFollowed(f"not an allowed image host: {current[:80]}")
+        resp = requests.get(current, allow_redirects=False, **kwargs)
+        location = _redirect_location(resp)
+        if location is None:
+            return resp
+        try:
+            resp.close()
+        except Exception:
+            pass
+        current = urljoin(current, location)
+    raise RedirectNotFollowed(f"more than {max_hops} redirects from {str(url)[:80]}")
+
+
+def _image_get(url: str, **kwargs):
+    """The HTTP GET of the fetch helpers: checked hops for the web, plain otherwise."""
+    if _web_rules.get():
+        return get_with_checked_redirects(url, **kwargs)
+    return requests.get(url, **kwargs)
 
 
 def _browser_dir_name(browser_key: str) -> str:
@@ -287,25 +393,40 @@ class PuzzleImageService:
                      browser_key: Optional[str] = None) -> str:
         """Keep image bytes a web browser uploaded. Never replaces a file.
 
-        With ``user_id`` (a signed-in account) the bytes go to the shared cache
-        and the account id and UTC time are appended to the upload record.
-        Otherwise, with ``browser_key``, they go to that browser's own
+        With ``user_id`` (a signed-in account) the bytes go to the shared
+        cache: the record line (file, account id, UTC time, SHA-256) is
+        written and flushed to disk first, and only then is the file given its
+        name. If the line cannot be written the image is not shared; it is
+        kept for ``browser_key`` instead when there is one. Without
+        ``user_id``, with ``browser_key``, the bytes go to that browser's own
         directory. With neither, nothing is kept.
 
-        Returns STORED_SHARED, STORED_BROWSER or STORED_NOWHERE. A name that
-        already exists counts as stored (the existing file is kept as is).
+        Returns STORED_SHARED, STORED_BROWSER or STORED_NOWHERE -- where the
+        bytes can now be found. A name that already exists counts as stored
+        (the existing file is kept as is).
         """
         if not data:
             return STORED_NOWHERE
         user_id = str(user_id).strip() if user_id else ''
-        try:
-            if user_id:
-                path = self.get_cache_path(fl_id, size, threshold, processed, is_cul)
-                if _write_new_file(path, data):
-                    self._record_shared_upload(path.name, user_id)
+        if user_id:
+            path = self.get_cache_path(fl_id, size, threshold, processed, is_cul)
+            try:
+                if path.is_file():
+                    return STORED_SHARED
+                created = _write_new_file(
+                    path, data,
+                    before_publish=lambda: self._record_shared_upload(path.name, user_id, data),
+                )
+                if created:
                     logger.info("Stored uploaded image in shared cache: %s (%d bytes)",
                                 path.name, len(data))
                 return STORED_SHARED
+            except UploadNotRecorded as e:
+                logger.warning("Uploaded image for %s not shared (record not written): %s",
+                               fl_id, e)
+            except OSError as e:
+                logger.warning("Uploaded image for %s not shared: %s", fl_id, e)
+        try:
             path = self.get_browser_cache_path(browser_key, fl_id, size, threshold, processed, is_cul)
             if path is None:
                 return STORED_NOWHERE
@@ -315,20 +436,32 @@ class PuzzleImageService:
             logger.warning("Failed to store uploaded image for %s: %s", fl_id, e)
             return STORED_NOWHERE
 
-    def _record_shared_upload(self, file_name: str, user_id: str) -> None:
-        """Append one line to the shared-upload record (JSON lines)."""
+    def _record_shared_upload(self, file_name: str, user_id: str, data: bytes) -> None:
+        """Append one line to the shared-upload record (JSON lines) and flush it to disk.
+
+        Raises ``UploadNotRecorded`` if the whole line cannot be written.
+        """
         line = json.dumps({
             'file': file_name,
             'user_id': user_id,
             'uploaded_at': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+            'sha256': hashlib.sha256(data).hexdigest(),
         }, ensure_ascii=True, sort_keys=True)
+        encoded = (line + '\n').encode('ascii')
         manifest = self._cache_dir / UPLOAD_MANIFEST_NAME
+        flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, 'O_BINARY', 0)
         try:
             with _manifest_lock:
-                with open(manifest, 'a', encoding='utf-8', newline='\n') as fh:
-                    fh.write(line + '\n')
+                fd = os.open(str(manifest), flags, 0o644)
+                try:
+                    written = os.write(fd, encoded)
+                    if written != len(encoded):
+                        raise OSError(f"short write ({written} of {len(encoded)} bytes)")
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
         except OSError as e:
-            logger.warning("Failed to record shared upload %s: %s", file_name, e)
+            raise UploadNotRecorded(f"{UPLOAD_MANIFEST_NAME}: {e}") from e
 
     def for_browser(self, browser_key: Optional[str]) -> 'BrowserImageView':
         """A view of this service that also finds ``browser_key``'s own images.
@@ -344,7 +477,8 @@ class PuzzleImageService:
                                 processed: bool = True,
                                 is_cul: bool = False,
                                 image_url: str = '',
-                                browser_key: Optional[str] = None) -> Optional[bytes]:
+                                browser_key: Optional[str] = None,
+                                web: bool = False) -> Optional[bytes]:
         """Fetch IIIF image, apply background removal, cache result.
 
         Args:
@@ -356,12 +490,25 @@ class PuzzleImageService:
             image_url: Direct IIIF canvas URL for non-NLI libraries. When non-empty,
                        fetched directly instead of constructing NLI URL from fl_id.
             browser_key: When given, that browser's own uploaded copy is used
-                       if there is no shared one.
+                       if there is no shared one. Implies ``web``.
+            web: The web app's rules (see the module docstring). Without it
+                       the desktop's behaviour is kept.
 
         Returns:
             Image bytes (RGBA PNG if processed, JPEG if original), or None on failure.
         """
-        # Determine cache key: an image fetched from a direct URL is named after
+        if not (web or browser_key):
+            # The desktop's lookup: the fl_id names the file when there is one.
+            cache_id = fl_id if fl_id else _safe_filename(image_url[:120])
+            if not cache_id:
+                return None
+            cached = self.read_cached(cache_id, size, threshold, processed, is_cul)
+            if cached is not None:
+                return cached[0]
+            return self._fetch_process_and_cache(fl_id, image_url, cache_id, size, threshold,
+                                                 processed, is_cul, allow_direct=True)
+
+        # The web's lookup: an image fetched from a direct URL is named after
         # that URL, an NLI image after its fl_id. A URL-fetched image is never
         # stored under an fl_id name.
         if image_url:
@@ -379,6 +526,17 @@ class PuzzleImageService:
                                   browser_key=browser_key)
         if cached is not None:
             return cached[0]
+        token = _web_rules.set(True)
+        try:
+            return self._fetch_process_and_cache(fl_id, image_url, cache_id, size, threshold,
+                                                 processed, is_cul, allow_direct=False)
+        finally:
+            _web_rules.reset(token)
+
+    def _fetch_process_and_cache(self, fl_id: str, image_url: str, cache_id: str,
+                                 size: int, threshold: float, processed: bool,
+                                 is_cul: bool, *, allow_direct: bool) -> Optional[bytes]:
+        """Fetch, remove the background if asked, and cache under ``cache_id``."""
         cache_path = self.get_cache_path(cache_id, size, threshold, processed, is_cul)
 
         # Fetch image
@@ -392,7 +550,7 @@ class PuzzleImageService:
         if not processed:
             # Cache and return original
             try:
-                _write_new_file(cache_path, raw_bytes)
+                _write_new_file(cache_path, raw_bytes, allow_direct=allow_direct)
             except OSError as e:
                 logger.warning(f"Failed to cache image for {cache_id}: {e}")
             return raw_bytes
@@ -406,7 +564,7 @@ class PuzzleImageService:
 
         # Cache processed result
         try:
-            _write_new_file(cache_path, result_bytes)
+            _write_new_file(cache_path, result_bytes, allow_direct=allow_direct)
         except OSError as e:
             logger.warning(f"Failed to cache processed image for {cache_id}: {e}")
         return result_bytes
@@ -421,12 +579,16 @@ class PuzzleImageService:
         and use a bounded timeout. Non-NLI hosts (Cambridge, Manchester, Oxford, etc.)
         retain the existing 30s timeout — they have legitimate slower response times
         for large IIIF tiles and have not exhibited the threadpool-saturation pattern.
+
+        Under the web's rules only known library image hosts are fetched and
+        each redirect hop is checked (``get_with_checked_redirects``); the
+        desktop fetches as it always did.
         """
         if '/full/' in image_url:
             url = image_url  # Already a complete image URL
         else:
             url = f"{image_url}/full/{size},/0/default.jpg"
-        if not is_allowed_image_url(url):
+        if _web_rules.get() and not is_allowed_image_url(url):
             logger.warning(f"Direct IIIF fetch refused (unknown host) for {image_url[:80]}")
             return None
 
@@ -445,7 +607,7 @@ class PuzzleImageService:
         try:
             # NLI: bounded env-driven timeout. Non-NLI: existing 30s preserved.
             timeout = (NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT) if is_nli_host else 30
-            resp = requests.get(url, headers=headers, timeout=timeout)
+            resp = _image_get(url, headers=headers, timeout=timeout)
             if resp.status_code == 200 and len(resp.content) > 100:
                 logger.info(f"Direct IIIF fetch OK for {image_url[:80]}")
                 if is_nli_host:
@@ -551,7 +713,8 @@ class PuzzleImageService:
 
         try:
             # Phase 98 D-19: env-driven (connect, read) tuple replaces hard-coded timeout=30.
-            resp = requests.get(
+            # Under the web's rules each redirect hop is checked (_image_get).
+            resp = _image_get(
                 url,
                 headers=headers,
                 timeout=(NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT),
@@ -577,6 +740,9 @@ class PuzzleImageService:
         except requests.exceptions.ConnectionError as e:
             logger.warning(f"IIIF connection error for {fl_id}: {e}")
             _nli_record_failure(failure_type='connection_error', path='puzzle_fetch_iiif_image')
+        except RedirectNotFollowed as e:
+            # Web only: a redirect off the allowed hosts. Not an NLI outage.
+            logger.warning(f"IIIF redirect not followed for {fl_id}: {e}")
 
         return None
 
@@ -584,8 +750,8 @@ class PuzzleImageService:
 class BrowserImageView:
     """A PuzzleImageService seen by one browser (see ``for_browser``).
 
-    ``resolve_fragment_image`` also finds that browser's own uploads; every
-    other attribute is the underlying service's.
+    ``resolve_fragment_image`` applies the web's rules and also finds that
+    browser's own uploads; every other attribute is the underlying service's.
     """
 
     def __init__(self, service: PuzzleImageService, browser_key: Optional[str]):
@@ -599,7 +765,7 @@ class BrowserImageView:
                                image_url: str = '') -> Optional[bytes]:
         return self._service.resolve_fragment_image(
             fl_id, size, threshold, processed, is_cul,
-            image_url=image_url, browser_key=self._browser_key,
+            image_url=image_url, browser_key=self._browser_key, web=True,
         )
 
     def __getattr__(self, name):

@@ -107,7 +107,8 @@ def _get_once(url, *, verify, headers, timeout, stream, **kwargs):
         )
 
 
-def nli_image_get(url, *, headers=None, timeout=None, stream=False, **kwargs):
+def nli_image_get(url, *, headers=None, timeout=None, stream=False,
+                  allowed_url=None, **kwargs):
     """``requests.get`` with the NLI host TLS policy applied per-hop.
 
     For NLI image hosts, TLS verification is disabled (with host-scoped warning
@@ -118,6 +119,11 @@ def nli_image_get(url, *, headers=None, timeout=None, stream=False, **kwargs):
     fetched with ``verify=True``, so the TLS allowlist cannot be escaped via a
     redirect (legitimate same-/cross-host NLI redirects, e.g. Rosetta delivery,
     still work). Pass ``allow_redirects=False`` to disable following entirely.
+
+    ``allowed_url``, if given, is called with each redirect target before it
+    is requested; a target it rejects raises ``requests.RequestException``.
+    Without it (the default, and every desktop caller) redirects are followed
+    as before.
 
     Does NOT consult or feed the circuit breaker — the caller records
     success/failure so it can attach a call-site ``path``.
@@ -147,6 +153,11 @@ def nli_image_get(url, *, headers=None, timeout=None, stream=False, **kwargs):
         except Exception:  # pragma: no cover - close is best-effort
             pass
         current_url = nxt.url
+        if allowed_url is not None and not allowed_url(current_url):
+            raise requests.exceptions.RequestException(
+                f'Redirect to a host that is not allowed: {host_of(current_url)}',
+                response=resp,
+            )
         redirects_left -= 1
 
 

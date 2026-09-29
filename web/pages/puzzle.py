@@ -2080,7 +2080,8 @@ def _invalidate_and_refetch(fl_id: str, new_threshold: float):
         from shared.puzzle_image_service import get_puzzle_image_service
         service = get_puzzle_image_service()
         # Pre-fetch at new threshold
-        service.resolve_fragment_image(fl_id=fl_id, size=800, threshold=new_threshold, processed=True)
+        service.resolve_fragment_image(fl_id=fl_id, size=800, threshold=new_threshold, processed=True,
+                                       web=True)
     except Exception as e:
         logger.error(f"Threshold refetch failed for {fl_id}: {e}")
 
