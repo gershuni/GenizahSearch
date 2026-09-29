@@ -261,6 +261,20 @@ def test_every_listed_site_still_makes_a_call(modules):
     assert not stale, f'listed but no longer making a direct call (remove them): {stale}'
 
 
+def test_every_metadata_manager_the_web_builds_checks_its_fetches(modules):
+    """MetadataManager's own fetches are checked only when it is built with the flag."""
+    built = []
+    for path, tree in modules.items():
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and (_dotted(node.func) or '').endswith('MetadataManager'):
+                flag = [kw.value for kw in node.keywords if kw.arg == 'checked_library_fetches']
+                ok = bool(flag) and isinstance(flag[0], ast.Constant) and flag[0].value is True
+                built.append((f'{path}:{node.lineno}', ok))
+    assert {'web/main.py', 'shared/research_worker.py'} <= {b[0].split(':')[0] for b in built}
+    unchecked = [where for where, ok in built if not ok]
+    assert not unchecked, f'MetadataManager built without checked_library_fetches=True: {unchecked}'
+
+
 def test_the_web_calls_nli_image_get_with_allowed_url(modules):
     """nli_image_get checks each hop only when given allowed_url; the desktop gives none."""
     calls = [(path, qualname, node) for path, tree in modules.items()
