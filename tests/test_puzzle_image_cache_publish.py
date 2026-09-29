@@ -821,3 +821,82 @@ def test_every_web_call_of_the_image_service_uses_the_web_rules():
 ])
 def test_the_web_rule_guard_tells_the_cases_apart(snippet, ok):
     assert (_web_rule_violations(snippet, 'snippet.py') == []) is ok
+
+
+# ── guards that no other test pins ───────────────────────────────────────────────
+
+def test_a_first_url_off_the_library_hosts_is_never_requested(tmp_path, pis, monkeypatch):
+    """The first URL is checked like every redirect target: an unknown host is
+    refused before any request is made."""
+    calls = []
+    monkeypatch.setattr(pis.requests, 'get', _fake_web({
+        OTHER_FULL: _Resp(200, _jpeg((21, 22, 23))),
+    }, calls))
+
+    with pytest.raises(pis.RedirectNotFollowed):
+        pis.get_with_checked_redirects(OTHER_FULL, timeout=5)
+    assert calls == []
+
+
+@pytest.mark.parametrize('provider', ['manchester', 'jts'])
+def test_a_provider_route_never_requests_a_metadata_url_off_the_library_hosts(
+        tmp_path, pis, monkeypatch, provider):
+    """The provider routes have no other check on a metadata URL than the one
+    in get_with_checked_redirects, so an unknown canvas host is never fetched."""
+    from web.state import state
+    sys_id = f'9900000000{len(provider):02d}88'
+    monkeypatch.setattr(state, 'meta_mgr', _Meta(sys_id, images_ext=[
+        {'url': 'https://images.example.org/iiif/other'}]))
+    calls = []
+    monkeypatch.setattr(pis.requests, 'get', _fake_web({
+        'https://images.example.org/iiif/other/full/2000,/0/default.jpg':
+            _Resp(200, _jpeg((24, 25, 26))),
+    }, calls))
+    client = _api_app(tmp_path, pis, monkeypatch)
+
+    got = client.get('/api/puzzle_ext_image', params={
+        'sys_id': sys_id, 'page': 0, 'provider': provider, 'processed': 'false'},
+        follow_redirects=False)
+
+    assert got.status_code != 200
+    assert calls == []
+    assert _files(tmp_path / 'puzzle') == []
+
+
+def test_the_provider_image_route_leaves_the_image_uncached_without_hard_links(
+        tmp_path, pis, monkeypatch):
+    """/api/puzzle_ext_image publishes its cache file atomically or not at all:
+    where hard links are not available it still sends the image, but writes
+    nothing that a concurrent reader could see half-written."""
+    sys_id = '990000000010' + '99'
+    start = _provider_setup('manchester', sys_id, monkeypatch)
+    body = _jpeg((31, 32, 33))
+    calls = []
+    monkeypatch.setattr(pis.requests, 'get', _fake_web({start: _Resp(200, body)}, calls))
+
+    def _no_links(src, dst, *args, **kwargs):
+        raise OSError(errno.EPERM, 'hard links not supported here')
+
+    monkeypatch.setattr(os, 'link', _no_links)
+    client = _api_app(tmp_path, pis, monkeypatch)
+
+    got = client.get('/api/puzzle_ext_image', params={
+        'sys_id': sys_id, 'page': 0, 'provider': 'manchester', 'processed': 'false'},
+        follow_redirects=False)
+
+    assert got.status_code == 200 and got.content == body
+    assert _files(tmp_path / 'puzzle') == []
+
+
+@pytest.mark.parametrize('url, ok', [
+    ('https://iiif.nli.org.il/IIIFv21/FL1/full/800,/0/default.jpg', True),
+    ('https://nli.org.il/x.jpg', True),
+    ('https://images.lib.cam.ac.uk/iiif/x.jp2', True),
+    ('https://fakenli.org.il/x.jpg', False),
+    ('https://notcam.ac.uk/x.jpg', False),
+    ('https://box.ac.uk/x.jpg', False),
+    ('https://library-princeton.edu/x.jpg', False),
+    ('https://images.lib.cam.ac.uk.example.org/x.jpg', False),
+])
+def test_known_hosts_match_only_on_a_dot_boundary(pis, url, ok):
+    assert pis.is_allowed_image_url(url) is ok
