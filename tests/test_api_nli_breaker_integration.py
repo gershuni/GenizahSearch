@@ -453,7 +453,7 @@ class TestStaticInvariantsInWebApi:
                     f'({ast.dump(elt)})'
                 )
 
-        # The manifest, MARC, IIIF and Rosetta fetches at least: an audit that
+        # The manifest, MARC, IIIF and Rosetta fetches at least: a check that
         # recognises no call proves nothing.
         assert inspected >= 4, f'only {inspected} NLI calls were recognised'
         assert not violations, (

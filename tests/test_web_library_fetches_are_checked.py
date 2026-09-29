@@ -50,10 +50,9 @@ CHECKERS = {
 # (file, function): direct calls to services that are not library image,
 # manifest or MARC hosts. Each must still match a call (no stale entries).
 EXEMPT = {
-    ('shared/sefaria_utils.py', 'SefariaLibraryManager._fetch_from_api'):
-        'Sefaria table of contents: a fixed Sefaria API URL, not a library host',
-    ('web/pages/parallels.py', 'fetch_sefaria_text'):
-        'Sefaria texts: fixed www.sefaria.org API URLs, not a library host',
+    ('shared/sefaria_utils.py', 'get_sefaria_json'):
+        'Sefaria API: the desktop branch; the web process (use_checked_sefaria_fetches) '
+        'goes through get_with_checked_redirects with the Sefaria host check',
     ('shared/dicta_client.py', '_translate_single'):
         'Dicta translation service: a fixed endpoint, not a library host',
     ('shared/posthog_server.py', '_drain_posthog_queue'):

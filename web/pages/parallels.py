@@ -32,7 +32,7 @@ from web.components.filter_panel import (
 logger = logging.getLogger(__name__)
 
 # Import Sefaria sources and text cleaning from the shared sefaria_utils module (no PyQt6 dependency)
-from shared.sefaria_utils import (SEFARIA_SOURCES, clean_hebrew_text, get_sefaria_library,
+from shared.sefaria_utils import (SEFARIA_SOURCES, clean_hebrew_text, get_sefaria_json, get_sefaria_library,
                                   read_sefaria_cache, write_sefaria_cache)
 
 # DMF-09/DMF-10/DMF-13: library filter imports
@@ -175,7 +175,7 @@ def fetch_sefaria_text(ref: str, use_cache: bool = True) -> str:
         if is_tanakh:
             # Try v3 API with "Text Only" version (no nikud/taamim) for Tanakh
             url = f"https://www.sefaria.org/api/v3/texts/{encoded_ref}?version=hebrew|Tanach%20with%20Text%20Only"
-            resp = requests.get(url, timeout=15)
+            resp = get_sefaria_json(url, timeout=15)
 
             if resp.status_code == 200:
                 data = resp.json()
@@ -192,7 +192,7 @@ def fetch_sefaria_text(ref: str, use_cache: bool = True) -> str:
         # Use v2 API for non-Tanakh or as fallback
         if not raw_text:
             url = f"https://www.sefaria.org/api/texts/{encoded_ref}?context=0&pad=0"
-            resp = requests.get(url, timeout=15)
+            resp = get_sefaria_json(url, timeout=15)
             if resp.status_code == 200:
                 data = resp.json()
                 he_text = data.get('he', [])

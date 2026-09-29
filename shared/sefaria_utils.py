@@ -19,6 +19,44 @@ from shared.atomic_io import write_bytes_atomic
 from shared.export_utils import make_safe_filename
 
 
+# The web process sets this once at startup (use_checked_sefaria_fetches):
+# its Sefaria table of contents is saved for every later visitor, so every
+# redirect hop must stay on Sefaria's hosts. The desktop keeps plain requests.
+_CHECKED_FETCHES = False
+
+
+def use_checked_sefaria_fetches():
+    """Make this process follow Sefaria redirects one checked hop at a time."""
+    global _CHECKED_FETCHES
+    _CHECKED_FETCHES = True
+
+
+def is_sefaria_url(url):
+    """True for an https URL on sefaria.org or one of its subdomains."""
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(str(url))
+        host = (parsed.hostname or '').lower().rstrip('.')
+        port = parsed.port
+    except ValueError:
+        return False
+    if parsed.scheme != 'https' or not host:
+        return False
+    if parsed.username is not None or parsed.password is not None:
+        return False
+    if port is not None and port != 443:
+        return False
+    return host == 'sefaria.org' or host.endswith('.sefaria.org')
+
+
+def get_sefaria_json(url, *, timeout):
+    """GET a Sefaria API URL: checked hops in the web process, plain otherwise."""
+    if _CHECKED_FETCHES:
+        from shared.puzzle_image_service import get_with_checked_redirects
+        return get_with_checked_redirects(url, allowed=is_sefaria_url, timeout=timeout)
+    return requests.get(url, timeout=timeout)
+
+
 def get_cache_dir():
     """Get or create the cache directory for Sefaria texts."""
     cache_dir = os.path.join(os.path.expanduser("~"), ".genizah_search", "sefaria_cache")
@@ -171,7 +209,7 @@ class SefariaLibraryManager:
     def _fetch_from_api(self):
         """Fetch the full TOC from Sefaria API."""
         try:
-            resp = requests.get(self.TOC_URL, timeout=30)
+            resp = get_sefaria_json(self.TOC_URL, timeout=30)
             if resp.status_code == 200:
                 return resp.json()
         except Exception as e:
