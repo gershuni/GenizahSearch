@@ -260,11 +260,14 @@ def test_publishing_a_join_draws_it_with_this_browsers_images(
     async def driver(user):
         session_id = await _open_with_one_fragment(user)
         own = _put_own_image(image_service, session_id, (90, 30, 160, 255))
+        # Signed in before saving: a saved join belongs to the account that
+        # saved it, and only its owner can publish it.
+        monkeypatch.setattr(GlobalAuthState, 'is_logged_in', classmethod(lambda cls: True))
+        monkeypatch.setattr(GlobalAuthState, 'get_user_id', classmethod(lambda cls: 'account-x'))
         await _save_join(user)
         await _wait_until(lambda: thumbnail_services)
         await asyncio.sleep(0.3)
-        monkeypatch.setattr(GlobalAuthState, 'is_logged_in', classmethod(lambda cls: True))
-        monkeypatch.setattr(GlobalAuthState, 'get_user_id', classmethod(lambda cls: 'account-x'))
+        assert joins_service.list_documents(owner_key='u:account-x')
         _click_button(user, _icon('publish'))
         await asyncio.sleep(0.3)
         _click_button(user, _text('Publish'))
