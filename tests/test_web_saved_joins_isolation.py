@@ -260,6 +260,7 @@ def test_puzzle_document_routes_are_not_registered():
 async def _two_browsers():
     import httpx
     from nicegui import core
+    from nicegui import storage as nicegui_storage
     from nicegui.testing.general import prepare_simulation
     from nicegui.testing.user import User
     from nicegui.ui_run import set_storage_secret
@@ -271,8 +272,17 @@ async def _two_browsers():
     core.app._startup_handlers.clear()
     saved_is_ready = web_state.is_ready
     web_state.is_ready = lambda: True
+    # An earlier test in the same process may already have sent a request
+    # through core.app (test_openapi_scope.py and test_capabilities_api.py do),
+    # which builds Starlette's middleware stack; set_storage_secret then cannot
+    # add the session middleware. Start from an unbuilt stack and put the
+    # middleware state back afterwards.
+    saved_user_middleware = list(core.app.user_middleware)
+    saved_stack = core.app.middleware_stack
+    saved_secret = nicegui_storage.Storage.secret
     try:
         prepare_simulation()
+        core.app.middleware_stack = None
         set_storage_secret('saved-joins-render-secret', {})
         os.environ['NICEGUI_USER_SIMULATION'] = 'true'
         try:
@@ -294,6 +304,9 @@ async def _two_browsers():
         core.app._startup_handlers.clear()
         core.app._startup_handlers.extend(saved_handlers)
         web_state.is_ready = saved_is_ready
+        core.app.user_middleware = saved_user_middleware
+        core.app.middleware_stack = saved_stack
+        nicegui_storage.Storage.secret = saved_secret
 
 
 def _run(driver):
