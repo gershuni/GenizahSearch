@@ -355,6 +355,16 @@ class TestStaticInvariantsInWebApi:
                 and f.attr in ('get', 'post')
             )
 
+        def _is_checked_get(call: ast.Call) -> bool:
+            """True iff `call.func` is `get_with_checked_redirects` (the checked
+            hop-by-hop GET; `session=_nli_session` makes it an NLI session call)."""
+            f = call.func
+            return isinstance(f, ast.Name) and f.id == 'get_with_checked_redirects'
+
+        def _uses_nli_session(call: ast.Call) -> bool:
+            return any(kw.arg == 'session' and isinstance(kw.value, ast.Name)
+                       and kw.value.id == '_nli_session' for kw in call.keywords)
+
         def _first_arg_str(call: ast.Call):
             """Return the first positional arg as a string if it's a Constant str or
             JoinedStr (f-string) we can inspect, else return a `<var:NAME>` marker
@@ -382,11 +392,13 @@ class TestStaticInvariantsInWebApi:
                     return kw.value
             return None
 
+        inspected = 0
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
-            is_nli_session = _is_nli_session_call(node)
-            is_requests = _is_requests_get_or_post(node)
+            is_nli_session = _is_nli_session_call(node) or (
+                _is_checked_get(node) and _uses_nli_session(node))
+            is_requests = _is_requests_get_or_post(node) or _is_checked_get(node)
             if not (is_nli_session or is_requests):
                 continue
             # Determine NLI vs non-NLI for `requests.get` calls
@@ -405,6 +417,7 @@ class TestStaticInvariantsInWebApi:
                 )
             if not is_nli:
                 continue
+            inspected += 1
             # NLI call: timeout kwarg MUST be a Tuple of two values whose names
             # start with NLI_ (e.g., NLI_CONNECT_TIMEOUT, NLI_IIIF_READ_TIMEOUT).
             timeout = _get_timeout_kwarg(node)
@@ -440,6 +453,9 @@ class TestStaticInvariantsInWebApi:
                     f'({ast.dump(elt)})'
                 )
 
+        # The manifest, MARC, IIIF and Rosetta fetches at least: a check that
+        # recognises no call proves nothing.
+        assert inspected >= 4, f'only {inspected} NLI calls were recognised'
         assert not violations, (
             'NLI timeout audit failures (Codex REVIEW Issue 4):\n  '
             + '\n  '.join(violations)

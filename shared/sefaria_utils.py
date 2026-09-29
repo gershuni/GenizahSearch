@@ -10,9 +10,44 @@ import os
 import json
 import time
 import re
+import hashlib
 import html as html_module
 
 import requests
+
+from shared.atomic_io import write_bytes_atomic
+from shared.export_utils import make_safe_filename
+
+
+def is_sefaria_url(url):
+    """True for an https URL on sefaria.org or one of its subdomains."""
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(str(url))
+        host = (parsed.hostname or '').lower().rstrip('.')
+        port = parsed.port
+    except ValueError:
+        return False
+    if parsed.scheme != 'https' or not host:
+        return False
+    if parsed.username is not None or parsed.password is not None:
+        return False
+    if port is not None and port != 443:
+        return False
+    return host == 'sefaria.org' or host.endswith('.sefaria.org')
+
+
+def get_sefaria_json(url, *, timeout, checked=False):
+    """GET a Sefaria API URL.
+
+    ``checked=True`` (the web server, which saves what it fetches for later
+    visitors) follows redirects one hop at a time and only between Sefaria's
+    own hosts. The default is the desktop's plain request.
+    """
+    if checked:
+        from shared.puzzle_image_service import get_with_checked_redirects
+        return get_with_checked_redirects(url, allowed=is_sefaria_url, timeout=timeout)
+    return requests.get(url, timeout=timeout)
 
 
 def get_cache_dir():
@@ -20,6 +55,69 @@ def get_cache_dir():
     cache_dir = os.path.join(os.path.expanduser("~"), ".genizah_search", "sefaria_cache")
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
+
+
+# One cached text per exact reference.
+#
+# The file name is a readable ASCII stem of the reference plus a hash of the
+# whole (stripped) reference, so two references never share a file even when
+# their stems are the same: every Hebrew-only reference has an empty ASCII stem,
+# and long English titles share their first characters. Files written under the
+# older naming (``<stem>_v2.txt`` on the web, ``<stem>_clean.txt`` on the
+# desktop) are simply never read again.
+#
+# The first line of a cache file is the reference as JSON; the text follows. A
+# file whose first line names another reference is treated as a miss.
+SEFARIA_CACHE_KIND = "v3"
+
+
+def _cache_key(ref):
+    return (ref or "").strip()
+
+
+def sefaria_cache_path(ref, cache_dir=None, kind=SEFARIA_CACHE_KIND):
+    """Return the cache file path for exactly ``ref`` (inside the cache folder).
+
+    ``kind`` separates caches whose texts are built differently (the web page
+    and the desktop dialog fetch slightly different versions).
+    """
+    key = _cache_key(ref)
+    stem = make_safe_filename(key, default="ref", max_length=40, preserve_hebrew=False)
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+    folder = cache_dir if cache_dir is not None else get_cache_dir()
+    return os.path.join(folder, f"{stem}_{digest}_{kind}.txt")
+
+
+def read_sefaria_cache(ref, cache_dir=None, kind=SEFARIA_CACHE_KIND):
+    """Return the cached text for ``ref``, or ``""`` when there is none."""
+    path = sefaria_cache_path(ref, cache_dir=cache_dir, kind=kind)
+    try:
+        with open(path, "r", encoding="utf-8", newline="") as fh:
+            header, sep, text = fh.read().partition("\n")
+    except (OSError, ValueError):
+        # Missing, unreadable, or not valid UTF-8 (e.g. cut short): a miss.
+        return ""
+    if not sep:
+        return ""
+    try:
+        stored_ref = json.loads(header)
+    except ValueError:
+        return ""
+    if stored_ref != _cache_key(ref):
+        return ""
+    return text
+
+
+def write_sefaria_cache(ref, text, cache_dir=None, kind=SEFARIA_CACHE_KIND):
+    """Store ``text`` for ``ref``. Failures are ignored (the cache is optional)."""
+    if not text:
+        return
+    path = sefaria_cache_path(ref, cache_dir=cache_dir, kind=kind)
+    data = (json.dumps(_cache_key(ref)) + "\n" + text).encode("utf-8")
+    try:
+        write_bytes_atomic(path, data)
+    except OSError:
+        pass
 
 
 def clean_hebrew_text(text):
@@ -49,8 +147,9 @@ class SefariaLibraryManager:
     TOC_URL = "https://www.sefaria.org/api/index/"
     CACHE_TTL_DAYS = 7
 
-    def __init__(self):
+    def __init__(self, checked_fetches=False):
         self.toc = None
+        self.checked_fetches = checked_fetches
         self._cache_file = os.path.join(get_cache_dir(), "sefaria_toc.json")
 
     def get_toc(self):
@@ -104,7 +203,7 @@ class SefariaLibraryManager:
     def _fetch_from_api(self):
         """Fetch the full TOC from Sefaria API."""
         try:
-            resp = requests.get(self.TOC_URL, timeout=30)
+            resp = get_sefaria_json(self.TOC_URL, timeout=30, checked=self.checked_fetches)
             if resp.status_code == 200:
                 return resp.json()
         except Exception as e:
@@ -144,11 +243,20 @@ class SefariaLibraryManager:
 
 # Singleton instance
 _sefaria_library = None
+_sefaria_library_checked = None
 
 
-def get_sefaria_library():
-    """Get the singleton SefariaLibraryManager instance."""
-    global _sefaria_library
+def get_sefaria_library(checked_fetches=False):
+    """Get the SefariaLibraryManager instance.
+
+    The web server asks for ``checked_fetches=True`` and gets its own
+    instance; the desktop's default instance is unchanged.
+    """
+    global _sefaria_library, _sefaria_library_checked
+    if checked_fetches:
+        if _sefaria_library_checked is None:
+            _sefaria_library_checked = SefariaLibraryManager(checked_fetches=True)
+        return _sefaria_library_checked
     if _sefaria_library is None:
         _sefaria_library = SefariaLibraryManager()
     return _sefaria_library

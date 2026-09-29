@@ -11,7 +11,8 @@ from web.export_service import get_export_service, encode_filename_for_header
 import requests
 import requests.adapters
 
-from shared.nli_fetch import nli_image_get
+from shared.nli_fetch import RedirectNotAllowed, nli_image_get
+from shared.puzzle_image_service import RedirectNotFollowed
 import re
 import os
 import threading
@@ -796,8 +797,11 @@ def init_api_routes(app_override=None):
         url = f"https://iiif.nli.org.il/IIIFv21/DOCID/PNX_MANUSCRIPTS{system_id}-{suffix}/manifest"
         try:
             # Phase 98 D-14: env-driven (connect, read) tuple replaces hard-coded timeout=15.
-            resp = _nli_session.get(
+            # Every redirect hop must stay on the library hosts.
+            from shared.puzzle_image_service import get_with_checked_redirects
+            resp = get_with_checked_redirects(
                 url,
+                session=_nli_session,
                 timeout=(NLI_CONNECT_TIMEOUT, NLI_IIIF_READ_TIMEOUT),
                 verify=True,
             )
@@ -844,6 +848,9 @@ def init_api_routes(app_override=None):
                 _nli_record_failure(failure_type='5xx', path='fetch_fl_ids_from_nli')
                 logger.warning(f"NLI {resp.status_code} for {cache_key}")
             # 404 / other 4xx / non-200 with no fl_ids → negative cache only, no breaker (D-07).
+        except RedirectNotFollowed as e:
+            # Not an NLI outage: no breaker failure.
+            logger.warning(f"NLI manifest redirect not followed for {cache_key}: {e}")
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
             logger.error(f"Failed to fetch FL IDs from IIIF manifest for {cache_key}: {e}")
             failure_type = 'timeout' if isinstance(e, requests.exceptions.Timeout) else 'connection_error'
@@ -858,8 +865,10 @@ def init_api_routes(app_override=None):
             try:
                 marc_url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"
                 # Phase 98 D-15: env-driven (connect, read) tuple replaces hard-coded timeout=10.
-                resp = _nli_session.get(
+                from shared.puzzle_image_service import get_with_checked_redirects
+                resp = get_with_checked_redirects(
                     marc_url,
+                    session=_nli_session,
                     timeout=(NLI_CONNECT_TIMEOUT, NLI_MARC_READ_TIMEOUT),
                     verify=True,
                 )
@@ -889,6 +898,8 @@ def init_api_routes(app_override=None):
                 elif 500 <= resp.status_code < 600:
                     _nli_record_failure(failure_type='5xx', path='fetch_fl_ids_from_nli')
                     logger.warning(f"NLI MARC {resp.status_code} for {system_id}")
+            except RedirectNotFollowed as e:
+                logger.warning(f"NLI MARC redirect not followed for {system_id}: {e}")
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                 logger.error(f"MARC fallback also failed for {system_id}: {e}")
                 failure_type = 'timeout' if isinstance(e, requests.exceptions.Timeout) else 'connection_error'
@@ -936,8 +947,9 @@ def init_api_routes(app_override=None):
         # Try IIIF first (works for valid FL IDs, returns real images)
         iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/2000,/0/default.jpg"
         try:
-            # Phase 98 D-16: bounded image timeout
-            resp = requests.get(
+            # Phase 98 D-16: bounded image timeout; every redirect hop checked.
+            from shared.puzzle_image_service import get_with_checked_redirects
+            resp = get_with_checked_redirects(
                 iiif_url,
                 headers=headers,
                 timeout=(NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT),
@@ -964,6 +976,8 @@ def init_api_routes(app_override=None):
                     resp.status_code, digits,
                 )
             # 404 / other → fall through to Rosetta
+        except RedirectNotFollowed as e:
+            logger.warning(f"IIIF redirect not followed for FL{digits}: {e}")
         except requests.exceptions.Timeout as e:
             logger.error(f"IIIF timeout for FL{digits}: {e}")
             _nli_record_failure(failure_type='timeout', path='nli_image')
@@ -980,8 +994,9 @@ def init_api_routes(app_override=None):
             return Response(content="Image not found", status_code=404)
         rosetta_url = f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=thumbnail&dps_pid=FL{digits}"
         try:
-            # Phase 98 D-16: bounded image timeout
-            resp = requests.get(
+            # Phase 98 D-16: bounded image timeout; every redirect hop checked.
+            from shared.puzzle_image_service import get_with_checked_redirects
+            resp = get_with_checked_redirects(
                 rosetta_url,
                 headers=headers,
                 timeout=(NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT),
@@ -1005,6 +1020,8 @@ def init_api_routes(app_override=None):
                     "NLI Rosetta non-success status %s for FL%s (returning 404)",
                     resp.status_code, digits,
                 )
+        except RedirectNotFollowed as e:
+            logger.warning(f"Rosetta redirect not followed for FL{digits}: {e}")
         except requests.exceptions.Timeout as e:
             logger.error(f"Rosetta timeout for FL{digits}: {e}")
             _nli_record_failure(failure_type='timeout', path='nli_image')
@@ -1063,9 +1080,13 @@ def init_api_routes(app_override=None):
             if _nli_circuit_is_open():
                 return None
             iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}/full/{width},/0/default.jpg"
+            from shared.puzzle_image_service import (
+                RedirectNotFollowed, get_with_checked_redirects, is_allowed_image_url,
+            )
             try:
-                # Phase 98 D-17: bounded image timeout
-                resp = requests.get(
+                # Phase 98 D-17: bounded image timeout. Each redirect hop is
+                # checked against the library image hosts.
+                resp = get_with_checked_redirects(
                     iiif_url,
                     headers=headers,
                     timeout=(NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT),
@@ -1089,6 +1110,8 @@ def init_api_routes(app_override=None):
                 _nli_record_failure(failure_type='timeout', path='_fetch_nli_image_bytes')
             except requests.exceptions.ConnectionError:
                 _nli_record_failure(failure_type='connection_error', path='_fetch_nli_image_bytes')
+            except RedirectNotFollowed:
+                pass  # a redirect off the library image hosts; not an NLI outage
             except requests.exceptions.RequestException:
                 _nli_record_failure(failure_type='request_error', path='_fetch_nli_image_bytes')
 
@@ -1124,6 +1147,7 @@ def init_api_routes(app_override=None):
                     rosetta_thumb,
                     headers=headers,
                     timeout=(NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT),
+                    allowed_url=is_allowed_image_url,
                 )
                 ct2 = (r2.headers.get('Content-Type', '') or '').split(';', 1)[0].strip()
                 if r2.status_code == 200 and ct2.startswith('image/'):
@@ -1146,6 +1170,8 @@ def init_api_routes(app_override=None):
                     _nli_record_failure(failure_type='429', path='_fetch_nli_image_bytes_rosetta_thumb')
                 elif 500 <= r2.status_code < 600:
                     _nli_record_failure(failure_type='5xx', path='_fetch_nli_image_bytes_rosetta_thumb')
+            except RedirectNotAllowed:
+                pass  # a redirect off the library image hosts; not an NLI outage
             except requests.exceptions.Timeout:
                 _nli_record_failure(failure_type='timeout', path='_fetch_nli_image_bytes_rosetta_thumb')
             except requests.exceptions.ConnectionError:
@@ -1401,7 +1427,9 @@ def init_api_routes(app_override=None):
         }
 
         try:
-            resp = requests.get(img_url, headers=headers, timeout=30, verify=True)
+            # Each redirect hop is checked against the library image hosts.
+            from shared.puzzle_image_service import get_with_checked_redirects
+            resp = get_with_checked_redirects(img_url, headers=headers, timeout=30, verify=True)
             if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
                 content_type = resp.headers.get('Content-Type', 'image/jpeg')
                 extra_headers = {}
@@ -1468,7 +1496,9 @@ def init_api_routes(app_override=None):
         }
 
         try:
-            resp = requests.get(img_url, headers=headers, timeout=30, verify=True)
+            # Each redirect hop is checked against the library image hosts.
+            from shared.puzzle_image_service import get_with_checked_redirects
+            resp = get_with_checked_redirects(img_url, headers=headers, timeout=30, verify=True)
             if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
                 content_type = resp.headers.get('Content-Type', 'image/jpeg')
                 _manchester_image_cache.set(cache_key, (resp.content, content_type))
@@ -1524,7 +1554,9 @@ def init_api_routes(app_override=None):
         }
 
         try:
-            resp = requests.get(img_url, headers=headers, timeout=30, verify=True)
+            # Each redirect hop is checked against the library image hosts.
+            from shared.puzzle_image_service import get_with_checked_redirects
+            resp = get_with_checked_redirects(img_url, headers=headers, timeout=30, verify=True)
             if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
                 content_type = resp.headers.get('Content-Type', 'image/jpeg')
                 _jts_image_cache.set(cache_key, (resp.content, content_type))
@@ -1642,7 +1674,9 @@ def init_api_routes(app_override=None):
         }
 
         try:
-            resp = requests.get(img_url, headers=headers, timeout=30, verify=True)
+            # Each redirect hop is checked against the library image hosts.
+            from shared.puzzle_image_service import get_with_checked_redirects
+            resp = get_with_checked_redirects(img_url, headers=headers, timeout=30, verify=True)
             if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
                 content_type = resp.headers.get('Content-Type', 'image/jpeg')
                 # Cache the image
@@ -1820,37 +1854,55 @@ def init_api_routes(app_override=None):
 
     # === Puzzle Canvas API (Phase 49) ===
 
+    def _puzzle_image_response(image_bytes: bytes, browser_copy: bool) -> Response:
+        """An image answer. A browser's own copy is never marked shareable."""
+        content_type = 'image/png' if image_bytes[:4] == b'\x89PNG' else 'image/jpeg'
+        cache_control = "private, max-age=3600" if browser_copy else "public, max-age=3600"
+        return Response(content=image_bytes, media_type=content_type,
+                        headers={"Cache-Control": cache_control})
+
     @target_app.get('/api/puzzle_image')
-    def puzzle_image(fl_id: str, threshold: float = 30.0, size: int = 800,
+    def puzzle_image(request: Request, fl_id: str, threshold: float = 30.0, size: int = 800,
                      processed: bool = True, is_cul: bool = False):
         """Serve processed/original fragment image for puzzle canvas.
-        Tries server-side IIIF fetch (works on desktop/local dev).
+        Tries the shared cache, then the requesting browser's own uploads,
+        then a server-side IIIF fetch (works on desktop/local dev).
         Returns 404 if NLI blocks the server IP — the browser JS then
-        falls back to the localhost helper service for bg removal.
+        falls back to the extension / localhost helper service.
         """
-        from shared.puzzle_image_service import get_puzzle_image_service
+        from shared.puzzle_image_service import get_puzzle_image_service, normalize_request_params
+        from web.puzzle_image_access import browser_key_for_request
+        if not _PUZZLE_FL_ID_RE.match(fl_id or ''):
+            return Response(content="Invalid fl_id", status_code=400,
+                            headers={"Cache-Control": "private, no-store"})
         service = get_puzzle_image_service()
+        size, threshold = normalize_request_params(size, threshold)
+        browser_key = browser_key_for_request(request)
+        cached = service.read_cached(fl_id, size, threshold, processed, is_cul,
+                                     browser_key=browser_key)
+        if cached is not None:
+            return _puzzle_image_response(*cached)
         image_bytes = service.resolve_fragment_image(
             fl_id=fl_id, size=size, threshold=threshold, processed=processed,
-            is_cul=is_cul
+            is_cul=is_cul, web=True,
         )
         if image_bytes is None:
             # Generate upload token so the browser extension can fetch + upload
             from web.puzzle_tokens import generate_upload_token
-            token = generate_upload_token(fl_id, threshold, is_cul)
+            token = generate_upload_token(fl_id, threshold, is_cul,
+                                          size=size, processed=processed)
             return Response(
                 content="Image not found", status_code=404,
                 headers={
                     "X-Puzzle-Upload-Token": token,
-                    "Access-Control-Expose-Headers": "X-Puzzle-Upload-Token"
+                    "Access-Control-Expose-Headers": "X-Puzzle-Upload-Token",
+                    "Cache-Control": "private, no-store",
                 }
             )
-        content_type = 'image/png' if image_bytes[:4] == b'\x89PNG' else 'image/jpeg'
-        return Response(
-            content=image_bytes,
-            media_type=content_type,
-            headers={"Cache-Control": "public, max-age=3600"}
-        )
+        return _puzzle_image_response(image_bytes, False)
+
+    # NLI image ids as the puzzle names them: digits, optionally prefixed FL.
+    _PUZZLE_FL_ID_RE = re.compile(r'^(FL)?\d+$')
 
     # In-memory rate limiter for puzzle upload endpoints
     _puzzle_rate_limits = {}  # IP -> (count, window_start_epoch)
@@ -1899,12 +1951,19 @@ def init_api_routes(app_override=None):
         """Process client-fetched image bytes with background removal.
         Fallback endpoint: client fetches IIIF image in the browser, POSTs
         raw bytes here for server-side bg removal + caching.
-        Requires a valid upload token from a prior GET /api/puzzle_image 404.
+        Requires a valid upload token from a prior GET /api/puzzle_image 404
+        for exactly the same image (fl_id, size, threshold, processed, is_cul).
+
+        Where the result is kept: a signed-in account's upload goes to the
+        shared cache (the account is recorded); a signed-out browser's is kept
+        for that browser only; with neither, nothing is kept.
         """
-        import re as _re
-        from shared.puzzle_image_service import get_puzzle_image_service
+        from shared.puzzle_image_service import (
+            get_puzzle_image_service, normalize_request_params, STORED_SHARED,
+        )
         from shared.background_removal import remove_background
         from web.puzzle_tokens import verify_upload_token
+        from web.puzzle_image_access import browser_key_for_request, signed_in_user_id
         from PIL import Image as _PILImage
         import io as _io
 
@@ -1916,39 +1975,35 @@ def init_api_routes(app_override=None):
             return rate_resp
 
         fl_id = request.query_params.get('fl_id', '')
-        # Validate fl_id: must be digits only (NLI FL IDs are numeric)
-        if not fl_id or not _re.match(r'^[\d]+$', _re.sub(r'\D', '', fl_id)):
+        # Validate fl_id: an NLI FL ID (digits, optionally prefixed FL)
+        if not _PUZZLE_FL_ID_RE.match(fl_id):
             return Response(content="Invalid fl_id", status_code=400)
+
+        is_cul = request.query_params.get('is_cul', 'false').lower() == 'true'
+        processed = request.query_params.get('processed', 'true').lower() == 'true'
+        # Normalize BEFORE the token check, so the token is checked against
+        # the cache entry that would actually be written.
+        size, threshold = normalize_request_params(
+            request.query_params.get('size', 800),
+            request.query_params.get('threshold', 30),
+        )
 
         # Verify upload token
         upload_token = request.headers.get('X-Puzzle-Upload-Token', '')
-        if not verify_upload_token(upload_token, fl_id):
+        if not verify_upload_token(upload_token, fl_id, size=size, threshold=threshold,
+                                   processed=processed, is_cul=is_cul):
             return Response(content="Invalid or expired upload token", status_code=403)
 
-        threshold = float(request.query_params.get('threshold', 30))
-        is_cul = request.query_params.get('is_cul', 'false').lower() == 'true'
-        processed = request.query_params.get('processed', 'true').lower() == 'true'
-        size = int(request.query_params.get('size', 800))
+        # Resolve who is uploading in the request context
+        user_id = signed_in_user_id()
+        browser_key = browser_key_for_request(request)
 
-        # Clamp parameters to valid ranges
-        threshold = max(0, min(255, threshold))
-        # Validate size against known presets (400, 800, 1200, 2000)
-        valid_sizes = {400, 800, 1200, 2000}
-        if size not in valid_sizes:
-            size = min(valid_sizes, key=lambda s: abs(s - size))
-        size = max(100, min(2000, size))
-
-        # Check cache first
+        # Check cache first (shared, then this browser's own)
         service = get_puzzle_image_service()
-        cache_path = service.get_cache_path(fl_id, size, threshold, processed, is_cul)
-        if cache_path.exists():
-            try:
-                cached = cache_path.read_bytes()
-                content_type = 'image/png' if cached[:4] == b'\x89PNG' else 'image/jpeg'
-                return Response(content=cached, media_type=content_type,
-                                headers={"Cache-Control": "public, max-age=3600"})
-            except Exception:
-                pass  # Cache operation failed; continue without cached data
+        cached = service.read_cached(fl_id, size, threshold, processed, is_cul,
+                                     browser_key=browser_key)
+        if cached is not None:
+            return _puzzle_image_response(*cached)
 
         # Read and validate client-uploaded image bytes
         content_length = int(request.headers.get('content-length', 0))
@@ -1973,88 +2028,21 @@ def init_api_routes(app_override=None):
             return Response(content="Corrupt image data", status_code=400)  # Request processing failed; return error response
 
         if not processed:
-            # Cache original and return (validated as real image)
-            try:
-                cache_path.parent.mkdir(parents=True, exist_ok=True)
-                cache_path.write_bytes(raw_bytes)
-            except OSError:
-                pass
-            return Response(content=raw_bytes, media_type='image/jpeg',
-                            headers={"Cache-Control": "public, max-age=3600"})
-
-        # Apply background removal
-        try:
-            result_bytes = remove_background(raw_bytes, threshold=threshold, is_cul=is_cul)
-        except Exception:
-            result_bytes = raw_bytes  # Image processing failed; serve original bytes
-
-        # Cache result via versioned cache path
-        service.save_derivative_to_cache(fl_id, size, threshold, is_cul, result_bytes)
-
-        content_type = 'image/png' if result_bytes[:4] == b'\x89PNG' else 'image/jpeg'
-        return Response(content=result_bytes, media_type=content_type,
-                        headers={"Cache-Control": "public, max-age=3600"})
-
-    @target_app.post('/api/puzzle_upload_derivative')
-    async def puzzle_upload_derivative(request: Request):
-        """Accept pre-processed PNG bytes from desktop app or extension.
-        Saves directly to server cache without re-processing.
-        Requires valid upload token for cache poisoning prevention.
-        """
-        import re as _re
-        from shared.puzzle_image_service import get_puzzle_image_service
-        from web.puzzle_tokens import verify_upload_token
-        from PIL import Image as _PILImage
-        import io as _io
-
-        MAX_BODY_SIZE = 10 * 1024 * 1024  # 10 MB
-
-        # Rate limiting
-        rate_resp = _check_puzzle_rate_limit(request)
-        if rate_resp:
-            return rate_resp
-
-        fl_id = request.query_params.get('fl_id', '')
-        if not fl_id or not _re.match(r'^[\d]+$', _re.sub(r'\D', '', fl_id)):
-            return Response(content="Invalid fl_id", status_code=400)
-
-        # Verify upload token
-        upload_token = request.headers.get('X-Puzzle-Upload-Token', '')
-        if not verify_upload_token(upload_token, fl_id):
-            return Response(content="Invalid or expired upload token", status_code=403)
-
-        threshold = float(request.query_params.get('threshold', 30.0))
-        is_cul = request.query_params.get('is_cul', 'false').lower() == 'true'
-        size = int(request.query_params.get('size', 800))
-
-        # Read body
-        content_length = int(request.headers.get('content-length', 0))
-        if content_length > MAX_BODY_SIZE:
-            return Response(content="Image too large", status_code=413)
-
-        png_bytes = await request.body()
-        if not png_bytes or len(png_bytes) > MAX_BODY_SIZE:
-            return Response(content="No image data or too large", status_code=400)
-
-        # Validate PNG header
-        if png_bytes[:4] != b'\x89PNG':
-            return Response(content="Invalid PNG format", status_code=400)
-
-        # Verify Pillow can open it
-        try:
-            img = _PILImage.open(_io.BytesIO(png_bytes))
-            img.verify()
-        except Exception:
-            return Response(content="Corrupt image data", status_code=400)  # Request processing failed; return error response
-
-        # Save to cache
-        service = get_puzzle_image_service()
-        success = service.save_derivative_to_cache(fl_id, size, threshold, is_cul, png_bytes)
-        if success:
-            from starlette.responses import JSONResponse
-            return JSONResponse({"cached": True})
+            # Keep the original (validated as a real image) and return it
+            result_bytes = raw_bytes
         else:
-            return Response(content="Cache write failed", status_code=500)
+            # Apply background removal
+            try:
+                result_bytes = remove_background(raw_bytes, threshold=threshold, is_cul=is_cul)
+            except Exception:
+                result_bytes = raw_bytes  # Image processing failed; serve original bytes
+            if result_bytes[:4] != b'\x89PNG':
+                # Only a processed PNG belongs under a processed-image name.
+                return _puzzle_image_response(result_bytes, True)
+
+        stored = service.store_upload(fl_id, size, threshold, processed, is_cul, result_bytes,
+                                      user_id=user_id, browser_key=browser_key)
+        return _puzzle_image_response(result_bytes, stored != STORED_SHARED)
 
     def _fetch_provider_image(provider: str, sys_id: str, page: int):
         """Fetch raw image bytes from a library-specific IIIF source.
@@ -2086,9 +2074,12 @@ def init_api_routes(app_override=None):
         No HMAC token needed (same-origin only). BG removal uses the same HSV
         pipeline as NLI images (default threshold=30.0 for external libraries).
         """
-        from shared.puzzle_image_service import get_puzzle_image_service
+        from shared.puzzle_image_service import (
+            get_puzzle_image_service, normalize_request_params, _write_new_file,
+        )
         from shared.background_removal import remove_background
 
+        size, threshold = normalize_request_params(size, threshold)
         if not provider or not sys_id:
             return Response(content="Missing provider or sys_id", status_code=400)
 
@@ -2129,10 +2120,9 @@ def init_api_routes(app_override=None):
         else:
             result_bytes = raw_bytes
 
-        # Cache result
+        # Cache result (create only: an existing file is kept)
         try:
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_bytes(result_bytes)
+            _write_new_file(cache_path, result_bytes)
         except OSError:
             pass
 
@@ -2199,82 +2189,10 @@ def init_api_routes(app_override=None):
                 ]
         return []
 
-    # === Puzzle Document CRUD + Export (Phase 50) ===
-
-    @target_app.get('/api/puzzle_documents')
-    def puzzle_documents_list():
-        """List all saved puzzle documents."""
-        from shared.puzzle_service import get_puzzle_service
-        svc = get_puzzle_service(thread_safe=True)
-        return svc.list_documents()
-
-    @target_app.get('/api/puzzle_document/{doc_id}')
-    def puzzle_document_get(doc_id: str):
-        """Load a specific puzzle document."""
-        from shared.puzzle_service import get_puzzle_service
-        svc = get_puzzle_service(thread_safe=True)
-        doc = svc.load_document(doc_id)
-        if doc is None:
-            from starlette.responses import JSONResponse
-            return JSONResponse({'error': 'not found'}, status_code=404)
-        return {
-            'id': doc.id, 'title': doc.title, 'notes': doc.notes,
-            'join_type': doc.join_type,
-            'fragments': [
-                {'sys_id': f.sys_id, 'folio_label': f.folio_label, 'fl_id': f.fl_id,
-                 'shelfmark': f.shelfmark, 'x': f.x, 'y': f.y,
-                 'rotation': f.rotation, 'scale': f.scale,
-                 'flip_h': f.flip_h, 'flip_v': f.flip_v,
-                 'bg_removal_threshold': f.bg_removal_threshold,
-                 'crop_top': f.crop_top, 'crop_bottom': f.crop_bottom,
-                 'crop_left': f.crop_left, 'crop_right': f.crop_right,
-                 'processed': f.processed}
-                for f in doc.fragments
-            ],
-            'created_at': doc.created_at, 'updated_at': doc.updated_at
-        }
-
-    @target_app.post('/api/puzzle_document')
-    async def puzzle_document_save(request: Request):
-        """Save or update a puzzle document."""
-        from shared.puzzle_service import get_puzzle_service
-        from shared.puzzle_model import PuzzleDocument, PuzzleFragment
-        from shared.puzzle_export import generate_thumbnail
-        from shared.puzzle_image_service import get_puzzle_image_service
-        import uuid
-
-        body = await request.json()
-        fragments = [PuzzleFragment(**f) for f in body.get('fragments', [])]
-        doc = PuzzleDocument(
-            id=body.get('id', ''),
-            title=body.get('title', ''),
-            notes=body.get('notes', ''),
-            fragments=fragments,
-        )
-        if not doc.id:
-            doc.id = str(uuid.uuid4())
-
-        # Generate thumbnail
-        img_svc = get_puzzle_image_service()
-        thumb = generate_thumbnail(fragments, img_svc, thumb_size=150)
-
-        svc = get_puzzle_service(thread_safe=True)
-        doc_id = svc.save_document(doc, thumbnail_b64=thumb)
-        if doc_id:
-            return {'id': doc_id, 'status': 'ok'}
-        from starlette.responses import JSONResponse
-        return JSONResponse({'error': 'save failed'}, status_code=500)
-
-    @target_app.delete('/api/puzzle_document/{doc_id}')
-    def puzzle_document_delete(doc_id: str):
-        """Delete a puzzle document."""
-        from shared.puzzle_service import get_puzzle_service
-        svc = get_puzzle_service(thread_safe=True)
-        ok = svc.delete_document(doc_id)
-        if ok:
-            return {'status': 'ok'}
-        from starlette.responses import JSONResponse
-        return JSONResponse({'error': 'not found'}, status_code=404)
+    # === Puzzle Export (Phase 50) ===
+    # Saved joins are read and written only by the Fragment Puzzle page,
+    # through web/saved_joins.py (kept per visitor); there are no document
+    # routes here.
 
     @target_app.post('/api/puzzle_export')
     async def puzzle_export(request: Request):
@@ -2290,7 +2208,8 @@ def init_api_routes(app_override=None):
             from starlette.responses import JSONResponse
             return JSONResponse({'error': 'no fragments'}, status_code=400)
 
-        img_svc = get_puzzle_image_service()
+        from web.puzzle_image_access import browser_key_for_request
+        img_svc = get_puzzle_image_service().for_browser(browser_key_for_request(request))
         result = compose_puzzle_export(fragments, img_svc, export_size=3000, margin=20)
         if result is None:
             from starlette.responses import JSONResponse
@@ -2302,30 +2221,17 @@ def init_api_routes(app_override=None):
         return Response(
             content=buf.getvalue(),
             media_type='image/png',
-            headers={'Content-Disposition': 'attachment; filename="puzzle_export.png"'}
+            headers={'Content-Disposition': 'attachment; filename="puzzle_export.png"',
+                     'Cache-Control': 'private, no-store'}
         )
 
-    @target_app.get('/api/puzzle_thumbnail/{doc_id}')
-    def puzzle_thumbnail(doc_id: str):
-        """Serve thumbnail image for a document."""
-        from shared.puzzle_service import get_puzzle_service
-        import base64
-
-        svc = get_puzzle_service(thread_safe=True)
-        docs = svc.list_documents()
-        for d in docs:
-            if d['id'] == doc_id:
-                thumb_b64 = d.get('thumbnail_b64', '')
-                if thumb_b64:
-                    return Response(
-                        content=base64.b64decode(thumb_b64),
-                        media_type='image/png'
-                    )
-        # Return 1x1 transparent pixel as fallback
-        return Response(
-            content=b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n\xb4\x00\x00\x00\x00IEND\xaeB`\x82',
-            media_type='image/png'
-        )
+    def _proxy_url_allowed(candidate: str) -> bool:
+        """An http(s) URL whose host is one of ALLOWED_IMAGE_DOMAINS."""
+        try:
+            parsed = urlparse(candidate)
+        except ValueError:
+            return False
+        return parsed.scheme in ('http', 'https') and parsed.netloc in ALLOWED_IMAGE_DOMAINS
 
     @target_app.get('/api/proxy_image')
     def proxy_image(url: str):
@@ -2366,7 +2272,12 @@ def init_api_routes(app_override=None):
             # retained for non-NLI hosts (Cambridge etc. have different latency
             # profiles and have not exhibited the threadpool-saturation pattern).
             timeout = (NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT) if is_nli_host else 15
-            resp = requests.get(url, headers=headers, timeout=timeout, verify=True)
+            # Each redirect hop must stay on the allowed image domains.
+            from shared.puzzle_image_service import get_with_checked_redirects
+            resp = get_with_checked_redirects(
+                url, allowed=_proxy_url_allowed,
+                headers=headers, timeout=timeout, verify=True,
+            )
             if resp.status_code == 200:
                 if is_nli_host:
                     _nli_record_success(path='proxy_image')

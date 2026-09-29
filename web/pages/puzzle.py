@@ -1930,6 +1930,7 @@ def _resolve_folios(sys_id: str) -> list:
     """
     import re as _re
     import requests as _requests
+    from shared.puzzle_image_service import RedirectNotFollowed, get_with_checked_redirects
 
     # Check enrich_metadata to detect external provider. Manchester/Oxford/JTS have
     # NLI FL IDs that are catalog stubs (return 503) — prefer images_ext for those.
@@ -2004,7 +2005,9 @@ def _resolve_folios(sys_id: str) -> list:
             headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
             # Phase 98 D-21: env-driven (connect, read) tuple — 5s default for JSON manifest.
             # NLI_IIIF_READ_TIMEOUT (not NLI_IMAGE_READ_TIMEOUT) because the response is JSON.
-            resp = _requests.get(
+            # Each redirect hop is checked against the library hosts: the FL ids
+            # found here name the images the puzzle loads and caches.
+            resp = get_with_checked_redirects(
                 url,
                 headers=headers,
                 timeout=(NLI_CONNECT_TIMEOUT, NLI_IIIF_READ_TIMEOUT),
@@ -2036,6 +2039,9 @@ def _resolve_folios(sys_id: str) -> list:
                 _nli_record_failure(failure_type='5xx', path='puzzle_resolve_folios')
                 logger.warning(f"NLI manifest {resp.status_code} for {sys_id}")
             # 404 / other -> fall through to images_ext fallback (D-07: no breaker increment)
+        except RedirectNotFollowed as e:
+            # A redirect off the library hosts: handled as a 404 (no breaker increment).
+            logger.warning(f"NLI manifest redirect not followed for {sys_id}: {e}")
         except _requests.exceptions.Timeout as e:
             logger.error(f"NLI manifest timeout for {sys_id}: {e}")
             _nli_record_failure(failure_type='timeout', path='puzzle_resolve_folios')
@@ -2064,11 +2070,13 @@ def _resolve_folios(sys_id: str) -> list:
 
 
 def _invalidate_and_refetch(fl_id: str, new_threshold: float):
-    """Invalidate the cached processed image and pre-fetch at a new threshold.
+    """Pre-fetch the processed image at a new threshold.
 
     Called when the user adjusts the background removal threshold slider.
-    Clears existing cached images for the given fl_id (all thresholds),
-    then triggers a new background removal at the specified threshold.
+    Every threshold has its own cache file, so nothing already cached is
+    removed: other thresholds, sizes and the original stay as they are, for
+    this visitor and everyone else. Only the new threshold's image is made
+    (if it is not cached yet).
 
     Args:
         fl_id: NLI folio leaf identifier.
@@ -2077,9 +2085,9 @@ def _invalidate_and_refetch(fl_id: str, new_threshold: float):
     try:
         from shared.puzzle_image_service import get_puzzle_image_service
         service = get_puzzle_image_service()
-        service.invalidate_cache(fl_id, threshold=None)
         # Pre-fetch at new threshold
-        service.resolve_fragment_image(fl_id=fl_id, size=800, threshold=new_threshold, processed=True)
+        service.resolve_fragment_image(fl_id=fl_id, size=800, threshold=new_threshold, processed=True,
+                                       web=True)
     except Exception as e:
         logger.error(f"Threshold refetch failed for {fl_id}: {e}")
 
@@ -2224,6 +2232,10 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
     """
     # Add Fabric.js CDN and page-specific styles
     page_client = ui.context.client
+    # This browser's own uploaded images are used for its thumbnails, exports
+    # and publishing. Resolved here: worker threads have no page context.
+    from web.puzzle_image_access import browser_key_for_page
+    image_browser_key = browser_key_for_page()
     ui.add_head_html(FABRIC_JS_CDN)
     ui.add_head_html(PUZZLE_STYLES)
     ui.add_body_html(PUZZLE_CANVAS_JS)
@@ -2244,9 +2256,10 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
     control_sync = {'active': False}
 
     # Join document state tracking
-    # NOTE: Web joins.db is shared across all users (same as pgp.db, fjms_enrichment.db).
-    # User-scoped persistence with auth is Phase 52 (Community + Integration).
-    # For v1, the web app serves a single researcher.
+    # Saved joins are kept per visitor (web/saved_joins.py): the account when
+    # signed in, this browser when signed out. current_doc_id is only ever set
+    # to a document the current visitor owns; anything else opens as an
+    # unsaved canvas (current_doc_id = None), so Save creates the visitor's own.
     doc_state = {
         'current_doc_id': None,       # None = scratch pad
         'has_unsaved_changes': False,
@@ -2257,9 +2270,61 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         'is_published': False,        # Whether current doc is published to community
     }
 
-    from shared.puzzle_service import get_puzzle_service
     from shared.puzzle_export import auto_suggest_title
     from shared.puzzle_model import PuzzleDocument, PuzzleFragment
+    from web import saved_joins as _saved_joins
+    from web.saved_joins import NoVisitorKey, for_current_visitor
+
+    # The visitor this page was opened for. The canvas kept in the tab
+    # (fragments, positions, open document) belongs to this owner only: it is
+    # discarded when the tab is reopened by someone else (sign-in, sign-out,
+    # another account), and nothing is saved from this page once the visitor
+    # has changed in another tab.
+    try:
+        page_owner = _saved_joins.owner_key()
+    except Exception as e:
+        logger.debug("puzzle: owner key unavailable at page build: %s", e)
+        page_owner = None
+    # This browser's signed-out owner key ('b:<session uuid>'). The session
+    # uuid survives sign-in, so after signing in this still names the
+    # signed-out owner of this browser -- used to carry an unsaved signed-out
+    # canvas over into the account (never the other way round).
+    try:
+        from web.safe_storage import get_persisted_session_uuid
+        _browser_uuid = get_persisted_session_uuid()
+        browser_owner = (_saved_joins.BROWSER_PREFIX + _browser_uuid) if _browser_uuid else None
+    except Exception as e:
+        logger.debug("puzzle: browser key unavailable at page build: %s", e)
+        browser_owner = None
+
+    def _visitor_changed(joins) -> bool:
+        """True when ``joins`` is not the visitor this page was opened for."""
+        return page_owner is None or joins is None or joins.owner != page_owner
+
+    def _visitor_joins():
+        """This visitor's saved joins, or None (with a notice) if the visitor
+        cannot be identified or is no longer the visitor this page was opened
+        for. Must run in the page context, before io_bound."""
+        try:
+            joins = for_current_visitor()
+            if _visitor_changed(joins):
+                if page_owner is None:
+                    message = tr('Saved joins are unavailable right now. Please reload the page.')
+                else:
+                    message = tr('You signed in or out since this page opened. Reload the page to continue.')
+                try:
+                    ui.notify(message, type='warning')
+                except Exception:
+                    pass  # no client context (e.g. page already closed)
+                return None
+            return joins
+        except NoVisitorKey:
+            logger.warning("puzzle: visitor could not be identified; saved joins unavailable")
+            try:
+                ui.notify(tr('Saved joins are unavailable right now. Please reload the page.'), type='warning')
+            except Exception:
+                pass  # no client context (e.g. page already closed)
+            return None
 
     # ── Document management functions ──
 
@@ -2362,38 +2427,64 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         async def do_auto_save():
             await asyncio.sleep(1.5)
             if doc_state['current_doc_id'] and not doc_state.get('loading'):
+                # NOTE: this task is started with create_task and has no NiceGUI
+                # slot of its own, so build_fragments_list raises RuntimeError
+                # and the cycle is skipped: in practice this auto-save does not
+                # write. It is deliberately left that way here -- making it
+                # write needs the restore/placement fixes first (a stale or
+                # default-positioned canvas would otherwise overwrite the
+                # owner's draft). Explicit Save is the path that writes.
                 try:
                     fragments = await build_fragments_list()
                 except RuntimeError:
                     return  # slot context lost — skip this auto-save cycle
-                svc = get_puzzle_service(thread_safe=True)
-                doc = await run.io_bound(svc.load_document, doc_state['current_doc_id'])
+                try:
+                    joins = for_current_visitor()
+                except NoVisitorKey:
+                    return  # visitor unknown this cycle; nothing is written
+                if _visitor_changed(joins):
+                    return  # signed in or out in another tab: this canvas is not theirs
+                # Only the visitor's own document is loaded (and so saved).
+                doc = await run.io_bound(joins.load_document, doc_state['current_doc_id'])
                 if doc:
                     doc.fragments = fragments
                     doc.title = title_input.value or doc.title
                     doc.notes = notes_input.value or ''
                     from datetime import datetime
                     doc.updated_at = datetime.now().isoformat()
-                    await run.io_bound(lambda: _save_doc_with_thumbnail(doc, fragments))
+                    await run.io_bound(lambda: _save_doc_with_thumbnail(joins, doc, fragments))
 
         loop = asyncio.get_event_loop()
         doc_state['auto_save_handle'] = loop.create_task(do_auto_save())
 
-    def _save_doc_with_thumbnail(doc, fragments):
-        """Save document with thumbnail (runs in thread via io_bound)."""
+    def _save_doc_with_thumbnail(joins, doc, fragments):
+        """Save document with thumbnail (runs in thread via io_bound).
+
+        ``joins`` is the visitor's SavedJoins, resolved in the page context
+        before the thread started. Returns the saved id, or None when the
+        document could not be saved for this visitor.
+        """
         from shared.puzzle_export import generate_thumbnail
         from shared.puzzle_image_service import get_puzzle_image_service
-        img_svc = get_puzzle_image_service()
+        img_svc = get_puzzle_image_service().for_browser(image_browser_key)
         thumb = generate_thumbnail(fragments, img_svc, thumb_size=150)
-        svc = get_puzzle_service(thread_safe=True)
-        svc.save_document(doc, thumbnail_b64=thumb)
+        return joins.save_document(doc, thumbnail_b64=thumb)
 
     async def refresh_docs_list():
         """Refresh the saved documents list in the left drawer."""
         docs_container.clear()
-        svc = get_puzzle_service(thread_safe=True)
-        docs = await run.io_bound(svc.list_documents)
+        joins = _visitor_joins()
+        docs = await run.io_bound(joins.list_documents) if joins is not None else []
         with docs_container:
+            try:
+                from web.auth_state import GlobalAuthState
+                signed_in = GlobalAuthState.is_logged_in()
+            except Exception:
+                signed_in = False
+            ui.label(
+                tr('Only you can see your saved joins until you publish them.') if signed_in
+                else tr('Saved in this browser only. Only you can see them.')
+            ).classes('text-caption').style('color: var(--text-tertiary);')
             if not docs:
                 ui.label(tr('No saved joins')).style('color: var(--text-secondary); font-style: italic;')
                 return
@@ -2409,7 +2500,9 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 ).on('click', lambda _, did=doc_id: load_document(did)):
                     with ui.row().classes('items-center gap-2 w-full no-wrap'):
                         if thumb_b64:
-                            ui.image(f'/api/puzzle_thumbnail/{doc_id}').style(
+                            # Inline: the thumbnail comes from the visitor's own
+                            # row, so no separate image route is needed.
+                            ui.image(f'data:image/png;base64,{thumb_b64}').style(
                                 'width: 48px; height: 48px; object-fit: contain; border-radius: 4px;'
                             )
                         else:
@@ -2455,6 +2548,9 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
 
             async def do_save():
                 import uuid
+                joins = _visitor_joins()
+                if joins is None:
+                    return
                 doc_id = doc_state['current_doc_id'] or str(uuid.uuid4())
                 doc = PuzzleDocument(
                     id=doc_id,
@@ -2462,7 +2558,16 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                     notes=save_notes.value or '',
                     fragments=fragments,
                 )
-                await run.io_bound(lambda: _save_doc_with_thumbnail(doc, fragments))
+                saved_id = await run.io_bound(lambda: _save_doc_with_thumbnail(joins, doc, fragments))
+                if not saved_id and doc_state['current_doc_id']:
+                    # The open document is not this visitor's (for example they
+                    # signed in or out since opening it): keep their work as a
+                    # new document of their own instead.
+                    doc.id = doc_id = str(uuid.uuid4())
+                    saved_id = await run.io_bound(lambda: _save_doc_with_thumbnail(joins, doc, fragments))
+                if not saved_id:
+                    ui.notify(tr('Could not save this join'), type='negative')
+                    return
                 doc_state['current_doc_id'] = doc_id
                 doc_state['has_unsaved_changes'] = False
                 try:
@@ -2483,10 +2588,40 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 ui.button(tr('Cancel'), on_click=dlg.close).props('flat')
         dlg.open()
 
+    async def _load_published_copy(doc_id):
+        """The PUBLISHED version of ``doc_id`` as an unsaved PuzzleDocument, or None.
+
+        Used when a link (``?doc=``, a community-join card) names a document
+        the visitor does not own: they get a copy of what was published, never
+        the author's saved working copy.
+        """
+        try:
+            from shared.puzzle_publish_service import (
+                document_from_published_detail, get_published_join_detail,
+            )
+            from web.supabase_client import get_client
+            detail = await run.io_bound(get_published_join_detail, get_client(), doc_id)
+        except Exception as e:
+            logger.info("puzzle: published version lookup failed: %s", e)
+            return None
+        if not detail or not detail.get('is_published'):
+            return None
+        return document_from_published_detail(detail)
+
     async def load_document(doc_id):
-        """Load a saved document onto the canvas."""
-        svc = get_puzzle_service(thread_safe=True)
-        doc = await run.io_bound(svc.load_document, doc_id)
+        """Load a document onto the canvas.
+
+        The visitor's own saved document opens as itself (edits auto-save).
+        Any other id opens the published version, if there is one, as an
+        unsaved canvas: Save then creates the visitor's own document.
+        """
+        joins = _visitor_joins()
+        if joins is None:
+            return
+        doc = await run.io_bound(joins.load_document, doc_id)
+        owned = doc is not None
+        if not owned:
+            doc = await _load_published_copy(doc_id)
         if doc is None:
             ui.notify(tr('Could not load document'), type='warning')
             return
@@ -2495,10 +2630,10 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         puzzle_meta.clear()
         pending_fragment_meta.clear()
 
-        doc_state['current_doc_id'] = doc.id
-        doc_state['has_unsaved_changes'] = False
+        doc_state['current_doc_id'] = doc.id if owned else None
+        doc_state['has_unsaved_changes'] = not owned
         try:
-            app.storage.tab['puzzle_doc_id'] = doc.id
+            app.storage.tab['puzzle_doc_id'] = doc.id if owned else None
         except RuntimeError:
             pass
 
@@ -2586,7 +2721,11 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         fragments_label.text = frag_text or tr('No fragments')
         details_container.style('display: block;')
         joins_dialog.close()
-        ui.notify(tr('Loaded: {}').format(doc.title), type='info')
+        if owned:
+            ui.notify(tr('Loaded: {}').format(doc.title), type='info')
+        else:
+            ui.notify(tr('Opened the published version: {}. Save to keep your own copy.').format(doc.title),
+                      type='info')
         await check_publish_state()
 
     async def new_puzzle():
@@ -2658,6 +2797,14 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
 
         user_id = GlobalAuthState.get_user_id()
 
+        # Only a document the visitor owns can be published or unpublished.
+        joins = _visitor_joins()
+        if joins is None:
+            return
+        if not await run.io_bound(joins.owns, doc_state['current_doc_id']):
+            ui.notify(tr('Save the puzzle first'), type='warning')
+            return
+
         if doc_state['is_published']:
             # UNPUBLISH flow
             try:
@@ -2691,8 +2838,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                     from shared.puzzle_image_service import get_puzzle_image_service
                     from web.supabase_client import get_user_client
 
-                    svc = get_puzzle_service(thread_safe=True)
-                    doc = await run.io_bound(svc.load_document, doc_state['current_doc_id'])
+                    doc = await run.io_bound(joins.load_document, doc_state['current_doc_id'])
                     if not doc:
                         ui.notify(tr('Could not load document'), type='negative')
                         return
@@ -2700,7 +2846,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                     doc.title = title_input.value or doc.title
                     doc.notes = notes_input.value or ''
 
-                    img_svc = get_puzzle_image_service()
+                    img_svc = get_puzzle_image_service().for_browser(image_browser_key)
                     client = get_user_client()
                     published_id = await run.io_bound(publish_join, client, user_id, doc, img_svc)
                     doc_state['is_published'] = True
@@ -2744,7 +2890,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             from shared.puzzle_export import compose_puzzle_export, add_metadata_banner
             from shared.puzzle_image_service import get_puzzle_image_service
             import io
-            img_svc = get_puzzle_image_service()
+            img_svc = get_puzzle_image_service().for_browser(image_browser_key)
             result = compose_puzzle_export(fragments, img_svc, export_size=3000, margin=20)
             if result is None:
                 return None
@@ -2755,12 +2901,10 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
 
         png_bytes = await run.io_bound(_do_export)
         if png_bytes:
-            import tempfile, os
             filename = auto_suggest_title(fragments).replace(' ', '_').replace('+', '_') + '.png'
-            tmp = os.path.join(tempfile.gettempdir(), filename)
-            with open(tmp, 'wb') as fout:
-                fout.write(png_bytes)
-            ui.download(tmp, filename)
+            # The bytes go to this browser only, over its own connection;
+            # nothing is written to disk or given a URL.
+            ui.download(png_bytes, filename, 'image/png')
             ui.notify(tr('Export ready'), type='positive')
         else:
             ui.notify(tr('Export failed'), type='negative')
@@ -2771,7 +2915,17 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             ui.label(tr('Delete "{}"?').format(title)).classes('text-lg').style('color: var(--text-primary);')
             with ui.row().classes('w-full justify-end gap-2'):
                 async def do_delete():
-                    svc = get_puzzle_service(thread_safe=True)
+                    joins = _visitor_joins()
+                    if joins is None:
+                        dlg.close()
+                        return
+                    # Only the visitor's own document can be deleted (or,
+                    # with it, unpublished).
+                    if not await run.io_bound(joins.owns, doc_id):
+                        dlg.close()
+                        ui.notify(tr('Could not load document'), type='warning')
+                        await refresh_docs_list()
+                        return
                     # Auto-unpublish from Supabase if published
                     try:
                         from shared.puzzle_publish_service import unpublish_join
@@ -2783,7 +2937,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                             await run.io_bound(unpublish_join, client, user_id, doc_id)
                     except Exception:
                         pass  # Not published or not logged in — fine
-                    await run.io_bound(svc.delete_document, doc_id)
+                    await run.io_bound(joins.delete_document, doc_id)
                     if doc_state['current_doc_id'] == doc_id:
                         doc_state['current_doc_id'] = None
                         doc_state['is_published'] = False
@@ -3650,7 +3804,31 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             })(0);
         ''')
 
-        # Restore saved fragments (client should be connected via timer delay)
+        # Restore saved fragments (client should be connected via timer delay).
+        # The tab's canvas is restored only for the visitor who left it, with
+        # one carry-over: an unsaved canvas this browser made while signed out
+        # follows the visitor into the account they sign in to. Its open draft
+        # id is dropped (that draft belongs to the browser key, not the
+        # account). Every other owner change (another account, signing out,
+        # an unknown owner) drops the whole tab state first, so an account's
+        # canvas never reaches anyone else.
+        try:
+            tab_store = app.storage.tab
+            recorded_owner = tab_store.get('puzzle_owner')
+            if page_owner is not None and recorded_owner == page_owner:
+                pass  # same visitor: restore as left
+            elif (page_owner is not None
+                  and page_owner.startswith(_saved_joins.USER_PREFIX)
+                  and browser_owner is not None
+                  and recorded_owner == browser_owner):
+                tab_store['puzzle_doc_id'] = None  # signed-out canvas kept, its draft is not
+            else:
+                tab_store['puzzle_fragments'] = {}
+                tab_store['puzzle_state'] = None
+                tab_store['puzzle_doc_id'] = None
+            tab_store['puzzle_owner'] = page_owner
+        except RuntimeError:
+            pass
         try:
             saved_meta = app.storage.tab.get('puzzle_fragments', {})
             saved_state = app.storage.tab.get('puzzle_state')
@@ -3659,13 +3837,25 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             saved_meta = {}
             saved_state = None
             saved_doc_id = None
-        # Restore saved document identity
+        # Restore saved document identity -- only a document this visitor
+        # owns (the tab may have been opened under another account).
         if saved_doc_id:
-            doc_state['current_doc_id'] = saved_doc_id
+            try:
+                joins = for_current_visitor()
+                if _visitor_changed(joins):
+                    raise NoVisitorKey('the visitor changed since the page opened')
+                doc = await run.io_bound(joins.load_document, saved_doc_id)
+            except Exception:
+                doc = None  # visitor unknown or lookup failed: start unsaved
+            if doc is None:
+                try:
+                    app.storage.tab['puzzle_doc_id'] = None
+                except RuntimeError:
+                    pass
+            else:
+                doc_state['current_doc_id'] = saved_doc_id
             # Restore details panel from saved doc
             try:
-                svc = get_puzzle_service(thread_safe=True)
-                doc = await run.io_bound(svc.load_document, saved_doc_id)
                 if doc:
                     title_input.value = doc.title
                     notes_input.value = doc.notes

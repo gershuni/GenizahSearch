@@ -6,17 +6,17 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from genizah_core import tr
-import os
 import requests
-
-# Import shared sanitization utility
-from shared_export_utils import sanitize_cache_filename as _sanitize_cache_filename
 
 # Import shared utilities (no PyQt6 dependency)
 from shared.sefaria_utils import (
     get_sefaria_library, SEFARIA_SOURCES,
-    get_cache_dir, clean_hebrew_text
+    clean_hebrew_text, read_sefaria_cache, write_sefaria_cache
 )
+
+# The desktop dialog keeps its own cache entries (it fetches the default
+# Hebrew version, the web page prefers the Tanakh "Text Only" one).
+_CACHE_KIND = "clean_v3"
 
 
 class SefariaFetchThread(QThread):
@@ -36,7 +36,6 @@ class SefariaFetchThread(QThread):
 
     def run(self):
         results = {}  # {ref: cleaned_text}
-        cache_dir = get_cache_dir()
 
         for i, ref in enumerate(self.refs):
             if self._cancelled:
@@ -44,19 +43,12 @@ class SefariaFetchThread(QThread):
 
             self.progress.emit(i, len(self.refs), ref)
 
-            # Check cache first (cleaned version)
-            safe_filename = _sanitize_cache_filename(ref)
-            cache_file = os.path.join(cache_dir, f"{safe_filename}_clean.txt")
-
-            if self.use_cache and os.path.exists(cache_file):
-                try:
-                    with open(cache_file, 'r', encoding='utf-8') as f:
-                        text = f.read()
-                        if text:
-                            results[ref] = text
-                            continue
-                except Exception:
-                    pass
+            # Check cache first (cleaned version, one entry per exact reference)
+            if self.use_cache:
+                text = read_sefaria_cache(ref, kind=_CACHE_KIND)
+                if text:
+                    results[ref] = text
+                    continue
 
             # Fetch from Sefaria
             try:
@@ -71,11 +63,7 @@ class SefariaFetchThread(QThread):
                         if cleaned:
                             results[ref] = cleaned
                             # Cache the cleaned result
-                            try:
-                                with open(cache_file, 'w', encoding='utf-8') as f:
-                                    f.write(cleaned)
-                            except Exception:
-                                pass
+                            write_sefaria_cache(ref, cleaned, kind=_CACHE_KIND)
             except Exception as e:
                 self.error.emit(f"Error fetching {ref}: {str(e)}")
 

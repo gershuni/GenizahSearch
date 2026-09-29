@@ -283,12 +283,18 @@ async def _fork_puzzle_join_and_navigate(join_id: str):
     """Fork a published join and navigate to the puzzle page with it."""
     try:
         from shared.puzzle_publish_service import fork_published_join
-        from shared.puzzle_service import get_puzzle_service
+        from web.saved_joins import NoVisitorKey, for_current_visitor
         from web.supabase_client import get_client
 
+        # The fork is saved under the visitor who forks it. Resolve the owner
+        # here, in the page context, before the worker thread starts.
+        try:
+            joins = for_current_visitor()
+        except NoVisitorKey:
+            ui.notify(tr('Could not fork join'), type='warning')
+            return
         client = get_client()
-        svc = get_puzzle_service(thread_safe=True)
-        new_doc_id = await run.io_bound(fork_published_join, client, join_id, svc)
+        new_doc_id = await run.io_bound(fork_published_join, client, join_id, joins)
         if new_doc_id:
             ui.navigate.to(f'/puzzle?doc={new_doc_id}')
         else:

@@ -26,6 +26,9 @@ def test_only_known_public_assets_are_cacheable():
         '/_nicegui_ws/socket.io',
         '/_nicegui/3.8.0/dynamic_resources/user-content',
         '/_nicegui/3.8.0/resources/key/file',
+        # Files registered at run time, e.g. a single-use download.
+        '/_nicegui/auto/static/0123456789abcdef/export.png',
+        '/_nicegui/auto/media/0123456789abcdef/clip.mp4',
         '/atlas-data/manifest.json',
         '/atlas-data/atlas-v1-not-a-hash.bin',
     ]
