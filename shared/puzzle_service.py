@@ -11,6 +11,15 @@ threading.Lock for concurrency safety. The database uses WAL journal mode
 for concurrent read access.
 
 Follows the singleton pattern established by nli_crossref_service.py.
+
+Owners (schema v3). Every row has a nullable ``owner_key``. The web app keeps
+each visitor's saved joins apart by passing ``owner_key=`` on every call
+(``'u:<user id>'`` when signed in, ``'b:<session uuid>'`` when signed out; see
+``web/saved_joins.py``, the only web module that talks to this service). When
+``owner_key`` is given, reads and deletes only see that owner's rows and a save
+refuses to touch a row that belongs to anyone else (including a row with no
+owner). The desktop app never passes an owner: with ``owner_key=None`` every
+method behaves exactly as before, over the per-install joins.db.
 """
 
 import json
@@ -143,7 +152,7 @@ class PuzzleService:
                 key TEXT PRIMARY KEY,
                 value TEXT
             );
-            INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '2');
+            INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '3');
 
             CREATE TABLE IF NOT EXISTS join_documents (
                 id TEXT PRIMARY KEY,
@@ -177,11 +186,28 @@ class PuzzleService:
             self._conn.commit()
             logger.info("PuzzleService: migrated schema to v2 (added thumbnail_b64)")
 
+        # Schema migration to v3: add owner_key column. Existing rows keep
+        # owner_key = NULL, which the web app never matches (so they stay in
+        # the file but are not shown to any web visitor) and which the desktop
+        # app ignores (it never filters by owner).
+        try:
+            self._conn.execute("SELECT owner_key FROM join_documents LIMIT 0")
+        except sqlite3.OperationalError:
+            self._conn.execute("ALTER TABLE join_documents ADD COLUMN owner_key TEXT")
+            self._conn.commit()
+            logger.info("PuzzleService: migrated schema to v3 (added owner_key)")
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_join_documents_owner "
+            "ON join_documents(owner_key, updated_at DESC)"
+        )
+        self._conn.commit()
+
     def is_available(self) -> bool:
         """Check if the service has a valid database connection."""
         return self._conn is not None
 
-    def save_document(self, doc: PuzzleDocument, thumbnail_b64: str = None) -> Optional[str]:
+    def save_document(self, doc: PuzzleDocument, thumbnail_b64: str = None,
+                      *, owner_key: Optional[str] = None) -> Optional[str]:
         """
         Save or update a PuzzleDocument.
 
@@ -189,6 +215,11 @@ class PuzzleService:
             doc: The PuzzleDocument to save.
             thumbnail_b64: Optional base64-encoded thumbnail PNG. If None,
                 preserves existing thumbnail (avoids overwrite on metadata-only saves).
+            owner_key: When given, the row is written with this owner, and an
+                existing row with the same id is only replaced if it already
+                belongs to this owner (a row with another owner, or with no
+                owner, is left untouched and None is returned). When None
+                (desktop), the existing row's owner is kept as it is.
 
         Returns:
             The document ID on success, None on failure.
@@ -214,24 +245,39 @@ class PuzzleService:
 
         with self._write_lock:
             try:
-                # Preserve existing thumbnail when not explicitly provided.
-                # Done inside the lock so the read shares the single connection
-                # safely and is part of the same transaction we may roll back.
-                if thumbnail_b64 is None:
-                    try:
-                        existing = self._conn.execute(
-                            "SELECT thumbnail_b64 FROM join_documents WHERE id = ?", (doc.id,)
-                        ).fetchone()
-                        thumbnail_b64 = existing['thumbnail_b64'] if existing else ''
-                    except Exception:
-                        thumbnail_b64 = ''  # Thumbnail extraction failed; use empty string
+                # Read the existing row inside the lock, so the owner check and
+                # the write below see the same state (no other save can slip in
+                # between them on this shared connection).
+                existing = self._conn.execute(
+                    "SELECT thumbnail_b64, owner_key FROM join_documents WHERE id = ?",
+                    (doc.id,)
+                ).fetchone()
 
+                if owner_key is not None:
+                    if existing is not None and existing['owner_key'] != owner_key:
+                        # The id is taken by another owner's row (or by a row
+                        # with no owner): never replace it.
+                        logger.info("PuzzleService.save_document: id belongs to another owner; not saved")
+                        return None
+                    row_owner = owner_key
+                else:
+                    # Desktop: keep whatever owner the row already has.
+                    row_owner = existing['owner_key'] if existing is not None else None
+
+                # Preserve existing thumbnail when not explicitly provided.
+                if thumbnail_b64 is None:
+                    thumbnail_b64 = (existing['thumbnail_b64'] or '') if existing is not None else ''
+
+                # INSERT OR REPLACE rewrites the whole row, so owner_key must
+                # be in the column list on every write.
                 self._conn.execute(
                     """INSERT OR REPLACE INTO join_documents
-                       (id, title, notes, join_type, fragments_json, thumbnail_b64, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                       (id, title, notes, join_type, fragments_json, thumbnail_b64,
+                        created_at, updated_at, owner_key)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (doc.id, doc.title, doc.notes, doc.join_type,
-                     fragments_json, thumbnail_b64, doc.created_at, doc.updated_at)
+                     fragments_json, thumbnail_b64, doc.created_at, doc.updated_at,
+                     row_owner)
                 )
                 # Rebuild fragment index
                 self._conn.execute(
@@ -258,9 +304,15 @@ class PuzzleService:
                 logger.error("PuzzleService.save_document failed: %s", e)
                 return None
 
-    def load_document(self, doc_id: str) -> Optional[PuzzleDocument]:
+    def load_document(self, doc_id: str, *,
+                      owner_key: Optional[str] = None) -> Optional[PuzzleDocument]:
         """
         Load a PuzzleDocument by ID.
+
+        Args:
+            doc_id: The document ID.
+            owner_key: When given, only a row that belongs to this owner is
+                returned.
 
         Returns:
             The PuzzleDocument, or None if not found or unavailable.
@@ -273,9 +325,15 @@ class PuzzleService:
             # sqlite3.Connection (check_same_thread=False), so reads must not
             # run concurrently with a write+commit on another thread.
             with self._write_lock:
-                row = self._conn.execute(
-                    "SELECT * FROM join_documents WHERE id = ?", (doc_id,)
-                ).fetchone()
+                if owner_key is not None:
+                    row = self._conn.execute(
+                        "SELECT * FROM join_documents WHERE id = ? AND owner_key = ?",
+                        (doc_id, owner_key)
+                    ).fetchone()
+                else:
+                    row = self._conn.execute(
+                        "SELECT * FROM join_documents WHERE id = ?", (doc_id,)
+                    ).fetchone()
             if row is None:
                 return None
 
@@ -294,9 +352,13 @@ class PuzzleService:
             logger.error("PuzzleService.load_document failed: %s", e)
             return None
 
-    def list_documents(self) -> List[Dict]:
+    def list_documents(self, *, owner_key: Optional[str] = None) -> List[Dict]:
         """
-        List all puzzle documents, sorted by updated_at DESC.
+        List puzzle documents, sorted by updated_at DESC.
+
+        Args:
+            owner_key: When given, only this owner's documents are listed.
+                When None (desktop), every document in the file is listed.
 
         Returns:
             List of dicts with id, title, join_type, fragments_json,
@@ -307,10 +369,17 @@ class PuzzleService:
 
         try:
             with self._write_lock:  # serialize on the shared connection
-                rows = self._conn.execute(
-                    "SELECT id, title, join_type, fragments_json, thumbnail_b64, updated_at "
-                    "FROM join_documents ORDER BY updated_at DESC"
-                ).fetchall()
+                if owner_key is not None:
+                    rows = self._conn.execute(
+                        "SELECT id, title, join_type, fragments_json, thumbnail_b64, updated_at "
+                        "FROM join_documents WHERE owner_key = ? ORDER BY updated_at DESC",
+                        (owner_key,)
+                    ).fetchall()
+                else:
+                    rows = self._conn.execute(
+                        "SELECT id, title, join_type, fragments_json, thumbnail_b64, updated_at "
+                        "FROM join_documents ORDER BY updated_at DESC"
+                    ).fetchall()
             results = []
             for r in rows:
                 d = dict(r)
@@ -331,9 +400,14 @@ class PuzzleService:
             logger.error("PuzzleService.list_documents failed: %s", e)
             return []
 
-    def delete_document(self, doc_id: str) -> bool:
+    def delete_document(self, doc_id: str, *, owner_key: Optional[str] = None) -> bool:
         """
         Delete a puzzle document by ID (CASCADE deletes fragment index entries).
+
+        Args:
+            doc_id: The document ID.
+            owner_key: When given, only a row that belongs to this owner is
+                deleted.
 
         Returns:
             True if a row was deleted, False otherwise.
@@ -343,9 +417,15 @@ class PuzzleService:
 
         with self._write_lock:
             try:
-                cursor = self._conn.execute(
-                    "DELETE FROM join_documents WHERE id = ?", (doc_id,)
-                )
+                if owner_key is not None:
+                    cursor = self._conn.execute(
+                        "DELETE FROM join_documents WHERE id = ? AND owner_key = ?",
+                        (doc_id, owner_key)
+                    )
+                else:
+                    cursor = self._conn.execute(
+                        "DELETE FROM join_documents WHERE id = ?", (doc_id,)
+                    )
                 self._conn.commit()
                 return cursor.rowcount > 0
             except Exception as e:
@@ -356,13 +436,15 @@ class PuzzleService:
                 logger.error("PuzzleService.delete_document failed: %s", e)
                 return False
 
-    def list_documents_for_fragment(self, fl_id: str = None, sys_id: str = None) -> List[str]:
+    def list_documents_for_fragment(self, fl_id: str = None, sys_id: str = None,
+                                    *, owner_key: Optional[str] = None) -> List[str]:
         """
         Find document IDs containing a given fragment.
 
         Args:
             fl_id: Look up by NLI FL ID.
             sys_id: Look up by system ID.
+            owner_key: When given, only this owner's documents are returned.
 
         Returns:
             List of document ID strings.
@@ -370,20 +452,27 @@ class PuzzleService:
         if not self.is_available():
             return []
 
+        if fl_id is not None:
+            column, value = 'fl_id', fl_id
+        elif sys_id is not None:
+            column, value = 'sys_id', sys_id
+        else:
+            return []
+
         try:
             with self._write_lock:  # serialize on the shared connection
-                if fl_id is not None:
+                if owner_key is not None:
                     rows = self._conn.execute(
-                        "SELECT DISTINCT doc_id FROM join_document_fragments WHERE fl_id = ?",
-                        (fl_id,)
-                    ).fetchall()
-                elif sys_id is not None:
-                    rows = self._conn.execute(
-                        "SELECT DISTINCT doc_id FROM join_document_fragments WHERE sys_id = ?",
-                        (sys_id,)
+                        f"SELECT DISTINCT f.doc_id FROM join_document_fragments f "
+                        f"JOIN join_documents d ON d.id = f.doc_id "
+                        f"WHERE f.{column} = ? AND d.owner_key = ?",
+                        (value, owner_key)
                     ).fetchall()
                 else:
-                    return []
+                    rows = self._conn.execute(
+                        f"SELECT DISTINCT doc_id FROM join_document_fragments WHERE {column} = ?",
+                        (value,)
+                    ).fetchall()
             return [r[0] for r in rows]
         except Exception as e:
             logger.error("PuzzleService.list_documents_for_fragment failed: %s", e)

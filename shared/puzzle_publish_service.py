@@ -318,30 +318,24 @@ def get_published_join_detail(client, join_id: str) -> Optional[Dict]:
     }
 
 
-def fork_published_join(client, join_id: str, puzzle_service) -> Optional[str]:
+def document_from_published_detail(detail: Dict, *, new_id: Optional[str] = None,
+                                   title_prefix: str = '') -> PuzzleDocument:
     """
-    Fork a published join into a local PuzzleDocument.
-
-    Creates a new local document with a fresh UUID and "Fork of:" title prefix.
-    Saves it to local joins.db via the provided puzzle_service.
+    Build a PuzzleDocument from a ``get_published_join_detail`` result.
 
     Args:
-        client: Supabase client.
-        join_id: The published join ID to fork.
-        puzzle_service: PuzzleService instance for local persistence.
+        detail: The published join detail dict.
+        new_id: The id for the new document. When None, the published join's
+            own id is kept (the caller must then treat the document as an
+            unsaved copy, never as a saved row).
+        title_prefix: Text put before the published title (e.g. "Fork of: ").
 
     Returns:
-        The new local document ID, or None on failure.
+        The PuzzleDocument (not saved anywhere).
     """
-    detail = get_published_join_detail(client, join_id)
-    if detail is None:
-        return None
-
-    # Reconstruct PuzzleDocument from fragments_json
-    fj = detail['fragments_json']
-
     # fragments_json is the full doc JSON (from doc.to_json())
     # It may have 'fragments' key with the list of fragment dicts
+    fj = detail.get('fragments_json') or {}
     if isinstance(fj, dict) and 'fragments' in fj:
         frag_list = fj['fragments']
     elif isinstance(fj, list):
@@ -354,15 +348,40 @@ def fork_published_join(client, join_id: str, puzzle_service) -> Optional[str]:
         try:
             fragments.append(PuzzleFragment(**fd))
         except Exception as e:
-            logger.warning("fork_published_join: skipping fragment: %s", e)
+            logger.warning("document_from_published_detail: skipping fragment: %s", e)
 
-    new_doc = PuzzleDocument(
-        id=str(uuid.uuid4()),
-        title=f"Fork of: {detail['title']}",
-        notes=detail.get('notes', ''),
+    return PuzzleDocument(
+        id=new_id or detail['id'],
+        title=f"{title_prefix}{detail.get('title') or ''}",
+        notes=detail.get('notes', '') or '',
         join_type=fj.get('join_type', 'physical') if isinstance(fj, dict) else 'physical',
         fragments=fragments,
     )
+
+
+def fork_published_join(client, join_id: str, puzzle_service) -> Optional[str]:
+    """
+    Fork a published join into a local PuzzleDocument.
+
+    Creates a new local document with a fresh UUID and "Fork of:" title prefix.
+    Saves it to local joins.db via the provided puzzle_service (on the web,
+    the forking visitor's own saved joins, ``web/saved_joins.py``).
+
+    Args:
+        client: Supabase client.
+        join_id: The published join ID to fork.
+        puzzle_service: PuzzleService (or an object with the same
+            ``save_document``) for local persistence.
+
+    Returns:
+        The new local document ID, or None when the published join is not found.
+    """
+    detail = get_published_join_detail(client, join_id)
+    if detail is None:
+        return None
+
+    new_doc = document_from_published_detail(
+        detail, new_id=str(uuid.uuid4()), title_prefix='Fork of: ')
 
     saved_id = puzzle_service.save_document(new_doc)
     return saved_id if saved_id else new_doc.id

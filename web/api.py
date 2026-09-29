@@ -2155,82 +2155,10 @@ def init_api_routes(app_override=None):
                 ]
         return []
 
-    # === Puzzle Document CRUD + Export (Phase 50) ===
-
-    @target_app.get('/api/puzzle_documents')
-    def puzzle_documents_list():
-        """List all saved puzzle documents."""
-        from shared.puzzle_service import get_puzzle_service
-        svc = get_puzzle_service(thread_safe=True)
-        return svc.list_documents()
-
-    @target_app.get('/api/puzzle_document/{doc_id}')
-    def puzzle_document_get(doc_id: str):
-        """Load a specific puzzle document."""
-        from shared.puzzle_service import get_puzzle_service
-        svc = get_puzzle_service(thread_safe=True)
-        doc = svc.load_document(doc_id)
-        if doc is None:
-            from starlette.responses import JSONResponse
-            return JSONResponse({'error': 'not found'}, status_code=404)
-        return {
-            'id': doc.id, 'title': doc.title, 'notes': doc.notes,
-            'join_type': doc.join_type,
-            'fragments': [
-                {'sys_id': f.sys_id, 'folio_label': f.folio_label, 'fl_id': f.fl_id,
-                 'shelfmark': f.shelfmark, 'x': f.x, 'y': f.y,
-                 'rotation': f.rotation, 'scale': f.scale,
-                 'flip_h': f.flip_h, 'flip_v': f.flip_v,
-                 'bg_removal_threshold': f.bg_removal_threshold,
-                 'crop_top': f.crop_top, 'crop_bottom': f.crop_bottom,
-                 'crop_left': f.crop_left, 'crop_right': f.crop_right,
-                 'processed': f.processed}
-                for f in doc.fragments
-            ],
-            'created_at': doc.created_at, 'updated_at': doc.updated_at
-        }
-
-    @target_app.post('/api/puzzle_document')
-    async def puzzle_document_save(request: Request):
-        """Save or update a puzzle document."""
-        from shared.puzzle_service import get_puzzle_service
-        from shared.puzzle_model import PuzzleDocument, PuzzleFragment
-        from shared.puzzle_export import generate_thumbnail
-        from shared.puzzle_image_service import get_puzzle_image_service
-        import uuid
-
-        body = await request.json()
-        fragments = [PuzzleFragment(**f) for f in body.get('fragments', [])]
-        doc = PuzzleDocument(
-            id=body.get('id', ''),
-            title=body.get('title', ''),
-            notes=body.get('notes', ''),
-            fragments=fragments,
-        )
-        if not doc.id:
-            doc.id = str(uuid.uuid4())
-
-        # Generate thumbnail
-        img_svc = get_puzzle_image_service()
-        thumb = generate_thumbnail(fragments, img_svc, thumb_size=150)
-
-        svc = get_puzzle_service(thread_safe=True)
-        doc_id = svc.save_document(doc, thumbnail_b64=thumb)
-        if doc_id:
-            return {'id': doc_id, 'status': 'ok'}
-        from starlette.responses import JSONResponse
-        return JSONResponse({'error': 'save failed'}, status_code=500)
-
-    @target_app.delete('/api/puzzle_document/{doc_id}')
-    def puzzle_document_delete(doc_id: str):
-        """Delete a puzzle document."""
-        from shared.puzzle_service import get_puzzle_service
-        svc = get_puzzle_service(thread_safe=True)
-        ok = svc.delete_document(doc_id)
-        if ok:
-            return {'status': 'ok'}
-        from starlette.responses import JSONResponse
-        return JSONResponse({'error': 'not found'}, status_code=404)
+    # === Puzzle Export (Phase 50) ===
+    # Saved joins are read and written only by the Fragment Puzzle page,
+    # through web/saved_joins.py (kept per visitor); there are no document
+    # routes here.
 
     @target_app.post('/api/puzzle_export')
     async def puzzle_export(request: Request):
@@ -2261,28 +2189,6 @@ def init_api_routes(app_override=None):
             media_type='image/png',
             headers={'Content-Disposition': 'attachment; filename="puzzle_export.png"',
                      'Cache-Control': 'private, no-store'}
-        )
-
-    @target_app.get('/api/puzzle_thumbnail/{doc_id}')
-    def puzzle_thumbnail(doc_id: str):
-        """Serve thumbnail image for a document."""
-        from shared.puzzle_service import get_puzzle_service
-        import base64
-
-        svc = get_puzzle_service(thread_safe=True)
-        docs = svc.list_documents()
-        for d in docs:
-            if d['id'] == doc_id:
-                thumb_b64 = d.get('thumbnail_b64', '')
-                if thumb_b64:
-                    return Response(
-                        content=base64.b64decode(thumb_b64),
-                        media_type='image/png'
-                    )
-        # Return 1x1 transparent pixel as fallback
-        return Response(
-            content=b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n\xb4\x00\x00\x00\x00IEND\xaeB`\x82',
-            media_type='image/png'
         )
 
     @target_app.get('/api/proxy_image')
