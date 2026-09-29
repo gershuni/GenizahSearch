@@ -19,18 +19,6 @@ from shared.atomic_io import write_bytes_atomic
 from shared.export_utils import make_safe_filename
 
 
-# The web process sets this once at startup (use_checked_sefaria_fetches):
-# its Sefaria table of contents is saved for every later visitor, so every
-# redirect hop must stay on Sefaria's hosts. The desktop keeps plain requests.
-_CHECKED_FETCHES = False
-
-
-def use_checked_sefaria_fetches():
-    """Make this process follow Sefaria redirects one checked hop at a time."""
-    global _CHECKED_FETCHES
-    _CHECKED_FETCHES = True
-
-
 def is_sefaria_url(url):
     """True for an https URL on sefaria.org or one of its subdomains."""
     from urllib.parse import urlparse
@@ -49,9 +37,14 @@ def is_sefaria_url(url):
     return host == 'sefaria.org' or host.endswith('.sefaria.org')
 
 
-def get_sefaria_json(url, *, timeout):
-    """GET a Sefaria API URL: checked hops in the web process, plain otherwise."""
-    if _CHECKED_FETCHES:
+def get_sefaria_json(url, *, timeout, checked=False):
+    """GET a Sefaria API URL.
+
+    ``checked=True`` (the web server, which saves what it fetches for later
+    visitors) follows redirects one hop at a time and only between Sefaria's
+    own hosts. The default is the desktop's plain request.
+    """
+    if checked:
         from shared.puzzle_image_service import get_with_checked_redirects
         return get_with_checked_redirects(url, allowed=is_sefaria_url, timeout=timeout)
     return requests.get(url, timeout=timeout)
@@ -154,8 +147,9 @@ class SefariaLibraryManager:
     TOC_URL = "https://www.sefaria.org/api/index/"
     CACHE_TTL_DAYS = 7
 
-    def __init__(self):
+    def __init__(self, checked_fetches=False):
         self.toc = None
+        self.checked_fetches = checked_fetches
         self._cache_file = os.path.join(get_cache_dir(), "sefaria_toc.json")
 
     def get_toc(self):
@@ -209,7 +203,7 @@ class SefariaLibraryManager:
     def _fetch_from_api(self):
         """Fetch the full TOC from Sefaria API."""
         try:
-            resp = get_sefaria_json(self.TOC_URL, timeout=30)
+            resp = get_sefaria_json(self.TOC_URL, timeout=30, checked=self.checked_fetches)
             if resp.status_code == 200:
                 return resp.json()
         except Exception as e:
@@ -249,11 +243,20 @@ class SefariaLibraryManager:
 
 # Singleton instance
 _sefaria_library = None
+_sefaria_library_checked = None
 
 
-def get_sefaria_library():
-    """Get the singleton SefariaLibraryManager instance."""
-    global _sefaria_library
+def get_sefaria_library(checked_fetches=False):
+    """Get the SefariaLibraryManager instance.
+
+    The web server asks for ``checked_fetches=True`` and gets its own
+    instance; the desktop's default instance is unchanged.
+    """
+    global _sefaria_library, _sefaria_library_checked
+    if checked_fetches:
+        if _sefaria_library_checked is None:
+            _sefaria_library_checked = SefariaLibraryManager(checked_fetches=True)
+        return _sefaria_library_checked
     if _sefaria_library is None:
         _sefaria_library = SefariaLibraryManager()
     return _sefaria_library

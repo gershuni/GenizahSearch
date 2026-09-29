@@ -3339,8 +3339,6 @@ async def initialize_engine():
             print("[init] 1/6 MetadataManager...", flush=True)
             # The web's library fetches (manifests, MARC) check every redirect hop.
             state.meta_mgr = MetadataManager(checked_library_fetches=True)
-            from shared.sefaria_utils import use_checked_sefaria_fetches
-            use_checked_sefaria_fetches()
             print("[init] 2/6 ListsManager...", flush=True)
             state.lists_mgr = ListsManager(state.meta_mgr)
 

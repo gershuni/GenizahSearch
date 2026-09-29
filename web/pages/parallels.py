@@ -175,7 +175,7 @@ def fetch_sefaria_text(ref: str, use_cache: bool = True) -> str:
         if is_tanakh:
             # Try v3 API with "Text Only" version (no nikud/taamim) for Tanakh
             url = f"https://www.sefaria.org/api/v3/texts/{encoded_ref}?version=hebrew|Tanach%20with%20Text%20Only"
-            resp = get_sefaria_json(url, timeout=15)
+            resp = get_sefaria_json(url, timeout=15, checked=True)
 
             if resp.status_code == 200:
                 data = resp.json()
@@ -192,7 +192,7 @@ def fetch_sefaria_text(ref: str, use_cache: bool = True) -> str:
         # Use v2 API for non-Tanakh or as fallback
         if not raw_text:
             url = f"https://www.sefaria.org/api/texts/{encoded_ref}?context=0&pad=0"
-            resp = get_sefaria_json(url, timeout=15)
+            resp = get_sefaria_json(url, timeout=15, checked=True)
             if resp.status_code == 200:
                 data = resp.json()
                 he_text = data.get('he', [])
@@ -4112,7 +4112,7 @@ def create_parallels_page(initial_text: str = None):
 
     async def show_all_sources_dialog():
         """Show dialog to browse all Sefaria sources in hierarchical tree."""
-        library = get_sefaria_library()
+        library = get_sefaria_library(checked_fetches=True)
 
         # Track selected refs
         selected_refs_state = {'refs': set()}

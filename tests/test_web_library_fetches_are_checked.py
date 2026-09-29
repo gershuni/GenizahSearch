@@ -51,8 +51,8 @@ CHECKERS = {
 # manifest or MARC hosts. Each must still match a call (no stale entries).
 EXEMPT = {
     ('shared/sefaria_utils.py', 'get_sefaria_json'):
-        'Sefaria API: the desktop branch; the web process (use_checked_sefaria_fetches) '
-        'goes through get_with_checked_redirects with the Sefaria host check',
+        'Sefaria API: the desktop branch; web callers pass checked=True and go '
+        'through get_with_checked_redirects with the Sefaria host check',
     ('shared/dicta_client.py', '_translate_single'):
         'Dicta translation service: a fixed endpoint, not a library host',
     ('shared/posthog_server.py', '_drain_posthog_queue'):

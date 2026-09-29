@@ -3,7 +3,9 @@
 
 The web server saves the Sefaria table of contents (sefaria_toc.json) and each
 reference's text for every later visitor, so a redirect may only move between
-Sefaria's own hosts. The desktop keeps its plain requests call.
+Sefaria's own hosts. The web asks for this explicitly (its own library instance
+and checked=True on each text fetch), so there is no window at start-up in which
+it fetches unchecked. The desktop keeps its plain requests call.
 """
 from __future__ import annotations
 
@@ -57,7 +59,6 @@ def su(tmp_path, monkeypatch):
     monkeypatch.setenv('HOME', str(home))
     monkeypatch.setenv('USERPROFILE', str(home))
     monkeypatch.setattr(module, 'get_cache_dir', lambda: str(tmp_path / 'sefaria_cache'))
-    monkeypatch.setattr(module, '_CHECKED_FETCHES', False)
     return module
 
 
@@ -68,14 +69,13 @@ def _toc_file(tmp_path):
 def test_web_table_of_contents_is_not_taken_from_a_redirect_off_sefaria(su, tmp_path,
                                                                         monkeypatch):
     import requests
-    su.use_checked_sefaria_fetches()
     calls = []
     monkeypatch.setattr(requests, 'get', _fake_get({
         su.SefariaLibraryManager.TOC_URL: _Resp(302, location=OTHER),
         OTHER: _Resp(200, [{'category': 'Other catalogue'}]),
     }, calls))
 
-    toc = su.SefariaLibraryManager().get_toc()
+    toc = su.SefariaLibraryManager(checked_fetches=True).get_toc()
 
     assert toc is None
     assert not any('example.org' in url for url, _, _ in calls)
@@ -85,7 +85,6 @@ def test_web_table_of_contents_is_not_taken_from_a_redirect_off_sefaria(su, tmp_
 
 def test_web_table_of_contents_follows_a_redirect_within_sefaria(su, tmp_path, monkeypatch):
     import requests
-    su.use_checked_sefaria_fetches()
     moved = 'https://sefaria.org/api/index/'
     calls = []
     monkeypatch.setattr(requests, 'get', _fake_get({
@@ -93,7 +92,7 @@ def test_web_table_of_contents_follows_a_redirect_within_sefaria(su, tmp_path, m
         moved: _Resp(200, [{'category': 'Tanakh'}]),
     }, calls))
 
-    toc = su.SefariaLibraryManager().get_toc()
+    toc = su.SefariaLibraryManager(checked_fetches=True).get_toc()
 
     assert toc == [{'category': 'Tanakh'}]
     assert [(u, f) for u, f, _ in calls] == [(su.SefariaLibraryManager.TOC_URL, False), (moved, False)]
@@ -115,7 +114,6 @@ def test_web_reference_text_is_not_taken_from_a_redirect_off_sefaria(su, tmp_pat
                                                                      monkeypatch):
     import requests
     from web.pages import parallels
-    su.use_checked_sefaria_fetches()
     ref = 'Mishnah Berakhot 1:1'
     url = 'https://www.sefaria.org/api/texts/Mishnah%20Berakhot%201:1?context=0&pad=0'
     other = 'https://other.example.org/texts/x'
@@ -132,11 +130,36 @@ def test_web_reference_text_is_not_taken_from_a_redirect_off_sefaria(su, tmp_pat
     assert not su.read_sefaria_cache(ref)   # nothing saved for the next visitor
 
 
-def test_web_startup_turns_on_checked_sefaria_fetches():
-    tree = ast.parse((REPO / 'web' / 'main.py').read_text(encoding='utf-8'))
-    called = {node.func.id for node in ast.walk(tree)
-              if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
-    assert 'use_checked_sefaria_fetches' in called
+def test_the_web_library_instance_is_its_own_and_checked(su):
+    web_library = su.get_sefaria_library(checked_fetches=True)
+    desktop_library = su.get_sefaria_library()
+    assert web_library is not desktop_library
+    assert web_library.checked_fetches is True
+    assert desktop_library.checked_fetches is False
+    assert su.get_sefaria_library(checked_fetches=True) is web_library
+
+
+def _calls_in(path, name):
+    tree = ast.parse(path.read_text(encoding='utf-8'))
+    return [node for node in ast.walk(tree) if isinstance(node, ast.Call)
+            and (getattr(node.func, 'id', None) == name or getattr(node.func, 'attr', None) == name)]
+
+
+def _kw_true(call, keyword):
+    return any(kw.arg == keyword and isinstance(kw.value, ast.Constant) and kw.value.value is True
+               for kw in call.keywords)
+
+
+def test_every_web_sefaria_fetch_asks_for_checked_hops():
+    """Every call under web/ asks for the checked form: the library instance
+    with checked_fetches=True and each text fetch with checked=True."""
+    web_files = sorted((REPO / 'web').rglob('*.py'))
+    libs = [(f, c) for f in web_files for c in _calls_in(f, 'get_sefaria_library')]
+    gets = [(f, c) for f in web_files for c in _calls_in(f, 'get_sefaria_json')]
+    assert libs and gets, 'no web Sefaria call found -- the check would prove nothing'
+    bad = [f'{f.relative_to(REPO)}:{c.lineno}' for f, c in libs if not _kw_true(c, 'checked_fetches')]
+    bad += [f'{f.relative_to(REPO)}:{c.lineno}' for f, c in gets if not _kw_true(c, 'checked')]
+    assert not bad, 'web Sefaria calls without the checked form: ' + ', '.join(bad)
 
 
 @pytest.mark.parametrize('url, ok', [
