@@ -291,7 +291,9 @@ python extension/build.py
 
 ### Security
 
-- **HMAC upload tokens**: Server issues signed tokens on cache miss (`X-Puzzle-Upload-Token` header). Uploads to `/api/puzzle_process` and `/api/puzzle_upload_derivative` require valid tokens (5-min expiry, fl_id-bound).
+- **HMAC upload tokens**: Server issues signed tokens on cache miss (`X-Puzzle-Upload-Token` header). Uploads to `/api/puzzle_process` require a valid token bound to the exact cache entry (fl_id, size, threshold, processed, CUL flag), usable once, 5-min expiry.
+- **Who fills the shared cache**: an upload from a signed-in visitor goes into the shared cache and is recorded (user id, UTC time) in `_uploads.jsonl` beside it; an upload from a signed-out browser is kept under `_browser/<hash>/` and served only to that browser (`Cache-Control: private`). No upload replaces an existing file. Server-side image fetches are limited to the known IIIF hosts (`DIRECT_IMAGE_HOST_SUFFIXES`).
+- **Saved joins (drafts)** are kept per visitor: per account when signed in, per browser when signed out (`owner_key` column in `joins.db`, schema v3, added automatically on first open). Published joins are unchanged (Supabase `published_joins`, public, edited only by their author). Rows saved before v3 have no owner and are not shown on the web; `scripts/assign_puzzle_draft_owners.py` (owner-run, on a copy, dry run by default) assigns owners from a mapping.
 - **URL validation**: Extension only fetches from `iiif.nli.org.il`
 - **Origin validation**: Content script only responds to messages from `genizahsearch.com` and `localhost`
 - **Rate limiting**: 60 requests/min/IP on upload endpoints
@@ -299,16 +301,18 @@ python extension/build.py
 
 ### Server Cache
 
-Processed puzzle images are cached on the server disk at:
+Processed puzzle images are cached on the server disk at (production, checked 2026-09-29):
 ```
-/home/ubuntu/.local/share/GenizahSearchPro/cache/puzzle/
+/home/ubuntu/GenizahSearch/cache/puzzle/
 ```
 
-Cache key format: `{fl_id}_{size}_{threshold}[_cul]_{PROCESSING_VERSION}.png`
+Cache key format: `{fl_id}_{size}_{threshold}[_cul]_{PROCESSING_VERSION}.png`; images fetched from a direct
+IIIF URL are filed under a name derived from that URL, never under a fragment id.
 
-Once cached, images serve all users instantly without the extension. The cache grows from:
-- Extension users (via `/api/puzzle_process`)
-- Desktop users (future: via `/api/puzzle_upload_derivative`)
+Once in the shared cache, images serve all users without the extension. The shared cache grows from
+signed-in extension users (via `/api/puzzle_process`) and from the server's own IIIF fetches; signed-out
+uploads stay under `_browser/<hash>/` for that browser. Before a deploy that touches the puzzle, save a file
+list (`find cache/puzzle -type f -printf '%P %s %T@\n' | sort`) so that any change can be checked afterwards.
 
 ---
 

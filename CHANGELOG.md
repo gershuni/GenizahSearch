@@ -4,6 +4,27 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Web: Fragment Puzzle saved joins are kept per visitor (web deploy)
+
+- **Saved joins are private until published.** The "Saved joins" drawer on /puzzle lists only your own
+  drafts: those of your account when you are signed in, of this browser when you are not. Publishing still
+  requires sign-in, and published joins stay public and are edited only by their author. A link to a join
+  you do not own opens its published version as a new canvas; saving it creates your own copy. Joins saved
+  on the website before this change are no longer listed while they are reviewed; nothing was deleted.
+- **Fragment images.** Images uploaded by signed-in visitors (the browser extension) are shared with
+  everyone, as before, and each is recorded with its uploader; images uploaded while signed out are kept for
+  that browser only. A cached image is never replaced by a later upload, and moving the threshold slider no
+  longer removes other cached images. The PNG export is sent straight to the browser that asked for it.
+- **Parallels: Sefaria filter texts are cached per reference.** Two references whose names differ only in
+  letters the file name cannot hold (for example Hebrew references) no longer share one cached text. Each
+  reference is fetched from Sefaria once more after the update. The desktop Filter Text dialog gets the same
+  fix in the next installer.
+- Removed: the unused `/api/puzzle_documents`, `/api/puzzle_document` (GET/POST/DELETE),
+  `/api/puzzle_thumbnail` and `/api/puzzle_upload_derivative` routes; the page itself never called them.
+  Owner tool: `scripts/assign_puzzle_draft_owners.py`.
+
 ## [9.4.0] - 2026-09-28 — Data integrity
 
 A desktop release carrying the data-integrity work of the 2026-09-25 improvement sweep (saving,
