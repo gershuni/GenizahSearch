@@ -1027,6 +1027,10 @@ Moved verbatim by `scripts/archive_closed_issues.py`. Nothing was edited or dele
 
 Moved verbatim from the top of the tracker on 2026-09-18 (the 2026-09-06 split did the same for the headers before them).
 
+> Previous: 2026-09-27 -- **Desktop list sync PR 2b-1** (`fix/desktop-2b1-list-sync`, on PR 2a): a cloud row per list membership (list, manuscript, folio, new `page` column); uploads never overwrite a differing note, Download/Merge keep both; My Library never synced; one sync at a time; web `/lists` edit/remove fixed. 4 rows archived; P3 +14. Next: PR 2b-2 (same installer), then 2c.
+>
+> (The header above was moved verbatim from the top of the tracker on 2026-09-29.)
+>
 > Previous: 2026-09-25 -- **Desktop data integrity PR 2a opened** (sweep items #3, #5, #7, #12, #23): New keeps `session.json`; Add Comment offers only stored choices; lists/settings/language saved atomically with backup recovery; one desktop copy per data folder; exclusions hold until New and the results-menu id is fixed. `config.pkl` row archived; 14 rows added (P2 +3, P3 +11). Next: PR 2b (list sync, #6 #24), PR 2c (Puzzle and threads).
 >
 > (The header above was moved verbatim from the top of the tracker on 2026-09-28.)
