@@ -41,7 +41,9 @@ if _NV > _PATCH_AUDIT_THRESHOLD:
 
 
 _VERSIONED_NICEGUI_ASSET_RE = re.compile(
-    r'^/_nicegui/[^/]+/(?:static|libraries|components|esm)(?:/|$)'
+    # ``/_nicegui/auto/...`` serves files registered at run time (for example
+    # single-use downloads), not versioned framework assets.
+    r'^/_nicegui/(?!auto/)[^/]+/(?:static|libraries|components|esm)(?:/|$)'
 )
 _CONTENT_HASHED_ATLAS_RE = re.compile(
     r'^/atlas-data/atlas-v1-[0-9a-f]{12}\.bin$'

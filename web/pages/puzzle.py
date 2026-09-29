@@ -2760,12 +2760,10 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
 
         png_bytes = await run.io_bound(_do_export)
         if png_bytes:
-            import tempfile, os
             filename = auto_suggest_title(fragments).replace(' ', '_').replace('+', '_') + '.png'
-            tmp = os.path.join(tempfile.gettempdir(), filename)
-            with open(tmp, 'wb') as fout:
-                fout.write(png_bytes)
-            ui.download(tmp, filename)
+            # The bytes go to this browser only, over its own connection;
+            # nothing is written to disk or given a URL.
+            ui.download(png_bytes, filename, 'image/png')
             ui.notify(tr('Export ready'), type='positive')
         else:
             ui.notify(tr('Export failed'), type='negative')
